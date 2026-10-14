@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- **Correcting a night the app called "no one in the bed" now turns it into a slept night (#355).** Until now, giving such a night an asleep and a wake-up time left it as "no one in the bed" with your times beside it, so it stayed out of the child's card figures, the history and the trends. With both times given, the night is now shown as a normal night marked **You corrected this**: asleep is your span minus any minutes of the window with no video, wake-ups 0, awake 0, longest stretch equal to the asleep total, and no minute-by-minute timeline (none was recorded). Only a correction of an "empty" night changes; nights the app scores itself are computed exactly as before, answering **No one was in the bed** still wins and stays unscored, a one-sided or In-bed-only correction, a wake-up not after the asleep time, and a night still in progress stay as they were, and a corrected night is still locked and never re-scored. The saved summary is not rewritten, so removing your correction brings back "no one in the bed". Not changed, and so not agreeing with the card: the morning report and push (sent before you corrected) still say "no one in the bed", and the sleep ↔ temperature averages do not include the night. No setting. See [the README](README.md).
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed

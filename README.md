@@ -654,8 +654,9 @@ measurement**, and (like everything here) never a safety device — see the warn
         sends the usual first sleep report and makes the night's timelapse. (Saving the correction does
         not save that summary itself, on purpose: the nightly update's first pass is the one that sends
         the report and makes the timelapse.) If that first summary says "no one in the bed" where a later
-        one would have found your child, it stays that way under your times; remove your correction
-        (while it is still last night) to let the nightly update look again. In the same way, if that
+        one would have found your child, the night is still not looked at again (it is locked), but your
+        times now make it a slept night (next point); remove your correction (while it is still last night)
+        to let the nightly update look again. In the same way, if that
         first summary has no wake-up time yet (the morning's departure was still being confirmed when it
         was saved), the night keeps showing no wake-up time until you add one to your review.
       - The sleep detail page always works the night out fresh and lays your times over it, so its
@@ -667,6 +668,28 @@ measurement**, and (like everything here) never a safety device — see the warn
         recalculates its total to fit them, even if you only marked **In bed**. The sleep detail page,
         which works the night out fresh, may keep its own total instead. Each screen's total always fits
         the times it shows; they just aren't always the same total.
+      - **Correcting a night the app called "no one in the bed" makes it a slept night (#355).** Give both an
+        asleep and a wake-up time and the night is shown as a normal night, marked **You corrected this**,
+        on the child's card, the history list and the sleep detail page: asleep = your wake-up minus your
+        asleep time, minus the minutes of the sleep window with no video (a window watched in full loses
+        none); wake-ups 0; awake 0; longest stretch = asleep. The app had measured no movement in the bed all
+        night, which is what "no one in the bed" means, so 0 wake-ups is what it saw, not a count of what
+        happened. The detail page has no minute-by-minute timeline or wake list for such a night (none was
+        recorded). The saved summary is not rewritten: removing your correction brings back "no one in the
+        bed" exactly. Compared with the other corrections:
+
+        | | Night the app scored (slept) | Night the app called "no one in the bed" |
+        |---|---|---|
+        | Both times given | your times, total recalculated | becomes a slept night, figures as above |
+        | Only an asleep **or** only a wake-up time, or only **In bed** | your time laid over | stays "no one in the bed", with your time shown |
+        | Wake-up not after asleep | total floored at 0 | stays "no one in the bed" |
+        | Night still in progress | your times laid over | stays as the cameras see it now |
+        | **No one was in the bed** (your answer) | "no one in the bed" | "no one in the bed" (your answer always wins) |
+
+        Not changed: the morning report and push were sent from the app's own summary, so they still say "no
+        one in the bed" for that night, and the sleep ↔ temperature averages read only slept nights as the app
+        saved them, so a night you promoted this way is not in them. Only an "no one in the bed" night is
+        promoted; "no data" and "no sleep" nights are not.
       - A corrected total still subtracts every unwatched minute the detector counted for the night,
         even ones outside your corrected times (the camera-outage limit under "Minutes with no video are
         unknown" in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)). Locking makes that figure stop changing; it

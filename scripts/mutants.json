@@ -17644,5 +17644,104 @@
     "expect": "killed",
     "tests": ["csp-directives.test.js"],
     "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#355 corrected empty: any status is promoted, not only empty",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "night.status === 'empty' && span > 0 && !nightNotOverYet(night)",
+    "replace": "span > 0 && !nightNotOverYet(night)",
+    "expect": "killed",
+    "tests": [
+      "corrected-empty.test.js"
+    ],
+    "namePattern": "only `empty` is promoted"
+  },
+  {
+    "label": "#355 corrected empty: a zero-length span is scored",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "night.status === 'empty' && span > 0 && !nightNotOverYet(night)",
+    "replace": "night.status === 'empty' && span >= 0 && !nightNotOverYet(night)",
+    "expect": "killed",
+    "tests": [
+      "corrected-empty.test.js"
+    ],
+    "namePattern": "one-sided, in-bed-only"
+  },
+  {
+    "label": "#355 corrected empty: a night still in progress is scored",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "night.status === 'empty' && span > 0 && !nightNotOverYet(night)",
+    "replace": "night.status === 'empty' && span > 0",
+    "expect": "killed",
+    "tests": [
+      "corrected-empty.test.js"
+    ],
+    "namePattern": "one-sided, in-bed-only"
+  },
+  {
+    "label": "#355 corrected empty: the promotion is never made (stays empty)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "night.status === 'empty' && span > 0 && !nightNotOverYet(night)",
+    "replace": "false",
+    "expect": "killed",
+    "tests": [
+      "corrected-empty.test.js"
+    ],
+    "namePattern": "an `empty` night with a correction becomes ok"
+  },
+  {
+    "label": "#355 corrected empty: promoted status is not ok",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "out.status = 'ok';",
+    "replace": "out.status = night.status;",
+    "expect": "killed",
+    "tests": [
+      "corrected-empty.test.js"
+    ],
+    "namePattern": "an `empty` night with a correction becomes ok"
+  },
+  {
+    "label": "#355 corrected empty: the detector verdict is not kept as algo_status",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "out.algo_status = night.status;\n  out.asleep_minutes",
+    "replace": "out.asleep_minutes",
+    "expect": "killed",
+    "tests": [
+      "corrected-empty.test.js"
+    ],
+    "namePattern": "an `empty` night with a correction becomes ok"
+  },
+  {
+    "label": "#355 corrected empty: unwatched window minutes are not subtracted",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "const unknown = Math.max(0, windowMin - (night.coverage_minutes ?? windowMin));",
+    "replace": "const unknown = 0;",
+    "expect": "killed",
+    "tests": [
+      "corrected-empty.test.js"
+    ],
+    "namePattern": "window minutes the cameras did not watch"
+  },
+  {
+    "label": "#355 corrected empty: longest stretch is the raw span, not the total",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "out.longest_stretch_minutes = out.asleep_minutes;",
+    "replace": "out.longest_stretch_minutes = span;",
+    "expect": "killed",
+    "tests": [
+      "corrected-empty.test.js"
+    ],
+    "namePattern": "window minutes the cameras did not watch"
+  },
+  {
+    "label": "#355 corrected empty: wake count is left null",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "out.wake_count = 0;",
+    "replace": "out.wake_count = null;",
+    "expect": "killed",
+    "tests": [
+      "corrected-empty.test.js"
+    ],
+    "namePattern": "an `empty` night with a correction becomes ok"
   }
 ]

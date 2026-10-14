@@ -681,8 +681,53 @@ export function applyCorrection(childId, night) {
   if (!onsetChanged && !wakeChanged) return out;
   if (onset && wake) {
     const span = Math.round((Date.parse(`${wake.replace(' ', 'T')}Z`) - Date.parse(`${onset.replace(' ', 'T')}Z`)) / 60000);
+    if (night.status === 'empty' && span > 0 && !nightNotOverYet(night)) return asScoredFromEmpty(out, night, span);
     out.asleep_minutes = Math.max(0, span - (night.awake_minutes ?? 0) - (night.unknown_minutes ?? 0));
   }
+  return out;
+}
+
+// #355. A night the detector scored `empty` that a parent then gave BOTH an asleep and a wake time becomes a
+// scored night: status 'ok', with its figures derived from the corrected span. Owner decision (2026-10-14):
+// the parent has told us a child slept, which is better evidence than the detector's "nobody was there", and
+// leaving it `empty` hid the night from the child card, reports and trends under times the parent had just
+// entered. The detector's own verdict stays on `algo_status`, as asNobodyInBed keeps it, and `corrected`
+// stays true so the UI can still say who the times came from. sleep_nights is never written (un-correcting
+// restores the `empty` night exactly) and computeNight is untouched: this is the overlay only.
+//
+// Where each figure comes from, none of it invented:
+//   - wake_count 0 and awake_minutes 0: that IS what `empty` means. computeNight only returns `empty` when
+//     wakeCount === 0 && awake === 0 over the window (sleepAnalysis.js, EMPTY BED), so the detector measured
+//     "no stirring" and the parent's span does not contradict it.
+//   - unknown_minutes: the window minutes the cameras did NOT watch, window length - coverage_minutes (both
+//     are stored on an empty row). `empty` requires >= 90% coverage (EMPTY_MIN_COVERAGE_FRAC), so this is at
+//     most 10% of the window. Subtracted whole, like every other night's aggregate (the KNOWN LIMIT above:
+//     if the corrected span is shorter than the window this over-subtracts, the safer direction).
+//   - longest_stretch_minutes = asleep_minutes: no wake splits the span, so it is one stretch, and it cannot
+//     exceed the total (the contradiction issue #355 reported on ok nights).
+// NOT produced: timeline, segments, wakes, visits, transitions. An `empty` night never had them, and
+// corrected timestamps alone must not manufacture an observed timeline (#355 acceptance).
+//
+// ⚠️ Only when BOTH times exist and the span is positive, and only once the night is over. One-sided or
+// in-bed-only corrections on an `empty` night have no span to score and stay `empty` + `corrected`, exactly
+// as before; a night still in progress keeps showing what the cameras see now. A `nobody_in_bed` answer never
+// reaches here (checked first in applyCorrection) and wins. no_data / no_sleep nights are deliberately NOT
+// promoted: the owner decision names `empty` only.
+//
+// ⚠️ KNOWN LIMIT: the 'ok' night is thinner than a detector one (no timeline in the detail view, wake_count 0
+// is "none measured" not "none happened"), and a parent with a long-still child who was actually elsewhere
+// can score an `ok` night by typing times. That is the decision: the parent's word wins.
+function asScoredFromEmpty(out, night, span) {
+  const ms = (s) => Date.parse(`${String(s).replace(' ', 'T')}Z`);
+  const windowMin = night.window_start && night.window_end ? Math.round((ms(night.window_end) - ms(night.window_start)) / 60000) : 0;
+  const unknown = Math.max(0, windowMin - (night.coverage_minutes ?? windowMin));
+  out.status = 'ok';
+  out.algo_status = night.status;
+  out.asleep_minutes = Math.max(0, span - unknown);
+  out.awake_minutes = 0;
+  out.unknown_minutes = unknown;
+  out.wake_count = 0;
+  out.longest_stretch_minutes = out.asleep_minutes;
   return out;
 }
 
