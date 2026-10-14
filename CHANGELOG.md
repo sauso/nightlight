@@ -9,6 +9,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **A server that cannot be reached no longer shows the sign-in form; you see "Can't reach Nightlight" and it retries (#382).** When the app opened and the server did not answer (a network failure, a timeout, or a server error such as a proxy's 502 while the container restarts), it treated that as "not signed in" and put a password form in front of you, or on a fresh install guessed "sign in" instead of "create the first admin". It now says it can't reach the server, keeps your sign-in, tries again after 5 seconds, then 10, 20 and every 30 seconds, and has a **Try again** button. The sign-in form appears only when the server actually answers that you are signed out, and the setup form only when it says setup is needed. The read-only demo is unchanged. Not done in this change (the issue stays open for them): a branded loading view in place of the blank first moment, a "your session expired" message on the sign-in form, and returning to the page you were on after signing in.
+- **Changing a child's photo no longer also saves a name, birthday or colour you had typed but not saved (#384).** The photo saves at once, but that save also sent the name, birthday and colour in the form, committing edits you had not confirmed. It now sends only the photo; the other edits stay in the form, still unsaved, and **Save changes** commits them as before. The wider question in the issue (should the photo wait for **Save changes** too, and should the screen show a saved/unsaved indicator) is an owner decision and is not changed here.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed
