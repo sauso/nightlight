@@ -15,7 +15,8 @@
 //   node scripts/mutate.mjs                 # every mutant, each against the tests it names
 //   node scripts/mutate.mjs --full          # every mutant against the WHOLE suite (slow, ~50s each)
 //   node scripts/mutate.mjs --only=sweeper  # mutants whose label contains "sweeper"
-//   node scripts/mutate.mjs --list          # print the catalogue and exit
+//   node scripts/mutate.mjs --shard=2/8     # the second of eight round-robin slices (what the CI matrix runs; after --only)
+//   node scripts/mutate.mjs --list          # print the catalogue (narrowed by --only/--shard) and exit
 //   node scripts/mutate.mjs --check         # run NO tests: only verify every `find` still matches exactly once and every
 //                                           # `namePattern` still matches a test in the files it names (a few seconds; the
 //                                           # way to find stale anchors before a full run, #575, #604). CI runs it via
@@ -90,22 +91,32 @@ const args = process.argv.slice(2);
 // command line that this script does not understand must therefore stop here: nothing has been read, nothing has
 // been written, no journal recovery has run. Keep the lists in step with the USAGE block in the header.
 const BOOLEAN_FLAGS = ['full', 'list', 'check', 'help'];
-const VALUE_FLAGS = ['only', 'timeout'];
+const VALUE_FLAGS = ['only', 'timeout', 'shard'];
 const USAGE = [
-  'usage: node scripts/mutate.mjs [--full] [--only=<substring>] [--timeout=<ms>]',
+  'usage: node scripts/mutate.mjs [--full] [--only=<substring>] [--shard=<i>/<n>] [--timeout=<ms>]',
   '       node scripts/mutate.mjs --list | --check | --help',
   '',
   '  (no flags)        every mutant, each against the tests it names',
   '  --full            every mutant against the WHOLE suite (slow)',
   '  --only=<text>     only the mutants whose label contains <text>',
+  '  --shard=<i>/<n>   only shard i of n (1-based), after --only; the shards partition the mutants (the CI matrix)',
   '  --timeout=<ms>    wall-clock limit per mutant',
-  '  --list            print the catalogue and exit',
+  '  --list           print the catalogue and exit',
   '  --check           run no tests; verify every catalogue entry still applies',
   '  -h, --help        print this and exit 0',
 ].join('\n');
 // The reasons this command line is not understood, one per argument; empty means it is fine. A flag that needs a
 // value but has none (`--only`), a flag given a value it does not take (`--full=1`), and a bare word are rejected
 // along with unknown flags: each is a typo that used to be ignored and run the whole battery.
+// `i/n` -> { i, n }, or null when it is not two plain positive integers with i <= n. Plain digits only: Number()
+// would accept "1e0", " 2", "0x1".
+function parseShard(v) {
+  const m = /^([1-9]\d*)\/([1-9]\d*)$/.exec(v);
+  if (!m) return null;
+  const i = Number(m[1]);
+  const n = Number(m[2]);
+  return i <= n ? { i, n } : null;
+}
 const argProblems = args.flatMap((a) => {
   if (a === '-h') return [];
   if (!a.startsWith('--')) return [`unexpected argument "${a}"`];
@@ -115,7 +126,14 @@ const argProblems = args.flatMap((a) => {
   // An EMPTY value counts as missing: `--only=` is falsy, so the run took it as "no filter" and selected the whole
   // catalogue (a typo, or an unset shell variable in `--only=$X`, started the full battery), and `--timeout=` only
   // failed later, after the catalogue was read and without the usage. Both are refused here.
-  if (VALUE_FLAGS.includes(name)) return rest.join('=') !== '' ? [] : [`${a}: --${name} needs a non-empty value, as --${name}=<value>`];
+  if (VALUE_FLAGS.includes(name)) {
+    const v = rest.join('=');
+    if (v === '') return [`${a}: --${name} needs a non-empty value, as --${name}=<value>`];
+    // Strict shape: `--shard=0/4`, `--shard=5/4`, `--shard=1/0` and `--shard=2` are typos that would otherwise run
+    // nothing, or everything, on a machine that was meant to run a quarter of the catalogue.
+    if (name === 'shard' && !parseShard(v)) return [`${a}: --shard must be <i>/<n> with whole numbers and 1 <= i <= n, e.g. --shard=2/8`];
+    return [];
+  }
   return [`unknown flag ${a}`];
 });
 // Problems are reported BEFORE --help is honoured, so `--help --bogus` exits 2 and names `--bogus`. Deliberate:
@@ -143,7 +161,15 @@ const EXPECT_VALUES = ['killed', 'survives', 'equivalent'];
 const expectProblem = (m) => (EXPECT_VALUES.includes(m.expect) ? null
   : `its \`expect\` is ${m.expect === undefined ? 'missing' : JSON.stringify(m.expect)}, but the run only understands ${EXPECT_VALUES.map((v) => `"${v}"`).join(', ')}`);
 const only = value('only');
-const mutants = only ? catalogue.filter((m) => m.label.includes(only)) : catalogue;
+const filtered = only ? catalogue.filter((m) => m.label.includes(only)) : catalogue;
+// --shard=i/n (CI matrix, .github/workflows/mutation.yml). ROUND-ROBIN by position, not contiguous blocks: the
+// catalogue is grouped by subsystem and the groups differ in cost (a frontend mutant runs vitest, a `--full`-style
+// backend entry is slow), so blocks would hand one runner all the slow ones. Position modulo n is stable for a given
+// catalogue, every mutant lands in exactly one shard, and the shards differ in size by at most one. Applied AFTER
+// --only so `--only=x --shard=1/2` halves the matches. It is deliberately a pure function of (catalogue, i, n):
+// the final CI job relies on the union of the shards being the whole catalogue.
+const shard = value('shard') ? parseShard(value('shard')) : null;
+const mutants = shard ? filtered.filter((_, idx) => idx % shard.n === shard.i - 1) : filtered;
 
 // The restore journal (#599). It exists ONLY while a mutant is on disk, so its presence at startup means a
 // previous run died between "write the mutant" and "write the original back". One per checkout, not per run:
@@ -239,7 +265,9 @@ function namePatternProblem(m, cache) {
 }
 
 if (flag('list')) {
-  for (const m of catalogue) console.log(`${m.expect === 'survives' ? 'CONTROL ' : '        '}${m.label}  [${m.file}]`);
+  // `mutants`, not `catalogue`: --only and --shard narrow the listing, which is how a shard's contents can be
+  // inspected (and tested) without running a single mutant. With neither flag it is the whole catalogue, as before.
+  for (const m of mutants) console.log(`${m.expect === 'survives' ? 'CONTROL ' : '        '}${m.label}  [${m.file}]`);
   process.exit(0);
 }
 // --check applies the same "does this mutant apply at all" rules the run enforces, to the WHOLE catalogue
@@ -294,7 +322,8 @@ if (badExpect.length) {
   process.exit(3);
 }
 if (!mutants.length) {
-  console.error(`no mutants match --only=${only}`);
+  // Loud on purpose: a matrix with more shards than mutants would otherwise have idle shards pass silently.
+  console.error(`no mutants match${only ? ` --only=${only}` : ''}${shard ? ` in shard ${shard.i}/${shard.n}` : ''}`);
   process.exit(2);
 }
 
