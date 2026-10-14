@@ -31,6 +31,34 @@ HLS can't carry at all — WebRTC can). This drives a specific pipeline, in orde
 4. **Frontend** picks WebRTC (`WhepPlayer.jsx`, "Low latency") or HLS (`HlsPlayer.jsx`,
    "Compatibility") per camera tile, toggled by the user.
 
+## Child process environment (`backend/src/lib/childEnv.js`, #553)
+
+Camera streams are untrusted input, and ffmpeg/ffprobe parse whatever a (possibly compromised) camera
+sends. So **no child gets the backend's environment**. Every ffmpeg, ffprobe and MediaMTX process is
+started through `spawnChild()`, which builds the environment from an allowlist; `JWT_SECRET`,
+`FIREBASE_CREDENTIALS`, `DATA_DIR`, `PUBLIC_HOST` and everything else the operator set never reach a child.
+
+| Variable | ffmpeg / ffprobe | MediaMTX | Why |
+|---|---|---|---|
+| `PATH` | yes | yes | finds the binary and what it execs |
+| `TZ` | yes | yes | segment and log times agree with the app |
+| `LANG`, `LC_ALL` | yes | yes | locale only |
+| `MTX_*` (operator's own) | **no** | yes | MediaMTX's documented override mechanism, e.g. `MTX_WEBRTCLOCALUDPADDRESS` |
+| `MTX_WEBRTCADDITIONALHOSTS`, `MTX_WEBRTCLOCALUDPADDRESS` computed at launch | no | yes | set by `mediamtxProcess.js` from `PUBLIC_HOST`/detected IPs/`WEBRTC_UDP_PORT`; wins over an inherited value |
+| `HOME`, `LIBVA_*`, `NVIDIA_*`, `HTTP(S)_PROXY`, `LD_LIBRARY_PATH` | no | no | nothing in the app documents or sets them (ffmpeg runs with software decoding; cameras are reached directly on the LAN) |
+
+A name that is unset in the backend stays unset in the child. A caller-supplied `env` option is ignored.
+
+**To add a variable:** add the name to `ALLOWED_NAMES` in `childEnv.js` with a comment saying which setup
+needs it, add a row to the table above, and update `backend/test/child-env.test.js` (it pins the list on
+purpose). For a per-launch computed value (MediaMTX's) pass it as `extra` instead. **To add a new spawn
+site:** call `spawnChild()`, never `child_process` directly; the source test in `child-env.test.js` fails
+on any other import of it under `backend/src`.
+
+**What this does not do:** the children still run as the same user as the backend, so they can read the
+database and `.jwt_secret` from disk. A separate uid was considered and not done (#553 (b)). Keep cameras
+on their own VLAN, as the README advises.
+
 ## ONVIF, PTZ, and camera credentials (`backend/src/lib/onvif.js`, `rtspProbe.js`)
 
 Cameras are added/edited by **components** (IP / port / path / username / password), not a

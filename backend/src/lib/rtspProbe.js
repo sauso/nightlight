@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawnChild } from './childEnv.js';
 import { redactCredentials } from './urlCredentials.js';
 
 // Quick "does this RTSP URL actually work?" check, used to validate a camera before saving
@@ -13,7 +13,7 @@ const DETAILED_TIMEOUT_MS = 12000;
 export function ffprobeVersion() {
   return new Promise((resolve) => {
     try {
-      const proc = spawn('ffprobe', ['-hide_banner', '-version'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      const proc = spawnChild('ffprobe', ['-hide_banner', '-version'], { stdio: ['ignore', 'pipe', 'ignore'] });
       let out = '';
       proc.stdout.on('data', (d) => (out += d.toString()));
       const killer = setTimeout(() => proc.kill('SIGKILL'), 3000);
@@ -38,7 +38,7 @@ export function ffprobeAudioCodec(rtspUrl) {
     ];
     let proc;
     try {
-      proc = spawn('ffprobe', args, { stdio: ['ignore', 'pipe', 'ignore'] });
+      proc = spawnChild('ffprobe', args, { stdio: ['ignore', 'pipe', 'ignore'] });
     } catch {
       resolve(null);
       return;
@@ -94,7 +94,7 @@ export function probeRtspDetailed(rtspUrl) {
     ];
     let proc;
     try {
-      proc = spawn('ffprobe', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      proc = spawnChild('ffprobe', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     } catch {
       resolve({ ok: false, error: 'Could not run ffprobe' });
       return;
@@ -151,7 +151,7 @@ export function validateRtspStream(rtspUrl) {
     ];
     let proc;
     try {
-      proc = spawn('ffprobe', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      proc = spawnChild('ffprobe', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     } catch {
       resolve({ ok: false, error: 'Could not run stream validation' });
       return;

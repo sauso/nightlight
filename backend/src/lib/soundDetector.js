@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawnChild } from './childEnv.js';
 import { logger } from './logger.js';
 import { forwardProcessLines } from './processOutput.js';
 import { getPathStatus } from './mediamtx.js';
@@ -149,7 +149,7 @@ export async function startSoundDetector(camera) {
       '-ar', String(WIN_RATE),
       '-f', 's16le', '-', // raw 16-bit PCM to stdout — streamed promptly, RMS computed below
     ];
-    const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     entry.proc = proc;
     // #369: freshness stamps for the detector watchdog, monotonic and per process; see motionDetector.js.
     entry.path = path;

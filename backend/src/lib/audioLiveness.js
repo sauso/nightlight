@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawnChild } from './childEnv.js';
 import { killIfSpawned } from './processGuards.js';
 
 // How long to wait for audio packets before giving up on a probe.
@@ -41,7 +41,7 @@ export function probeAudioFlowing(mediamtxPath) {
     ];
     let proc;
     try {
-      proc = spawn('ffprobe', args, { stdio: ['ignore', 'pipe', 'ignore'] });
+      proc = spawnChild('ffprobe', args, { stdio: ['ignore', 'pipe', 'ignore'] });
     } catch {
       resolve(null);
       return;
@@ -126,7 +126,7 @@ export function probeVideoFlowing(mediamtxPath) {
     ];
     let proc;
     try {
-      proc = spawn('ffprobe', args, { stdio: ['ignore', 'pipe', 'ignore'] });
+      proc = spawnChild('ffprobe', args, { stdio: ['ignore', 'pipe', 'ignore'] });
     } catch {
       resolve(null);
       return;

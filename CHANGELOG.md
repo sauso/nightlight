@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Security
+
+- **ffmpeg, ffprobe and MediaMTX no longer receive the server's environment (#553, part a).** A camera is untrusted input and these programs parse what it sends; they used to inherit everything the server was started with, including `JWT_SECRET` when you set it as an environment variable. Each now gets only `PATH`, `TZ`, `LANG` and `LC_ALL`, plus, for MediaMTX only, your own `MTX_*` overrides (`MTX_WEBRTCLOCALUDPADDRESS` and the like still work). `HOME`, `LIBVA_*`/`NVIDIA_*`, `HTTP_PROXY`/`HTTPS_PROXY` and `LD_LIBRARY_PATH` are no longer passed on; nothing in Nightlight documents or sets them, but if you added one yourself for hardware decoding or a proxy, it will stop having an effect (not tested on real hardware). **Not done:** the programs still run as the same user as the server and can read the database on disk (part b of the issue, a separate user, was decided against). See [Child process environment](docs/architecture.md#child-process-environment-backendsrclibchildenvjs-553).
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed
