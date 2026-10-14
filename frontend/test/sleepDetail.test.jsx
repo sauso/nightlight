@@ -22,7 +22,7 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within, fireEvent, act } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
-import { renderAsAdmin } from './helpers/render.jsx';
+import { renderAsAdmin, renderAs, forEachRole } from './helpers/render.jsx';
 import SleepDetail, { addDays } from '../src/pages/SleepDetail.jsx';
 import { api } from '../src/lib/api.js';
 
@@ -809,5 +809,44 @@ describe('what a night lists', () => {
     });
     mount();
     expect(await screen.findByText(/100%/)).toBeTruthy();
+  });
+});
+
+// #365: the temperature insight shows no verdict until BOTH groups (cooler, warmer) have enough nights.
+// The server decides (verdict 'not_enough_nights' + min_group_nights); this is what the card does with it.
+describe('★ the temperature insight with too few nights in a group (#365)', () => {
+  const half = (nights, avg_temp, avg_wakes) => ({ nights, avg_temp, avg_wakes, avg_asleep_minutes: 600 });
+  const base = {
+    status: 'ok', nights_analyzed: 21, min_group_nights: 10, temp_wake_r: 1, temp_asleep_r: -1, temp_spread: 2,
+    overall: { avg_temp: 21, min_temp: 20, max_temp: 22, avg_humidity: null },
+  };
+  const mountAs = (who) =>
+    renderAs(who, <Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes>,
+      { kids: [KID], settings: { timezone: 'Australia/Melbourne' }, route: '/children/kid-1/sleep' });
+
+  test('says "not enough nights yet" with the counts, and shows no verdict or comparison, for both roles', async () => {
+    await forEachRole(async (_name, who) => {
+      mockSleep({ insights: { ...base, verdict: 'not_enough_nights', cooler: half(9, 19, 1), warmer: half(10, 22, 6) } });
+      const { unmount } = mountAs(who);
+      const card = (await screen.findByText(/Not enough nights yet/)).closest('.sleep-insight');
+      expect(card.textContent).toMatch(/needs 10 of each/);
+      expect(card.textContent).toMatch(/9 cooler and 10 warmer/);
+      expect(within(card).queryByText(/tend to mean more wake-ups|saw fewer wake-ups|No clear link/)).toBeNull();
+      expect(within(card).queryByText(/Cooler nights/), 'no averages to read as a finding').toBeNull();
+      unmount();
+      vi.restoreAllMocks();
+    });
+  });
+
+  test('at the minimum the same card shows the verdict and the comparison as before', async () => {
+    await forEachRole(async (_name, who) => {
+      mockSleep({ insights: { ...base, verdict: 'warm_more_wakes', cooler: half(10, 19, 1), warmer: half(10, 22, 6) } });
+      const { unmount } = mountAs(who);
+      expect(await screen.findByText(/Warmer nights tend to mean more wake-ups/)).toBeTruthy();
+      expect(screen.getByText(/Cooler nights/)).toBeTruthy();
+      expect(screen.queryByText(/Not enough nights yet/)).toBeNull();
+      unmount();
+      vi.restoreAllMocks();
+    });
   });
 });

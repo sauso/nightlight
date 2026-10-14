@@ -829,7 +829,15 @@ measurement**, and (like everything here) never a safety device — see the warn
   tile), the sleep detail overlays the night's room temperature beneath the timeline, aligned to
   the same time axis. After a handful of tracked nights, a **"Sleep & room temperature"** card
   compares wake-ups on the child's warmer vs cooler nights, so you can spot whether a warm room
-  tends to mean more waking — a pattern, not a cause.
+  tends to mean more waking — a pattern, not a cause. It
+  needs 5 tracked nights with a temperature before it shows anything, and then **at least 10 nights
+  in each of the cooler group and the warmer group before it says anything about sleep** (fixed, not
+  a setting; the figure is a judgement, not a measurement, and counts nights only, so it is the same
+  in any home or climate). Nights at exactly the median temperature belong to neither group, so the
+  least that can qualify is 21 nights. Until both groups reach 10 the card reads "Not enough nights
+  yet" with how many it has of each, and shows no verdict and no averages. A room whose temperature
+  never changes by a degree is still reported as "barely changed" (more nights would not help it).
+  Once both groups have 10, the wording and numbers are exactly what they were before.
 
 ## Adding caregivers
 

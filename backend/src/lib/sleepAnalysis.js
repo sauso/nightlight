@@ -2473,6 +2473,16 @@ export function getStoredNights(childId, limit = 14) {
 const INSIGHT_MIN_NIGHTS = 5; // fewer than this and any correlation is noise — say "keep tracking"
 const INSIGHT_R = 0.35; // |Pearson r| at/above this counts as a real link (moderate)
 const INSIGHT_TEMP_SPREAD = 1; // need at least this much °C spread across nights, else "too flat to tell"
+// A verdict needs at least this many nights in EACH of the cooler and the warmer group (#365). A
+// JUDGEMENT, NOT A MEASUREMENT: it was chosen by the owner, not fitted to any household's data, and no
+// night anywhere set it. It is deliberately house-agnostic: it counts nights, never degrees, minutes or
+// a timezone, so it means the same thing in every home and climate. What it guards against: the median
+// split can leave a group of one (the case the issue filed: four nights at 20°C and one at 22°C gave
+// "warm_more_wakes" from a single warm night). Below it the card says "not enough nights yet" and shows
+// no verdict. Known limit: 10 per group is not a statistical guarantee, only a floor under the worst
+// case; the card is still "a pattern, not a cause". The median night(s) belong to neither group, so the
+// least that can ever qualify is 21 tracked nights.
+const INSIGHT_MIN_GROUP_NIGHTS = 10;
 
 function pearson(xs, ys) {
   const n = xs.length;
@@ -2541,8 +2551,14 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
   });
 
   // Verdict the UI turns into a sentence. 'flat' = temperature barely varied, so we can't say anything.
+  // 'flat' stays FIRST (#365): it makes no claim about sleep, only that the room did not change, and a
+  // room that never changes has empty cooler/warmer groups for ever (nights equal to the median join
+  // neither), so gating it would tell that house "not enough nights yet" when more nights cannot help.
+  // 'not_enough_nights' withholds every actual verdict until both groups reach the minimum; the
+  // arithmetic below it is unchanged once they do.
   let verdict = 'none';
   if (spread < INSIGHT_TEMP_SPREAD) verdict = 'flat';
+  else if (cool.length < INSIGHT_MIN_GROUP_NIGHTS || warm.length < INSIGHT_MIN_GROUP_NIGHTS) verdict = 'not_enough_nights';
   else if (rWakes != null && rWakes >= INSIGHT_R) verdict = 'warm_more_wakes';
   else if (rWakes != null && rWakes <= -INSIGHT_R) verdict = 'warm_fewer_wakes';
 
@@ -2550,6 +2566,7 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
     status: 'ok',
     nights_analyzed: rows.length,
     verdict,
+    min_group_nights: INSIGHT_MIN_GROUP_NIGHTS, // additive (#365): the UI says "N of 10" with it
     temp_wake_r: rWakes == null ? null : Math.round(rWakes * 100) / 100,
     temp_asleep_r: rAsleep == null ? null : Math.round(rAsleep * 100) / 100,
     temp_spread: Math.round(spread * 10) / 10,

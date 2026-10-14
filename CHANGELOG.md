@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- **The "Sleep & room temperature" card no longer gives a verdict until the cooler and the warmer group each have at least 10 nights (#365).** The nights are split at the median temperature, and a group could be a single night: four nights at 20°C and one at 22°C with more wake-ups was reported as "warmer nights tend to mean more wake-ups". Until both groups have 10 the card now says "Not enough nights yet" with how many it has of each, and shows no verdict and no cooler/warmer averages. The 10 is fixed (no setting, range not applicable) and is a judgement, not a measurement; it counts nights only, so it is not tied to any home, climate or timezone. Nights at exactly the median temperature are in neither group, so the least that can qualify is 21 tracked nights; on the default 30-night look-back, a child with fewer than about 21 nights with a temperature will see this message. Once both groups reach 10 the verdict, correlation and averages are computed exactly as before. The insights response gains `min_group_nights` and a new `verdict` value, `not_enough_nights`; nothing is removed, and the correlation and group figures are still returned. Room temperature that never moves by a degree still reports "barely changed", not "not enough nights", because more nights cannot change that. Known limit, unchanged by this: the card still uses the detector's stored figures, not corrected ones, and does not adjust for the length of each night; the other points in the issue are not part of this change.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed
