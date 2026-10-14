@@ -455,8 +455,9 @@ not `stale`: there is no list on screen to keep, and the empty copy would be unv
 from the data: a catch block that sets the data to `[]` or `null` puts the failed state back into the empty one.
 
 Covered: Children, Cameras, Live, a child's alerts and unknown-child page, Sleep detail, Clip management.
-Not yet: Logs, Camera events and Recent alerts (they already show their error and hide the empty copy, but have
-only "Refresh now", not **Retry**), and the Night review, Timelapse, Recordings and sensor cards.
+Not yet: Logs (a failed fetch shows its error banner above "No log activity yet", the same conflation), Camera
+events and Recent alerts (they show their error and hide the empty copy, but have only "Refresh now", not
+**Retry**), and the Night review, Timelapse, Recordings and sensor cards.
 
 ### List row (`.cam-row`)
 Full-width button, `padding: 11px 14px`, 12px gap, hairline `--border` between rows (none on the
