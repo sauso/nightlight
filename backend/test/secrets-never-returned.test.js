@@ -400,7 +400,7 @@ describe('every API response, for every role', () => {
       // check, the GET sweep included, looks for their tails too.
       const mfa = await import('../src/lib/mfa.js');
       mfaSecret = mfa.generateSecret();
-      const generated = generateBackupCodes();
+      const generated = await generateBackupCodes();
       backupCodes = generated.codes;
       db.prepare(
         `INSERT INTO users (id, username, password_hash, role, mfa_enabled, mfa_secret, mfa_backup_codes)

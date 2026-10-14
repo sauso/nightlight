@@ -91,6 +91,41 @@ authenticator app needs no attention. If you'd like the stronger secret, re-enro
 `GET /api/auth/me/mfa` reports `needs_reenrolment: true` for an account still on an older secret,
 which is the quickest way to check.
 
+## Replayed codes, and limits on guessing (#550)
+
+| | Authenticator code | Backup code |
+|---|---|---|
+| Can be used again | **No.** Each code works **once**: the server remembers the newest 30-second step it has accepted for the account and refuses any code from that step or an earlier one. A code that was shown a moment ago cannot be re-used, and neither can one copied from over a shoulder or out of a log. | **No.** Consumed on use (unchanged). |
+| What a refused repeat looks like | The same **"Incorrect code"** (HTTP 401) as a wrong code, so a refusal does not reveal that the code was once valid. | Same. |
+| Counts toward the guess limits | Yes | Yes |
+
+Practical effect: if you sign in, sign out and want to sign in again within the same 30 seconds, wait for
+the app to show the **next** code. Codes from an earlier step than the one last used are refused too
+(the 30-second tolerance for clock drift still applies to the first use of a code).
+
+The second step is limited in three ways, and a request has to pass all of them:
+
+| Limit | Default | Counted per | Why |
+|---|---|---|---|
+| Per source and account | 20 per 15 minutes | source address + account | Stops one device guessing at one account. Unchanged. |
+| Per source | 100 per 15 minutes | source address, all accounts | Stops one device spraying many accounts. Unchanged. |
+| **Per user (new)** | **30 failed attempts per 15 minutes** | the account alone, whatever the source address | A guesser who spreads attempts over many addresses gets a fresh budget at each address from the two limits above; this one adds them up. **Only failed attempts count**, so signing in correctly never spends it. 30 sits above the per-source 20, so one device always hits its own limit first and this only ever stops a **distributed** guesser. |
+
+Over the limit, the answer is the usual "Too many attempts - please wait a few minutes and try again."
+(HTTP 429). The per-user count only starts from a sign-in token the server itself issued after the
+password was accepted; a made-up token is counted against its source address and cannot be used to run
+down someone else's budget.
+
+**Known limit:** someone who already has the password can still use up the per-user budget from many
+addresses and so block that person's second step for the rest of the 15 minutes (backup codes share the
+budget). They have beaten the first factor already; the alternative, no per-account limit, left the
+6-digit code open to a guesser with many addresses. Waiting 15 minutes, or an admin resetting
+two-factor, clears it. The limits are held in memory, so a restart of the container also clears them.
+There are no settings to change these numbers.
+
+Starting a new set-up, turning two-factor off, or an admin or console reset clears the remembered step,
+so a new authenticator's first code is never refused because of an old one.
+
 ## Notes for operators
 
 - The TOTP secret and the (hashed) backup codes live in the `users` table of the app database

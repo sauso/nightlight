@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **Signing in no longer freezes the whole server for a moment, and a two-factor code can no longer be used twice (#548, #550).** Checking a password blocked the server for about 80 ms (a second or more for a backup code), during which camera and sound detection, live video and every other request waited, and anyone able to send sign-in attempts could keep it busy. Passwords are now checked in a separate worker thread; the hashes, the cost setting, the "Incorrect username or password" and "Incorrect code" texts, the status codes and the response bodies are unchanged. (bcryptjs's own async calls were tried first and do not help: they only yield after 100 ms of work.) Separately, an authenticator code stayed valid for 60-90 seconds and could be used any number of times in that window; each code now works **once** for an account, and a repeat is refused with the same "Incorrect code" as a wrong one (a new nullable `mfa_last_step` column, added automatically; existing accounts are unaffected and the first code after upgrading works as usual). The second-step limit was per source address only; there is now also a limit per account of **30 failed attempts per 15 minutes** across all addresses, alongside the unchanged 20 per source and account and 100 per source. Only failures count, and only for a sign-in token the server issued, so a successful sign-in never spends it and a forged token cannot. **Known limit:** someone who holds the password can use up that budget from many addresses and block the second step for the rest of the 15 minutes (an admin reset or a restart clears it). Not done: backup codes themselves are unchanged (still 8 hex characters, consumed on use; they now share the new per-account limit), the code typed to finish turning two-factor on can still be used once more at the next sign-in, and there are no passkeys in the app to touch. See [Replayed codes, and limits on guessing](docs/mfa.md#replayed-codes-and-limits-on-guessing-550).
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed

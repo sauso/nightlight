@@ -1656,8 +1656,8 @@
   {
     "label": "account rate limit: /login/mfa wired to the wrong limiter",
     "file": "backend/src/routes/auth.js",
-    "find": "router.post('/login/mfa', mfaLimiter, (req, res) => {",
-    "replace": "router.post('/login/mfa', loginLimiter, (req, res) => {",
+    "find": "router.post('/login/mfa', mfaLimiter, asyncHandler(async (req, res) => {",
+    "replace": "router.post('/login/mfa', loginLimiter, asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": [
       "login-rate-limit.test.js"
@@ -1667,8 +1667,8 @@
   {
     "label": "account rate limit: /me/password wired to the wrong limiter",
     "file": "backend/src/routes/auth.js",
-    "find": "router.put('/me/password', requireAuth, sessionActionLimiter, (req, res) => {",
-    "replace": "router.put('/me/password', requireAuth, loginLimiter, (req, res) => {",
+    "find": "router.put('/me/password', requireAuth, sessionActionLimiter, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/me/password', requireAuth, loginLimiter, asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": [
       "login-rate-limit.test.js"
@@ -1700,8 +1700,8 @@
   {
     "label": "account rate limit: /me/password mounts the limiter before requireAuth",
     "file": "backend/src/routes/auth.js",
-    "find": "router.put('/me/password', requireAuth, sessionActionLimiter, (req, res) => {",
-    "replace": "router.put('/me/password', sessionActionLimiter, requireAuth, (req, res) => {",
+    "find": "router.put('/me/password', requireAuth, sessionActionLimiter, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/me/password', sessionActionLimiter, requireAuth, asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": [
       "login-rate-limit.test.js"
@@ -1711,8 +1711,8 @@
   {
     "label": "account rate limit: /me/mfa/disable mounts the limiter before requireAuth",
     "file": "backend/src/routes/auth.js",
-    "find": "router.post('/me/mfa/disable', requireAuth, sessionActionLimiter, (req, res) => {",
-    "replace": "router.post('/me/mfa/disable', sessionActionLimiter, requireAuth, (req, res) => {",
+    "find": "router.post('/me/mfa/disable', requireAuth, sessionActionLimiter, asyncHandler(async (req, res) => {",
+    "replace": "router.post('/me/mfa/disable', sessionActionLimiter, requireAuth, asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": [
       "login-rate-limit.test.js"
@@ -1722,8 +1722,8 @@
   {
     "label": "account rate limit: /me/mfa/disable wired to the wrong limiter",
     "file": "backend/src/routes/auth.js",
-    "find": "router.post('/me/mfa/disable', requireAuth, sessionActionLimiter, (req, res) => {",
-    "replace": "router.post('/me/mfa/disable', requireAuth, loginLimiter, (req, res) => {",
+    "find": "router.post('/me/mfa/disable', requireAuth, sessionActionLimiter, asyncHandler(async (req, res) => {",
+    "replace": "router.post('/me/mfa/disable', requireAuth, loginLimiter, asyncHandler(async (req, res) => {",
     "expect": "killed",
     "tests": [
       "login-rate-limit.test.js"
@@ -13552,7 +13552,7 @@
   {
     "label": "#563 MFA: verifyToken's up-front refusal of an empty secret or token removed",
     "file": "backend/src/lib/mfa.js",
-    "find": "  if (!secret || !token) return false;",
+    "find": "  if (!secret || !token) return null;",
     "replace": "  /* #563 mutant: guard removed */",
     "expect": "equivalent",
     "tests": ["input-validation.test.js", "mfa.test.js"],
@@ -17644,5 +17644,252 @@
     "expect": "killed",
     "tests": ["csp-directives.test.js"],
     "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#550 replay: a step EQUAL to the stored one is accepted again",
+    "file": "backend/src/routes/auth.js",
+    "find": "(mfa_last_step IS NULL OR mfa_last_step < ?)",
+    "replace": "(mfa_last_step IS NULL OR mfa_last_step <= ?)",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "the same code is accepted once and refused"
+  },
+  {
+    "label": "#550 replay: comparison inverted (older steps accepted, newer refused)",
+    "file": "backend/src/routes/auth.js",
+    "find": "(mfa_last_step IS NULL OR mfa_last_step < ?)",
+    "replace": "(mfa_last_step IS NULL OR mfa_last_step > ?)",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "an OLDER step is refused after a newer one"
+  },
+  {
+    "label": "#550 replay: the claim's row count is no longer checked (every correct code passes)",
+    "file": "backend/src/routes/auth.js",
+    "find": ".run(step, user.id, step).changes === 1;",
+    "replace": ".run(step, user.id, step).changes >= 0;",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "the same code is accepted once and refused"
+  },
+  {
+    "label": "#550 replay: a REJECTED claim must not fall back to success (race: check and record split)",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (step !== null) {\n    ok = db",
+    "replace": "if (step !== null) {\n    ok = true || db",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "two simultaneous submissions of one code",
+    "note": "Stands in for a non-atomic check: every submission of a correct code succeeds, which is what a read-then-write pair allows under concurrency."
+  },
+  {
+    "label": "#550 replay: the step recorded is the server clock's, not the code's",
+    "file": "backend/src/lib/mfa.js",
+    "find": "r.valid === true && Number.isSafeInteger(r.timeStep) ? r.timeStep : null",
+    "replace": "r.valid === true ? Math.floor(Date.now() / 30000) : null",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js",
+      "mfa.test.js"
+    ],
+    "namePattern": "the stored step is the step the code belongs to"
+  },
+  {
+    "label": "#550 replay: disabling MFA leaves the old step behind",
+    "file": "backend/src/routes/auth.js",
+    "find": "mfa_backup_codes = NULL, mfa_last_step = NULL WHERE id = ?').run(user.id);",
+    "replace": "mfa_backup_codes = NULL WHERE id = ?').run(user.id);",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "clearing MFA resets the step"
+  },
+  {
+    "label": "#550 replay: an admin clearing a user's MFA leaves the old step behind",
+    "file": "backend/src/routes/auth.js",
+    "find": "mfa_last_step = NULL WHERE id = ?').run(req.params.id);",
+    "replace": "mfa_last_step = mfa_last_step WHERE id = ?').run(req.params.id);",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "clearing MFA resets the step"
+  },
+  {
+    "label": "#550 replay: starting a new enrolment leaves the old step behind",
+    "file": "backend/src/routes/auth.js",
+    "find": "mfa_secret = ?, mfa_last_step = NULL WHERE id = ?",
+    "replace": "mfa_secret = ?, mfa_last_step = mfa_last_step WHERE id = ?",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "a leftover step",
+    "note": "Keeps the statement's arity and only stops the step being cleared."
+  },
+  {
+    "label": "#550 per-user limit: removed from the /login/mfa chain",
+    "file": "backend/src/routes/auth.js",
+    "find": "[mfaAccountLimiter, mfaUserLimiter, perClientLimiter]",
+    "replace": "[mfaAccountLimiter, perClientLimiter]",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "failures from DIFFERENT addresses add up"
+  },
+  {
+    "label": "#550 per-user limit: budget raised tenfold",
+    "file": "backend/src/routes/auth.js",
+    "find": "const PER_USER_MFA_LIMIT = 30;",
+    "replace": "const PER_USER_MFA_LIMIT = 300;",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "failures from DIFFERENT addresses add up"
+  },
+  {
+    "label": "#550 per-user limit: successful sign-ins spend the budget",
+    "file": "backend/src/routes/auth.js",
+    "find": "skipSuccessfulRequests: true,",
+    "replace": "skipSuccessfulRequests: false,",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "successful sign-ins never spend the budget"
+  },
+  {
+    "label": "#550 per-user limit: keyed on an unverified (merely decoded) token",
+    "file": "backend/src/routes/auth.js",
+    "find": "const payload = jwt.verify(mfaToken, JWT_SECRET, { algorithms: ['HS256'] });",
+    "replace": "const payload = jwt.decode(mfaToken);",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "a FORGED token naming a user"
+  },
+  {
+    "label": "#550 per-user limit: a token of the wrong purpose is keyed to its user",
+    "file": "backend/src/routes/auth.js",
+    "find": "return payload.purpose === 'mfa' && typeof payload.id === 'string' && payload.id ? payload.id : null;",
+    "replace": "return typeof payload.id === 'string' && payload.id ? payload.id : null;",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "wrong purpose is not keyed"
+  },
+  {
+    "label": "#550 per-user limit: the per-source limit is loosened (20 -> 40)",
+    "file": "backend/src/routes/auth.js",
+    "find": "const PER_ACCOUNT_LIMIT = 20;",
+    "replace": "const PER_ACCOUNT_LIMIT = 40;",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "the per-source limit is not loosened"
+  },
+  {
+    "label": "#548 login: synchronous compare back on the request path",
+    "file": "backend/src/routes/auth.js",
+    "find": "!(await passwordHash.compare(String(password || ''), hashToCheck))",
+    "replace": "!bcrypt.compareSync(String(password || ''), hashToCheck)",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "a login attempt leaves the event loop free"
+  },
+  {
+    "label": "#548 login: the post-compare re-read of the hash is removed (a reset mid-compare still signs in)",
+    "file": "backend/src/routes/auth.js",
+    "find": "?.password_hash !== user.password_hash) {",
+    "replace": "?.password_hash === null) {",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "password reset that lands DURING the compare"
+  },
+  {
+    "label": "#548 password change: the compare-and-swap on the verified hash is removed",
+    "file": "backend/src/routes/auth.js",
+    "find": "'UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?'",
+    "replace": "'UPDATE users SET password_hash = ? WHERE id = ? AND ? IS NOT NULL'",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "two simultaneous password changes"
+  },
+  {
+    "label": "#548 backup code: the compare-and-swap on the stored list is not checked",
+    "file": "backend/src/routes/auth.js",
+    "find": "user.mfa_backup_codes ?? null).changes === 1;",
+    "replace": "user.mfa_backup_codes ?? null).changes >= 0;",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "two simultaneous uses of one BACKUP code"
+  },
+  {
+    "label": "#548 setup: the post-hash re-check of 'no users yet' is removed",
+    "file": "backend/src/routes/auth.js",
+    "find": "cannot both create an admin.\n  if (userCount() > 0) {",
+    "replace": "cannot both create an admin.\n  if (false) {",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "two simultaneous /setup requests"
+  },
+  {
+    "label": "#548 enable: the 'MFA still off' guard on the write is removed",
+    "file": "backend/src/routes/auth.js",
+    "find": "WHERE id = ? AND mfa_enabled = 0')",
+    "replace": "WHERE id = ? AND ? IS NOT NULL')",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "two simultaneous /me/mfa/enable"
+  },
+  {
+    "label": "#548 worker: a stopped worker leaves callers in flight hanging",
+    "file": "backend/src/lib/passwordHash.js",
+    "find": "failAll(new Error('Password hashing worker stopped'));",
+    "replace": "/* mutant: callers left waiting */",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "a killed worker is replaced",
+    "note": "Expected to end as a HANG (the in-flight promise never settles), counted as killed."
+  },
+  {
+    "label": "#548 worker: the cost factor default changes from 10",
+    "file": "backend/src/lib/passwordHash.js",
+    "find": "export const hash = (password, cost = 10)",
+    "replace": "export const hash = (password, cost = 8)",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "hashes are ordinary bcrypt at the same cost",
+    "note": "Callers pass 10 explicitly today; this pins the module default as well."
   }
 ]

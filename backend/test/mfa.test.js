@@ -118,10 +118,33 @@ test('keyUri percent-encodes a username with spaces', () => {
   assert.ok(!uri.includes('two words'), 'a raw space would produce an unscannable URI');
 });
 
+// --- matchTokenStep (#550: what the replay check keys on) -------------------------------------
+
+test('matchTokenStep returns the step the code belongs to, and null for a wrong or empty code', () => {
+  const secret = mfa.generateSecret();
+  const now = Math.floor(Date.now() / 1000);
+  const step = (offsetSec) => Math.floor((now + offsetSec) / 30);
+  assert.equal(mfa.matchTokenStep(secret, otplib.generateSync({ secret, epoch: now })), step(0));
+  // A code from the previous step is reported as THAT step: if it reported the server's current one, a
+  // replayed old code would look newer than it is and slip past a "greater than last" check.
+  assert.equal(mfa.matchTokenStep(secret, otplib.generateSync({ secret, epoch: now - 30 })), step(-30));
+  assert.equal(mfa.matchTokenStep(secret, otplib.generateSync({ secret, epoch: now + 30 })), step(30));
+  assert.equal(mfa.matchTokenStep(secret, otplib.generateSync({ secret, epoch: now - 300 })), null);
+  assert.equal(mfa.matchTokenStep(secret, null), null);
+  assert.equal(mfa.matchTokenStep(null, '123456'), null);
+  assert.equal(mfa.matchTokenStep('not-valid-base32!!!', '123456'), null);
+});
+
+test('★ matchTokenStep gives a step for a LEGACY 80-bit secret too', () => {
+  const secret = 'JBSWY3DPEHPK3PXP';
+  const code = otplib.generateSync({ secret, guardrails: otplib.createGuardrails({ MIN_SECRET_BYTES: 10 }) });
+  assert.equal(mfa.matchTokenStep(secret, code), Math.floor(Date.now() / 30000));
+});
+
 // --- backup codes -----------------------------------------------------------------------------
 
-test('generateBackupCodes returns display codes plus a hashed JSON blob', () => {
-  const { codes, hashesJson } = mfa.generateBackupCodes();
+test('generateBackupCodes returns display codes plus a hashed JSON blob', async () => {
+  const { codes, hashesJson } = await mfa.generateBackupCodes();
   assert.ok(Array.isArray(codes) && codes.length > 0);
   assert.equal(mfa.backupCodesRemaining(hashesJson), codes.length);
   for (const c of codes) assert.match(c, /^[0-9a-f]{4}-[0-9a-f]{4}$/, 'shown to the user in xxxx-xxxx form');
@@ -129,43 +152,43 @@ test('generateBackupCodes returns display codes plus a hashed JSON blob', () => 
   for (const c of codes) assert.ok(!hashesJson.includes(c.replace('-', '')), 'code found in the stored blob');
 });
 
-test('generateBackupCodes honours an explicit count', () => {
-  assert.equal(mfa.generateBackupCodes(3).codes.length, 3);
-  assert.equal(mfa.generateBackupCodes(0).codes.length, 0);
+test('generateBackupCodes honours an explicit count', async () => {
+  assert.equal((await mfa.generateBackupCodes(3)).codes.length, 3);
+  assert.equal((await mfa.generateBackupCodes(0)).codes.length, 0);
 });
 
-test('★ a backup code works exactly once', () => {
-  const { codes, hashesJson } = mfa.generateBackupCodes(3);
-  const first = mfa.verifyAndConsumeBackupCode(hashesJson, codes[0]);
+test('★ a backup code works exactly once', async () => {
+  const { codes, hashesJson } = await mfa.generateBackupCodes(3);
+  const first = await mfa.verifyAndConsumeBackupCode(hashesJson, codes[0]);
   assert.equal(first.ok, true);
   assert.equal(mfa.backupCodesRemaining(first.hashesJson), 2, 'the used code is consumed');
 
   // Replaying the same code against the UPDATED list must fail — that is what single-use means.
-  assert.equal(mfa.verifyAndConsumeBackupCode(first.hashesJson, codes[0]).ok, false);
+  assert.equal((await mfa.verifyAndConsumeBackupCode(first.hashesJson, codes[0])).ok, false);
   // The others still work.
-  assert.equal(mfa.verifyAndConsumeBackupCode(first.hashesJson, codes[1]).ok, true);
+  assert.equal((await mfa.verifyAndConsumeBackupCode(first.hashesJson, codes[1])).ok, true);
 });
 
-test('backup codes are accepted regardless of dashes, case or spacing', () => {
-  const { codes, hashesJson } = mfa.generateBackupCodes(2);
+test('backup codes are accepted regardless of dashes, case or spacing', async () => {
+  const { codes, hashesJson } = await mfa.generateBackupCodes(2);
   const messy = `  ${codes[0].toUpperCase().replace('-', ' ')} `;
-  assert.equal(mfa.verifyAndConsumeBackupCode(hashesJson, messy).ok, true);
+  assert.equal((await mfa.verifyAndConsumeBackupCode(hashesJson, messy)).ok, true);
 });
 
-test('verifyAndConsumeBackupCode rejects an unknown code', () => {
-  const { hashesJson } = mfa.generateBackupCodes(2);
-  const r = mfa.verifyAndConsumeBackupCode(hashesJson, 'dead-beef');
+test('verifyAndConsumeBackupCode rejects an unknown code', async () => {
+  const { hashesJson } = await mfa.generateBackupCodes(2);
+  const r = await mfa.verifyAndConsumeBackupCode(hashesJson, 'dead-beef');
   assert.equal(r.ok, false);
   assert.equal(r.hashesJson, undefined, 'nothing is consumed on a failed attempt');
 });
 
-test('verifyAndConsumeBackupCode handles empty, null and corrupt stored data', () => {
-  assert.equal(mfa.verifyAndConsumeBackupCode(null, 'abcd-1234').ok, false);
-  assert.equal(mfa.verifyAndConsumeBackupCode('[]', 'abcd-1234').ok, false);
-  assert.equal(mfa.verifyAndConsumeBackupCode('{not json', 'abcd-1234').ok, false);
-  const { hashesJson } = mfa.generateBackupCodes(1);
-  assert.equal(mfa.verifyAndConsumeBackupCode(hashesJson, '').ok, false);
-  assert.equal(mfa.verifyAndConsumeBackupCode(hashesJson, null).ok, false);
+test('verifyAndConsumeBackupCode handles empty, null and corrupt stored data', async () => {
+  assert.equal((await mfa.verifyAndConsumeBackupCode(null, 'abcd-1234')).ok, false);
+  assert.equal((await mfa.verifyAndConsumeBackupCode('[]', 'abcd-1234')).ok, false);
+  assert.equal((await mfa.verifyAndConsumeBackupCode('{not json', 'abcd-1234')).ok, false);
+  const { hashesJson } = await mfa.generateBackupCodes(1);
+  assert.equal((await mfa.verifyAndConsumeBackupCode(hashesJson, '')).ok, false);
+  assert.equal((await mfa.verifyAndConsumeBackupCode(hashesJson, null)).ok, false);
 });
 
 test('backupCodesRemaining is 0 for null, empty or corrupt data rather than throwing', () => {

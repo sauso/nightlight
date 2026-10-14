@@ -100,6 +100,17 @@ attach headers). Roles are `admin` / `caregiver`; `requireAdmin` gates account/s
 the routes registered *after* it: cameras.js's four media routes sit above that line on purpose, so
 moving a route across it changes who can reach it.
 
+**Password hashing runs off the main loop (#548).** Every bcrypt hash and compare on a request path goes
+through `lib/passwordHash.js`, which runs the same `bcryptjs` (cost 10, so existing hashes still verify)
+in one persistent worker thread. bcryptjs's own async API does not help: it yields only after 100 ms of
+work and a cost-10 compare takes about 82 ms, so `bcrypt.compare` blocked the event loop exactly as
+`compareSync` did. Because a handler now yields mid-request, each place that reads a row, awaits, then
+writes uses a compare-and-swap or re-checks after the await (login, password change, backup codes,
+`/setup`, `/me/mfa/enable`); the TOTP replay check (`users.mfa_last_step`, nullable) is a single
+`UPDATE ... WHERE mfa_last_step IS NULL OR mfa_last_step < ?` whose row count is the verdict. The per-user
+MFA limiter sits beside the per-source ones in `routes/auth.js` and is keyed on a *verified* MFA token.
+User-facing rules: [mfa.md](mfa.md#replayed-codes-and-limits-on-guessing-550).
+
 **Every route's gate is pinned** by `backend/test/route-permissions.test.js` (issue #563). It enumerates
 the real route table (index.js's registrations read from its source, and every mounted router's actual
 `router.stack`), classifies each route as public / optional / media / signed-in / signed-in+admin, and

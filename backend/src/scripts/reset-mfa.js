@@ -21,10 +21,10 @@ const arg = process.argv[2];
 // static, and the only variable (a user id) is bound as a parameter. (The clause was always a
 // hardcoded literal, never user input, but keeping the SQL constant leaves no room for doubt.)
 const clearAllStmt = db.prepare(
-  'UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL WHERE mfa_enabled = 1'
+  'UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL, mfa_last_step = NULL WHERE mfa_enabled = 1'
 );
 const clearOneStmt = db.prepare(
-  'UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL WHERE id = ?'
+  'UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL, mfa_last_step = NULL WHERE id = ?'
 );
 
 if (!arg || arg === '--help' || arg === '-h') {
