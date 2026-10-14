@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **A failed load no longer looks like "nothing here yet" on the Children, Cameras, Live, child, Sleep and Clip screens (#375).** During an outage the Children tab showed "Cannot reach Nightlight" and, under it, "No children yet" with an **Add child** button; a failed sleep request read "No sleep data for this night — it predates tracking", a failed alerts request read "No alerts yet", and a failed clips request read "0 clips" and "No clips yet". Each of these screens now tells loading, failed and genuinely empty apart: loading says "Loading…"; a failed first load says what could not be loaded, why, and offers **Retry** (reachable by keyboard), with no empty message and no **Add child** / **Add camera**; a refresh that fails after a good load keeps the last list and says it could not be refreshed; the empty message appears only after the server answered with nothing. A child's page opened for a child that does not exist now says it cannot find them, instead of "Loading…" forever. Nothing is shown as a pop-up. Not done in this change: showing when the data was last updated, the same treatment on Logs, Camera events, Recent alerts, the Night review and the child page's sleep, timelapse, recordings and sensor cards, and the settings screens (the notification status badges already say "Status unavailable", #385). See [Design language](docs/design-language.md#loading-failed-and-empty-are-three-different-screens-375).
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed

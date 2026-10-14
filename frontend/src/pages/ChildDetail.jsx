@@ -8,6 +8,8 @@ import Avatar from '../components/Avatar.jsx';
 import Modal from '../components/Modal.jsx';
 import CameraRow from '../components/CameraRow.jsx';
 import AlertList from '../components/AlertList.jsx';
+import LoadFailed from '../components/LoadFailed.jsx';
+import { loadState } from '../lib/loadState.js';
 import SensorHistoryCard from '../components/SensorHistoryCard.jsx';
 import SleepSummaryCard from '../components/SleepSummaryCard.jsx';
 import TimelapseCard from '../components/TimelapseCard.jsx';
@@ -25,7 +27,7 @@ export default function ChildDetail() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-  const { kids, cameras } = useCameras();
+  const { kids, cameras, loaded: camerasLoaded, error: camerasError, refresh: refreshCameras } = useCameras();
   const { settings } = useSettings();
   // Same formatter the sleep card uses, so the card and the review agree to the minute.
   const fmtTime = (utc) => {
@@ -36,6 +38,10 @@ export default function ChildDetail() {
   const kid = kids.find((k) => k.id === id);
   const childCams = cameras.filter((c) => c.child_id === id);
   const [alerts, setAlerts] = useState([]);
+  // Alerts get the same three-way split as every fetched list (#375). A failed fetch used to be swallowed and
+  // leave [], which the render below turned into "No alerts for <child> yet" - the same words as a quiet week.
+  const [alertsLoaded, setAlertsLoaded] = useState(false);
+  const [alertsError, setAlertsError] = useState('');
   const [photoOpen, setPhotoOpen] = useState(false);
 
   async function loadAlerts() {
@@ -43,24 +49,42 @@ export default function ChildDetail() {
     try {
       const all = await api.get('/cameras/alerts');
       setAlerts((Array.isArray(all) ? all : []).filter((ev) => camIds.has(ev.camera_id)).slice(0, 20));
-    } catch { /* ignore — feed just stays as-is */ }
+      setAlertsLoaded(true);
+      setAlertsError('');
+    } catch (err) {
+      // The last feed stays on screen (stale); the message says so and offers Retry.
+      setAlertsError(err?.message || 'Request failed');
+    }
   }
 
   useEffect(() => {
+    // The feed is filtered to THIS child's cameras, so asking before the camera list has loaded would filter
+    // against an empty set and report a successful "no alerts" that was never true.
+    if (!camerasLoaded) return undefined;
     loadAlerts();
     const t = setInterval(loadAlerts, 15000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, cameras.length]);
+  }, [id, cameras.length, camerasLoaded]);
 
   if (!kid) {
+    // Not found only after the list has actually loaded: before that, or after a failed load, the child may
+    // well exist and "Loading…" forever (the old behaviour) hid the failure (#375).
+    const missing = loadState({ loaded: camerasLoaded, error: camerasError, count: kids.length });
     return (
       <>
         <AppHeader title="Child" back={{ to: '/children', label: 'Children' }} />
-        <main className="app-main"><div className="empty-state">Loading…</div></main>
+        <main className="app-main">
+          {missing === 'error' && <LoadFailed what="this child" error={camerasError} onRetry={refreshCameras} />}
+          {missing === 'loading' && <div className="empty-state">Loading…</div>}
+          {(missing === 'empty' || missing === 'ready' || missing === 'stale') && (
+            <div className="empty-state">We couldn’t find this child. Go back to Children and pick one from the list.</div>
+          )}
+        </main>
       </>
     );
   }
+  const alertsState = loadState({ loaded: alertsLoaded, error: alertsError, count: alerts.length });
   const age = ageLabel(kid.birthday);
 
   return (
@@ -115,13 +139,18 @@ export default function ChildDetail() {
           )}
         </div>
 
-        {alerts.length === 0 ? (
+        {alertsState === 'ready' || alertsState === 'stale' ? (
+          <>
+            {alertsState === 'stale' && <LoadFailed what="alerts" error={alertsError} onRetry={loadAlerts} stale />}
+            <AlertList alerts={alerts} onChanged={loadAlerts} title="Recent alerts" />
+          </>
+        ) : (
           <div className="card">
             <div className="card-title">Recent alerts</div>
-            <div className="camera-tile__sub">No alerts for {kid.name} yet.</div>
+            {alertsState === 'loading' && <div className="camera-tile__sub">Loading…</div>}
+            {alertsState === 'error' && <LoadFailed what="alerts" error={alertsError} onRetry={loadAlerts} />}
+            {alertsState === 'empty' && <div className="camera-tile__sub">No alerts for {kid.name} yet.</div>}
           </div>
-        ) : (
-          <AlertList alerts={alerts} onChanged={loadAlerts} title="Recent alerts" />
         )}
       </main>
 
