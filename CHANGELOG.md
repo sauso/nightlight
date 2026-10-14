@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **Unsaved edits to a child, a camera or the Recording settings now survive the app reloading itself, and Recording's switches all wait for Save (#377, #391).** The app reloads when you return after more than 15 seconds away (on purpose, to repair video), which emptied any form you were half way through; going to another screen and back did the same. What you typed is now kept in that browser tab for 6 hours and put back, with an **Unsaved changes restored** line and a **Discard changes** button; saving, discarding, removing the child or camera, closing the tab or signing out clears it. **Passwords are never kept**, so after a reload the camera password has to be typed again. On Settings → Recording, *Show a Record button on each camera* used to write the moment you flipped it while *Record wake-ups without alerting* waited for **Save changes**; both now wait, one **Save changes** applies the whole page, and an **Unsaved changes** line shows while anything differs from what is stored. Known gap: the other settings forms (General, MQTT, the push providers, Users, Account) still lose unsaved edits on a reload, and there is no "discard changes?" prompt on Back, swipe-back or the bottom bar yet.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed

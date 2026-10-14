@@ -2620,34 +2620,10 @@
     "tests": ["settingsRecording.test.jsx"]
   },
   {
-    "label": "#449 M5: the on-demand switch ignores the optimistic pendingOndemand value",
-    "file": "frontend/src/pages/SettingsRecording.jsx",
-    "find": "  const ondemandOn = pendingOndemand ?? (form.ondemand_enabled ?? true);",
-    "replace": "  const ondemandOn = form.ondemand_enabled ?? true;",
-    "expect": "killed",
-    "tests": ["settingsRecording.test.jsx"]
-  },
-  {
-    "label": "#449 M6: the on-demand switch is not disabled while its toggle is in flight",
-    "file": "frontend/src/pages/SettingsRecording.jsx",
-    "find": "                disabled={toggleBusy || busy}",
-    "replace": "                disabled={busy}",
-    "expect": "killed",
-    "tests": ["settingsRecording.test.jsx"]
-  },
-  {
     "label": "#449 M7: Save drops commit(response) and relies on refresh() instead",
     "file": "frontend/src/pages/SettingsRecording.jsx",
     "find": "        commit(response);\r\n        markSaved(payload);",
     "replace": "        refresh();\r\n        markSaved(payload);",
-    "expect": "killed",
-    "tests": ["settingsRecording.test.jsx"]
-  },
-  {
-    "label": "#449 M8: Save is not disabled while the toggle is in flight",
-    "file": "frontend/src/pages/SettingsRecording.jsx",
-    "find": "disabled={busy || toggleBusy}",
-    "replace": "disabled={busy}",
     "expect": "killed",
     "tests": ["settingsRecording.test.jsx"]
   },
@@ -17644,5 +17620,336 @@
     "expect": "killed",
     "tests": ["csp-directives.test.js"],
     "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#391 recording: Save leaves the on/off switch out of the payload",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "    const payload = shown;",
+    "replace": "    const { ondemand_enabled, ...payload } = shown;",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx",
+      "settingsForms.test.jsx"
+    ]
+  },
+  {
+    "label": "#391 recording: the on/off switch writes by itself again",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "onChange={(e) => setField('ondemand_enabled', e.target.checked)}",
+    "replace": "onChange={(e) => { setField('ondemand_enabled', e.target.checked); api.put('/settings', { ondemand_enabled: e.target.checked }); }}",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx",
+      "settingsForms.test.jsx"
+    ]
+  },
+  {
+    "label": "#391 recording: the unsaved-changes notice is never shown",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "{unsaved && <UnsavedNotice restored={restored} onDiscard={discardChanges} />}",
+    "replace": "{false && <UnsavedNotice restored={restored} onDiscard={discardChanges} />}",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx",
+      "settingsForms.test.jsx"
+    ]
+  },
+  {
+    "label": "#391 recording: the on/off switch is not disabled while Save is in flight",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "                disabled={busy}\n                onChange={(e) => setField('ondemand_enabled', e.target.checked)}",
+    "replace": "                onChange={(e) => setField('ondemand_enabled', e.target.checked)}",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx"
+    ]
+  },
+  {
+    "label": "#391 recording: a stored 1/0 switch is compared raw, so flipping it twice stays \"unsaved\"",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "    ondemand_enabled: !!(src.ondemand_enabled ?? true),",
+    "replace": "    ondemand_enabled: src.ondemand_enabled ?? true,",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx"
+    ]
+  },
+  {
+    "label": "#391 recording: the on/off switch defaults to off when nothing is stored",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "    ondemand_enabled: !!(src.ondemand_enabled ?? true),",
+    "replace": "    ondemand_enabled: !!(src.ondemand_enabled ?? false),",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 recording: Discard changes does not discard",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "    discard();\n",
+    "replace": "    /* not discarded */\n",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 recording: the draft is judged against the placeholder settings before they load",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "ready: loaded !== false",
+    "replace": "ready: true",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 recording: the draft is not restored on mount",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "useSettingsDraft(settings, restoredDraft || {})",
+    "replace": "useSettingsDraft(settings, {})",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 formDraft: a credential-named field is stored when a caller allows it",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "    if (SECRET_KEY_RE.test(k)) continue;\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: the credential pattern forgets passwords",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "/pass|secret|token|key|credential|auth/i",
+    "replace": "/secret|token|key|credential|auth/i",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: the credential pattern forgets tokens",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "/pass|secret|token|key|credential|auth/i",
+    "replace": "/pass|secret|key|credential|auth/i",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: the allow-list is not applied (every field of the form is stored)",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "  for (const k of allow) {",
+    "replace": "  for (const k of Object.keys(values || {})) {",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: an object value (a photo) is stored",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "if (v === null || ['string', 'number', 'boolean'].includes(typeof v)) out[k] = v;",
+    "replace": "out[k] = v;",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: a draft never expires",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "Date.now() - parsed.at > DRAFT_TTL_MS",
+    "replace": "false",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: a draft expires one millisecond early",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "Date.now() - parsed.at > DRAFT_TTL_MS",
+    "replace": "Date.now() - parsed.at >= DRAFT_TTL_MS",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: the key is not scoped to the signed-in person",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "return `${DRAFT_PREFIX}${userId ?? 'anon'}:${formId}`;",
+    "replace": "return `${DRAFT_PREFIX}${formId}`;",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: clearAllDrafts removes everything in sessionStorage",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "if (k.startsWith(DRAFT_PREFIX)) s.removeItem(k);",
+    "replace": "s.removeItem(k);",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: clearAllDrafts removes nothing",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "if (k.startsWith(DRAFT_PREFIX)) s.removeItem(k);",
+    "replace": "if (false) s.removeItem(k);",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 useFormDraft: every field is stored, not just the ones that differ",
+    "file": "frontend/src/lib/useFormDraft.js",
+    "find": "    if (String(picked[k] ?? '') !== String(base[k] ?? '')) changed[k] = picked[k];",
+    "replace": "    changed[k] = picked[k];",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 useFormDraft: a draft is written before the form has loaded",
+    "file": "frontend/src/lib/useFormDraft.js",
+    "find": "    if (!ready) return;\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 useFormDraft: a typed secret does not count as an unsaved edit",
+    "file": "frontend/src/lib/useFormDraft.js",
+    "find": "(storable || hasUnsavedEdits({}, {}, secrets))",
+    "replace": "storable",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 camera: Save does not move the baseline, so the draft outlives it",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "      setBaseline({ ...form, rtsp_password: '', talk_password: '' });",
+    "replace": "      /* baseline not moved */",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 camera: a removed camera's draft is kept",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "      clearDraft(draftKey);\n      await refresh();",
+    "replace": "      await refresh();",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 camera: the draft is not restored once the camera has loaded",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "    setForm({ ...loaded, ...draft });",
+    "replace": "    setForm(loaded);",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 camera: Discard changes does not reset the form",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "  function discardDraft() {\n    setForm(baseline);",
+    "replace": "  function discardDraft() {\n    setForm(form);",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 child: Save does not move the baseline, so the draft outlives it",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "      setBaseline(form);\n      await refresh();",
+    "replace": "      await refresh();",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 child: the draft is not restored once the child has loaded",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "    setForm({ ...loaded, ...draft });",
+    "replace": "    setForm(loaded);",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 child: a new child's draft is not restored",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "useState(() => (isNew ? loadDraft(draftKey, DRAFT_FIELDS) : null))",
+    "replace": "useState(() => null)",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 child: Discard changes does not reset the form",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "  function discardDraft() {\n    setForm(baseline);",
+    "replace": "  function discardDraft() {\n    setForm(form);",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 auth: signing out keeps the drafts",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    clearAllDrafts();\n    setToken(null);",
+    "replace": "    setToken(null);",
+    "expect": "killed",
+    "tests": [
+      "lib/AuthContext.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 auth: an expired sign-in clears the drafts",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    resetPushRegistration();\n    setUser(null);",
+    "replace": "    resetPushRegistration();\n    clearAllDrafts();\n    setUser(null);",
+    "expect": "killed",
+    "tests": [
+      "lib/AuthContext.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 child: a removed child's draft is kept",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "      clearDraft(draftKey); // a removed child's half-typed edits must not outlive it\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["formDrafts.test.jsx"]
   }
 ]
