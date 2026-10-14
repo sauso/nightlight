@@ -22,7 +22,7 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within, fireEvent, act } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
-import { renderAsAdmin } from './helpers/render.jsx';
+import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import SleepDetail, { addDays } from '../src/pages/SleepDetail.jsx';
 import { api } from '../src/lib/api.js';
 
@@ -664,6 +664,77 @@ describe('★ the empty states each say a different thing', () => {
     expect(await screen.findByText('Loading night…')).toBeTruthy();
     resolveNight(NIGHT);
     await waitFor(() => expect(screen.queryByText('Loading night…')).toBeNull());
+  });
+});
+
+// #521: Recompute used to be unreachable on any `empty` night, because that branch returns before the
+// `ok`-night render where the control lives. Same component as on an `ok` night, so these tests only pin
+// what is different here: that it is REACHABLE, that the two-step flow (press previews, second press
+// applies) and the locked dialog survive the move, and that it stays admin-only.
+describe('#521 Recompute is reachable on an empty night', () => {
+  const EMPTY = { ...NIGHT, status: 'empty', coverage_minutes: 720, onset_at: null, wake_at: null };
+  // What is SAVED for that night: an earlier, scored pass. Differs from the empty night, so the dialog has
+  // something to offer.
+  const SAVED = { night_date: '2026-08-30', status: 'ok', onset_at: '2026-08-30 09:30:00', wake_at: '2026-08-30 20:15:00',
+    asleep_minutes: 600, awake_minutes: 20, wake_count: 1 };
+
+  // Routes by query, because the dialog asks for three different things of the same path.
+  function mockEmpty({ night = EMPTY, locked = false } = {}) {
+    const get = vi.fn((path) => {
+      if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'last', night: { night_date: '2026-08-30' } });
+      if (path.includes('/sleep/insights')) return Promise.resolve(null);
+      if (path.includes('stored=1')) return Promise.resolve({ night: SAVED, locked });
+      return Promise.resolve(night); // the page's own read, and the post-store re-fetch
+    });
+    vi.spyOn(api, 'get').mockImplementation(get);
+    return get;
+  }
+  const storeCalls = (get) => get.mock.calls.map((c) => c[0]).filter((p) => p.includes('store=1') && !p.includes('stored=1'));
+
+  test('★ a detector-empty night offers it; the first press PREVIEWS and writes nothing, the second applies', async () => {
+    const get = mockEmpty();
+    mount();
+    const btn = await screen.findByRole('button', { name: /recompute this night/i });
+    fireEvent.click(btn);
+    // Step 1: the dialog opens on the saved-vs-now comparison, and nothing has been stored yet.
+    expect(await screen.findByRole('button', { name: /save the new numbers/i })).toBeInTheDocument();
+    expect(storeCalls(get)).toHaveLength(0);
+    // Step 2: only this press writes (the route's allowDowngrade / lock refusals are the server's call).
+    fireEvent.click(screen.getByRole('button', { name: /save the new numbers/i }));
+    await waitFor(() => expect(storeCalls(get)).toHaveLength(1));
+  });
+
+  test('a PARENT-flagged night opens on "locked" and offers no way to store', async () => {
+    const get = mockEmpty({ night: { ...EMPTY, corrected: true, nobody_in_bed: true }, locked: true });
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: /recompute this night/i }));
+    expect(await screen.findByText(/This night is locked because you corrected it/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save the new numbers/i })).not.toBeInTheDocument();
+    expect(storeCalls(get)).toHaveLength(0);
+    // The note under the button must not talk about "times" on a night that has none.
+    expect(screen.getByText(/Your answer that no one was in the bed is kept/)).toBeInTheDocument();
+    expect(screen.queryByText(/These times are the ones you told us/)).not.toBeInTheDocument();
+  });
+
+  test('★ still admin-only: a caregiver sees the empty night and no Recompute control', async () => {
+    mockEmpty();
+    renderAsCaregiver(
+      <Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes>,
+      { kids: [KID], settings: { timezone: 'Australia/Melbourne' }, route: '/children/kid-1/sleep' }
+    );
+    expect(await screen.findByText(/No one in the bed for this night/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+  });
+
+  test('it is not added to the other empty states (no_data, no_sleep, off)', async () => {
+    for (const status of ['no_data', 'no_sleep', 'off']) {
+      mockEmpty({ night: { ...NIGHT, status } });
+      const { unmount } = mount();
+      await screen.findByText(/No sleep data|No clear sleep|tracking is off/);
+      expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+      unmount();
+      vi.restoreAllMocks();
+    }
   });
 });
 

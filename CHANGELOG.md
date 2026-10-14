@@ -9,6 +9,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- **The Sound detection screen now shows whether the detector is listening, how loud the room has been, and what the detector deliberately cannot do (#371).** Under **Sensitivity** a new **Calibration** box says **Listening** once readings have been coming in (and, if they have, the average and peak sound over the last 5 minutes in dB above the room's own level, next to the alert line for the current sensitivity), or **No sound readings yet** if none has arrived in the last 10 minutes (still learning for the first 5 seconds after a start or a change, no microphone, or the detector not running; it cannot tell which). It refreshes every 30 seconds. At the bottom, **What this detector can and can't do** lists the limits already documented in [docs/notifications.md](docs/notifications.md): it measures loudness and cannot tell crying from speech or a television, a room that is loud when the detector starts sets the starting level high, a steady noise is absorbed after about 45 seconds (about 5 minutes for a moderate one), sustained noise can be absorbed during the cooldown with no follow-up alert, and the learned level can restart from scratch. Nothing about detection, alerting or sleep tracking changed, there are no new settings, and no new server route: it reads the per-minute history the server already serves. The live ambient level itself is not shown, because no route serves it.
+
+### Fixed
+
+- **"Recompute this night" can now be reached on a night that shows "No one in the bed" (#521).** Both a night the detector scored empty and a night flagged "no one was in the bed" returned before the button was drawn, so an admin who had tuned a threshold had to un-flag the night, recompute and re-flag it. The same button now appears there, for admins only. It works exactly as on any other night: the first press only compares the saved summary with the current one, the second press saves, a night you corrected is still refused as locked, and a night that was scored can still not be turned into one that is not. On a flagged night the note under the button now says your answer is kept (it used to talk about "times", which a flagged night does not have). Nights with no data, no clear sleep or tracking off do not get the button.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed
