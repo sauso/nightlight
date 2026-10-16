@@ -48,11 +48,12 @@ export const REQUEST_NOT_BUILT =
 export function redactSecrets(text, secrets = []) {
   let out = String(text ?? '');
   for (const s of secrets) {
-    if (typeof s !== 'string' || !s) continue;
+    if (typeof s !== 'string') continue;
     // The secret as it would be WRITTEN BACK by a server or proxy that echoes the header in a JSON or form-encoded
     // error: a `"` or `\` becomes `\"` / `\\` in JSON and a space or symbol becomes %XX in a URL or form, so
     // the literal-only replacement missed it (found by the Codex review of PR #742, reproduced with an ntfy token
     // holding a quote). Longest spelling first, so a shorter variant cannot leave a fragment of a longer one.
+    // `.filter(Boolean)` is also what keeps an EMPTY secret from shredding the message (every spelling of '' is '').
     const spellings = [...new Set([s, JSON.stringify(s).slice(1, -1), encodeURIComponent(s), encodeURIComponent(s).replace(/%20/g, '+')])]
       .filter(Boolean).sort((a, b) => b.length - a.length);
     for (const v of spellings) if (out.includes(v)) out = out.split(v).join('[redacted]');
