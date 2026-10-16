@@ -1181,6 +1181,12 @@ browser you happen to be using.
 
 - **Camera shows "No signal"**: double check the RTSP URL works with a tool like VLC
   (Media → Open Network Stream) first — if VLC can't play it, the app won't either.
+- **The app shows "Can't reach Nightlight" instead of the sign-in screen**: the app could not get an answer
+  from the server (it is restarting, off, or this device is not on the home network), so it does not know
+  whether you are signed in and does not ask for a password that could not be checked anyway. It retries
+  by itself (after 5 seconds, then 10, 20, and every 30 seconds from then on) and you can press **Try again**
+  at any time; once the server answers you land in the app, or on the sign-in screen if you really were signed
+  out. Your sign-in is kept while it retries. Only a server that answers "not signed in" shows the sign-in screen.
 - **Video won't connect from a phone but the pages load fine**: confirm the device is on
   the same LAN (for Low latency mode) — see "Remote / internet access" above if it's
   actually a different network.

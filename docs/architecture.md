@@ -134,6 +134,14 @@ The JWT signing secret is auto-generated and persisted to `DATA_DIR/.jwt_secret`
 `JWT_SECRET` isn't set — deliberately avoiding a hardcoded fallback, since this image is
 publicly distributed and a baked-in secret would be a shared key across every install.
 
+
+**Client startup (#382).** The SPA decides "signed in" from `/auth/me` and "which form" from `/auth/status`.
+Only a **401** from `/auth/me` means signed out. A network failure, a timeout or a 5xx (or a proxy's 502 while
+the backend restarts) leaves the stored token alone and shows `ServerUnreachable` ("Can't reach Nightlight")
+instead, retried by `lib/useAutoRetry.js` (5 s, 10 s, 20 s, then every 30 s) and by a **Try again** button. A
+failed `/auth/status` does the same on the sign-in screen: it no longer guesses "established install" and shows
+the sign-in form. The demo's tokenless path and the native app's (same web code, same stored token) are unchanged.
+
 ## Data layer (`backend/src/db.js`)
 
 better-sqlite3, single file in `DATA_DIR` (default `/app/data`). Schema is created with

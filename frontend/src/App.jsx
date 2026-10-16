@@ -11,6 +11,7 @@ import { useSwipeBack } from './lib/useSwipeBack.js';
 import { useHardwareBack } from './lib/useHardwareBack.js';
 import NavBar from './components/NavBar.jsx';
 import LiveMonitor from './components/LiveMonitor.jsx';
+import ServerUnreachable from './components/ServerUnreachable.jsx';
 import InstallPrompt from './components/InstallPrompt.jsx';
 import PushBanner from './components/PushBanner.jsx';
 import Login from './pages/Login.jsx';
@@ -109,7 +110,7 @@ export function AdminProtected({ children }) {
 }
 
 function Shell() {
-  const { user, loading } = useAuth();
+  const { user, loading, unreachable, retrying, refresh } = useAuth();
   useReloadAfterBackground();
   useSwipeBack();
   useHardwareBack();
@@ -130,6 +131,11 @@ function Shell() {
   }, [user]);
 
   if (loading) return null;
+
+  // #382: a stored sign-in could not be checked because the server did not answer. Without this the
+  // Protected wrapper below sent such a device to the sign-in form. Only while nobody is signed in: a
+  // failed refresh() on an open session leaves `user` set and the app as it was.
+  if (unreachable && !user) return <ServerUnreachable onRetry={refresh} retrying={retrying} />;
 
   return (
     <>

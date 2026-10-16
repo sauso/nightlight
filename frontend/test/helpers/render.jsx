@@ -28,7 +28,7 @@ const DEFAULT_SETTINGS = {
 
 // The injected values MUST match the shape the real providers publish, or a screen can pass its test
 // while breaking in the app. These are taken from the providers themselves:
-//   AuthContext     -> { user, loading, login, logout, refresh }
+//   AuthContext     -> { user, loading, unreachable, retrying, login, logout, refresh }
 //   SettingsContext -> { settings, loading, loaded, refresh, commit }
 //   CamerasContext  -> { kids, cameras, error, loaded, refresh }
 // (An earlier version of this helper published `setSettings`/`reload` and omitted `error`, none of
@@ -70,7 +70,7 @@ export function renderAs(
     // every screen renders once with `user: null` — and a form that fails to pick the user up when it
     // lands stays empty and then saves those blanks over the real values.
     // The spies are rebuilt each time, so grab handles from the returned `auth` AFTER a rerenderWith.
-    auth = { user: opts.user, loading: opts.loading, login: vi.fn(), logout: vi.fn(), refresh: vi.fn() };
+    auth = { user: opts.user, loading: opts.loading, unreachable: false, retrying: false, login: vi.fn(), logout: vi.fn(), refresh: vi.fn() };
     settingsValue = {
       settings: { ...DEFAULT_SETTINGS, ...opts.settings },
       loading: opts.loading,
