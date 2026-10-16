@@ -11,6 +11,7 @@
   recovery if you lose your authenticator.
 - **[Demo mode](demo-mode.md)** — only for hosting a public read-only demo; not needed for a normal
   install.
+- **[Mutation testing](mutation-testing.md)** — contributor reference: running the mutant catalogue (weekly in CI, sharded) and reading the result.
 - **[Design language](design-language.md)** — contributor reference: colors, type, icons.
 
 ## Elsewhere in the repo

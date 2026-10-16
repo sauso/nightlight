@@ -306,6 +306,13 @@ saved is what the camera is still using).
 | **Sound confirm** | 4 s | 0–30 s | Loudness must stay above that margin, *on average*, for this long — so a pulsing cry still counts while a single bang does not. |
 | **Sound cooldown** | 120 s | 1–3600 s | Minimum gap between sound alerts from this camera. |
 
+**What these settings do for each motion source.** A camera whose motion source is **MQTT** or **ONVIF**
+accepts the motion events the camera itself reports, and applies only the app's alert schedule and the
+**Motion cooldown**; it does not use the frame-difference **Motion confirm** rule (or sensitivity), which
+belong to the video-comparison source. A **Sound confirm** of 0 still averages over a minimum of about
+three analysis windows (about 0.6 s), in addition to the detector's initial calibration of the room's
+ambient level (about 5 s after it starts), so it is never a literal first-window trigger.
+
 ### Alert image URL (optional)
 
 If your camera exposes an HTTP snapshot endpoint, put it here and alert images are grabbed from it

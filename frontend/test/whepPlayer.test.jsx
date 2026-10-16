@@ -248,6 +248,10 @@ describe('WhepPlayer late POST answer from a torn-down run (#694)', () => {
     held[0].release('/live/cam1/whep/late');
     await settle();
     expect(deletes()).toEqual([{ url: '/live/cam1/whep/late', redirect: 'error' }]);
+    // The late DELETE carries the session token like every other cleanup (it goes through the shared helper):
+    // a hand-written fetch without it would leave the viewer session open (found by the #704 review).
+    const late = fetchMock.mock.calls.find(([, init = {}]) => init.method === 'DELETE');
+    expect(late[1].headers?.Authorization).toBe(`Bearer ${TOKEN}`);
   });
 
   test('a late answer whose Location fails the #562 guard sends no DELETE at all', async () => {
@@ -258,6 +262,8 @@ describe('WhepPlayer late POST answer from a torn-down run (#694)', () => {
     held[0].release('/api/users/1');
     await settle();
     expect(deletes()).toEqual([]);
+    // And the torn-down run's answer is not applied either (found by the #704 review: only the DELETE was checked).
+    expect(peers[0].remoteDescription).toBeNull();
   });
 
   test('normal connect then disconnect is unchanged: one DELETE, at unmount, after the answer was applied', async () => {
