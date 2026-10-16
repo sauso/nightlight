@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import Hls from 'hls.js';
 import StreamUnavailableNotice from './StreamUnavailableNotice.jsx';
 import { getMediaToken } from '../lib/api.js';
 
@@ -21,7 +20,7 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, statusU
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
   const stateRef = useRef('idle');
-  const [state, setStateRaw] = useState('idle'); // idle | connecting | live | error
+  const [state, setStateRaw] = useState('idle'); // idle | connecting | live | error | load-failed
   const [reconnectKey, setReconnectKey] = useState(0);
 
   function setState(next) {
@@ -44,7 +43,9 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, statusU
   // was working (which would also defeat any background audio playback).
   useEffect(() => {
     function handleVisibility() {
-      if (document.visibilityState === 'visible' && stateRef.current !== 'live') {
+      // 'load-failed' is excluded: re-importing the same failed module URL replays the cached failure (see the
+      // import below), so a reconnect would only flicker "Connecting…" before failing again.
+      if (document.visibilityState === 'visible' && stateRef.current !== 'live' && stateRef.current !== 'load-failed') {
         setReconnectKey((k) => k + 1);
       }
     }
@@ -98,6 +99,7 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, statusU
     // hls.js path, which has no DOM listeners of its own to remove (hls.destroy() detaches its own).
     let onLoadedMetadata = null;
     let onVideoError = null;
+    let cancelled = false;
 
     if (canPlayNatively) {
       // Safari: let the browser's own (hardware-accelerated) HLS support handle it,
@@ -113,30 +115,52 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, statusU
       onVideoError = () => setState('error');
       video.addEventListener('loadedmetadata', onLoadedMetadata);
       video.addEventListener('error', onVideoError);
-    } else if (Hls.isSupported()) {
-      const hls = new Hls({
-        backBufferLength: 10,
-        // Target staying close to the live edge instead of hls.js's more conservative
-        // default (which alone accounted for several extra seconds of the ~15s delay).
-        liveSyncDurationCount: 1,
-        liveMaxLatencyDurationCount: 3,
-        // If playback ever falls behind, speed up slightly (imperceptible) to catch
-        // back up to the live edge rather than staying permanently delayed.
-        liveDurationInfinity: false,
-        maxLiveSyncPlaybackRate: 1.3,
-      });
-      hlsRef.current = hls;
-      hls.loadSource(hlsUrl(mediamtxPath));
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => setState('live'));
-      hls.on(Hls.Events.ERROR, (event, data) => {
-        if (data.fatal) setState('error');
-      });
     } else {
-      setState('error');
+      // #386: hls.js is ~560 kB of the ~1.1 MB entry chunk and this branch is the only code that needs
+      // it, so it is fetched on demand. It is NOT needed by the WebRTC path (the default) or by the
+      // native-HLS branch above (Safari/iOS), so most sessions never download it.
+      // `cancelled` covers the window between asking for the module and getting it: the effect re-runs
+      // (a mode switch, a retry) or unmounts in that gap, and a player created after teardown would
+      // attach to a video that is being replaced and never be destroyed.
+      import('hls.js').then(({ default: Hls }) => {
+        if (cancelled) return;
+        if (!Hls.isSupported()) {
+          setState('error');
+          return;
+        }
+        const hls = new Hls({
+          backBufferLength: 10,
+          // Target staying close to the live edge instead of hls.js's more conservative
+          // default (which alone accounted for several extra seconds of the ~15s delay).
+          liveSyncDurationCount: 1,
+          liveMaxLatencyDurationCount: 3,
+          // If playback ever falls behind, speed up slightly (imperceptible) to catch
+          // back up to the live edge rather than staying permanently delayed.
+          liveDurationInfinity: false,
+          maxLiveSyncPlaybackRate: 1.3,
+        });
+        hlsRef.current = hls;
+        hls.loadSource(hlsUrl(mediamtxPath));
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => setState('live'));
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (data.fatal) setState('error');
+        });
+      }, () => {
+        // The chunk could not be fetched (offline). NOT the 'error' state: that one auto-retries every 5 s by
+        // importing the same URL again, and a dynamic import of a URL that failed once is remembered by the
+        // browser's module map for the life of the document, so every retry would replay the first failure
+        // forever (verified in headless Chrome for the route chunks, #386). Only a new document clears it,
+        // so this state stops the retry loop and offers a reload instead.
+        if (!cancelled) setState('load-failed');
+      }).catch(() => {
+        // The module loaded but building the player threw: an ordinary failure to connect, retried as before.
+        if (!cancelled) setState('error');
+      });
     }
 
     return () => {
+      cancelled = true;
       // Listeners off BEFORE the src is removed and load() called: tearing the source down is itself
       // something browsers may answer with an `error` event, and it must not reach this run's handler
       // and flip a player that is being replaced into the error state.
@@ -168,7 +192,15 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, statusU
       {state !== 'live' && (
         <div className={`whep-overlay whep-overlay--${state}${statusUnknown ? ' whep-overlay--unknown' : ''}`}>
           {/* Same rule as WhepPlayer (#505): unknown status is not "No signal". */}
-          {statusUnknown ? (
+          {state === 'load-failed' ? (
+            // Takes priority over the unknown-status notice: this one has a fix the viewer can act on.
+            <div className="stream-unavailable" role="alert">
+              <span>Couldn’t load the video player. Check your connection, then reload the page.</span>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => window.location.reload()}>
+                Reload
+              </button>
+            </div>
+          ) : statusUnknown ? (
             <StreamUnavailableNotice onRetry={() => setReconnectKey((k) => k + 1)} />
           ) : (
             <>

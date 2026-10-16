@@ -237,6 +237,26 @@ stalled connection fails with a "took too long to respond" error instead of hang
 is allowed to run long (camera probes and saves, recomputing a night, photo uploads, stopping a recording, diagnostics, the clip list and bulk delete) passes
 `{ timeoutMs: SLOW_REQUEST_TIMEOUT_MS }` (90 s) as its last argument.
 
+**What is in the first download, and what is fetched later (#386).** The entry chunk used to carry every
+screen plus hls.js (about 560 kB of its 1,098 kB). Screens are now split by route with `lazyPage()`
+(`lib/lazyPage.jsx`), and hls.js is imported only when `HlsPlayer` actually needs it:
+
+| | Loaded with the first page | Fetched on first use |
+|---|---|---|
+| Screens | Sign-in, the live monitor, the nav bar, the Children, Cameras, Settings hub and Account roots, "Page not found" | Child detail, sleep detail, night review, child settings, camera settings, detection settings, every Settings sub-page, clips, About |
+| hls.js | Never | Only by a camera in **Compatibility (HLS)** mode on a browser without native HLS. The default WebRTC view and Safari/iOS (native HLS) never download it |
+
+While a screen's chunk loads, its slot shows "Loading…" with the nav bar and live monitor still on screen. If the
+fetch fails (the phone is offline), the slot shows "Couldn't load this screen" with a **Reload** button that
+reloads the page; it does not blank the page. It reloads rather than importing again because a browser remembers a
+module URL that failed once for the life of the page, so a second import replays the first failure. Only
+chunk-fetch failures (recognised by the browsers' "failed to fetch dynamically imported module" messages) are caught
+there: a screen whose code loads but throws when it starts, and any other render error
+still reach the app-level crash page. A Compatibility (HLS) tile whose hls.js fetch fails shows the same kind of
+message with a **Reload** button and stops retrying on its own, for the same reason. If the chunk is an old one that
+a new deploy has replaced, the reload is what fixes it too (the app also reloads itself after being backgrounded for
+15 s).
+
 **Unsaved form edits survive the background reload (#377).** `App.jsx` reloads the page after 15 s in the
 background to repair stale media connections, and that empties React state. The child form, the camera form
 and Settings → Recording therefore store what is different from the saved values in `sessionStorage`

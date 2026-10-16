@@ -16,30 +16,36 @@ import InstallPrompt from './components/InstallPrompt.jsx';
 import PushBanner from './components/PushBanner.jsx';
 import Login from './pages/Login.jsx';
 import Children from './pages/Children.jsx';
-import ChildDetail from './pages/ChildDetail.jsx';
-import NightReview from './pages/NightReview.jsx';
-import SleepDetail from './pages/SleepDetail.jsx';
-import ChildSettings from './pages/ChildSettings.jsx';
 import Cameras from './pages/Cameras.jsx';
-import CameraSettings from './pages/CameraSettings.jsx';
-import DetectionSettings from './pages/DetectionSettings.jsx';
 import Account from './pages/Account.jsx';
 import Settings from './pages/Settings.jsx';
-import SettingsGeneral from './pages/SettingsGeneral.jsx';
-import SettingsCamera from './pages/SettingsCamera.jsx';
-import SettingsRecording from './pages/SettingsRecording.jsx';
-import SettingsMqtt from './pages/SettingsMqtt.jsx';
-import SettingsPush from './pages/SettingsPush.jsx';
-import SettingsPushPushover from './pages/SettingsPushPushover.jsx';
-import SettingsPushFirebase from './pages/SettingsPushFirebase.jsx';
-import SettingsPushGotify from './pages/SettingsPushGotify.jsx';
-import SettingsPushNtfy from './pages/SettingsPushNtfy.jsx';
-import SettingsUsers from './pages/SettingsUsers.jsx';
-import UserSettings from './pages/UserSettings.jsx';
-import SettingsLogs from './pages/SettingsLogs.jsx';
-import ClipManagement from './pages/ClipManagement.jsx';
-import About from './pages/About.jsx';
 import NotFound from './pages/NotFound.jsx';
+import { lazyPage } from './lib/lazyPage.jsx';
+
+// #386: everything not needed to show the Live page, sign in, or reach the primary tabs is split out of
+// the entry chunk (see lib/lazyPage.jsx). Eager on purpose: Login, the Children / Cameras / Settings /
+// Account tab roots and NotFound (so a bad address never needs a network fetch), plus LiveMonitor and
+// NavBar above. ChildDetail is lazy because it pulls the sleep, recordings and timelapse cards.
+const ChildDetail = lazyPage(() => import('./pages/ChildDetail.jsx'));
+const NightReview = lazyPage(() => import('./pages/NightReview.jsx'));
+const SleepDetail = lazyPage(() => import('./pages/SleepDetail.jsx'));
+const ChildSettings = lazyPage(() => import('./pages/ChildSettings.jsx'));
+const CameraSettings = lazyPage(() => import('./pages/CameraSettings.jsx'));
+const DetectionSettings = lazyPage(() => import('./pages/DetectionSettings.jsx'));
+const SettingsGeneral = lazyPage(() => import('./pages/SettingsGeneral.jsx'));
+const SettingsCamera = lazyPage(() => import('./pages/SettingsCamera.jsx'));
+const SettingsRecording = lazyPage(() => import('./pages/SettingsRecording.jsx'));
+const SettingsMqtt = lazyPage(() => import('./pages/SettingsMqtt.jsx'));
+const SettingsPush = lazyPage(() => import('./pages/SettingsPush.jsx'));
+const SettingsPushPushover = lazyPage(() => import('./pages/SettingsPushPushover.jsx'));
+const SettingsPushFirebase = lazyPage(() => import('./pages/SettingsPushFirebase.jsx'));
+const SettingsPushGotify = lazyPage(() => import('./pages/SettingsPushGotify.jsx'));
+const SettingsPushNtfy = lazyPage(() => import('./pages/SettingsPushNtfy.jsx'));
+const SettingsUsers = lazyPage(() => import('./pages/SettingsUsers.jsx'));
+const UserSettings = lazyPage(() => import('./pages/UserSettings.jsx'));
+const SettingsLogs = lazyPage(() => import('./pages/SettingsLogs.jsx'));
+const ClipManagement = lazyPage(() => import('./pages/ClipManagement.jsx'));
+const About = lazyPage(() => import('./pages/About.jsx'));
 
 // How long the app needs to have been backgrounded before we reload on return. Short
 // enough to catch a real "put the phone away for a bit" gap, long enough that quickly
