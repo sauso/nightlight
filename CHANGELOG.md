@@ -23,7 +23,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - **Developer tooling (not part of the image): the exit-cleanly test no longer fails under heavy load (#666).** `suite-exits-cleanly.test.js` timed each probe process from the moment it was spawned, so a loaded machine failed a probe for being slow to start; the clock now starts when the probe says it has finished (32 copies pinned to one core: 2 of 32 runs passed before, 32 of 32 after).
 - **Developer tooling: running the tests on Node 22 now says why it fails (#565).** The tests need Node 24 because Node 22 ignores the `exports` option of `mock.module`; `node-version-pin.test.js` now says so in one line instead of 16 unrelated-looking failures, and the README has a "Running the tests" note.
 - **Developer tooling: the admin-gate mutation catalogue covers every admin route (#563).** Twenty-four more `requireAdmin` removals are in `scripts/mutants.json`, so all 43 admin gates have a mutant. No change to the app.
-- **A camera tile no longer says the camera is offline when Nightlight's own streaming service did not answer (#505, #480).** When the status check timed out, the tile showed "No signal" and, after about 30 seconds, a red dot, as if the camera had failed. It now shows "Streaming service unavailable. Your camera may still be online." with an icon and a Retry button, and the dot stays amber. A camera that really is offline looks as it did before.
+
 
 ## [0.39.0] - 2026-10-13
 
