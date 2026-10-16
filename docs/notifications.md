@@ -328,6 +328,13 @@ Leave it blank to use a stream frame.
 | **Alert image URL** | blank | e.g. `http://192.168.1.50/snapshot.jpg`. If the endpoint needs a username, include it: `http://admin@192.168.1.50/snapshot.jpg`. |
 | **Alert image password** | blank | Only if the endpoint needs one. Blank means *keep whatever is already saved*. |
 
+Two limits protect the server from a misbehaving camera (#536). **Redirects are not followed**: if the
+address answers with a redirect (for example `http://` to `https://`), the image is not used and the alert
+falls back to a stream frame, so enter the final address. **The image may be at most 5 MB**; a larger one is
+abandoned part-way through and the alert falls back to a stream frame too. A normal camera JPEG is well
+under that (typically 0.1–2 MB; not measured on every model). Either case is a line in the log
+starting `[snapshot]`.
+
 **The password is stored but never shown again.** Like the camera's RTSP and two-way-audio passwords,
 it is never sent back to the browser — the field stays blank and the label says *(saved)* when one is
 stored. Type a new one to replace it; leave it blank to keep it.

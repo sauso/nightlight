@@ -70,14 +70,17 @@ test('an empty 200 is null: a zero-byte "image" would be saved and pushed as a b
   assert.equal(await fetchHttpSnapshot(`http://${base}/snap.jpg`), null);
 });
 
-test('a redirect is followed (some cameras bounce /snap to a token URL)', async () => {
+// #536 reversed this: redirects used to be followed (some cameras bounce /snap to a token URL), but a followed
+// redirect sends the Authorization header to whatever host the camera names, so it is now refused and the admin
+// enters the final address. snapshot-http-limits.test.js pins the same rule from the size-cap side.
+test('a redirect is not followed: null, and the redirect target is never requested', async () => {
   route = (req, res) => {
     if (req.url === '/snap') return res.writeHead(302, { location: '/token/abc.jpg' }).end();
     res.writeHead(200).end(JPEG);
   };
   const img = await fetchHttpSnapshot(`http://${base}/snap`);
-  assert.ok(img?.equals(JPEG));
-  assert.deepEqual(seen.map((s) => s.url), ['/snap', '/token/abc.jpg']);
+  assert.equal(img, null);
+  assert.deepEqual(seen.map((s) => s.url), ['/snap']);
 });
 
 test('a malformed address and a non-http scheme are null without a request being made', async () => {

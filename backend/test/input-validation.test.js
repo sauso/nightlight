@@ -171,8 +171,9 @@ describe('PUT /api/settings: the timezone must be one the runtime knows', () => 
 // ---- photos -----------------------------------------------------------------------------------------------
 
 describe('photos: an image data URL, within the cap', () => {
-  // The cap lib/photo.js's header states: ~700 KB of base64, a 512 px JPEG with headroom.
-  const MAX = 700 * 1024;
+  // The cap lib/photo.js's header states: 90 KB of data URL (#555 bullet 3: the old 700 KB could never be reached,
+  // express.json() refuses a body over its 100 KB default first). A literal, not the exported constant.
+  const MAX = 90 * 1024;
   const PREFIX = 'data:image/jpeg;base64,';
   const ofLength = (n) => PREFIX + 'A'.repeat(n - PREFIX.length);
 
@@ -198,6 +199,23 @@ describe('photos: an image data URL, within the cap', () => {
     // MUTANT THIS KILLS (#563): the size cap removed survived the whole suite.
     assert.equal(normalizePhoto(ofLength(MAX)).length, MAX);
     assert.throws(() => normalizePhoto(ofLength(MAX + 1)), /too large/);
+  });
+
+  test('★ a photo at the cap still fits in a default express.json() body (#555 bullet 3)', () => {
+    // The point of the cap is that it is REACHABLE: if the largest photo normalizePhoto accepts, in a request with
+    // the other child fields, is over body-parser's 100 KB default, the cap is dead code again and the user gets
+    // a bare 413. 100 KB is body-parser's documented default for express.json() with no options (index.js).
+    const body = JSON.stringify({ name: 'Child', birthday: '2023-04-01', color: '#7FBFA3', photo: ofLength(MAX) });
+    assert.ok(Buffer.byteLength(body) <= 100 * 1024, `${Buffer.byteLength(body)} bytes would be a 413`);
+  });
+
+  test('svg and other image types are refused; jpeg, png and webp pass (#555 bullet 2)', () => {
+    for (const ok of ['data:image/jpeg;base64,AA', 'data:image/png;base64,AA', 'data:image/webp;base64,AA']) {
+      assert.equal(normalizePhoto(ok), ok);
+    }
+    for (const bad of ['data:image/svg+xml;base64,AA', 'data:image/gif;base64,AA', 'data:image/png,AA', 'data:image/;base64,AA']) {
+      assert.throws(() => normalizePhoto(bad), /Photo must be a JPEG, PNG or WebP image/, bad);
+    }
   });
 
   test('the routes that take a photo refuse a non-image and store nothing', async () => {

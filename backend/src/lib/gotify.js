@@ -43,10 +43,13 @@ export async function sendGotify({ title, message, click, priority } = {}) {
     if (click) payload.extras = { 'client::notification': { click: { url: click } } };
 
     const res = await postWithTimeout(
-      `${c.serverUrl}/message?token=${encodeURIComponent(c.appToken)}`,
+      // The token goes in the X-Gotify-Key header, not the query string (#555 bullet 4): a URL is what reverse
+      // proxies and server access logs record, a header is not. Gotify accepts either (its docs describe both
+      // `?token=` and `X-Gotify-Key`). Not verified here against a real Gotify server: see the PR.
+      `${c.serverUrl}/message`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Gotify-Key': c.appToken },
         body: JSON.stringify(payload),
       },
       { label: 'gotify' }

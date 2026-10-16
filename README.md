@@ -85,7 +85,8 @@ Recording*. Video defaults to `<data dir>/clips`; you can point it at your array
 PUID/PGID control which user/group owns files this container creates in your data
 directory - the defaults above (99/100) match Unraid's own "nobody"/"users" convention,
 so they're usually already correct there. On another system, find your own with
-`id your_username`. TZ (e.g. `Australia/Melbourne`) affects log timestamps only -
+`id your_username`. Do not set `PUID=0`: it runs the app as root, and the container logs a warning at start
+if you do. TZ (e.g. `Australia/Melbourne`) affects log timestamps only -
 [full list of values](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
 
 `UMASK` (optional, default `077`) decides who else can read what the container writes there. The
