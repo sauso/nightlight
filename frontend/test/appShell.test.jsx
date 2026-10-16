@@ -11,7 +11,7 @@
 // fact that it works is why LiveMonitor is no longer on the coverage exclude list. What it does NOT
 // test is anything about video actually playing; that belongs to the Playwright suite in e2e/.
 import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import { HashRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
@@ -214,6 +214,74 @@ describe('#382: a server that cannot be reached is not "signed out"', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // --- Review of #715: an OPEN session whose refresh() fails. Account and UserSettings call refresh() after a
+  // save; a 5xx there sets `unreachable` while the user stays signed in.
+  const meCalls = () => api.get.mock.calls.filter(([p]) => p === '/auth/me').length;
+  // Signed in on Account, with /auth/me answering; set `outage.on` and every /auth/me from then on gets a 502.
+  async function openAccount() {
+    const outage = { on: false };
+    setToken('a-token');
+    mockApi(ADMIN, { '/auth/sessions': [] });
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((p) => (outage.on && String(p).startsWith('/auth/me') ? Promise.reject(http502) : base(p)));
+    window.location.hash = '#/account';
+    render(app());
+    await screen.findByRole('button', { name: 'Save name' });
+    return outage;
+  }
+  // The save finished (its refresh() has returned), or the unreachable screen replaced the page.
+  const saveSettled = () => waitFor(() => expect(
+    screen.queryByText(/Can't reach/) || screen.queryByRole('button', { name: /Saved/ }),
+  ).toBeTruthy());
+
+  test('★ an open session whose refresh() fails keeps its user and stays in the app', async () => {
+    // The unreachable screen is for a device nobody is signed in on yet. Replacing an open app with it on a blip
+    // (or dropping the user there) would throw someone off the live view for a server hiccup after a save.
+    const outage = await openAccount();
+    const user = userEvent.setup();
+    outage.on = true;
+    const before = meCalls();
+    await user.click(screen.getByRole('button', { name: 'Save name' }));
+    await saveSettled();
+    expect(meCalls(), 'precondition: the refresh() after the save asked /auth/me and got the 502').toBe(before + 1);
+    expect(screen.queryByText(/Can't reach/), 'a blip must not take the app away from someone signed in').toBeNull();
+    expect(document.querySelector('.app-shell')).not.toBeNull();
+    expect(screen.getByRole('button', { name: /Saved/ })).toBeInTheDocument();
+    expect(getToken()).toBe('a-token');
+  });
+
+  test('★ Sign out after a failed refresh() shows the sign-in form at once, not "Can\'t reach"', async () => {
+    // Sign out used to drop only the user, leaving `unreachable` set from the failed refresh(): Shell then showed
+    // "Can't reach Nightlight" until the pending retry (5 s here, up to 30 s) found no token.
+    const outage = await openAccount();
+    const user = userEvent.setup();
+    outage.on = true;
+    await user.click(screen.getByRole('button', { name: 'Save name' }));
+    await saveSettled();
+    outage.on = false;
+    await user.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Can't reach/)).toBeNull();
+    expect(getToken()).toBeNull();
+  });
+
+  test('★ Try again says "Trying…" and is disabled while its check is out, so a second tap sends nothing', async () => {
+    setToken('a-token');
+    meFails(http500);
+    const user = userEvent.setup();
+    render(app());
+    const tryAgain = await screen.findByRole('button', { name: 'Try again' });
+    // The server now takes its time: this check stays out.
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((p) => (String(p).startsWith('/auth/me') ? new Promise(() => {}) : base(p)));
+    const before = meCalls();
+    await user.click(tryAgain);
+    const busy = await screen.findByRole('button', { name: 'Trying…' });
+    expect(busy).toBeDisabled();
+    fireEvent.click(busy);
+    expect(meCalls(), 'one /auth/me for one tap').toBe(before + 1);
   });
 });
 

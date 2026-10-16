@@ -142,6 +142,83 @@ describe('#382: a manual Try again and the automatic retry never run together', 
       vi.useRealTimers();
     }
   });
+
+  test('★ the status answer and the retry timer land in the same tick, before React re-renders: ONE guest sign-in', async () => {
+    // The ordering the in-flight guard above does not cover (review of #715): the manual check has ANSWERED, so
+    // its flag is already clear, but React has not yet committed statusFailures = 0, which is what clears the
+    // 5 s timer. The timer's call then started a second GET and a second POST /auth/guest.
+    vi.useFakeTimers(); // no shouldAdvanceTime: the test alone decides when the timer comes due
+    try {
+      const pending = [];
+      const get = vi.spyOn(api, 'get')
+        .mockRejectedValueOnce(new Error('offline'))
+        .mockImplementation(() => new Promise((resolve) => { pending.push(resolve); }));
+      const guest = vi.spyOn(api, 'post').mockImplementation(() => new Promise(() => {})); // the guest sign-in stays out
+      mount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      const tryAgain = screen.getByRole('button', { name: 'Try again' });
+      await act(async () => { await vi.advanceTimersByTimeAsync(RETRY_BASE_MS - 10); });
+      act(() => { tryAgain.click(); });
+      expect(pending, 'precondition: the manual check is out').toHaveLength(1);
+
+      await act(async () => {
+        pending[0]({ demo: true }); // the manual check answers, and its continuation runs...
+        for (let i = 0; i < 3; i += 1) await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(20); // ...then the 5 s timer comes due, all inside one act: no commit yet
+        pending.slice(1).forEach((resolve) => resolve({ demo: true }));
+        for (let i = 0; i < 3; i += 1) await Promise.resolve();
+      });
+      expect(guest.mock.calls.filter(([path]) => path === '/auth/guest'), 'one guest session only').toHaveLength(1);
+      expect(get, 'and no status check after the guest sign-in began').toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('★ a Try again that succeeds cancels the pending automatic retry: no further status check', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const get = vi.spyOn(api, 'get').mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ needsSetup: false });
+      mount();
+      const tryAgain = await screen.findByRole('button', { name: 'Try again' });
+      await act(async () => { tryAgain.click(); });
+      expect(await screen.findByRole('button', { name: 'Sign in' })).toBeTruthy();
+      expect(get).toHaveBeenCalledTimes(2);
+      await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+      expect(get, 'the 5 s retry armed by the first failure was cancelled by the answer').toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('★ while /auth/status keeps failing it retries after 5, 10 and 20 s, then every 30 s', async () => {
+    // The schedule README.md promises. Setting the count to 1 instead of adding one stopped after the first
+    // retry: the count never changed again, so nothing re-armed the timer.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const at = [];
+      vi.spyOn(api, 'get').mockImplementation(() => {
+        at.push(Date.now());
+        return Promise.reject(new Error('offline'));
+      });
+      mount();
+      await screen.findByText(/Can't reach Nightlight/);
+      // Short slices, each in its own act(), so React commits each failure (and the next timer is armed) before
+      // the clock moves on; a slice is also how late a retry can be seen, hence the one second of slack below.
+      for (let t = 0; t < 130000; t += 250) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+      }
+      const gaps = at.slice(1).map((t, i) => t - at[i]);
+      const expected = [5000, 10000, 20000, 30000, 30000, 30000];
+      expect(gaps, `the gaps between checks were ${gaps.join(', ')} ms`).toHaveLength(expected.length);
+      expected.forEach((wait, i) => {
+        expect(gaps[i], `check ${i + 2}`).toBeGreaterThanOrEqual(wait);
+        expect(gaps[i], `check ${i + 2}`).toBeLessThan(wait + 1000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('signing in', () => {

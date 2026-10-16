@@ -19166,6 +19166,141 @@
     "namePattern": "#382"
   },
   {
+    "label": "#382 review M-A3: AuthContext: a failed refresh() on an open session also drops the user",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "        setUnreachable(true);\n",
+    "replace": "        setUser(null); setUnreachable(true);\n",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "keeps its user and stays in the app"
+  },
+  {
+    "label": "#382 review M-A17: App shell: the unreachable screen replaces an open session's app too",
+    "file": "frontend/src/App.jsx",
+    "find": "if (unreachable && !user) return",
+    "replace": "if (unreachable) return",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "keeps its user and stays in the app"
+  },
+  {
+    "label": "#382 review M-A22: AuthContext: the failure count is set to 1 instead of counted, so retrying stops after one retry",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "setFailures((n) => n + 1);",
+    "replace": "setFailures(1);",
+    "expect": "killed",
+    "tests": ["lib/AuthContext.test.jsx"],
+    "namePattern": "while the server stays down it retries"
+  },
+  {
+    "label": "#382 review M-A21: Login: the status failure count is set to 1 instead of counted, so retrying stops after one retry",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "setStatusFailures((n) => n + 1);",
+    "replace": "setStatusFailures(1);",
+    "expect": "killed",
+    "tests": ["login.test.jsx"],
+    "namePattern": "keeps failing it retries"
+  },
+  {
+    "label": "#382 review M-A11: useAutoRetry: the backoff has no 30 s cap",
+    "file": "frontend/src/lib/useAutoRetry.js",
+    "find": "return Math.min(RETRY_BASE_MS * 2 ** (failures - 1), RETRY_MAX_MS);",
+    "replace": "return RETRY_BASE_MS * 2 ** (failures - 1);",
+    "expect": "killed",
+    "tests": ["lib/useAutoRetry.test.jsx", "lib/AuthContext.test.jsx", "login.test.jsx"],
+    "namePattern": "for every attempt after that|while the server stays down it retries|keeps failing it retries"
+  },
+  {
+    "label": "#382 review M-A10: useAutoRetry: a new count or an unmount no longer cancels the scheduled retry",
+    "file": "frontend/src/lib/useAutoRetry.js",
+    "find": "    return () => clearTimeout(timer);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["lib/useAutoRetry.test.jsx", "lib/AuthContext.test.jsx", "login.test.jsx"],
+    "namePattern": "unmounting|replaces the scheduled retry|a count back at 0|a Try again that succeeds cancels"
+  },
+  {
+    "label": "#382 review M-A16: Login: a successful status check leaves the failure count (and its armed retry) in place",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "    setStatusFailures(0);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["login.test.jsx"],
+    "namePattern": "a Try again that succeeds cancels"
+  },
+  {
+    "label": "#382 review M-A6: AuthContext: an answering /auth/me leaves the unreachable flag and the failure count set",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "      setUser(me);\n      setUnreachable(false);\n      setFailures(0);\n",
+    "replace": "      setUser(me);\n",
+    "expect": "killed",
+    "tests": ["lib/AuthContext.test.jsx"],
+    "namePattern": "the backoff starts over"
+  },
+  {
+    "label": "#382 review M-A7: AuthContext: a refresh() with no token leaves the unreachable flag and the failure count set",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "      setUser(null);\n      setUnreachable(false);\n      setFailures(0);\n      setLoading(false);\n",
+    "replace": "      setUser(null);\n      setLoading(false);\n",
+    "expect": "killed",
+    "tests": ["lib/AuthContext.test.jsx"],
+    "namePattern": "signed out in another tab"
+  },
+  {
+    "label": "#382 review M-A19: AuthContext: refresh() no longer marks itself as retrying (Try again stays enabled)",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    setRetrying(true);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "is disabled while its check is out"
+  },
+  {
+    "label": "#382 review A1: Sign out leaves the unreachable state from a failed refresh() set",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    setUnreachable(false);\n    setFailures(0);\n  }\n\n  return (",
+    "replace": "  }\n\n  return (",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx", "lib/AuthContext.test.jsx"],
+    "namePattern": "Sign out after a failed refresh"
+  },
+  {
+    "label": "#382 review A1b: Sign out clears the unreachable flag but leaves the failed refresh()'s retry armed",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    setUnreachable(false);\n    setFailures(0);\n  }\n\n  return (",
+    "replace": "    setUnreachable(false);\n  }\n\n  return (",
+    "expect": "killed",
+    "tests": ["lib/AuthContext.test.jsx"],
+    "namePattern": "Sign out cancels the retry"
+  },
+  {
+    "label": "#382 review A2: a stale /auth/me failure after the sign-in ended sets unreachable again",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "} else if (!getToken()) {",
+    "replace": "} else if (false) {",
+    "expect": "killed",
+    "tests": ["lib/AuthContext.test.jsx"],
+    "namePattern": "THEN the earlier"
+  },
+  {
+    "label": "#382 review A3: Login: a status check may still start after the guest sign-in began (no guard)",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "if (guestSignInBegun.current) return;",
+    "replace": "if (false) return;",
+    "expect": "killed",
+    "tests": ["login.test.jsx"],
+    "namePattern": "land in the same tick"
+  },
+  {
+    "label": "#382 review A3: Login: the guest sign-in never marks itself begun",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "    guestSignInBegun.current = true;\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["login.test.jsx"],
+    "namePattern": "land in the same tick"
+  },
+  {
     "label": "#391 recording: Save leaves the on/off switch out of the payload",
     "file": "frontend/src/pages/SettingsRecording.jsx",
     "find": "    const payload = shown;",
@@ -19893,6 +20028,16 @@
     "expect": "killed",
     "tests": ["whepPlayer.test.jsx"],
     "namePattern": "normal connect then disconnect|late answer from the old run"
+  },
+  {
+    "label": "#694 review W3+W5 (a pair): the `cancelled` check moved after the body read AND the cleanup no longer resets resourceUrl, so a run cancelled mid-read DELETEs twice",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "        if (cancelled) {\n          if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;\n        }\n        const answerSdp = await res.text();\n        await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });\n      } catch (err) {\n        if (!cancelled) {\n          setState('error');\n          setErrorMsg(err.message || 'Could not connect to camera');\n          if (!everConnectedRef.current) onFirstConnectFailed?.();\n        }\n      }\n    }\n\n    connect();\n\n    return () => {\n      cancelled = true;\n      clearTimeout(firstConnectTimeoutId);\n      if (pcRef.current) {\n        pcRef.current.close();\n        pcRef.current = null;\n      }\n      if (resourceUrl) {\n        deleteWhepSession(resourceUrl);\n        resourceUrl = null;\n      }",
+    "replace": "        const answerSdp = await res.text();\n        if (cancelled) {\n          if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;\n        }\n        await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });\n      } catch (err) {\n        if (!cancelled) {\n          setState('error');\n          setErrorMsg(err.message || 'Could not connect to camera');\n          if (!everConnectedRef.current) onFirstConnectFailed?.();\n        }\n      }\n    }\n\n    connect();\n\n    return () => {\n      cancelled = true;\n      clearTimeout(firstConnectTimeoutId);\n      if (pcRef.current) {\n        pcRef.current.close();\n        pcRef.current = null;\n      }\n      if (resourceUrl) {\n        deleteWhepSession(resourceUrl);\n      }",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "while the answer body is being read",
+    "note": "One entry because the two edits only fail together. W3 alone (no reset) is equivalent: the only DELETE besides the cleanup's is the one in the `cancelled` check, which runs BEFORE the body read, so before the cleanup can have DELETEd this address. W5 alone (check after the read) is equivalent: the cleanup's reset leaves nothing for that check to DELETE again. Found by the review of #694."
   },
   {
     "label": "#564 webrtcSessions: kickWebrtcSession sends nothing, so a revoked login's live view keeps streaming",
