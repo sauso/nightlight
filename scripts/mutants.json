@@ -17679,6 +17679,39 @@
     "namePattern": "the CI matrix"
   },
   {
+    "label": "#W3 --shard: an index above 2^53 is accepted (it rounds, so i > n compares equal)",
+    "file": "scripts/mutate.mjs",
+    "find": "if (!Number.isSafeInteger(i) || !Number.isSafeInteger(n)) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --only: a filter that matches no control carries none (a broken suite reports everything killed)",
+    "file": "scripts/mutate.mjs",
+    "find": "&& !matched.some((m) => m.expect === 'survives') ? [...matched, control] : matched;",
+    "replace": "&& false ? [...matched, control] : matched;",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --only: the control is added even when the filter matches nothing (a typo runs just the control)",
+    "file": "scripts/mutate.mjs",
+    "find": "const filtered = only && matched.length && control",
+    "replace": "const filtered = only && control",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
     "label": "#W3 --shard: a leading 0 / zero index is accepted",
     "file": "scripts/mutate.mjs",
     "find": "/^([1-9]\\d*)\\/([1-9]\\d*)$/",

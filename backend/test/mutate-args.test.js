@@ -170,7 +170,7 @@ describe('--shard=<i>/<n> (the CI matrix)', () => {
 
   test('a malformed shard is refused with the usage before anything is read', async () => {
     const dir = shardTree();
-    for (const bad of ['0/4', '5/4', '1/0', '2', '1/2/3', 'a/b', '-1/4', '1.5/4', '01/4', '1e0/2', ' 1/2', '/2', '1/']) {
+    for (const bad of ['0/4', '5/4', '1/0', '2', '1/2/3', 'a/b', '-1/4', '1.5/4', '01/4', '1e0/2', ' 1/2', '/2', '1/', '9007199254740993/9007199254740992', '1/9007199254740993']) {
       const res = await runHarness(dir, [`--shard=${bad}`]);
       assert.equal(res.code, 2, `--shard=${bad} was accepted:\n${res.stdout}\n${res.stderr}`);
       assert.match(res.stderr, /--shard must be <i>\/<n>/);
@@ -191,5 +191,33 @@ describe('--shard=<i>/<n> (the CI matrix)', () => {
     const none = await runHarness(dir, ['--shard=9/9']);
     assert.equal(none.code, 2);
     assert.match(none.stderr, /no mutants match in shard 9\/9/);
+  });
+
+  // The harness check is a control mutant that must SURVIVE; a filtered run that selects no control cannot tell a
+  // working suite from a broken one (every test failing reports every mutant KILLED). Found by the #722 review.
+  test('--only that matches no control still carries one; a filter matching nothing stays refused', async () => {
+    const control = { ...MUTANT, label: 'shard-fixture control', replace: '  return a + b; // comment only', expect: 'survives' };
+    const dir = buildTree([...catalogue, control], { 'backend/src/add.js': ADD_SRC, 'backend/test/add.test.js': ADD_TEST });
+    const res = await runHarness(dir, ['--list', '--only=shard-fixture a4']);
+    assert.equal(res.code, 0, `${res.stdout}\n${res.stderr}`);
+    const lines = res.stdout.split('\n').filter(Boolean);
+    assert.equal(lines.length, 2, res.stdout);
+    assert.match(lines[0], /shard-fixture a4/);
+    assert.match(lines[1], /^CONTROL .*shard-fixture control/);
+    // A filter that already selects the control does not add a second copy.
+    const own = await runHarness(dir, ['--list', '--only=shard-fixture control']);
+    assert.equal(own.stdout.split('\n').filter(Boolean).length, 1, own.stdout);
+    // A typo in the filter still matches nothing, rather than running just the control.
+    const typo = await runHarness(dir, ['--only=no-such-label']);
+    assert.equal(typo.code, 2);
+    assert.match(typo.stderr, /no mutants match/);
+  });
+
+  test('a filtered run against a broken suite is voided by the carried control', async () => {
+    const control = { ...MUTANT, label: 'shard-fixture control', replace: '  return a + b; // comment only', expect: 'survives' };
+    const dir = buildTree([...catalogue, control], { 'backend/src/add.js': ADD_SRC, 'backend/test/add.test.js': ADD_TEST.replace('5)', '6)') });
+    const run = await runHarness(dir, ['--only=shard-fixture a4']);
+    assert.notEqual(run.code, 0, `a failing suite went green:\n${run.stdout}\n${run.stderr}`);
+    assert.match(run.stdout + run.stderr, /CONTROL MUTANT WAS KILLED/);
   });
 });

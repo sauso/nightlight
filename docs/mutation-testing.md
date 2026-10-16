@@ -60,6 +60,9 @@ Known limits of the sharded run:
 - The catalogue's *control* mutants (a comment edit, which must survive; it proves the harness works) are spread over
   the shards by the same rule. A shard that holds none cannot detect a broken harness by itself; it relies on the
   other shards' controls. A harness broken for one runner only would go unnoticed.
+- A run narrowed with `--only=` always carries one control: if the text matches mutants but none of them is a control,
+  the first control in the catalogue is added (listed as `CONTROL`), so a broken test environment cannot report every
+  selected mutant as killed and pass. With `--shard` as well, only the shard that draws the control carries it.
 - The runs are only as repeatable as the runner. A mutant near its time limit can be a `HANG` in one run and a kill in
   the next.
 - Nothing posts the result anywhere or opens an issue. Someone has to look at the red run.

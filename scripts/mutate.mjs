@@ -115,6 +115,9 @@ function parseShard(v) {
   if (!m) return null;
   const i = Number(m[1]);
   const n = Number(m[2]);
+  // Number() rounds above 2^53, so 9007199254740993/9007199254740992 compared as i === n and was accepted although
+  // i > n (found by the #722 review). Reject anything that is not an exact integer instead of comparing rounded ones.
+  if (!Number.isSafeInteger(i) || !Number.isSafeInteger(n)) return null;
   return i <= n ? { i, n } : null;
 }
 const argProblems = args.flatMap((a) => {
@@ -161,7 +164,14 @@ const EXPECT_VALUES = ['killed', 'survives', 'equivalent'];
 const expectProblem = (m) => (EXPECT_VALUES.includes(m.expect) ? null
   : `its \`expect\` is ${m.expect === undefined ? 'missing' : JSON.stringify(m.expect)}, but the run only understands ${EXPECT_VALUES.map((v) => `"${v}"`).join(', ')}`);
 const only = value('only');
-const filtered = only ? catalogue.filter((m) => m.label.includes(only)) : catalogue;
+const matched = only ? catalogue.filter((m) => m.label.includes(only)) : catalogue;
+// A FILTERED run still needs a control. The harness check (a control mutant that is KILLED voids the run) only works if
+// a control is in the run; `--only="#679"` selected three killed-expected mutants and no control, so a broken test
+// environment (every test failing) reported all three KILLED and the run, and the CI collect job, went green
+// (found by the #722 review, reproduced). When the filter matched something but no control, the first catalogue
+// control rides along. A filter that matches nothing stays empty, so a typo is still refused ("no mutants match").
+const control = catalogue.find((m) => m.expect === 'survives');
+const filtered = only && matched.length && control && !matched.some((m) => m.expect === 'survives') ? [...matched, control] : matched;
 // --shard=i/n (CI matrix, .github/workflows/mutation.yml). ROUND-ROBIN by position, not contiguous blocks: the
 // catalogue is grouped by subsystem and the groups differ in cost (a frontend mutant runs vitest, a `--full`-style
 // backend entry is slow), so blocks would hand one runner all the slow ones. Position modulo n is stable for a given
