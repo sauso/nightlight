@@ -15,6 +15,9 @@ services:
     # ⚠️ Do NOT rely on Docker's default: Engine 29 no longer documents one, and a bare `docker stop`
     # measured ~4s on the machine this was found on — enough to kill the save half-finished.
     stop_grace_period: 30s
+    # No `healthcheck:` here on purpose: the image defines one (GET /api/health on $PORT, 120s start
+    # period), and a container inherits it. It only labels the container healthy/unhealthy
+    # (`docker ps`, Unraid's Docker tab); nothing restarts an unhealthy container. See docs/operations.md.
     network_mode: host
     environment:
       # Which host user/group owns files this container creates in the data volume
@@ -54,6 +57,11 @@ services:
       # Your public IP or DDNS hostname - only needed for Low Latency (WebRTC) mode
       # to work from outside your home network. Leave unset for LAN-only use.
       - PUBLIC_HOST=${PUBLIC_HOST:-}
+      # Optional. STUN servers for Low Latency (WebRTC), in the browser and in MediaMTX: a comma-separated
+      # list of stun:host[:port]. Unset = Google's public server (below). BLANK = no STUN at all (nothing
+      # contacts Google; viewing on your own network never needs STUN). Note `-` and not `:-`: a blank
+      # value in .env must stay blank, not turn back into the default. See .env.example.
+      - STUN_SERVERS=${STUN_SERVERS-stun:stun.l.google.com:19302}
       # Optional. The UDP port Low Latency (WebRTC) video uses - a bare number, 1-65535, blank =
       # 8189. Change it only to run a second instance on the same host. See .env.example.
       - WEBRTC_UDP_PORT=${WEBRTC_UDP_PORT:-}

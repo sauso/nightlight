@@ -18,6 +18,11 @@ export function CamerasProvider({ children }) {
   const [kids, setKids] = useState([]);
   const [cameras, setCameras] = useState([]);
   const [error, setError] = useState('');
+  // True once a request has SUCCEEDED, and never reset: `kids`/`cameras` start as [] only so consumers can
+  // map them, which made "not loaded yet" and "failed" look exactly like "none configured" (#375). A screen
+  // reads (loaded, error, list length) through lib/loadState.js to tell the three apart. Additive: nothing
+  // that already reads `kids`, `cameras`, `error` or `refresh` changes.
+  const [loaded, setLoaded] = useState(false);
   const failureCountRef = useRef(0);
   const wasDownRef = useRef(false);
   const notReadyCountsRef = useRef(new Map()); // camera_id -> consecutive not-ready polls
@@ -43,11 +48,19 @@ export function CamerasProvider({ children }) {
           counts.delete(cam.id);
           return { ...cam, statusLevel: 'live' };
         }
+        if (cam.status?.unknown) {
+          // MediaMTX's status call timed out: we do not know the camera is down, so never count toward the
+          // red "offline" dot (that would claim an outage we have not seen) and restart the count so a real
+          // outage afterwards is confirmed from scratch. Same amber "connecting" dot as a brief drop.
+          counts.delete(cam.id);
+          return { ...cam, statusLevel: 'connecting', statusUnknown: true };
+        }
         const count = (counts.get(cam.id) || 0) + 1;
         counts.set(cam.id, count);
         return { ...cam, statusLevel: count > NOT_READY_RED_THRESHOLD ? 'offline' : 'connecting' };
       });
       setCameras(camsWithLevel);
+      setLoaded(true);
 
       setError('');
       if (wasDownRef.current) {
@@ -81,7 +94,7 @@ export function CamerasProvider({ children }) {
   }, []);
 
   return (
-    <CamerasContext.Provider value={{ kids, cameras, error, refresh: load }}>
+    <CamerasContext.Provider value={{ kids, cameras, error, loaded, refresh: load }}>
       {children}
     </CamerasContext.Provider>
   );

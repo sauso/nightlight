@@ -6,8 +6,8 @@
 //     is scoped to that window; turning tracking off stops a child's sleep being recorded at all. A
 //     screen that quietly changed either would show nothing wrong — the damage appears days later as
 //     missing or mis-scoped nights.
-//  2. **Setting a photo writes IMMEDIATELY, with a partial payload** that carries neither of those
-//     fields. That is safe only because the route keeps what it is not sent
+//  2. **Setting a photo writes IMMEDIATELY, with a partial payload** (just `photo`, #384) that carries
+//     neither of those fields, nor the name, birthday or colour the person may have edited but not saved. That is safe only because the route keeps what it is not sent
 //     (backend/test/children-route.test.js pins the other half). What is tested here is that the
 //     partial payload really is partial — and that the screen does not reach for stale state to pad
 //     it out, which is how a "helpful" fix would reintroduce exactly the bug.
@@ -19,7 +19,7 @@
 // child's name, birthday, colour and photo: tracking and the window are shown disabled and left out of
 // their save, and Add / Remove child are admin-only. Both roles are exercised wherever the screen differs.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { renderAs, renderAsAdmin, ADMIN, CAREGIVER } from './helpers/render.jsx';
 import ChildSettings from '../src/pages/ChildSettings.jsx';
@@ -185,20 +185,42 @@ describe('saving', () => {
 });
 
 describe('★★ the immediate photo write', () => {
-  test('sends ONLY the identity fields — not the sleep settings', async () => {
+  test('sends ONLY the photo — not the identity fields, not the sleep settings (#384)', async () => {
     // The partial payload the route is trusted to complete. If this screen ever padded it out from
     // its own state, a photo change would start writing whatever the form happened to be holding —
-    // including a sleep window the person had edited but not saved.
+    // a name or birthday, or a sleep window, the person had edited but not saved.
     const { user } = mount();
     await user.click(await screen.findByRole('button', { name: 'Remove' }));
 
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
     const [path, body] = putSpy.mock.calls[0];
     expect(path).toBe('/children/kid-1');
-    expect(Object.keys(body).sort()).toEqual(['birthday', 'color', 'name', 'photo']);
-    expect(body.photo).toBe(null);
-    expect(body, 'the sleep window is the route\'s to keep').not.toHaveProperty('sleep_window_start');
-    expect(body).not.toHaveProperty('track_sleep');
+    expect(body).toEqual({ photo: null });
+  });
+
+  test('★ #384: an unsaved name and birthday are neither written by the photo save nor lost, and still go with Save changes', async () => {
+    const { user } = mount();
+    const name = await screen.findByLabelText('Name');
+    await user.clear(name);
+    await user.type(name, 'Renamed');
+    fireEvent.change(screen.getByLabelText(/Birthday/), { target: { value: '2024-02-02' } });
+
+    await user.click(screen.getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
+    expect(putSpy.mock.calls[0][1], 'the photo save must carry nothing the person has not saved').toEqual({ photo: null });
+    await screen.findByText('Photo saved ✓');
+
+    // Left untouched: still on screen after the photo save and the refresh that follows it...
+    expect(screen.getByLabelText('Name').value).toBe('Renamed');
+    expect(screen.getByLabelText(/Birthday/).value).toBe('2024-02-02');
+
+    // ...and still unsaved, so Save changes is what commits them (with the photo as it now is).
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(2));
+    const saved = putSpy.mock.calls[1][1];
+    expect(saved.name).toBe('Renamed');
+    expect(saved.birthday).toBe('2024-02-02');
+    expect(saved.photo).toBe(null);
   });
 
   test('says it saved, and refreshes so the avatar updates everywhere', async () => {

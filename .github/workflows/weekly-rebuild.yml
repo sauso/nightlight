@@ -16,6 +16,11 @@ on:
     - cron: '0 16 * * 1' # Mondays 16:00 UTC (after the 15:00 nightly e2e, so it doesn't overlap)
   workflow_dispatch: {}
 
+# Least privilege (#566 bullet 5): this workflow only reads the repository (the Docker Hub push uses its own secrets, not this token), so the token it is handed is
+# limited to that instead of the repository default (which may include write).
+permissions:
+  contents: read
+
 concurrency:
   group: weekly-rebuild
   cancel-in-progress: false
@@ -69,6 +74,10 @@ jobs:
           pull: true
           no-cache: true
           tags: sauso/nightlight:${{ matrix.tag }}
+          # Same attestations as docker-publish.yml, or this rebuild would silently replace an attested
+          # :latest/:dev with an unattested one (#566 bullet 4).
+          sbom: true
+          provenance: mode=max
           build-args: |
             GIT_SHA=${{ steps.bmeta.outputs.sha }}
             GIT_REF=${{ matrix.ref }}

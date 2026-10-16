@@ -104,4 +104,6 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   localStorage.clear();
+  // Form drafts (#377) live here; one test's half-typed form must never be restored in the next.
+  sessionStorage.clear();
 });
