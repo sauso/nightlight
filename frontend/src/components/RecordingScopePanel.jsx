@@ -42,7 +42,9 @@ export default function RecordingScopePanel({ cam }) {
   }, [check]);
 
   const setup = describeSetup({ cam, kids, settings });
-  const ready = describeReady({ cam, setup, readiness });
+  // A failed check wins over an older success: otherwise "Check again" failing would leave the previous
+  // answer on screen, looking like a fresh one, and the failure message would be unreachable.
+  const ready = failed ? null : describeReady({ cam, setup, readiness });
 
   return (
     <section aria-labelledby="scope-title">

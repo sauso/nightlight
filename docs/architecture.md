@@ -87,7 +87,12 @@ settings page's read-only "Recording and alerts" panel asks `GET /api/cameras/:i
 (admin only) whether the ring buffer, the detectors and the alert window are up *right now*. The route
 only reads: it asks `clipCapture`, `motionDetector`, `onvifMotion`, `soundDetector` and `detectSchedule`
 for their own answers and never starts, stops or reconciles anything, so it cannot cause the path
-reloads the invariant above is about. It returns booleans and fixed words only. Its one restated
+reloads the invariant above is about. It returns booleans and fixed words only. `alerting_now` is false
+for a silenced camera, one outside its schedule, and a disabled one (which runs no detector);
+`alert_pause_reason` is `null` while alerts fire, else `"silenced"`, `"schedule"` or `"disabled"`
+(checked in that order of precedence: disabled, silenced, schedule), computed from the same instant as
+`alerting_now`. It is an added field: `alerting_now` is unchanged in meaning for existing clients, and the
+panel falls back to guessing the reason from the camera row only if the field is absent. Its one restated
 condition, manual recording availability, mirrors `can_record` in `routes/cameras.js`, and
 `recording-readiness.test.js` fails if the two disagree.
 

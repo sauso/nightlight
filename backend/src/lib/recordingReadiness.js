@@ -4,7 +4,7 @@ import { getOndemandSettings, getWakeClipSettings } from './recordings.js';
 import { isDetecting } from './motionDetector.js';
 import { isOnvifMotion } from './onvifMotion.js';
 import { isSoundDetecting } from './soundDetector.js';
-import { inActiveWindow } from './detectSchedule.js';
+import { inActiveWindow, isSnoozed } from './detectSchedule.js';
 import { childTracksSleep } from './sleepAnalysis.js';
 
 // "Is this camera ready RIGHT NOW to save what it is configured to save?" (#394).
@@ -55,6 +55,18 @@ export function soundState(cam, { running }) {
   return running ? 'running' : 'not_running';
 }
 
+// Why alerts are not firing, as one word, or null when they are. Order is the order of precedence:
+// a disabled camera is 'disabled' even if also silenced (nothing runs at all); a silence outranks the
+// schedule because inActiveWindow checks it first. isSnoozed is asked once and inActiveWindow only when it
+// said no, so the reason and the verdict cannot disagree (time only moves forward: not silenced now means
+// not silenced a microsecond later). Reuses detectSchedule's own functions; no schedule maths is restated.
+export function alertPauseReason(cam, disabled = !!cam.disabled) {
+  if (disabled) return 'disabled';
+  if (isSnoozed(cam.id)) return 'silenced';
+  if (!inActiveWindow(cam)) return 'schedule';
+  return null;
+}
+
 /**
  * The full readiness answer for one camera row (SELECT * FROM cameras).
  * Pure reads; never starts, stops or reconciles anything (reconciling writes to MediaMTX and
@@ -64,6 +76,7 @@ export function recordingReadiness(cam) {
   const running = isClipCapturing(cam.id);
   const disabled = !!cam.disabled;
   const storageReady = clipStorageReady();
+  const pauseReason = alertPauseReason(cam, disabled);
   const wakeCapable = !disabled && !!cam.child_id && childTracksSleep(cam.child_id) && getWakeClipSettings().enabled;
   return {
     buffer: bufferState({ disabled, running, wanted: clipRingWanted(cam), storageReady }),
@@ -75,7 +88,13 @@ export function recordingReadiness(cam) {
     sound: soundState(cam, { running: isSoundDetecting(cam.id) }),
     // inActiveWindow is the SAME function the detectors call before raising an alert, so this is the
     // server's verdict in the app's timezone, not a browser re-computation of it. False while
-    // silenced or outside the schedule; true when there is no schedule.
-    alerting_now: inActiveWindow(cam),
+    // silenced, outside the schedule, or with the camera disabled (a disabled camera runs no detector,
+    // so "alerting" there would contradict motion/sound 'off' and buffer 'camera_disabled' in the same
+    // answer); true when there is no schedule. Derived from the same reason as `alert_pause_reason`.
+    alerting_now: pauseReason === null,
+    // WHY alerts are paused, from the same snapshot as the verdict above (#713 review): the panel used to
+    // guess "silenced" vs "schedule" from the camera row it already held, which can be 15 s stale
+    // while alerting_now is fresh. ADDED beside alerting_now, which keeps its meaning: open clients read it.
+    alert_pause_reason: pauseReason,
   };
 }

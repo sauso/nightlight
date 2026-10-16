@@ -17800,7 +17800,7 @@
   {
     "label": "#394 readiness: alerting_now ignores silences and the schedule",
     "file": "backend/src/lib/recordingReadiness.js",
-    "find": "alerting_now: inActiveWindow(cam),",
+    "find": "alerting_now: pauseReason === null,",
     "replace": "alerting_now: true,",
     "expect": "killed",
     "tests": [
@@ -17998,7 +17998,7 @@
   {
     "label": "#394 panel: a silence is not named as the reason alerts are paused",
     "file": "frontend/src/lib/recordingScope.js",
-    "find": "else if (on('snooze')) alerting",
+    "find": "else if (reason === 'silenced' || (reason !== 'schedule' && on('snooze'))) alerting",
     "replace": "else if (false) alerting",
     "expect": "killed",
     "tests": [
@@ -18049,6 +18049,72 @@
       "recordingScope.test.jsx"
     ],
     "namePattern": "the panel, as an admin"
+  },
+  {
+    "label": "#394 readiness: a disabled camera is reported as alerting",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (disabled) return 'disabled';",
+    "replace": "if (false) return 'disabled';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "#713 review"
+  },
+  {
+    "label": "#394 readiness: a silence is never named as the reason",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (isSnoozed(cam.id)) return 'silenced';",
+    "replace": "if (false) return 'silenced';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "#713 review"
+  },
+  {
+    "label": "#394 readiness: outside the schedule is never named as the reason",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (!inActiveWindow(cam)) return 'schedule';",
+    "replace": "if (false) return 'schedule';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "#713 review"
+  },
+  {
+    "label": "#394 panel: a failed recheck keeps showing the older answer",
+    "file": "frontend/src/components/RecordingScopePanel.jsx",
+    "find": "failed ? null : describeReady(",
+    "replace": "describeReady(",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "#713 review"
+  },
+  {
+    "label": "#394 panel: the pause reason is guessed from the camera row, ignoring the server's",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "reason === 'silenced' || (reason !== 'schedule' && on('snooze'))",
+    "replace": "on('snooze')",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "#713 review"
+  },
+  {
+    "label": "#394 panel: a disabled camera is shown as alerting",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "disabled || reason === 'disabled'",
+    "replace": "false",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "#713 review"
   },
   {
     "label": "#384 photo save also sends the form's name, birthday and colour",

@@ -141,17 +141,21 @@ export function describeReady({ cam, setup, readiness }) {
   const motion = DETECTOR_TEXT[readiness.motion] || { state: 'off', text: String(readiness.motion) };
   const sound = DETECTOR_TEXT[readiness.sound] || { state: 'off', text: String(readiness.sound) };
 
-  // "Alerts firing now" needs a reason when it is no: the server says only yes or no, but the panel holds
-  // the silence and the schedule, so it can name which one.
-  let alerting;
-  if (!on('motion') && !on('sound')) alerting = { state: 'off', text: 'Nothing to alert on', note: 'Motion and sound alerts are both off.' };
-  else if (readiness.alerting_now) alerting = { state: 'ok', text: 'Yes', note: null };
-  else if (on('snooze')) alerting = { state: 'off', text: 'Silenced', note: 'No alert, no notification and no alert clip until the silence ends.' };
-  else alerting = { state: 'off', text: 'Outside the schedule', note: 'No alert, no notification and no alert clip until the schedule opens.' };
-
   // The three things that cut from the buffer, each judged against it: a setting that is "on" with no
   // buffer is the gap this panel is for, and is shown as a problem, not as "off".
   const disabled = readiness.buffer === 'camera_disabled';
+
+  // "Alerts firing now" needs a reason when it is no. The server names it (`alert_pause_reason`, computed
+  // in the same instant as `alerting_now`). The camera row this panel holds can be up to 15 s stale, so the
+  // old inference from it (a silence still in the row, else "the schedule") is only the fallback for a
+  // server that does not send the field, and it must never override a reason the server did send.
+  const reason = readiness.alert_pause_reason;
+  let alerting;
+  if (!on('motion') && !on('sound')) alerting = { state: 'off', text: 'Nothing to alert on', note: 'Motion and sound alerts are both off.' };
+  else if (disabled || reason === 'disabled') alerting = { state: 'off', text: 'Camera disabled', note: null };
+  else if (readiness.alerting_now) alerting = { state: 'ok', text: 'Yes', note: null };
+  else if (reason === 'silenced' || (reason !== 'schedule' && on('snooze'))) alerting = { state: 'off', text: 'Silenced', note: 'No alert, no notification and no alert clip until the silence ends.' };
+  else alerting = { state: 'off', text: 'Outside the schedule', note: 'No alert, no notification and no alert clip until the schedule opens.' };
   const clip = (wanted, ready, okText, offText) => {
     if (disabled) return { state: 'off', text: 'Camera disabled' };
     if (!wanted) return { state: 'off', text: offText };

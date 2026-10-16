@@ -45,7 +45,7 @@ const UNMAPPED = '/dev/sda1 / ext4 rw 0 0\n';
 
 const BUFFER = ['ready', 'not_running', 'not_needed', 'storage_unavailable', 'camera_disabled'];
 const DETECTOR = ['off', 'running', 'not_running', 'camera_side'];
-const KEYS = ['alerting_now', 'buffer', 'manual_recording_available', 'motion', 'sound', 'storage_ready', 'wake_clip_ready'];
+const KEYS = ['alert_pause_reason', 'alerting_now', 'buffer', 'manual_recording_available', 'motion', 'sound', 'storage_ready', 'wake_clip_ready'];
 
 let server;
 let adminToken;
@@ -157,6 +157,7 @@ describe('what comes back: booleans and enums, nothing else', () => {
     assert.ok(BUFFER.includes(body.buffer), body.buffer);
     assert.ok(DETECTOR.includes(body.motion), body.motion);
     assert.ok(['off', 'running', 'not_running'].includes(body.sound), body.sound);
+    assert.ok([null, 'silenced', 'schedule', 'disabled'].includes(body.alert_pause_reason), body.alert_pause_reason);
     for (const k of ['storage_ready', 'wake_clip_ready', 'manual_recording_available', 'alerting_now']) {
       assert.equal(typeof body[k], 'boolean', k);
     }
@@ -193,6 +194,38 @@ describe('what comes back: booleans and enums, nothing else', () => {
     assert.equal((await get(adminToken)).status, 200);
   });
 
+  test('a marker planted in EVERY free-text column of the camera and settings rows never appears (no URL, path or secret leaks)', async () => {
+    // The column list is derived from the schema, not typed, so a column added later (a new URL, a data
+    // path, a token) is planted too. Only the columns the readiness logic itself reads are skipped:
+    // the key (the route looks it up), the child link and the source enum.
+    const LOGIC_COLUMNS = { cameras: ['id', 'child_id', 'detect_source'], settings: ['id', 'timezone'] };
+    const markers = [];
+    for (const table of ['cameras', 'settings']) {
+      const where = table === 'cameras' ? "id = 'cam-1'" : "id = 'app'";
+      const cols = db.prepare(`PRAGMA table_info(${table})`).all()
+        .filter((c) => /TEXT|CHAR/i.test(c.type) && !LOGIC_COLUMNS[table].includes(c.name));
+      for (const { name } of cols) {
+        const m = `zzzzMARK-${table}.${name}`;
+        db.prepare(`UPDATE ${table} SET ${name} = ? WHERE ${where}`).run(m);
+        markers.push(m);
+      }
+    }
+    // Hostile fixture: many columns planted, including the ones that obviously carry a URL, a path or a secret.
+    assert.ok(markers.length >= 10, `only ${markers.length} planted`);
+    for (const must of ['cameras.rtsp_url', 'cameras.onvif_password']) {
+      assert.ok(markers.some((m) => m.endsWith(must)), `${must} was not planted`);
+    }
+    const res = await get(adminToken);
+    assert.equal(res.status, 200);
+    const text = JSON.stringify(res.body);
+    for (const m of markers) assert.ok(!text.includes(m), `${m} leaked: ${text}`);
+    assert.doesNotMatch(text, /zzzzMARK|:\/\/|\/data|\\|\.mp4|clips/i);
+    // Every value is a boolean, null or a short fixed word: nothing free-form can ride along.
+    for (const [k, v] of Object.entries(res.body)) {
+      assert.ok(typeof v === 'boolean' || v === null || /^[a-z_]{2,24}$/.test(v), `${k}: ${v}`);
+    }
+  });
+
   test('it never writes: the camera row and the settings row are byte-identical after a call', async () => {
     const before = JSON.stringify([row(), db.prepare("SELECT * FROM settings WHERE id = 'app'").get()]);
     await get(adminToken);
@@ -205,6 +238,18 @@ describe('the buffer, as the panel reads it', () => {
   test('a disabled camera is camera_disabled, whatever else is on', async () => {
     db.prepare("UPDATE cameras SET disabled = 1, detect_record_clips = 1 WHERE id = 'cam-1'").run();
     assert.equal((await get(adminToken)).body.buffer, 'camera_disabled');
+  });
+
+  test('a disabled camera is not alerting now, even with an alert switch on and no silence or schedule (#713 review)', async () => {
+    db.prepare("UPDATE cameras SET disabled = 1, detect_motion_enabled = 1, detect_sound_enabled = 1 WHERE id = 'cam-1'").run();
+    const body = (await get(adminToken)).body;
+    // The same answer already says nothing runs; alerting_now must not contradict it.
+    assert.equal(body.buffer, 'camera_disabled');
+    assert.equal(body.motion, 'off');
+    assert.equal(body.sound, 'off');
+    assert.equal(body.alerting_now, false);
+    assert.equal(body.alert_pause_reason, 'disabled');
+    assert.equal(recordingReadiness(row()).alerting_now, false);
   });
 
   test('nothing wants a ring: not_needed (detection clips off, manual recording off, no wake clip possible)', async () => {
@@ -327,6 +372,36 @@ describe('detectors and alerting_now', () => {
     assert.equal((await get(adminToken)).body.alerting_now, false);
     db.prepare('UPDATE cameras SET alerts_snoozed_until = ? WHERE id = ?').run(Date.now() - 1000, 'cam-1');
     assert.equal((await get(adminToken)).body.alerting_now, true);
+  });
+
+  test('alert_pause_reason: null while alerting; silenced, schedule or disabled otherwise, with that precedence (#713 review)', async () => {
+    const reason = async () => (await get(adminToken)).body;
+    const outsideSchedule = () => {
+      const now = nowMinutesInAppTz();
+      const at = (m) => ((m % 1440) + 1440) % 1440;
+      db.prepare('UPDATE cameras SET detect_schedule_enabled = 1, detect_start = ?, detect_end = ? WHERE id = ?').run(at(now + 120), at(now + 240), 'cam-1');
+    };
+    let b = await reason();
+    assert.deepEqual([b.alerting_now, b.alert_pause_reason], [true, null]);
+
+    outsideSchedule();
+    b = await reason();
+    assert.deepEqual([b.alerting_now, b.alert_pause_reason], [false, 'schedule']);
+
+    // A silence outranks the schedule (inActiveWindow checks it first), so the panel says "Silenced".
+    db.prepare('UPDATE cameras SET alerts_snoozed_until = ? WHERE id = ?').run(Date.now() + 600000, 'cam-1');
+    b = await reason();
+    assert.deepEqual([b.alerting_now, b.alert_pause_reason], [false, 'silenced']);
+
+    // Disabled outranks both.
+    db.prepare('UPDATE cameras SET disabled = 1 WHERE id = ?').run('cam-1');
+    b = await reason();
+    assert.deepEqual([b.alerting_now, b.alert_pause_reason], [false, 'disabled']);
+
+    // An ended silence is no reason; only the schedule is left.
+    db.prepare('UPDATE cameras SET disabled = 0, alerts_snoozed_until = ? WHERE id = ?').run(Date.now() - 1000, 'cam-1');
+    b = await reason();
+    assert.deepEqual([b.alerting_now, b.alert_pause_reason], [false, 'schedule']);
   });
 
   test('a schedule is judged in the APP’S timezone, not UTC', async () => {

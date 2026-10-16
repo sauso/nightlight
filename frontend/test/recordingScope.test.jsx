@@ -210,6 +210,25 @@ describe('describeReady: runtime, from the server’s answer', () => {
     // Sound alone is enough to alert on.
     expect(byKey(readyOf({}, { detect_motion_enabled: 0, detect_sound_enabled: 1 })).alerting.text).toBe('Yes');
   });
+
+  test('the server’s alert_pause_reason wins over what a stale camera row says (#713 review)', () => {
+    // The row (up to 15 s old) still shows a silence, the server says it is the schedule now, and vice versa.
+    const staleSilence = { alerts_snoozed_until: NOW + 60000 };
+    expect(byKey(readyOf({ alerting_now: false, alert_pause_reason: 'schedule' }, staleSilence)).alerting)
+      .toMatchObject({ state: 'off', text: 'Outside the schedule' });
+    expect(byKey(readyOf({ alerting_now: false, alert_pause_reason: 'silenced' }, { alerts_snoozed_until: null })).alerting)
+      .toMatchObject({ state: 'off', text: 'Silenced' });
+    // A server that does not send the field is still read the old way.
+    expect(byKey(readyOf({ alerting_now: false }, staleSilence)).alerting.text).toBe('Silenced');
+    expect(byKey(readyOf({ alerting_now: false }, {})).alerting.text).toBe('Outside the schedule');
+  });
+
+  test('a disabled camera is never "Yes", from the reason or (older server) from the buffer word alone', () => {
+    expect(byKey(readyOf({ alerting_now: false, alert_pause_reason: 'disabled', buffer: 'camera_disabled' })).alerting)
+      .toMatchObject({ state: 'off', text: 'Camera disabled' });
+    // An older server reported alerting_now true for a disabled camera; the panel must not repeat it.
+    expect(byKey(readyOf({ alerting_now: true, buffer: 'camera_disabled' })).alerting.text).toBe('Camera disabled');
+  });
 });
 
 // ---- the panel on its page ---------------------------------------------------------------------------------
@@ -269,6 +288,22 @@ describe('the panel, as an admin', () => {
     expect(await p.findByText('Recording buffer')).toBeTruthy();
     expect(p.queryByRole('alert')).toBeNull();
     expect(readinessCalls()).toHaveLength(2);
+  });
+
+  test('a success followed by a FAILED Check again shows the failure, not the old answer (#713 review)', async () => {
+    const { user } = mount();
+    const p = await panel();
+    expect(await p.findByText('Recording buffer')).toBeTruthy();
+    getSpy.mockRejectedValueOnce(new Error('boom'));
+    await user.click(p.getByRole('button', { name: 'Check again' }));
+    expect((await p.findByRole('alert')).textContent).toMatch(/Couldn’t check whether this camera is ready right now/);
+    // The stale answer must be gone, or the admin reads it as the result of the recheck.
+    expect(p.queryByText('Recording buffer')).toBeNull();
+    expect(p.getByText('Nightlight compares frames')).toBeTruthy();
+    // And a later success replaces the message again.
+    await user.click(p.getByRole('button', { name: 'Check again' }));
+    expect(await p.findByText('Recording buffer')).toBeTruthy();
+    expect(p.queryByRole('alert')).toBeNull();
   });
 
   test('a buffer that is not running is shown as a problem with its explanation', async () => {
