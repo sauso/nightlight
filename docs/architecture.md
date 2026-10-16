@@ -239,10 +239,15 @@ screen plus hls.js (about 560 kB of its 1,098 kB). Screens are now split by rout
 | hls.js | Never | Only by a camera in **Compatibility (HLS)** mode on a browser without native HLS. The default WebRTC view and Safari/iOS (native HLS) never download it |
 
 While a screen's chunk loads, its slot shows "Loading…" with the nav bar and live monitor still on screen. If the
-fetch fails (the phone is offline), the slot shows "Couldn't load this screen" with a **Retry** button that
-fetches it again; it does not blank the page. Only chunk-fetch failures are caught there: any other render error
-still reaches the app-level crash page. If the chunk is an old one that a new deploy has replaced, Retry will keep
-failing until the page is reloaded (the app also reloads itself after being backgrounded for 15 s).
+fetch fails (the phone is offline), the slot shows "Couldn't load this screen" with a **Reload** button that
+reloads the page; it does not blank the page. It reloads rather than importing again because a browser remembers a
+module URL that failed once for the life of the page, so a second import replays the first failure. Only
+chunk-fetch failures (recognised by the browsers' "failed to fetch dynamically imported module" messages) are caught
+there: a screen whose code loads but throws when it starts, and any other render error
+still reach the app-level crash page. A Compatibility (HLS) tile whose hls.js fetch fails shows the same kind of
+message with a **Reload** button and stops retrying on its own, for the same reason. If the chunk is an old one that
+a new deploy has replaced, the reload is what fixes it too (the app also reloads itself after being backgrounded for
+15 s).
 
 ## CSP is enforced — keep it that way
 

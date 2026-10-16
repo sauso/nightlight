@@ -17646,12 +17646,52 @@
     "namePattern": "#562 CSP wiring"
   },
   {
-    "label": "#386 lazyPage: Retry reuses the failed lazy component, so the screen can never load after an offline failure",
+    "label": "#386 lazyPage: the failed-screen button does nothing, so the screen can never recover after an offline failure",
     "file": "frontend/src/lib/lazyPage.jsx",
-    "find": "const retry = () => { Inner = lazy(load); setAttempt((n) => n + 1); };",
-    "replace": "const retry = () => { setAttempt((n) => n + 1); };",
+    "find": "onClick={() => window.location.reload()}",
+    "replace": "onClick={() => {}}",
     "expect": "killed",
     "tests": ["lazyPage.test.jsx"]
+  },
+  {
+    "label": "#386 lazyPage: every factory rejection is tagged as a chunk failure, so a module that throws on evaluation reads as a connection problem",
+    "file": "frontend/src/lib/lazyPage.jsx",
+    "find": "throw isChunkFetchFailure(e) ? new ChunkLoadError(e) : e;",
+    "replace": "throw new ChunkLoadError(e);",
+    "expect": "killed",
+    "tests": ["lazyPage.test.jsx"]
+  },
+  {
+    "label": "#386 lazyPage: a TypeError is no longer required for a fetch-failure message, so any error quoting one is tagged",
+    "file": "frontend/src/lib/lazyPage.jsx",
+    "find": "if (error.name === 'TypeError') return FETCH_FAILURE.test(message);",
+    "replace": "if (FETCH_FAILURE.test(message)) return true;",
+    "expect": "killed",
+    "tests": ["lazyPage.test.jsx"]
+  },
+  {
+    "label": "#386 lazyPage: an error named ChunkLoadError is no longer recognised as a failed load",
+    "file": "frontend/src/lib/lazyPage.jsx",
+    "find": "if (error.name === 'ChunkLoadError') return true;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["lazyPage.test.jsx"]
+  },
+  {
+    "label": "#386 HlsPlayer: a failed hls.js fetch goes to the auto-retry state, which re-imports the same failed URL every 5 s forever",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": "if (!cancelled) setState('load-failed');",
+    "replace": "if (!cancelled) setState('error');",
+    "expect": "killed",
+    "tests": ["hlsPlayerLoadFailed.test.jsx"]
+  },
+  {
+    "label": "#386 HlsPlayer: coming back to the tab re-imports the failed hls.js URL instead of leaving the reload prompt up",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": " && stateRef.current !== 'load-failed') {",
+    "replace": ") {",
+    "expect": "killed",
+    "tests": ["hlsPlayerLoadFailed.test.jsx"]
   },
   {
     "label": "#386 lazyPage: every render error is treated as a chunk failure, hiding crashes from the app ErrorBoundary",

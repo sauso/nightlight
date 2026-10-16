@@ -1,14 +1,16 @@
 // #386: route-level code splitting (lib/lazyPage.jsx) and the on-demand hls.js load in HlsPlayer.
 //
-// WHAT THIS PROVES: a lazy screen shows its loading slot, then renders; a failed chunk fetch shows an inline
-// message with a Retry that fetches again and recovers (React.lazy alone caches the rejection, so the retry
-// test fails if lazyPage reused the first lazy component); an ordinary render error is NOT swallowed by the
-// chunk boundary and still reaches the app-level ErrorBoundary.
+// WHAT THIS PROVES: a lazy screen shows its loading slot, then renders; a failed chunk FETCH (recognised by
+// the browsers' messages, or by name ChunkLoadError) shows an inline message whose button RELOADS THE
+// DOCUMENT (a second import() of a URL that failed once replays the cached failure, so importing again
+// cannot recover: only a new document does); a module that loads but THROWS when evaluated, an ordinary
+// render error, and an unrecognised factory rejection are NOT shown as a connection problem and still
+// reach the app-level ErrorBoundary.
 // (That the real App serves lazy routes is covered by appShell.test.jsx, whose route table now goes through lazyPage.)
 // WHAT IT DOES NOT PROVE: a real network failure (the factory is made to reject), real bundle sizes (see the
 // PR body for the build numbers), or load time on a device.
 import { describe, test, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ErrorBoundary from '../src/components/ErrorBoundary.jsx';
 import Hls from 'hls.js';
@@ -28,32 +30,58 @@ describe('lazyPage', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
-  test('a failed chunk load shows an inline message, and Retry loads it again', async () => {
-    const factory = vi.fn()
-      .mockRejectedValueOnce(new TypeError('Failed to fetch dynamically imported module'))
-      .mockResolvedValue({ default: () => <p>second attempt worked</p> });
+  // jsdom cannot spy on location.reload, so the whole location is swapped for a stub (same as chrome.test.jsx).
+  async function withReloadStub(run) {
+    const reload = vi.fn();
+    const original = window.location;
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...original, reload } });
+    try {
+      await run(reload);
+    } finally {
+      Object.defineProperty(window, 'location', { configurable: true, value: original });
+    }
+  }
+
+  // Every wording a browser (or Vite's preload helper) uses for "the module could not be fetched".
+  test.each([
+    ['Chrome', new TypeError('Failed to fetch dynamically imported module: https://x/assets/Page-abc.js')],
+    ['Firefox', new TypeError('error loading dynamically imported module: https://x/assets/Page-abc.js')],
+    ['Safari', new TypeError('Importing a module script failed.')],
+    ['Vite CSS preload', new Error('Unable to preload CSS for /assets/Page-abc.css')],
+    ['a webpack-style ChunkLoadError', Object.assign(new Error('Loading chunk 7 failed.'), { name: 'ChunkLoadError' })],
+  ])('a failed chunk fetch (%s) shows an inline message whose button reloads the document', async (_browser, failure) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const factory = vi.fn().mockRejectedValue(failure);
     const Page = lazyPage(factory);
-    render(<Page />);
+    await withReloadStub(async (reload) => {
+      render(<Page />);
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(/couldn.t load this screen/i);
+      expect(factory).toHaveBeenCalledTimes(1);
+      expect(reload).not.toHaveBeenCalled();
 
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent(/couldn.t load this screen/i);
-    expect(factory).toHaveBeenCalledTimes(1);
-
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(await screen.findByText('second attempt worked')).toBeInTheDocument();
-    expect(factory).toHaveBeenCalledTimes(2);
-    expect(screen.queryByRole('alert')).toBeNull();
+      // The button must NOT import again: that replays the browser's cached failure (the server sees one
+      // request for two imports), so a "Retry" that re-imports can never recover. It reloads instead.
+      await userEvent.click(screen.getByRole('button', { name: 'Reload' }));
+      expect(reload).toHaveBeenCalledTimes(1);
+      expect(factory).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    });
   });
 
-  test('Retry that fails again keeps the message up rather than going blank', async () => {
+  // A module that is fetched fine but throws at its top level rejects the same import() promise. It is a
+  // bug, not a connection problem: telling the viewer to check their connection would be a lie.
+  test.each([
+    ['an evaluation error (module top level throws)', new Error('boom while evaluating the module')],
+    ['a TypeError that is not a fetch failure', new TypeError("Cannot read properties of undefined (reading 'x')")],
+    ['an error whose message only mentions a fetch', new Error('Failed to fetch dynamically imported module')],
+  ])('%s reaches the app ErrorBoundary and is not shown as a connection problem', async (_what, failure) => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    const factory = vi.fn().mockRejectedValue(new TypeError('offline'));
-    const Page = lazyPage(factory);
-    render(<Page />);
-    await screen.findByRole('alert');
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    await waitFor(() => expect(factory).toHaveBeenCalledTimes(2));
-    expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    const Page = lazyPage(() => Promise.reject(failure));
+    render(<ErrorBoundary><Page /></ErrorBoundary>);
+    expect(await screen.findByText('Something went wrong')).toBeInTheDocument();
+    expect(screen.queryByText(/couldn.t load this screen/i)).toBeNull();
+    expect(screen.queryByText(/check your connection/i)).toBeNull();
   });
 
   test('an ordinary render error is not caught here — it reaches the app ErrorBoundary', async () => {

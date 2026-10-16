@@ -20,7 +20,7 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, statusU
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
   const stateRef = useRef('idle');
-  const [state, setStateRaw] = useState('idle'); // idle | connecting | live | error
+  const [state, setStateRaw] = useState('idle'); // idle | connecting | live | error | load-failed
   const [reconnectKey, setReconnectKey] = useState(0);
 
   function setState(next) {
@@ -43,7 +43,9 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, statusU
   // was working (which would also defeat any background audio playback).
   useEffect(() => {
     function handleVisibility() {
-      if (document.visibilityState === 'visible' && stateRef.current !== 'live') {
+      // 'load-failed' is excluded: re-importing the same failed module URL replays the cached failure (see the
+      // import below), so a reconnect would only flicker "Connecting…" before failing again.
+      if (document.visibilityState === 'visible' && stateRef.current !== 'live' && stateRef.current !== 'load-failed') {
         setReconnectKey((k) => k + 1);
       }
     }
@@ -144,9 +146,15 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, statusU
         hls.on(Hls.Events.ERROR, (event, data) => {
           if (data.fatal) setState('error');
         });
+      }, () => {
+        // The chunk could not be fetched (offline). NOT the 'error' state: that one auto-retries every 5 s by
+        // importing the same URL again, and a dynamic import of a URL that failed once is remembered by the
+        // browser's module map for the life of the document, so every retry would replay the first failure
+        // forever (verified in headless Chrome for the route chunks, #386). Only a new document clears it,
+        // so this state stops the retry loop and offers a reload instead.
+        if (!cancelled) setState('load-failed');
       }).catch(() => {
-        // The chunk could not be fetched (offline). Same state as any other failure to connect, so the
-        // existing 5 s retry above tries the import again rather than leaving "Connecting…" forever.
+        // The module loaded but building the player threw: an ordinary failure to connect, retried as before.
         if (!cancelled) setState('error');
       });
     }
@@ -184,7 +192,15 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false, statusU
       {state !== 'live' && (
         <div className={`whep-overlay whep-overlay--${state}${statusUnknown ? ' whep-overlay--unknown' : ''}`}>
           {/* Same rule as WhepPlayer (#505): unknown status is not "No signal". */}
-          {statusUnknown ? (
+          {state === 'load-failed' ? (
+            // Takes priority over the unknown-status notice: this one has a fix the viewer can act on.
+            <div className="stream-unavailable" role="alert">
+              <span>Couldn’t load the video player. Check your connection, then reload the page.</span>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => window.location.reload()}>
+                Reload
+              </button>
+            </div>
+          ) : statusUnknown ? (
             <StreamUnavailableNotice onRetry={() => setReconnectKey((k) => k + 1)} />
           ) : (
             <>
