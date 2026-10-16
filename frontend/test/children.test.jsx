@@ -145,10 +145,16 @@ describe('a child detail screen', () => {
     expect(row.closest('button')).toBeNull();
   });
 
-  test('an unknown child renders a placeholder rather than crashing', async () => {
+  test('a child that has not loaded yet renders a placeholder rather than crashing', async () => {
     // `kids` is empty on first paint, so every deep link passes through this branch.
-    renderAsAdmin(detailRoutes, { ...atChild('nobody'), kids: [] });
+    renderAsAdmin(detailRoutes, { ...atChild('nobody'), kids: [], camerasLoaded: false });
     expect(await screen.findByText('Loading…')).toBeTruthy();
+  });
+
+  test('an unknown child, once the list HAS loaded, says it cannot be found instead of loading forever (#375)', async () => {
+    renderAsAdmin(detailRoutes, { ...atChild('nobody'), kids: KIDS });
+    expect(await screen.findByText(/couldn’t find this child/)).toBeTruthy();
+    expect(screen.queryByText('Loading…')).toBeNull();
   });
 
   test('a child with no birthday is invited to add one', async () => {
@@ -241,7 +247,9 @@ describe('the alerts feed on a child screen', () => {
       String(path).includes('/cameras/alerts') ? Promise.reject(new Error('offline')) : Promise.resolve(null));
     renderAsAdmin(detailRoutes, atChild('kid-1'));
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/cameras/alerts'));
-    await waitFor(() => expect(screen.getByText(/No alerts for Child B yet/)).toBeTruthy());
+    // The failure is named, with Retry - NOT worded as a quiet week (#375).
+    expect(await screen.findByText('offline')).toBeTruthy();
+    expect(screen.queryByText(/No alerts for Child B yet/)).toBeNull();
     // The cameras card still renders — a dead feed must not take the screen down with it.
     expect(screen.getByText('Child B Room')).toBeTruthy();
     expect(screen.getByText('Cameras · 2')).toBeTruthy();

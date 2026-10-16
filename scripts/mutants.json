@@ -13836,8 +13836,8 @@
   {
     "label": "W5 role UI M19: the Children tab shows Add child to a caregiver",
     "file": "frontend/src/pages/Children.jsx",
-    "find": "        {isAdmin && (\r\n          <button className=\"btn btn-primary\" onClick={() => navigate('/children/new')}",
-    "replace": "        {true && (\r\n          <button className=\"btn btn-primary\" onClick={() => navigate('/children/new')}",
+    "find": "        {isAdmin && !blocked && (\r\n          <button className=\"btn btn-primary\" onClick={() => navigate('/children/new')}",
+    "replace": "        {true && !blocked && (\r\n          <button className=\"btn btn-primary\" onClick={() => navigate('/children/new')}",
     "expect": "killed",
     "tests": ["children.test.jsx"],
     "namePattern": "only an admin gets Add child"
@@ -16575,8 +16575,8 @@
   {
     "label": "#562 WHEP player: the call site stores the raw Location header again",
     "file": "frontend/src/components/WhepPlayer.jsx",
-    "find": "resourceUrlRef.current = resolveWhepResource(",
-    "replace": "resourceUrlRef.current = ((rawLocation) => rawLocation)(",
+    "find": "resourceUrl = resolveWhepResource(",
+    "replace": "resourceUrl = ((rawLocation) => rawLocation)(",
     "expect": "killed",
     "tests": ["whepPlayer.test.jsx"],
     "namePattern": "WhepPlayer session DELETE"
@@ -17842,6 +17842,206 @@
       "sleepDetail.test.jsx"
     ],
     "namePattern": "#521 Recompute is reachable"
+  },
+  {
+    "label": "#375 loadState: a failed request with rows reads as stale even if nothing ever loaded",
+    "file": "frontend/src/lib/loadState.js",
+    "find": "loaded && count > 0 ? 'stale' : 'error'",
+    "replace": "count > 0 ? 'stale' : 'error'",
+    "expect": "killed",
+    "tests": ["lib/loadState.test.js"],
+    "namePattern": "#375 loadState"
+  },
+  {
+    "label": "#375 loadState: a failure after a good EMPTY load keeps the empty copy (stale instead of error)",
+    "file": "frontend/src/lib/loadState.js",
+    "find": "loaded && count > 0 ? 'stale' : 'error'",
+    "replace": "loaded ? 'stale' : 'error'",
+    "expect": "killed",
+    "tests": ["lib/loadState.test.js"],
+    "namePattern": "#375 loadState"
+  },
+  {
+    "label": "#375 loadState: the error branch is skipped, so a failed first request reads as loading",
+    "file": "frontend/src/lib/loadState.js",
+    "find": "if (error) return",
+    "replace": "if (false) return",
+    "expect": "killed",
+    "tests": ["lib/loadState.test.js"],
+    "namePattern": "#375 loadState"
+  },
+  {
+    "label": "#375 loadState: a successful empty answer reads as ready",
+    "file": "frontend/src/lib/loadState.js",
+    "find": "return count > 0 ? 'ready' : 'empty';",
+    "replace": "return 'ready';",
+    "expect": "killed",
+    "tests": ["lib/loadState.test.js"],
+    "namePattern": "#375 loadState"
+  },
+  {
+    "label": "#375 loadState: an unanswered request reads as empty",
+    "file": "frontend/src/lib/loadState.js",
+    "find": "if (!loaded) return 'loading';",
+    "replace": "if (!loaded) return 'empty';",
+    "expect": "killed",
+    "tests": ["lib/loadState.test.js"],
+    "namePattern": "#375 loadState"
+  },
+  {
+    "label": "#375 children: Add child is offered while the children failed to load",
+    "file": "frontend/src/pages/Children.jsx",
+    "find": "{isAdmin && !blocked && (",
+    "replace": "{isAdmin && (",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "failed: the error and Retry, NOT \"No children yet\""
+  },
+  {
+    "label": "#375 CamerasContext: loaded is never set, so a successful empty install reads as still loading",
+    "file": "frontend/src/lib/CamerasContext.jsx",
+    "find": "      setLoaded(true);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["lib/CamerasContext.test.jsx"],
+    "namePattern": "#375 loaded"
+  },
+  {
+    "label": "#375 child detail: the alerts feed is asked before the camera list has loaded",
+    "file": "frontend/src/pages/ChildDetail.jsx",
+    "find": "if (!camerasLoaded) return undefined;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "not asked before the camera list"
+  },
+  {
+    "label": "#375 child detail: a failed alerts request keeps the empty copy",
+    "file": "frontend/src/pages/ChildDetail.jsx",
+    "find": "setAlertsError(err?.message || 'Request failed');",
+    "replace": "setAlertsLoaded(true);",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Child detail: alerts feed"
+  },
+  {
+    "label": "#375 sleep detail: a failed night request becomes null (the no-data copy)",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": ".catch((err) => { if (alive) setNightError(err?.message || 'Request failed'); });",
+    "replace": ".catch(() => { if (alive) setNight(null); });",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Sleep detail"
+  },
+  {
+    "label": "#375 child detail: a missing child with other children cached reads as stale (no failure UI) instead of error",
+    "file": "frontend/src/pages/ChildDetail.jsx",
+    "find": "error: camerasError, count: 0 });",
+    "replace": "error: camerasError, count: kids.length });",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "a failed refresh with OTHER children cached"
+  },
+  {
+    "label": "#375 sleep detail: Retry re-runs the reset effect, so a night on screen is blanked",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "  }, [id, date]);",
+    "replace": "  }, [id, date, nightRetry]);",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Retry on the stale banner keeps the night on screen"
+  },
+  {
+    "label": "#375 sleep detail: a failed refresh after an EMPTY answer keeps the stale banner and the no-data copy",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "const displayable = !!night && night.status !== 'no_data';",
+    "replace": "const displayable = night !== undefined;",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "a failed refresh after an EMPTY"
+  },
+  {
+    "label": "#375 cameras tab: Retry is wired to a no-op instead of refresh",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "onRetry={refresh}",
+    "replace": "onRetry={() => {}}",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Cameras tab: Retry calls refresh"
+  },
+  {
+    "label": "#375 live: Retry is wired to a no-op instead of refresh",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "onRetry={refresh}",
+    "replace": "onRetry={() => {}}",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Live: Retry calls refresh"
+  },
+  {
+    "label": "#375 clip management: a failed list request becomes an empty list",
+    "file": "frontend/src/pages/ClipManagement.jsx",
+    "find": "      setError(e.message || 'Failed to load clips');\n    }\n  }",
+    "replace": "      setError(e.message || 'Failed to load clips');\n      setClips([]);\n    }\n  }",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Clip management"
+  },
+  {
+    "label": "#694 WHEP player: a late answer from a torn-down run is not DELETEd (its session is left open)",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "late answer from the old run|late answer after unmount"
+  },
+  {
+    "label": "#694 WHEP player: a late answer carries on into setRemoteDescription on the closed peer",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "if (resourceUrl) deleteWhepSession(resourceUrl);",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "late answer from the old run"
+  },
+  {
+    "label": "#694 WHEP player: a late answer DELETEs even when the Location was refused (fetch(null))",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "deleteWhepSession(resourceUrl);\n          return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "fails the #562 guard"
+  },
+  {
+    "label": "#694 WHEP player: a refused late Location no longer returns, so the cancelled run's answer is applied",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (cancelled) {\n          if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "if (cancelled && resourceUrl) {\n          deleteWhepSession(resourceUrl);\n          return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "fails the #562 guard",
+    "note": "Found by the #704 review: the refused-Location test only checked that no DELETE was sent."
+  },
+  {
+    "label": "#694 WHEP player: the late-answer DELETE is a bare fetch without the session token",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "if (resourceUrl) fetch(resourceUrl, { method: 'DELETE', redirect: 'error' }).catch(() => {});\n          return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "a late answer after unmount",
+    "note": "Found by the #704 review: the race tests projected each DELETE to its URL and redirect mode, so a missing Authorization header passed."
+  },
+  {
+    "label": "#694 WHEP player: the cleanup no longer DELETEs this run's own session",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "      if (resourceUrl) {\n        deleteWhepSession(resourceUrl);",
+    "replace": "      if (false) {\n        deleteWhepSession(resourceUrl);",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "normal connect then disconnect|late answer from the old run"
   },
   {
     "label": "#564 webrtcSessions: kickWebrtcSession sends nothing, so a revoked login's live view keeps streaming",

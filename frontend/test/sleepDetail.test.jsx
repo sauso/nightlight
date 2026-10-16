@@ -639,17 +639,18 @@ describe('★ the empty states each say a different thing', () => {
     expect(await screen.findByText(/No sleep data for this night/)).toBeTruthy();
   });
 
-  test('★ a failed request also reads as no data rather than a blank screen', async () => {
-    // The catch sets `null`, which lands on the same message. Not ideal — it cannot distinguish "no
-    // night" from "could not ask" — but it is pinned because the alternative it must never do is stay
-    // on "Loading night…" forever.
+  test('★ a failed request says it could not load, with Retry - not "no data", not "Loading…" forever (#375)', async () => {
+    // It used to set `null`, the same value as "no night recorded", so an outage read as "it predates
+    // tracking". The other thing it must never do is stay on "Loading night…" forever.
     vi.spyOn(api, 'get').mockImplementation((path) => {
       if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'last', night: { night_date: '2026-08-30' } });
       if (path.includes('/sleep/insights')) return Promise.resolve(null);
       return Promise.reject(new Error('boom'));
     });
     mount();
-    expect(await screen.findByText(/No sleep data for this night/)).toBeTruthy();
+    expect(await screen.findByText(/Couldn’t load this night/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy();
+    expect(screen.queryByText(/No sleep data for this night/)).toBeNull();
     expect(screen.queryByText('Loading night…')).toBeNull();
   });
 

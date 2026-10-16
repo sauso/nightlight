@@ -30,7 +30,7 @@ const DEFAULT_SETTINGS = {
 // while breaking in the app. These are taken from the providers themselves:
 //   AuthContext     -> { user, loading, login, logout, refresh }
 //   SettingsContext -> { settings, loading, loaded, refresh, commit }
-//   CamerasContext  -> { kids, cameras, error, refresh }
+//   CamerasContext  -> { kids, cameras, error, loaded, refresh }
 // (An earlier version of this helper published `setSettings`/`reload` and omitted `error`, none of
 // which the app ever produces — Cameras.jsx and CameraSettings.jsx both destructure `error`.)
 //
@@ -46,6 +46,10 @@ const DEFAULT_SETTINGS = {
 // wipe an unsaved draft must publish one itself, e.g. via `rerenderWith({ settings: {...} })`, or use
 // its own stateful provider — see settingsRecording.test.jsx's T1/T3/T4.
 //
+// `camerasLoaded` is CamerasContext's `loaded` (a request has SUCCEEDED once; #375): true by default, so a test
+// that injects kids/cameras means "the server answered". Pass false with an `error` for a first request that
+// failed, or with none for one still in flight.
+//
 // `settingsLoaded` is the provider's `loaded`: true (the default) means `settings` are the server's own —
 // which is what every test that injects a timezone means by it. Pass false for the moment after boot when
 // SettingsContext still holds its placeholder DEFAULTS (timezone 'UTC'), or for a first /settings request
@@ -54,7 +58,7 @@ const DEFAULT_SETTINGS = {
 export function renderAs(
   user,
   ui,
-  { settings = {}, cameras = [], kids = [], error = '', loading = false, settingsLoaded = true, route = '/' } = {}
+  { settings = {}, cameras = [], kids = [], error = '', camerasLoaded = true, loading = false, settingsLoaded = true, route = '/' } = {}
 ) {
   // Kept in scope so the returned handles always refer to the CURRENT render, not the first one.
   let auth;
@@ -78,7 +82,7 @@ export function renderAs(
       // any test can actually trigger a click that calls this (closures, not call order).
       commit: vi.fn((newSettings) => rerenderWith({ settings: newSettings })),
     };
-    camerasValue = { kids: opts.kids, cameras: opts.cameras, error: opts.error, refresh: vi.fn() };
+    camerasValue = { kids: opts.kids, cameras: opts.cameras, error: opts.error, loaded: opts.camerasLoaded, refresh: vi.fn() };
     return (
       <MemoryRouter initialEntries={[opts.route]}>
         <AuthContext.Provider value={auth}>
@@ -90,7 +94,7 @@ export function renderAs(
     );
   };
 
-  let opts = { settings, cameras, kids, error, loading, settingsLoaded, route, ui, user };
+  let opts = { settings, cameras, kids, error, camerasLoaded, loading, settingsLoaded, route, ui, user };
   const result = render(build(opts));
 
   // ⚠️ RTL's own `rerender` replaces the tree WITHOUT the providers, so anything using a context
