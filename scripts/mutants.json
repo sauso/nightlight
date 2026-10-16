@@ -18114,7 +18114,7 @@
     "tests": [
       "recordingScope.test.jsx"
     ],
-    "namePattern": "#713 review"
+    "namePattern": "a disabled camera is never"
   },
   {
     "label": "#386 lazyPage: the failed-screen button does nothing, so the screen can never recover after an offline failure",
