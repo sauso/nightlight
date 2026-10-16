@@ -70,6 +70,11 @@ export function AuthProvider({ children }) {
     clearMediaToken();
     resetPushRegistration();
     setUser(null);
+    // A real 401 supersedes an earlier "unreachable" from a failed refresh(): the server has answered, so
+    // Shell must show the sign-in screen now, not ServerUnreachable until the backoff retry (up to 30 s)
+    // finally clears it. Zeroing `failures` also cancels that pending retry.
+    setUnreachable(false);
+    setFailures(0);
   }), []);
 
   // Keep the in-memory media token fresh while signed in (its own TTL is 12h; refresh hourly so any

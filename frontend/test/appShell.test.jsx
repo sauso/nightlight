@@ -177,6 +177,30 @@ describe('#382: a server that cannot be reached is not "signed out"', () => {
     expect(screen.queryByText(/Can't reach/)).toBeNull();
   });
 
+  test('★ a real 401 on another request, after an unreachable refresh, shows the sign-in form at once', async () => {
+    // refresh() failed (500): `unreachable` is true and a backoff retry is pending. A different request then
+    // answers 401. The unauthorized listener used to clear only `user`, so the shell kept showing
+    // "Can't reach Nightlight" until the next retry (up to 30 s) instead of the sign-in form.
+    const realFetch = globalThis.fetch;
+    try {
+      setToken('a-token');
+      meFails(http500);
+      render(app());
+      await screen.findByText(/Can't reach Nightlight/);
+      // /auth/status is public and never 401s on a real server, so the sign-in screen can load it.
+      globalThis.fetch = vi.fn(async (url) => (String(url).endsWith('/auth/status')
+        ? { ok: true, status: 200, text: async () => JSON.stringify({ needsSetup: false }) }
+        : { ok: false, status: 401, text: async () => JSON.stringify({ error: 'Invalid or expired session' }) }));
+      api.get.mockRestore(); // from here on, requests go through the real client
+      await act(async () => { await api.get('/cameras').catch(() => {}); });
+
+      expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
+      expect(screen.queryByText(/Can't reach/)).toBeNull();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   test('it retries on its own and recovers without a tap', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {

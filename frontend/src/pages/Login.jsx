@@ -16,6 +16,7 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
   const [demoSignIn, setDemoSignIn] = useState(false);
   const signInStarted = useRef(false);
+  const statusCheckInFlight = useRef(false);
   // #382: /auth/status failed (network, timeout, 5xx). `statusFailures` drives useAutoRetry's backoff.
   const [statusFailures, setStatusFailures] = useState(0);
   const [statusRetrying, setStatusRetrying] = useState(false);
@@ -38,6 +39,14 @@ export default function Login() {
   // Also the retry target. Only the first call is guarded by signInStarted; a retry runs only after a
   // failure, when no demo sign-in has begun, so it cannot mint a second guest session.
   async function chooseSignIn() {
+    // At most one status check at a time. After the first failure `statusFailures` stays positive, so the
+    // automatic retry timer is armed while a manual "Try again" is pending; without this guard the timer
+    // launched a second GET beside it, and when both answered { demo: true } both called handleDemoSignIn()
+    // and posted /auth/guest twice, consuming two of the shared demo's active slots (the thing signInStarted
+    // exists to prevent). A skipped call loses nothing: the check in flight either succeeds, or fails and
+    // bumps statusFailures, which re-arms the timer.
+    if (statusCheckInFlight.current) return;
+    statusCheckInFlight.current = true;
     setStatusRetrying(true);
     let status;
     try {
@@ -47,10 +56,12 @@ export default function Login() {
       // endpoint belongs to an established install. That showed a password form that could not work to
       // someone whose server was just down (#382), and on a fresh install it hid the setup form. Say the
       // server is unreachable and retry; the form appears once the server has actually answered.
+      statusCheckInFlight.current = false;
       setStatusFailures((n) => n + 1);
       setStatusRetrying(false);
       return;
     }
+    statusCheckInFlight.current = false;
     setStatusFailures(0);
     setStatusRetrying(false);
     if (!status.demo) {

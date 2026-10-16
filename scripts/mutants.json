@@ -17701,6 +17701,28 @@
     "namePattern": "#382"
   },
   {
+    "label": "#382 Login: no guard against a second status check in flight (timer beside a manual Try again)",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "if (statusCheckInFlight.current) return;",
+    "replace": "if (false) return;",
+    "expect": "killed",
+    "tests": [
+      "login.test.jsx"
+    ],
+    "namePattern": "Try again pressed just before the timer fires"
+  },
+  {
+    "label": "#382 AuthContext: a real 401 leaves the unreachable state set",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    setUnreachable(false);\n    setFailures(0);\n  }), []);",
+    "replace": "  }), []);",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "a real 401 on another request, after an unreachable refresh"
+  },
+  {
     "label": "#382 useAutoRetry: never schedules a retry",
     "file": "frontend/src/lib/useAutoRetry.js",
     "find": "if (failures < 1) return undefined;",

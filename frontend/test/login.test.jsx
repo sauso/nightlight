@@ -113,6 +113,37 @@ describe('which of the three screens is shown', () => {
   });
 });
 
+describe('#382: a manual Try again and the automatic retry never run together', () => {
+  test('★ Try again pressed just before the timer fires, GET still pending: ONE status check, ONE guest sign-in', async () => {
+    // After the first failure `statusFailures` stays positive, so the 5 s timer is armed while the manual
+    // check is pending. Unguarded, the timer started a second GET; both answered { demo: true } and both
+    // posted /auth/guest, consuming two of the shared demo's active session slots.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const pending = [];
+      const get = vi.spyOn(api, 'get')
+        .mockRejectedValueOnce(new Error('offline'))
+        .mockImplementation(() => new Promise((resolve) => { pending.push(resolve); }));
+      const guest = vi.spyOn(api, 'post').mockResolvedValue(SESSION);
+      mount();
+      const tryAgain = await screen.findByRole('button', { name: 'Try again' });
+      await act(async () => { await vi.advanceTimersByTimeAsync(RETRY_BASE_MS - 500); });
+      expect(get, 'the timer has not fired yet').toHaveBeenCalledTimes(1);
+
+      act(() => { tryAgain.click(); }); // manual retry; its GET stays pending
+      expect(get).toHaveBeenCalledTimes(2);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); // the 5 s timer's moment passes
+      expect(get, 'the timer must not start a second status check beside the pending one').toHaveBeenCalledTimes(2);
+
+      await act(async () => { pending.forEach((resolve) => resolve({ demo: true })); });
+      await waitFor(() => expect(guest).toHaveBeenCalled());
+      expect(guest.mock.calls.filter(([path]) => path === '/auth/guest')).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('signing in', () => {
   beforeEach(() => {
     mockStatus(false);
