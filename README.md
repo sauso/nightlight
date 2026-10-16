@@ -8,14 +8,15 @@ iOS** ([nightlight-mobile](https://github.com/sauso/nightlight-mobile)) for reli
 background audio and picture-in-picture (see [Mobile apps](#mobile-apps-android--ios)
 below). No cloud, no subscription, no account anywhere but your own network.
 
-> **One thing to know about "no cloud".** Nightlight has no cloud service of its own, but the
-> **Low latency (WebRTC)** live view is set up to use Google's public STUN server
+> **One thing to know about "no cloud".** Nightlight has no cloud service of its own, but by default
+> the **Low latency (WebRTC)** live view uses Google's public STUN server
 > (`stun.l.google.com:19302`), both in the browser and in the bundled MediaMTX. STUN is how WebRTC
 > works out a public address: the browser asks that server, so Google can see the viewer's public IP
-> address and when each live view connected. It does nothing useful on a home network, and there is
-> **no setting to turn it off** in this version (it is fixed in the frontend and in
-> `mediamtx/mediamtx.yml`). **Compatibility (HLS)** viewing does not use WebRTC and does not contact
-> it. Push notifications, if you enable a provider, also leave your network: see
+> address and when each live view connected. **Watching on your home network needs no STUN**; a viewer
+> outside it, behind NAT, may. Set `STUN_SERVERS` to a blank value to use none (nothing then contacts
+> Google), or to your own server: see [`STUN_SERVERS`](#stun_servers--which-stun-servers-low-latency-webrtc-uses).
+> **Compatibility (HLS)** viewing does not use WebRTC and never contacts a STUN server. Push
+> notifications, if you enable a provider, also leave your network: see
 > [Push notifications](docs/notifications.md).
 
 > **⚠️ Not a safety device.** Nightlight is a convenience tool, not a safety device. It is
@@ -611,6 +612,12 @@ measurement**, and (like everything here) never a safety device — see the warn
     | Sleep detail page | worked out fresh each time | still worked out fresh each time, with your times laid over it |
     | Editing or removing your correction | — | always allowed |
 
+    **Recompute this night** (admins only) is on every night that was scored, including one that shows
+    **No one in the bed**, whether the detector scored it empty or you flagged it. It works the same way
+    there: the first press compares the saved summary with the current one and saves nothing, the second
+    saves. A flagged night is a corrected night, so it normally opens on "locked" until you remove the correction (once its saved summary is final, see above). It is
+    not offered on nights with no data, no clear sleep, or with sleep tracking off.
+
     - **What gets locked is the night as it is when you save.** If last night's saved summary was still
       being refined (the first ~3 hours after the window closes), saving your correction first stores the
       night freshly worked out at that moment, then locks it, so an early rough pass isn't what gets kept.
@@ -964,6 +971,26 @@ is used instead — a typo here will never stop the app starting.
 every remote user sharing the proxy's address, one person mistyping their password cannot lock anyone
 else out. Setting `TRUST_PROXY` makes the per-source half meaningful as well.
 
+### `STUN_SERVERS` — which STUN servers Low latency (WebRTC) uses
+
+| Variable | Default | What it does |
+|---|---|---|
+| `STUN_SERVERS` | `stun:stun.l.google.com:19302` (Google's public server) | Comma-separated list of `stun:host` or `stun:host:port` URLs, used by the browser **and** by the bundled MediaMTX, and the only STUN hosts the browser is allowed to contact. |
+
+| You set | Result |
+|---|---|
+| nothing (variable unset) | Google's public STUN server, as in earlier versions |
+| blank (`STUN_SERVERS=`, or the field cleared on Unraid) | **No STUN server.** Nothing contacts Google or anyone else |
+| `stun:stun.example.org:3478` or a comma-separated list | exactly those servers (port defaults to 3478) |
+| anything that is not a `stun:` URL (`turn:`, `stuns:`, a typo) | that entry is ignored, with **one** warning in the log; if no entry is valid, STUN is **off** (never silently back to Google) |
+
+STUN is only how a WebRTC peer learns its public address. **Watching on your home network never needs it.** A viewer
+outside your network who is behind NAT may fail to connect without it (Compatibility (HLS) mode still works). With the
+default, Google sees the viewer's public IP address and when each live view connected. `turn:` relay servers are not
+supported. Change takes effect on restart. The log shows `[stun] ...` at start-up.
+
+On Unraid it is the **STUN Servers** field: it ships with the Google URL, so clear the field to turn STUN off.
+
 ### `CLOUDFLARE_ANALYTICS` — Cloudflare Web Analytics through Cloudflare's proxy
 
 | Variable | Default | What it does |
@@ -1175,6 +1202,12 @@ browser you happen to be using.
 
 - **Camera shows "No signal"**: double check the RTSP URL works with a tool like VLC
   (Media → Open Network Stream) first — if VLC can't play it, the app won't either.
+- **The app shows "Can't reach Nightlight" instead of the sign-in screen**: the app could not get an answer
+  from the server (it is restarting, off, or this device is not on the home network), so it does not know
+  whether you are signed in and does not ask for a password that could not be checked anyway. It retries
+  by itself (after 5 seconds, then 10, 20, and every 30 seconds from then on) and you can press **Try again**
+  at any time; once the server answers you land in the app, or on the sign-in screen if you really were signed
+  out. Your sign-in is kept while it retries. Only a server that answers "not signed in" shows the sign-in screen.
 - **Video won't connect from a phone but the pages load fine**: confirm the device is on
   the same LAN (for Low latency mode) — see "Remote / internet access" above if it's
   actually a different network.
@@ -1217,6 +1250,16 @@ cd nightlight
 docker build -t nightlight .
 docker run -d --name nightlight --network host --stop-timeout 30 \
   -e PUID=99 -e PGID=100 -v ./data:/app/data nightlight
+```
+
+### Running the tests
+
+The tests need **Node 24** (the version in `.nvmrc`; `engines` in both `package.json` files says `>=24`, and the Docker image and CI use the same). On an older Node the backend suite does not fail in one place with one reason: 16 test files fail in ways that look unrelated (`The requested module 'child_process' does not provide an export named 'spawn'`, `mock.module is not a function`). The cause is that the tests replace modules with `mock.module(name, { exports })`, and Node 22 ignores `exports`, so the mocked module has no named exports to import. `backend/test/node-version-pin.test.js` fails first, with that explanation, when the suite runs on a Node that cannot do it.
+
+```bash
+nvm use                      # reads .nvmrc
+cd backend && npm ci && npm test
+cd ../frontend && npm ci && npm test
 ```
 
 ## Project layout

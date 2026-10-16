@@ -15,7 +15,8 @@
 //    an external <link>. (If real style violations show up, add 'unsafe-inline': low risk.)
 //  - media-src/worker-src blob:: hls.js feeds <video> via MSE blob URLs and runs its demuxer worker from a
 //    blob: URL. img-src data:: snapshot posters/icons. font-src data:: any inlined @font-face.
-//  - connect-src adds the client-side WebRTC STUN host (WhepPlayer.jsx); keep it in sync if it ever changes.
+//  - connect-src adds the client-side WebRTC STUN host(s) (WhepPlayer.jsx), taken from the STUN_SERVERS setting
+//    (lib/stunServers.js, #558): one entry per configured server, none when STUN is off.
 //  - No upgrade-insecure-requests: the app is also served over plain http on the LAN.
 //
 // ⚠️ CLOUDFLARE WEB ANALYTICS IS OPT-IN (#562 bullet 6, owner decision 2026-10-13). Until then script-src and
@@ -27,6 +28,8 @@
 // each refusal is POSTed to /api/csp-report (logged, at most 10 a minute). The two ways out, documented in
 // docs/architecture.md and the README: set the variable, or turn off the automatic beacon injection for that
 // site in the Cloudflare dashboard.
+
+import { parseStunServers, stunCspSource } from './stunServers.js';
 
 export const CLOUDFLARE_SCRIPT_ORIGIN = 'https://static.cloudflareinsights.com'; // serves beacon.min.js
 export const CLOUDFLARE_BEACON_ORIGIN = 'https://cloudflareinsights.com'; //         the beacon POSTs here
@@ -74,6 +77,9 @@ export function buildCspDirectives(env = process.env) {
   // byte-for-byte what every install served until now (csp-directives.test.js deep-equals it).
   const cfScript = enabled ? [CLOUDFLARE_SCRIPT_ORIGIN] : [];
   const cfConnect = enabled ? [CLOUDFLARE_BEACON_ORIGIN] : [];
+  // One source per STUN server in use (default: Google's, so the unset header is byte-for-byte as before #558).
+  // Blank STUN_SERVERS gives none, so a browser that has been told not to use STUN is not allowed to either.
+  const stunConnect = parseStunServers(env.STUN_SERVERS).urls.map(stunCspSource);
   return {
     defaultSrc: ["'self'"],
     scriptSrc: ["'self'", ...cfScript],
@@ -81,7 +87,7 @@ export function buildCspDirectives(env = process.env) {
     imgSrc: ["'self'", 'data:'],
     mediaSrc: ["'self'", 'blob:'],
     workerSrc: ["'self'", 'blob:'],
-    connectSrc: ["'self'", 'stun.l.google.com:19302', ...cfConnect],
+    connectSrc: ["'self'", ...stunConnect, ...cfConnect],
     fontSrc: ["'self'", 'data:'],
     objectSrc: ["'none'"],
     baseUri: ["'self'"],
