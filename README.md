@@ -611,6 +611,12 @@ measurement**, and (like everything here) never a safety device — see the warn
     | Sleep detail page | worked out fresh each time | still worked out fresh each time, with your times laid over it |
     | Editing or removing your correction | — | always allowed |
 
+    **Recompute this night** (admins only) is on every night that was scored, including one that shows
+    **No one in the bed**, whether the detector scored it empty or you flagged it. It works the same way
+    there: the first press compares the saved summary with the current one and saves nothing, the second
+    saves. A flagged night is a corrected night, so it normally opens on "locked" until you remove the correction (once its saved summary is final, see above). It is
+    not offered on nights with no data, no clear sleep, or with sleep tracking off.
+
     - **What gets locked is the night as it is when you save.** If last night's saved summary was still
       being refined (the first ~3 hours after the window closes), saving your correction first stores the
       night freshly worked out at that moment, then locks it, so an early rough pass isn't what gets kept.
@@ -1217,6 +1223,16 @@ cd nightlight
 docker build -t nightlight .
 docker run -d --name nightlight --network host --stop-timeout 30 \
   -e PUID=99 -e PGID=100 -v ./data:/app/data nightlight
+```
+
+### Running the tests
+
+The tests need **Node 24** (the version in `.nvmrc`; `engines` in both `package.json` files says `>=24`, and the Docker image and CI use the same). On an older Node the backend suite does not fail in one place with one reason: 16 test files fail in ways that look unrelated (`The requested module 'child_process' does not provide an export named 'spawn'`, `mock.module is not a function`). The cause is that the tests replace modules with `mock.module(name, { exports })`, and Node 22 ignores `exports`, so the mocked module has no named exports to import. `backend/test/node-version-pin.test.js` fails first, with that explanation, when the suite runs on a Node that cannot do it.
+
+```bash
+nvm use                      # reads .nvmrc
+cd backend && npm ci && npm test
+cd ../frontend && npm ci && npm test
 ```
 
 ## Project layout

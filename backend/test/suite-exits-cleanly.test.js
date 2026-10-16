@@ -25,7 +25,8 @@
 // the suite lie about what it ran.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { readFileSync, readdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -37,17 +38,37 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND = path.resolve(HERE, '..');
 
-// Comfortably longer than a clean start+stop takes, and far shorter than the 60s flush interval that
-// a leaked timer would hold the process open for — so the two outcomes cannot be confused for one
-// another on a slow runner.
+// ⚠️ THREE DIFFERENT CLOCKS, and mixing them was the flake in issue #666. Every probe child has to boot
+// node, open the database and import a module BEFORE it can say anything about timers. That startup
+// cost is a property of the machine's load; the exit (or the hang) that follows the body is a property
+// of the code under test. The first version gave both one wall-clock deadline measured from spawn, so a
+// loaded runner failed a probe for being slow to START — "the probe never reached the end" on a case
+// whose only real assertion is "this timer pins the process". Measured: 32 copies of this file pinned
+// to one core failed 30 of 32 runs that way; four copies at once (the load the issue describes) did not
+// reproduce it in 40 runs, so the exact failure seen on 2026-10-11 is inferred, not observed.
+//
+//   STARTUP_BUDGET_MS  how long a child may take to reach the end of its body. Pure load tolerance; it
+//                      costs nothing on a green run, because the clock stops the moment BODY-DONE is
+//                      printed. Generous on purpose: a child that never gets there is a crash or a
+//                      wedged import, and that is reported as such, not as a timing verdict.
+//   EXIT_DEADLINE_MS   after BODY-DONE, how long a child that SHOULD exit has to do it. A clean
+//                      start+stop returns in ~270ms; 20s is the old, proven-generous number.
+//   HANG_GRACE_MS      after BODY-DONE, how long a child that SHOULD be pinned is watched before it is
+//                      declared hung and killed. This one is paid in full on every green build (four
+//                      controls), so it is short: a leaked timer holds the process for the 60s flush
+//                      interval, a clean one is gone in tens of ms. Load can only make a pinned child
+//                      look MORE pinned, never less, so a short grace here cannot produce a false
+//                      failure — which is why it is the only deadline that may be tight.
+const STARTUP_BUDGET_MS = 120_000;
 const EXIT_DEADLINE_MS = 20_000;
+const HANG_GRACE_MS = 3_000;
 
-// The control case below has to WAIT OUT its deadline every single run, so that number is paid in
-// wall-clock on every green build — it is deliberately not the same one. A clean start+stop child
-// returns in ~270ms, so 5s is ~18x the honest time (no flake risk from a slow runner) while still
-// being a twelfth of the 60s flush interval a leaked timer would hold the process open for. The
-// generous 20s stays where it costs nothing: on the cases that PASS by exiting promptly.
-const HANG_DEADLINE_MS = 5_000;
+// The nested `node --test` run below boots a whole test runner plus a test file, so it gets a much
+// longer ceiling than a probe. It is only ever reached by a real hang (a clean run returns in ~1.5s),
+// so the ceiling costs nothing on a green build (and a leak planted on purpose is reported after
+// this long, not 5 minutes). It was EXIT_DEADLINE_MS * 3 = 60s measured from spawn
+// and timed out (ETIMEDOUT) on 23 of 32 heavily loaded runs (#666).
+const NESTED_RUN_CEILING_MS = 150_000;
 
 // ⚠️ `node --test` sets NODE_TEST_CONTEXT on every child it spawns, and a child that sees it switches
 // from the human reporter to TAP — so `ℹ pass 18` arrives as `# pass 18` instead. Inherited blindly,
@@ -62,7 +83,15 @@ function cleanEnv() {
 // Runs `body` in a FRESH node process and reports whether that process exited by itself.
 // A child is the only honest way to ask this question: a leaked handle is a property of a whole
 // process, and the process running these assertions is the same one the leak would be in.
-function childExitsOnItsOwn(body, timeoutMs = EXIT_DEADLINE_MS, modulePath = 'src/lib/activityTracker.js') {
+//
+// Async, with the deadline anchored on the BODY-DONE marker rather than on spawn (#666, see the
+// constants above). `graceMs` is how long after the marker the child may keep running before it is
+// killed and reported as not having exited on its own.
+//
+// ⚠️ The result's `exited` is "we never had to kill it", not "status === 0": a child that crashes
+// before the marker has exited (ranBody false, status non-zero) and the callers' `ranBody`/`status`
+// assertions are what turn that into a failure with a reason attached.
+function childExitsOnItsOwn(body, graceMs = EXIT_DEADLINE_MS, modulePath = 'src/lib/activityTracker.js') {
   const dir = mkdtempSync(path.join(tmpdir(), 'nightlight-exit-'));
   const script = path.join(dir, 'probe.mjs');
   writeFileSync(
@@ -78,31 +107,52 @@ function childExitsOnItsOwn(body, timeoutMs = EXIT_DEADLINE_MS, modulePath = 'sr
       // Printed AFTER the body, and flushed before any hang. It is what separates "the child hung
       // holding a leaked timer" from "the child hung, or crashed, somewhere earlier for an unrelated
       // reason" — without it the control case below passes for any failure that happens to stall.
+      // It is also the moment the parent starts timing the child (see the constants above).
       `\nconsole.log('BODY-DONE');\n`,
     'utf8'
   );
-  try {
-    const r = spawnSync(process.execPath, [script], { timeout: timeoutMs, encoding: 'utf8', env: cleanEnv() });
-    // spawnSync sets `signal` when it kills a child on timeout; a child that returned on its own has
-    // a numeric status and no signal.
-    return {
-      exited: r.signal === null && r.status !== null,
-      ranBody: (r.stdout || '').includes('BODY-DONE'),
-      status: r.status,
-      signal: r.signal,
-      stderr: r.stderr,
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [script], { env: cleanEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let killedByUs = false;
+    let graceTimer = null;
+    const kill = () => { killedByUs = true; child.kill('SIGKILL'); };
+    const startupTimer = setTimeout(kill, STARTUP_BUDGET_MS);
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.stdout.on('data', (d) => {
+      stdout += d;
+      if (graceTimer === null && stdout.includes('BODY-DONE')) {
+        clearTimeout(startupTimer);
+        graceTimer = setTimeout(kill, graceMs);
+      }
+    });
+    const finish = (status, signal) => {
+      clearTimeout(startupTimer);
+      clearTimeout(graceTimer);
+      rmSync(dir, { recursive: true, force: true });
+      resolve({
+        exited: !killedByUs && signal === null && status !== null,
+        ranBody: stdout.includes('BODY-DONE'),
+        status,
+        signal,
+        stderr,
+      });
     };
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+    // 'close', not 'exit': stdout must be fully drained before BODY-DONE is judged absent.
+    child.on('close', finish);
+    child.on('error', (e) => { stderr += String(e); finish(null, 'spawn-error'); });
+  });
 }
 
 describe('starting the activity tracker does not pin the process open', () => {
-  test('a process that starts and then STOPS the tracker exits on its own', () => {
-    const r = childExitsOnItsOwn('at.startActivityTracker();\nat.stopActivityTracker();\n');
+  test('a process that starts and then STOPS the tracker exits on its own', async () => {
+    const r = await childExitsOnItsOwn('at.startActivityTracker();\nat.stopActivityTracker();\n');
     assert.ok(
       r.exited,
-      `the child had to be killed after ${EXIT_DEADLINE_MS}ms (signal=${r.signal}) — stopActivityTracker ` +
+      `the child had to be killed ${EXIT_DEADLINE_MS}ms after finishing its body (signal=${r.signal}) — stopActivityTracker ` +
         `left a timer behind, which is what forced --test-force-exit on the whole suite. stderr: ${r.stderr}`
     );
     assert.equal(r.status, 0, `the child exited ${r.status} rather than cleanly: ${r.stderr}`);
@@ -112,8 +162,8 @@ describe('starting the activity tracker does not pin the process open', () => {
   // that did nothing at all would still pass if some unrelated change let the process exit anyway.
   // This asserts the leak is REAL and that the test can see it: start without stopping, and the child
   // must have to be killed.
-  test('a process that starts and does NOT stop it has to be killed — the leak is real', () => {
-    const r = childExitsOnItsOwn('at.startActivityTracker();\n', HANG_DEADLINE_MS);
+  test('a process that starts and does NOT stop it has to be killed — the leak is real', async () => {
+    const r = await childExitsOnItsOwn('at.startActivityTracker();\n', HANG_GRACE_MS);
     assert.ok(
       r.ranBody,
       `the child never reached the end of the probe, so it proves nothing about timers: ${r.stderr}`
@@ -126,11 +176,11 @@ describe('starting the activity tracker does not pin the process open', () => {
     );
   });
 
-  test('stop is idempotent and a restart still works', () => {
+  test('stop is idempotent and a restart still works', async () => {
     // Kills the "cleared but not nulled" mutant: `startActivityTracker` guards on `if (flushTimer)
     // return`, so a stop that clears the handles without nulling them makes every later start a
     // silent no-op — and nothing else in the suite would notice.
-    const r = childExitsOnItsOwn(
+    const r = await childExitsOnItsOwn(
       'at.stopActivityTracker();\n' + // never started
         'at.startActivityTracker();\n' +
         'at.stopActivityTracker();\n' +
@@ -278,17 +328,18 @@ describe('the whole suite terminates without being forced', () => {
   // `node --test` with no force-exit terminates for the file it is given. It does NOT prove every
   // file in the suite is leak-free — that is proved by the suite itself passing without the flag,
   // which is now what CI does on every push. There is no way to assert that from within.
-  test('node --test with no force-exit returns for a file that uses the tracker', () => {
+  test('node --test with no force-exit returns for a file that uses the tracker', async () => {
     const started = Date.now();
-    const stdout = execFileSync(process.execPath, ['--test', 'test/activityTracker.test.js'], {
+    // Async, with a ceiling that only a real hang reaches (see NESTED_RUN_CEILING_MS). A rejection here
+    // carries the child's stdout/stderr, which is what the file-level failure of #666 never showed.
+    const { stdout } = await promisify(execFile)(process.execPath, ['--test', 'test/activityTracker.test.js'], {
       cwd: BACKEND,
-      timeout: EXIT_DEADLINE_MS * 3,
+      timeout: NESTED_RUN_CEILING_MS,
       encoding: 'utf8',
-      stdio: 'pipe',
       env: cleanEnv(),
     });
     const elapsed = Date.now() - started;
-    assert.ok(elapsed < EXIT_DEADLINE_MS * 3, `it took ${elapsed}ms to come back`);
+    assert.ok(elapsed < NESTED_RUN_CEILING_MS, `it took ${elapsed}ms to come back`);
     // Anti-vacuous: returning promptly means nothing if it returned without running anything. A
     // renamed or deleted target file would otherwise leave this green forever.
     // Accepts the human reporter (`ℹ pass 18`) or TAP (`# pass 18`), so this does not silently go
@@ -312,15 +363,17 @@ describe('the whole suite terminates without being forced', () => {
 // back; this stops the cause.
 describe('every periodic job can be stopped (#286)', () => {
   for (const { module, start, stop, pinsLoop } of PERIODIC) {
-    test(`${start} can be undone, and the process then exits`, () => {
-      const r = childExitsOnItsOwn(`at.${start}();\nat.${stop}();\n`, EXIT_DEADLINE_MS, module);
+    test(`${start} can be undone, and the process then exits`, async () => {
+      const r = await childExitsOnItsOwn(`at.${start}();\nat.${stop}();\n`, EXIT_DEADLINE_MS, module);
       assert.ok(r.exited, `${module} had to be killed after ${start}/${stop} — a timer survived. stderr: ${r.stderr}`);
       assert.equal(r.status, 0, `${module} exited ${r.status}: ${r.stderr}`);
     });
 
-    test(`...and ${start} ${pinsLoop ? 'really does pin the process without it' : 'unrefs its timers, so it cannot pin the process'}`, () => {
-      const r = childExitsOnItsOwn(`at.${start}();
-`, HANG_DEADLINE_MS, module);
+    test(`...and ${start} ${pinsLoop ? 'really does pin the process without it' : 'unrefs its timers, so it cannot pin the process'}`, async () => {
+      // A module that pins is watched briefly (load cannot fake a hang); one that must NOT pin gets the
+      // generous exit deadline, because there load CAN fake one (#666).
+      const r = await childExitsOnItsOwn(`at.${start}();
+`, pinsLoop ? HANG_GRACE_MS : EXIT_DEADLINE_MS, module);
       assert.ok(r.ranBody, `the probe never reached the end for ${module}: ${r.stderr}`);
       // For a module that pins the loop this is the control that makes the pair above meaningful.
       // For one that unrefs, the honest assertion is the opposite: it must NOT pin, because that is
@@ -409,7 +462,7 @@ describe('every periodic job can be stopped (#286)', () => {
     );
   });
 
-  test('★ a stop must NULL its handle, or the next start is a silent no-op', () => {
+  test('★ a stop must NULL its handle, or the next start is a silent no-op', async () => {
     // Every one of these guards on `if (timer) return` (or `if (!timer)`), so a stop that clears the
     // handle without nulling it leaves the module permanently stopped: the restart looks like it
     // worked and nothing runs again. Mutation testing found this uncovered for the new stops — the
@@ -418,7 +471,7 @@ describe('every periodic job can be stopped (#286)', () => {
     // Counts real setInterval calls in a child, which is the only observable difference: a restart
     // that silently did nothing registers no new timers.
     for (const { module, start, stop } of PERIODIC) {
-      const r = childExitsOnItsOwn(
+      const r = await childExitsOnItsOwn(
         `at.${start}();\n` +
           `at.${stop}();\n` +
           'let created = 0;\n' +

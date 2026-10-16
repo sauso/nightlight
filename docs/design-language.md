@@ -373,6 +373,12 @@ control — keep it, it's what makes the switch keyboard- and screen-reader-acce
 at **1.4s** (connecting, urgent), `--offline` static with no ring. The tempo carries the meaning;
 if you add a state, pick its tempo deliberately.
 
+**Tile overlay states** (the text over a camera's video when it is not playing): *Connecting…*, *No signal*
+(the camera or its stream is down), and *Streaming service unavailable. Your camera may still be online.* (the
+server's own status check timed out, so the camera's state is unknown), the last as an icon, text and a Retry
+button in `--text-secondary`, not `--offline` red, because it does not claim the camera is down. Its dot stays
+on the amber "connecting" tempo and never turns red.
+
 ### Modal (`components/Modal.jsx`)
 On phone widths a **sheet**, not a centred dialog: overlay `rgba(10, 13, 28, 0.7)`, card
 `max-width: 440`, hugging the bottom edge (`placement="top"` for the top), rounded 20px on the inner
@@ -436,6 +442,28 @@ chrome around a short page instead of a blank one: header **"Page not found"**, 
 It is deliberately small: it does **not** tell "no such child or camera" from "still loading" for a real
 route with a missing id (that is #375), and an address that matches a *pattern* route with an unknown last
 segment, such as `/cameras/<id>/<unknown>`, still lands on that route's screen, not here.
+
+### Loading, failed and empty are three different screens (#375)
+A list that comes from the server can be in one of these states, and each says something different. Never let
+one stand in for another: "No children yet" next to an outage tells a parent their setup is gone.
+
+| State | What the screen shows | Setup actions ("Add child", "+ Add camera") |
+|---|---|---|
+| **Loading** (nothing has answered yet) | A plain "Loading…" line. Not the empty copy, not an error. | Hidden |
+| **Failed** (the request failed and there is no list to keep) | An inline message with a **Retry** button (`components/LoadFailed.jsx`): what could not load, the cause, and "Check your connection, then try again." Not the empty copy. Never `alert()` or `confirm()`. | Hidden |
+| **Stale** (a refresh failed after a good load) | The last list stays, with a "Couldn't refresh … Showing what we had." message and **Retry** above it. | As for a normal list |
+| **Empty** (a request succeeded and returned none) | The screen's own empty copy. | Shown (to those allowed to use them) |
+
+`lib/loadState.js` makes the call: `loadState({ loaded, error, count })` returns `loading`, `error`, `stale`,
+`empty` or `ready`. `loaded` means a request has **succeeded** at least once (not that one has finished), which
+is why `CamerasContext` publishes it next to `error`. A failure after a good load of an **empty** list is `error`,
+not `stale`: there is no list on screen to keep, and the empty copy would be unverifiable. Keep the failure apart
+from the data: a catch block that sets the data to `[]` or `null` puts the failed state back into the empty one.
+
+Covered: Children, Cameras, Live, a child's alerts and unknown-child page, Sleep detail, Clip management.
+Not yet: Logs (a failed fetch shows its error banner above "No log activity yet", the same conflation), Camera
+events and Recent alerts (they show their error and hide the empty copy, but have only "Refresh now", not
+**Retry**), and the Night review, Timelapse, Recordings and sensor cards.
 
 ### List row (`.cam-row`)
 Full-width button, `padding: 11px 14px`, 12px gap, hairline `--border` between rows (none on the
