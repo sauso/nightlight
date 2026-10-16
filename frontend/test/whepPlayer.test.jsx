@@ -201,17 +201,21 @@ describe('WhepPlayer session DELETE (#562)', () => {
 // ★ #694. The Location used to be stored in one ref shared by every run of the connect effect, before the
 // `cancelled` check, so a slow POST from a torn-down run could overwrite a newer run's address.
 describe('WhepPlayer late POST answer from a torn-down run (#694)', () => {
-  // A POST whose answer the test releases by hand; the DELETE is answered at once.
+  // A POST whose answer the test releases by hand; the DELETE is answered at once. `holdBody`: the answer's
+  // headers (and so its Location) arrive, but its SDP body stays out until the entry's releaseBody().
   function holdPosts() {
     const held = [];
     fetchMock.mockImplementation((url, init = {}) => {
       if (init.method !== 'POST') return Promise.resolve(deleteAnswer);
       return new Promise((resolve) => {
-        held.push({
-          url,
-          release: (location) =>
-            resolve({ ok: true, status: 201, headers: headersWith(location), text: async () => 'v=0 answer' }),
-        });
+        const entry = { url };
+        entry.release = (location, { holdBody = false } = {}) => {
+          let bodyArrives;
+          const body = holdBody ? new Promise((r) => { bodyArrives = r; }) : Promise.resolve('v=0 answer');
+          entry.releaseBody = () => bodyArrives('v=0 answer');
+          resolve({ ok: true, status: 201, headers: headersWith(location), text: () => body });
+        };
+        held.push(entry);
       });
     });
     return held;
@@ -272,6 +276,28 @@ describe('WhepPlayer late POST answer from a torn-down run (#694)', () => {
     expect(deletes()).toEqual([]);
     // And the torn-down run's answer is not applied either (found by the #704 review: only the DELETE was checked).
     expect(peers[0].remoteDescription).toBeNull();
+  });
+
+  test('★ cancelled while the answer body is being read: exactly one DELETE', async () => {
+    // The headers have arrived and this run has stored its session address, but `await res.text()` is still out
+    // when the run is torn down, so the cleanup DELETEs. Two lines keep it to one: the `cancelled` check sits
+    // BEFORE the body read, and the cleanup sets `resourceUrl = null`. Either alone is enough; with neither (the
+    // check moved after the read AND no reset), the cancelled run's continuation DELETEd the same session a
+    // second time (found in the review of #694; the pair is one catalogue entry).
+    const held = holdPosts();
+    const { unmount } = render(<WhepPlayer mediamtxPath="cam1" active muted />);
+    await waitFor(() => expect(held).toHaveLength(1));
+    held[0].release('/live/cam1/whep/s1', { holdBody: true });
+    await settle();
+    unmount();
+    await settle();
+    expect(deletes(), 'precondition: the cleanup ended the session this run had stored').toEqual([
+      { url: '/live/cam1/whep/s1', redirect: 'error' },
+    ]);
+    held[0].releaseBody();
+    await settle();
+    expect(deletes()).toEqual([{ url: '/live/cam1/whep/s1', redirect: 'error' }]);
+    expect(peers[0].closed).toBe(true);
   });
 
   test('normal connect then disconnect is unchanged: one DELETE, at unmount, after the answer was applied', async () => {
