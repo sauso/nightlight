@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **Documentation: which motion settings apply to which motion source (#374), and why a wake clip and a timeline wake can disagree (#358).** An MQTT or ONVIF camera uses only the alert schedule and the motion cooldown (not the frame-difference confirm rule); a Sound confirm of 0 still averages about 0.6 s on top of the roughly 5 s initial calibration; and wake clips are best-effort capture candidates, not a one-to-one copy of the sleep timeline. No behaviour changes.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed
