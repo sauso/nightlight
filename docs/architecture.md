@@ -208,6 +208,30 @@ page and only a 4xx message reaches the person:
   the connection so the client sees a failure rather than a truncated body that looks complete. If the
   reply already finished, the error is only logged.
 
+**Log lines are single lines (`lib/logger.js`, #539).** Every line passes one choke point, which first
+redacts credentials and then escapes line breaks and control characters, so a camera name containing a
+newline cannot forge a second timestamped line in `docker logs`, the in-app log viewer or the diagnostics
+bundle. The escapes are visible text, not removals:
+
+| Character | Written as |
+|---|---|
+| LF, CR | `\n`, `\r` |
+| other C0 controls (including ESC), DEL, the C1 block | `\xNN` (for example ESC is `\x1b`) |
+| U+2028, U+2029 (Unicode line / paragraph separators) | `\u2028`, `\u2029` |
+| tab, zero-width and other format characters (U+200B, U+FEFF, the soft hyphen, the bidirectional controls), and everything else | unchanged |
+
+This also applies to the stack of a 5xx error and to multi-line child-process output: a stack is now one
+log line with `\n` where the breaks were, so it reads on a single (long) line in the viewer. A literal
+backslash is not doubled, so a typed `\n` looks the same as an escaped newline; that cannot forge a line.
+There is no length cap in the logger (child-process lines are capped upstream).
+
+The diagnostics bundle's name replacement (`lib/identityRedaction.js`) reads these escaped lines, so it knows
+the escapes without restating them: it calls the logger's own `neutraliseControlChars` on every UTF-16 code
+unit once, searches for each name's escaped spelling as well as the name as typed, and treats an escape as a
+word boundary. A name that contains a line break (`Name\nTwo`) or follows one (a multi-line error, a stack) is
+therefore still replaced and still caught by the bundle's privacy check, and a change to the escaping here
+needs no edit there (#539, found in review).
+
 **Example of "4xx before any write": the morning review's frame ids** (`PUT /api/children/:id/review/:date`,
 #522). `true_onset_transition_id`, `true_wake_transition_id` and `true_in_bed_transition_id` each name one
 recorded *got into / out of bed* event of that child and that night.
