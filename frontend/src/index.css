@@ -681,6 +681,20 @@ body.in-pip .tile-menu-backdrop {
 
 .whep-overlay--error { color: var(--offline); }
 
+/* Streaming service unavailable (#505): calm, so --text-secondary rather than --offline's red, which means
+   "this camera is down" and this state does not claim that. Icon + text + a Retry button, stacked and centred
+   so it fits a phone-width tile; padding keeps it off the tile's corner buttons. */
+.whep-overlay--unknown { color: var(--text-secondary); }
+.stream-unavailable {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 0 44px;
+  text-align: center;
+  line-height: 1.35;
+}
+
 .mute-btn {
   position: absolute;
   top: 10px;
@@ -1808,6 +1822,10 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   font-size: 13px;
   margin-bottom: 14px;
 }
+
+.load-failed { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.load-failed__text { flex: 1 1 200px; min-width: 0; }
+.load-failed__retry { width: auto; flex-shrink: 0; }
 
 .saved-banner {
   background: rgba(127, 191, 163, 0.12);
