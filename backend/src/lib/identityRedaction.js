@@ -23,6 +23,8 @@
 //     words). Same trade-off as scrubSecrets' 4-character floor. The structured fields are still aliased.
 //   - A name that exists ONLY in the in-memory log buffer and is no longer in the database (a child or an
 //     account renamed since the line was logged) is unknowable here. Documented in SECURITY.md.
+//   - A name inside a NON-string log argument is in the log as JSON.stringify wrote it (`\u0001`, `\"`), a
+//     spelling not searched for. No call site logs a name that way (checked by grep, PR #709 review).
 
 import { neutraliseControlChars } from './logger.js';
 
@@ -43,7 +45,11 @@ const NOT_AFTER = '(?![\\p{L}\\p{N}])';
 // whatever it does to each of the 65,536 UTF-16 code units (its character class has no `u` flag, so it can
 // only ever match one code unit at a time, which makes this exhaustive). A character the logger starts
 // escaping tomorrow is redacted here with no edit. Built once, lazily (about 15 ms, measured on Windows,
-// Node 24), and only by a process that builds a bundle.
+// Node 24), and only by a process that builds a bundle. The walk starts at U+0000 on purpose: NUL is one of
+// the units the logger escapes (`\x00`), and a probe from 1 left a name right after an escaped NUL unredacted
+// (round-2 review of PR #709; the exhaustive tests walk every escaped unit).
+// The cache is a speed choice only: rebuilding on every call gives the same set, so no test can tell (a
+// mutant that always rebuilds survives; that is expected, unverified by design).
 let loggerEscapes = null;
 function escapesTheLoggerWrites() {
   if (!loggerEscapes) {

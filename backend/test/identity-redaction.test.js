@@ -220,6 +220,40 @@ test('#709: a name right after an escaped control character is still a whole wor
   assert.equal(r.scrub('nZed Room x1Hall'), 'nZed Room x1Hall');
 });
 
+// Round-2 review of PR #709: nine sampled classes let a probe from U+0001 (NUL's escape missing) and a logged
+// spelling that kept NUL raw both survive. This walks EVERY code unit the logger changes. The list comes from the
+// logger's own function on purpose: this file is about the redactor keeping up with the logger, and the logger's
+// exact set is pinned by the exhaustive walk in logger-control-chars.test.js.
+function unitsTheLoggerEscapes() {
+  const units = [];
+  for (let u = 0; u <= 0xffff; u++) {
+    const ch = String.fromCharCode(u);
+    if (neutraliseControlChars(ch) !== ch) units.push(u);
+  }
+  return units;
+}
+
+test('#709 exhaustive: every code unit the logger escapes, inside a name or right before one, is scrubbed and gated', () => {
+  const units = unitsTheLoggerEscapes();
+  for (const must of [0x00, 0x0a, 0x1b, 0x7f, 0x85, 0x2029]) assert.ok(units.includes(must), `U+${must.toString(16)} not derived`);
+  for (const u of units) {
+    const c = String.fromCharCode(u);
+    const at = `U+${u.toString(16).padStart(4, '0')}`;
+    const names = { lead: `${c}Qzx-lead`, mid: `Qzx-mid-a${c}Qzx-mid-b`, end: `Qzx-end${c}`, after: 'Qzx After Room' };
+    const r = createIdentityRedactor({
+      cameras: Object.values(names).map((name, i) => ({ id: `c${i + 1}`, name })),
+    });
+    const raw = `on "${names.lead}" "${names.mid}" "${names.end}" failed:${c}${names.after} down${c}${names.mid}${c}${names.lead}${c}end`;
+    for (const [form, text] of [['logged', neutraliseControlChars(raw)], ['as typed', raw]]) {
+      const out = r.scrub(text);
+      assert.ok(!out.includes('Qzx'), `${at}, ${form}: ${JSON.stringify(out)}`);
+      assert.match(r.findLeak({ line: text }) ?? 'null', /survived/, `${at}, ${form}: the gate must see the unscrubbed text`);
+      assert.equal(r.findLeak({ line: out }), null, `${at}, ${form}: and must pass the scrubbed one`);
+      for (const alias of ['Camera 1', 'Camera 2', 'Camera 3', 'Camera 4']) assert.ok(out.includes(alias), `${at}, ${form}: ${alias} missing`);
+    }
+  }
+});
+
 test('#709: longest SPELLING first: a name that is a prefix of another name\'s logged spelling does not split it', () => {
   // Camera 1 is "Qzx" + two line separators + " Rook" (10 characters, 20 as logged). Camera 2 is the logged
   // spelling of "Qzx" + two separators, typed with real backslashes (15 characters). Ordered by NAME length,

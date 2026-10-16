@@ -86,6 +86,50 @@ describe('every control character class is escaped (#539)', () => {
     assert.ok(out[0].endsWith('\\x1b[2J\\x1b[31mred'));
   });
 
+  // Round-2 review of PR #709: sampled code points cannot pin a range edge they do not sit on (widening the
+  // separator pair to U+2028-U+2030 survived and would mangle U+202F and U+2030 in ordinary text). This walks all
+  // 65,536 UTF-16 code units through the public logger, 256 per line, against an expectation written out here
+  // from the documented rules, never from the code under test.
+  test('an exhaustive walk of the BMP: exactly the documented code units change, everything else is identical', (t) => {
+    const hex = (u, w) => u.toString(16).padStart(w, '0');
+    const documented = (u) => {
+      if (u === 0x0a) return '\\n';
+      if (u === 0x0d) return '\\r';
+      if ((u <= 0x1f && u !== 0x09) || (u >= 0x7f && u <= 0x9f)) return `\\x${hex(u, 2)}`;
+      if (u === 0x2028 || u === 0x2029) return `\\u${hex(u, 4)}`;
+      return null;
+    };
+    const CHUNK = 256;
+    const { out, recent } = capture(t, () => {
+      for (let base = 0; base < 0x10000; base += CHUNK) {
+        let text = '';
+        for (let u = base; u < base + CHUNK; u++) text += String.fromCharCode(u);
+        logger.info(text);
+      }
+    });
+    assert.equal(recent.length, 0x10000 / CHUNK);
+    let changed = 0;
+    for (let i = 0; i < recent.length; i++) {
+      let want = '[INFO] ';
+      for (let u = i * CHUNK; u < (i + 1) * CHUNK; u++) {
+        const esc = documented(u);
+        if (esc !== null) changed++;
+        want += esc ?? String.fromCharCode(u);
+      }
+      const range = `U+${hex(i * CHUNK, 4)}..U+${hex((i + 1) * CHUNK - 1, 4)}`;
+      for (const sink of [out, recent]) {
+        const got = sink[i].slice(20);
+        if (got !== want) {
+          let at = 0;
+          while (at < want.length && got[at] === want[at]) at++;
+          assert.fail(`${range}: first difference at character ${at}: got ${JSON.stringify(got.slice(at, at + 12))}, want ${JSON.stringify(want.slice(at, at + 12))}`);
+        }
+      }
+    }
+    // C0 without tab (31), DEL and C1 (33), the two separators (2).
+    assert.equal(changed, 66);
+  });
+
   test('tab is kept: it cannot start a line, and child-process output carries it', (t) => {
     const { recent } = capture(t, () => logger.info('a\tb'));
     assert.ok(recent[0].endsWith('a\tb'));

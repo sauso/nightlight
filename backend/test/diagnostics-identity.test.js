@@ -198,6 +198,34 @@ test('★ #709: names containing control characters reach no bundle, neither as 
   }
 });
 
+test('★ #709 exhaustive: for EVERY code unit the logger escapes, no camera name reaches the bundle', async () => {
+  // Round-2 review of PR #709: the nine sampled characters above let NUL through two mutants (a probe from U+0001,
+  // and a logged spelling that kept NUL raw). Every unit the logger changes (derived from its own function; its
+  // exact set is pinned in logger-control-chars.test.js), in a name at the start, middle and end, and a name that
+  // sits right after the escaped unit in a log line, through the real route: its scrub AND its privacy gate.
+  const units = [];
+  for (let u = 0; u <= 0xffff; u++) {
+    const ch = String.fromCharCode(u);
+    if (neutraliseControlChars(ch) !== ch) units.push(u);
+  }
+  for (const must of [0x00, 0x0a, 0x7f, 0x2029]) assert.ok(units.includes(must), `U+${must.toString(16)} not derived`);
+  for (const u of units) {
+    resetState();
+    const c = String.fromCharCode(u);
+    const at = `U+${u.toString(16).padStart(4, '0')}`;
+    const names = { lead: `${c}Qzx-lead`, mid: `Qzx-mid-a${c}Qzx-mid-b`, end: `Qzx-end${c}`, after: 'Qzx After Room' };
+    Object.values(names).forEach((name, i) => insertCamera(`cam-${i + 1}`, name, { sort_order: i + 1 }));
+    logger.info(`[detect] motion on "${names.lead}" "${names.mid}" "${names.end}"`);
+    logger.error(`[x] failed:${c}${names.after} down${c}${names.mid}${c}${names.lead}${c}${names.end}${c}end`);
+    const res = await bundle();
+    assert.equal(res.status, 200, `${at}: ${text(res).slice(0, 200)}`);
+    assert.ok(!text(res).includes('Qzx'), `${at}: ${text(res).match(/.{0,40}Qzx.{0,40}/)?.[0]}`);
+    assert.equal(res.body.server_logs.length, 2, at);
+    for (const alias of ['Camera 1', 'Camera 2', 'Camera 3']) assert.ok(res.body.server_logs[0].includes(alias), `${at}: ${alias}`);
+    assert.ok(res.body.server_logs[1].includes('failed:') && res.body.server_logs[1].includes('Camera 4 down'), `${at}: ${res.body.server_logs[1]}`);
+  }
+});
+
 test('a renamed or removed camera: its history rows carry the OLD name, which is still replaced', async () => {
   insertCamera('cam-live', 'Today Name');
   const old = 'ZZ Yesterday Name';

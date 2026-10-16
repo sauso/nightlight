@@ -1443,6 +1443,63 @@
     "note": "A logged spelling is up to six times longer than its name; a shorter name that is a prefix of it would win and publish the rest."
   },
   {
+    "label": "#539 redactor: the escape probe starts at U+0001 (NUL's escape is not a boundary)",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "for (let unit = 0; unit <= 0xffff; unit++)",
+    "replace": "for (let unit = 1; unit <= 0xffff; unit++)",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "#709 exhaustive",
+    "note": "Round-2 review of PR #709: survived the nine sampled classes; a name right after an escaped NUL was published."
+  },
+  {
+    "label": "#539 redactor: a name's logged spelling keeps NUL raw",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "const logged = neutraliseControlChars(literal);",
+    "replace": "const logged = neutraliseControlChars(literal).split('\\\\x00').join(String.fromCharCode(0));",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "#709 exhaustive",
+    "note": "Round-2 review of PR #709: the logged spelling must be exactly what the logger writes for every unit it escapes."
+  },
+  {
+    "label": "#539 redactor: the first escape (NUL) is dropped from the boundary set",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "loggerEscapes = [...out];",
+    "replace": "loggerEscapes = [...out].slice(1);",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "#709 exhaustive"
+  },
+  {
+    "label": "#539 redactor: the last escape (U+2029) is dropped from the boundary set",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "loggerEscapes = [...out];",
+    "replace": "loggerEscapes = [...out].slice(0, -1);",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "#709 exhaustive"
+  },
+  {
+    "label": "#539 redactor: one middle escape (ESC) is dropped from the boundary set",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "if (written !== ch) out.add(written);",
+    "replace": "if (written !== ch && unit !== 0x1b) out.add(written);",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "#709 exhaustive"
+  },
+  {
+    "label": "#539 logger: widen the separator pair to U+2028-U+2030",
+    "file": "backend/src/lib/logger.js",
+    "find": "\\u2028\\u2029]/g",
+    "replace": "\\u2028-\\u2030]/g",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "namePattern": "exhaustive walk of the BMP",
+    "note": "Round-2 review of PR #709: survived the sampled code points; U+202F and U+2030 in ordinary text would be mangled."
+  },
+  {
     "label": "logger raw: bypass the credential-redacting choke point",
     "file": "backend/src/lib/logger.js",
     "find": "raw: (source, line) => write(console.log, source, [String(line).replace(LEADING_TIMESTAMP, '')]),",

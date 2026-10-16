@@ -71,7 +71,10 @@ Logs empties that buffer, and a restart does too); (2) a name shorter than 3 cha
 text (it is still replaced in the child and camera lists, but "Jo" is not searched for in log lines,
 because that would rewrite ordinary words); (3) a name written in an MQTT topic or a camera's address
 in a form other than as typed or percent-encoded. (A name containing a line break or another control
-character is also found in the escaped form the log writes it in, for example `Name\nTwo`, #539.) The
+character is also found in the escaped form the log writes it in, for example `Name\nTwo`, #539. Two
+names that differ only by a real line break versus a typed backslash-n look the same there and may share
+one alias. A camera password that itself contains a line break is not recognised as part of its address
+and could appear in a log line; the app's single-line fields make that practically unreachable.) The
 reverse also holds: (4) a name that is an
 ordinary word (a child called "Max", "Motion" or "Sound") is replaced wherever that word appears in
 the log text and in a camera's own settings, so a line can read "Child 1 detected" or a
