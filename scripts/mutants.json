@@ -17736,6 +17736,51 @@
     "namePattern": "Sleep detail"
   },
   {
+    "label": "#375 child detail: a missing child with other children cached reads as stale (no failure UI) instead of error",
+    "file": "frontend/src/pages/ChildDetail.jsx",
+    "find": "error: camerasError, count: 0 });",
+    "replace": "error: camerasError, count: kids.length });",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "a failed refresh with OTHER children cached"
+  },
+  {
+    "label": "#375 sleep detail: Retry re-runs the reset effect, so a night on screen is blanked",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "  }, [id, date]);",
+    "replace": "  }, [id, date, nightRetry]);",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Retry on the stale banner keeps the night on screen"
+  },
+  {
+    "label": "#375 sleep detail: a failed refresh after an EMPTY answer keeps the stale banner and the no-data copy",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "const displayable = !!night && night.status !== 'no_data';",
+    "replace": "const displayable = night !== undefined;",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "a failed refresh after an EMPTY"
+  },
+  {
+    "label": "#375 cameras tab: Retry is wired to a no-op instead of refresh",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "onRetry={refresh}",
+    "replace": "onRetry={() => {}}",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Cameras tab: Retry calls refresh"
+  },
+  {
+    "label": "#375 live: Retry is wired to a no-op instead of refresh",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "onRetry={refresh}",
+    "replace": "onRetry={() => {}}",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Live: Retry calls refresh"
+  },
+  {
     "label": "#375 clip management: a failed list request becomes an empty list",
     "file": "frontend/src/pages/ClipManagement.jsx",
     "find": "      setError(e.message || 'Failed to load clips');\n    }\n  }",

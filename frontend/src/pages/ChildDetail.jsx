@@ -70,14 +70,20 @@ export default function ChildDetail() {
   if (!kid) {
     // Not found only after the list has actually loaded: before that, or after a failed load, the child may
     // well exist and "Loading…" forever (the old behaviour) hid the failure (#375).
-    const missing = loadState({ loaded: camerasLoaded, error: camerasError, count: kids.length });
+    //
+    // ⚠️ The requested child is ABSENT here, so whatever the provider cached cannot vouch for it: a failed
+    // refresh after a good load leaves a NON-empty `kids` that simply lacks this id, and loadState would call
+    // that 'stale' (it assumes the cached list is on screen). Nothing on this screen is the cached list, so
+    // count is passed as 0 and any provider error is a blocking `error` with Retry, however many children
+    // are cached. (Review finding on PR #716.)
+    const missing = loadState({ loaded: camerasLoaded, error: camerasError, count: 0 });
     return (
       <>
         <AppHeader title="Child" back={{ to: '/children', label: 'Children' }} />
         <main className="app-main">
           {missing === 'error' && <LoadFailed what="this child" error={camerasError} onRetry={refreshCameras} />}
           {missing === 'loading' && <div className="empty-state">Loading…</div>}
-          {(missing === 'empty' || missing === 'ready' || missing === 'stale') && (
+          {missing === 'empty' && (
             <div className="empty-state">We couldn’t find this child. Go back to Children and pick one from the list.</div>
           )}
         </main>

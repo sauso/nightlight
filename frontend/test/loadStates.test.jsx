@@ -2,8 +2,8 @@
 // the empty copy for all three. Per screen: FAILED shows the error and Retry and NOT the empty copy;
 // EMPTY shows the empty copy; LOADING shows neither. Where the screen has a stale case, a failure after a
 // good load keeps the list.
-import { describe, test, expect, vi, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
+import { screen, waitFor, act } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver, forEachRole, renderAs } from './helpers/render.jsx';
 import Children from '../src/pages/Children.jsx';
@@ -179,6 +179,40 @@ describe('Child detail: alerts feed and unknown child', () => {
     expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy();
     expect(screen.queryByText('Loading…')).toBeNull();
   });
+
+  // Review finding on PR #716: with OTHER children cached, loadState called this 'stale' and the page said
+  // "We couldn’t find this child" with no failure UI. The cached list is not on this screen, so it cannot
+  // vouch for the one that is missing.
+  test('★ #375 a failed refresh with OTHER children cached still shows the error and Retry, not "couldn’t find this child"', async () => {
+    const OTHER = { ...KID, id: 'kid-2', name: 'Child B' };
+    const { user, camerasValue } = renderAsAdmin(detail, { route: '/children/kid-1', kids: [OTHER], cameras: [], ...STALE });
+    expect(screen.getByText(DOWN)).toBeTruthy();
+    expect(screen.queryByText(/We couldn’t find this child/)).toBeNull();
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+    expect(camerasValue.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  test('a SUCCESSFUL list that lacks the child still says it could not be found (no error, no Retry)', () => {
+    const OTHER = { ...KID, id: 'kid-2', name: 'Child B' };
+    renderAsAdmin(detail, { route: '/children/kid-1', kids: [OTHER], cameras: [] });
+    expect(screen.getByText(/We couldn’t find this child/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /retry/i })).toBeNull();
+  });
+});
+
+describe('Retry buttons are wired to the provider refresh', () => {
+  // A Retry that renders but calls nothing is invisible to every other test here (reviewer's suspected
+  // survivors: `onRetry={refresh}` swapped for a no-op).
+  test('★ #375 Cameras tab: Retry calls refresh', async () => {
+    const { user, camerasValue } = renderAsAdmin(<Cameras />, { cameras: [], ...FAILED });
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+    expect(camerasValue.refresh).toHaveBeenCalledTimes(1);
+  });
+  test('★ #375 Live: Retry calls refresh', async () => {
+    const { user, camerasValue } = renderAsAdmin(<LiveMonitor />, { cameras: [], ...FAILED });
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+    expect(camerasValue.refresh).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('Sleep detail', () => {
@@ -222,6 +256,73 @@ describe('Sleep detail', () => {
     expect(await screen.findByText('Loading night…')).toBeTruthy();
     expect(screen.queryByText(/No sleep data for this night/)).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  // The 2-minute refresh only runs on the LATEST night, so these pin the clock the way sleepDetail.test.jsx
+  // does (02:00Z on the 31st is noon in Melbourne, so yesterday is the live night, 2026-08-30) and capture
+  // the interval callback to fire a refresh by hand. Only `Date` is faked, so waitFor keeps working.
+  describe('a failed 2-minute refresh', () => {
+    let refresh;
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-08-31T02:00:00Z'));
+      refresh = null;
+      const realSet = globalThis.setInterval;
+      vi.spyOn(globalThis, 'setInterval').mockImplementation((fn, ms, ...a) => {
+        if (ms === 2 * 60 * 1000) { refresh = fn; return 0; }
+        return realSet(fn, ms, ...a);
+      });
+    });
+    afterEach(() => vi.useRealTimers());
+
+    // First answer `first`, then whatever `later()` returns.
+    const mountWith = (first, later) => {
+      let calls = 0;
+      vi.spyOn(api, 'get').mockImplementation((p) => {
+        if (p.includes('/sleep/live')) return Promise.resolve({ scope: 'tonight', night: { night_date: '2026-08-30' } });
+        if (p.includes('/sleep/insights')) return Promise.resolve(null);
+        calls += 1;
+        return calls === 1 ? Promise.resolve(first) : later();
+      });
+      return renderAsAdmin(ui, { ...KID_ROUTE, settings: { timezone: 'Australia/Melbourne' } });
+    };
+    const fireRefresh = async () => {
+      await waitFor(() => expect(refresh).toBeTruthy());
+      await act(async () => { refresh(); });
+    };
+
+    // Review finding on PR #716: Retry on the "may be out of date" banner re-ran the effect that first
+    // blanked `night` and the error, so the night on screen vanished (and a second failure became a
+    // blocking first-load error that unmounted the page body).
+    test('★ #375 Retry on the stale banner keeps the night on screen, even when the retry fails too', async () => {
+      const { user } = mountWith({ status: 'no_sleep' }, () => Promise.reject(new Error('down again')));
+      expect(await screen.findByText(/No clear sleep detected/)).toBeTruthy();
+      await fireRefresh();
+      expect(await screen.findByText(/Couldn’t refresh this night/)).toBeTruthy();
+      await user.click(screen.getByRole('button', { name: /retry/i }));
+      await waitFor(() => expect(api.get.mock.calls.filter((c) => /\/sleep\/2026-08-30/.test(c[0])).length).toBe(3));
+      // The night never went away and the banner is still the stale one, not the blocking failure.
+      expect(screen.getByText(/No clear sleep detected/)).toBeTruthy();
+      expect(screen.getByText(/Couldn’t refresh this night/)).toBeTruthy();
+      expect(screen.queryByText(/Couldn’t load this night/)).toBeNull();
+      expect(screen.queryByText('Loading night…')).toBeNull();
+    });
+
+    // Review finding on PR #716: an EMPTY first answer followed by a failed refresh showed the stale banner
+    // AND "No sleep data for this night", a claim nothing can verify any more. docs/design-language.md:
+    // a failure after an empty result is `error`.
+    test.each([['null', null], ['no_data', { status: 'no_data' }]])(
+      '★ #375 a failed refresh after an EMPTY (%s) answer is a blocking failure and drops the no-data copy',
+      async (_n, first) => {
+        mountWith(first, () => Promise.reject(new Error('sleep down')));
+        if (first) expect(await screen.findByText(/No sleep data for this night/)).toBeTruthy();
+        await fireRefresh();
+        expect(await screen.findByText(/Couldn’t load this night/)).toBeTruthy();
+        expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy();
+        expect(screen.queryByText(/No sleep data for this night/)).toBeNull();
+        expect(screen.queryByText(/Couldn’t refresh this night/)).toBeNull();
+      }
+    );
   });
 });
 

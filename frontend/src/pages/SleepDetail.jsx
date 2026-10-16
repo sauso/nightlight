@@ -103,11 +103,19 @@ export default function SleepDetail() {
     return () => { alive = false; };
   }, [id, todayLocal, searchParams]);
 
+  // Forget the night only when the child or the date CHANGES. This used to be the first lines of the fetch
+  // effect below, which Retry (nightRetry) also re-runs: Retry on the "may be out of date" banner then blanked
+  // a night that was on screen, and a retry that failed again became a blocking first-load error that
+  // unmounted NightContent (an open clip modal with it). Declared BEFORE the fetch effect so a date change
+  // resets and then fetches within the same commit. (Review finding on PR #716.)
+  useEffect(() => {
+    setNight(undefined);
+    setNightError('');
+  }, [id, date]);
+
   useEffect(() => {
     if (!date) return;
     let alive = true;
-    setNight(undefined);
-    setNightError('');
     const load = () => api.get(`/children/${id}/sleep/${date}?detail=1`)
       .then((r) => { if (alive) { setNight(r || null); setNightError(''); } })
       // A failed 2-minute refresh leaves the night already on screen in place (stale) rather than blanking it.
@@ -229,9 +237,14 @@ export default function SleepDetail() {
 }
 
 function NightBody({ night, error, onRetry, ...rest }) {
-  if (night === undefined) {
+  // "Displayable" = something worth keeping on screen beside a stale banner. A null / `no_data` answer is the
+  // EMPTY result: its copy ("No sleep data for this night") cannot be verified once a refresh fails, so a
+  // failure after it is a blocking `error`, the same rule as loadState (docs/design-language.md, #375). The
+  // other statuses (`ok`, `empty`, `no_sleep`, `off`) are real answers and stay as stale. (Review finding on PR #716.)
+  const displayable = !!night && night.status !== 'no_data';
+  if (!displayable) {
     if (error) return <LoadFailed what="this night" error={error} onRetry={onRetry} />;
-    return <div className="card"><div className="empty-state" style={{ padding: 20 }}>Loading night…</div></div>;
+    if (night === undefined) return <div className="card"><div className="empty-state" style={{ padding: 20 }}>Loading night…</div></div>;
   }
   // A refresh failed but the last night is still shown: say it may be out of date, then render it as usual.
   // One fragment shape whether or not the banner is there, so NightContent keeps its state (an open clip
