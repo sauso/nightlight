@@ -5,13 +5,25 @@
 // proxy-addr using the TRUST_PROXY value. So "who counts as a trusted proxy" decides which bucket a
 // request lands in. Those rules had no test that went through real Express and a real socket.
 //
-// ★ ONLY THE `::/1` CASE FAILS ON THE OLD PACKAGE. Run against proxy-addr 2.0.7 it gets the forged
-// address back (proven by swapping the lockfile in and re-running); the others pin behaviour that was
-// already right and must stay right.
+// ★ THE req.ip TESTS MARKED ★ FAIL ON THE OLD PACKAGE: run against proxy-addr 2.0.7 (swapped into
+// node_modules and re-run) they get the forged address back. The other req.ip tests pin behaviour that was
+// already right and must stay right. (In the limiter block ★ marks the case that matters most, not a 2.0.7
+// failure: both limiter tests pass on 2.0.7.)
 //
-// ⚠️ The /hls block mounts the SAME options index.js passes to createProxyMiddleware, against a real
-// local upstream. index.js cannot be imported (it spawns MediaMTX and FFmpeg), so the options are
-// duplicated here: it pins the library's behaviour at the installed version, not index.js's wiring.
+// ⚠️ TWO PEER SHAPES, BECAUSE PRODUCTION SEES THE SECOND ONE. index.js calls `app.listen(PORT)` with no
+// host, so Node listens on `::` (dual-stack) and an IPv4 client arrives as `::ffff:127.0.0.1`, not
+// `127.0.0.1`. proxy-addr 2.0.8 handles that shape on its own code path (it turns the mapped address back
+// into IPv4 before comparing). The first block binds 127.0.0.1, so its peer is plain IPv4; the dual-stack
+// block listens the way index.js does. Found by review of PR #708: with the first block alone, deleting
+// that conversion from proxy-addr, or the cross-family guard in its list-of-ranges matcher, still passed
+// every test here.
+//
+// ⚠️ The /hls block is NOT index.js's /hls route. It mounts createProxyMiddleware with the target,
+// changeOrigin and pathRewrite options index.js uses, plus the two header lines of its proxyRes hook,
+// against a real local upstream. Not covered: the keepUnderPrefix(proxyRes, '/hls') call in that hook (so
+// a redirect's Location is not checked), the requireAuthQueryOrHeader and demo-limiter middleware that
+// run before the proxy, and the /live proxy. index.js cannot be imported (it spawns MediaMTX and FFmpeg),
+// so this pins the library's behaviour at the installed version, not index.js's wiring.
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -28,25 +40,50 @@ const { applyTrustProxy } = await import('../src/lib/trustProxy.js');
 const listen = (app) => new Promise((resolve) => {
   const s = app.listen(0, '127.0.0.1', () => resolve(s));
 });
+// As index.js does it: no host argument, so Node listens on `::` (dual-stack) wherever the OS allows.
+const listenLikeIndex = (app) => new Promise((resolve, reject) => {
+  const s = app.listen(0, () => resolve(s));
+  s.on('error', reject);
+});
 const close = (s) => new Promise((r) => s.close(r));
+// Always dialled through IPv4 127.0.0.1: on a dual-stack listener that is what makes the peer `::ffff:127.0.0.1`.
 const urlOf = (s) => `http://127.0.0.1:${s.address().port}`;
+const urlV6Of = (s) => `http://[::1]:${s.address().port}`;
 
 // An app whose trust proxy comes from the REAL applyTrustProxy, so the env-value parsing is in play.
-async function appWith(trustProxyEnv, mount) {
+// The value it applied is kept on the server: see assertHonoured below for why the tests check it.
+async function appWith(trustProxyEnv, mount, listenFn = listen) {
   const app = express();
-  applyTrustProxy(app, trustProxyEnv);
+  const applied = applyTrustProxy(app, trustProxyEnv);
   app.use(express.json());
   mount(app);
-  return listen(app);
+  const s = await listenFn(app);
+  s.appliedTrustProxy = applied;
+  return s;
 }
 
 const echoIp = (app) => app.get('/ip', (req, res) => res.json({ ip: req.ip }));
-const ipSeenBy = async (server, xff) => (await call(`${urlOf(server)}/ip`, { headers: { 'x-forwarded-for': xff } })).body.ip;
+const ipSeenBy = async (server, xff, url = urlOf(server)) => (await call(`${url}/ip`, { headers: { 'x-forwarded-for': xff } })).body.ip;
+
+// ⚠️ A TRUST_PROXY value that parseTrustProxy rejects falls back to 'loopback', which ALSO trusts the
+// loopback peer these tests use, so a "trusted" result can pass for the wrong reason. Every string value
+// in these tests is meant to be honoured exactly, so assert that it was (found by review of PR #708: a
+// validator that rejected IPv4-mapped ranges left the mapped-range test green).
+function assertHonoured(server, env) {
+  if (typeof env !== 'string') return;
+  // 'true'/'false' become booleans and a bare integer a hop count (trustProxy.js); everything else verbatim.
+  const want = env === 'false' ? false : env === 'true' ? true : /^\d+$/.test(env) ? Number(env) : env;
+  assert.equal(server.appliedTrustProxy, want, `TRUST_PROXY=${env} was not applied as given (fell back to the default?)`);
+}
 
 describe('req.ip under each TRUST_PROXY value (peer is always 127.0.0.1)', () => {
   const servers = [];
   after(async () => { for (const s of servers) await close(s); });
-  const make = async (env) => { const s = await appWith(env, echoIp); servers.push(s); return s; };
+  const make = async (env) => {
+    const s = await appWith(env, echoIp); servers.push(s);
+    assertHonoured(s, env);
+    return s;
+  };
 
   test('unset: loopback is trusted, so the forwarded client address is used', async () => {
     assert.equal(await ipSeenBy(await make(undefined), '203.0.113.7'), '203.0.113.7');
@@ -66,12 +103,99 @@ describe('req.ip under each TRUST_PROXY value (peer is always 127.0.0.1)', () =>
   test('a mapped IPv4 range still trusts the matching IPv4 peer', async () => {
     // The fix must not over-correct: ::ffff:7f00:0/104 (hex form: parseTrustProxy's shape check rejects
     // the dotted form and falls back to loopback, which would make this pass for the wrong reason)
-    // genuinely covers 127.0.0.1.
-    assert.equal(await ipSeenBy(await make('::ffff:7f00:0/104'), '203.0.113.7'), '203.0.113.7');
+    // genuinely covers 127.0.0.1. The fallback is ruled out by checking the applied value, here and in
+    // `make` (a validator that rejected mapped ranges passed this test before that check existed).
+    const s = await make('::ffff:7f00:0/104');
+    assert.equal(s.appliedTrustProxy, '::ffff:7f00:0/104');
+    assert.equal(await ipSeenBy(s, '203.0.113.7'), '203.0.113.7');
   });
 
   test('TRUST_PROXY=false: the forwarded header never wins', async () => {
     assert.equal(await ipSeenBy(await make('false'), '203.0.113.7'), '127.0.0.1');
+  });
+
+  test('a hop count, true and the other named ranges give the same answer as before the bump', async () => {
+    // The README says these are unchanged by proxy-addr 2.0.8; this passes on 2.0.7 too (checked by
+    // swapping it in). 127.0.0.1 is one hop and `true` trusts everyone; linklocal/uniquelocal exclude it.
+    const cases = [['1', '203.0.113.7'], ['true', '203.0.113.7'], ['linklocal', '127.0.0.1'], ['uniquelocal', '127.0.0.1']];
+    for (const [env, want] of cases) {
+      assert.equal(await ipSeenBy(await make(env), '203.0.113.7'), want, `TRUST_PROXY=${env}`);
+    }
+  });
+});
+
+describe('req.ip when listening like index.js (dual-stack: the IPv4 peer arrives as ::ffff:127.0.0.1)', () => {
+  const MAPPED = '::ffff:127.0.0.1';
+  const FORGED = '203.0.113.7';
+  const NO_DUAL_STACK = 'no ::ffff: peer from a host-less listen on this machine (IPv6 or dual-stack sockets disabled)';
+  const NO_V6_LOOPBACK = 'no IPv6 loopback (::1) reachable on a host-less listen on this machine';
+  const servers = [];
+  // Which peer shapes this machine produces, probed once with TRUST_PROXY=false (nothing is trusted, so
+  // req.ip is the raw peer). With IPv6 disabled Node listens on IPv4 only, the peer is plain 127.0.0.1
+  // and these tests would only repeat the block above, so they skip and say why rather than pass.
+  let mappedPeer = false;
+  let nativeV6Peer = false;
+  before(async () => {
+    const probe = await appWith('false', echoIp, listenLikeIndex);
+    servers.push(probe);
+    mappedPeer = (await ipSeenBy(probe, FORGED)) === MAPPED;
+    try { nativeV6Peer = (await ipSeenBy(probe, FORGED, urlV6Of(probe))) === '::1'; } catch { nativeV6Peer = false; }
+  });
+  after(async () => { for (const s of servers) await close(s); });
+  const make = async (env) => {
+    const s = await appWith(env, echoIp, listenLikeIndex); servers.push(s);
+    assertHonoured(s, env);
+    return s;
+  };
+
+  test('control: the default (loopback) trusts the mapped peer, so the forwarded address is used', async (t) => {
+    // Without this, a setup where the forwarded address could never reach req.ip would let every
+    // "not trusted" test below pass for nothing.
+    if (!mappedPeer) return t.skip(NO_DUAL_STACK);
+    assert.equal(await ipSeenBy(await make(undefined), FORGED), FORGED);
+  });
+
+  test('★ ::/1 does not trust the mapped IPv4 peer (single range)', async (t) => {
+    // Kills deleting proxy-addr's mapped-to-IPv4 conversion in its single-range matcher: the mapped
+    // address then stays IPv6, sits inside ::/1, and is trusted. The 127.0.0.1-bound test cannot see that.
+    if (!mappedPeer) return t.skip(NO_DUAL_STACK);
+    assert.equal(await ipSeenBy(await make('::/1'), FORGED), MAPPED);
+  });
+
+  test('★ the list 10.0.0.0/8,::/1 does not trust the mapped IPv4 peer (list of ranges)', async (t) => {
+    // A list goes through a different matcher from a single range. Kills deleting its cross-family guard
+    // or its own mapped-to-IPv4 conversion; no test covered a list at all before this one.
+    if (!mappedPeer) return t.skip(NO_DUAL_STACK);
+    assert.equal(await ipSeenBy(await make('10.0.0.0/8,::/1'), FORGED), MAPPED);
+  });
+
+  test('an IPv4-mapped range of /96 or longer still trusts the mapped peer inside it', async (t) => {
+    // The over-correction check, on the peer shape production sees. Also kills the conversion deletion
+    // from the other side: without it the mapped peer no longer matches its own mapped range.
+    if (!mappedPeer) return t.skip(NO_DUAL_STACK);
+    assert.equal(await ipSeenBy(await make('::ffff:7f00:0/104'), FORGED), FORGED);
+  });
+
+  test('★ the /96 boundary the README states: ::ffff:0:0/96 trusts the mapped peer, ::ffff:0:0/95 does not', async (t) => {
+    // /96 is where a mapped-form range stops covering only IPv4 space (proxy-addr 2.0.8's `>= 96`).
+    // 2.0.7 trusted the peer under /95 as well.
+    if (!mappedPeer) return t.skip(NO_DUAL_STACK);
+    assert.equal(await ipSeenBy(await make('::ffff:0:0/96'), FORGED), FORGED);
+    assert.equal(await ipSeenBy(await make('::ffff:0:0/95'), FORGED), MAPPED);
+  });
+
+  test('★ a mapped-form range shorter than /96 (::ffff:0:0/80) does not trust the native IPv6 peer ::1, alone or in a list', async (t) => {
+    // 2.0.8 never matches a native IPv6 peer against a range written in IPv4-mapped form; ::1 sits inside
+    // ::ffff:0:0/80 bit-for-bit and 2.0.7 trusted it. The README states this; this test pins it, through
+    // both matchers (a single range and a list each carry their own copy of that guard).
+    if (!nativeV6Peer) return t.skip(NO_V6_LOOPBACK);
+    // Control on the same path: the default does trust ::1, so the forwarded address can get through.
+    const control = await make(undefined);
+    assert.equal(await ipSeenBy(control, FORGED, urlV6Of(control)), FORGED);
+    for (const env of ['::ffff:0:0/80', '10.0.0.0/8,::ffff:0:0/80']) {
+      const s = await make(env);
+      assert.equal(await ipSeenBy(s, FORGED, urlV6Of(s)), '::1', `TRUST_PROXY=${env} trusted the native peer ::1`);
+    }
   });
 });
 
@@ -105,7 +229,9 @@ describe('the login limiter against forged X-Forwarded-For', () => {
   });
 });
 
-describe('/hls proxy path (same options as index.js)', () => {
+// index.js's proxy options for /hls (target, changeOrigin, pathRewrite, the two cache headers), not its
+// whole route: keepUnderPrefix, the auth and demo-limiter middleware and /live are not covered (header).
+describe('/hls proxy path (createProxyMiddleware with index.js\'s /hls options; not its keepUnderPrefix or auth)', () => {
   let upstream;
   let app;
   let lastUpstreamReq;

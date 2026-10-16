@@ -11,9 +11,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Security
 
-- **`proxy-addr` updated 2.0.7 → 2.0.8 (GHSA-jqcg-44mw-7w3h).** A patch bump inside the range already in `package.json`, so only the lockfile changes. One behaviour change: an IPv6 `TRUST_PROXY` range is now compared with IPv4 peers by the rules in the `proxy-addr` advisory, so a value such as `::/1` no longer counts an IPv4 address as trusted (IPv4 ranges and the named ranges are unaffected).
-- **`@fastify/busboy` updated 3.2.0 → 3.2.3 (GHSA-xjh9-v7x6-24jw, GHSA-x8mw-p69m-v3mx, GHSA-gxm5-99cw-xjw9).** A patch bump of the multipart parser used by `firebase-admin`; lockfile only.
-- **`ip-address` updated 10.5.0 → 10.7.4 (GHSA-rpw4-54j3-4h4q, GHSA-2vr4-cq9g-pvrc, GHSA-j6r3-76f7-8jcv, GHSA-h3mg-xc3c-68pw).** A minor bump of the address parser used by `express-rate-limit` and `socks`; lockfile only.
+- **`proxy-addr` updated 2.0.7 → 2.0.8 (GHSA-jqcg-44mw-7w3h).** Not listed in `backend/package.json`; `express`'s own `~2.0.7` range admits the patch, so only the lockfile changes. One behaviour change for `TRUST_PROXY`: an IPv6 range is now compared with IPv4 peers only if it is an IPv4-mapped range of /96 or longer (such as `::ffff:a00:0/104`), which behaves like the IPv4 range it maps. Any other IPv6 range, such as `::/1`, no longer matches IPv4 peers, and a mapped-form range shorter than /96 (such as `::ffff:0:0/80`) now matches no peer. IPv4 ranges, the named ranges, hop counts and `true`/`false` are unchanged (README, `TRUST_PROXY`).
+- **`@fastify/busboy` updated 3.2.0 → 3.2.3 (GHSA-xjh9-v7x6-24jw, GHSA-x8mw-p69m-v3mx, GHSA-gxm5-99cw-xjw9).** The multipart parser used by `firebase-admin`, whose `^3.0.0` range admits the patch; lockfile only.
+- **`ip-address` updated 10.5.0 → 10.7.4 (GHSA-rpw4-54j3-4h4q, GHSA-2vr4-cq9g-pvrc, GHSA-j6r3-76f7-8jcv, GHSA-h3mg-xc3c-68pw).** The address parser used by `express-rate-limit` (`^10.2.0`) and by `socks` via `mqtt` (`^10.1.1`); both ranges admit the minor bump, so lockfile only.
 - **Not fixed: `http-proxy-middleware` (GHSA-vfj7-8cjw-p6xm, via `micromatch` and `braces`).** No `braces` release carries the fix, and `http-proxy-middleware` 4.x depends on the same `micromatch`, so a major bump would not clear it.
 
 ## [0.40.0] - 2026-10-17

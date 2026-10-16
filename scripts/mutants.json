@@ -20731,5 +20731,29 @@
       "mutate-args.test.js"
     ],
     "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#708 trustProxy: an IPv4-mapped IPv6 range is rejected, so TRUST_PROXY silently falls back to loopback",
+    "file": "backend/src/lib/trustProxy.js",
+    "find": "const v6 = /^[0-9a-fA-F:]+$/.test(addr) && addr.includes(':');",
+    "replace": "const v6 = /^[0-9a-fA-F:]+$/.test(addr) && addr.includes(':') && !/ffff/i.test(addr);",
+    "expect": "killed",
+    "tests": [
+      "dep-bump-proxy.test.js"
+    ],
+    "namePattern": "a mapped IPv4 range still trusts the matching IPv4 peer",
+    "note": "Survived the PR #708 test file before it checked the applied value: the loopback fallback also trusts 127.0.0.1, so the trusted result looked right. trust-proxy.test.js has no IPv6 case."
+  },
+  {
+    "label": "#708 trustProxy: every IPv6 address or range is rejected (falls back to loopback)",
+    "file": "backend/src/lib/trustProxy.js",
+    "find": "const v6 = /^[0-9a-fA-F:]+$/.test(addr) && addr.includes(':');",
+    "replace": "const v6 = false;",
+    "expect": "killed",
+    "tests": [
+      "dep-bump-proxy.test.js"
+    ],
+    "namePattern": "an IPv6 range that cannot contain an IPv4 peer does not trust it",
+    "note": "trust-proxy.test.js and login-rate-limit.test.js both pass with this mutant (no IPv6 value in either); only the PR #708 file kills it."
   }
 ]
