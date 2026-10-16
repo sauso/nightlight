@@ -115,6 +115,17 @@ describe('birthday', () => {
     // 2023-02-29 does not exist (2023 is not a leap year); 2024-02-29 does.
     assert.equal((await put({ birthday: '2023-02-29' })).status, 400);
   });
+
+  // The birthday twin of the colour test above (PR #702 review: dropping `|| birthday === existing` from
+  // badBirthday survived, because only the colour had a "stored before this check" case).
+  test('a birthday stored before this check is accepted when re-sent unchanged, refused when changed to another bad one', async () => {
+    db.prepare('UPDATE children SET birthday = ? WHERE id = ?').run('legacy-not-a-date', KID);
+    assert.equal((await put({ name: 'Renamed', birthday: 'legacy-not-a-date' })).status, 200);
+    assert.equal(row().name, 'Renamed');
+    assert.equal(row().birthday, 'legacy-not-a-date');
+    assert.equal((await put({ name: 'Again', birthday: 'another-bad' })).status, 400);
+    assert.equal(row().name, 'Renamed', 'a refused request must write nothing');
+  });
 });
 
 describe('photo type', () => {
@@ -148,5 +159,24 @@ describe('photo type', () => {
     assert.equal(row().name, 'Renamed');
     assert.equal(row().photo, gif);
     assert.equal((await put({ photo: 'data:image/svg+xml;base64,AA==' })).status, 400);
+  });
+
+  // INTENDED (see the comment on normalizePhoto in lib/photo.js): a value equal to the stored one is accepted
+  // UNCHECKED, size included. The cap used to be 700 KB, and a photo stored under it (up to the ~99 KB the
+  // 100 KB body limit let through) can sit above today's 90 KB cap; refusing it on a re-send would block every
+  // later save of that child, a rename included. Only a CHANGED photo is held to the cap. 95 KB keeps the whole
+  // PUT body under the 100 KB express.json limit, so this is a request the real app can make.
+  test('a photo above the cap that was stored earlier is accepted when re-sent unchanged; a new one above the cap is refused', async () => {
+    const big = `data:image/jpeg;base64,${'A'.repeat(95 * 1024)}`;
+    db.prepare('UPDATE children SET photo = ? WHERE id = ?').run(big, KID);
+    assert.equal((await put({ name: 'Renamed', photo: big })).status, 200);
+    assert.equal(row().name, 'Renamed');
+    assert.equal(row().photo, big);
+    const other = `data:image/jpeg;base64,${'B'.repeat(95 * 1024)}`;
+    const res = await put({ name: 'Again', photo: other });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /too large/);
+    assert.equal(row().photo, big, 'a refused photo must not replace the stored one');
+    assert.equal(row().name, 'Renamed');
   });
 });

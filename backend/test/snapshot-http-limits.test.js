@@ -23,6 +23,16 @@ const { fetchHttpSnapshot } = await import('../src/lib/snapshot.js');
 
 const requested = []; // paths the "camera" was asked for
 let aborted; // set when the client drops a streaming response
+const closedPaths = new Set(); // request paths whose response the client closed (held-open responses only)
+// Poll for the server to notice the client socket close: the close arrives a moment AFTER the function returns.
+const closedWithin = async (path, ms) => {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (closedPaths.has(path)) return true;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return closedPaths.has(path);
+};
 let server;
 let base;
 
@@ -42,8 +52,20 @@ before(async () => {
       return res.end(Buffer.alloc(10, 1));
     }
     if (req.url === '/declared-big') {
+      // Headers go out, the body never does and the response is never ended: only the declared-length guard can
+      // return quickly. (It used to send 10 bytes and end, which made a client that skipped the guard fail on
+      // a length mismatch instead of waiting, so deleting the guard went unnoticed: PR #702 review.)
       res.writeHead(200, { 'content-length': String(50 * 1024 * 1024), 'content-type': 'image/jpeg' });
-      return res.end(Buffer.alloc(10)); // would never finish its promise; the client must not wait for it
+      res.flushHeaders();
+      res.on('close', () => closedPaths.add(req.url));
+      return undefined;
+    }
+    if (req.url === '/redirect-open') {
+      // A redirect whose body then stays open. Chunked, so the response is still "in progress" on the wire.
+      res.writeHead(302, { location: `${base}/target`, 'content-type': 'text/plain' });
+      res.write('moved');
+      res.on('close', () => closedPaths.add(req.url));
+      return undefined;
     }
     if (req.url.startsWith('/exact/')) {
       return res.end(Buffer.alloc(Number(req.url.split('/')[2]), 3));
@@ -90,8 +112,29 @@ test('a body that never ends is abandoned at the cap, and the connection is drop
   assert.equal(aborted, true, 'the server was left streaming: the client did not tear the connection down');
 });
 
-test('a Content-Length over the cap is refused', async () => {
+test('a Content-Length over the cap is refused without waiting for the body', async () => {
+  // Default 5 s stream timeout: returning in well under 1 s can only be the declared-length guard, since the
+  // server never sends a byte of body.
+  const t0 = Date.now();
   assert.equal(await fetchHttpSnapshot(`${base}/declared-big`, { maxBytes: 1024 }), null);
+  assert.ok(Date.now() - t0 < 1000, 'it waited for the stream instead of refusing on the declared length');
+});
+
+// PR #702 review (P2, verified with a real HTTP probe): the early returns (a redirect, a declared length over
+// the cap) left the response body unread and the timer cleared, so a camera that kept its body open kept the
+// connection live and streaming after the function had returned. The base code at least closed it by timeout.
+test('a Content-Length over the cap is refused and the connection is closed', async () => {
+  closedPaths.delete('/declared-big');
+  assert.equal(await fetchHttpSnapshot(`${base}/declared-big`, { maxBytes: 1024 }), null);
+  assert.equal(await closedWithin('/declared-big', 2000), true, 'the server still sees the connection open');
+});
+
+test('a redirect whose body stays open is refused and the connection is closed', async () => {
+  closedPaths.delete('/redirect-open');
+  requested.length = 0;
+  assert.equal(await fetchHttpSnapshot(`${base}/redirect-open`), null);
+  assert.equal(await closedWithin('/redirect-open', 2000), true, 'the server still sees the connection open');
+  assert.deepEqual(requested, ['/redirect-open'], 'the redirect target must not be requested');
 });
 
 test('exactly the cap is accepted; one byte more is not', async () => {

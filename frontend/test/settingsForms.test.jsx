@@ -388,46 +388,44 @@ describe('Settings → Recording', () => {
     await screen.findAllByText('Saved ✓');
   });
 
-  test('the on-demand switch applies IMMEDIATELY, without waiting for Save', async () => {
+  test('the on-demand switch is a DRAFT: nothing is sent until Save (#391)', async () => {
     withStorage(0);
-    // #449: PUT /settings always answers with the full, normalised admin settings row (see
-    // backend/src/routes/settings.js) — not `{}`. commit() uses that response directly now, so a
-    // mock that returned an empty object here would be testing against a response shape the real
-    // route never sends.
+    // PUT /settings answers with the full, normalised admin settings row (see backend/src/routes/settings.js).
     vi.spyOn(api, 'put').mockResolvedValue({ ...SETTINGS, ondemand_enabled: false });
     const { user, settingsValue } = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
 
     await user.click(screen.getByRole('switch', { name: 'Show a Record button on each camera' }));
-    // ⚠️ The pill shape promises immediate apply (see Switch.jsx), and turning it off has to stop the
-    // per-camera FFmpeg buffering right away rather than at some later Save that may never come.
-    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/settings', { ondemand_enabled: false }));
-    // #449 Codex F1: the toggle commits the PUT's own response as the new settings instead of
-    // calling refresh() — a second, separate re-read that could fail independently of the write that
-    // already succeeded (see SettingsContext's commit()).
+    expect(api.put).not.toHaveBeenCalled();
+    expect(screen.getByText('Unsaved changes.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Save/ }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    expect(api.put.mock.calls[0][1].ondemand_enabled).toBe(false);
+    // The save commits the PUT's own response as the new settings instead of a second, separate re-read
+    // that could fail independently of the write that already succeeded (#449; SettingsContext's commit()).
     await waitFor(() => expect(settingsValue.commit).toHaveBeenCalledWith({ ...SETTINGS, ondemand_enabled: false }));
     expect(settingsValue.refresh).not.toHaveBeenCalled();
+    await screen.findAllByText('Saved ✓');
   });
 
-  test('a failed immediate toggle PUTS THE SWITCH BACK and says why', async () => {
+  test('a failed Save leaves the switch where the person put it, with the error and the notice', async () => {
     withStorage(0);
     vi.spyOn(api, 'put').mockRejectedValue(new Error('Disk is full'));
     const { user } = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
-    const sw = screen.getByRole('switch', { name: 'Show a Record button on each camera' });
-    expect(sw).toBeChecked();
-
-    await user.click(sw);
+    await user.click(screen.getByRole('switch', { name: 'Show a Record button on each camera' }));
+    await user.click(screen.getByRole('button', { name: /Save/ }));
     expect(await screen.findByText('Disk is full')).toBeInTheDocument();
-    // ⚠️ The optimistic update MUST be reverted. A switch left showing "off" against a server that
-    // still has it on is worse than never having moved: the next visit silently disagrees with itself.
-    await waitFor(() => expect(screen.getByRole('switch', { name: 'Show a Record button on each camera' })).toBeChecked());
+    // It is still a draft, and says so; the stored value (on) is untouched on the server.
+    expect(screen.getByText('Unsaved changes.')).toBeInTheDocument();
   });
 
-  test('a failed toggle with no message still says something', async () => {
+  test('a failed Save with no message still says something', async () => {
     withStorage(0);
     vi.spyOn(api, 'put').mockRejectedValue(new Error(''));
     const { user } = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
     await user.click(screen.getByRole('switch', { name: 'Show a Record button on each camera' }));
-    expect(await screen.findByText('Could not change that setting')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Save/ }));
+    expect(await screen.findByText('Could not save')).toBeInTheDocument();
   });
 
   test('the per-feature fields appear only while that feature is on', async () => {
@@ -436,16 +434,10 @@ describe('Settings → Recording', () => {
     expect(screen.getByLabelText('Clip length (seconds)')).toBeInTheDocument();
     expect(screen.getByLabelText('Capture before (seconds)')).toBeInTheDocument();
 
-    // Realistic response, as above — an empty object would leave `ondemandOn` derived from a
-    // settings object that no longer even has the key, once commit() republishes it.
-    vi.spyOn(api, 'put').mockResolvedValue({ ...SETTINGS, ondemand_enabled: false });
     await user.click(screen.getByRole('switch', { name: 'Show a Record button on each camera' }));
-    await waitFor(() => expect(screen.queryByLabelText('Capture before (seconds)')).not.toBeInTheDocument());
+    expect(screen.queryByLabelText('Capture before (seconds)')).not.toBeInTheDocument();
     // The wake-clip fields belong to the OTHER feature and must be untouched by that.
     expect(screen.getByLabelText('Clip length (seconds)')).toBeInTheDocument();
-    // The switch shows its new state optimistically, before the PUT has returned. End the test only once
-    // the write has finished, or its continuation runs into the next test (see the Save test above, #570).
-    await waitFor(() => expect(screen.getByRole('switch', { name: 'Show a Record button on each camera' })).toBeEnabled());
   });
 
   test('storage is shown in human units, and an unknown size reads as a dash', async () => {

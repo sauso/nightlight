@@ -179,3 +179,6 @@ from the file.
 - **[MQTT](mqtt.md)** — the broker connection and per-camera topics this doesn't cover.
 - Per-camera motion/sound detection sensitivity, schedule, and detection source (Nightlight
   frame-diff / ONVIF / MQTT) are configured on each camera's own settings page, not here.
+- **[Recording](recording.md#the-recording-and-alerts-panel-per-camera-read-only)** — the read-only
+  *Recording and alerts* panel on that page, which shows what a camera is set up to alert on and record,
+  and whether it is ready right now.

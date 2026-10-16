@@ -77,6 +77,12 @@ export async function fetchHttpSnapshot(rawUrl, { timeoutMs = 5000, maxBytes = M
     return null;
   } finally {
     clearTimeout(timer);
+    // Every exit path, early returns included (a redirect, a non-200, a declared length over the cap),
+    // must leave no connection behind. Clearing the timer above removed the only thing that used to close
+    // an unread body (the 5 s abort), so without this a camera that answers and then keeps its body open
+    // would stay connected and streaming after we returned (PR #702 review, verified with a real HTTP
+    // probe). Aborting after a body that was read to the end is a no-op.
+    ctrl.abort();
   }
 }
 

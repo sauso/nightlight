@@ -82,6 +82,20 @@ reconciliation. Three independent mechanisms keep the pipeline alive without man
 When editing this area, preserve the "only write when actually broken" invariant — an
 unconditional reconcile-on-every-tick would cause constant disconnects.
 
+**Reading readiness without reconciling (`backend/src/lib/recordingReadiness.js`, #394).** The camera
+settings page's read-only "Recording and alerts" panel asks `GET /api/cameras/:id/recording-readiness`
+(admin only) whether the ring buffer, the detectors and the alert window are up *right now*. The route
+only reads: it asks `clipCapture`, `motionDetector`, `onvifMotion`, `soundDetector` and `detectSchedule`
+for their own answers and never starts, stops or reconciles anything, so it cannot cause the path
+reloads the invariant above is about. It returns booleans and fixed words only. `alerting_now` is false
+for a silenced camera, one outside its schedule, and a disabled one (which runs no detector);
+`alert_pause_reason` is `null` while alerts fire, else `"silenced"`, `"schedule"` or `"disabled"`
+(checked in that order of precedence: disabled, silenced, schedule), computed from the same instant as
+`alerting_now`. It is an added field: `alerting_now` is unchanged in meaning for existing clients, and the
+panel falls back to guessing the reason from the camera row only if the field is absent. Its one restated
+condition, manual recording availability, mirrors `can_record` in `routes/cameras.js`, and
+`recording-readiness.test.js` fails if the two disagree.
+
 ## Auth (`backend/src/middleware/auth.js`, `backend/src/routes/auth.js`)
 
 JWT-based, but a valid JWT alone isn't sufficient — every request also checks a `sessions` row
@@ -140,6 +154,14 @@ unchecked, so a record saved before the rule can still be edited
 The JWT signing secret is auto-generated and persisted to `DATA_DIR/.jwt_secret` if
 `JWT_SECRET` isn't set — deliberately avoiding a hardcoded fallback, since this image is
 publicly distributed and a baked-in secret would be a shared key across every install.
+
+
+**Client startup (#382).** The SPA decides "signed in" from `/auth/me` and "which form" from `/auth/status`.
+Only a **401** from `/auth/me` means signed out. A network failure, a timeout or a 5xx (or a proxy's 502 while
+the backend restarts) leaves the stored token alone and shows `ServerUnreachable` ("Can't reach Nightlight")
+instead, retried by `lib/useAutoRetry.js` (5 s, 10 s, 20 s, then every 30 s) and by a **Try again** button. A
+failed `/auth/status` does the same on the sign-in screen: it no longer guesses "established install" and shows
+the sign-in form. The demo's tokenless path and the native app's (same web code, same stored token) are unchanged.
 
 ## Data layer (`backend/src/db.js`)
 
@@ -238,6 +260,37 @@ JWT and redirects to `#/login` on a 401. Every request also carries a timeout (3
 stalled connection fails with a "took too long to respond" error instead of hanging); a call the server
 is allowed to run long (camera probes and saves, recomputing a night, photo uploads, stopping a recording, diagnostics, the clip list and bulk delete) passes
 `{ timeoutMs: SLOW_REQUEST_TIMEOUT_MS }` (90 s) as its last argument.
+
+**What is in the first download, and what is fetched later (#386).** The entry chunk used to carry every
+screen plus hls.js (about 560 kB of its 1,098 kB). Screens are now split by route with `lazyPage()`
+(`lib/lazyPage.jsx`), and hls.js is imported only when `HlsPlayer` actually needs it:
+
+| | Loaded with the first page | Fetched on first use |
+|---|---|---|
+| Screens | Sign-in, the live monitor, the nav bar, the Children, Cameras, Settings hub and Account roots, "Page not found" | Child detail, sleep detail, night review, child settings, camera settings, detection settings, every Settings sub-page, clips, About |
+| hls.js | Never | Only by a camera in **Compatibility (HLS)** mode on a browser without native HLS. The default WebRTC view and Safari/iOS (native HLS) never download it |
+
+While a screen's chunk loads, its slot shows "Loading…" with the nav bar and live monitor still on screen. If the
+fetch fails (the phone is offline), the slot shows "Couldn't load this screen" with a **Reload** button that
+reloads the page; it does not blank the page. It reloads rather than importing again because a browser remembers a
+module URL that failed once for the life of the page, so a second import replays the first failure. Only
+chunk-fetch failures (recognised by the browsers' "failed to fetch dynamically imported module" messages) are caught
+there: a screen whose code loads but throws when it starts, and any other render error
+still reach the app-level crash page. A Compatibility (HLS) tile whose hls.js fetch fails shows the same kind of
+message with a **Reload** button and stops retrying on its own, for the same reason. If the chunk is an old one that
+a new deploy has replaced, the reload is what fixes it too (the app also reloads itself after being backgrounded for
+15 s).
+
+**Unsaved form edits survive the background reload (#377).** `App.jsx` reloads the page after 15 s in the
+background to repair stale media connections, and that empties React state. The child form, the camera form
+and Settings → Recording therefore store what is different from the saved values in `sessionStorage`
+(`lib/formDraft.js`, kept in step by `lib/useFormDraft.js`) and restore it on mount. Rules that must hold:
+**no secret is ever written** (each form passes an allow-list of fields, credential-named keys are dropped
+even if allowed, and a camera password is lost on reload by design); a draft is **per signed-in user**, expires
+after 6 hours, and is removed by a successful save, an explicit discard, removing the thing, and sign-out
+(an expired sign-in keeps it, so signing back in resumes). "Unsaved" is always derived (form versus last
+saved), never a flag set by `onChange`. Forms with an explicit Save show `components/UnsavedNotice.jsx`.
+The forms not yet covered are listed in `docs/design-language.md` (§6, Forms with a Save button).
 
 ## CSP is enforced — keep it that way
 

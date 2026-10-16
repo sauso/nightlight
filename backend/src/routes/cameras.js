@@ -33,6 +33,7 @@ import { startRecording, stopRecording, recordingState, getOndemandSettings } fr
 import { stripUrlPassword, urlHasPassword, resolveUrlPassword, scrubSecrets, findCredentialLeak } from '../lib/urlCredentials.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { clearStalePrimaryPointers } from '../lib/primaryCamera.js';
+import { recordingReadiness } from '../lib/recordingReadiness.js';
 
 const router = Router();
 
@@ -692,6 +693,17 @@ router.get('/:id/activity-history', requireAuth, (req, res) => {
     )
     .all(req.params.id, `-${hours} hours`);
   res.json({ hours, samples: rows });
+});
+
+// What this camera is READY to save right now (#394), for the "Recording and alerts" panel on its settings
+// page. Read-only, additive, no setting and no write. ADMIN-ONLY because that page is: the panel's
+// "set up" half comes from the camera's own fields, which an admin already gets, and this route says
+// nothing a caregiver's screens use. Booleans and enums only (lib/recordingReadiness.js says why).
+// Literal suffix after /:id, so it cannot be mistaken for the /alerts or /clips routes above.
+router.get('/:id/recording-readiness', requireAuth, requireAdmin, (req, res) => {
+  const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!cam) return res.status(404).json({ error: 'Camera not found' });
+  res.json(recordingReadiness(cam));
 });
 
 // Bulk-delete clips (admin — this lives on the admin Settings screen). Body: { ids: [eventId, ...] }.

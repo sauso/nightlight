@@ -54,6 +54,7 @@ const renderProvider = () =>
 beforeEach(async () => {
   vi.resetModules();
   localStorage.clear();
+  sessionStorage.clear();
   window.location.hash = '';
   // setup.js runs vi.restoreAllMocks() after every test, which strips the implementation too - so
   // re-arm it here rather than once at declaration.
@@ -160,6 +161,15 @@ describe('logout', () => {
     expect(getMediaToken()).toBeNull();
   });
 
+  test('★ #377 signing out clears every unsaved-form draft, so the next person is never offered them', async () => {
+    sessionStorage.setItem('nightlight_draft:u1:child:1', JSON.stringify({ at: Date.now(), values: { name: 'half typed' } }));
+    sessionStorage.setItem('unrelated', 'keep');
+    const { getByText } = await signedIn();
+    await act(async () => { getByText('sign out').click(); });
+    expect(sessionStorage.getItem('nightlight_draft:u1:child:1')).toBeNull();
+    expect(sessionStorage.getItem('unrelated')).toBe('keep');
+  });
+
   test('unregisters this device for push, so alerts stop reaching it', async () => {
     const { getByText } = await signedIn();
     await act(async () => { getByText('sign out').click(); });
@@ -254,6 +264,16 @@ describe('★ #562 a 401 on any request while signed in', () => {
     expect(resetPushRegistration).toHaveBeenCalledTimes(1);
     expect(unregisterPushNotifications).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1); // the one request that answered 401, nothing after it
+  });
+
+  test('★ #377 an EXPIRED sign-in keeps the unsaved-form drafts, so signing back in resumes them', async () => {
+    const key = 'nightlight_draft:u1:child:1';
+    sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), values: { name: 'half typed' } }));
+    await signedIn();
+    answer401();
+    await act(async () => { await api.get('/cameras').catch(() => {}); });
+    expect(screen.getByTestId('user')).toHaveTextContent('none');
+    expect(sessionStorage.getItem(key)).not.toBeNull();
   });
 
   test('★ after the provider unmounts, a 401 no longer reaches it (the effect returns the unsubscribe)', async () => {
