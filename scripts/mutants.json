@@ -16575,8 +16575,8 @@
   {
     "label": "#562 WHEP player: the call site stores the raw Location header again",
     "file": "frontend/src/components/WhepPlayer.jsx",
-    "find": "resourceUrlRef.current = resolveWhepResource(",
-    "replace": "resourceUrlRef.current = ((rawLocation) => rawLocation)(",
+    "find": "resourceUrl = resolveWhepResource(",
+    "replace": "resourceUrl = ((rawLocation) => rawLocation)(",
     "expect": "killed",
     "tests": ["whepPlayer.test.jsx"],
     "namePattern": "WhepPlayer session DELETE"
@@ -17788,6 +17788,268 @@
     "expect": "killed",
     "tests": ["loadStates.test.jsx"],
     "namePattern": "Clip management"
+  },
+  {
+    "label": "#694 WHEP player: a late answer from a torn-down run is not DELETEd (its session is left open)",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "late answer from the old run|late answer after unmount"
+  },
+  {
+    "label": "#694 WHEP player: a late answer carries on into setRemoteDescription on the closed peer",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "if (resourceUrl) deleteWhepSession(resourceUrl);",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "late answer from the old run"
+  },
+  {
+    "label": "#694 WHEP player: a late answer DELETEs even when the Location was refused (fetch(null))",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "deleteWhepSession(resourceUrl);\n          return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "fails the #562 guard"
+  },
+  {
+    "label": "#694 WHEP player: a refused late Location no longer returns, so the cancelled run's answer is applied",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (cancelled) {\n          if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "if (cancelled && resourceUrl) {\n          deleteWhepSession(resourceUrl);\n          return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "fails the #562 guard",
+    "note": "Found by the #704 review: the refused-Location test only checked that no DELETE was sent."
+  },
+  {
+    "label": "#694 WHEP player: the late-answer DELETE is a bare fetch without the session token",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "if (resourceUrl) fetch(resourceUrl, { method: 'DELETE', redirect: 'error' }).catch(() => {});\n          return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "a late answer after unmount",
+    "note": "Found by the #704 review: the race tests projected each DELETE to its URL and redirect mode, so a missing Authorization header passed."
+  },
+  {
+    "label": "#694 WHEP player: the cleanup no longer DELETEs this run's own session",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "      if (resourceUrl) {\n        deleteWhepSession(resourceUrl);",
+    "replace": "      if (false) {\n        deleteWhepSession(resourceUrl);",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "normal connect then disconnect|late answer from the old run"
+  },
+  {
+    "label": "#564 webrtcSessions: kickWebrtcSession sends nothing, so a revoked login's live view keeps streaming",
+    "file": "backend/src/lib/webrtcSessions.js",
+    "find": "  const res = await fetch(`${MEDIAMTX_API}/v3/webrtc/sessions/kick/${id}`, {",
+    "replace": "  if (id) return;\n  const res = await fetch(`${MEDIAMTX_API}/v3/webrtc/sessions/kick/${id}`, {",
+    "expect": "killed",
+    "tests": ["webrtcSessions.test.js"],
+    "namePattern": "kickWebrtcSession"
+  },
+  {
+    "label": "#564 webrtcSessions: the kick targets the wrong session id",
+    "file": "backend/src/lib/webrtcSessions.js",
+    "find": "/v3/webrtc/sessions/kick/${id}`, {",
+    "replace": "/v3/webrtc/sessions/kick/${String(id).slice(1)}`, {",
+    "expect": "killed",
+    "tests": ["webrtcSessions.test.js"],
+    "namePattern": "kickWebrtcSession"
+  },
+  {
+    "label": "#564 recordings route: the thumbnail route serves the video file (still a 200)",
+    "file": "backend/src/routes/recordings.js",
+    "find": "  const file = getRecordingThumbFile(req.params.id);",
+    "replace": "  const file = getRecordingVideoFile(req.params.id);",
+    "expect": "killed",
+    "tests": ["recordings-routes.test.js"],
+    "namePattern": "a ready recording streams"
+  },
+  {
+    "label": "#564 identityRedaction: a name that cannot be percent-encoded is dropped from the matcher instead of redacted as typed",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "function variants(literal) {\n  const out = [literal];",
+    "replace": "function variants(literal) {\n  try { encodeURIComponent(literal); } catch { return []; }\n  const out = [literal];",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js"],
+    "namePattern": "lone surrogate"
+  },
+  {
+    "label": "#564 sleepAnalysis: the fallback for an unparseable window hour is 20 instead of the documented 19",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "return { h: Number.isFinite(h) ? h : 19, m: Number.isFinite(m) ? m : 0 };",
+    "replace": "return { h: Number.isFinite(h) ? h : 20, m: Number.isFinite(m) ? m : 0 };",
+    "expect": "killed",
+    "tests": ["sleepInsights.test.js"],
+    "namePattern": "unparseable sleep window"
+  },
+  {
+    "label": "#564 clipStorage: the age sweep expires clips younger than the retention (cutoff = now)",
+    "file": "backend/src/lib/clipStorage.js",
+    "find": "    for (const { id, clip_path } of getExpiredClips(days)) {",
+    "replace": "    for (const { id, clip_path } of getExpiredClips(0)) {",
+    "expect": "killed",
+    "tests": ["clip-storage.test.js"],
+    "namePattern": "a sweep with nothing to do"
+  },
+  {
+    "label": "#564 clipStorage: the size pass has no cap, so it deletes clips while storage is far under it",
+    "file": "backend/src/lib/clipStorage.js",
+    "find": "    if (bytes > cap) {\n      for (const c of getReadyClipsOldestFirst()) {\n        if (bytes <= cap) break;",
+    "replace": "    if (true) {\n      for (const c of getReadyClipsOldestFirst()) {",
+    "expect": "killed",
+    "tests": ["clip-storage.test.js"],
+    "namePattern": "a sweep with nothing to do"
+  },
+  {
+    "label": "#564 gotify: a priority of 0 is replaced by the saved default (truthiness check)",
+    "file": "backend/src/lib/gotify.js",
+    "find": "priority: priority != null ? priority : c.priority,",
+    "replace": "priority: priority || c.priority,",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "a priority of 0 is sent as 0"
+  },
+  {
+    "label": "#564 gotify: the app token is not URL-encoded in the query",
+    "file": "backend/src/lib/gotify.js",
+    "find": "token=${encodeURIComponent(c.appToken)}",
+    "replace": "token=${c.appToken}",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "the token is URL-encoded"
+  },
+  {
+    "label": "#564 pushover: a blank device is sent (Pushover refuses it) instead of omitted",
+    "file": "backend/src/lib/pushover.js",
+    "find": "if (c.device) form.set('device', c.device);",
+    "replace": "form.set('device', c.device);",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "a blank device is OMITTED"
+  },
+  {
+    "label": "#564 pushover: an empty image buffer is attached",
+    "file": "backend/src/lib/pushover.js",
+    "find": "if (image && image.length) {\n      form.set('attachment'",
+    "replace": "if (image) {\n      form.set('attachment'",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "a snapshot is attached as snapshot"
+  },
+  {
+    "label": "#564 pushover: validate sends a comma-separated device list (users/validate checks one at a time)",
+    "file": "backend/src/lib/pushover.js",
+    "find": "if (dev && !dev.includes(',')) params.device = dev;",
+    "replace": "if (dev) params.device = dev;",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "validate: both fields are required"
+  },
+  {
+    "label": "#564 pushover: validate swaps the application token and the user key",
+    "file": "backend/src/lib/pushover.js",
+    "find": "const params = { token: appToken, user: userKey };",
+    "replace": "const params = { token: userKey, user: appToken };",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "validate: both fields are required",
+    "note": "Found by the #714 review: the fake edge answered ok whatever it was sent, so the test did not look at the form."
+  },
+  {
+    "label": "#564 pushover: validate is sent as a GET",
+    "file": "backend/src/lib/pushover.js",
+    "find": "`${API}/users/validate.json`, { method: 'POST', body }",
+    "replace": "`${API}/users/validate.json`, { method: 'GET', body }",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "validate: both fields are required"
+  },
+  {
+    "label": "#564 pushover: the attachment is a same-length buffer of zeros (a corrupt snapshot)",
+    "file": "backend/src/lib/pushover.js",
+    "find": "new Blob([image], { type: 'image/jpeg' })",
+    "replace": "new Blob([Buffer.alloc(image.length)], { type: 'image/jpeg' })",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "a snapshot is attached as snapshot",
+    "note": "Found by the #714 review: both tests compared only the attachment's size."
+  },
+  {
+    "label": "#564 snapshot: URL credentials stay in the URL, so fetch refuses a camera that needs a login",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "    url.username = '';\n    url.password = '';\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["snapshot-http-fetch.test.js"],
+    "namePattern": "credentials in the URL become a Basic header"
+  },
+  {
+    "label": "#564 snapshot: a non-2xx answer is accepted as a picture",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "    if (!res.ok) {\n      logger.info(`[snapshot] camera URL returned",
+    "replace": "    if (false) {\n      logger.info(`[snapshot] camera URL returned",
+    "expect": "killed",
+    "tests": ["snapshot-http-fetch.test.js"],
+    "namePattern": "a non-2xx answer is null"
+  },
+  {
+    "label": "#564 detectionAlert: the public server address is never stamped on the tap target",
+    "file": "backend/src/lib/detectionAlert.js",
+    "find": "const server = getPublicBaseUrl();",
+    "replace": "const server = null;",
+    "expect": "killed",
+    "tests": ["detection-alert.test.js"],
+    "namePattern": "once the app has taught the server"
+  },
+  {
+    "label": "#564 detectionAlert: Gotify fires although it is switched off",
+    "file": "backend/src/lib/detectionAlert.js",
+    "find": "  if (fireGotify) {",
+    "replace": "  if (true) {",
+    "expect": "killed",
+    "tests": ["detection-alert.test.js"],
+    "namePattern": "ntfy alone"
+  },
+  {
+    "label": "#564 onvifMotion: every detect_source is treated as ONVIF",
+    "file": "backend/src/lib/onvifMotion.js",
+    "find": "&& camera.detect_source === 'onvif';",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["onvif-motion-wanted.test.js"],
+    "namePattern": "each condition alone refuses"
+  },
+  {
+    "label": "#505 CamerasContext: status.unknown is ignored (an unknown status is treated like offline)",
+    "file": "frontend/src/lib/CamerasContext.jsx",
+    "find": "if (cam.status?.unknown) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"]
+  },
+  {
+    "label": "#505 CamerasContext: an unknown camera is not flagged for the tile",
+    "file": "frontend/src/lib/CamerasContext.jsx",
+    "find": "statusLevel: 'connecting', statusUnknown: true",
+    "replace": "statusLevel: 'connecting'",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"]
+  },
+  {
+    "label": "#505 WhepPlayer: the service-unavailable notice never shows",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "{statusUnknown && state !== 'idle' ? (",
+    "replace": "{false ? (",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"]
   },
   {
     "label": "#563 gate: GET /api/auth/sessions/all without requireAdmin",

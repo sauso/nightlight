@@ -27,6 +27,7 @@ useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const { CLIPS_DIR } = await import('../src/lib/clipRecorder.js');
 const ev = await import('../src/lib/detectionEvents.js');
+const { logger } = await import('../src/lib/logger.js');
 const {
   checkClipStorage, clipStorageReady, isOnRealMount, readMounts, freeBytes, hasMinFreeSpace,
   MIN_FREE_BYTES, clipStorageStats, sweepClips, startClipStorage, stopClipStorage,
@@ -479,9 +480,21 @@ describe('★ sweepClips — the retention sweeper', () => {
   });
 
   test('a sweep with nothing to do is a quiet no-op', () => {
+    // ⚠️ #564: this used to sweep an EMPTY database and assert the clip list was still empty, which a sweep that
+    // deleted everything it could find also satisfies (there was nothing to find). "Nothing to do" now means
+    // clips that are inside BOTH bounds: young enough for the 14-day rule and far under the 5 GB cap. A clip
+    // pending capture and an on-demand recording sit beside them, because neither is the sweep's to touch.
+    const young = makeClip('young.mp4', { bytes: 1000, ageDays: 2 });
+    const today = makeClip('today.mp4', { bytes: 1000 });
+    const rec = makeRecording('ready', 5000);
     setRetention(14, 5);
+    const sweptLines = () => logger.getRecent().filter((l) => l.includes('[clips] retention swept')).length;
+    const before = sweptLines(); // the ring buffer is shared with every earlier case in this file
     sweepClips();
-    assert.deepEqual(liveClipIds(), []);
+    assert.deepEqual(liveClipIds(), [young.id, today.id], 'a clip inside both bounds was swept');
+    assert.ok(fs.existsSync(young.abs) && fs.existsSync(today.abs), 'a clip file inside both bounds was deleted');
+    assert.ok(db.prepare('SELECT 1 FROM recordings WHERE id = ?').get(rec.lastInsertRowid), 'the sweep removed an on-demand recording');
+    assert.equal(sweptLines(), before, 'it reported sweeping when it swept nothing');
   });
 });
 

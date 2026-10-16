@@ -99,8 +99,15 @@ test('a percent-encoded name (an RTSP path) is replaced', () => {
   assert.equal(r.scrub('/Baby%20Room/stream'), '/Camera 1/stream');
 });
 
-test('a lone surrogate in a name does not throw', () => {
-  assert.doesNotThrow(() => make({ cameras: [{ id: 'c1', name: 'bad\uD800name' }], children: [] }).scrub('x'));
+test('a lone surrogate in a name does not throw, and the name as typed is still redacted', () => {
+  // ⚠️ #564: this was `doesNotThrow(() => make(...).scrub('x'))`. 'x' never contains the name, so a redactor
+  // that survived the URIError by DROPPING the name (the catch in `variants` swallowing the literal too)
+  // passed it, and a name nothing redacts is the leak this module exists to prevent. The text now contains
+  // the name, in both spellings it can reach a published string in.
+  let r;
+  assert.doesNotThrow(() => { r = make({ cameras: [{ id: 'c1', name: 'bad\uD800name' }], children: [] }); });
+  assert.equal(r.scrub('feed bad\uD800name is down'), 'feed Camera 1 is down');
+  assert.equal(r.scrub('a perfectly ordinary line'), 'a perfectly ordinary line', 'it must not redact what it should not');
 });
 
 test('generic account names are not identity; a real login and a real first name are', () => {
