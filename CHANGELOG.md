@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- **The full mutation catalogue now runs in CI, in 16 parallel shards, every week and on demand (never on a pull request).** `scripts/mutate.mjs` has a new `--shard=<i>/<n>` option (round-robin, applied after `--only`, and `--list` now honours both), and a new workflow, `.github/workflows/mutation.yml`, runs the shards, uploads each log and ends with a job that prints every surviving mutant and fails if one survived unexpectedly, a shard aborted or one never reported. It needs no secrets and can only read the repository. Contributor tooling only: nothing changes in the app. See [docs/mutation-testing.md](docs/mutation-testing.md) for how to run it and read the result; the first full run on GitHub's runners had not happened when this was written.
+
 ## [0.39.0] - 2026-10-13
 
 ### Fixed
