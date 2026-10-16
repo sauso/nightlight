@@ -31,6 +31,7 @@ import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import WhepPlayer from '../src/components/WhepPlayer.jsx';
 import { setToken } from '../src/lib/api.js';
+import { resetIceServersCache } from '../src/lib/iceServers.js';
 
 // A marker that can only have come from this test, so "the token went nowhere else" is checkable.
 const TOKEN = 'TOKEN-562-must-stay-on-this-site';
@@ -77,6 +78,11 @@ const headersWith = (location) => ({ get: (name) => (name.toLowerCase() === 'loc
 // The modelled server: answers the POST like MediaMTX (201, an SDP answer, a Location), the DELETE with
 // `deleteAnswer`.
 function answer(url, init) {
+  // The player asks the server which STUN servers to use before it connects (#558): an unrelated GET that
+  // must not be mistaken for the DELETE answer below. No STUN, so the peer connection is built as before.
+  if (init.method === 'GET' && url === '/api/about') {
+    return { ok: true, status: 200, headers: headersWith(null), text: async () => JSON.stringify({ stunServers: [] }) };
+  }
   if (init.method === 'POST') {
     return { ok: true, status: 201, headers: headersWith(locationHeader), text: async () => 'v=0 answer' };
   }
@@ -104,6 +110,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   vi.stubGlobal('RTCPeerConnection', FakePeerConnection);
   setToken(TOKEN);
+  resetIceServersCache();
 });
 
 afterEach(() => {
@@ -122,7 +129,8 @@ async function mountAnswerAndUnmount(location, camera = 'cam1') {
   await new Promise((resolve) => { setTimeout(resolve, 0); });
   // The cleanup ran (it closes the peer connection before it decides on the DELETE).
   expect(peers[0].closed).toBe(true);
-  const calls = fetchMock.mock.calls.map(([url, init = {}]) => ({
+  // Not the STUN-list lookup (#558): these assertions are about the requests that carry the token to MediaMTX.
+  const calls = fetchMock.mock.calls.filter(([url]) => url !== '/api/about').map(([url, init = {}]) => ({
     url,
     method: init.method,
     authorization: init.headers?.Authorization,

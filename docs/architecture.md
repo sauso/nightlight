@@ -291,7 +291,8 @@ is built by `backend/src/lib/cspDirectives.js` (#562): index.js cannot be import
 policy lives where `csp-directives.test.js` can serve it and read the header back. The directives
 are tuned to this app and the reasoning is in the comment at the top of that file — read it before
 changing anything there. Two things that bite: hls.js needs `worker-src blob:` + `media-src blob:`,
-and WebRTC's STUN server is gated by `connect-src`. Never add `unsafe-inline`/`unsafe-eval` to
+and WebRTC's STUN servers are gated by `connect-src`, one entry per server in the `STUN_SERVERS` setting
+(`lib/stunServers.js`, #558: the same parse also feeds MediaMTX's config and `GET /api/about` for the browser). Never add `unsafe-inline`/`unsafe-eval` to
 `script-src`; theming is safe because it uses CSSOM `setProperty`, which CSP doesn't police.
 Violations are logged to the container log via `POST /api/csp-report` (at most 10 a minute), so
 check there if a new dependency breaks.

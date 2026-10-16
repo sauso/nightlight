@@ -63,10 +63,36 @@ umask "$UMASK"
 # #689). Before #549 they were 0755 too. Only the data directory itself takes the mask.
 ( umask 022; mkdir -p "$(dirname "$DATA_DIR")" )
 mkdir -p "$DATA_DIR"
-# Runs on every start, not just first install - this is also what makes it safe to
-# adopt on an existing deployment: any files left over from an earlier root-only setup
-# get fixed up automatically, no separate migration step needed.
-chown -R nightlight:nightlight "$DATA_DIR"
+# --- Ownership of the data directory (#567) ---------------------------------------------------
+# This used to be an unconditional `chown -R` on every start. It rewrites every file's inode (so every clip,
+# snapshot and recording is touched, and a spinning disk holding many GB of clips spends minutes at boot, which
+# also delays the app's self-heal after a restart) to change nothing once ownership is right, which is nearly
+# every start. Now the walk happens only when something at the TOP says ownership is not right:
+#   - the data directory itself: new install (mkdir above made it root-owned), or PUID/PGID changed (the
+#     directory still belongs to the old ids); this is the check that catches the cases the walk exists for;
+#   - the database, its -wal/-shm and .jwt_secret, if present: the files a backup restore or a hand-copy as
+#     root is most likely to drop in, and the ones the app cannot run without.
+# Compared with $PUID:$PGID, not `id nightlight`: the usermod/groupmod above made them the same, and this reads
+# the same in the tests, where those tools are stubbed. stat -L: judge the directory the chown would change, as
+# `chown` (no -h) does, if DATA_DIR is a symlink.
+# ⚠️ TRADE-OFF, stated plainly: a file or folder DEEPER in the tree that has the wrong owner while all of the
+# above are right (say a clip restored as root into a correctly-owned data directory) is no longer repaired at
+# start. Before #567 it was. Run `chown -R <PUID>:<PGID> <data dir>` on the host, or change PUID/PGID once and
+# back, to force a full pass. (The mode tightening below still walks the whole tree on every start; it only
+# reads, it does not rewrite.)
+NEEDS_CHOWN=
+for f in . babymonitor.db babymonitor.db-wal babymonitor.db-shm .jwt_secret; do
+  if [ -e "$DATA_DIR/$f" ] && [ "$(stat -L -c %u:%g "$DATA_DIR/$f" 2>/dev/null)" != "$PUID:$PGID" ]; then
+    NEEDS_CHOWN="$f"
+    break
+  fi
+done
+if [ -n "$NEEDS_CHOWN" ]; then
+  printf '[entrypoint] ownership of %s is not %s:%s; fixing the whole data directory\n' "$DATA_DIR/$NEEDS_CHOWN" "$PUID" "$PGID"
+  chown -R nightlight:nightlight "$DATA_DIR"
+else
+  printf '[entrypoint] data directory already owned by %s:%s; not walking it\n' "$PUID" "$PGID"
+fi
 
 # A umask only shapes NEW files. An install upgraded from before #549 has every file 0644 and every
 # folder 0755, so at the default 077 the group/other bits come off whatever still has any. Why each

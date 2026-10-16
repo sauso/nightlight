@@ -2,7 +2,8 @@
 
 Self-hosted baby monitor with low-latency multi-camera streaming from RTSP cameras.
 Installable to your phone's home screen as a standalone app. No cloud, no
-subscription, no account anywhere but your own network.
+subscription, no account anywhere but your own network (the optional STUN server
+below is the one exception, and can be turned off).
 
 One container includes the app, [MediaMTX](https://github.com/bluenviron/mediamtx)
 (RTSP to WebRTC/HLS bridge), and FFmpeg (audio transcoding) together.
@@ -56,6 +57,14 @@ a trusted device.
   used. If another user or container reads the data directory, set `-e UMASK=022`
   **before** upgrading - after one start at `077` it only affects new files. Details:
   [Who can read the data directory](https://github.com/sauso/nightlight/blob/main/docs/operations.md#who-can-read-the-data-directory).
+- `STUN_SERVERS` (optional) sets the STUN servers for Low Latency (WebRTC), in the browser
+  and in the bundled MediaMTX. Unset = Google's public server
+  (`stun:stun.l.google.com:19302`); **blank = no STUN at all**, so nothing contacts Google;
+  otherwise a comma-separated list of `stun:host[:port]` URLs (anything else is ignored with
+  a warning). Viewing on your own network never needs STUN; viewers outside it, behind NAT,
+  may. Details: the README's `STUN_SERVERS` section.
+- The image has a Docker `HEALTHCHECK` (`GET /api/health`, 2 minute start period). It only
+  marks the container healthy/unhealthy; nothing restarts it.
 - `CLOUDFLARE_ANALYTICS` is off by default: Cloudflare Web Analytics' beacon, which
   Cloudflare's proxy injects into every page, is blocked by Nightlight's
   Content-Security-Policy. Set `-e CLOUDFLARE_ANALYTICS=1` (or `true`, `yes`, `on`) only
