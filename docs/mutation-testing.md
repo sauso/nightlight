@@ -57,6 +57,11 @@ are a weaker kill, so look at them.
 
 Known limits of the sharded run:
 
+- **GitHub starts a `schedule` or `workflow_dispatch` run only from a workflow file that is on the repository's
+  default branch (`main`).** Until a release carries this file to `main`, `gh workflow run mutation.yml --ref <branch>`
+  answers `HTTP 404: workflow mutation.yml not found on the default branch` (seen when PR #722 was reviewed), and the
+  weekly run does not fire. Before then, run the catalogue locally (`node scripts/mutate.mjs --only=...`).
+
 - The catalogue's *control* mutants (a comment edit, which must survive; it proves the harness works) are spread over
   the shards by the same rule. A shard that holds none cannot detect a broken harness by itself; it relies on the
   other shards' controls. A harness broken for one runner only would go unnoticed.
