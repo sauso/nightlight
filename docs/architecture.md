@@ -162,6 +162,12 @@ the backend restarts) leaves the stored token alone and shows `ServerUnreachable
 instead, retried by `lib/useAutoRetry.js` (5 s, 10 s, 20 s, then every 30 s) and by a **Try again** button. A
 failed `/auth/status` does the same on the sign-in screen: it no longer guesses "established install" and shows
 the sign-in form. The demo's tokenless path and the native app's (same web code, same stored token) are unchanged.
+Once someone is signed in, a failed `refresh()` (Account and UserSettings call it after a save) sets the same flag
+but keeps the user, so the app stays on screen: `Shell` shows `ServerUnreachable` only while nobody is signed in.
+**Sign out** and a 401 on any request clear the flag and cancel the pending retry, and a failed `/auth/me` that
+lands after the sign-in has ended (no stored token any more) is ignored, so neither leaves a signed-out device on
+"Can't reach Nightlight". On the sign-in screen, once a status check has started the demo's guest sign-in no later
+check runs, so a retry timer that comes due in the same moment cannot open a second guest session.
 
 ## Data layer (`backend/src/db.js`)
 

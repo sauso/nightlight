@@ -17,6 +17,9 @@ export default function Login() {
   const [demoSignIn, setDemoSignIn] = useState(false);
   const signInStarted = useRef(false);
   const statusCheckInFlight = useRef(false);
+  // Set once a status check has started the demo's guest sign-in; never cleared while this screen is up (see
+  // chooseSignIn). The demo screen's own Try again calls handleDemoSignIn directly and is not affected.
+  const guestSignInBegun = useRef(false);
   // #382: /auth/status failed (network, timeout, 5xx). `statusFailures` drives useAutoRetry's backoff.
   const [statusFailures, setStatusFailures] = useState(0);
   const [statusRetrying, setStatusRetrying] = useState(false);
@@ -36,8 +39,8 @@ export default function Login() {
     chooseSignIn();
   }, []);
 
-  // Also the retry target. Only the first call is guarded by signInStarted; a retry runs only after a
-  // failure, when no demo sign-in has begun, so it cannot mint a second guest session.
+  // Also the retry target. Only the first call is guarded by signInStarted; the two guards at the top keep a
+  // retry from minting a second guest session.
   async function chooseSignIn() {
     // At most one status check at a time. After the first failure `statusFailures` stays positive, so the
     // automatic retry timer is armed while a manual "Try again" is pending; without this guard the timer
@@ -45,6 +48,13 @@ export default function Login() {
     // and posted /auth/guest twice, consuming two of the shared demo's active slots (the thing signInStarted
     // exists to prevent). A skipped call loses nothing: the check in flight either succeeds, or fails and
     // bumps statusFailures, which re-arms the timer.
+    // And none at all once a guest sign-in has begun. statusCheckInFlight only covers a check still pending: if
+    // the retry timer comes due after a successful check's continuation (flag already false) but before React
+    // has committed statusFailures = 0 (which is what clears the timer), the timer's call started a second GET
+    // and a second POST /auth/guest, two of the shared demo's slots again (found in the review of #715). Once
+    // the demo sign-in has started there is nothing left for a status check to decide. Only the guest sign-in is
+    // guarded this way: on an ordinary install a late extra check would only set the same form again.
+    if (guestSignInBegun.current) return;
     if (statusCheckInFlight.current) return;
     statusCheckInFlight.current = true;
     setStatusRetrying(true);
@@ -68,6 +78,7 @@ export default function Login() {
       setNeedsSetup(status.needsSetup);
       return;
     }
+    guestSignInBegun.current = true;
     handleDemoSignIn();
   }
 

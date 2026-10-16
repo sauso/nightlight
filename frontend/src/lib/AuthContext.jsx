@@ -40,6 +40,16 @@ export function AuthProvider({ children }) {
         setUser(null);
         setUnreachable(false);
         setFailures(0);
+      } else if (!getToken()) {
+        // The sign-in ended while this request was out: a 401 on another request (api.js dropped the token and
+        // the onUnauthorized listener below reset everything) or Sign out got there first. This failure is about a
+        // session that no longer exists, so it says nothing about the server. Marking it unreachable here put
+        // "Can't reach Nightlight" in place of the sign-in form until the 5 s retry found no token (found in the
+        // review of #715). Nothing to do: whoever dropped the token has already set the signed-out state, and
+        // this older answer must not overwrite it.
+        // WHY a token check and not a request generation counter: the one case a counter would add is a sign-in
+        // REPLACED by a new one while this request was out, and that is harmless here (the new user is set, so the
+        // app stays on screen, and the next retry, with the new token, clears the flag).
       } else {
         // Keep the stored token and any user already signed in (this is also what Account's and
         // UserSettings' refresh() calls hit): a blip must not sign anyone out, nor show a sign-in form.
@@ -103,6 +113,12 @@ export function AuthProvider({ children }) {
     clearAllDrafts();
     setToken(null);
     setUser(null);
+    // Signed out is not unreachable. A refresh() that failed earlier in this session (a blip after a save on
+    // Account) leaves `unreachable` set and a backoff retry pending; with the user gone, Shell then showed
+    // "Can't reach Nightlight" instead of the sign-in form until that retry (5-30 s) found no token (found in the
+    // review of #715). Zeroing `failures` also cancels the pending retry. Same reset as the 401 listener above.
+    setUnreachable(false);
+    setFailures(0);
   }
 
   return (
