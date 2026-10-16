@@ -2007,6 +2007,21 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   border-bottom: 1px solid var(--border);
 }
 .det-row:last-child { border-bottom: none; }
+/* Recording and alerts panel (#394). Reuses .det-row for the rows; these add only what it lacks: the group
+   label (the 12px uppercase micro-label the sheets use) and a value column that wraps instead of squeezing
+   the label, because "20:00–07:00 (America/Los_Angeles)" does not fit beside a label on a phone. */
+.scope-list { list-style: none; margin: 0; padding: 0; }
+.scope-group {
+  padding: 12px 14px 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-top: 1px solid var(--border);
+}
+.scope-group:first-child { border-top: none; }
+.scope-row__value { text-align: right; max-width: 55%; font-size: 15px; color: var(--text-secondary); }
 .det-row--clickable { cursor: pointer; }
 .det-row__left { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .det-row__label { font-size: 16px; font-weight: 500; }
