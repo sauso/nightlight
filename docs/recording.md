@@ -58,6 +58,49 @@ and [Silencing a camera's alerts](camera-controls.md#silencing-a-cameras-alerts-
 
 ---
 
+## The "Recording and alerts" panel (per camera, read-only)
+
+**Cameras → edit** a camera → **Recording and alerts**, under Detection. It shows, in one place, what
+this camera is set up to alert on and record, and whether it is **ready right now**. It is a summary
+only: it has no switch, changes nothing, and adds no setting (so there is no default or range). Admin
+only, like the page it sits on; a caregiver cannot open that page.
+
+The two groups answer different questions, and the difference is the point:
+
+| | **Set up** | **Ready right now** |
+|---|---|---|
+| What it is | What is switched on, read from the camera's own settings | Whether the thing behind each switch is actually running |
+| Where it comes from | The camera's fields, the child assigned to it, and **Settings → Recording** | The server, asked each time (and again with **Check again**) |
+| Fresh? | As of the page load | As of the last check; it is a snapshot, so press **Check again** after changing something |
+
+| Row | Set up says | Ready right now says |
+|---|---|---|
+| Motion alerts | The source: Nightlight compares frames, the camera's own events (ONVIF) or (MQTT), or off | Whether that detector is running. For MQTT it says *Reported by the camera*: the camera decides and Nightlight only listens, so there is no process to check |
+| Sound alerts | On or off | Whether the sound detector is running |
+| Schedule and timezone | The alert hours and the **app's** timezone (Settings → General), or *Always* | *Alerts firing now*: yes, or why not (*Silenced*, *Outside the schedule*) |
+| Silence | Until when, and who set it | (the same *Alerts firing now* row) |
+| Alerts save a clip | The per-camera **Save a clip when triggered** | Whether the buffer is ready to cut one |
+| Wake clips | Eligible only with the global option on, a child assigned, **and** sleep tracking on for that child, with every missing piece named | Whether the buffer is ready for one |
+| Manual recording | The global **Show a Record button on each camera** | Whether Record would work right now |
+| Recording buffer | | *Ready*, *Not running*, *Not needed*, *Storage unavailable* or *Camera disabled* |
+
+**Why the buffer row exists.** Alert clips, the Record button and wake clips all cut their footage from
+the same rolling buffer (see *A note on buffering* under Wake clips). A camera can have all three switched
+on and still have no buffer, because the clips folder is not usable or the buffer has not started. The
+three rows are then shown as **Waiting on the buffer**, not as off. *Not needed* is the opposite and is
+not a problem: nothing is set up to record from that camera.
+
+**What it deliberately does not do.** It does not change how alerts, clips or notifications behave. In
+particular, **a silence or the schedule still stops the alert itself, and with it the alert clip**; the
+panel states this beside the rows. Keeping every alert clip while muting only the notification would need
+separate controls for notifying and for recording events, which was considered and **not adopted**. The panel
+exists so that "stop the notifications" is not mistaken for "keep every alert clip".
+
+It reads `GET /api/cameras/:id/recording-readiness` (admin only), which returns booleans and fixed words
+only: no name, address, path or credential.
+
+---
+
 ## Wake clips (recorded, never announced)
 
 When sleep tracking sees your child **wake up**, Nightlight saves a short clip of the moment it

@@ -10,6 +10,7 @@ import { loadDraft, clearDraft } from '../lib/formDraft.js';
 import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
 import DetectionRow from '../components/DetectionRow.jsx';
 import CameraReportButton from '../components/CameraReportButton.jsx';
+import RecordingScopePanel from '../components/RecordingScopePanel.jsx';
 import { useDetectionSave, retry } from '../lib/detectionSaves.js';
 import { TITLES as DETECTION_TITLES } from './DetectionSettings.jsx';
 
@@ -391,6 +392,8 @@ export default function CameraSettings() {
                     right={<><span className="camera-tile__sub">{cam.detect_schedule_enabled ? `${minToHHMM(cam.detect_start)}–${minToHHMM(cam.detect_end)}` : 'Always'}</span><ChevronRight size={18} style={{ opacity: 0.45 }} aria-hidden="true" /></>}
                     onClick={() => navigate(`/cameras/${id}/schedule`, detFrom)} />
                 </div>
+                {/* Read-only summary of what this camera alerts on and records, and whether it is ready (#394). */}
+                <RecordingScopePanel cam={cam} />
               </>
             )}
 

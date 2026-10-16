@@ -275,6 +275,10 @@ About that one shared address:
 **Cameras → edit** a camera. Motion and sound are independent detectors — either can be enabled
 without the other, and each has its own sensitivity, confirmation delay and cooldown.
 
+The camera's page also carries a read-only **Recording and alerts** summary of what the camera alerts on,
+whether alerts save a clip, and whether it is ready right now; see
+[the panel](recording.md#the-recording-and-alerts-panel-per-camera-read-only).
+
 ### Changes save automatically
 
 The Motion, Sound and Alert schedule screens have no Save button — every change (a slider, a switch,

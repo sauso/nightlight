@@ -17864,6 +17864,501 @@
     "namePattern": "#701 chown: the sentinel loop"
   },
   {
+    "label": "#394 bufferState: a disabled camera with a stale ring reads ready",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (disabled) return 'camera_disabled';",
+    "replace": "if (false) return 'camera_disabled';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "bufferState: each answer"
+  },
+  {
+    "label": "#394 bufferState: a running ring is only ready while something still wants it",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (running) return 'ready';",
+    "replace": "if (running && wanted) return 'ready';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "bufferState: each answer"
+  },
+  {
+    "label": "#394 bufferState: a ring nobody wants is reported as not running",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (!wanted) return 'not_needed';",
+    "replace": "if (false) return 'not_needed';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "bufferState: each answer"
+  },
+  {
+    "label": "#394 bufferState: bad storage is reported as not running",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (!storageReady) return 'storage_unavailable';",
+    "replace": "if (false) return 'storage_unavailable';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "bufferState: each answer"
+  },
+  {
+    "label": "#394 motionState: the MQTT source is claimed to be running or not",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (cam.detect_source === 'mqtt') return 'camera_side';",
+    "replace": "if (false) return 'camera_side';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "motionState: off, camera-side"
+  },
+  {
+    "label": "#394 motionState: the ONVIF source reads the frame-diff process",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (cam.detect_source === 'onvif') return onvifRunning ? 'running' : 'not_running';",
+    "replace": "if (cam.detect_source === 'onvif') return framediffRunning ? 'running' : 'not_running';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "motionState: off, camera-side"
+  },
+  {
+    "label": "#394 motionState: a disabled camera reports its motion source as on",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (cam.disabled || !cam.detect_motion_enabled) return 'off';",
+    "replace": "if (!cam.detect_motion_enabled) return 'off';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "motionState: off, camera-side"
+  },
+  {
+    "label": "#394 soundState: a disabled camera reports sound detection as on",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (cam.disabled || !cam.detect_sound_enabled) return 'off';",
+    "replace": "if (!cam.detect_sound_enabled) return 'off';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "soundState: off, running"
+  },
+  {
+    "label": "#394 readiness: storage_ready is always true",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "storage_ready: storageReady,",
+    "replace": "storage_ready: true,",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "a ring is wanted but the clips folder is not usable"
+  },
+  {
+    "label": "#394 readiness: the buffer is told a ring is always wanted",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "wanted: clipRingWanted(cam), storageReady",
+    "replace": "wanted: true, storageReady",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "nothing wants a ring: not_needed"
+  },
+  {
+    "label": "#394 readiness: wake clip counts as ready without a ring",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "wake_clip_ready: wakeCapable && running,",
+    "replace": "wake_clip_ready: wakeCapable,",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "all inputs present but NO ring"
+  },
+  {
+    "label": "#394 readiness: wake eligibility ignores whether the child tracks sleep",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "!!cam.child_id && childTracksSleep(cam.child_id) && getWakeClipSettings().enabled",
+    "replace": "!!cam.child_id && getWakeClipSettings().enabled",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "not ready when the child does not track sleep"
+  },
+  {
+    "label": "#394 readiness: wake eligibility ignores the global option",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "!!cam.child_id && childTracksSleep(cam.child_id) && getWakeClipSettings().enabled",
+    "replace": "!!cam.child_id && childTracksSleep(cam.child_id)",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "not ready when the global option is off"
+  },
+  {
+    "label": "#394 readiness: wake eligibility ignores a disabled camera",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "const wakeCapable = !disabled && !!cam.child_id",
+    "replace": "const wakeCapable = !!cam.child_id",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "a disabled camera is never wake-ready"
+  },
+  {
+    "label": "#394 readiness: manual recording ignores the global option",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "manual_recording_available: getOndemandSettings().enabled && running && !disabled,",
+    "replace": "manual_recording_available: running && !disabled,",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "a ring that is up makes the buffer ready"
+  },
+  {
+    "label": "#394 readiness: manual recording is offered without a running ring",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "manual_recording_available: getOndemandSettings().enabled && running && !disabled,",
+    "replace": "manual_recording_available: getOndemandSettings().enabled && !disabled,",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "a ring is wanted, storage is fine, and none is running"
+  },
+  {
+    "label": "#394 readiness: alerting_now ignores silences and the schedule",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "alerting_now: pauseReason === null,",
+    "replace": "alerting_now: true,",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "a silence in the future stops alerting"
+  },
+  {
+    "label": "#394 route: the readiness route lets a caregiver in",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.get('/:id/recording-readiness', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/:id/recording-readiness', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "an anonymous caller gets 401"
+  },
+  {
+    "label": "#394 route: the answer carries the camera row as well",
+    "file": "backend/src/routes/cameras.js",
+    "find": "res.json(recordingReadiness(cam));",
+    "replace": "res.json({ ...cam, ...recordingReadiness(cam) });",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "exactly the documented keys"
+  },
+  {
+    "label": "#394 panel: start == end is read as a closed window instead of always",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "cam.detect_schedule_enabled && (cam.detect_start | 0) !== (cam.detect_end | 0)",
+    "replace": "cam.detect_schedule_enabled",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: the schedule omits the app's timezone",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "`${minToHHMM(cam.detect_start)}–${minToHHMM(cam.detect_end)} (${zone})`",
+    "replace": "`${minToHHMM(cam.detect_start)}–${minToHHMM(cam.detect_end)}`",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: an ended silence is shown as active",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "cam.alerts_snoozed_until && cam.alerts_snoozed_until > now ? cam.alerts_snoozed_until : null",
+    "replace": "cam.alerts_snoozed_until || null",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: wake clips default to off before settings arrive",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "const wakeOn = settings.wake_clips_enabled ?? true;",
+    "replace": "const wakeOn = settings.wake_clips_enabled ?? false;",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: manual recording defaults to off before settings arrive",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "const manualOn = settings.ondemand_enabled ?? true;",
+    "replace": "const manualOn = settings.ondemand_enabled ?? false;",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: wake eligibility ignores the child's sleep tracking",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "else if (kid && !kid.track_sleep)",
+    "replace": "else if (false)",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: wake eligibility ignores the global option",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "if (!wakeOn) wakeWhy.push(",
+    "replace": "if (false) wakeWhy.push(",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: wake eligibility ignores a missing child",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "if (!cam.child_id) wakeWhy.push(",
+    "replace": "if (false) wakeWhy.push(",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: a detector that is not running is shown as neutral",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "not_running: { state: 'bad', text: 'Not running' },",
+    "replace": "not_running: { state: 'off', text: 'Not running' },",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: a ready buffer is shown as neutral",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "ready: { state: 'ok', text: 'Ready', note: null },",
+    "replace": "ready: { state: 'off', text: 'Ready', note: null },",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: the buffer counts as ready whenever the server names one",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "const bufferReady = readiness.buffer === 'ready';",
+    "replace": "const bufferReady = readiness.buffer != null;",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: a disabled camera reads as waiting on the buffer",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "if (disabled) return { state: 'off', text: 'Camera disabled' };",
+    "replace": "if (false) return { state: 'off', text: 'Camera disabled' };",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: a recording feature that is off is shown as a problem",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "if (!wanted) return { state: 'off', text: offText };",
+    "replace": "if (false) return { state: 'off', text: offText };",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: alerts firing now is always yes",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "else if (readiness.alerting_now) alerting",
+    "replace": "else if (true) alerting",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: one alert switch on is read as nothing to alert on",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "if (!on('motion') && !on('sound')) alerting",
+    "replace": "if (!on('motion') || !on('sound')) alerting",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: a silence is not named as the reason alerts are paused",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "else if (reason === 'silenced' || (reason !== 'schedule' && on('snooze'))) alerting",
+    "replace": "else if (false) alerting",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: wake clips are ready whenever they are eligible",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "...clip(on('wake'), readiness.wake_clip_ready,",
+    "replace": "...clip(on('wake'), true,",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: manual recording is available whenever the option is on",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "...clip(on('manual'), readiness.manual_recording_available,",
+    "replace": "...clip(on('manual'), true,",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: asks a different route",
+    "file": "frontend/src/components/RecordingScopePanel.jsx",
+    "find": "`/cameras/${cam.id}/recording-readiness`",
+    "replace": "`/cameras/${cam.id}/readiness`",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "the panel, as an admin"
+  },
+  {
+    "label": "#394 page: the panel is not rendered",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "<RecordingScopePanel cam={cam} />",
+    "replace": "null",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "the panel, as an admin"
+  },
+  {
+    "label": "#394 readiness: a disabled camera is reported as alerting",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (disabled) return 'disabled';",
+    "replace": "if (false) return 'disabled';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "#713 review"
+  },
+  {
+    "label": "#394 readiness: a silence is never named as the reason",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (isSnoozed(cam.id)) return 'silenced';",
+    "replace": "if (false) return 'silenced';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "#713 review"
+  },
+  {
+    "label": "#394 readiness: outside the schedule is never named as the reason",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (!inActiveWindow(cam)) return 'schedule';",
+    "replace": "if (false) return 'schedule';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "#713 review"
+  },
+  {
+    "label": "#394 panel: a failed recheck keeps showing the older answer",
+    "file": "frontend/src/components/RecordingScopePanel.jsx",
+    "find": "failed ? null : describeReady(",
+    "replace": "describeReady(",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "#713 review"
+  },
+  {
+    "label": "#394 panel: the pause reason is guessed from the camera row, ignoring the server's",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "reason === 'silenced' || (reason !== 'schedule' && on('snooze'))",
+    "replace": "on('snooze')",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "#713 review"
+  },
+  {
+    "label": "#394 panel: a disabled camera is shown as alerting",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "disabled || reason === 'disabled'",
+    "replace": "false",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "a disabled camera is never"
+  },
+  {
     "label": "#386 lazyPage: the failed-screen button does nothing, so the screen can never recover after an offline failure",
     "file": "frontend/src/lib/lazyPage.jsx",
     "find": "onClick={() => window.location.reload()}",
