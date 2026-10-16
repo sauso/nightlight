@@ -83,6 +83,9 @@ const NAMED_ESCAPES = { '\n': '\\n', '\r': '\\r' };
 // user is indistinguishable from an escaped newline; doubling it would alter every Windows-style path in a
 // normal line, and the forgery is already defeated either way. No length cap: this file has no length
 // convention (processOutput.js caps child-process lines upstream, MAX_LINE_CHARS).
+// ⚠️ lib/identityRedaction.js CALLS this function to learn every escape it writes (found in review of PR #709: a
+// name containing a newline reached the diagnostics bundle as `Private\nName`, a spelling the redactor did not
+// know). Keep it exported and keep the class code-unit based (no `u` flag): that probe walks UTF-16 code units.
 export function neutraliseControlChars(text) {
   return text.replace(LINE_BREAKERS_AND_CONTROLS, (c) => {
     if (NAMED_ESCAPES[c]) return NAMED_ESCAPES[c];

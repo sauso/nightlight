@@ -20,7 +20,8 @@ import { useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, signToken, 
 useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
-const { logger } = await import('../src/lib/logger.js');
+const { logger, neutraliseControlChars } = await import('../src/lib/logger.js');
+const { reportGuardFailure, resetGuardRateLimit } = await import('../src/lib/processGuards.js');
 const { default: diagnosticsRouter } = await import('../src/routes/diagnostics.js');
 
 const MARK = 'ZZ-IDENT-MARKER';
@@ -35,7 +36,7 @@ before(async () => {
   server = await mountRouter('/api/diagnostics', diagnosticsRouter);
 });
 
-beforeEach(() => {
+function resetState() {
   db.prepare('DELETE FROM camera_events').run();
   db.prepare('DELETE FROM detection_events').run();
   db.prepare('DELETE FROM cameras').run();
@@ -43,7 +44,8 @@ beforeEach(() => {
   db.prepare("DELETE FROM users WHERE id != 'ident-admin'").run();
   db.prepare("UPDATE settings SET app_name = 'Nightlight' WHERE id = 'app'").run();
   logger.clear();
-});
+}
+beforeEach(resetState);
 
 after(async () => {
   mock.restoreAll();
@@ -135,6 +137,65 @@ test('★ #547: no marker planted in a children, users or camera column reaches 
   assert.deepEqual(res.body.redaction, { identity: 'aliased', birthday: 'omitted' });
   assert.match(res.body.note, /Child 1/);
   assert.match(res.body.note, /timezone/);
+});
+
+test('★ #709: names containing control characters reach no bundle, neither as typed nor as the logger escapes them', async () => {
+  // Since #539 the log buffer holds a control character as visible text (`\n`, `\x01`, ...), so a name has a
+  // spelling in `server_logs` that the redactor did not know: it survived, and the gate (same matcher) passed it.
+  // Every identity source the route hands the redactor gets its own name with a marker on BOTH sides of the
+  // character (so neither half can leak unnoticed), in the middle, leading or trailing (a leading line break is
+  // trimmed off the name, which leaves the escape right before it in the log). The names reach the log through
+  // every level, raw(), and a real Error stack, the way they really do. One class of each the logger escapes
+  // differently, plus tab, which it leaves raw.
+  const controls = [0x0a, 0x0d, 0x09, 0x01, 0x1b, 0x7f, 0x85, 0x2028, 0x2029];
+  for (const code of controls) {
+    resetState();
+    resetGuardRateLimit();
+    const c = String.fromCharCode(code);
+    const at = `U+${code.toString(16).padStart(4, '0')}`;
+    const names = {
+      child: `Qzx-child-a${c}Qzx-child-b`,
+      camera: `${c}Qzx-camera`,
+      login: `Qzx-login${c}`,
+      first: `Qzx-first-a${c}Qzx-first-b`,
+      last: `${c}Qzx-last`,
+      oldcam: `Qzx-oldcam-a${c}Qzx-oldcam-b`,
+      detcam: `Qzx-detcam${c}`,
+      former: `${c}Qzx-former-a${c}Qzx-former-b`,
+    };
+    db.prepare("INSERT INTO children (id, name, created_at) VALUES ('kid-c', ?, '2021-01-01 00:00:00')").run(names.child);
+    insertCamera('cam-c', names.camera, { child_id: 'kid-c' });
+    db.prepare("INSERT INTO users (id, username, password_hash, first_name, last_name, created_at) VALUES ('u-c', ?, 'x', ?, ?, '2021-02-01 00:00:00')")
+      .run(names.login, names.first, names.last);
+    db.prepare('INSERT INTO camera_events (camera_id, camera_name, type, detail, actor_user_id, actor_username) VALUES (?, ?, ?, ?, ?, ?)')
+      .run('cam-gone-1', names.oldcam, 'restart', `restarted ${names.oldcam} for ${names.child}`, 'old-id', names.former);
+    db.prepare('INSERT INTO detection_events (camera_id, camera_name, type, detail) VALUES (?, ?, ?, ?)')
+      .run('cam-gone-2', names.detcam, 'motion', `${names.child} moved`);
+
+    logger.info(`[detect] motion on "${names.camera}" for ${names.child}`);
+    logger.warn(`[talk] session by ${names.login} (${names.first} ${names.last})`);
+    logger.error(`[sleep] failed for ${names.child}:\n${names.camera} stopped\n${names.oldcam}`);
+    logger.raw(`ffmpeg:${names.camera}`, `${names.detcam} frame error\n${names.former}`);
+    reportGuardFailure('ident-stack', new Error(`lost ${names.former}\n${names.first}\n${names.last}`));
+
+    const res = await bundle();
+    assert.equal(res.status, 200, `${at}: ${text(res).slice(0, 300)}`);
+    assert.ok(!text(res).includes('Qzx'), `${at}: a marker reached the bundle: ${text(res).match(/.{0,40}Qzx.{0,40}/)?.[0]}`);
+    const logs = res.body.server_logs;
+    assert.equal(logs.length, 5, `${at}: every logged line is in the bundle (the check is not passing an empty log)`);
+    for (const [field, name] of Object.entries(names)) {
+      for (const l of logs) {
+        assert.ok(!l.includes(name) && !l.includes(neutraliseControlChars(name)), `${at} ${field}: ${l}`);
+      }
+    }
+    // Controls: the lines were rewritten, not blanked, and the aliases still correlate. (A leading or trailing
+    // character is not part of the trimmed name, so its escape stays beside the alias: `"\nCamera 1"`.)
+    const want = [['Camera 1', 'Child 1'], ['User 2'], ['Child 1', 'Camera 1', 'Camera (removed) 1'],
+      ['Camera 1', 'Camera (removed) 2', 'User (former) 1'], ['User (former) 1', 'User 2', '    at ']];
+    want.forEach((aliases, i) => aliases.forEach((a) => assert.ok(logs[i].includes(a), `${at}: "${a}" missing from ${logs[i]}`)));
+    assert.equal(res.body.camera_history[0].detail, 'restarted Camera (removed) 1 for Child 1', at);
+    assert.equal(res.body.recent_detection_events[0].detail, 'Child 1 moved', at);
+  }
 });
 
 test('a renamed or removed camera: its history rows carry the OLD name, which is still replaced', async () => {

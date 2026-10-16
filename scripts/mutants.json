@@ -1353,6 +1353,96 @@
     "note": "Escaped first, the newline becomes printable text and the query-stripping redaction swallows the rest of the line."
   },
   {
+    "label": "#539 logger: also escape U+200B (zero-width space)",
+    "file": "backend/src/lib/logger.js",
+    "find": "\\u2028\\u2029]/g",
+    "replace": "\\u2028\\u2029\\u200b]/g",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "namePattern": "byte-for-byte unchanged",
+    "note": "Survived the first review of PR #709: nothing said what must NOT change outside the control classes."
+  },
+  {
+    "label": "#539 logger: also escape U+2027 (the code point before the line separator)",
+    "file": "backend/src/lib/logger.js",
+    "find": "\\u2028\\u2029]/g",
+    "replace": "\\u2027-\\u2029]/g",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "namePattern": "byte-for-byte unchanged",
+    "note": "Pins the upper edge of the separator pair."
+  },
+  {
+    "label": "#539 logger: widen the C1 block by one, to U+00A0 (no-break space)",
+    "file": "backend/src/lib/logger.js",
+    "find": "\\u007f-\\u009f",
+    "replace": "\\u007f-\\u00a0",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "namePattern": "byte-for-byte unchanged",
+    "note": "Pins the upper edge of the C1 range: U+00A0 is printable and common in typed names."
+  },
+  {
+    "label": "#539 logger: widen DEL down to U+007E (tilde)",
+    "file": "backend/src/lib/logger.js",
+    "find": "\\u001f\\u007f-",
+    "replace": "\\u001f\\u007e-",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "namePattern": "byte-for-byte unchanged",
+    "note": "Pins the lower edge of the DEL/C1 range."
+  },
+  {
+    "label": "#539 logger: ERROR-level lines skip neutralising",
+    "file": "backend/src/lib/logger.js",
+    "find": "const line = neutraliseControlChars(redactCredentials(",
+    "replace": "const line = (level === 'ERROR' ? (x) => x : neutraliseControlChars)(redactCredentials(",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "namePattern": "ERROR level is neutralised",
+    "note": "Survived the first review of PR #709: the ERROR fixtures were JSON objects, already escaped by JSON.stringify. The new fixtures are a string message and the stacks errorHandler and reportGuardFailure really log."
+  },
+  {
+    "label": "#539 redactor: a name's logged spelling (control characters escaped) is not searched for",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "if (logged !== literal) out.push(logged);",
+    "replace": "if (false) out.push(logged);",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "control character",
+    "note": "PR #709 review (P1): a camera, child or account name containing a newline reached the diagnostics bundle as Private\\nName, and findLeak (same matcher) passed it."
+  },
+  {
+    "label": "#539 redactor: a logger escape is not a word boundary (a name right after an escaped line break)",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "|(?<=${escapesTheLoggerWrites().map(escapeRe).join('|')})",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "control character",
+    "note": "The escape ends in a letter or digit, so a name after a newline in a multi-line error or stack read as the tail of a longer word and was published."
+  },
+  {
+    "label": "#539 redactor: the logger's escapes are probed over Latin-1 only (misses U+2028 / U+2029)",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "unit <= 0xffff",
+    "replace": "unit <= 0xff",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js"],
+    "namePattern": "right after an escaped control character",
+    "note": "The probe must cover every UTF-16 code unit the logger's class can match."
+  },
+  {
+    "label": "#539 redactor: alternatives ordered by the name's length, not the matched spelling's",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "b.v.length - a.v.length",
+    "replace": "b.e.text.length - a.e.text.length",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js"],
+    "namePattern": "longest SPELLING first",
+    "note": "A logged spelling is up to six times longer than its name; a shorter name that is a prefix of it would win and publish the rest."
+  },
+  {
     "label": "logger raw: bypass the credential-redacting choke point",
     "file": "backend/src/lib/logger.js",
     "find": "raw: (source, line) => write(console.log, source, [String(line).replace(LEADING_TIMESTAMP, '')]),",
@@ -15923,8 +16013,8 @@
   {
     "label": "#547 lib: shortest literal first, so a longer name is split",
     "file": "backend/src/lib/identityRedaction.js",
-    "find": ".sort((a, b) => b.text.length - a.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));",
-    "replace": ".sort((a, b) => a.text.length - b.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));",
+    "find": "alternatives.sort((a, b) => b.v.length - a.v.length || Number(b.e.keep) - Number(a.e.keep) || a.v.localeCompare(b.v));",
+    "replace": "alternatives.sort((a, b) => a.v.length - b.v.length || Number(b.e.keep) - Number(a.e.keep) || a.v.localeCompare(b.v));",
     "expect": "killed",
     "tests": ["identity-redaction.test.js"],
     "namePattern": "longest literal first"
@@ -15941,8 +16031,8 @@
   {
     "label": "#547 lib: no boundary before a name",
     "file": "backend/src/lib/identityRedaction.js",
-    "find": "const NOT_BEFORE = '(?<![\\\\p{L}\\\\p{N}])';",
-    "replace": "const NOT_BEFORE = '';",
+    "find": "(?:(?<![\\\\p{L}\\\\p{N}])|",
+    "replace": "(?:(?<=)|",
     "expect": "killed",
     "tests": ["identity-redaction.test.js"],
     "namePattern": "word"
@@ -16001,8 +16091,8 @@
   {
     "label": "#547 lib: an issued alias beats a longer name that starts with it (Camera 1 Nursery leaks Nursery)",
     "file": "backend/src/lib/identityRedaction.js",
-    "find": ".sort((a, b) => b.text.length - a.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));",
-    "replace": ".sort((a, b) => Number(b.keep) - Number(a.keep) || b.text.length - a.text.length || a.text.localeCompare(b.text));",
+    "find": "alternatives.sort((a, b) => b.v.length - a.v.length || Number(b.e.keep) - Number(a.e.keep) || a.v.localeCompare(b.v));",
+    "replace": "alternatives.sort((a, b) => Number(b.e.keep) - Number(a.e.keep) || b.v.length - a.v.length || a.v.localeCompare(b.v));",
     "expect": "killed",
     "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
     "namePattern": "Camera 1"

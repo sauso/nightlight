@@ -7,6 +7,9 @@ import assert from 'node:assert/strict';
 
 const { logger } = await import('../src/lib/logger.js');
 const { formatSummaryLine } = await import('../src/lib/observationClock.js');
+// The two production paths that log an Error's multi-line stack (#709 review: ERROR level had only JSON fixtures).
+const { reportGuardFailure, resetGuardRateLimit } = await import('../src/lib/processGuards.js');
+const { errorHandler } = await import('../src/middleware/errorHandler.js');
 
 const PREFIX = String.raw`\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}`;
 
@@ -86,6 +89,78 @@ describe('every control character class is escaped (#539)', () => {
   test('tab is kept: it cannot start a line, and child-process output carries it', (t) => {
     const { recent } = capture(t, () => logger.info('a\tb'));
     assert.ok(recent[0].endsWith('a\tb'));
+  });
+
+  // #709 review: a mutant that ALSO escaped U+200B survived, because no test said what must NOT change outside the
+  // control classes. Each sample sits next to a range edge or is a format character a widened class would catch.
+  // Built with fromCodePoint so no invisible character sits in this file's source. NOT pinned either way: the
+  // bidirectional controls (U+202A-U+202E, U+2066-U+2069), which cannot start a line; that is a separate decision.
+  test('zero-width, format and other non-control Unicode is returned byte-for-byte unchanged', (t) => {
+    const cp = (...codes) => String.fromCodePoint(...codes);
+    const samples = [
+      ['zero-width space U+200B', cp(0x200b)],
+      ['zero-width non-joiner and joiner U+200C, U+200D', cp(0x200c, 0x200d)],
+      ['zero-width no-break space / BOM U+FEFF', cp(0xfeff)],
+      ['soft hyphen U+00AD', cp(0xad)],
+      ['no-break space U+00A0, the first code point after the C1 block', cp(0xa0)],
+      ['tilde U+007E, the last code point before DEL', '~'],
+      ['U+2027, the code point before the line separator', cp(0x2027)],
+      ['accented Latin', cp(0xe9, 0xfc, 0xf1, 0xc5, 0xff)],
+      ['emoji, a ZWJ family sequence and a skin-tone modifier', cp(0x1f600, 0x20, 0x1f468, 0x200d, 0x1f469, 0x200d, 0x1f467, 0x20, 0x1f44d, 0x1f3fd)],
+      ['CJK and Hangul', cp(0x65e5, 0x672c, 0x8a9e, 0x20, 0xd55c, 0xad6d, 0xc5b4)],
+      ['a right-to-left script', cp(0x5e9, 0x5dc, 0x5d5, 0x5dd)],
+    ];
+    const { out, recent } = capture(t, () => samples.forEach(([, text]) => logger.info(`<${text}>`)));
+    samples.forEach(([label, text], i) => {
+      const want = Buffer.from(`[INFO] <${text}>`, 'utf8');
+      for (const sink of [out, recent]) {
+        const got = Buffer.from(sink[i].slice(20), 'utf8');
+        assert.ok(got.equals(want), `${label}: ${JSON.stringify(sink[i])}`);
+      }
+    });
+  });
+});
+
+describe('ERROR level is neutralised like every other level (#709 review)', () => {
+  // The existing ERROR fixtures were JSON objects, which JSON.stringify had already escaped, so a logger that
+  // skipped neutralising at ERROR passed them. These are string messages, and the stacks the code really logs.
+  const LOG_LINE = new RegExp(`^(${PREFIX}) \\[(INFO|WARN|ERROR)\\] (.*)$`);
+
+  test('an ERROR string message with a forged line, CR and ESC stays one escaped line in both sinks', (t) => {
+    const { out, recent } = capture(t, () => logger.error('[sleep] failed for "Cam\n2026-10-02 03:12:00 [INFO] forged"\r\x1b[2J'));
+    for (const sink of [out, recent]) {
+      assert.equal(sink.length, 1);
+      assert.ok(!/[\r\n\x1b]/.test(sink[0]), JSON.stringify(sink[0]));
+      assert.equal(sink[0].slice(20), '[ERROR] [sleep] failed for "Cam\\n2026-10-02 03:12:00 [INFO] forged"\\r\\x1b[2J');
+    }
+  });
+
+  test('an Error stack logged by errorHandler and reportGuardFailure is ONE line the log viewer still filters', (t) => {
+    resetGuardRateLimit();
+    const err = new Error('boom for "Cam\nforged"');
+    const res = { headersSent: false, status() { return this; }, json() { return this; } };
+    const { out, recent } = capture(t, () => {
+      errorHandler(err, { method: 'GET', originalUrl: '/api/x' }, res, () => {});
+      reportGuardFailure('stack-test', err);
+      logger.error('[x] two args:', err.stack);
+    });
+    assert.ok(err.stack.split('\n').length >= 3, 'the fixture must really be multi-line (message break + frames)');
+    for (const sink of [out, recent]) {
+      // Three calls, three entries: a stack is still ONE buffer entry, as it was before #539 (the viewer and the
+      // bundle treat an entry as one opaque string), only now without a real line break inside it.
+      assert.equal(sink.length, 3, sink.join(' || '));
+      sink.forEach((l, i) => {
+        assert.ok(!/[\r\n]/.test(l), JSON.stringify(l));
+        const m = LOG_LINE.exec(l);
+        assert.ok(m, l);
+        assert.equal(m[2], 'ERROR');
+        // The tag still opens the message, and the viewer's Errors chip (a substring match on "error") finds it.
+        assert.match(m[3], [/^\[http\] GET \/api\/x: unhandled error \(answered 500\): /, /^\[guard:stack-test\] /, /^\[x\] two args: /][i]);
+        assert.ok(l.toLowerCase().includes('error'));
+        // Every break of the stack is still there, as visible text, followed by the frame it started.
+        assert.ok(m[3].includes('Error: boom for "Cam\\nforged"\\n    at '), m[3]);
+      });
+    }
   });
 });
 

@@ -70,7 +70,9 @@ have since changed (a child or account renamed after the line was logged: **Clea
 Logs empties that buffer, and a restart does too); (2) a name shorter than 3 characters inside free
 text (it is still replaced in the child and camera lists, but "Jo" is not searched for in log lines,
 because that would rewrite ordinary words); (3) a name written in an MQTT topic or a camera's address
-in a form other than as typed or percent-encoded. The reverse also holds: (4) a name that is an
+in a form other than as typed or percent-encoded. (A name containing a line break or another control
+character is also found in the escaped form the log writes it in, for example `Name\nTwo`, #539.) The
+reverse also holds: (4) a name that is an
 ordinary word (a child called "Max", "Motion" or "Sound") is replaced wherever that word appears in
 the log text and in a camera's own settings, so a line can read "Child 1 detected" or a
 `detect_source` can read "Camera 1" (and an id that happens to contain such a word is rewritten, the
