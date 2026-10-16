@@ -20,6 +20,9 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { useTempDataDir, cleanupTempDataDirs } from './helpers/harness.js';
 
+// The largest body this file's local server will build: well above the 5 MiB default cap the tests probe at cap + 1.
+const MAX_TEST_BODY = 16 * 1024 * 1024;
+
 useTempDataDir();
 const { fetchHttpSnapshot } = await import('../src/lib/snapshot.js');
 
@@ -70,11 +73,13 @@ before(async () => {
       return undefined;
     }
     if (req.url.startsWith('/exact/')) {
-      return res.end(Buffer.alloc(Number(req.url.split('/')[2]), 3));
+      // Clamped: the size comes from the request URL (a local test server, but CodeQL's resource-exhaustion rule
+      // cannot know that, and an unbounded Buffer.alloc from a URL is the pattern it exists to flag).
+      return res.end(Buffer.alloc(Math.min(Number(req.url.split('/')[2]), MAX_TEST_BODY), 3));
     }
     if (req.url.startsWith('/chunked/')) {
       // Two writes and no Content-Length: the streaming count is the only guard that sees this body's size.
-      const n = Number(req.url.split('/')[2]);
+      const n = Math.min(Number(req.url.split('/')[2]), MAX_TEST_BODY);
       res.writeHead(200, { 'content-type': 'image/jpeg' });
       res.write(Buffer.alloc(n - 1, 5));
       return res.end(Buffer.alloc(1, 5));
