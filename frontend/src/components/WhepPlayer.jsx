@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { getToken } from '../lib/api.js';
 import { resolveWhepResource } from '../lib/whep.js';
+import StreamUnavailableNotice from './StreamUnavailableNotice.jsx';
 import { useNowPlayingSession, NOW_PLAYING_ARTWORK } from '../lib/useNowPlaying.js';
 
 // Re-exported for backwards compatibility with any importer that reached for it here; the
@@ -46,6 +47,7 @@ export default function WhepPlayer({
   onFirstConnectFailed,
   cameraName,
   isBackgroundAudio = false,
+  statusUnknown = false,
 }) {
   const videoRef = useRef(null);
   // Audio lives on its own <audio> element, separate from <video> - Chrome treats
@@ -320,10 +322,19 @@ export default function WhepPlayer({
       />
       <audio ref={audioRef} autoPlay />
       {state !== 'live' && (
-        <div className={`whep-overlay whep-overlay--${state}`}>
-          {state === 'connecting' && <span>Connecting…</span>}
-          {state === 'error' && <span>{errorMsg || 'No signal'}</span>}
-          {state === 'idle' && <span>Tap to view</span>}
+        <div className={`whep-overlay whep-overlay--${state}${statusUnknown && state !== 'idle' ? ' whep-overlay--unknown' : ''}`}>
+          {/* statusUnknown (#505): the server could not tell us the stream's state, so "No signal" would
+              blame the camera. Only while the video is NOT playing: if it plays, the camera is fine and
+              nothing covers it. A stopped tile (idle) keeps "Tap to view". */}
+          {statusUnknown && state !== 'idle' ? (
+            <StreamUnavailableNotice onRetry={() => setReconnectKey((k) => k + 1)} />
+          ) : (
+            <>
+              {state === 'connecting' && <span>Connecting…</span>}
+              {state === 'error' && <span>{errorMsg || 'No signal'}</span>}
+              {state === 'idle' && <span>Tap to view</span>}
+            </>
+          )}
         </div>
       )}
     </div>
