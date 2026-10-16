@@ -360,6 +360,13 @@ export function alertMarginDb(sensitivity) {
 // minute in progress is not in the history yet (it appears about 7 s after it ends). "No readings" is
 // therefore one of: still learning after a start or save (seconds), no microphone, or the detector not
 // running; the history cannot tell them apart, so the text names all three instead of guessing one.
+// For the same reason the "Listening" box says only that readings are coming in and NEVER that the room's
+// level "has been learned": a muted microphone stores zero-level readings without ever seeding a baseline
+// (review of #711), so stored readings do not prove calibration.
+//
+// BOUNDARIES (pinned in test/soundCalibration.test.jsx): a reading exactly READINGS_FRESH_MIN old is still
+// fresh (the cut-off is `>`), a reading exactly LEVEL_WINDOW_MIN old is still averaged (`<=`), and a reading
+// dated after `nowMs` (clock skew between the server's minute and this browser) is ignored, not counted.
 const LEVEL_WINDOW_MIN = 5; // the span the level is averaged over
 const READINGS_FRESH_MIN = 10; // no stored minute this recent = "no readings"
 const POLL_MS = 30000; // history gains a minute each minute; half a minute keeps the figure within one of it
@@ -422,7 +429,7 @@ function SoundCalibration({ cameraId, sensitivity }) {
         )}
         {state.phase === 'ok' && state.ready && (
           <div className="camera-tile__sub">
-            <strong>Listening.</strong> The room’s level has been learned.
+            <strong>Listening.</strong> Sound readings are coming in.
             {state.avg !== null && (
               <>
                 {' '}Over the last {LEVEL_WINDOW_MIN} minutes the sound averaged{' '}

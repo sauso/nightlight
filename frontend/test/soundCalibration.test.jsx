@@ -62,6 +62,32 @@ describe('#371 summariseSoundLevel', () => {
   test('a row with an unparseable time is ignored, not turned into a figure', () => {
     expect(summariseSoundLevel([{ t: 'garbage', sound_level: 99, sound_peak: 99, sound_windows: 5 }], NOW).ready).toBe(false);
   });
+
+  // The three boundaries below were unpinned: each mutant (drop the future filter, `>` to `>=`, `<=` to `<`)
+  // survived because every other fixture sits well inside or outside a limit. Intended boundaries are the
+  // code's: exactly 10 minutes old is still fresh, exactly 5 minutes old is still averaged.
+  test('★ a reading dated in the future is ignored, not counted as fresh or averaged', () => {
+    // Alone, a future row must not make the detector look like it is listening.
+    expect(summariseSoundLevel([row(-3)], NOW)).toEqual({ ready: false });
+    // Beside a real recent row, it must not drag the figures (level 50 / peak 90 would swamp 2 / 5).
+    const out = summariseSoundLevel([row(1), row(-3, { sound_level: 50, sound_peak: 90 })], NOW);
+    expect(out.avg).toBeCloseTo(2, 5);
+    expect(out.peak).toBe(5);
+  });
+
+  test('★ a reading exactly ten minutes old is still fresh; one second older is not', () => {
+    expect(summariseSoundLevel([row(10)], NOW).ready).toBe(true);
+    const justOver = { ...row(10), t: new Date(NOW - 10 * 60000 - 1000).toISOString().slice(0, 19).replace('T', ' ') };
+    expect(summariseSoundLevel([justOver], NOW).ready).toBe(false);
+  });
+
+  test('★ a reading exactly five minutes old is still averaged; one second older is not', () => {
+    const at5 = summariseSoundLevel([row(5, { sound_level: 8, sound_peak: 12 })], NOW);
+    expect(at5.avg).toBeCloseTo(8, 5);
+    expect(at5.peak).toBe(12);
+    const justOver = { ...row(5, { sound_level: 8, sound_peak: 12 }), t: new Date(NOW - 5 * 60000 - 1000).toISOString().slice(0, 19).replace('T', ' ') };
+    expect(summariseSoundLevel([justOver], NOW)).toEqual({ ready: true, avg: null, peak: null });
+  });
 });
 
 describe('#371 alertMarginDb', () => {
@@ -106,6 +132,17 @@ describe('#371 the Sound detection screen', () => {
     // The alert line at sensitivity 50, so the level can be read against it.
     expect(screen.getByText('11 dB')).toBeInTheDocument();
     expect(get).toHaveBeenCalledWith('/cameras/cam-1/activity-history?hours=1');
+  });
+
+  test('★ it never claims the room has been learned: a muted microphone stores zero readings with no baseline', async () => {
+    // A muted microphone (digital silence) is stored as level 0 although the analyser never seeded a baseline,
+    // so stored readings prove the detector is listening, not that it is calibrated (review of #711).
+    vi.spyOn(api, 'get').mockResolvedValue({ hours: 1, samples: [row(1, { sound_level: 0, sound_peak: 0 })] });
+    mount();
+    expect(await screen.findByText('Listening.')).toBeInTheDocument();
+    const box = screen.getByRole('status');
+    expect(box).toHaveTextContent('Sound readings are coming in.');
+    expect(box.textContent).not.toMatch(/learned|calibrat/i);
   });
 
   test('★ with no readings it says so and names the three possible reasons, not one', async () => {

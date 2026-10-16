@@ -17767,6 +17767,50 @@
     "namePattern": "#371 the Sound detection screen"
   },
   {
+    "label": "#371 sound calibration: a reading dated in the future is counted",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": ".filter((r) => r.ms !== null && r.windows > 0 && r.ms <= nowMs);",
+    "replace": ".filter((r) => r.ms !== null && r.windows > 0);",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: a reading exactly ten minutes old has expired",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "nowMs - newest > READINGS_FRESH_MIN * 60000",
+    "replace": "nowMs - newest >= READINGS_FRESH_MIN * 60000",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: a reading exactly five minutes old is left out of the average",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "nowMs - r.ms <= LEVEL_WINDOW_MIN * 60000",
+    "replace": "nowMs - r.ms < LEVEL_WINDOW_MIN * 60000",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: the listening box claims the room's level has been learned",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "<strong>Listening.</strong> Sound readings are coming in.",
+    "replace": "<strong>Listening.</strong> The room’s level has been learned.",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
     "label": "#521 recompute on an empty night: the control is not rendered (unreachable again)",
     "file": "frontend/src/pages/SleepDetail.jsx",
     "find": "          <RecomputeNight childId={childId}",
