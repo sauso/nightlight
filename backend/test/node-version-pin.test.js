@@ -70,11 +70,11 @@ test('the Node running this suite honours mock.module({ exports }), which many t
     'honoured',
     `Node ${process.versions.node} ignores the "exports" option of mock.module, so every test that mocks a module ` +
       `(16 files on 22.22) fails to link with "does not provide an export named ...". The project needs Node ${major} ` +
-      `(.nvmrc): run \`nvm use\`. stderr: ${r.stderr.slice(-300)}`
+      `(.nvmrc): run \`nvm use\`, or in a sandbox without nvm \`. scripts/use-node.sh\`. stderr: ${r.stderr.slice(-300)}`
   );
 });
 
 test('the running Node is at least the pinned major', () => {
   const running = Number(process.versions.node.split('.')[0]);
-  assert.ok(running >= major, `running Node ${process.versions.node}, but .nvmrc / engines say ${major}: run \`nvm use\``);
+  assert.ok(running >= major, `running Node ${process.versions.node}, but .nvmrc / engines say ${major}: run \`nvm use\`, or in a sandbox without nvm \`. scripts/use-node.sh\``);
 });

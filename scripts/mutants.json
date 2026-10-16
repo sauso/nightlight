@@ -20731,5 +20731,41 @@
       "mutate-args.test.js"
     ],
     "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#751 use-node.sh: a Node whose major equals .nvmrc is not accepted (-ge becomes -gt)",
+    "file": "scripts/use-node.sh",
+    "find": "if [ \"$nl_have\" -ge \"$nl_want\" ] 2>/dev/null; then",
+    "replace": "if [ \"$nl_have\" -gt \"$nl_want\" ] 2>/dev/null; then",
+    "expect": "killed",
+    "tests": ["use-node-script.test.js"],
+    "namePattern": "already satisfies .nvmrc is left alone"
+  },
+  {
+    "label": "#751 use-node.sh: a bad .nvmrc exits the caller's shell instead of returning",
+    "file": "scripts/use-node.sh",
+    "find": "(got '$nl_want')\" >&2\n    return 1 2>/dev/null || exit 1",
+    "replace": "(got '$nl_want')\" >&2\n    exit 1",
+    "expect": "killed",
+    "tests": ["use-node-script.test.js"],
+    "namePattern": "not a bare major version is refused"
+  },
+  {
+    "label": "#751 use-node.sh: an empty .nvmrc is accepted as a version",
+    "file": "scripts/use-node.sh",
+    "find": "  '' | *[!0-9]*)",
+    "replace": "  *[!0-9]*)",
+    "expect": "killed",
+    "tests": ["use-node-script.test.js"],
+    "namePattern": "not a bare major version is refused"
+  },
+  {
+    "label": "#751 use-node.sh: with no download for this OS the script reports success",
+    "file": "scripts/use-node.sh",
+    "find": "install Node $nl_want by hand\" >&2\n  return 1 2>/dev/null || exit 1",
+    "replace": "install Node $nl_want by hand\" >&2\n  return 0 2>/dev/null || exit 0",
+    "expect": "killed",
+    "tests": ["use-node-script.test.js"],
+    "namePattern": "fails, says what to do, and leaves PATH exactly as it was"
   }
 ]
