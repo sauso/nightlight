@@ -17743,5 +17743,321 @@
     "expect": "killed",
     "tests": ["loadStates.test.jsx"],
     "namePattern": "Clip management"
+  },
+  {
+    "label": "#563 gate: GET /api/auth/sessions/all without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.get('/sessions/all', requireAuth, requireAdmin, ",
+    "replace": "router.get('/sessions/all', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/auth/users without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.post('/users', requireAuth, requireAdmin, ",
+    "replace": "router.post('/users', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: PUT /api/auth/users/:id without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.put('/users/:id', requireAuth, requireAdmin, ",
+    "replace": "router.put('/users/:id', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: DELETE /api/auth/users/:id/mfa without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.delete('/users/:id/mfa', requireAuth, requireAdmin, ",
+    "replace": "router.delete('/users/:id/mfa', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: DELETE /api/auth/users/:id without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.delete('/users/:id', requireAuth, requireAdmin, ",
+    "replace": "router.delete('/users/:id', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/cameras/onvif-probe without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/onvif-probe', requireAdmin, ",
+    "replace": "router.post('/onvif-probe', ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/cameras/probe-report without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/probe-report', requireAdmin, ",
+    "replace": "router.post('/probe-report', ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: DELETE /api/cameras/alerts without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.delete('/alerts', requireAuth, requireAdmin, ",
+    "replace": "router.delete('/alerts', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/cameras/clips/delete without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/clips/delete', requireAdmin, ",
+    "replace": "router.post('/clips/delete', ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/cameras/verify-talk without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/verify-talk', requireAdmin, ",
+    "replace": "router.post('/verify-talk', ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: GET /api/gotify/config without requireAdmin",
+    "file": "backend/src/routes/gotify.js",
+    "find": "router.get('/config', requireAuth, requireAdmin, ",
+    "replace": "router.get('/config', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: PUT /api/gotify/config without requireAdmin",
+    "file": "backend/src/routes/gotify.js",
+    "find": "router.put('/config', requireAuth, requireAdmin, ",
+    "replace": "router.put('/config', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: GET /api/notifications/status without requireAdmin",
+    "file": "backend/src/routes/notifications.js",
+    "find": "router.get('/status', requireAuth, requireAdmin, ",
+    "replace": "router.get('/status', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: PUT /api/ntfy/config without requireAdmin",
+    "file": "backend/src/routes/ntfy.js",
+    "find": "router.put('/config', requireAuth, requireAdmin, ",
+    "replace": "router.put('/config', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/ntfy/test without requireAdmin",
+    "file": "backend/src/routes/ntfy.js",
+    "find": "router.post('/test', requireAuth, requireAdmin, ",
+    "replace": "router.post('/test', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: GET /api/pushover/config without requireAdmin",
+    "file": "backend/src/routes/pushover.js",
+    "find": "router.get('/config', requireAuth, requireAdmin, ",
+    "replace": "router.get('/config', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/pushover/test without requireAdmin",
+    "file": "backend/src/routes/pushover.js",
+    "find": "router.post('/test', requireAuth, requireAdmin, ",
+    "replace": "router.post('/test', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: GET /api/settings/mqtt/status without requireAdmin",
+    "file": "backend/src/routes/settings.js",
+    "find": "router.get('/mqtt/status', requireAuth, requireAdmin, ",
+    "replace": "router.get('/mqtt/status', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: GET /api/settings/clip-storage without requireAdmin",
+    "file": "backend/src/routes/settings.js",
+    "find": "router.get('/clip-storage', requireAuth, requireAdmin, ",
+    "replace": "router.get('/clip-storage', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: PUT /api/settings without requireAdmin",
+    "file": "backend/src/routes/settings.js",
+    "find": "router.put('/', requireAuth, requireAdmin, ",
+    "replace": "router.put('/', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: PUT /api/cameras/:id without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id', asyncHandler(async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review found that 4 of the 43 admin gates still had no removal entry (the other 39 are above): existing entries anchored to these lines change cooldown state or reorder guards, none removes the gate."
+  },
+  {
+    "label": "#563 gate: PUT /api/cameras/:id/detection without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/:id/detection', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id/detection', asyncHandler(async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review (see the PUT /api/cameras/:id entry)."
+  },
+  {
+    "label": "#563 gate: DELETE /api/logs without requireAdmin",
+    "file": "backend/src/routes/logs.js",
+    "find": "router.delete('/', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review (see the PUT /api/cameras/:id entry)."
+  },
+  {
+    "label": "#563 gate: DELETE /api/timelapses/:id without requireAdmin",
+    "file": "backend/src/routes/timelapses.js",
+    "find": "router.delete('/:id', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/:id', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review (see the PUT /api/cameras/:id entry)."
+  },
+  {
+    "label": "#666 exit probe: stopActivityTracker leaves the flush timer running (the probe child must be killed, not exit)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "      writeMinute(cameraId, s);\n    }\n  }\n  clearInterval(flushTimer);",
+    "replace": "      writeMinute(cameraId, s);\n    }\n  }\n  // MUTANT: clearInterval(flushTimer);",
+    "expect": "killed",
+    "tests": [
+      "suite-exits-cleanly.test.js"
+    ],
+    "namePattern": "a process that starts and then STOPS the tracker exits on its own",
+    "note": "Guards the #666 rewrite of childExitsOnItsOwn (deadline measured from BODY-DONE, not from spawn): the new harness must still see a leaked timer. Checked by hand against the full file too: 5 of 64 tests fail with the timer left running, the nested node --test run only after its 150s ceiling."
+  },
+  {
+    "label": "#W3 --shard: the modulus compares against i instead of i - 1 (shard n gets nothing, shard 1 misses entry 0)",
+    "file": "scripts/mutate.mjs",
+    "find": "idx % shard.n === shard.i - 1",
+    "replace": "idx % shard.n === shard.i",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: sharding happens on the whole catalogue before --only is applied",
+    "file": "scripts/mutate.mjs",
+    "find": "const mutants = shard ? filtered.filter(",
+    "replace": "const mutants = shard ? catalogue.filter(",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: i > n is accepted (a shard that can never exist runs nothing and says so late)",
+    "file": "scripts/mutate.mjs",
+    "find": "return i <= n ? { i, n } : null;",
+    "replace": "return { i, n };",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: an index above 2^53 is accepted (it rounds, so i > n compares equal)",
+    "file": "scripts/mutate.mjs",
+    "find": "if (!Number.isSafeInteger(i) || !Number.isSafeInteger(n)) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --only: a filter that matches no control carries none (a broken suite reports everything killed)",
+    "file": "scripts/mutate.mjs",
+    "find": "&& !matched.some((m) => m.expect === 'survives') ? [...matched, control] : matched;",
+    "replace": "&& false ? [...matched, control] : matched;",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --only: the control is added even when the filter matches nothing (a typo runs just the control)",
+    "file": "scripts/mutate.mjs",
+    "find": "const filtered = only && matched.length && control",
+    "replace": "const filtered = only && control",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: a leading 0 / zero index is accepted",
+    "file": "scripts/mutate.mjs",
+    "find": "/^([1-9]\\d*)\\/([1-9]\\d*)$/",
+    "replace": "/^(\\d+)\\/([1-9]\\d*)$/",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --list ignores --only and --shard (prints the whole catalogue)",
+    "file": "scripts/mutate.mjs",
+    "find": "for (const m of mutants) console.log(`${m.expect === 'survives'",
+    "replace": "for (const m of catalogue) console.log(`${m.expect === 'survives'",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
   }
 ]
