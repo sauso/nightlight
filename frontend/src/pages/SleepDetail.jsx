@@ -311,6 +311,19 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
             <ReviewNightButton childId={childId} date={date} corrected={night.corrected} />
           </div>
         )}
+        {/* #521: Recompute used to be unreachable here, because this branch returns before the `ok`-night
+            render below where it lives. An admin who tuned a threshold had no way to ask "does the detector
+            still call this night empty?" short of un-flagging the night first. It is the SAME component as on
+            an `ok` night, so every guard comes with it and none is re-implemented: admin-only, the dialog
+            previews the saved row against this one before anything is written (the second press applies),
+            and the server's allowDowngrade / locked refusals still decide what can be stored. A flagged night
+            is a corrected night, so it normally opens on "locked" (nothing to recompute until the correction
+            is removed). Not offered on no_data / no_sleep: the issue is about `empty`, and those are a
+            coverage or scoring question, not a "did the detector change its mind" one. */}
+        <div style={{ padding: '0 14px 14px' }}>
+          <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime} onRecomputed={onRecomputed}
+            onCorrectionRemoved={onCorrectionRemoved} />
+        </div>
       </div>
     );
   }
