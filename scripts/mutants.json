@@ -17622,6 +17622,106 @@
     "namePattern": "#562 CSP wiring"
   },
   {
+    "label": "#384 photo save also sends the form's name, birthday and colour",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "{ photo }, { timeoutMs",
+    "replace": "{ name: form.name, birthday: form.birthday, color: form.color, photo }, { timeoutMs",
+    "expect": "killed",
+    "tests": [
+      "childSettings.test.jsx"
+    ],
+    "namePattern": "#384"
+  },
+  {
+    "label": "#382 AuthContext: any /auth/me failure counts as signed out (the old behaviour)",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "if (err?.status === 401) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 AuthContext: a 401 is treated as unreachable",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "if (err?.status === 401) {",
+    "replace": "if (err?.status === 999) {",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 App shell: the unreachable state is not shown",
+    "file": "frontend/src/App.jsx",
+    "find": "if (unreachable && !user) return",
+    "replace": "if (false && unreachable && !user) return",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 Login: a failed /auth/status falls open to the sign-in form again",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "if (statusFailures > 0 && needsSetup === null && !demoSignIn) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": [
+      "login.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 Login: no guard against a second status check in flight (timer beside a manual Try again)",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "if (statusCheckInFlight.current) return;",
+    "replace": "if (false) return;",
+    "expect": "killed",
+    "tests": [
+      "login.test.jsx"
+    ],
+    "namePattern": "Try again pressed just before the timer fires"
+  },
+  {
+    "label": "#382 AuthContext: a real 401 leaves the unreachable state set",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    setUnreachable(false);\n    setFailures(0);\n  }), []);",
+    "replace": "  }), []);",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "a real 401 on another request, after an unreachable refresh"
+  },
+  {
+    "label": "#382 useAutoRetry: never schedules a retry",
+    "file": "frontend/src/lib/useAutoRetry.js",
+    "find": "if (failures < 1) return undefined;",
+    "replace": "return undefined;",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx",
+      "login.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 AuthContext: the stored token is dropped on an unreachable server",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "        setUnreachable(true);\n",
+    "replace": "        setUnreachable(true); setToken(null);\n",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
     "label": "#391 recording: Save leaves the on/off switch out of the payload",
     "file": "frontend/src/pages/SettingsRecording.jsx",
     "find": "    const payload = shown;",

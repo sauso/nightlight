@@ -109,11 +109,19 @@ export default function ChildSettings() {
 
   // Persist just the photo immediately for an existing child (no Save press needed). On a new child
   // there's no record yet, so it rides along when the form is first saved.
+  //
+  // The request carries ONLY `photo` (#384). It used to also send the form's name, birthday and colour,
+  // which committed whatever the person had typed there but not yet saved, behind their back, and the
+  // screen still counted those edits as unsaved. The route keeps every field it is not sent
+  // (routes/children.js: name/color fall back to the stored value, birthday and the sleep fields to
+  // `existing` when undefined), so a partial body is complete as far as the server is concerned. And this
+  // function never touches `form` beyond what the caller already set (photo), so the other edits stay in
+  // the form, still unsaved, for the Save changes button.
   async function persistPhoto(photo) {
     if (isNew) return;
     setPhotoStatus('saving');
     try {
-      await api.put(`/children/${id}`, { name: form.name, birthday: form.birthday, color: form.color, photo }, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
+      await api.put(`/children/${id}`, { photo }, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       await refresh();
       setPhotoStatus('saved');
       setTimeout(() => setPhotoStatus(''), 2000);
