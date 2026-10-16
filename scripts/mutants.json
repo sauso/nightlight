@@ -18363,6 +18363,24 @@
     "namePattern": "#701 review entries that are not text are dropped"
   },
   {
+    "label": "#742 review httpNotify.js: redactSecrets drops the JSON-escaped spelling (a quote or backslash in the token is echoed back escaped and survives)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "[...new Set([s, JSON.stringify(s).slice(1, -1), encodeURIComponent(s),",
+    "replace": "[...new Set([s, encodeURIComponent(s),",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets"
+  },
+  {
+    "label": "#742 review httpNotify.js: redactSecrets drops the percent-encoded spelling (a space or symbol echoed as %XX survives)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "[...new Set([s, JSON.stringify(s).slice(1, -1), encodeURIComponent(s), encodeURIComponent(s).replace(/%20/g, '+')])]",
+    "replace": "[...new Set([s, JSON.stringify(s).slice(1, -1)])]",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets"
+  },
+  {
     "label": "#702 review photo.js: the allowlist loses its start anchor (an SVG with a PNG prefix later in it is stored)",
     "file": "backend/src/lib/photo.js",
     "find": "const PHOTO_PREFIX = /^data:image",

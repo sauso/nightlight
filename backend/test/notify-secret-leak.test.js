@@ -125,6 +125,19 @@ describe('#702 review: the shared bounded POST never quotes a request it cannot 
     assert.equal(redactSecrets('fetch failed', ['', null, undefined, 42]), 'fetch failed');
     assert.equal(redactSecrets(undefined, [A]), '');
   });
+
+  test('#742 review redactSecrets: a secret echoed JSON-escaped or percent-encoded is cut out too', () => {
+    // ntfy accepts a token holding a quote, a backslash or a space; a server that echoes the Authorization header
+    // in a JSON error writes `\"` and `\\`, a form or URL echo writes %22 and + (Codex review of PR #742).
+    const tok = `tk"${A}\\${B} x`;
+    const json = JSON.stringify({ error: `bad header Bearer ${tok}` });
+    const form = `Authorization=${encodeURIComponent(`Bearer ${tok}`)}&b=${encodeURIComponent(tok).replace(/%20/g, '+')}`;
+    for (const echoed of [`bad header Bearer ${tok}`, json, form]) {
+      const out = redactSecrets(echoed, [tok]);
+      assert.ok(!out.includes(A) && !out.includes(B), `a fragment of the token survived: ${out}`);
+      assert.ok(out.includes('[redacted]'), out);
+    }
+  });
 });
 
 describe('#702 review: a stored Gotify token that fetch cannot send', () => {
