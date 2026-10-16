@@ -4,6 +4,8 @@ import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Modal from '../components/Modal.jsx';
 import ClipDatePicker from '../components/ClipDatePicker.jsx';
+import LoadFailed from '../components/LoadFailed.jsx';
+import { loadState } from '../lib/loadState.js';
 import { useHomeTime } from '../lib/useHomeTime.js';
 
 // Admin Clip Management: browse every recorded clip, filter by day, and bulk-select + delete. Deleting
@@ -27,7 +29,8 @@ function fmtBytes(b) {
 
 export default function ClipManagement() {
   const [clips, setClips] = useState(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(''); // the LIST request's failure
+  const [actionError, setActionError] = useState(''); // a delete's failure
   const [selectedDays, setSelectedDays] = useState(() => new Set()); // empty = all days
   const [selected, setSelected] = useState(() => new Set());
   const [playing, setPlaying] = useState(null);
@@ -40,9 +43,12 @@ export default function ClipManagement() {
       // Slow-allowed (#556): returns up to 5000 rows (getClips caps there), which is a large body on a slow link.
       const rows = await api.get('/cameras/clips', { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       setClips(Array.isArray(rows) ? rows : []);
+      setError('');
     } catch (e) {
+      // `clips` stays null on a first failure: it used to become [], which rendered "0 clips" and "No clips
+      // yet. Turn on 'Save a clip...'" under the error banner - an outage worded as an unconfigured install
+      // (#375). A reload that fails after a good load keeps the list it had.
       setError(e.message || 'Failed to load clips');
-      setClips([]);
     }
   }
   useEffect(() => { load(); }, []);
@@ -105,6 +111,7 @@ export default function ClipManagement() {
 
   async function deleteSelected() {
     setBusy(true);
+    setActionError('');
     try {
       const ids = [...selected];
       // Slow-allowed (#556): the route deletes each clip file one by one, synchronously, so thousands take a while.
@@ -113,23 +120,27 @@ export default function ClipManagement() {
       setConfirming(false);
       await load();
     } catch (e) {
-      setError(e.message || 'Failed to delete clips');
+      setActionError(e.message || 'Failed to delete clips');
     } finally {
       setBusy(false);
     }
   }
 
   const selCount = selected.size;
+  const listState = loadState({ loaded: clips != null, error, count: clips ? clips.length : 0 });
 
   return (
     <>
       <AppHeader title="Clip Management" back={{ to: '/settings', label: 'Settings' }} />
       <main className="app-main" style={{ paddingBottom: selCount ? 84 : undefined }}>
-        {error && <div className="error-banner">{error}</div>}
+        {listState === 'error' && <LoadFailed what="clips" error={error} onRetry={load} />}
+        {listState === 'stale' && <LoadFailed what="clips" error={error} onRetry={load} stale />}
+        {/* A failed delete/clear is not a failed LIST: it has no Retry, and the list stays as it was. */}
+        {actionError && <div className="error-banner">{actionError}</div>}
 
         <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
           <div className="camera-tile__sub">
-            {clips == null ? 'Loading…' : `${clips.length} clip${clips.length === 1 ? '' : 's'}${totalBytes ? ` · ${fmtBytes(totalBytes)}` : ''}`}
+            {clips == null ? (listState === 'error' ? '' : 'Loading…') : `${clips.length} clip${clips.length === 1 ? '' : 's'}${totalBytes ? ` · ${fmtBytes(totalBytes)}` : ''}`}
           </div>
           {availableDays.size > 0 && (
             <ClipDatePicker
@@ -142,7 +153,7 @@ export default function ClipManagement() {
           )}
         </div>
 
-        {clips != null && clips.length === 0 && (
+        {listState === 'empty' && (
           <div className="empty-state" style={{ padding: 24 }}>
             No clips yet. Turn on “Save a clip when triggered” for a camera (under its Motion/Sound settings).
           </div>

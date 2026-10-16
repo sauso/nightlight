@@ -17,6 +17,11 @@ on:
   pull_request:
   workflow_dispatch: {}
 
+# Least privilege (#566 bullet 5): this workflow only reads the repository, so the token it is handed is
+# limited to that instead of the repository default (which may include write).
+permissions:
+  contents: read
+
 concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
@@ -44,7 +49,11 @@ jobs:
       #      find, stat and chmod are what production runs (`npm test` above used Ubuntu's dash and GNU tools).
       #      A run that skipped anything proves nothing, hence the check on the TAP summary;
       #   2. scripts/entrypoint-umask.mutants.sh: every named mutation of the block must turn the test red.
-      - name: Entrypoint file modes on BusyBox, and the shell mutants (#549)
+      #   3. entrypoint-chown.test.js (#567) as ROOT in the same image (post-merge review of PR #701): its "a file
+      #      owned by someone else" cases need root to create such a file, so `npm test` above (the unprivileged
+      #      `runner` user) SKIPS them. Here they run, under BusyBox stat, and a skip fails the step. Root inside a
+      #      throwaway container only: the job's token permissions are unchanged.
+      - name: Entrypoint file modes and ownership on BusyBox, and the shell mutants (#549, #567)
         run: |
           docker run --rm --user node -v "$PWD/backend:/w:ro" -w /w node:24-alpine \
             node --test --test-reporter=tap test/entrypoint-umask.test.js > "$RUNNER_TEMP/busybox.tap" \
@@ -52,6 +61,12 @@ jobs:
           grep -q '^# skipped 0$' "$RUNNER_TEMP/busybox.tap" \
             || { cat "$RUNNER_TEMP/busybox.tap"; echo "::error::the BusyBox run skipped tests"; exit 1; }
           tail -9 "$RUNNER_TEMP/busybox.tap"
+          docker run --rm --user root -v "$PWD/backend:/w:ro" -w /w node:24-alpine \
+            node --test --test-reporter=tap test/entrypoint-chown.test.js > "$RUNNER_TEMP/busybox-chown.tap" \
+            || { cat "$RUNNER_TEMP/busybox-chown.tap"; exit 1; }
+          grep -q '^# skipped 0$' "$RUNNER_TEMP/busybox-chown.tap" \
+            || { cat "$RUNNER_TEMP/busybox-chown.tap"; echo "::error::the BusyBox chown run (as root) skipped tests"; exit 1; }
+          tail -9 "$RUNNER_TEMP/busybox-chown.tap"
           bash scripts/entrypoint-umask.mutants.sh
 
   core-coverage:

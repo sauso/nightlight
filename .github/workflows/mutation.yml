@@ -18,13 +18,10 @@ name: Mutation testing (full catalogue, sharded)
 # LEAST PRIVILEGE. The token can only read the repository; there are no secrets and none are needed, because the
 # mutants run in a throwaway checkout on the runner and nothing is pushed. `workflow_dispatch` input is passed
 # through the environment, never interpolated into the script, so it cannot inject shell.
-#
-# THIS COPY ON `main` IS A STUB THAT REGISTERS THE WORKFLOW. GitHub only lets you dispatch a workflow whose file is on
-# the default branch (`gh workflow run` answered HTTP 404 before this), and a dispatch with `--ref dev` then runs dev's
-# copy of this file against dev's checkout. The weekly `schedule` trigger is deliberately NOT here: a scheduled run
-# always uses main's checkout, which has no `mutate.mjs --shard` until the next release, so it would fail every Sunday.
-# The release brings dev's copy (with the schedule) over this one.
 on:
+  schedule:
+    # Sundays, off the hour. future-clock.yml owns Monday 05:17; this stays off its runners' queue.
+    - cron: '43 2 * * 0'
   workflow_dispatch:
     inputs:
       only:
