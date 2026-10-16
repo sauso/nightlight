@@ -73,6 +73,21 @@ describe('#558 parseStunServers', () => {
     assert.match(r.warning, /STUN is OFF/);
   });
 
+  test('#701 a DNS label is at most 63 characters, in the first label and in every later one', () => {
+    // RFC 1035 section 2.3.4. The regex bounds each label to 1 + 61 + 1; the bound exists so a pasted value
+    // cannot make the pattern run unbounded, and so an over-long name (which no resolver accepts) is reported
+    // as a typo instead of being written into the MediaMTX file and the CSP.
+    const l63 = 'a'.repeat(63);
+    const l64 = 'a'.repeat(64);
+    assert.deepEqual(parseStunUrl(`stun:${l63}.example.org`), { host: `${l63}.example.org`, port: 3478 }, '63 is the longest allowed');
+    assert.deepEqual(parseStunUrl(`stun:example.${l63}`), { host: `example.${l63}`, port: 3478 });
+    assert.equal(parseStunUrl(`stun:${l64}.example.org`), null, 'a 64-character FIRST label is refused');
+    assert.equal(parseStunUrl(`stun:${l64}`), null, 'a 64-character single label is refused');
+    assert.equal(parseStunUrl(`stun:example.${l64}`), null, 'a 64-character LATER label is refused');
+    assert.equal(parseStunUrl(`stun:example.${l64}.org`), null);
+    assert.ok(parseStunServers(`stun:${l64}.example.org`).warning, 'and the setting reports it');
+  });
+
   test('#558 stun URL host/port rules, and the CSP source for each', () => {
     assert.deepEqual(parseStunUrl('stun:h.example.org'), { host: 'h.example.org', port: 3478 }, 'no port = 3478');
     assert.equal(stunCspSource('stun:h.example.org'), 'h.example.org:3478');
@@ -225,11 +240,19 @@ describe('#558 no second copy of the default', () => {
 });
 
 describe('#558 index.js wiring (source text only: index.js cannot be booted by a test)', () => {
-  const src = fs.readFileSync(path.resolve(HERE, '..', 'src', 'index.js'), 'utf8').replace(/\s+/g, ' ');
+  // Comments are stripped BEFORE the assertions (#701 review): a call that was commented out, or one merely
+  // quoted in a comment, still contains the text, so a plain substring test passed with MediaMTX never started.
+  // `(^|\s)//` and not a bare `//` so a URL such as http://... in code is left alone. (A `//` inside a string
+  // literal preceded by whitespace would also be cut; index.js has none near these calls, and the cost of a
+  // wrong cut is a test failing, not passing.)
+  const src = fs.readFileSync(path.resolve(HERE, '..', 'src', 'index.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|\s)\/\/.*$/gm, '$1')
+    .replace(/\s+/g, ' ');
   test('#558 MediaMTX is started from the config written for the parsed STUN_SERVERS, never from the raw base file', () => {
     assert.ok(src.includes('parseStunServers(process.env.STUN_SERVERS)'), 'the setting is read from the environment');
     assert.ok(src.includes('writeMediamtxConfig(mediamtxBasePath, stun.urls,'), 'the parsed list is what is written');
-    assert.ok(src.includes('startMediaMTX(mediamtxConfigPath)'), 'the written copy is what is started');
+    assert.ok(src.includes('startMediaMTX(mediamtxConfigPath);'), 'the written copy is what is started (as a statement, in code, not in a comment)');
     assert.ok(!src.includes('startMediaMTX(mediamtxBasePath)'));
   });
 });

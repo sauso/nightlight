@@ -31,6 +31,20 @@ export function getIceServers() {
   return attempt;
 }
 
+// getIceServers(), but never waits longer than `ms`: past that it answers [] (no STUN) for THIS attempt while
+// the lookup carries on and still fills the cache if it succeeds late. WHY (#701 review): the lookup is a
+// network request that can hang until the API client's 30s timeout, and the player's first-connection
+// deadline is 2s. getIceServers() itself never rejects.
+export function getIceServersWithin(ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve([]), ms);
+    getIceServers().then((servers) => {
+      clearTimeout(timer);
+      resolve(servers);
+    });
+  });
+}
+
 // Test seam: the cache outlives a test, and the setting is per test.
 export function resetIceServersCache() {
   cached = null;

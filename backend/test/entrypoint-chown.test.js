@@ -62,6 +62,17 @@ function run(dataDir, { puid, pgid }) {
   return { status: r.status, chowns, out: r.stdout, ctx: `\n--- stdout ---\n${r.stdout}\n--- stderr ---\n${r.stderr}` };
 }
 
+// Runs everywhere (reads text, needs no root and no Linux), so the list below cannot drift unseen on a machine
+// where the root-only test further down is skipped (#701 review: the -shm entry could be dropped unnoticed).
+describe('#567 entrypoint ownership check: which files it looks at', () => {
+  test('#701 chown: the sentinel loop names the data directory, the database, BOTH its sidecar files and .jwt_secret', () => {
+    const text = fs.readFileSync(SCRIPT, 'utf8').replace(/\r\n/g, '\n');
+    const m = /^for f in (.+); do$/m.exec(text.slice(text.indexOf('NEEDS_CHOWN=')));
+    assert.ok(m, 'the sentinel loop is found');
+    assert.deepEqual(m[1].split(/\s+/), ['.', 'babymonitor.db', 'babymonitor.db-wal', 'babymonitor.db-shm', '.jwt_secret']);
+  });
+});
+
 describe('#567 entrypoint ownership pass', { skip }, () => {
   before(() => {
     ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'nl-chown-'));
@@ -101,7 +112,9 @@ describe('#567 entrypoint ownership pass', { skip }, () => {
   });
 
   test('#567 chown: a database file owned by someone else inside a right directory walks the tree', { skip: skipNotRoot }, () => {
-    for (const f of ['babymonitor.db', 'babymonitor.db-wal', '.jwt_secret']) {
+    // Every name the sentinel loop in entrypoint.sh lists (-shm was missing here, #701 review: dropping it from the
+    // script passed). Keep this list equal to that loop; the first test in this file reads the script to enforce it.
+    for (const f of ['babymonitor.db', 'babymonitor.db-wal', 'babymonitor.db-shm', '.jwt_secret']) {
       const data = freshData();
       fs.writeFileSync(path.join(data, f), 'x');
       fs.chownSync(path.join(data, f), UID + 4242, GID);

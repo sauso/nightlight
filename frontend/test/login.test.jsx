@@ -14,7 +14,8 @@
 //   * the code step must not leak the short-lived MFA token, and backing out of it must not leave a
 //     half-authenticated state lying around.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, act } from '@testing-library/react';
+import { RETRY_BASE_MS } from '../src/lib/useAutoRetry.js';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { renderAs, ADMIN } from './helpers/render.jsx';
 import Login from '../src/pages/Login.jsx';
@@ -76,13 +77,70 @@ describe('which of the three screens is shown', () => {
     expect(screen.getByText(/Set up the first admin account/)).toBeTruthy();
   });
 
-  test('★ a failed status check falls back to sign-in rather than a blank page', async () => {
-    // `needsSetup === null` renders nothing, so an unhandled rejection here is a permanently blank
-    // app with no way in. Sign-in is the right guess: a server that cannot answer is far more likely
-    // to be an existing install with a hiccup than a brand new one.
+  test('★ #382: a failed status check says the server cannot be reached; it does NOT show sign-in', async () => {
+    // Was: the sign-in form (needsSetup = false). That put a password form in front of someone whose
+    // server was down, and on a fresh install it hid the setup form. Neither form until the server answers.
     vi.spyOn(api, 'get').mockRejectedValue(new Error('offline'));
     mount();
-    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeTruthy();
+    expect(await screen.findByText(/Can't reach Nightlight/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
+    expect(screen.queryByLabelText('Username')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
+  test('★ #382: Try again asks again, and the right form appears once the server answers', async () => {
+    const get = vi.spyOn(api, 'get').mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ needsSetup: true });
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Try again' }));
+    expect(await screen.findByLabelText('First name'), 'the setup form, not a guessed sign-in').toBeTruthy();
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/Can't reach/)).toBeNull();
+  });
+
+  test('★ #382: it retries by itself, without a tap', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const get = vi.spyOn(api, 'get').mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ needsSetup: false });
+      mount();
+      await screen.findByText(/Can't reach Nightlight/);
+      expect(get).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(RETRY_BASE_MS); });
+      expect(await screen.findByRole('button', { name: 'Sign in' })).toBeTruthy();
+      expect(get).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('#382: a manual Try again and the automatic retry never run together', () => {
+  test('★ Try again pressed just before the timer fires, GET still pending: ONE status check, ONE guest sign-in', async () => {
+    // After the first failure `statusFailures` stays positive, so the 5 s timer is armed while the manual
+    // check is pending. Unguarded, the timer started a second GET; both answered { demo: true } and both
+    // posted /auth/guest, consuming two of the shared demo's active session slots.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const pending = [];
+      const get = vi.spyOn(api, 'get')
+        .mockRejectedValueOnce(new Error('offline'))
+        .mockImplementation(() => new Promise((resolve) => { pending.push(resolve); }));
+      const guest = vi.spyOn(api, 'post').mockResolvedValue(SESSION);
+      mount();
+      const tryAgain = await screen.findByRole('button', { name: 'Try again' });
+      await act(async () => { await vi.advanceTimersByTimeAsync(RETRY_BASE_MS - 500); });
+      expect(get, 'the timer has not fired yet').toHaveBeenCalledTimes(1);
+
+      act(() => { tryAgain.click(); }); // manual retry; its GET stays pending
+      expect(get).toHaveBeenCalledTimes(2);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); }); // the 5 s timer's moment passes
+      expect(get, 'the timer must not start a second status check beside the pending one').toHaveBeenCalledTimes(2);
+
+      await act(async () => { pending.forEach((resolve) => resolve({ demo: true })); });
+      await waitFor(() => expect(guest).toHaveBeenCalled());
+      expect(guest.mock.calls.filter(([path]) => path === '/auth/guest')).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

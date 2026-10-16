@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { getToken } from '../lib/api.js';
 import { resolveWhepResource } from '../lib/whep.js';
-import { getIceServers } from '../lib/iceServers.js';
+import { getIceServersWithin } from '../lib/iceServers.js';
+import StreamUnavailableNotice from './StreamUnavailableNotice.jsx';
 import { useNowPlayingSession, NOW_PLAYING_ARTWORK } from '../lib/useNowPlaying.js';
 
 // Re-exported for backwards compatibility with any importer that reached for it here; the
@@ -21,6 +22,29 @@ function whepUrl(mediamtxPath) {
 const BLANK_POSTER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3Crect width='1' height='1' fill='%230a0d1c'/%3E%3C/svg%3E";
 
+// How long a connection attempt waits for the ICE-server lookup (lib/iceServers.js) before going ahead with no
+// STUN. Half of the 2s first-connection deadline, so the lookup can use at most half the budget (#701 review).
+const ICE_LOOKUP_BUDGET_MS = 1000;
+
+// Ends a WHEP viewing session on the server. A courtesy (MediaMTX frees the session on its own once the peer is
+// gone), so a failure is swallowed.
+function deleteWhepSession(resourceUrl) {
+  fetch(resourceUrl, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${getToken()}` },
+    // WHY no redirects (#562, found in code review with a stub server): a same-origin 307/308 answer
+    // to this DELETE is followed with the method AND the Authorization header kept (the Fetch spec
+    // keeps a DELETE's method on a 301/302 as well; not tried), so checking the first address
+    // (resolveWhepResource) would not bound where the token ends up: a redirect to an /api
+    // route would replay the DELETE there. Refusing to follow costs nothing: the DELETE is
+    // a courtesy and its failure is already swallowed by the catch below.
+    // The POST is deliberately left on the default (follow): it goes to the fixed address this
+    // file builds, not one a response named, and a legitimate reverse proxy may redirect it (to
+    // https, say); refusing there could break the live view for that install.
+    redirect: 'error',
+  }).catch(() => {});
+}
+
 export default function WhepPlayer({
   mediamtxPath,
   active,
@@ -28,6 +52,7 @@ export default function WhepPlayer({
   onFirstConnectFailed,
   cameraName,
   isBackgroundAudio = false,
+  statusUnknown = false,
 }) {
   const videoRef = useRef(null);
   // Audio lives on its own <audio> element, separate from <video> - Chrome treats
@@ -38,7 +63,6 @@ export default function WhepPlayer({
   // independently, the same way Spotify's web player does.
   const audioRef = useRef(null);
   const pcRef = useRef(null);
-  const resourceUrlRef = useRef(null);
   const everConnectedRef = useRef(false);
   const [state, setState] = useState('idle'); // idle | connecting | live | error
   const [errorMsg, setErrorMsg] = useState('');
@@ -117,6 +141,12 @@ export default function WhepPlayer({
     if (!active) return;
     let cancelled = false;
     let firstConnectTimeoutId = null;
+    // This run's own session address (#694). It used to live in a ref shared by every run of this effect, and the
+    // POST stored into it BEFORE the `cancelled` check: a slow POST from a torn-down run A could resolve after
+    // run B had stored its own address and overwrite it, so B's cleanup DELETEd A's session and B's stayed open
+    // until MediaMTX noticed the viewer had gone. A local cannot be reached by another run, so a late answer can
+    // only ever affect the run that sent it.
+    let resourceUrl = null;
 
     async function connect() {
       setState('connecting');
@@ -125,26 +155,34 @@ export default function WhepPlayer({
         // STUN helps both sides discover a reachable address when connecting over the internet and is
         // not used for same-network viewing. Which servers (possibly none) is the server's STUN_SERVERS
         // setting, not a constant here: see lib/iceServers.js (#558).
-        const iceServers = await getIceServers();
-        if (cancelled) return;
-        const pc = new RTCPeerConnection({ iceServers });
-        pcRef.current = pc;
-        pc.addTransceiver('video', { direction: 'recvonly' });
-        pc.addTransceiver('audio', { direction: 'recvonly' });
+        let pc = null;
 
         // Browsers' own native ICE-failure detection is very conservative (often 15s+)
         // before declaring a connection failed. Rather than wait on that, treat a first
         // connection attempt that hasn't succeeded within 2s as failed ourselves - real
         // same-LAN connections settle in well under a second, so this is still generous.
+        // WHY this starts BEFORE the ICE-server lookup below (#701 review): the lookup is an HTTP
+        // request that may never answer (a hung /api/about); with the timer armed after it, the
+        // deadline that makes CameraTile fall back to Compatibility mode would slip from 2s to the
+        // API client's 30s timeout. `pc?.` because the connection may not exist yet when it fires.
         if (!everConnectedRef.current) {
           firstConnectTimeoutId = setTimeout(() => {
-            if (!cancelled && pc.connectionState !== 'connected') {
+            if (!cancelled && pc?.connectionState !== 'connected') {
               setState('error');
               setErrorMsg('Connection timed out');
               onFirstConnectFailed?.();
             }
           }, 2000);
         }
+
+        // Bounded to 1s so a slow lookup cannot eat the 2s budget above: past that it falls back to
+        // no STUN for this attempt (same-network viewing does not need it; the next retry asks again).
+        const iceServers = await getIceServersWithin(ICE_LOOKUP_BUDGET_MS);
+        if (cancelled) return;
+        pc = new RTCPeerConnection({ iceServers });
+        pcRef.current = pc;
+        pc.addTransceiver('video', { direction: 'recvonly' });
+        pc.addTransceiver('audio', { direction: 'recvonly' });
 
         // Each track arrives as its own ontrack event (one for video, one for audio),
         // since they were requested as separate transceivers above - route each to its
@@ -240,13 +278,20 @@ export default function WhepPlayer({
         //    is only a courtesy that lets MediaMTX free the session at once; without it the session lasts
         //    until MediaMTX notices the peer has gone. How long that is has NOT been measured. In a correct
         //    deployment (a Location of /live/<camera>/whep/<id>) the DELETE is still sent, unchanged.
-        resourceUrlRef.current = resolveWhepResource(
+        resourceUrl = resolveWhepResource(
           res.headers.get('Location'),
           whepUrl(mediamtxPath),
           window.location.origin,
         );
+        // WHY a late answer DELETEs at once (#694): this run's cleanup already ran (and found nothing stored, so
+        // sent no DELETE), and it will never run again, so the session MediaMTX just created for this answer has
+        // no other chance of being ended. Nothing is stored for any later run to trip over. A refused Location
+        // (null) sends nothing, as in the normal path.
+        if (cancelled) {
+          if (resourceUrl) deleteWhepSession(resourceUrl);
+          return;
+        }
         const answerSdp = await res.text();
-        if (cancelled) return;
         await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
       } catch (err) {
         if (!cancelled) {
@@ -266,22 +311,9 @@ export default function WhepPlayer({
         pcRef.current.close();
         pcRef.current = null;
       }
-      if (resourceUrlRef.current) {
-        fetch(resourceUrlRef.current, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${getToken()}` },
-          // WHY no redirects (#562, found in code review with a stub server): a same-origin 307/308 answer
-          // to this DELETE is followed with the method AND the Authorization header kept (the Fetch spec
-          // keeps a DELETE's method on a 301/302 as well; not tried), so checking the first address
-          // (resolveWhepResource above) would not bound where the token ends up: a redirect to an /api
-          // route would replay the DELETE there. Refusing to follow costs nothing: the DELETE is
-          // a courtesy and its failure is already swallowed by the catch below.
-          // The POST above is deliberately left on the default (follow): it goes to the fixed address this
-          // file builds, not one a response named, and a legitimate reverse proxy may redirect it (to
-          // https, say); refusing there could break the live view for that install.
-          redirect: 'error',
-        }).catch(() => {});
-        resourceUrlRef.current = null;
+      if (resourceUrl) {
+        deleteWhepSession(resourceUrl);
+        resourceUrl = null;
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -304,10 +336,19 @@ export default function WhepPlayer({
       />
       <audio ref={audioRef} autoPlay />
       {state !== 'live' && (
-        <div className={`whep-overlay whep-overlay--${state}`}>
-          {state === 'connecting' && <span>Connecting…</span>}
-          {state === 'error' && <span>{errorMsg || 'No signal'}</span>}
-          {state === 'idle' && <span>Tap to view</span>}
+        <div className={`whep-overlay whep-overlay--${state}${statusUnknown && state !== 'idle' ? ' whep-overlay--unknown' : ''}`}>
+          {/* statusUnknown (#505): the server could not tell us the stream's state, so "No signal" would
+              blame the camera. Only while the video is NOT playing: if it plays, the camera is fine and
+              nothing covers it. A stopped tile (idle) keeps "Tap to view". */}
+          {statusUnknown && state !== 'idle' ? (
+            <StreamUnavailableNotice onRetry={() => setReconnectKey((k) => k + 1)} />
+          ) : (
+            <>
+              {state === 'connecting' && <span>Connecting…</span>}
+              {state === 'error' && <span>{errorMsg || 'No signal'}</span>}
+              {state === 'idle' && <span>Tap to view</span>}
+            </>
+          )}
         </div>
       )}
     </div>

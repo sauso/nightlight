@@ -10,7 +10,7 @@ import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import WhepPlayer from '../src/components/WhepPlayer.jsx';
 import { setToken } from '../src/lib/api.js';
-import { getIceServers, resetIceServersCache } from '../src/lib/iceServers.js';
+import { getIceServers, getIceServersWithin, resetIceServersCache } from '../src/lib/iceServers.js';
 
 let configs;
 let aboutAnswer;
@@ -82,6 +82,61 @@ describe('#558 the player uses the server\'s STUN list', () => {
     aboutAnswer = answerWith(['stun:a.example.org:3478']);
     await Promise.all([getIceServers(), getIceServers(), getIceServers()]);
     await getIceServers();
+    expect(aboutCalls).toBe(1);
+  });
+});
+
+// #701 review (P2): the ICE-server lookup used to run BEFORE the 2s first-connection timer was armed, so a
+// /api/about that never answered held CameraTile's fall-back to Compatibility mode for the API client's 30s timeout.
+// Here /api/about NEVER settles and the clock is faked.
+describe('#701 a hung /api/about cannot delay the first-connection deadline', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    aboutAnswer = () => new Promise(() => {});
+  });
+  afterEach(() => { vi.useRealTimers(); });
+
+  test('#701 onFirstConnectFailed fires at 2s, not before and not at the API timeout', async () => {
+    const onFirstConnectFailed = vi.fn();
+    render(<WhepPlayer mediamtxPath="cam1" active muted onFirstConnectFailed={onFirstConnectFailed} />);
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(onFirstConnectFailed).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2);
+    expect(onFirstConnectFailed).toHaveBeenCalledTimes(1);
+  });
+
+  test('#701 the lookup gives up after 1s: the connection is built with NO STUN (never Google)', async () => {
+    render(<WhepPlayer mediamtxPath="cam1" active muted />);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(configs).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(configs).toEqual([{ iceServers: [] }]);
+  });
+
+  test('#701 unmounting while the lookup is pending builds no peer connection', async () => {
+    const { unmount } = render(<WhepPlayer mediamtxPath="cam1" active muted />);
+    await vi.advanceTimersByTimeAsync(500);
+    unmount();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(configs).toHaveLength(0);
+  });
+
+  test('#701 an unmounted player does not fire onFirstConnectFailed at 2s', async () => {
+    const onFirstConnectFailed = vi.fn();
+    const { unmount } = render(<WhepPlayer mediamtxPath="cam1" active muted onFirstConnectFailed={onFirstConnectFailed} />);
+    unmount();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(onFirstConnectFailed).not.toHaveBeenCalled();
+  });
+
+  test('#701 getIceServersWithin answers [] at the budget and a late success is still cached', async () => {
+    let release;
+    aboutAnswer = () => new Promise((resolve) => { release = () => resolve(answerWith(['stun:a.example.org:3478'])()); });
+    const pending = getIceServersWithin(1000);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await pending).toEqual([]);
+    release();
+    expect(await getIceServers()).toEqual([{ urls: ['stun:a.example.org:3478'] }]);
     expect(aboutCalls).toBe(1);
   });
 });
