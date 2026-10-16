@@ -78,5 +78,16 @@ describe('#555 bullet 10: per-camera cooldown maps', { concurrency: false }, () 
       assert.equal(res.status, 200, JSON.stringify(res.body));
       assert.deepEqual(stamps(CAM), [PLANTED, PLANTED]);
     });
+    // Post-merge review of PR #702 (mutant CD3b): the fixture above is a DISABLED camera, and both edit routes skip
+    // stopping and restarting the detectors for a disabled camera, so stopOnvifMotion never ran and the test above
+    // still passed with `lastAlert.delete(cameraId)` added to stopOnvifMotion, the very thing its comment forbids.
+    // Here the camera is ENABLED, so the edit really calls stopOnvifMotion (motion is off, so it is not wanted).
+    test(`#702 review: ${label} of an ENABLED camera (its detectors really stop) keeps the stamps`, async () => {
+      db.prepare('UPDATE cameras SET disabled = 0 WHERE id = ?').run(CAM);
+      const res = await doCall();
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.deepEqual(stamps(CAM), [PLANTED, PLANTED]);
+      assert.deepEqual(stamps(OTHER), [PLANTED, PLANTED]);
+    });
   }
 });

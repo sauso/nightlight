@@ -199,7 +199,11 @@ losing a few recent clips, arguably more disposable than the database.
    self-corrects — you don't need to manually `chown` first. ⚠️ It no longer walks the whole tree
    on every start (that was slow with many GB of clips): a **restored `clips/` folder** owned by
    someone else, inside a data directory that is already right, is not fixed. Run
-   `chown -R 99:100 <data directory>` on the host (your `PUID:PGID`) after restoring clips. At the default `UMASK` the same
+   `chown -R 99:100 <data directory>` on the host (your `PUID:PGID`) after restoring clips. If the data
+   directory, or the database inside it, is a **symlink**, the start-up `chown` does not follow it: when the
+   linked-to folder or file has the wrong owner the log says `fixing the whole data directory` on every start
+   and nothing changes, so re-own the target on the host. (`PUID`/`PGID` written with leading zeros, such as
+   `099`, are compared as numbers, so they do not cause a walk on every start.) At the default `UMASK` the same
    start also makes the restored files owner-only again (see
    [Who can read the data directory](#who-can-read-the-data-directory)).
 4. Start the container. Existing sessions from the backup are still valid if `.jwt_secret` was

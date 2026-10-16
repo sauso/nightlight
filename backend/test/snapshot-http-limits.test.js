@@ -12,7 +12,9 @@
 //   - a redirect is refused, and the redirect TARGET is never requested (the whole point of refusing it);
 //   - the default cap is 5 MB (a literal here, not the exported constant: a test that derives its fixture from the
 //     constant cannot fail when the constant is changed).
-// NOT covered: a real camera; a body that stalls mid-stream (that is the existing 5 s timer, unchanged).
+//   - a body that keeps arriving a byte at a time is cut off by the timer, which must outlive the headers (#702
+//     review, SN11).
+// NOT covered: a real camera.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -77,6 +79,14 @@ before(async () => {
       res.write(Buffer.alloc(n - 1, 5));
       return res.end(Buffer.alloc(1, 5));
     }
+    if (req.url === '/drip') {
+      // Headers at once, then ONE byte every 50 ms for ever: always under the size cap, so only the timer can end it.
+      res.writeHead(200, { 'content-type': 'image/jpeg' });
+      res.flushHeaders();
+      const timer = setInterval(() => res.write(Buffer.from([1])), 50);
+      res.on('close', () => { clearInterval(timer); closedPaths.add(req.url); });
+      return undefined;
+    }
     if (req.url === '/endless') {
       // No Content-Length (chunked), and it never ends: only the cap can stop it.
       res.writeHead(200, { 'content-type': 'image/jpeg' });
@@ -135,6 +145,26 @@ test('a redirect whose body stays open is refused and the connection is closed',
   assert.equal(await fetchHttpSnapshot(`${base}/redirect-open`), null);
   assert.equal(await closedWithin('/redirect-open', 2000), true, 'the server still sees the connection open');
   assert.deepEqual(requested, ['/redirect-open'], 'the redirect target must not be requested');
+});
+
+// Post-merge review of PR #702 (mutant SN11): the timer must cover the BODY read, not only the wait for the headers.
+// With `clearTimeout(timer)` moved to straight after `await fetch(...)` every other test here still passed, and a
+// camera that answers at once and then drips its body (under the cap) held the alert, and the socket, for as long
+// as it kept dripping. The race turns that hang into a failure instead of a stuck suite.
+test('#702 review snapshot: a body that arrives one byte at a time is cut off at the timeout, and the connection is closed', async () => {
+  closedPaths.delete('/drip');
+  const HUNG = Symbol('hung');
+  let deadline;
+  const t0 = Date.now();
+  const out = await Promise.race([
+    fetchHttpSnapshot(`${base}/drip`, { timeoutMs: 600 }),
+    new Promise((r) => { deadline = setTimeout(() => r(HUNG), 4000); }),
+  ]);
+  clearTimeout(deadline);
+  assert.notEqual(out, HUNG, 'still reading the body after 4 s: the timeout does not cover the body read');
+  assert.equal(out, null);
+  assert.ok(Date.now() - t0 >= 500, 'it returned before the timeout, so something other than the timer ended it');
+  assert.equal(await closedWithin('/drip', 2000), true, 'the server still sees the connection open');
 });
 
 test('exactly the cap is accepted; one byte more is not', async () => {

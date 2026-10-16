@@ -42,7 +42,10 @@ beforeEach(() => {
 });
 
 const BAD_COLORS = ['red;background:url(//evil/x)', 'red', '#fff', '#12345', '#1234567', '#GGGGGG', ' #112233', '#112233 ', 12, {}, ['#112233'], true];
-const BAD_BIRTHDAYS = ['yesterday', '2023-4-1', '2023-02-31', '2023-13-01', '2023-00-10', '20230401', '2023-04-01T00:00:00Z', 5, {}, ['2023-04-01'], true];
+// The last two (post-merge review of PR #702, mutant CH11): JavaScript's expanded-year dates. Both survive the Date
+// round trip (toISOString().slice(0, 10) gives them back unchanged), so only the YYYY-MM-DD shape check refuses
+// them; without these entries that check could be deleted and every case here still passed.
+const BAD_BIRTHDAYS = ['yesterday', '2023-4-1', '2023-02-31', '2023-13-01', '2023-00-10', '20230401', '2023-04-01T00:00:00Z', 5, {}, ['2023-04-01'], true, '+010000-01', '-000001-01'];
 
 describe('colour', () => {
   for (const bad of BAD_COLORS) {

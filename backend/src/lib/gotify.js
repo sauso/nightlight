@@ -1,6 +1,6 @@
 import db from '../db.js';
 import { logger } from './logger.js';
-import { postWithTimeout } from './httpNotify.js';
+import { postWithTimeout, redactSecrets } from './httpNotify.js';
 
 // Gotify notifications (self-hosted, https://gotify.net). The server POSTs to a Gotify application's
 // message endpoint with that application's token; the recipient runs the Gotify server + app. Text
@@ -55,14 +55,20 @@ export async function sendGotify({ title, message, click, priority } = {}) {
       { label: 'gotify' }
     );
     if (!res.ok) {
-      const text = res.text;
+      // A server (or a proxy in front of it) that echoes the request back must not put the token in the log.
+      const text = redactSecrets(res.text, [c.appToken]);
       logger.error(`[gotify] send failed (${res.status}): ${text.slice(0, 200)}`);
       return { ok: false, error: `HTTP ${res.status}${text ? ` — ${text.slice(0, 140)}` : ''}` };
     }
     logger.info(`[gotify] sent "${title || 'notification'}"`);
     return { ok: true };
   } catch (e) {
-    logger.error('[gotify] send failed (network):', e.message);
-    return { ok: false, error: e.message };
+    // The token is in a HEADER since #555, and a header value fetch refuses is quoted whole in its error (see
+    // REQUEST_NOT_BUILT in httpNotify.js, which already replaces that message). redactSecrets is the second
+    // line: no message reaches the log or the Test button's 400 with the token in it, whatever produced it.
+    // Tokens saved since this change cannot hold such a character (routes/gotify.js); one saved before can.
+    const reason = redactSecrets(e.message, [c.appToken]);
+    logger.error('[gotify] send failed (network):', reason);
+    return { ok: false, error: reason };
   }
 }

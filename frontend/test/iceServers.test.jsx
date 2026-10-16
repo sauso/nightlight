@@ -78,6 +78,23 @@ describe('#558 the player uses the server\'s STUN list', () => {
     expect(await getIceServers()).toEqual([]);
   });
 
+  // Post-merge review of PR #701 (mutant F3): with `if (!urls) throw` turned into `return []` every test passed, but
+  // the missing field was then REMEMBERED as a successful "no STUN" for the life of the page, so a remote viewer
+  // stayed without STUN after the server came back (an upgrade, a proxy that served a stale /about) until a reload.
+  test('#701 review an /about with no stunServers field is NOT remembered: the next lookup asks again', async () => {
+    aboutAnswer = () => ({ ok: true, status: 200, headers: { get: () => 'application/json' }, text: async () => JSON.stringify({ version: '0.38.0' }) });
+    expect(await getIceServers()).toEqual([]);
+    aboutAnswer = answerWith(['stun:a.example.org:3478']);
+    expect(await getIceServers()).toEqual([{ urls: ['stun:a.example.org:3478'] }]);
+    expect(aboutCalls).toBe(2);
+  });
+
+  // Mutant F4: without the `typeof u === 'string'` filter, whatever the JSON held went straight into iceServers.
+  test('#701 review entries that are not text are dropped from the list the player is given', async () => {
+    aboutAnswer = answerWith(['stun:a.example.org:3478', 5, null, { urls: 'stun:x.example.org' }, ['stun:y.example.org'], 'stun:b.example.org:3478']);
+    expect(await getIceServers()).toEqual([{ urls: ['stun:a.example.org:3478', 'stun:b.example.org:3478'] }]);
+  });
+
   test('#558 a successful answer is remembered: many tiles cost one request', async () => {
     aboutAnswer = answerWith(['stun:a.example.org:3478']);
     await Promise.all([getIceServers(), getIceServers(), getIceServers()]);

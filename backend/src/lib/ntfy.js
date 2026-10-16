@@ -1,6 +1,6 @@
 import db from '../db.js';
 import { logger } from './logger.js';
-import { postWithTimeout } from './httpNotify.js';
+import { postWithTimeout, redactSecrets } from './httpNotify.js';
 
 // ntfy notifications (https://ntfy.sh, or any self-hosted ntfy server). The server POSTs the alert
 // straight to a topic; the recipient subscribes in the ntfy app or a browser. The snapshot is sent
@@ -55,9 +55,13 @@ const headerSafe = (s) => latin1(s).replace(/[\x00-\x1F\x7F]+/g, ' ').trim();
 export async function sendNtfy({ title, message, click, image, priority } = {}) {
   const c = getNtfyConfig();
   if (!c.serverUrl || !c.topic) return;
+  // The access token rides in the Authorization header, so it has the same exposure the Gotify token had (post-merge
+  // review of PR #702): a token with a line break made fetch quote the whole header into its error. httpNotify.js
+  // replaces that error; redactSecrets below keeps the credentials out of every other message too.
+  const auth = authHeader(c);
+  const secrets = [c.token, c.password, auth];
   try {
     const headers = {};
-    const auth = authHeader(c);
     if (auth) headers.Authorization = auth;
     if (title) headers.Title = headerSafe(title);
     if (click) headers.Click = click;
@@ -78,14 +82,15 @@ export async function sendNtfy({ title, message, click, image, priority } = {}) 
       { label: 'ntfy' }
     );
     if (!res.ok) {
-      const text = res.text;
+      const text = redactSecrets(res.text, secrets);
       logger.error(`[ntfy] send failed (${res.status}): ${text.slice(0, 200)}`);
       return { ok: false, error: `HTTP ${res.status}${text ? ` — ${text.slice(0, 140)}` : ''}` };
     }
     logger.info(`[ntfy] sent "${title || 'notification'}"${image && image.length ? ` with snapshot (${image.length} bytes)` : ''}`);
     return { ok: true };
   } catch (e) {
-    logger.error('[ntfy] send failed (network):', e.message);
-    return { ok: false, error: e.message };
+    const reason = redactSecrets(e.message, secrets);
+    logger.error('[ntfy] send failed (network):', reason);
+    return { ok: false, error: reason };
   }
 }

@@ -26,6 +26,33 @@ import { logger } from './logger.js';
 // gets through, short enough that the Test button gives an answer while someone is still looking at it.
 export const NOTIFY_TIMEOUT_MS = 10_000;
 
+// ⚠️ A REQUEST THAT CANNOT BE BUILT MUST NOT QUOTE ITSELF (post-merge review of PR #702). Node's fetch refuses a
+// header value holding CR, LF or NUL with `Headers.append: "<the WHOLE value>" is an invalid header value.`, and a
+// URL with user:pass@ in it with `Request cannot be constructed from a URL that includes credentials: <url>`
+// (both measured on Node 24.18). The providers log e.message and hand it to the Test button, and their headers
+// carry their token (Gotify's X-Gotify-Key, ntfy's `Authorization: Bearer`), so one stray line break in a saved
+// token wrote the whole token to `docker logs`, the in-app log, the support bundle, and the 400 body of
+// POST /api/<provider>/test. The logger's redaction could not catch it: it knows the `//user:pass@` and
+// query-string shapes, not a bare token. So such a failure becomes this fixed sentence, which quotes nothing.
+// Identified by elimination, not by matching the message: undici reports EVERY network failure as
+// TypeError('fetch failed') (the reason is in `cause`), so any OTHER TypeError out of fetch() is it refusing to
+// build the request. Fail-safe: a future message format we have never seen is still not quoted.
+export const REQUEST_NOT_BUILT =
+  'the request could not be built: a saved setting (server address, token or password) contains a character that cannot be sent; enter it again';
+
+/**
+ * `text` with every occurrence of each non-empty secret replaced by `[redacted]`. Belt and braces for the
+ * providers' own error messages and log lines: whatever the source of a message (an error, a server's reply),
+ * the provider's own token is cut out before it can reach the log or a response.
+ */
+export function redactSecrets(text, secrets = []) {
+  let out = String(text ?? '');
+  for (const s of secrets) {
+    if (typeof s === 'string' && s && out.includes(s)) out = out.split(s).join('[redacted]');
+  }
+  return out;
+}
+
 /**
  * POST with a hard upper bound covering both the request and the body read.
  *
@@ -61,6 +88,8 @@ export async function postWithTimeout(url, options = {}, { timeoutMs = NOTIFY_TI
       logger.error(`[${label}] request timed out after ${secs}s — the server accepted the connection but stopped responding`);
       throw new Error(`timed out after ${secs}s — the server accepted the connection but stopped responding`);
     }
+    // See REQUEST_NOT_BUILT above: this message may quote a header value or a URL, which carry credentials.
+    if (e instanceof TypeError && e.message !== 'fetch failed') throw new Error(REQUEST_NOT_BUILT);
     throw e;
   } finally {
     clearTimeout(timer);

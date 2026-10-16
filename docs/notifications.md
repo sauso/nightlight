@@ -210,6 +210,10 @@ therefore sends a line break in a camera or child name, or in a message that tra
 (an emoji in a camera name does not appear in the ntfy title). The message **body** is not affected: the
 multi-line nightly sleep report keeps its line breaks.
 
+The **access token** travels in a header too. If the saved one contains a character a header cannot carry (a
+line break pasted into the middle of it, say), every ntfy send fails and **Send test** answers "the request
+could not be built" without quoting the token, which is also kept out of the log. Re-enter the token to fix it.
+
 ## Option D: Gotify
 
 [Gotify](https://gotify.net) is a lightweight **self-hosted** push server with its own Android app.
@@ -222,6 +226,15 @@ multi-line nightly sleep report keeps its line breaks.
    **Save**, and **Send test**. Higher priorities show more prominently in the Gotify app and can
    bypass its quiet settings; **0 still delivers**, just quietly — it is a valid choice here, not
    "unset". Out-of-range values are clamped to 0–10 by the server.
+
+   The **application token** may contain only letters (`A–Z`, `a–z`), digits, `.`, `-` and `_`,
+   which are the characters Gotify builds its tokens from. A token with any other character (a
+   space or line break pasted in the middle, an accented letter) is refused when you save, with a
+   message that does not repeat it; spaces and line breaks around it are simply removed. Leaving the
+   field blank keeps the saved token. The token is sent in the `X-Gotify-Key` header, never in the
+   address, and it is never written to the log or shown in a Test result: a token saved by an older
+   version that cannot be sent makes **Send test** answer "the request could not be built" without
+   quoting it. Re-enter the token from Gotify's **Apps** page to fix that.
 
 Gotify alerts are **text only** (no image — Gotify has no native attachments); tapping one opens the
 camera. Only the short message passes through your Gotify server; the other notifications do too,

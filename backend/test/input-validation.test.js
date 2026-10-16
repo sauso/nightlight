@@ -218,6 +218,19 @@ describe('photos: an image data URL, within the cap', () => {
     }
   });
 
+  // Post-merge review of PR #702 (mutant PH4): with the `^` dropped from PHOTO_PREFIX every test passed, and an SVG
+  // that carries an allowed prefix LATER in its text was stored as a "photo" (it starts with data:image/, so the
+  // first check lets it through to the allowlist).
+  test('#702 review photo: the allowed type must be at the START (an SVG with a PNG prefix later in it is refused)', () => {
+    for (const bad of [
+      'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>data:image/png;base64,',
+      'data:image/svg+xml;base64,PHN2Zz4=#data:image/jpeg;base64,AA',
+      'data:image/gif;base64,R0lGODlhdata:image/webp;base64,AA',
+    ]) {
+      assert.throws(() => normalizePhoto(bad), /Photo must be a JPEG, PNG or WebP image/, bad);
+    }
+  });
+
   test('the routes that take a photo refuse a non-image and store nothing', async () => {
     const html = 'data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==';
     const childCount = () => db.prepare('SELECT COUNT(*) AS c FROM children').get().c;

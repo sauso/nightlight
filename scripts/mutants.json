@@ -18192,8 +18192,8 @@
   {
     "label": "#567 chown: only the user id is compared, not the group",
     "file": "backend/entrypoint.sh",
-    "find": "stat -L -c %u:%g \"$DATA_DIR/$f\" 2>/dev/null)\" != \"$PUID:$PGID\"",
-    "replace": "stat -L -c %u:%u \"$DATA_DIR/$f\" 2>/dev/null)\" != \"$PUID:$PUID\"",
+    "find": "stat -L -c %u:%g \"$DATA_DIR/$f\" 2>/dev/null)\" != \"$WANT_OWNER\"",
+    "replace": "stat -L -c %u \"$DATA_DIR/$f\" 2>/dev/null)\" != \"${WANT_OWNER%%:*}\"",
     "expect": "killed",
     "tests": [
       "entrypoint-chown.test.js"
@@ -18298,6 +18298,213 @@
       "entrypoint-chown.test.js"
     ],
     "namePattern": "#701 chown: the sentinel loop"
+  },
+  {
+    "label": "#701 review chown: only the data directory is checked, not the files in it (mutant E1, which survived every non-root run)",
+    "file": "backend/entrypoint.sh",
+    "find": "stat -L -c %u:%g \"$DATA_DIR/$f\" 2>/dev/null)\" != \"$WANT_OWNER\"",
+    "replace": "stat -L -c %u:%g \"$DATA_DIR\" 2>/dev/null)\" != \"$WANT_OWNER\"",
+    "expect": "killed",
+    "tests": ["entrypoint-chown.test.js"],
+    "namePattern": "or .jwt_secret owned by someone else walks the tree, as any user"
+  },
+  {
+    "label": "#701 review chown: PUID/PGID are compared as written again (PUID=099 walks the whole tree on every start)",
+    "file": "backend/entrypoint.sh",
+    "find": "WANT_OWNER=\"$(canonical_id \"$PUID\"):$(canonical_id \"$PGID\")\"",
+    "replace": "WANT_OWNER=\"$PUID:$PGID\"",
+    "expect": "killed",
+    "tests": ["entrypoint-chown.test.js"],
+    "namePattern": "a PUID and PGID written with leading zeros are compared as numbers"
+  },
+  {
+    "label": "#701 review chown: an all-zero PUID canonicalises to an empty id instead of 0",
+    "file": "backend/entrypoint.sh",
+    "find": "printf '%s' \"${_cid:-0}\"",
+    "replace": "printf '%s' \"$_cid\"",
+    "expect": "killed",
+    "tests": ["entrypoint-chown.test.js"],
+    "namePattern": "PUID=000 PGID=00 is 0:0"
+  },
+  {
+    "label": "#701 review STUN parser: the start anchor is dropped (YAML smuggled in before a valid URL is accepted)",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "const STUN_URL = /^stun:",
+    "replace": "const STUN_URL = /stun:",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "#701 review: an entry must be a stun: URL from its first character"
+  },
+  {
+    "label": "#701 review STUN parser: the pattern is multi-line (a valid first line lets YAML through after a line break)",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "(?::(\\d{1,5}))?$/;",
+    "replace": "(?::(\\d{1,5}))?$/m;",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "#701 review: an entry must be a stun: URL from its first character"
+  },
+  {
+    "label": "#701 review iceServers.js: an /about with no stunServers field is remembered as success (no STUN until a reload)",
+    "file": "frontend/src/lib/iceServers.js",
+    "find": "if (!urls) throw new Error('no stunServers in /about');",
+    "replace": "if (!urls) return [];",
+    "expect": "killed",
+    "tests": ["iceServers.test.jsx"],
+    "namePattern": "#701 review an /about with no stunServers field is NOT remembered"
+  },
+  {
+    "label": "#701 review iceServers.js: entries that are not text are passed to the peer connection",
+    "file": "frontend/src/lib/iceServers.js",
+    "find": "about.stunServers.filter((u) => typeof u === 'string')",
+    "replace": "about.stunServers",
+    "expect": "killed",
+    "tests": ["iceServers.test.jsx"],
+    "namePattern": "#701 review entries that are not text are dropped"
+  },
+  {
+    "label": "#702 review photo.js: the allowlist loses its start anchor (an SVG with a PNG prefix later in it is stored)",
+    "file": "backend/src/lib/photo.js",
+    "find": "const PHOTO_PREFIX = /^data:image",
+    "replace": "const PHOTO_PREFIX = /data:image",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "namePattern": "#702 review photo: the allowed type must be at the START"
+  },
+  {
+    "label": "#702 review snapshot.js: the timer is cleared once the headers arrive (a dripping body is read for ever)",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "    const res = await fetch(url, { headers, signal: ctrl.signal, redirect: 'manual' });\n",
+    "replace": "    const res = await fetch(url, { headers, signal: ctrl.signal, redirect: 'manual' });\n    clearTimeout(timer);\n",
+    "expect": "killed",
+    "tests": ["snapshot-http-limits.test.js"],
+    "namePattern": "#702 review snapshot: a body that arrives one byte at a time"
+  },
+  {
+    "label": "#702 review onvifMotion.js: stopOnvifMotion forgets the cooldown stamp (an edit re-arms alerts; mutant CD3b)",
+    "file": "backend/src/lib/onvifMotion.js",
+    "find": "export async function stopOnvifMotion(cameraId) {\n",
+    "replace": "export async function stopOnvifMotion(cameraId) {\n  lastAlert.delete(cameraId);\n",
+    "expect": "killed",
+    "tests": ["camera-delete-cooldown-maps.test.js"],
+    "namePattern": "of an ENABLED camera"
+  },
+  {
+    "label": "#702 review children.js: the birthday shape check is removed (expanded years like +010000-01 pass the round trip)",
+    "file": "backend/src/routes/children.js",
+    "find": "if (typeof birthday !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(birthday)) return true;",
+    "replace": "if (typeof birthday !== 'string') return true;",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "010000-01|000001-01"
+  },
+  {
+    "label": "#702 review httpNotify.js: a request fetch cannot build is rethrown with its own message, which quotes the header value",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "    if (e instanceof TypeError && e.message !== 'fetch failed') throw new Error(REQUEST_NOT_BUILT);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review postWithTimeout: a request fetch cannot build"
+  },
+  {
+    "label": "#702 review httpNotify.js: every TypeError is replaced, a real network failure included",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "if (e instanceof TypeError && e.message !== 'fetch failed') throw",
+    "replace": "if (e instanceof TypeError) throw",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review postWithTimeout: a network failure keeps"
+  },
+  {
+    "label": "#702 review httpNotify.js: redactSecrets does not skip an empty secret (it shreds every message)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "if (typeof s === 'string' && s && out.includes(s))",
+    "replace": "if (typeof s === 'string' && out.includes(s))",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review redactSecrets"
+  },
+  {
+    "label": "#702 review gotify.js: a send error is logged and returned unredacted",
+    "file": "backend/src/lib/gotify.js",
+    "find": "const reason = redactSecrets(e.message, [c.appToken]);",
+    "replace": "const reason = e.message;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify: an error that quotes the token"
+  },
+  {
+    "label": "#702 review gotify.js: a server's error reply is logged and returned unredacted",
+    "file": "backend/src/lib/gotify.js",
+    "find": "const text = redactSecrets(res.text, [c.appToken]);",
+    "replace": "const text = res.text;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify: a server that echoes"
+  },
+  {
+    "label": "#702 review routes/gotify.js: the token's characters are not checked on save",
+    "file": "backend/src/routes/gotify.js",
+    "find": "if (newToken && !GOTIFY_TOKEN.test(newToken)) return",
+    "replace": "if (false) return",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: a token with a line break"
+  },
+  {
+    "label": "#702 review routes/gotify.js: the token allow-list loses its start anchor",
+    "file": "backend/src/routes/gotify.js",
+    "find": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+$/;",
+    "replace": "const GOTIFY_TOKEN = /[A-Za-z0-9._-]+$/;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: a token with a line break"
+  },
+  {
+    "label": "#702 review routes/gotify.js: the token allow-list loses its end anchor",
+    "file": "backend/src/routes/gotify.js",
+    "find": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+$/;",
+    "replace": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+/;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: a token with a line break"
+  },
+  {
+    "label": "#702 review routes/gotify.js: the dot is dropped from the allow-list (an older Gotify's tokens are refused)",
+    "file": "backend/src/routes/gotify.js",
+    "find": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+$/;",
+    "replace": "const GOTIFY_TOKEN = /^[A-Za-z0-9_-]+$/;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: the tokens Gotify generates"
+  },
+  {
+    "label": "#702 review routes/gotify.js: a non-text token reaches .trim() again (a 500)",
+    "file": "backend/src/routes/gotify.js",
+    "find": "if (rawToken && typeof rawToken !== 'string') return",
+    "replace": "if (false) return",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: a token that is not text"
+  },
+  {
+    "label": "#702 review ntfy.js: a send error is logged and returned unredacted",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const reason = redactSecrets(e.message, secrets);",
+    "replace": "const reason = e.message;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review ntfy: an error that quotes the token"
+  },
+  {
+    "label": "#702 review ntfy.js: a server's error reply is logged and returned unredacted",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const text = redactSecrets(res.text, secrets);",
+    "replace": "const text = res.text;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review ntfy: a server that echoes"
   },
   {
     "label": "#394 bufferState: a disabled camera with a stale ring reads ready",
