@@ -8,14 +8,15 @@ iOS** ([nightlight-mobile](https://github.com/sauso/nightlight-mobile)) for reli
 background audio and picture-in-picture (see [Mobile apps](#mobile-apps-android--ios)
 below). No cloud, no subscription, no account anywhere but your own network.
 
-> **One thing to know about "no cloud".** Nightlight has no cloud service of its own, but the
-> **Low latency (WebRTC)** live view is set up to use Google's public STUN server
+> **One thing to know about "no cloud".** Nightlight has no cloud service of its own, but by default
+> the **Low latency (WebRTC)** live view uses Google's public STUN server
 > (`stun.l.google.com:19302`), both in the browser and in the bundled MediaMTX. STUN is how WebRTC
 > works out a public address: the browser asks that server, so Google can see the viewer's public IP
-> address and when each live view connected. It does nothing useful on a home network, and there is
-> **no setting to turn it off** in this version (it is fixed in the frontend and in
-> `mediamtx/mediamtx.yml`). **Compatibility (HLS)** viewing does not use WebRTC and does not contact
-> it. Push notifications, if you enable a provider, also leave your network: see
+> address and when each live view connected. **Watching on your home network needs no STUN**; a viewer
+> outside it, behind NAT, may. Set `STUN_SERVERS` to a blank value to use none (nothing then contacts
+> Google), or to your own server: see [`STUN_SERVERS`](#stun_servers--which-stun-servers-low-latency-webrtc-uses).
+> **Compatibility (HLS)** viewing does not use WebRTC and never contacts a STUN server. Push
+> notifications, if you enable a provider, also leave your network: see
 > [Push notifications](docs/notifications.md).
 
 > **⚠️ Not a safety device.** Nightlight is a convenience tool, not a safety device. It is
@@ -970,6 +971,26 @@ is used instead — a typo here will never stop the app starting.
 **You do not have to set it.** Login attempts are limited per account *and* per source, so even with
 every remote user sharing the proxy's address, one person mistyping their password cannot lock anyone
 else out. Setting `TRUST_PROXY` makes the per-source half meaningful as well.
+
+### `STUN_SERVERS` — which STUN servers Low latency (WebRTC) uses
+
+| Variable | Default | What it does |
+|---|---|---|
+| `STUN_SERVERS` | `stun:stun.l.google.com:19302` (Google's public server) | Comma-separated list of `stun:host` or `stun:host:port` URLs, used by the browser **and** by the bundled MediaMTX, and the only STUN hosts the browser is allowed to contact. |
+
+| You set | Result |
+|---|---|
+| nothing (variable unset) | Google's public STUN server, as in earlier versions |
+| blank (`STUN_SERVERS=`, or the field cleared on Unraid) | **No STUN server.** Nothing contacts Google or anyone else |
+| `stun:stun.example.org:3478` or a comma-separated list | exactly those servers (port defaults to 3478) |
+| anything that is not a `stun:` URL (`turn:`, `stuns:`, a typo) | that entry is ignored, with **one** warning in the log; if no entry is valid, STUN is **off** (never silently back to Google) |
+
+STUN is only how a WebRTC peer learns its public address. **Watching on your home network never needs it.** A viewer
+outside your network who is behind NAT may fail to connect without it (Compatibility (HLS) mode still works). With the
+default, Google sees the viewer's public IP address and when each live view connected. `turn:` relay servers are not
+supported. Change takes effect on restart. The log shows `[stun] ...` at start-up.
+
+On Unraid it is the **STUN Servers** field: it ships with the Google URL, so clear the field to turn STUN off.
 
 ### `CLOUDFLARE_ANALYTICS` — Cloudflare Web Analytics through Cloudflare's proxy
 

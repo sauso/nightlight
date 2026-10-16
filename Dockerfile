@@ -113,6 +113,18 @@ ENV NIGHTLIGHT_BUILD_TIME=$BUILD_TIME
 
 VOLUME ["/app/data"]
 
+# Docker (and Unraid's Docker tab) can now tell "container up" from "app not answering" (#567). It asks the
+# app's own unauthenticated GET /api/health, with the BusyBox wget the base image already has, on the port the
+# app really listens on (PORT, 4000 when unset or blank: the same rule as src/index.js).
+# --start-period 120s: MediaMTX, the detectors and the camera reconcile start slowly, and failures inside the
+#   period do not count against --retries, so a normal boot is never shown as unhealthy. 120s is a judgment, not
+#   a measurement; a slower first boot only shows "starting", then healthy.
+# ⚠️ This only LABELS the container. Plain Docker, compose and Unraid do not restart an unhealthy container
+#   (only an orchestrator such as Swarm does); `restart: unless-stopped` still acts only on process exit.
+#   Not tested: no CI job builds the image and runs this command (docs/operations.md, "Health check").
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+  CMD wget -q -O /dev/null "http://127.0.0.1:${PORT:-4000}/api/health" || exit 1
+
 EXPOSE 4000
 ENTRYPOINT ["tini", "--", "/app/entrypoint.sh"]
 CMD ["node", "src/index.js"]

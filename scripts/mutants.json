@@ -17865,6 +17865,248 @@
     "namePattern": "does not warn"
   },
   {
+    "label": "#558 STUN: a blank STUN_SERVERS falls back to the Google default instead of meaning none",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "if (raw === undefined) return { urls: [...DEFAULT_STUN_SERVERS], warning: null };",
+    "replace": "if (!String(raw ?? '').trim()) return { urls: [...DEFAULT_STUN_SERVERS], warning: null };",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 blank and whitespace"
+  },
+  {
+    "label": "#558 STUN: a value with no valid entry falls back to Google instead of STUN off",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "  if (bad.length === 0) return { urls, warning: null };",
+    "replace": "  if (bad.length === 0) return { urls, warning: null };\n  if (urls.length === 0) return { urls: [...DEFAULT_STUN_SERVERS], warning: null };",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 every entry invalid"
+  },
+  {
+    "label": "#558 STUN: the host check accepts a space (a value reaches YAML and the CSP unescaped)",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "[0-9A-Fa-f:.]+\\]",
+    "replace": "[0-9A-Fa-f:. ]+\\]",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 stun URL host/port rules"
+  },
+  {
+    "label": "#558 STUN: a missing port is not defaulted to 3478 in the CSP source",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "const port = m[2] === undefined ? DEFAULT_STUN_PORT : Number(m[2]);",
+    "replace": "const port = m[2] === undefined ? 443 : Number(m[2]);",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 stun URL host/port rules"
+  },
+  {
+    "label": "#558 STUN: the MediaMTX template placeholder missing is silently ignored",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "if (!re.test(baseText)) throw new Error(`mediamtx.yml has no \"${MEDIAMTX_ICE_LINE}\" line to fill in`);",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 a template that lost its placeholder"
+  },
+  {
+    "label": "#558 STUN: a failed config write starts MediaMTX from nothing instead of the base file",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "    return basePath;\n  }\n}",
+    "replace": "    return path.join(tmpDir, 'missing.yml');\n  }\n}",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 when the copy cannot be written"
+  },
+  {
+    "label": "#558 STUN CSP: connect-src keeps Google whatever STUN_SERVERS says",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "connectSrc: [\"'self'\", ...stunConnect, ...cfConnect],",
+    "replace": "connectSrc: [\"'self'\", 'stun.l.google.com:19302', ...cfConnect],",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 a custom list replaces Google"
+  },
+  {
+    "label": "#558 STUN about: /api/about reports the default list whatever STUN_SERVERS says",
+    "file": "backend/src/routes/about.js",
+    "find": "stunServers: parseStunServers(process.env.STUN_SERVERS).urls",
+    "replace": "stunServers: ['stun:stun.l.google.com:19302']",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 custom: /api/about"
+  },
+  {
+    "label": "#558 STUN index: MediaMTX starts from the raw base file, not the written copy",
+    "file": "backend/src/index.js",
+    "find": "startMediaMTX(mediamtxConfigPath);",
+    "replace": "startMediaMTX(mediamtxBasePath);",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 index.js wiring"
+  },
+  {
+    "label": "#558 STUN frontend: a failed /about lookup falls back to Google instead of no STUN",
+    "file": "frontend/src/lib/iceServers.js",
+    "find": "      if (cached === attempt) cached = null;\n      return [];",
+    "replace": "      if (cached === attempt) cached = null;\n      return [{ urls: ['stun:stun.l.google.com:19302'] }];",
+    "expect": "killed",
+    "tests": [
+      "iceServers.test.jsx"
+    ],
+    "namePattern": "#558 if /api/about cannot be read"
+  },
+  {
+    "label": "#558 STUN frontend: an empty list is turned into a one-entry list with no URLs",
+    "file": "frontend/src/lib/iceServers.js",
+    "find": "return urls.length ? [{ urls }] : [];",
+    "replace": "return [{ urls }];",
+    "expect": "killed",
+    "tests": [
+      "iceServers.test.jsx"
+    ],
+    "namePattern": "#558 an EMPTY list"
+  },
+  {
+    "label": "#567 chown: the whole data directory is walked on every start again",
+    "file": "backend/entrypoint.sh",
+    "find": "if [ -n \"$NEEDS_CHOWN\" ]; then",
+    "replace": "if true; then",
+    "expect": "killed",
+    "tests": [
+      "entrypoint-chown.test.js"
+    ],
+    "namePattern": "#567 chown: a data directory already owned"
+  },
+  {
+    "label": "#567 chown: only the user id is compared, not the group",
+    "file": "backend/entrypoint.sh",
+    "find": "stat -L -c %u:%g \"$DATA_DIR/$f\" 2>/dev/null)\" != \"$PUID:$PGID\"",
+    "replace": "stat -L -c %u:%u \"$DATA_DIR/$f\" 2>/dev/null)\" != \"$PUID:$PUID\"",
+    "expect": "killed",
+    "tests": [
+      "entrypoint-chown.test.js"
+    ],
+    "namePattern": "#567 chown: a different PGID"
+  },
+  {
+    "label": "#701 STUN frontend: the ICE-server lookup is not bounded, so a hung /api/about holds the connection back",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "await getIceServersWithin(ICE_LOOKUP_BUDGET_MS)",
+    "replace": "await getIceServersWithin(1e9)",
+    "expect": "killed",
+    "tests": [
+      "iceServers.test.jsx"
+    ],
+    "namePattern": "#701 the lookup gives up after 1s"
+  },
+  {
+    "label": "#701 STUN frontend: the 2s first-connection timer is armed only after an unbounded lookup (the original defect)",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "let pc = null;",
+    "replace": "let pc = null;\n        await getIceServersWithin(1e9);",
+    "expect": "killed",
+    "tests": [
+      "iceServers.test.jsx"
+    ],
+    "namePattern": "#701 onFirstConnectFailed fires at 2s"
+  },
+  {
+    "label": "#701 STUN frontend: the first-connection deadline is 3s instead of 2s",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "}, 2000);",
+    "replace": "}, 3000);",
+    "expect": "killed",
+    "tests": [
+      "iceServers.test.jsx"
+    ],
+    "namePattern": "#701 onFirstConnectFailed fires at 2s"
+  },
+  {
+    "label": "#701 STUN frontend: a player unmounted during the lookup still builds a peer connection",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "getIceServersWithin(ICE_LOOKUP_BUDGET_MS);\n        if (cancelled) return;\n        pc = new",
+    "replace": "getIceServersWithin(ICE_LOOKUP_BUDGET_MS);\n        pc = new",
+    "expect": "killed",
+    "tests": [
+      "iceServers.test.jsx"
+    ],
+    "namePattern": "#701 unmounting while the lookup is pending"
+  },
+  {
+    "label": "#701 STUN frontend: a lookup that takes too long falls back to Google instead of no STUN",
+    "file": "frontend/src/lib/iceServers.js",
+    "find": "setTimeout(() => resolve([]), ms)",
+    "replace": "setTimeout(() => resolve([{ urls: ['stun:stun.l.google.com:19302'] }]), ms)",
+    "expect": "killed",
+    "tests": [
+      "iceServers.test.jsx"
+    ],
+    "namePattern": "#701 the lookup gives up after 1s|#701 getIceServersWithin answers"
+  },
+  {
+    "label": "#701 STUN index: the MediaMTX start is commented out but its text is still in the file (a substring test passed)",
+    "file": "backend/src/index.js",
+    "find": "startMediaMTX(mediamtxConfigPath);",
+    "replace": "void 0; // startMediaMTX(mediamtxConfigPath);",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 MediaMTX is started from the config written"
+  },
+  {
+    "label": "#701 STUN parser: the first DNS label has no length limit",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "^stun:((?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}",
+    "replace": "^stun:((?:[A-Za-z0-9](?:[A-Za-z0-9-]*",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#701 a DNS label is at most 63"
+  },
+  {
+    "label": "#701 STUN parser: a later DNS label has no length limit",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}",
+    "replace": "(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#701 a DNS label is at most 63"
+  },
+  {
+    "label": "#701 chown: the -shm file is dropped from the ownership sentinel list",
+    "file": "backend/entrypoint.sh",
+    "find": "for f in . babymonitor.db babymonitor.db-wal babymonitor.db-shm .jwt_secret; do",
+    "replace": "for f in . babymonitor.db babymonitor.db-wal .jwt_secret; do",
+    "expect": "killed",
+    "tests": [
+      "entrypoint-chown.test.js"
+    ],
+    "namePattern": "#701 chown: the sentinel loop"
+  },
+  {
     "label": "#394 bufferState: a disabled camera with a stale ring reads ready",
     "file": "backend/src/lib/recordingReadiness.js",
     "find": "if (disabled) return 'camera_disabled';",

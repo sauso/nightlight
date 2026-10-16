@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { getToken } from '../lib/api.js';
 import { resolveWhepResource } from '../lib/whep.js';
+import { getIceServersWithin } from '../lib/iceServers.js';
 import StreamUnavailableNotice from './StreamUnavailableNotice.jsx';
 import { useNowPlayingSession, NOW_PLAYING_ARTWORK } from '../lib/useNowPlaying.js';
 
@@ -20,6 +21,10 @@ function whepUrl(mediamtxPath) {
 // any poster, even a flat color, is the one fix that's reliably honored everywhere.
 const BLANK_POSTER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3Crect width='1' height='1' fill='%230a0d1c'/%3E%3C/svg%3E";
+
+// How long a connection attempt waits for the ICE-server lookup (lib/iceServers.js) before going ahead with no
+// STUN. Half of the 2s first-connection deadline, so the lookup can use at most half the budget (#701 review).
+const ICE_LOOKUP_BUDGET_MS = 1000;
 
 // Ends a WHEP viewing session on the server. A courtesy (MediaMTX frees the session on its own once the peer is
 // gone), so a failure is swallowed.
@@ -147,28 +152,37 @@ export default function WhepPlayer({
       setState('connecting');
       setErrorMsg('');
       try {
-        const pc = new RTCPeerConnection({
-          // STUN helps both sides discover a reachable address when connecting over the
-          // internet. Harmless and effectively unused for same-LAN viewing.
-          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-        });
-        pcRef.current = pc;
-        pc.addTransceiver('video', { direction: 'recvonly' });
-        pc.addTransceiver('audio', { direction: 'recvonly' });
+        // STUN helps both sides discover a reachable address when connecting over the internet and is
+        // not used for same-network viewing. Which servers (possibly none) is the server's STUN_SERVERS
+        // setting, not a constant here: see lib/iceServers.js (#558).
+        let pc = null;
 
         // Browsers' own native ICE-failure detection is very conservative (often 15s+)
         // before declaring a connection failed. Rather than wait on that, treat a first
         // connection attempt that hasn't succeeded within 2s as failed ourselves - real
         // same-LAN connections settle in well under a second, so this is still generous.
+        // WHY this starts BEFORE the ICE-server lookup below (#701 review): the lookup is an HTTP
+        // request that may never answer (a hung /api/about); with the timer armed after it, the
+        // deadline that makes CameraTile fall back to Compatibility mode would slip from 2s to the
+        // API client's 30s timeout. `pc?.` because the connection may not exist yet when it fires.
         if (!everConnectedRef.current) {
           firstConnectTimeoutId = setTimeout(() => {
-            if (!cancelled && pc.connectionState !== 'connected') {
+            if (!cancelled && pc?.connectionState !== 'connected') {
               setState('error');
               setErrorMsg('Connection timed out');
               onFirstConnectFailed?.();
             }
           }, 2000);
         }
+
+        // Bounded to 1s so a slow lookup cannot eat the 2s budget above: past that it falls back to
+        // no STUN for this attempt (same-network viewing does not need it; the next retry asks again).
+        const iceServers = await getIceServersWithin(ICE_LOOKUP_BUDGET_MS);
+        if (cancelled) return;
+        pc = new RTCPeerConnection({ iceServers });
+        pcRef.current = pc;
+        pc.addTransceiver('video', { direction: 'recvonly' });
+        pc.addTransceiver('audio', { direction: 'recvonly' });
 
         // Each track arrives as its own ontrack event (one for video, one for audio),
         // since they were requested as separate transceivers above - route each to its
