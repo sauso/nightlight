@@ -1823,6 +1823,10 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   margin-bottom: 14px;
 }
 
+.load-failed { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.load-failed__text { flex: 1 1 200px; min-width: 0; }
+.load-failed__retry { width: auto; flex-shrink: 0; }
+
 .saved-banner {
   background: rgba(127, 191, 163, 0.12);
   border: 1px solid rgba(127, 191, 163, 0.4);
