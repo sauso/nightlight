@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- **Developer tooling (not part of the image): `scripts/use-node.sh` puts the Node major from `.nvmrc` on PATH in a sandbox that came with an older Node (#751).** The cloud builders ship Node 22, where the backend suite fails in ways that look unrelated to a change; `nightlight/CLAUDE.md` now tells a session to source the script first. It uses nvm, fnm or volta if present, otherwise downloads the release from nodejs.org and checks its SHA-256. Not yet run on a Linux sandbox.
+
 ## [0.40.0] - 2026-10-17
 
 ### Added
