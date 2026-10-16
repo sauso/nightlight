@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { api, getToken, setToken, refreshMediaToken, clearMediaToken, onUnauthorized } from './api.js';
 import { unregisterPushNotifications, resetPushRegistration } from './pushNotifications.js';
+import { clearAllDrafts } from './formDraft.js';
 
 // Exported so tests can inject a value directly — chiefly to render a screen as an admin and
 // again as a caregiver, since role gating is real in this UI and is where bugs hide.
@@ -67,6 +68,10 @@ export function AuthProvider({ children }) {
     unregisterPushNotifications().catch(() => {});
     api.post('/auth/logout', {}).catch(() => {}); // best-effort - clear local state regardless
     clearMediaToken();
+    // An explicit sign-out: whatever the last person left half-typed must not be offered to the next. A session
+    // that merely EXPIRES (onUnauthorized above) keeps its drafts on purpose, so signing back in resumes them;
+    // drafts are keyed by user id, so a different person signing in still never sees them (#377).
+    clearAllDrafts();
     setToken(null);
     setUser(null);
   }

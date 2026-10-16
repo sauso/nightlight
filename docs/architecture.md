@@ -229,6 +229,17 @@ stalled connection fails with a "took too long to respond" error instead of hang
 is allowed to run long (camera probes and saves, recomputing a night, photo uploads, stopping a recording, diagnostics, the clip list and bulk delete) passes
 `{ timeoutMs: SLOW_REQUEST_TIMEOUT_MS }` (90 s) as its last argument.
 
+**Unsaved form edits survive the background reload (#377).** `App.jsx` reloads the page after 15 s in the
+background to repair stale media connections, and that empties React state. The child form, the camera form
+and Settings → Recording therefore store what is different from the saved values in `sessionStorage`
+(`lib/formDraft.js`, kept in step by `lib/useFormDraft.js`) and restore it on mount. Rules that must hold:
+**no secret is ever written** (each form passes an allow-list of fields, credential-named keys are dropped
+even if allowed, and a camera password is lost on reload by design); a draft is **per signed-in user**, expires
+after 6 hours, and is removed by a successful save, an explicit discard, removing the thing, and sign-out
+(an expired sign-in keeps it, so signing back in resumes). "Unsaved" is always derived (form versus last
+saved), never a flag set by `onChange`. Forms with an explicit Save show `components/UnsavedNotice.jsx`.
+The forms not yet covered are listed in `docs/design-language.md` (§6, Forms with a Save button).
+
 ## CSP is enforced — keep it that way
 
 `backend/src/index.js` serves an **enforcing** Content-Security-Policy via helmet (it was
