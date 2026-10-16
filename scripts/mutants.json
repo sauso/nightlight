@@ -17754,6 +17754,35 @@
     "namePattern": "validate: both fields are required"
   },
   {
+    "label": "#564 pushover: validate swaps the application token and the user key",
+    "file": "backend/src/lib/pushover.js",
+    "find": "const params = { token: appToken, user: userKey };",
+    "replace": "const params = { token: userKey, user: appToken };",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "validate: both fields are required",
+    "note": "Found by the #714 review: the fake edge answered ok whatever it was sent, so the test did not look at the form."
+  },
+  {
+    "label": "#564 pushover: validate is sent as a GET",
+    "file": "backend/src/lib/pushover.js",
+    "find": "`${API}/users/validate.json`, { method: 'POST', body }",
+    "replace": "`${API}/users/validate.json`, { method: 'GET', body }",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "validate: both fields are required"
+  },
+  {
+    "label": "#564 pushover: the attachment is a same-length buffer of zeros (a corrupt snapshot)",
+    "file": "backend/src/lib/pushover.js",
+    "find": "new Blob([image], { type: 'image/jpeg' })",
+    "replace": "new Blob([Buffer.alloc(image.length)], { type: 'image/jpeg' })",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "a snapshot is attached as snapshot",
+    "note": "Found by the #714 review: both tests compared only the attachment's size."
+  },
+  {
     "label": "#564 snapshot: URL credentials stay in the URL, so fetch refuses a camera that needs a login",
     "file": "backend/src/lib/snapshot.js",
     "find": "    url.username = '';\n    url.password = '';\n",

@@ -183,7 +183,8 @@ describe('Pushover', () => {
     const file = calls[0].body.get('attachment');
     assert.equal(file.name, 'snapshot.jpg');
     assert.equal(file.type, 'image/jpeg');
-    assert.equal(file.size, 4);
+    // The BYTES, not only the length: a four-byte fixture let `new Blob([Buffer.alloc(image.length)])` pass (#714 review).
+    assert.deepEqual(Buffer.from(await file.arrayBuffer()), Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
     await sendPushover({ title: 't', message: 'm', image: Buffer.alloc(0) });
     assert.equal(calls[1].body.has('attachment'), false, 'a zero-byte attachment was sent');
   });
@@ -210,6 +211,11 @@ describe('Pushover', () => {
 
     assert.deepEqual(await validatePushover('t', 'u', 'phone'), { ok: true });
     assert.equal(calls[0].url, 'https://api.pushover.net/1/users/validate.json');
+    // POST with the token and the user in their own fields: the fake edge answers ok whatever it is sent, so without
+    // these a swapped token/user or a GET would still pass (#714 review).
+    assert.equal(calls[0].method, 'POST');
+    assert.equal(calls[0].body.get('token'), 't');
+    assert.equal(calls[0].body.get('user'), 'u');
     assert.equal(calls[0].body.get('device'), 'phone', 'a single typo-able device name must be validated');
 
     await validatePushover('t', 'u', 'phone,tablet');

@@ -139,7 +139,8 @@ describe('with every channel switched on', () => {
     assert.equal(form.get('message'), 'Motion detected');
     assert.equal(form.get('url'), link);
     assert.equal(form.get('url_title'), 'Open in Nightlight');
-    assert.equal(form.get('attachment').size, JPEG.length, 'Pushover was not sent the snapshot');
+    // The bytes, not only the size: a same-length buffer of zeros would be a corrupt snapshot (#714 review).
+    assert.ok(Buffer.from(await form.get('attachment').arrayBuffer()).equals(JPEG), 'Pushover was not sent the snapshot');
   });
 
   test('a sound alert says so, and an unknown type falls back to a plain "Alert" rather than throwing', async () => {
