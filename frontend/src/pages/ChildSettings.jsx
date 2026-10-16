@@ -7,6 +7,9 @@ import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
 import Modal from '../components/Modal.jsx';
 import Switch from '../components/Switch.jsx';
+import UnsavedNotice from '../components/UnsavedNotice.jsx';
+import { loadDraft, clearDraft } from '../lib/formDraft.js';
+import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
 import { fileToAvatarDataUrl } from '../lib/imageResize.js';
 
 const COLORS = ['#f4c56a', '#7FBFA3', '#8A9FE0', '#E0A5C9', '#E0B27F', '#7c83db'];
@@ -22,6 +25,17 @@ const COLORS = ['#f4c56a', '#7FBFA3', '#8A9FE0', '#E0A5C9', '#E0B27F', '#7c83db'
 //   - adding and removing a child: admin only (the server refuses both).
 const CAREGIVER_FIELDS = ['name', 'birthday', 'color', 'photo'];
 
+// What survives a reload as a draft (#377). Everything the form edits EXCEPT `photo`: a photo is saved the
+// moment it is picked on an existing child (persistPhoto), and as a data: URL it is too big to be worth
+// keeping in storage for the new-child case. A photo chosen for a not-yet-created child is lost on reload.
+// No secret fields exist on this form; the allow-list is still explicit so a future one is not stored by default.
+const DRAFT_FIELDS = ['name', 'birthday', 'color', 'track_sleep', 'sleep_window_start', 'sleep_window_end', 'primary_camera_id'];
+
+const NEW_CHILD = {
+  name: '', birthday: '', color: COLORS[0], photo: null,
+  track_sleep: true, sleep_window_start: '19:00', sleep_window_end: '07:00', primary_camera_id: '',
+};
+
 export default function ChildSettings() {
   const { id } = useParams();
   const isNew = !id || id === 'new';
@@ -32,11 +46,16 @@ export default function ChildSettings() {
   const isAdmin = user?.role === 'admin';
   const kid = isNew ? null : kids.find((k) => k.id === id);
 
+  // Unsaved edits survive the background reload and a trip to another screen (#377, formDraft.js).
+  const draftKey = useDraftKey(isNew ? 'child:new' : `child:${id}`);
   // `primary_camera_id` '' = automatic, and '' is what the server stores as NULL (#655).
-  const [form, setForm] = useState({
-    name: '', birthday: '', color: COLORS[0], photo: null,
-    track_sleep: true, sleep_window_start: '19:00', sleep_window_end: '07:00', primary_camera_id: '',
-  });
+  // A new child's form starts from any draft; an existing child's is restored once the child has loaded.
+  const [restoredDraft] = useState(() => (isNew ? loadDraft(draftKey, DRAFT_FIELDS) : null));
+  const [form, setForm] = useState(() => ({ ...NEW_CHILD, ...restoredDraft }));
+  // The form as last loaded or saved: what "unsaved" is measured against. Typing never touches it.
+  const [baseline, setBaseline] = useState(NEW_CHILD);
+  const [restored, setRestored] = useState(!!restoredDraft);
+  const [formReady, setFormReady] = useState(isNew);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [removing, setRemoving] = useState(false);
@@ -52,14 +71,27 @@ export default function ChildSettings() {
   useEffect(() => {
     if (isNew || initedRef.current || !kid) return;
     initedRef.current = true;
-    setForm({
+    const loaded = {
       name: kid.name, birthday: kid.birthday || '', color: kid.color || COLORS[0], photo: kid.photo || null,
       track_sleep: kid.track_sleep == null ? true : !!kid.track_sleep,
       sleep_window_start: kid.sleep_window_start || '19:00',
       sleep_window_end: kid.sleep_window_end || '07:00',
       primary_camera_id: kid.primary_camera_id || '',
-    });
-  }, [kid, isNew]);
+    };
+    const draft = loadDraft(draftKey, DRAFT_FIELDS);
+    setBaseline(loaded);
+    setForm({ ...loaded, ...draft });
+    setRestored(!!draft);
+    setFormReady(true);
+  }, [kid, isNew, draftKey]);
+
+  const unsaved = useFormDraft({ key: draftKey, allow: DRAFT_FIELDS, form, baseline, ready: formReady });
+
+  // Back to what is stored. useFormDraft sees form == baseline and removes the stored draft.
+  function discardDraft() {
+    setForm(baseline);
+    setRestored(false);
+  }
 
   // The sleep camera picker (#655). Its options are EVERY camera assigned to this child, in tile order
   // (GET /cameras order), turned-off ones included and marked, because an admin may choose a camera that is
@@ -125,6 +157,10 @@ export default function ChildSettings() {
     try {
       if (isNew) await api.post('/children', form);
       else await api.put(`/children/${id}`, isAdmin ? form : Object.fromEntries(CAREGIVER_FIELDS.map((k) => [k, form[k]])));
+      // Saved: the form now equals what is stored, so the draft is stale. Moving the baseline is what clears it
+      // (useFormDraft derives the draft from form-versus-baseline); it is set BEFORE the awaits below so the
+      // render that clears the draft happens before navigate() unmounts this screen.
+      setBaseline(form);
       await refresh();
       navigate(back.to);
     } catch (err) {
@@ -140,6 +176,7 @@ export default function ChildSettings() {
     setRemoveError('');
     try {
       await api.del(`/children/${id}`);
+      clearDraft(draftKey); // a removed child's half-typed edits must not outlive it
       await refresh();
       navigate(back.to);
     } catch (err) {
@@ -162,6 +199,7 @@ export default function ChildSettings() {
         ) : (
           <form onSubmit={save}>
             {error && <div className="error-banner">{error}</div>}
+            {unsaved && <UnsavedNotice restored={restored} onDiscard={discardDraft} />}
 
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 18 }}>
               <Avatar name={form.name || 'Child'} src={form.photo} color={form.color} size={88} />
