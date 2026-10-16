@@ -4,6 +4,9 @@ import { useSettings } from '../lib/SettingsContext.jsx';
 import { useSettingsDraft } from '../lib/useSettingsDraft.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
+import UnsavedNotice from '../components/UnsavedNotice.jsx';
+import { loadDraft } from '../lib/formDraft.js';
+import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
 
 // Recording settings — split into the app's two genuinely different kinds of recording:
 //   * Automatic clips: captured for you when a detection fires, and aged out by retention.
@@ -19,91 +22,83 @@ function fmtBytes(b) {
   return `${(b / 1024).toFixed(0)} KB`;
 }
 
+// ONE save model for the whole page (#391): every control here, switches included, is a draft until
+// "Save changes" is pressed, and an "Unsaved changes" notice says so while any of them differs from what is
+// stored. The "Show a Record button" switch used to write the moment it was flipped while the wake-clip
+// switch beside it waited for Save, so two identical-looking pills committed differently and someone who
+// turned wake-ups off and left the page could believe recording had stopped. Nothing here claims a feature
+// is off until the save that turned it off has succeeded.
+//
+// Every field this page edits, with the default the screen SHOWS when nothing is stored. Booleans are
+// normalised (the database hands back 1/0, the switch hands back true/false) so toggling a switch twice
+// reads as "no change" rather than as 1 -> true. The same list is what a reload-surviving draft may store
+// (#377): all numbers and booleans, no secrets on this page.
+const DRAFT_FIELDS = [
+  'clip_pre_roll_s', 'clip_post_roll_s', 'clip_retention_days', 'clip_retention_max_gb',
+  'wake_clips_enabled', 'wake_clip_seconds', 'wake_clip_retention_days',
+  'ondemand_enabled', 'ondemand_pre_roll_s', 'ondemand_max_duration_s',
+];
+
+function valuesOf(src) {
+  return {
+    clip_pre_roll_s: src.clip_pre_roll_s ?? 5,
+    clip_post_roll_s: src.clip_post_roll_s ?? 15,
+    clip_retention_days: src.clip_retention_days ?? 14,
+    clip_retention_max_gb: src.clip_retention_max_gb ?? 5,
+    wake_clips_enabled: !!(src.wake_clips_enabled ?? true),
+    wake_clip_seconds: src.wake_clip_seconds ?? 30,
+    wake_clip_retention_days: src.wake_clip_retention_days ?? 14,
+    ondemand_enabled: !!(src.ondemand_enabled ?? true),
+    ondemand_pre_roll_s: src.ondemand_pre_roll_s ?? 30,
+    ondemand_max_duration_s: src.ondemand_max_duration_s ?? 120,
+  };
+}
+
 export default function SettingsRecording() {
-  const { settings, refresh, commit } = useSettings();
+  const { settings, refresh, commit, loaded } = useSettings();
   // Server settings vs. this screen's own unsaved edits, kept separate (#449) — see
   // useSettingsDraft.js for why a derived `form` replaced the old setForm(settings) sync effect.
-  const { form, setField, markSaved } = useSettingsDraft(settings);
+  const draftKey = useDraftKey('settings:recording');
+  // Read once on mount: edits typed before a background reload, or before a visit to another screen.
+  const [restoredDraft] = useState(() => loadDraft(draftKey, DRAFT_FIELDS));
+  const { form, setField, markSaved, discard } = useSettingsDraft(settings, restoredDraft || {});
+  const [restored, setRestored] = useState(!!restoredDraft);
   const [storage, setStorage] = useState(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
-  // ondemand_enabled commits on its own (see toggleOndemand) so it is deliberately NOT one of the
-  // drafts above — it's this screen's own optimistic value while that write is in flight, separate
-  // from every other field's "typed but not yet saved" state.
-  const [pendingOndemand, setPendingOndemand] = useState(null);
-  const [toggleBusy, setToggleBusy] = useState(false);
 
   const loadStorage = () => api.get('/settings/clip-storage').then(setStorage).catch(() => {});
   useEffect(() => { loadStorage(); }, []);
 
-  // The on/off switch applies the moment it's flipped — that's what the pill shape promises in this
-  // codebase (see Switch.jsx), and turning the feature off should stop the per-camera buffering right
-  // away rather than waiting for a Save. The numeric fields below keep Save, so their shape says so.
-  async function toggleOndemand(enabled) {
-    // Disabled while in flight (below) makes this unreachable from a second click, but guard it here
-    // too: nothing else prevents two requests from overlapping and having their responses land out of
-    // order, each one's optimistic/committed value stomping the other's (Codex F2).
-    //
-    // Also refuse while a Save is in flight (`busy`), not just another toggle: both handlers commit a
-    // FULL settings snapshot from their own PUT response (see commit() in SettingsContext.jsx). If the
-    // toggle's PUT is sent, then Save's PUT is sent and its response lands and commits first (clearing
-    // the numeric drafts via markSaved), the toggle's response — a snapshot taken BEFORE the save — can
-    // still land after and commit, reverting the just-saved numeric values on screen and setting up the
-    // next Save to write the stale numbers back over the server. The Switch is also `disabled` while
-    // `busy` below, but the guard belongs here too for the same reason toggleBusy is checked above: a
-    // disabled prop only stops a click, not a request already on its way.
-    if (toggleBusy || busy) return;
-    setToggleBusy(true);
-    setPendingOndemand(enabled); // optimistic
-    setError('');
-    try {
-      const response = await api.put('/settings', { ondemand_enabled: enabled });
-      if (response && typeof response === 'object') {
-        // The PUT response is this write's own confirmation — see SettingsContext's commit() for why
-        // that's used instead of a second, separate refresh() that could fail on its own.
-        commit(response);
-        setPendingOndemand(null);
-      } else {
-        // Defensive: the route always answers with the settings object (see commit's comment). If it
-        // ever didn't, fall back to a re-read rather than trust an empty/malformed body — and leave
-        // pendingOndemand as-is so the switch doesn't flicker back to the old value before that
-        // re-read lands.
-        await refresh();
-      }
-    } catch (err) {
-      setPendingOndemand(null); // put it back — the switch reads settings.ondemand_enabled again
-      setError(err.message || 'Could not change that setting');
-    } finally {
-      setToggleBusy(false);
-    }
+  const shown = valuesOf(form);
+  const stored = valuesOf(settings);
+  // True while anything on screen differs from what is stored. Derived, so putting a value back clears it.
+  //
+  // `ready` waits for the server's settings. Until then `settings` is the provider's placeholder, and a
+  // draft value that happens to equal a placeholder default would read as "no change" and be cleared from
+  // storage, one reload from lost. After a background reload that window is real: the settings request is
+  // still in flight when this screen first renders.
+  const unsaved = useFormDraft({ key: draftKey, allow: DRAFT_FIELDS, form: shown, baseline: stored, ready: loaded !== false });
+
+  // Back to what is stored: with no drafts, form == stored and useFormDraft removes the stored draft.
+  function discardChanges() {
+    discard();
+    setRestored(false);
   }
 
   async function save(e) {
     e.preventDefault();
-    // Mirrors the guard in toggleOndemand (#449): both handlers commit a full settings snapshot from
-    // their own PUT response, so an overlapping Save + toggle race can have the toggle's stale,
-    // pre-save snapshot land and commit AFTER Save's, reverting the numbers this Save just wrote. The
-    // Save button is also `disabled` while `toggleBusy` below, but a disabled prop only blocks a click
-    // that hasn't fired yet — this refuses a submit already in progress (e.g. Enter in a field) too.
-    if (toggleBusy) return;
     setBusy(true);
     setError('');
-    const payload = {
-      clip_pre_roll_s: form.clip_pre_roll_s,
-      clip_post_roll_s: form.clip_post_roll_s,
-      clip_retention_days: form.clip_retention_days,
-      clip_retention_max_gb: form.clip_retention_max_gb,
-      wake_clips_enabled: wakeClipsOn,
-      wake_clip_seconds: form.wake_clip_seconds,
-      wake_clip_retention_days: form.wake_clip_retention_days,
-      ondemand_pre_roll_s: form.ondemand_pre_roll_s,
-      ondemand_max_duration_s: form.ondemand_max_duration_s,
-    };
+    // The values as SHOWN, defaults included (valuesOf), so what is saved is what the person was looking at.
+    // This now includes ondemand_enabled (#391): it used to commit on its own, by a separate PUT, the moment
+    // the switch moved. One request, one outcome, one error message for the whole page.
+    const payload = shown;
     try {
       const response = await api.put('/settings', payload);
       if (response && typeof response === 'object') {
-        // As in toggleOndemand: commit this write's own response instead of a second refresh() that
+        // Commit this write's own response instead of a second refresh() that
         // could fail silently and leave a stale value ready to be re-saved over the real one (#449
         // Codex F1). markSaved runs only once the committed base actually reflects what was sent, so
         // a saved draft can drop cleanly rather than possibly re-appearing dirty against a base that
@@ -111,7 +106,7 @@ export default function SettingsRecording() {
         commit(response);
         markSaved(payload);
       } else {
-        // Defensive fallback — see toggleOndemand. Drafts stay dirty: nothing has confirmed the save
+        // Defensive fallback: the route always answers with the settings object. Drafts stay dirty: nothing has confirmed the save
         // actually landed, so this must not look like a successful save cleared them.
         await refresh();
       }
@@ -125,10 +120,9 @@ export default function SettingsRecording() {
     }
   }
 
-  // pendingOndemand is this screen's own optimistic value; null means "no request in flight, use
-  // what's committed." Deliberately `??`, not `||` — see the module comment on wakeClipsOn below.
-  const ondemandOn = pendingOndemand ?? (form.ondemand_enabled ?? true);
-  const wakeClipsOn = form.wake_clips_enabled ?? true;
+  // What the screen shows, drafts included. Deliberately `??` inside valuesOf, not `||`: zero is meaningful here.
+  const ondemandOn = shown.ondemand_enabled;
+  const wakeClipsOn = shown.wake_clips_enabled;
 
   return (
     <>
@@ -136,6 +130,7 @@ export default function SettingsRecording() {
       <main className="app-main">
         {error && <div className="error-banner">{error}</div>}
         {saved && <div className="saved-banner">Saved ✓</div>}
+        {unsaved && <UnsavedNotice restored={restored} onDiscard={discardChanges} />}
 
         <form onSubmit={save}>
           {/* --- Automatic clips (detection-triggered) --- */}
@@ -197,6 +192,7 @@ export default function SettingsRecording() {
               </div>
               <Switch
                 checked={wakeClipsOn}
+                disabled={busy}
                 onChange={(e) => setField('wake_clips_enabled', e.target.checked)}
                 aria-label="Record wake-ups without alerting"
               />
@@ -246,8 +242,8 @@ export default function SettingsRecording() {
               </div>
               <Switch
                 checked={ondemandOn}
-                disabled={toggleBusy || busy}
-                onChange={(e) => toggleOndemand(e.target.checked)}
+                disabled={busy}
+                onChange={(e) => setField('ondemand_enabled', e.target.checked)}
                 aria-label="Show a Record button on each camera"
               />
             </div>
@@ -297,7 +293,7 @@ export default function SettingsRecording() {
             </div>
           )}
 
-          <button className="btn btn-primary" type="submit" disabled={busy || toggleBusy} style={{ marginTop: 20 }}>
+          <button className="btn btn-primary" type="submit" disabled={busy} style={{ marginTop: 20 }}>
             {busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save changes'}
           </button>
         </form>

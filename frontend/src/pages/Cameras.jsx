@@ -6,6 +6,8 @@ import { useCameras } from '../lib/CamerasContext.jsx';
 import Modal from '../components/Modal.jsx';
 import BreathingDot from '../components/BreathingDot.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import LoadFailed from '../components/LoadFailed.jsx';
+import { loadState } from '../lib/loadState.js';
 
 // Cameras management (its own top-level tab). Editing/adding a camera happens on its own routed
 // screen (CameraSettings.jsx); this page keeps the at-a-glance list plus quick inline actions
@@ -15,8 +17,9 @@ const BACK = { state: { from: { to: '/cameras', label: 'Cameras' } } };
 export default function Cameras() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-  const { kids: children, cameras, error: contextError, refresh } = useCameras();
+  const { kids: children, cameras, error: contextError, loaded, refresh } = useCameras();
   const navigate = useNavigate();
+  const listState = loadState({ loaded, error: contextError, count: cameras.length });
   const [error, setError] = useState('');
   const [removing, setRemoving] = useState(null);
   const [removeBusy, setRemoveBusy] = useState(false);
@@ -69,9 +72,14 @@ export default function Cameras() {
     <>
       <AppHeader title="Cameras" />
       <main className="app-main">
-        {(error || contextError) && <div className="error-banner">{error || contextError}</div>}
-
-        {cameras.length === 0 && <div className="empty-state">No cameras added yet.</div>}
+        {error && <div className="error-banner">{error}</div>}
+        {/* The poll's failure is its own message with Retry, and "No cameras added yet" waits for a request that
+            actually succeeded (#375): an outage is not an empty install. */}
+        {(listState === 'error' || listState === 'stale') && (
+          <LoadFailed what="cameras" error={contextError} onRetry={refresh} stale={listState === 'stale'} />
+        )}
+        {listState === 'loading' && <div className="empty-state">Loading…</div>}
+        {listState === 'empty' && <div className="empty-state">No cameras added yet.</div>}
 
         {cameras.map((cam) => (
           <div className={`card cam-card${cam.disabled ? ' cam-card--off' : ''}`} key={cam.id}>
@@ -116,7 +124,7 @@ export default function Cameras() {
           </div>
         ))}
 
-        {isAdmin && (
+        {isAdmin && listState !== 'loading' && listState !== 'error' && (
           <button className="btn btn-primary" onClick={() => navigate('/cameras/new', BACK)}>+ Add camera</button>
         )}
       </main>

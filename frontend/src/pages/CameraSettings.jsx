@@ -5,6 +5,9 @@ import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Modal from '../components/Modal.jsx';
+import UnsavedNotice from '../components/UnsavedNotice.jsx';
+import { loadDraft, clearDraft } from '../lib/formDraft.js';
+import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
 import DetectionRow from '../components/DetectionRow.jsx';
 import CameraReportButton from '../components/CameraReportButton.jsx';
 import RecordingScopePanel from '../components/RecordingScopePanel.jsx';
@@ -18,6 +21,14 @@ const EMPTY_FORM = {
   child_id: '', mqtt_topic: '', talk_username: '', talk_password: '', sub_rtsp_path: '',
 };
 
+// What survives a reload as a draft (#377). The two PASSWORDS (rtsp_password, talk_password) are deliberately
+// absent and must stay so: a draft is plain text in browser storage, and the owner's rule is that no secret
+// is ever persisted. After a reload the person types the password again; the notice says so. The username
+// fields are kept (a login name is not a secret, and losing it is what makes the form tedious to redo).
+const DRAFT_FIELDS = [
+  'name', 'rtsp_host', 'rtsp_port', 'rtsp_path', 'rtsp_username', 'child_id', 'mqtt_topic', 'talk_username', 'sub_rtsp_path',
+];
+
 // Per-camera settings as a routed screen (replaces the old edit modal). /cameras/new adds a
 // camera; /cameras/:id edits one. Only connection/identity fields live here — motion, sound and
 // schedule are their own screens (see DetectionSettings.jsx), reachable from the Detection rows
@@ -30,7 +41,13 @@ export default function CameraSettings() {
   const { kids: children, cameras, refresh } = useCameras();
   const cam = isNew ? null : cameras.find((c) => c.id === id);
 
-  const [form, setForm] = useState(EMPTY_FORM);
+  const draftKey = useDraftKey(isNew ? 'camera:new' : `camera:${id}`);
+  const [restoredDraft] = useState(() => (isNew ? loadDraft(draftKey, DRAFT_FIELDS) : null));
+  const [form, setForm] = useState(() => ({ ...EMPTY_FORM, ...restoredDraft }));
+  // The form as last loaded or saved: what "unsaved" is measured against. Typing never touches it.
+  const [baseline, setBaseline] = useState(EMPTY_FORM);
+  const [restored, setRestored] = useState(!!restoredDraft);
+  const [formReady, setFormReady] = useState(isNew);
   const [caps, setCaps] = useState({ backchannel_supported: undefined, talk_has_password: false, rtsp_has_password: false });
   const initedRef = useRef(false);
   const [busy, setBusy] = useState(false);
@@ -59,7 +76,7 @@ export default function CameraSettings() {
     if (isNew || initedRef.current) return;
     if (!cam) return; // still loading
     initedRef.current = true;
-    setForm({
+    const loaded = {
       name: cam.name,
       rtsp_host: cam.rtsp_host || '',
       rtsp_port: cam.rtsp_port || '554',
@@ -71,13 +88,30 @@ export default function CameraSettings() {
       talk_username: cam.talk_username || '',
       talk_password: '',
       sub_rtsp_path: cam.sub_rtsp_path || '',
-    });
+    };
+    const draft = loadDraft(draftKey, DRAFT_FIELDS);
+    setBaseline(loaded);
+    setForm({ ...loaded, ...draft });
+    setRestored(!!draft);
+    setFormReady(true);
     setCaps({
       backchannel_supported: cam.backchannel_supported,
       talk_has_password: !!cam.talk_has_password,
       rtsp_has_password: !!cam.rtsp_has_password,
     });
-  }, [cam, isNew]);
+  }, [cam, isNew, draftKey]);
+
+  // `unsaved` also counts a typed password, which is never stored: it is an edit the person would lose.
+  const unsaved = useFormDraft({
+    key: draftKey, allow: DRAFT_FIELDS, form, baseline, ready: formReady,
+    secrets: [form.rtsp_password, form.talk_password],
+  });
+
+  // Back to what is stored. useFormDraft sees form == baseline and removes the stored draft.
+  function discardDraft() {
+    setForm(baseline);
+    setRestored(false);
+  }
 
   async function fetchFromOnvif() {
     const host = form.rtsp_host.trim();
@@ -162,6 +196,11 @@ export default function CameraSettings() {
       // answers, so it is one of the calls allowed to run long.
       const slow = { timeoutMs: SLOW_REQUEST_TIMEOUT_MS };
       const saved = isNew ? await api.post('/cameras', payload, slow) : await api.put(`/cameras/${id}`, payload, slow);
+      // Saved: the form now equals what is stored, so the draft is stale. Moving the baseline is what clears it
+      // (useFormDraft derives the draft from form-versus-baseline). It matters beyond tidiness: after ADDING a
+      // camera this same component stays mounted under /cameras/:newId, and without it the old form would be
+      // re-stored there as an edit of the new camera.
+      setBaseline({ ...form, rtsp_password: '', talk_password: '' });
       await refresh();
       // New camera: drop into its own settings so motion/sound can be configured next.
       navigate(isNew ? `/cameras/${saved.id}` : back.to, isNew ? { state: { from: back } } : { state: { from: back } });
@@ -183,6 +222,7 @@ export default function CameraSettings() {
     setRemoveBusy(true); setPageError(''); setRemoveError('');
     try {
       await api.del(`/cameras/${id}`);
+      clearDraft(draftKey);
       await refresh();
       navigate(back.to);
     } catch (err) {
@@ -222,6 +262,10 @@ export default function CameraSettings() {
           <div className="empty-state">Loading…</div>
         ) : (
           <form onSubmit={save}>
+            {unsaved && (
+              <UnsavedNotice restored={restored} onDiscard={discardDraft}
+                note={restored ? 'Passwords are never kept on the device, so type them again.' : ''} />
+            )}
             <div className="field">
               <label htmlFor="cam-name">Name</label>
               <input id="cam-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}

@@ -143,6 +143,14 @@ The JWT signing secret is auto-generated and persisted to `DATA_DIR/.jwt_secret`
 `JWT_SECRET` isn't set — deliberately avoiding a hardcoded fallback, since this image is
 publicly distributed and a baked-in secret would be a shared key across every install.
 
+
+**Client startup (#382).** The SPA decides "signed in" from `/auth/me` and "which form" from `/auth/status`.
+Only a **401** from `/auth/me` means signed out. A network failure, a timeout or a 5xx (or a proxy's 502 while
+the backend restarts) leaves the stored token alone and shows `ServerUnreachable` ("Can't reach Nightlight")
+instead, retried by `lib/useAutoRetry.js` (5 s, 10 s, 20 s, then every 30 s) and by a **Try again** button. A
+failed `/auth/status` does the same on the sign-in screen: it no longer guesses "established install" and shows
+the sign-in form. The demo's tokenless path and the native app's (same web code, same stored token) are unchanged.
+
 ## Data layer (`backend/src/db.js`)
 
 better-sqlite3, single file in `DATA_DIR` (default `/app/data`). Schema is created with
@@ -237,6 +245,17 @@ JWT and redirects to `#/login` on a 401. Every request also carries a timeout (3
 stalled connection fails with a "took too long to respond" error instead of hanging); a call the server
 is allowed to run long (camera probes and saves, recomputing a night, photo uploads, stopping a recording, diagnostics, the clip list and bulk delete) passes
 `{ timeoutMs: SLOW_REQUEST_TIMEOUT_MS }` (90 s) as its last argument.
+
+**Unsaved form edits survive the background reload (#377).** `App.jsx` reloads the page after 15 s in the
+background to repair stale media connections, and that empties React state. The child form, the camera form
+and Settings → Recording therefore store what is different from the saved values in `sessionStorage`
+(`lib/formDraft.js`, kept in step by `lib/useFormDraft.js`) and restore it on mount. Rules that must hold:
+**no secret is ever written** (each form passes an allow-list of fields, credential-named keys are dropped
+even if allowed, and a camera password is lost on reload by design); a draft is **per signed-in user**, expires
+after 6 hours, and is removed by a successful save, an explicit discard, removing the thing, and sign-out
+(an expired sign-in keeps it, so signing back in resumes). "Unsaved" is always derived (form versus last
+saved), never a flag set by `onChange`. Forms with an explicit Save show `components/UnsavedNotice.jsx`.
+The forms not yet covered are listed in `docs/design-language.md` (§6, Forms with a Save button).
 
 ## CSP is enforced — keep it that way
 

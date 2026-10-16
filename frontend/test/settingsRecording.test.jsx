@@ -9,7 +9,7 @@
 //     retention and "0 keeps them forever" for wake clips. Every default here is written with `??`
 //     rather than `||` for exactly that reason, and the difference is invisible until somebody sets a
 //     limit to 0 and silently gets 14 days instead. One `||` is all it takes.
-//  3. **The save sends a hand-written whitelist of nine fields** into a route that is one long
+//  3. **The save sends a hand-written whitelist of ten fields** into a route that is one long
 //     positional UPDATE. A field dropped from that list stops saving, with no error anywhere.
 //
 // Role gating is NOT tested here: the route sits under <AdminProtected> (covered in
@@ -142,6 +142,7 @@ describe('saving', () => {
       'clip_pre_roll_s',
       'clip_retention_days',
       'clip_retention_max_gb',
+      'ondemand_enabled',
       'ondemand_max_duration_s',
       'ondemand_pre_roll_s',
       'wake_clip_retention_days',
@@ -150,14 +151,14 @@ describe('saving', () => {
     ]);
   });
 
-  test('⚠️ does NOT resend the on/off switch, which applies on its own', async () => {
-    // `ondemand_enabled` is deliberately absent from the save payload: the switch applies the instant
-    // it is flipped. Including it here would let a stale form value undo a toggle the user had just
-    // made — the two controls would fight each other.
+  test('★ the on/off switch rides in the same Save, as a real boolean (#391)', async () => {
+    // `ondemand_enabled` used to be deliberately absent from this payload because the switch wrote on its
+    // own. It is one of the page's drafts now, so Save must carry it, and carry the STORED value when the
+    // switch was not touched (false here) rather than a default of true that would re-enable the feature.
     const { user } = renderWith({ ondemand_enabled: false });
     await user.click(await screen.findByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
-    expect(putSpy.mock.calls[0][1]).not.toHaveProperty('ondemand_enabled');
+    expect(putSpy.mock.calls[0][1].ondemand_enabled).toBe(false);
   });
 
   test('sends the wake-clip switch as a real boolean even when it was never touched', async () => {
@@ -209,8 +210,8 @@ describe('the wake-clip fields follow their switch', () => {
   });
 
   test('turning the switch off hides them without saving anything', async () => {
-    // The switch here is an ordinary form field, unlike the on-demand one below — nothing is written
-    // until Save. A regression that made it apply immediately would be a surprising, unasked-for write.
+    // The switch is an ordinary form field, like the on-demand one (#391) — nothing is written until Save.
+    // A regression that made it apply immediately would be a surprising, unasked-for write.
     const { user } = renderWith({ wake_clips_enabled: true });
     await user.click(await screen.findByLabelText('Record wake-ups without alerting'));
     expect(screen.queryByLabelText('Clip length (seconds)')).toBeNull();
@@ -218,31 +219,74 @@ describe('the wake-clip fields follow their switch', () => {
   });
 });
 
-describe('★ the on-demand switch applies immediately', () => {
+describe('★ the on-demand switch is a draft like every other control (#391)', () => {
   const SWITCH = 'Show a Record button on each camera';
 
-  test('flipping it writes straight away, without a Save', async () => {
-    // Its pill shape promises this in this codebase, and turning the feature off is supposed to stop
-    // every camera buffering at once rather than at the next Save.
+  test('flipping it sends NOTHING, and says there are unsaved changes', async () => {
+    // Two pills on this page used to commit differently: this one wrote at once, the wake-clip one waited
+    // for Save. Someone who turned a feature off and left believed it had stopped. One model now.
     const { user } = renderWith({ ondemand_enabled: true });
+    expect(screen.queryByText('Unsaved changes.')).toBeNull();
     await user.click(await screen.findByLabelText(SWITCH));
-    await waitFor(() => expect(putSpy).toHaveBeenCalledWith('/settings', { ondemand_enabled: false }));
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(screen.getByText('Unsaved changes.')).toBeTruthy();
   });
 
-  test('★★ a rejected toggle puts the switch BACK and says why', async () => {
-    // The failure that would otherwise be silent and actively misleading: the switch is moved
-    // optimistically, so if the write fails and nothing puts it back, the screen shows "off" while
-    // every camera carries on buffering. The user would have no reason to doubt it.
+  test('Save sends it, once, with the rest of the page', async () => {
+    const { user } = renderWith({ ondemand_enabled: true });
+    await user.click(await screen.findByLabelText(SWITCH));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
+    expect(putSpy.mock.calls[0][1]).toMatchObject({ ondemand_enabled: false, wake_clips_enabled: true });
+  });
+
+  test('★ a switch stored as 1/0 (what the database returns) flipped twice is still "no change"', async () => {
+    // The database hands back 1, the switch hands back true; compared raw, 1 -> true -> 1 would read as an
+    // edit forever and the notice (and a stored draft) would never go away.
+    const { user } = renderWith({ ondemand_enabled: 1, wake_clips_enabled: 1 });
+    const toggle = await screen.findByLabelText(SWITCH);
+    await user.click(toggle);
+    await user.click(toggle);
+    expect(screen.queryByText('Unsaved changes.')).toBeNull();
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  test('with nothing stored the switch is ON and Save carries that, not a false', async () => {
+    const { user } = renderWith();
+    expect((await screen.findByLabelText(SWITCH)).checked).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1]).toMatchObject({ ondemand_enabled: true, wake_clips_enabled: true });
+  });
+
+  test('flipping it back clears the notice: unsaved is derived, not a flag', async () => {
+    const { user } = renderWith({ ondemand_enabled: true });
+    const toggle = await screen.findByLabelText(SWITCH);
+    await user.click(toggle);
+    await user.click(toggle);
+    expect(screen.queryByText('Unsaved changes.')).toBeNull();
+  });
+
+  test('★★ a rejected Save keeps the draft and the notice, and says why', async () => {
+    // Nothing on screen may read as "recording stopped" once the write failed: the notice stays, the error
+    // shows, and the stored value (still on) is what a reload would bring back.
     vi.restoreAllMocks();
     mockApi({ putFails: 'Server unavailable' });
     const { user } = renderWith({ ondemand_enabled: true });
-
-    const toggle = await screen.findByLabelText(SWITCH);
-    expect(toggle.checked).toBe(true);
-    await user.click(toggle);
-
+    await user.click(await screen.findByLabelText(SWITCH));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(await screen.findByText('Server unavailable')).toBeTruthy();
-    await waitFor(() => expect(screen.getByLabelText(SWITCH).checked).toBe(true));
+    expect(screen.getByText('Unsaved changes.')).toBeTruthy();
+  });
+
+  test('after a successful Save the notice is gone', async () => {
+    const { user } = renderWith({ ondemand_enabled: true });
+    await user.click(await screen.findByLabelText(SWITCH));
+    // PUT /settings answers with the settings as stored, so commit() republishes the new value.
+    putSpy.mockResolvedValue({ ...FULL_SETTINGS, ondemand_enabled: false });
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(screen.queryByText('Unsaved changes.')).toBeNull());
+    expect(screen.getByLabelText(SWITCH).checked).toBe(false);
   });
 
   test('its fields are hidden when the feature is off, like the wake-clip block', async () => {
@@ -309,7 +353,7 @@ describe('★ unsaved drafts survive a context refresh (#449)', () => {
     return { ...result, user: userEvent.setup() };
   }
 
-  test('T1: pre-roll, a wake-clip field, and a HIDDEN on-demand field all survive a toggle + context republish', async () => {
+  test('T1: pre-roll, a wake-clip field, and a HIDDEN on-demand field all survive a switch flip + context republish', async () => {
     const { user, rerenderWith } = renderWith(FULL_SETTINGS);
 
     const preRoll = await screen.findByLabelText('Pre-roll (seconds)');
@@ -325,11 +369,10 @@ describe('★ unsaved drafts survive a context refresh (#449)', () => {
     await user.type(ondemandPre, '22');
 
     await user.click(screen.getByLabelText(SWITCH_LABEL));
-    await waitFor(() => expect(putSpy).toHaveBeenCalledWith('/settings', { ondemand_enabled: false }));
+    expect(putSpy).not.toHaveBeenCalled(); // a draft now (#391), not an immediate write
 
-    // Stands in for the real SettingsProvider re-fetching after the toggle's refresh() — a NEW
-    // settings object, same shape a real GET /settings would return.
-    rerenderWith({ settings: withOndemand(false) });
+    // Stands in for the real SettingsProvider re-fetching for some unrelated reason — a NEW settings object.
+    rerenderWith({ settings: { ...FULL_SETTINGS, temp_unit: 'F' } });
 
     // The on-demand fields correctly hide themselves while the feature is off — but a field being
     // off-screen must not be what clears its draft (Codex F4).
@@ -337,10 +380,7 @@ describe('★ unsaved drafts survive a context refresh (#449)', () => {
     expect(screen.getByLabelText('Pre-roll (seconds)').value).toBe('12');
     expect(screen.getByLabelText('Clip length (seconds)').value).toBe('45');
 
-    // Toggle back on — a second PUT, a second republish.
     await user.click(screen.getByLabelText(SWITCH_LABEL));
-    await waitFor(() => expect(putSpy).toHaveBeenCalledWith('/settings', { ondemand_enabled: true }));
-    rerenderWith({ settings: withOndemand(true) });
 
     // The on-demand pre-roll draft, typed before the field was ever hidden, is still there —
     const ondemandPreAgain = await screen.findByLabelText('Capture before (seconds)');
@@ -356,46 +396,7 @@ describe('★ unsaved drafts survive a context refresh (#449)', () => {
     })));
   });
 
-  test('T1b: the switch shows the optimistic value and disables itself while the toggle is in flight, then re-enables and STAYS on success', async () => {
-    // Uses renderStateful, not renderWith: with an inert commit(), pendingOndemand clearing on
-    // success would make the switch flicker back to the OLD committed value (nothing ever updated
-    // it) — a harness artifact, not the behaviour being pinned. A real commit is what "stays" means.
-    vi.restoreAllMocks();
-    let resolvePut;
-    mockApi({ putImpl: () => new Promise((resolve) => { resolvePut = resolve; }) });
-    const { user } = renderStateful(withOndemand(true));
-
-    const toggle = await screen.findByLabelText(SWITCH_LABEL);
-    expect(toggle.checked).toBe(true);
-    await user.click(toggle);
-
-    // Optimistic AND disabled the instant the request goes out, before the PUT resolves (Codex F5
-    // for the value, F2 for the disable — a second click here must not be able to start a race).
-    expect(screen.getByLabelText(SWITCH_LABEL).checked).toBe(false);
-    expect(screen.getByLabelText(SWITCH_LABEL)).toBeDisabled();
-
-    resolvePut({ ...FULL_SETTINGS, ondemand_enabled: false }); // the PUT's own response, as PUT /settings really answers
-    await waitFor(() => expect(screen.getByLabelText(SWITCH_LABEL)).not.toBeDisabled());
-    expect(screen.getByLabelText(SWITCH_LABEL).checked).toBe(false);
-  });
-
-  test('T1b: a rejected toggle re-enables the switch too, as well as reverting it', async () => {
-    vi.restoreAllMocks();
-    let rejectPut;
-    mockApi({ putImpl: () => new Promise((_resolve, reject) => { rejectPut = reject; }) });
-    const { user } = renderWith(withOndemand(true));
-
-    const toggle = await screen.findByLabelText(SWITCH_LABEL);
-    await user.click(toggle);
-    expect(screen.getByLabelText(SWITCH_LABEL)).toBeDisabled();
-
-    rejectPut(new Error('Server unavailable'));
-    await waitFor(() => expect(screen.getByLabelText(SWITCH_LABEL)).not.toBeDisabled());
-    expect(screen.getByLabelText(SWITCH_LABEL).checked).toBe(true);
-    expect(await screen.findByText('Server unavailable')).toBeTruthy();
-  });
-
-  test('T1c: the PUT response is shown for both the toggle and Save even though refresh() fails, and a second Save is not stale', async () => {
+  test('T1c: the PUT response is shown after Save even though refresh() fails, and a second Save is not stale', async () => {
     // #449 Codex F1: SettingsContext's refresh() swallows a failed GET, so "clear the draft, then
     // refresh()" can leave a stale value on screen next to a "Saved ✓" banner, ready to be re-sent by
     // the next Save. The fix is to never depend on refresh() landing at all after a successful write —
@@ -404,20 +405,16 @@ describe('★ unsaved drafts survive a context refresh (#449)', () => {
     const failingRefresh = vi.fn(async () => { throw new Error('refresh boom'); });
     vi.spyOn(api, 'get').mockResolvedValue({ total_bytes: 0, clip_count: 0 });
     putSpy = vi.spyOn(api, 'put').mockImplementation((_path, body) =>
-      'ondemand_enabled' in body
-        ? Promise.resolve({ ...FULL_SETTINGS, ondemand_enabled: body.ondemand_enabled })
-        // Deliberately returns a clip_retention_days that does NOT match what was typed (99), so a
-        // passing assertion can only mean the UI is showing the RESPONSE, not coincidentally echoing
-        // the input back.
-        : Promise.resolve({ ...FULL_SETTINGS, ...body, clip_retention_days: 7 })
+      // Deliberately returns a clip_retention_days that does NOT match what was typed (99), so a
+      // passing assertion can only mean the UI is showing the RESPONSE, not coincidentally echoing
+      // the input back.
+      Promise.resolve({ ...FULL_SETTINGS, ...body, clip_retention_days: 7 })
     );
 
     const { user } = renderStateful(FULL_SETTINGS, failingRefresh);
 
-    const toggle = await screen.findByLabelText(SWITCH_LABEL);
-    await user.click(toggle);
-    await waitFor(() => expect(screen.getByLabelText(SWITCH_LABEL).checked).toBe(false));
-    expect(failingRefresh).not.toHaveBeenCalled(); // commit() supersedes refresh() entirely (M7)
+    // The switch is saved by the SAME request as the number below (#391): one PUT carries both.
+    await user.click(await screen.findByLabelText(SWITCH_LABEL));
 
     const field = await screen.findByLabelText('Keep clips for (days)');
     await user.clear(field);
@@ -430,29 +427,17 @@ describe('★ unsaved drafts survive a context refresh (#449)', () => {
     // The button ALSO reads "Saved ✓" once saved (see its ternary), so getByRole('button', ...)
     // disambiguates it from the banner div — a plain getByText('Saved ✓') matches both.
     await waitFor(() => expect(screen.getByRole('button', { name: 'Saved ✓' })).toBeTruthy());
+    expect(putSpy.mock.calls[0][1].ondemand_enabled).toBe(false);
+    expect(screen.getByLabelText(SWITCH_LABEL).checked).toBe(false);
     // Shows the server's normalised 7, not the 99 that was typed.
     expect(screen.getByLabelText('Keep clips for (days)').value).toBe('7');
 
     // A second Save, nothing further edited, must send what was actually just committed (7) — not a
     // stale pre-fix value that a dropped commit() would leave behind.
     await user.click(saveBtn);
-    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(3));
-    expect(putSpy.mock.calls[2][1].clip_retention_days).toBe(7);
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(2));
+    expect(putSpy.mock.calls[1][1].clip_retention_days).toBe(7);
     expect(failingRefresh).not.toHaveBeenCalled();
-  });
-
-  test('T2: a failed toggle preserves an unsaved pre-roll draft (pinning existing behaviour, not a regression test — see the plan)', async () => {
-    vi.restoreAllMocks();
-    mockApi({ putFails: 'Server unavailable' });
-    const { user } = renderWith(withOndemand(true));
-
-    const preRoll = await screen.findByLabelText('Pre-roll (seconds)');
-    await user.clear(preRoll);
-    await user.type(preRoll, '19');
-
-    await user.click(screen.getByLabelText(SWITCH_LABEL));
-    await screen.findByText('Server unavailable');
-    expect(screen.getByLabelText('Pre-roll (seconds)').value).toBe('19');
   });
 
   test('T3: an untouched field follows the server on a context refresh (kills a "never sync" implementation)', async () => {
@@ -484,52 +469,25 @@ describe('★ unsaved drafts survive a context refresh (#449)', () => {
     await waitFor(() => expect(screen.getByLabelText('Keep clips for (days)').value).toBe('45'));
   });
 
-  // Save and the toggle each commit a FULL settings snapshot from their own PUT response (commit() in
-  // SettingsContext.jsx). The race this guards against: toggle PUT sent -> Save PUT sent -> Save's
-  // response lands first and commits (markSaved clears the numeric drafts) -> the toggle's response —
-  // a snapshot taken BEFORE the save — lands afterwards and commits, reverting the just-saved numeric
-  // values on screen, ready for the NEXT Save to write them back over the server. Disabling each
-  // control while the other's request is in flight makes that overlap impossible.
-  describe('★ Save and the toggle exclude each other while either is in flight (#449 P1)', () => {
-    test('holding the toggle PUT disables Save, and a submit while it is disabled sends no PUT', async () => {
-      vi.restoreAllMocks();
-      let resolveTogglePut;
-      mockApi({ putImpl: () => new Promise((resolve) => { resolveTogglePut = resolve; }) });
-      const { user } = renderWith(FULL_SETTINGS);
+  // While a Save is in flight both switches are disabled: nothing may change under a request that is
+  // already carrying the old values. (The matching guard against a SECOND, overlapping write — the old
+  // toggle-versus-Save race of #449 — no longer has two writers to guard, because the switch no longer
+  // writes by itself, #391.)
+  test('holding a Save PUT disables both switches', async () => {
+    vi.restoreAllMocks();
+    let resolveSavePut;
+    mockApi({ putImpl: () => new Promise((resolve) => { resolveSavePut = resolve; }) });
+    const { user } = renderWith(FULL_SETTINGS);
 
-      const toggle = await screen.findByLabelText(SWITCH_LABEL);
-      await user.click(toggle);
-      await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
+    await screen.findByLabelText('Pre-roll (seconds)');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
 
-      const saveBtn = screen.getByRole('button', { name: 'Save changes' });
-      expect(saveBtn).toBeDisabled();
+    expect(screen.getByLabelText(SWITCH_LABEL)).toBeDisabled();
+    expect(screen.getByLabelText('Record wake-ups without alerting')).toBeDisabled();
 
-      await user.click(saveBtn); // a disabled button; userEvent does not fire its handler
-      expect(putSpy).toHaveBeenCalledTimes(1); // still just the toggle's own PUT — no second one went out
-
-      resolveTogglePut({ ...FULL_SETTINGS, ondemand_enabled: false });
-      await waitFor(() => expect(saveBtn).not.toBeDisabled());
-    });
-
-    test('holding a Save PUT disables the toggle, and a click while it is disabled sends no PUT', async () => {
-      vi.restoreAllMocks();
-      let resolveSavePut;
-      mockApi({ putImpl: () => new Promise((resolve) => { resolveSavePut = resolve; }) });
-      const { user } = renderWith(FULL_SETTINGS);
-
-      await screen.findByLabelText('Pre-roll (seconds)');
-      await user.click(screen.getByRole('button', { name: 'Save changes' }));
-      await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
-
-      const toggle = screen.getByLabelText(SWITCH_LABEL);
-      expect(toggle).toBeDisabled();
-
-      await user.click(toggle); // a disabled switch; userEvent does not fire its handler
-      expect(putSpy).toHaveBeenCalledTimes(1); // still just Save's own PUT — no toggle PUT went out
-
-      resolveSavePut({ ...FULL_SETTINGS });
-      await waitFor(() => expect(toggle).not.toBeDisabled());
-    });
+    resolveSavePut({ ...FULL_SETTINGS });
+    await waitFor(() => expect(screen.getByLabelText(SWITCH_LABEL)).not.toBeDisabled());
   });
 
   test('T5: an edit made while Save is in flight survives the save that was already sending', async () => {

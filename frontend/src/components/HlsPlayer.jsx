@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
+import StreamUnavailableNotice from './StreamUnavailableNotice.jsx';
 import { getMediaToken } from '../lib/api.js';
 
 // The token travels as a query param (not an Authorization header) because Safari's
@@ -16,7 +17,7 @@ function hlsUrl(mediamtxPath) {
 const BLANK_POSTER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'%3E%3Crect width='1' height='1' fill='%230a0d1c'/%3E%3C/svg%3E";
 
-export default function HlsPlayer({ mediamtxPath, active, muted = false }) {
+export default function HlsPlayer({ mediamtxPath, active, muted = false, statusUnknown = false }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
   const stateRef = useRef('idle');
@@ -165,9 +166,16 @@ export default function HlsPlayer({ mediamtxPath, active, muted = false }) {
         style={{ opacity: state === 'live' ? 1 : 0 }}
       />
       {state !== 'live' && (
-        <div className={`whep-overlay whep-overlay--${state}`}>
-          {state === 'connecting' && <span>Connecting…</span>}
-          {state === 'error' && <span>No signal</span>}
+        <div className={`whep-overlay whep-overlay--${state}${statusUnknown ? ' whep-overlay--unknown' : ''}`}>
+          {/* Same rule as WhepPlayer (#505): unknown status is not "No signal". */}
+          {statusUnknown ? (
+            <StreamUnavailableNotice onRetry={() => setReconnectKey((k) => k + 1)} />
+          ) : (
+            <>
+              {state === 'connecting' && <span>Connecting…</span>}
+              {state === 'error' && <span>No signal</span>}
+            </>
+          )}
         </div>
       )}
     </div>

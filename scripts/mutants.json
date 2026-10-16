@@ -2620,34 +2620,10 @@
     "tests": ["settingsRecording.test.jsx"]
   },
   {
-    "label": "#449 M5: the on-demand switch ignores the optimistic pendingOndemand value",
-    "file": "frontend/src/pages/SettingsRecording.jsx",
-    "find": "  const ondemandOn = pendingOndemand ?? (form.ondemand_enabled ?? true);",
-    "replace": "  const ondemandOn = form.ondemand_enabled ?? true;",
-    "expect": "killed",
-    "tests": ["settingsRecording.test.jsx"]
-  },
-  {
-    "label": "#449 M6: the on-demand switch is not disabled while its toggle is in flight",
-    "file": "frontend/src/pages/SettingsRecording.jsx",
-    "find": "                disabled={toggleBusy || busy}",
-    "replace": "                disabled={busy}",
-    "expect": "killed",
-    "tests": ["settingsRecording.test.jsx"]
-  },
-  {
     "label": "#449 M7: Save drops commit(response) and relies on refresh() instead",
     "file": "frontend/src/pages/SettingsRecording.jsx",
     "find": "        commit(response);\r\n        markSaved(payload);",
     "replace": "        refresh();\r\n        markSaved(payload);",
-    "expect": "killed",
-    "tests": ["settingsRecording.test.jsx"]
-  },
-  {
-    "label": "#449 M8: Save is not disabled while the toggle is in flight",
-    "file": "frontend/src/pages/SettingsRecording.jsx",
-    "find": "disabled={busy || toggleBusy}",
-    "replace": "disabled={busy}",
     "expect": "killed",
     "tests": ["settingsRecording.test.jsx"]
   },
@@ -13836,8 +13812,8 @@
   {
     "label": "W5 role UI M19: the Children tab shows Add child to a caregiver",
     "file": "frontend/src/pages/Children.jsx",
-    "find": "        {isAdmin && (\r\n          <button className=\"btn btn-primary\" onClick={() => navigate('/children/new')}",
-    "replace": "        {true && (\r\n          <button className=\"btn btn-primary\" onClick={() => navigate('/children/new')}",
+    "find": "        {isAdmin && !blocked && (\r\n          <button className=\"btn btn-primary\" onClick={() => navigate('/children/new')}",
+    "replace": "        {true && !blocked && (\r\n          <button className=\"btn btn-primary\" onClick={() => navigate('/children/new')}",
     "expect": "killed",
     "tests": ["children.test.jsx"],
     "namePattern": "only an admin gets Add child"
@@ -16575,8 +16551,8 @@
   {
     "label": "#562 WHEP player: the call site stores the raw Location header again",
     "file": "frontend/src/components/WhepPlayer.jsx",
-    "find": "resourceUrlRef.current = resolveWhepResource(",
-    "replace": "resourceUrlRef.current = ((rawLocation) => rawLocation)(",
+    "find": "resourceUrl = resolveWhepResource(",
+    "replace": "resourceUrl = ((rawLocation) => rawLocation)(",
     "expect": "killed",
     "tests": ["whepPlayer.test.jsx"],
     "namePattern": "WhepPlayer session DELETE"
@@ -18073,5 +18049,1356 @@
       "recordingScope.test.jsx"
     ],
     "namePattern": "the panel, as an admin"
+  },
+  {
+    "label": "#384 photo save also sends the form's name, birthday and colour",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "{ photo }, { timeoutMs",
+    "replace": "{ name: form.name, birthday: form.birthday, color: form.color, photo }, { timeoutMs",
+    "expect": "killed",
+    "tests": [
+      "childSettings.test.jsx"
+    ],
+    "namePattern": "#384"
+  },
+  {
+    "label": "#382 AuthContext: any /auth/me failure counts as signed out (the old behaviour)",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "if (err?.status === 401) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 AuthContext: a 401 is treated as unreachable",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "if (err?.status === 401) {",
+    "replace": "if (err?.status === 999) {",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 App shell: the unreachable state is not shown",
+    "file": "frontend/src/App.jsx",
+    "find": "if (unreachable && !user) return",
+    "replace": "if (false && unreachable && !user) return",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 Login: a failed /auth/status falls open to the sign-in form again",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "if (statusFailures > 0 && needsSetup === null && !demoSignIn) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": [
+      "login.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 Login: no guard against a second status check in flight (timer beside a manual Try again)",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "if (statusCheckInFlight.current) return;",
+    "replace": "if (false) return;",
+    "expect": "killed",
+    "tests": [
+      "login.test.jsx"
+    ],
+    "namePattern": "Try again pressed just before the timer fires"
+  },
+  {
+    "label": "#382 AuthContext: a real 401 leaves the unreachable state set",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    setUnreachable(false);\n    setFailures(0);\n  }), []);",
+    "replace": "  }), []);",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "a real 401 on another request, after an unreachable refresh"
+  },
+  {
+    "label": "#382 useAutoRetry: never schedules a retry",
+    "file": "frontend/src/lib/useAutoRetry.js",
+    "find": "if (failures < 1) return undefined;",
+    "replace": "return undefined;",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx",
+      "login.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 AuthContext: the stored token is dropped on an unreachable server",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "        setUnreachable(true);\n",
+    "replace": "        setUnreachable(true); setToken(null);\n",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#391 recording: Save leaves the on/off switch out of the payload",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "    const payload = shown;",
+    "replace": "    const { ondemand_enabled, ...payload } = shown;",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx",
+      "settingsForms.test.jsx"
+    ]
+  },
+  {
+    "label": "#391 recording: the on/off switch writes by itself again",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "onChange={(e) => setField('ondemand_enabled', e.target.checked)}",
+    "replace": "onChange={(e) => { setField('ondemand_enabled', e.target.checked); api.put('/settings', { ondemand_enabled: e.target.checked }); }}",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx",
+      "settingsForms.test.jsx"
+    ]
+  },
+  {
+    "label": "#391 recording: the unsaved-changes notice is never shown",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "{unsaved && <UnsavedNotice restored={restored} onDiscard={discardChanges} />}",
+    "replace": "{false && <UnsavedNotice restored={restored} onDiscard={discardChanges} />}",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx",
+      "settingsForms.test.jsx"
+    ]
+  },
+  {
+    "label": "#391 recording: the on/off switch is not disabled while Save is in flight",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "                disabled={busy}\n                onChange={(e) => setField('ondemand_enabled', e.target.checked)}",
+    "replace": "                onChange={(e) => setField('ondemand_enabled', e.target.checked)}",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx"
+    ]
+  },
+  {
+    "label": "#391 recording: a stored 1/0 switch is compared raw, so flipping it twice stays \"unsaved\"",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "    ondemand_enabled: !!(src.ondemand_enabled ?? true),",
+    "replace": "    ondemand_enabled: src.ondemand_enabled ?? true,",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx"
+    ]
+  },
+  {
+    "label": "#391 recording: the on/off switch defaults to off when nothing is stored",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "    ondemand_enabled: !!(src.ondemand_enabled ?? true),",
+    "replace": "    ondemand_enabled: !!(src.ondemand_enabled ?? false),",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 recording: Discard changes does not discard",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "    discard();\n",
+    "replace": "    /* not discarded */\n",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 recording: the draft is judged against the placeholder settings before they load",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "ready: loaded !== false",
+    "replace": "ready: true",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 recording: the draft is not restored on mount",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "useSettingsDraft(settings, restoredDraft || {})",
+    "replace": "useSettingsDraft(settings, {})",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 formDraft: a credential-named field is stored when a caller allows it",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "    if (SECRET_KEY_RE.test(k)) continue;\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: the credential pattern forgets passwords",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "/pass|secret|token|key|credential|auth/i",
+    "replace": "/secret|token|key|credential|auth/i",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: the credential pattern forgets tokens",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "/pass|secret|token|key|credential|auth/i",
+    "replace": "/pass|secret|key|credential|auth/i",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: the allow-list is not applied (every field of the form is stored)",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "  for (const k of allow) {",
+    "replace": "  for (const k of Object.keys(values || {})) {",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: an object value (a photo) is stored",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "if (v === null || ['string', 'number', 'boolean'].includes(typeof v)) out[k] = v;",
+    "replace": "out[k] = v;",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: a draft never expires",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "Date.now() - parsed.at > DRAFT_TTL_MS",
+    "replace": "false",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: a draft expires one millisecond early",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "Date.now() - parsed.at > DRAFT_TTL_MS",
+    "replace": "Date.now() - parsed.at >= DRAFT_TTL_MS",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: the key is not scoped to the signed-in person",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "return `${DRAFT_PREFIX}${userId ?? 'anon'}:${formId}`;",
+    "replace": "return `${DRAFT_PREFIX}${formId}`;",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: clearAllDrafts removes everything in sessionStorage",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "if (k.startsWith(DRAFT_PREFIX)) s.removeItem(k);",
+    "replace": "s.removeItem(k);",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: clearAllDrafts removes nothing",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "if (k.startsWith(DRAFT_PREFIX)) s.removeItem(k);",
+    "replace": "if (false) s.removeItem(k);",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 useFormDraft: every field is stored, not just the ones that differ",
+    "file": "frontend/src/lib/useFormDraft.js",
+    "find": "    if (String(picked[k] ?? '') !== String(base[k] ?? '')) changed[k] = picked[k];",
+    "replace": "    changed[k] = picked[k];",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 useFormDraft: a draft is written before the form has loaded",
+    "file": "frontend/src/lib/useFormDraft.js",
+    "find": "    if (!ready) return;\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 useFormDraft: a typed secret does not count as an unsaved edit",
+    "file": "frontend/src/lib/useFormDraft.js",
+    "find": "(storable || hasUnsavedEdits({}, {}, secrets))",
+    "replace": "storable",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 camera: Save does not move the baseline, so the draft outlives it",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "      setBaseline({ ...form, rtsp_password: '', talk_password: '' });",
+    "replace": "      /* baseline not moved */",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 camera: a removed camera's draft is kept",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "      clearDraft(draftKey);\n      await refresh();",
+    "replace": "      await refresh();",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 camera: the draft is not restored once the camera has loaded",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "    setForm({ ...loaded, ...draft });",
+    "replace": "    setForm(loaded);",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 camera: Discard changes does not reset the form",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "  function discardDraft() {\n    setForm(baseline);",
+    "replace": "  function discardDraft() {\n    setForm(form);",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 child: Save does not move the baseline, so the draft outlives it",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "      setBaseline(form);\n      await refresh();",
+    "replace": "      await refresh();",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 child: the draft is not restored once the child has loaded",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "    setForm({ ...loaded, ...draft });",
+    "replace": "    setForm(loaded);",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 child: a new child's draft is not restored",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "useState(() => (isNew ? loadDraft(draftKey, DRAFT_FIELDS) : null))",
+    "replace": "useState(() => null)",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 child: Discard changes does not reset the form",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "  function discardDraft() {\n    setForm(baseline);",
+    "replace": "  function discardDraft() {\n    setForm(form);",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 auth: signing out keeps the drafts",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    clearAllDrafts();\n    setToken(null);",
+    "replace": "    setToken(null);",
+    "expect": "killed",
+    "tests": [
+      "lib/AuthContext.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 auth: an expired sign-in clears the drafts",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    resetPushRegistration();\n    setUser(null);",
+    "replace": "    resetPushRegistration();\n    clearAllDrafts();\n    setUser(null);",
+    "expect": "killed",
+    "tests": [
+      "lib/AuthContext.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 child: a removed child's draft is kept",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "      clearDraft(draftKey); // a removed child's half-typed edits must not outlive it\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["formDrafts.test.jsx"]
+  },
+  {
+    "label": "#371 sound calibration: a reading 11 minutes old still counts as listening",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "nowMs - newest > READINGS_FRESH_MIN * 60000",
+    "replace": "false",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: a minute with zero readings counts as listening",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "r.windows > 0 && r.ms <= nowMs",
+    "replace": "r.windows >= 0 && r.ms <= nowMs",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: the level averages minutes unweighted by readings",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "recent.reduce((n, r) => n + (Number.isFinite(r.level) ? r.level : 0) * r.windows, 0) / total,",
+    "replace": "recent.reduce((n, r) => n + (Number.isFinite(r.level) ? r.level : 0), 0) / recent.length,",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: the level averages the whole history, not the last five minutes",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "nowMs - r.ms <= LEVEL_WINDOW_MIN * 60000",
+    "replace": "true",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: a quiet five minutes shows 0 dB instead of no figure",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "if (!total) return { ready: true, avg: null, peak: null };",
+    "replace": "if (!total) return { ready: true, avg: 0, peak: 0 };",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: the alert line rises with sensitivity",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "4 + 14 * ((100 - s) / 99)",
+    "replace": "4 + 14 * (s / 99)",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 alertMarginDb"
+  },
+  {
+    "label": "#371 sound limits: the cooldown shown is a fixed 120 s, not the camera's",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "a {cooldownS}-second wait",
+    "replace": "a 120-second wait",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#371 sound calibration: a camera with readings is told it has none",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "{state.phase === 'ok' && !state.ready && (",
+    "replace": "{state.phase === 'ok' && state.ready && (",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#371 sound calibration: a failed history request shows nothing",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "{state.phase === 'error' && (",
+    "replace": "{state.phase === 'never' && (",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#371 sound calibration: the refresh timer is not cleared on leaving the screen",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "return () => { live = false; clearInterval(timer); };",
+    "replace": "return () => { live = false; };",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#371 sound calibration: the history is requested for no particular camera",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "`/cameras/${cameraId}/activity-history?hours=1`",
+    "replace": "`/cameras/x/activity-history?hours=1`",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#371 sound calibration: a reading dated in the future is counted",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": ".filter((r) => r.ms !== null && r.windows > 0 && r.ms <= nowMs);",
+    "replace": ".filter((r) => r.ms !== null && r.windows > 0);",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: a reading exactly ten minutes old has expired",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "nowMs - newest > READINGS_FRESH_MIN * 60000",
+    "replace": "nowMs - newest >= READINGS_FRESH_MIN * 60000",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: a reading exactly five minutes old is left out of the average",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "nowMs - r.ms <= LEVEL_WINDOW_MIN * 60000",
+    "replace": "nowMs - r.ms < LEVEL_WINDOW_MIN * 60000",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: the listening box claims the room's level has been learned",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "<strong>Listening.</strong> Sound readings are coming in.",
+    "replace": "<strong>Listening.</strong> The room’s level has been learned.",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#521 recompute on an empty night: the control is not rendered (unreachable again)",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "          <RecomputeNight childId={childId}",
+    "replace": "          <RecomputeNight childId={null}",
+    "expect": "killed",
+    "tests": [
+      "sleepDetail.test.jsx"
+    ],
+    "namePattern": "#521 Recompute is reachable"
+  },
+  {
+    "label": "#521 recompute on an empty night: a caregiver is offered it",
+    "file": "frontend/src/components/RecomputeNight.jsx",
+    "find": "user?.role !== 'admin' || !childId",
+    "replace": "!childId",
+    "expect": "killed",
+    "tests": [
+      "sleepDetail.test.jsx"
+    ],
+    "namePattern": "#521 Recompute is reachable"
+  },
+  {
+    "label": "#521 recompute on an empty night: a flagged night's note talks about times",
+    "file": "frontend/src/components/RecomputeNight.jsx",
+    "find": "{night.nobody_in_bed",
+    "replace": "{false",
+    "expect": "killed",
+    "tests": [
+      "sleepDetail.test.jsx"
+    ],
+    "namePattern": "#521 Recompute is reachable"
+  },
+  {
+    "label": "#375 loadState: a failed request with rows reads as stale even if nothing ever loaded",
+    "file": "frontend/src/lib/loadState.js",
+    "find": "loaded && count > 0 ? 'stale' : 'error'",
+    "replace": "count > 0 ? 'stale' : 'error'",
+    "expect": "killed",
+    "tests": ["lib/loadState.test.js"],
+    "namePattern": "#375 loadState"
+  },
+  {
+    "label": "#375 loadState: a failure after a good EMPTY load keeps the empty copy (stale instead of error)",
+    "file": "frontend/src/lib/loadState.js",
+    "find": "loaded && count > 0 ? 'stale' : 'error'",
+    "replace": "loaded ? 'stale' : 'error'",
+    "expect": "killed",
+    "tests": ["lib/loadState.test.js"],
+    "namePattern": "#375 loadState"
+  },
+  {
+    "label": "#375 loadState: the error branch is skipped, so a failed first request reads as loading",
+    "file": "frontend/src/lib/loadState.js",
+    "find": "if (error) return",
+    "replace": "if (false) return",
+    "expect": "killed",
+    "tests": ["lib/loadState.test.js"],
+    "namePattern": "#375 loadState"
+  },
+  {
+    "label": "#375 loadState: a successful empty answer reads as ready",
+    "file": "frontend/src/lib/loadState.js",
+    "find": "return count > 0 ? 'ready' : 'empty';",
+    "replace": "return 'ready';",
+    "expect": "killed",
+    "tests": ["lib/loadState.test.js"],
+    "namePattern": "#375 loadState"
+  },
+  {
+    "label": "#375 loadState: an unanswered request reads as empty",
+    "file": "frontend/src/lib/loadState.js",
+    "find": "if (!loaded) return 'loading';",
+    "replace": "if (!loaded) return 'empty';",
+    "expect": "killed",
+    "tests": ["lib/loadState.test.js"],
+    "namePattern": "#375 loadState"
+  },
+  {
+    "label": "#375 children: Add child is offered while the children failed to load",
+    "file": "frontend/src/pages/Children.jsx",
+    "find": "{isAdmin && !blocked && (",
+    "replace": "{isAdmin && (",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "failed: the error and Retry, NOT \"No children yet\""
+  },
+  {
+    "label": "#375 CamerasContext: loaded is never set, so a successful empty install reads as still loading",
+    "file": "frontend/src/lib/CamerasContext.jsx",
+    "find": "      setLoaded(true);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["lib/CamerasContext.test.jsx"],
+    "namePattern": "#375 loaded"
+  },
+  {
+    "label": "#375 child detail: the alerts feed is asked before the camera list has loaded",
+    "file": "frontend/src/pages/ChildDetail.jsx",
+    "find": "if (!camerasLoaded) return undefined;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "not asked before the camera list"
+  },
+  {
+    "label": "#375 child detail: a failed alerts request keeps the empty copy",
+    "file": "frontend/src/pages/ChildDetail.jsx",
+    "find": "setAlertsError(err?.message || 'Request failed');",
+    "replace": "setAlertsLoaded(true);",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Child detail: alerts feed"
+  },
+  {
+    "label": "#375 sleep detail: a failed night request becomes null (the no-data copy)",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": ".catch((err) => { if (alive) setNightError(err?.message || 'Request failed'); });",
+    "replace": ".catch(() => { if (alive) setNight(null); });",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Sleep detail"
+  },
+  {
+    "label": "#375 child detail: a missing child with other children cached reads as stale (no failure UI) instead of error",
+    "file": "frontend/src/pages/ChildDetail.jsx",
+    "find": "error: camerasError, count: 0 });",
+    "replace": "error: camerasError, count: kids.length });",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "a failed refresh with OTHER children cached"
+  },
+  {
+    "label": "#375 sleep detail: Retry re-runs the reset effect, so a night on screen is blanked",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "  }, [id, date]);",
+    "replace": "  }, [id, date, nightRetry]);",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Retry on the stale banner keeps the night on screen"
+  },
+  {
+    "label": "#375 sleep detail: a failed refresh after an EMPTY answer keeps the stale banner and the no-data copy",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "const displayable = !!night && night.status !== 'no_data';",
+    "replace": "const displayable = night !== undefined;",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "a failed refresh after an EMPTY"
+  },
+  {
+    "label": "#375 cameras tab: Retry is wired to a no-op instead of refresh",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "onRetry={refresh}",
+    "replace": "onRetry={() => {}}",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Cameras tab: Retry calls refresh"
+  },
+  {
+    "label": "#375 live: Retry is wired to a no-op instead of refresh",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "onRetry={refresh}",
+    "replace": "onRetry={() => {}}",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Live: Retry calls refresh"
+  },
+  {
+    "label": "#375 clip management: a failed list request becomes an empty list",
+    "file": "frontend/src/pages/ClipManagement.jsx",
+    "find": "      setError(e.message || 'Failed to load clips');\n    }\n  }",
+    "replace": "      setError(e.message || 'Failed to load clips');\n      setClips([]);\n    }\n  }",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Clip management"
+  },
+  {
+    "label": "#694 WHEP player: a late answer from a torn-down run is not DELETEd (its session is left open)",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "late answer from the old run|late answer after unmount"
+  },
+  {
+    "label": "#694 WHEP player: a late answer carries on into setRemoteDescription on the closed peer",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "if (resourceUrl) deleteWhepSession(resourceUrl);",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "late answer from the old run"
+  },
+  {
+    "label": "#694 WHEP player: a late answer DELETEs even when the Location was refused (fetch(null))",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "deleteWhepSession(resourceUrl);\n          return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "fails the #562 guard"
+  },
+  {
+    "label": "#694 WHEP player: a refused late Location no longer returns, so the cancelled run's answer is applied",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (cancelled) {\n          if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "if (cancelled && resourceUrl) {\n          deleteWhepSession(resourceUrl);\n          return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "fails the #562 guard",
+    "note": "Found by the #704 review: the refused-Location test only checked that no DELETE was sent."
+  },
+  {
+    "label": "#694 WHEP player: the late-answer DELETE is a bare fetch without the session token",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "if (resourceUrl) fetch(resourceUrl, { method: 'DELETE', redirect: 'error' }).catch(() => {});\n          return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "a late answer after unmount",
+    "note": "Found by the #704 review: the race tests projected each DELETE to its URL and redirect mode, so a missing Authorization header passed."
+  },
+  {
+    "label": "#694 WHEP player: the cleanup no longer DELETEs this run's own session",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "      if (resourceUrl) {\n        deleteWhepSession(resourceUrl);",
+    "replace": "      if (false) {\n        deleteWhepSession(resourceUrl);",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "normal connect then disconnect|late answer from the old run"
+  },
+  {
+    "label": "#564 webrtcSessions: kickWebrtcSession sends nothing, so a revoked login's live view keeps streaming",
+    "file": "backend/src/lib/webrtcSessions.js",
+    "find": "  const res = await fetch(`${MEDIAMTX_API}/v3/webrtc/sessions/kick/${id}`, {",
+    "replace": "  if (id) return;\n  const res = await fetch(`${MEDIAMTX_API}/v3/webrtc/sessions/kick/${id}`, {",
+    "expect": "killed",
+    "tests": ["webrtcSessions.test.js"],
+    "namePattern": "kickWebrtcSession"
+  },
+  {
+    "label": "#564 webrtcSessions: the kick targets the wrong session id",
+    "file": "backend/src/lib/webrtcSessions.js",
+    "find": "/v3/webrtc/sessions/kick/${id}`, {",
+    "replace": "/v3/webrtc/sessions/kick/${String(id).slice(1)}`, {",
+    "expect": "killed",
+    "tests": ["webrtcSessions.test.js"],
+    "namePattern": "kickWebrtcSession"
+  },
+  {
+    "label": "#564 recordings route: the thumbnail route serves the video file (still a 200)",
+    "file": "backend/src/routes/recordings.js",
+    "find": "  const file = getRecordingThumbFile(req.params.id);",
+    "replace": "  const file = getRecordingVideoFile(req.params.id);",
+    "expect": "killed",
+    "tests": ["recordings-routes.test.js"],
+    "namePattern": "a ready recording streams"
+  },
+  {
+    "label": "#564 identityRedaction: a name that cannot be percent-encoded is dropped from the matcher instead of redacted as typed",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "function variants(literal) {\n  const out = [literal];",
+    "replace": "function variants(literal) {\n  try { encodeURIComponent(literal); } catch { return []; }\n  const out = [literal];",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js"],
+    "namePattern": "lone surrogate"
+  },
+  {
+    "label": "#564 sleepAnalysis: the fallback for an unparseable window hour is 20 instead of the documented 19",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "return { h: Number.isFinite(h) ? h : 19, m: Number.isFinite(m) ? m : 0 };",
+    "replace": "return { h: Number.isFinite(h) ? h : 20, m: Number.isFinite(m) ? m : 0 };",
+    "expect": "killed",
+    "tests": ["sleepInsights.test.js"],
+    "namePattern": "unparseable sleep window"
+  },
+  {
+    "label": "#564 clipStorage: the age sweep expires clips younger than the retention (cutoff = now)",
+    "file": "backend/src/lib/clipStorage.js",
+    "find": "    for (const { id, clip_path } of getExpiredClips(days)) {",
+    "replace": "    for (const { id, clip_path } of getExpiredClips(0)) {",
+    "expect": "killed",
+    "tests": ["clip-storage.test.js"],
+    "namePattern": "a sweep with nothing to do"
+  },
+  {
+    "label": "#564 clipStorage: the size pass has no cap, so it deletes clips while storage is far under it",
+    "file": "backend/src/lib/clipStorage.js",
+    "find": "    if (bytes > cap) {\n      for (const c of getReadyClipsOldestFirst()) {\n        if (bytes <= cap) break;",
+    "replace": "    if (true) {\n      for (const c of getReadyClipsOldestFirst()) {",
+    "expect": "killed",
+    "tests": ["clip-storage.test.js"],
+    "namePattern": "a sweep with nothing to do"
+  },
+  {
+    "label": "#564 gotify: a priority of 0 is replaced by the saved default (truthiness check)",
+    "file": "backend/src/lib/gotify.js",
+    "find": "priority: priority != null ? priority : c.priority,",
+    "replace": "priority: priority || c.priority,",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "a priority of 0 is sent as 0"
+  },
+  {
+    "label": "#564 gotify: the app token is not URL-encoded in the query",
+    "file": "backend/src/lib/gotify.js",
+    "find": "token=${encodeURIComponent(c.appToken)}",
+    "replace": "token=${c.appToken}",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "the token is URL-encoded"
+  },
+  {
+    "label": "#564 pushover: a blank device is sent (Pushover refuses it) instead of omitted",
+    "file": "backend/src/lib/pushover.js",
+    "find": "if (c.device) form.set('device', c.device);",
+    "replace": "form.set('device', c.device);",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "a blank device is OMITTED"
+  },
+  {
+    "label": "#564 pushover: an empty image buffer is attached",
+    "file": "backend/src/lib/pushover.js",
+    "find": "if (image && image.length) {\n      form.set('attachment'",
+    "replace": "if (image) {\n      form.set('attachment'",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "a snapshot is attached as snapshot"
+  },
+  {
+    "label": "#564 pushover: validate sends a comma-separated device list (users/validate checks one at a time)",
+    "file": "backend/src/lib/pushover.js",
+    "find": "if (dev && !dev.includes(',')) params.device = dev;",
+    "replace": "if (dev) params.device = dev;",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "validate: both fields are required"
+  },
+  {
+    "label": "#564 pushover: validate swaps the application token and the user key",
+    "file": "backend/src/lib/pushover.js",
+    "find": "const params = { token: appToken, user: userKey };",
+    "replace": "const params = { token: userKey, user: appToken };",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "validate: both fields are required",
+    "note": "Found by the #714 review: the fake edge answered ok whatever it was sent, so the test did not look at the form."
+  },
+  {
+    "label": "#564 pushover: validate is sent as a GET",
+    "file": "backend/src/lib/pushover.js",
+    "find": "`${API}/users/validate.json`, { method: 'POST', body }",
+    "replace": "`${API}/users/validate.json`, { method: 'GET', body }",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "validate: both fields are required"
+  },
+  {
+    "label": "#564 pushover: the attachment is a same-length buffer of zeros (a corrupt snapshot)",
+    "file": "backend/src/lib/pushover.js",
+    "find": "new Blob([image], { type: 'image/jpeg' })",
+    "replace": "new Blob([Buffer.alloc(image.length)], { type: 'image/jpeg' })",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "a snapshot is attached as snapshot",
+    "note": "Found by the #714 review: both tests compared only the attachment's size."
+  },
+  {
+    "label": "#564 snapshot: URL credentials stay in the URL, so fetch refuses a camera that needs a login",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "    url.username = '';\n    url.password = '';\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["snapshot-http-fetch.test.js"],
+    "namePattern": "credentials in the URL become a Basic header"
+  },
+  {
+    "label": "#564 snapshot: a non-2xx answer is accepted as a picture",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "    if (!res.ok) {\n      logger.info(`[snapshot] camera URL returned",
+    "replace": "    if (false) {\n      logger.info(`[snapshot] camera URL returned",
+    "expect": "killed",
+    "tests": ["snapshot-http-fetch.test.js"],
+    "namePattern": "a non-2xx answer is null"
+  },
+  {
+    "label": "#564 detectionAlert: the public server address is never stamped on the tap target",
+    "file": "backend/src/lib/detectionAlert.js",
+    "find": "const server = getPublicBaseUrl();",
+    "replace": "const server = null;",
+    "expect": "killed",
+    "tests": ["detection-alert.test.js"],
+    "namePattern": "once the app has taught the server"
+  },
+  {
+    "label": "#564 detectionAlert: Gotify fires although it is switched off",
+    "file": "backend/src/lib/detectionAlert.js",
+    "find": "  if (fireGotify) {",
+    "replace": "  if (true) {",
+    "expect": "killed",
+    "tests": ["detection-alert.test.js"],
+    "namePattern": "ntfy alone"
+  },
+  {
+    "label": "#564 onvifMotion: every detect_source is treated as ONVIF",
+    "file": "backend/src/lib/onvifMotion.js",
+    "find": "&& camera.detect_source === 'onvif';",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["onvif-motion-wanted.test.js"],
+    "namePattern": "each condition alone refuses"
+  },
+  {
+    "label": "#505 CamerasContext: status.unknown is ignored (an unknown status is treated like offline)",
+    "file": "frontend/src/lib/CamerasContext.jsx",
+    "find": "if (cam.status?.unknown) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"]
+  },
+  {
+    "label": "#505 CamerasContext: an unknown camera is not flagged for the tile",
+    "file": "frontend/src/lib/CamerasContext.jsx",
+    "find": "statusLevel: 'connecting', statusUnknown: true",
+    "replace": "statusLevel: 'connecting'",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"]
+  },
+  {
+    "label": "#505 WhepPlayer: the service-unavailable notice never shows",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "{statusUnknown && state !== 'idle' ? (",
+    "replace": "{false ? (",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"]
+  },
+  {
+    "label": "#563 gate: GET /api/auth/sessions/all without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.get('/sessions/all', requireAuth, requireAdmin, ",
+    "replace": "router.get('/sessions/all', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/auth/users without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.post('/users', requireAuth, requireAdmin, ",
+    "replace": "router.post('/users', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: PUT /api/auth/users/:id without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.put('/users/:id', requireAuth, requireAdmin, ",
+    "replace": "router.put('/users/:id', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: DELETE /api/auth/users/:id/mfa without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.delete('/users/:id/mfa', requireAuth, requireAdmin, ",
+    "replace": "router.delete('/users/:id/mfa', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: DELETE /api/auth/users/:id without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.delete('/users/:id', requireAuth, requireAdmin, ",
+    "replace": "router.delete('/users/:id', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/cameras/onvif-probe without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/onvif-probe', requireAdmin, ",
+    "replace": "router.post('/onvif-probe', ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/cameras/probe-report without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/probe-report', requireAdmin, ",
+    "replace": "router.post('/probe-report', ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: DELETE /api/cameras/alerts without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.delete('/alerts', requireAuth, requireAdmin, ",
+    "replace": "router.delete('/alerts', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/cameras/clips/delete without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/clips/delete', requireAdmin, ",
+    "replace": "router.post('/clips/delete', ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/cameras/verify-talk without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/verify-talk', requireAdmin, ",
+    "replace": "router.post('/verify-talk', ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: GET /api/gotify/config without requireAdmin",
+    "file": "backend/src/routes/gotify.js",
+    "find": "router.get('/config', requireAuth, requireAdmin, ",
+    "replace": "router.get('/config', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: PUT /api/gotify/config without requireAdmin",
+    "file": "backend/src/routes/gotify.js",
+    "find": "router.put('/config', requireAuth, requireAdmin, ",
+    "replace": "router.put('/config', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: GET /api/notifications/status without requireAdmin",
+    "file": "backend/src/routes/notifications.js",
+    "find": "router.get('/status', requireAuth, requireAdmin, ",
+    "replace": "router.get('/status', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: PUT /api/ntfy/config without requireAdmin",
+    "file": "backend/src/routes/ntfy.js",
+    "find": "router.put('/config', requireAuth, requireAdmin, ",
+    "replace": "router.put('/config', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/ntfy/test without requireAdmin",
+    "file": "backend/src/routes/ntfy.js",
+    "find": "router.post('/test', requireAuth, requireAdmin, ",
+    "replace": "router.post('/test', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: GET /api/pushover/config without requireAdmin",
+    "file": "backend/src/routes/pushover.js",
+    "find": "router.get('/config', requireAuth, requireAdmin, ",
+    "replace": "router.get('/config', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/pushover/test without requireAdmin",
+    "file": "backend/src/routes/pushover.js",
+    "find": "router.post('/test', requireAuth, requireAdmin, ",
+    "replace": "router.post('/test', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: GET /api/settings/mqtt/status without requireAdmin",
+    "file": "backend/src/routes/settings.js",
+    "find": "router.get('/mqtt/status', requireAuth, requireAdmin, ",
+    "replace": "router.get('/mqtt/status', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: GET /api/settings/clip-storage without requireAdmin",
+    "file": "backend/src/routes/settings.js",
+    "find": "router.get('/clip-storage', requireAuth, requireAdmin, ",
+    "replace": "router.get('/clip-storage', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: PUT /api/settings without requireAdmin",
+    "file": "backend/src/routes/settings.js",
+    "find": "router.put('/', requireAuth, requireAdmin, ",
+    "replace": "router.put('/', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: PUT /api/cameras/:id without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id', asyncHandler(async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review found that 4 of the 43 admin gates still had no removal entry (the other 39 are above): existing entries anchored to these lines change cooldown state or reorder guards, none removes the gate."
+  },
+  {
+    "label": "#563 gate: PUT /api/cameras/:id/detection without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/:id/detection', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id/detection', asyncHandler(async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review (see the PUT /api/cameras/:id entry)."
+  },
+  {
+    "label": "#563 gate: DELETE /api/logs without requireAdmin",
+    "file": "backend/src/routes/logs.js",
+    "find": "router.delete('/', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review (see the PUT /api/cameras/:id entry)."
+  },
+  {
+    "label": "#563 gate: DELETE /api/timelapses/:id without requireAdmin",
+    "file": "backend/src/routes/timelapses.js",
+    "find": "router.delete('/:id', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/:id', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review (see the PUT /api/cameras/:id entry)."
+  },
+  {
+    "label": "#666 exit probe: stopActivityTracker leaves the flush timer running (the probe child must be killed, not exit)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "      writeMinute(cameraId, s);\n    }\n  }\n  clearInterval(flushTimer);",
+    "replace": "      writeMinute(cameraId, s);\n    }\n  }\n  // MUTANT: clearInterval(flushTimer);",
+    "expect": "killed",
+    "tests": [
+      "suite-exits-cleanly.test.js"
+    ],
+    "namePattern": "a process that starts and then STOPS the tracker exits on its own",
+    "note": "Guards the #666 rewrite of childExitsOnItsOwn (deadline measured from BODY-DONE, not from spawn): the new harness must still see a leaked timer. Checked by hand against the full file too: 5 of 64 tests fail with the timer left running, the nested node --test run only after its 150s ceiling."
+  },
+  {
+    "label": "#W3 --shard: the modulus compares against i instead of i - 1 (shard n gets nothing, shard 1 misses entry 0)",
+    "file": "scripts/mutate.mjs",
+    "find": "idx % shard.n === shard.i - 1",
+    "replace": "idx % shard.n === shard.i",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: sharding happens on the whole catalogue before --only is applied",
+    "file": "scripts/mutate.mjs",
+    "find": "const mutants = shard ? filtered.filter(",
+    "replace": "const mutants = shard ? catalogue.filter(",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: i > n is accepted (a shard that can never exist runs nothing and says so late)",
+    "file": "scripts/mutate.mjs",
+    "find": "return i <= n ? { i, n } : null;",
+    "replace": "return { i, n };",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: an index above 2^53 is accepted (it rounds, so i > n compares equal)",
+    "file": "scripts/mutate.mjs",
+    "find": "if (!Number.isSafeInteger(i) || !Number.isSafeInteger(n)) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --only: a filter that matches no control carries none (a broken suite reports everything killed)",
+    "file": "scripts/mutate.mjs",
+    "find": "&& !matched.some((m) => m.expect === 'survives') ? [...matched, control] : matched;",
+    "replace": "&& false ? [...matched, control] : matched;",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --only: the control is added even when the filter matches nothing (a typo runs just the control)",
+    "file": "scripts/mutate.mjs",
+    "find": "const filtered = only && matched.length && control",
+    "replace": "const filtered = only && control",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: a leading 0 / zero index is accepted",
+    "file": "scripts/mutate.mjs",
+    "find": "/^([1-9]\\d*)\\/([1-9]\\d*)$/",
+    "replace": "/^(\\d+)\\/([1-9]\\d*)$/",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --list ignores --only and --shard (prints the whole catalogue)",
+    "file": "scripts/mutate.mjs",
+    "find": "for (const m of mutants) console.log(`${m.expect === 'survives'",
+    "replace": "for (const m of catalogue) console.log(`${m.expect === 'survives'",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
   }
 ]
