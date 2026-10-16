@@ -17746,6 +17746,204 @@
     "namePattern": "#382"
   },
   {
+    "label": "#371 sound calibration: a reading 11 minutes old still counts as listening",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "nowMs - newest > READINGS_FRESH_MIN * 60000",
+    "replace": "false",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: a minute with zero readings counts as listening",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "r.windows > 0 && r.ms <= nowMs",
+    "replace": "r.windows >= 0 && r.ms <= nowMs",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: the level averages minutes unweighted by readings",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "recent.reduce((n, r) => n + (Number.isFinite(r.level) ? r.level : 0) * r.windows, 0) / total,",
+    "replace": "recent.reduce((n, r) => n + (Number.isFinite(r.level) ? r.level : 0), 0) / recent.length,",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: the level averages the whole history, not the last five minutes",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "nowMs - r.ms <= LEVEL_WINDOW_MIN * 60000",
+    "replace": "true",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: a quiet five minutes shows 0 dB instead of no figure",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "if (!total) return { ready: true, avg: null, peak: null };",
+    "replace": "if (!total) return { ready: true, avg: 0, peak: 0 };",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: the alert line rises with sensitivity",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "4 + 14 * ((100 - s) / 99)",
+    "replace": "4 + 14 * (s / 99)",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 alertMarginDb"
+  },
+  {
+    "label": "#371 sound limits: the cooldown shown is a fixed 120 s, not the camera's",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "a {cooldownS}-second wait",
+    "replace": "a 120-second wait",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#371 sound calibration: a camera with readings is told it has none",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "{state.phase === 'ok' && !state.ready && (",
+    "replace": "{state.phase === 'ok' && state.ready && (",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#371 sound calibration: a failed history request shows nothing",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "{state.phase === 'error' && (",
+    "replace": "{state.phase === 'never' && (",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#371 sound calibration: the refresh timer is not cleared on leaving the screen",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "return () => { live = false; clearInterval(timer); };",
+    "replace": "return () => { live = false; };",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#371 sound calibration: the history is requested for no particular camera",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "`/cameras/${cameraId}/activity-history?hours=1`",
+    "replace": "`/cameras/x/activity-history?hours=1`",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#371 sound calibration: a reading dated in the future is counted",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": ".filter((r) => r.ms !== null && r.windows > 0 && r.ms <= nowMs);",
+    "replace": ".filter((r) => r.ms !== null && r.windows > 0);",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: a reading exactly ten minutes old has expired",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "nowMs - newest > READINGS_FRESH_MIN * 60000",
+    "replace": "nowMs - newest >= READINGS_FRESH_MIN * 60000",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: a reading exactly five minutes old is left out of the average",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "nowMs - r.ms <= LEVEL_WINDOW_MIN * 60000",
+    "replace": "nowMs - r.ms < LEVEL_WINDOW_MIN * 60000",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: the listening box claims the room's level has been learned",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "<strong>Listening.</strong> Sound readings are coming in.",
+    "replace": "<strong>Listening.</strong> The room’s level has been learned.",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#521 recompute on an empty night: the control is not rendered (unreachable again)",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "          <RecomputeNight childId={childId}",
+    "replace": "          <RecomputeNight childId={null}",
+    "expect": "killed",
+    "tests": [
+      "sleepDetail.test.jsx"
+    ],
+    "namePattern": "#521 Recompute is reachable"
+  },
+  {
+    "label": "#521 recompute on an empty night: a caregiver is offered it",
+    "file": "frontend/src/components/RecomputeNight.jsx",
+    "find": "user?.role !== 'admin' || !childId",
+    "replace": "!childId",
+    "expect": "killed",
+    "tests": [
+      "sleepDetail.test.jsx"
+    ],
+    "namePattern": "#521 Recompute is reachable"
+  },
+  {
+    "label": "#521 recompute on an empty night: a flagged night's note talks about times",
+    "file": "frontend/src/components/RecomputeNight.jsx",
+    "find": "{night.nobody_in_bed",
+    "replace": "{false",
+    "expect": "killed",
+    "tests": [
+      "sleepDetail.test.jsx"
+    ],
+    "namePattern": "#521 Recompute is reachable"
+  },
+  {
     "label": "#375 loadState: a failed request with rows reads as stale even if nothing ever loaded",
     "file": "frontend/src/lib/loadState.js",
     "find": "loaded && count > 0 ? 'stale' : 'error'",
