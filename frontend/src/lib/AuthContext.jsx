@@ -1,11 +1,8 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { api, getToken, setToken, refreshMediaToken, clearMediaToken, onUnauthorized } from './api.js';
 import { unregisterPushNotifications, resetPushRegistration } from './pushNotifications.js';
-<<<<<<< HEAD
 import { useAutoRetry } from './useAutoRetry.js';
-=======
 import { clearAllDrafts } from './formDraft.js';
->>>>>>> origin/dev
 
 // Exported so tests can inject a value directly — chiefly to render a screen as an admin and
 // again as a caregiver, since role gating is real in this UI and is where bugs hide.
