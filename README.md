@@ -611,6 +611,12 @@ measurement**, and (like everything here) never a safety device — see the warn
     | Sleep detail page | worked out fresh each time | still worked out fresh each time, with your times laid over it |
     | Editing or removing your correction | — | always allowed |
 
+    **Recompute this night** (admins only) is on every night that was scored, including one that shows
+    **No one in the bed**, whether the detector scored it empty or you flagged it. It works the same way
+    there: the first press compares the saved summary with the current one and saves nothing, the second
+    saves. A flagged night is a corrected night, so it normally opens on "locked" until you remove the correction (once its saved summary is final, see above). It is
+    not offered on nights with no data, no clear sleep, or with sleep tracking off.
+
     - **What gets locked is the night as it is when you save.** If last night's saved summary was still
       being refined (the first ~3 hours after the window closes), saving your correction first stores the
       night freshly worked out at that moment, then locks it, so an early rough pass isn't what gets kept.

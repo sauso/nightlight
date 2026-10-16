@@ -18,6 +18,11 @@ export function CamerasProvider({ children }) {
   const [kids, setKids] = useState([]);
   const [cameras, setCameras] = useState([]);
   const [error, setError] = useState('');
+  // True once a request has SUCCEEDED, and never reset: `kids`/`cameras` start as [] only so consumers can
+  // map them, which made "not loaded yet" and "failed" look exactly like "none configured" (#375). A screen
+  // reads (loaded, error, list length) through lib/loadState.js to tell the three apart. Additive: nothing
+  // that already reads `kids`, `cameras`, `error` or `refresh` changes.
+  const [loaded, setLoaded] = useState(false);
   const failureCountRef = useRef(0);
   const wasDownRef = useRef(false);
   const notReadyCountsRef = useRef(new Map()); // camera_id -> consecutive not-ready polls
@@ -55,6 +60,7 @@ export function CamerasProvider({ children }) {
         return { ...cam, statusLevel: count > NOT_READY_RED_THRESHOLD ? 'offline' : 'connecting' };
       });
       setCameras(camsWithLevel);
+      setLoaded(true);
 
       setError('');
       if (wasDownRef.current) {
@@ -88,7 +94,7 @@ export function CamerasProvider({ children }) {
   }, []);
 
   return (
-    <CamerasContext.Provider value={{ kids, cameras, error, refresh: load }}>
+    <CamerasContext.Provider value={{ kids, cameras, error, loaded, refresh: load }}>
       {children}
     </CamerasContext.Provider>
   );
