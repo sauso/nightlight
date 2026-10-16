@@ -391,6 +391,12 @@ user-settings screens. A new Save-button form should join this, not invent anoth
 at **1.4s** (connecting, urgent), `--offline` static with no ring. The tempo carries the meaning;
 if you add a state, pick its tempo deliberately.
 
+**Tile overlay states** (the text over a camera's video when it is not playing): *Connecting…*, *No signal*
+(the camera or its stream is down), and *Streaming service unavailable. Your camera may still be online.* (the
+server's own status check timed out, so the camera's state is unknown), the last as an icon, text and a Retry
+button in `--text-secondary`, not `--offline` red, because it does not claim the camera is down. Its dot stays
+on the amber "connecting" tempo and never turns red.
+
 ### Modal (`components/Modal.jsx`)
 On phone widths a **sheet**, not a centred dialog: overlay `rgba(10, 13, 28, 0.7)`, card
 `max-width: 440`, hugging the bottom edge (`placement="top"` for the top), rounded 20px on the inner

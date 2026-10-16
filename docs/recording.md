@@ -106,6 +106,14 @@ that gap without making alerts noisier.
   before the first footage it holds), so it can be a few seconds before the wake's minute on the timeline; the review page still
   matches it to that wake. See "Where a wake clip starts" in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 
+**Clips are capture candidates, not a one-to-one copy of the timeline.** The live watcher records a clip
+as it happens and cannot look back the way the nightly analysis does, so a wake on the sleep timeline can
+have no clip and a clip can sit where the timeline shows no wake. The two apply the same thresholds but
+not the same rules: the nightly analysis also counts movement **outside the bed** as activity (the live
+watcher sees only bed motion and sound), scores **one camera** (the child's primary), and applies the
+put-down and onset rules (including how it treats sound around bedtime and just after falling asleep)
+that the live watcher does not have. The live watcher tracks **every camera assigned to the child**.
+
 **Settings → Recording → Wake clips**
 
 | Setting | Default | Range | What it does |
