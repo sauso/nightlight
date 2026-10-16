@@ -361,6 +361,24 @@ Expected from WebKit's behaviour, not checked on a device. `.field` has `margin-
 when checked; transitions 0.16s. The real `<input>` is present but `opacity: 0` over the whole
 control — keep it, it's what makes the switch keyboard- and screen-reader-accessible.
 
+### Forms with a Save button: one model (#391, #377)
+
+A screen with a **Save changes** button commits **only** when it is pressed, and that includes its
+switches. A page must not mix a switch that writes at once with controls that wait: Recording did, and
+someone could turn a feature off, leave, and believe it had stopped. The exceptions are screens that
+declare the opposite for the whole page and have no Save button (the camera Motion / Sound / Schedule
+screens, which save themselves and say **Saving… / Saved ✓**).
+
+While the screen differs from what is stored it shows `components/UnsavedNotice.jsx` ("Unsaved changes",
+with **Discard changes**). The notice is derived from the data, so putting a value back removes it. What
+is typed is kept for 6 hours in the browser tab (`lib/formDraft.js`) and restored after the app's
+background reload or a visit to another screen, with the notice saying so; **a secret field is never
+kept**, so a screen with a password must say, when it restores, that the password has to be typed again.
+
+Covered today: the child form, the camera form and Settings → Recording. **Not covered** (they still lose
+unsaved edits on a reload): Settings → General, MQTT, the four push provider pages, Users, and the Account and
+user-settings screens. A new Save-button form should join this, not invent another store.
+
 ### Badges, chips, status
 - `.status-badge` — filled pill, 3px 10px, 12px/600, white text; `--ok` `--live`, `--bad`
   `--offline`, `--off` `--text-secondary`. `--sm` = 2px 8px / 11px.

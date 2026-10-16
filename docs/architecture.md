@@ -249,6 +249,17 @@ message with a **Reload** button and stops retrying on its own, for the same rea
 a new deploy has replaced, the reload is what fixes it too (the app also reloads itself after being backgrounded for
 15 s).
 
+**Unsaved form edits survive the background reload (#377).** `App.jsx` reloads the page after 15 s in the
+background to repair stale media connections, and that empties React state. The child form, the camera form
+and Settings → Recording therefore store what is different from the saved values in `sessionStorage`
+(`lib/formDraft.js`, kept in step by `lib/useFormDraft.js`) and restore it on mount. Rules that must hold:
+**no secret is ever written** (each form passes an allow-list of fields, credential-named keys are dropped
+even if allowed, and a camera password is lost on reload by design); a draft is **per signed-in user**, expires
+after 6 hours, and is removed by a successful save, an explicit discard, removing the thing, and sign-out
+(an expired sign-in keeps it, so signing back in resumes). "Unsaved" is always derived (form versus last
+saved), never a flag set by `onChange`. Forms with an explicit Save show `components/UnsavedNotice.jsx`.
+The forms not yet covered are listed in `docs/design-language.md` (§6, Forms with a Save button).
+
 ## CSP is enforced — keep it that way
 
 `backend/src/index.js` serves an **enforcing** Content-Security-Policy via helmet (it was

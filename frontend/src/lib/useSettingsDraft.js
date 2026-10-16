@@ -17,8 +17,12 @@ import { useMemo, useState } from 'react';
 // refresh — an effect-based "only sync untouched keys" fix would need to know, per key, whether it
 // was ever edited; this gets that for free because editing is the only thing that ever populates
 // `drafts` in the first place.
-export function useSettingsDraft(settings) {
-  const [drafts, setDrafts] = useState({});
+//
+// `initialDrafts` (#377) seeds the edits from a draft restored after a page reload; omitted, nothing is
+// pre-edited. It is read once, on mount (a useState initial value), so a later context refresh can never
+// replay it over what the person has since typed.
+export function useSettingsDraft(settings, initialDrafts = {}) {
+  const [drafts, setDrafts] = useState(initialDrafts);
 
   const form = useMemo(() => ({ ...settings, ...drafts }), [settings, drafts]);
 
@@ -45,7 +49,13 @@ export function useSettingsDraft(settings) {
     });
   }
 
+  // Throw every edit away: the form goes back to tracking the server on every key (#377 "Discard changes").
+  // Not setFields(serverValues): that would PIN each key to today's value and hide a later change.
+  function discard() {
+    setDrafts({});
+  }
+
   const dirtyKeys = Object.keys(drafts);
 
-  return { form, setField, setFields, dirtyKeys, markSaved };
+  return { form, setField, setFields, dirtyKeys, markSaved, discard };
 }
