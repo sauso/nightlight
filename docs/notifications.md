@@ -211,8 +211,19 @@ therefore sends a line break in a camera or child name, or in a message that tra
 multi-line nightly sleep report keeps its line breaks.
 
 The **access token** travels in a header too. If the saved one contains a character a header cannot carry (a
-line break pasted into the middle of it, say), every ntfy send fails and **Send test** answers "the request
-could not be built" without quoting the token, which is also kept out of the log. Re-enter the token to fix it.
+line break or another control character pasted into the middle of it, say), every ntfy send fails and
+**Send test** reports that the request could not be sent: "the request could not be built" for a line break or
+a NUL, plain "fetch failed" for the other control characters. Neither quotes the token, and the log does not
+either. Re-enter the token to fix it.
+
+**What Send test (and the log) shows when ntfy or Gotify refuses a message.** `HTTP <status>` with its standard
+name (`HTTP 401 Unauthorized`), followed by the server's own short message fields if its reply is JSON:
+`error`, `errorDescription`, `message`, `detail` and `title` (each cut to 200 characters), plus `code` and `http`
+for ntfy. Nothing else from the reply is ever shown or logged, not a link, not an HTML error page, not any
+other field: a server or proxy that echoes the request back could otherwise hand your token or password back in
+the reply. A message field that repeats eight or more characters of your token (or, with a user name and
+password, of the encoded pair that is actually sent) is shown as `[withheld: it repeats part of a saved
+credential]`.
 
 ## Option D: Gotify
 
@@ -233,8 +244,11 @@ could not be built" without quoting the token, which is also kept out of the log
    message that does not repeat it; spaces and line breaks around it are simply removed. Leaving the
    field blank keeps the saved token. The token is sent in the `X-Gotify-Key` header, never in the
    address, and it is never written to the log or shown in a Test result: a token saved by an older
-   version that cannot be sent makes **Send test** answer "the request could not be built" without
-   quoting it. Re-enter the token from Gotify's **Apps** page to fix that.
+   version that cannot be sent makes **Send test** report that the request could not be sent ("the
+   request could not be built", or plain "fetch failed" for some control characters) without quoting
+   it. Re-enter the token from Gotify's **Apps** page to fix that. When Gotify refuses a message,
+   Send test shows the status and Gotify's own `error` / `errorDescription` words only, as described
+   for ntfy above.
 
 Gotify alerts are **text only** (no image — Gotify has no native attachments); tapping one opens the
 camera. Only the short message passes through your Gotify server; the other notifications do too,

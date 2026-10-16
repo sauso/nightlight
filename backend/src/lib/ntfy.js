@@ -1,6 +1,8 @@
 import db from '../db.js';
 import { logger } from './logger.js';
-import { postWithTimeout, redactSecrets } from './httpNotify.js';
+import { postWithTimeout, redactSecrets, describeErrorReply, REPLY_FIELDS } from './httpNotify.js';
+
+const NTFY_REPLY_FIELDS = [...REPLY_FIELDS, 'code', 'http'];
 
 // ntfy notifications (https://ntfy.sh, or any self-hosted ntfy server). The server POSTs the alert
 // straight to a topic; the recipient subscribes in the ntfy app or a browser. The snapshot is sent
@@ -58,8 +60,12 @@ export async function sendNtfy({ title, message, click, image, priority } = {}) 
   // The access token rides in the Authorization header, so it has the same exposure the Gotify token had (post-merge
   // review of PR #702): a token with a line break made fetch quote the whole header into its error. httpNotify.js
   // replaces that error; redactSecrets below keeps the credentials out of every other message too.
+  // WHAT is a secret here is what actually travels (Opus review of PR #742, D2): the token, or base64(user:password)
+  // without its `Basic ` prefix (a server can echo the bare value, and the prefixed one contains it). NOT the plain
+  // password: it is never on the wire, so it cannot be echoed, and cutting it out of text only shredded unrelated
+  // words and hinted at it (a password `ntfy` turned the docs URL in ntfy's own reply into `[redacted].sh`).
   const auth = authHeader(c);
-  const secrets = [c.token, c.password, auth];
+  const secrets = [c.token, auth?.startsWith('Basic ') ? auth.slice('Basic '.length) : ''];
   try {
     const headers = {};
     if (auth) headers.Authorization = auth;
@@ -82,9 +88,11 @@ export async function sendNtfy({ title, message, click, image, priority } = {}) 
       { label: 'ntfy' }
     );
     if (!res.ok) {
-      const text = redactSecrets(res.text, secrets);
-      logger.error(`[ntfy] send failed (${res.status}): ${text.slice(0, 200)}`);
-      return { ok: false, error: `HTTP ${res.status}${text ? ` — ${text.slice(0, 140)}` : ''}` };
+      // Never the raw reply (describeErrorReply in httpNotify.js). ntfy's own error JSON is
+      // {"code":40101,"http":401,"error":"unauthorized","link":...}: its numbers are kept too, its link is not.
+      const reply = describeErrorReply(res.status, res.text, secrets, NTFY_REPLY_FIELDS);
+      logger.error(`[ntfy] send failed (${res.status}): ${reply}`);
+      return { ok: false, error: reply };
     }
     logger.info(`[ntfy] sent "${title || 'notification'}"${image && image.length ? ` with snapshot (${image.length} bytes)` : ''}`);
     return { ok: true };

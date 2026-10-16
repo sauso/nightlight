@@ -226,6 +226,8 @@ describe('photos: an image data URL, within the cap', () => {
       'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>data:image/png;base64,',
       'data:image/svg+xml;base64,PHN2Zz4=#data:image/jpeg;base64,AA',
       'data:image/gif;base64,R0lGODlhdata:image/webp;base64,AA',
+      // Opus review of PR #742 (PHm): with the `m` flag `^` also matches after a line break, so this was accepted.
+      'data:image/svg+xml,<svg/>\ndata:image/png;base64,AAAA',
     ]) {
       assert.throws(() => normalizePhoto(bad), /Photo must be a JPEG, PNG or WebP image/, bad);
     }

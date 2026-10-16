@@ -1,6 +1,6 @@
 import db from '../db.js';
 import { logger } from './logger.js';
-import { postWithTimeout, redactSecrets } from './httpNotify.js';
+import { postWithTimeout, redactSecrets, describeErrorReply } from './httpNotify.js';
 
 // Gotify notifications (self-hosted, https://gotify.net). The server POSTs to a Gotify application's
 // message endpoint with that application's token; the recipient runs the Gotify server + app. Text
@@ -55,10 +55,11 @@ export async function sendGotify({ title, message, click, priority } = {}) {
       { label: 'gotify' }
     );
     if (!res.ok) {
-      // A server (or a proxy in front of it) that echoes the request back must not put the token in the log.
-      const text = redactSecrets(res.text, [c.appToken]);
-      logger.error(`[gotify] send failed (${res.status}): ${text.slice(0, 200)}`);
-      return { ok: false, error: `HTTP ${res.status}${text ? ` — ${text.slice(0, 140)}` : ''}` };
+      // Never the raw reply: a server (or a proxy in front of it) that echoes the request could hand the token back
+      // in any spelling. Only Gotify's own message fields are kept (describeErrorReply in httpNotify.js).
+      const reply = describeErrorReply(res.status, res.text, [c.appToken]);
+      logger.error(`[gotify] send failed (${res.status}): ${reply}`);
+      return { ok: false, error: reply };
     }
     logger.info(`[gotify] sent "${title || 'notification'}"`);
     return { ok: true };

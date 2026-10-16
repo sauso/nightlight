@@ -18365,8 +18365,8 @@
   {
     "label": "#742 review httpNotify.js: redactSecrets drops the JSON-escaped spelling (a quote or backslash in the token is echoed back escaped and survives)",
     "file": "backend/src/lib/httpNotify.js",
-    "find": "[...new Set([s, JSON.stringify(s).slice(1, -1), encodeURIComponent(s),",
-    "replace": "[...new Set([s, encodeURIComponent(s),",
+    "find": "const spellings = [s, JSON.stringify(s).slice(1, -1)];",
+    "replace": "const spellings = [s];",
     "expect": "killed",
     "tests": ["notify-secret-leak.test.js"],
     "namePattern": "#742 review redactSecrets"
@@ -18374,17 +18374,116 @@
   {
     "label": "#742 review httpNotify.js: redactSecrets drops the percent-encoded spelling (a space or symbol echoed as %XX survives)",
     "file": "backend/src/lib/httpNotify.js",
-    "find": "[...new Set([s, JSON.stringify(s).slice(1, -1), encodeURIComponent(s), encodeURIComponent(s).replace(/%20/g, '+')])]",
-    "replace": "[...new Set([s, JSON.stringify(s).slice(1, -1)])]",
+    "find": "spellings.push(enc, enc.replace(/%20/g, '+'));",
+    "replace": "void enc;",
     "expect": "killed",
     "tests": ["notify-secret-leak.test.js"],
     "namePattern": "#742 review redactSecrets"
+  },
+  {
+    "label": "#742 review httpNotify.js: the JSON spelling keeps its closing quote (R1: matches only where a quote follows, and eats it)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "JSON.stringify(s).slice(1, -1)];",
+    "replace": "JSON.stringify(s).slice(1)];",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets: the JSON-escaped spelling is cut exactly"
+  },
+  {
+    "label": "#742 review httpNotify.js: only the first space of a form-encoded echo becomes + (R2)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "enc.replace(/%20/g, '+')",
+    "replace": "enc.replace(/%20/, '+')",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets: a token with two spaces"
+  },
+  {
+    "label": "#742 review httpNotify.js: encodeURIComponent is not guarded (D4: a lone surrogate throws out of a catch block)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "    try {\n      const enc = encodeURIComponent(s);\n      spellings.push(enc, enc.replace(/%20/g, '+'));\n    } catch { /* a lone surrogate: see above */ }\n",
+    "replace": "    const enc = encodeURIComponent(s);\n    spellings.push(enc, enc.replace(/%20/g, '+'));\n",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets: a secret holding a lone surrogate"
+  },
+  {
+    "label": "#742 review httpNotify.js: a secret of any length is cut out of free text (D2: a 1-character token shreds words)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "if (typeof s !== 'string' || s.length < MIN_SECRET_RUN) continue;\n    // The secret as a server",
+    "replace": "if (typeof s !== 'string' || s.length < 1) continue;\n    // The secret as a server",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets: a secret shorter than 8|#742 review ntfy: a short token"
+  },
+  {
+    "label": "#742 review httpNotify.js: the credential run length is 9, not 8 (an 8-character echo survives)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "export const MIN_SECRET_RUN = 8;",
+    "replace": "export const MIN_SECRET_RUN = 9;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: a kept field that repeats 8|#742 review redactSecrets: a secret shorter than 8"
+  },
+  {
+    "label": "#742 review httpNotify.js: a reply that is not JSON is quoted raw (the first 140 characters)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "  } catch {\n    return head;\n  }",
+    "replace": "  } catch {\n    return `${head} — ${String(text).slice(0, 140)}`;\n  }",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: only the whitelisted|#742 review gotify: an echo of the token"
+  },
+  {
+    "label": "#742 review httpNotify.js: every field of a JSON reply is kept (the whitelist is bypassed)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "for (const f of fields) {",
+    "replace": "for (const f of Object.keys(body)) {",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: only the whitelisted|#742 review gotify: an echo of the token"
+  },
+  {
+    "label": "#742 review httpNotify.js: a kept field that repeats part of a credential is no longer withheld",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "sharesRun(kept, secrets) ? WITHHELD :",
+    "replace": "false ? WITHHELD :",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: a kept field that repeats|#742 review gotify: a kept field|#742 review ntfy: Basic credentials"
+  },
+  {
+    "label": "#742 review httpNotify.js: a kept field is not cut to 200 characters",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "v.slice(0, REPLY_FIELD_MAX)",
+    "replace": "v",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: each kept field is cut"
+  },
+  {
+    "label": "#742 review httpNotify.js: the standard status phrase is dropped from a refusal",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "const head = `HTTP ${status}${STATUS_CODES[status] ? ` ${STATUS_CODES[status]}` : ''}`;",
+    "replace": "const head = `HTTP ${status}`;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: only the whitelisted"
   },
   {
     "label": "#702 review photo.js: the allowlist loses its start anchor (an SVG with a PNG prefix later in it is stored)",
     "file": "backend/src/lib/photo.js",
     "find": "const PHOTO_PREFIX = /^data:image",
     "replace": "const PHOTO_PREFIX = /data:image",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "namePattern": "#702 review photo: the allowed type must be at the START"
+  },
+  {
+    "label": "#742 review photo.js: the allowlist is multi-line (PHm: `^` also matches after a line break in an SVG)",
+    "file": "backend/src/lib/photo.js",
+    "find": "(?:jpeg|png|webp);base64,/;",
+    "replace": "(?:jpeg|png|webp);base64,/m;",
     "expect": "killed",
     "tests": ["input-validation.test.js"],
     "namePattern": "#702 review photo: the allowed type must be at the START"
@@ -18437,8 +18536,8 @@
   {
     "label": "#702 review httpNotify.js: redactSecrets does not skip an empty secret (it shreds every message)",
     "file": "backend/src/lib/httpNotify.js",
-    "find": "      .filter(Boolean).sort((a, b) => b.length - a.length);",
-    "replace": "      .sort((a, b) => b.length - a.length);",
+    "find": "if (typeof s !== 'string' || s.length < MIN_SECRET_RUN) continue;\n    // The secret as a server",
+    "replace": "if (typeof s !== 'string') continue;\n    // The secret as a server",
     "expect": "killed",
     "tests": ["notify-secret-leak.test.js"],
     "namePattern": "#702 review redactSecrets"
@@ -18453,13 +18552,22 @@
     "namePattern": "#702 review gotify: an error that quotes the token"
   },
   {
-    "label": "#702 review gotify.js: a server's error reply is logged and returned unredacted",
+    "label": "#742 review gotify.js: a server's error reply is logged and returned raw again (the first 140 characters)",
     "file": "backend/src/lib/gotify.js",
-    "find": "const text = redactSecrets(res.text, [c.appToken]);",
-    "replace": "const text = res.text;",
+    "find": "const reply = describeErrorReply(res.status, res.text, [c.appToken]);",
+    "replace": "const reply = `HTTP ${res.status} — ${res.text.slice(0, 140)}`;",
     "expect": "killed",
     "tests": ["notify-secret-leak.test.js"],
-    "namePattern": "#702 review gotify: a server that echoes"
+    "namePattern": "#742 review gotify: an echo of the token in any spelling|#702 review gotify: a server that echoes"
+  },
+  {
+    "label": "#742 review gotify.js: the reply filter is not told the token (a partial echo in a kept field survives)",
+    "file": "backend/src/lib/gotify.js",
+    "find": "describeErrorReply(res.status, res.text, [c.appToken])",
+    "replace": "describeErrorReply(res.status, res.text, [])",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review gotify: a kept field that repeats part"
   },
   {
     "label": "#702 review routes/gotify.js: the token's characters are not checked on save",
@@ -18484,6 +18592,15 @@
     "file": "backend/src/routes/gotify.js",
     "find": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+$/;",
     "replace": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+/;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: a token with a line break"
+  },
+  {
+    "label": "#742 review routes/gotify.js: the token allow-list is widened to \" & < > (G4: characters an echo escapes differently)",
+    "file": "backend/src/routes/gotify.js",
+    "find": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+$/;",
+    "replace": "const GOTIFY_TOKEN = /^[A-Za-z0-9._\"&<>-]+$/;",
     "expect": "killed",
     "tests": ["notify-secret-leak.test.js"],
     "namePattern": "#702 review gotify save: a token with a line break"
@@ -18516,13 +18633,49 @@
     "namePattern": "#702 review ntfy: an error that quotes the token"
   },
   {
-    "label": "#702 review ntfy.js: a server's error reply is logged and returned unredacted",
+    "label": "#742 review ntfy.js: a server's error reply is logged and returned raw again (the first 140 characters)",
     "file": "backend/src/lib/ntfy.js",
-    "find": "const text = redactSecrets(res.text, secrets);",
-    "replace": "const text = res.text;",
+    "find": "const reply = describeErrorReply(res.status, res.text, secrets, NTFY_REPLY_FIELDS);",
+    "replace": "const reply = `HTTP ${res.status} — ${res.text.slice(0, 140)}`;",
     "expect": "killed",
     "tests": ["notify-secret-leak.test.js"],
-    "namePattern": "#702 review ntfy: a server that echoes"
+    "namePattern": "an echo of the credential in any spelling|#702 review ntfy: a server that echoes"
+  },
+  {
+    "label": "#742 review ntfy.js: ntfy's code and http numbers are dropped from a refusal",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const NTFY_REPLY_FIELDS = [...REPLY_FIELDS, 'code', 'http'];",
+    "replace": "const NTFY_REPLY_FIELDS = [...REPLY_FIELDS];",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "own error reply keeps its words and numbers"
+  },
+  {
+    "label": "#742 review ntfy.js: the token is not a secret (N1: a token echoed in an error survives)",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const secrets = [c.token, auth?.startsWith('Basic ')",
+    "replace": "const secrets = [auth?.startsWith('Basic ')",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review ntfy: an error that quotes the token"
+  },
+  {
+    "label": "#742 review ntfy.js: base64(user:password) is not a secret (N4: Basic credentials echoed back survive)",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const secrets = [c.token, auth?.startsWith('Basic ') ? auth.slice('Basic '.length) : ''];",
+    "replace": "const secrets = [c.token];",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review ntfy: Basic credentials"
+  },
+  {
+    "label": "#742 review ntfy.js: the plain password is cut out of text again (N2/D2: it never travels, and it shreds ordinary words)",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const secrets = [c.token, auth?.startsWith('Basic ') ? auth.slice('Basic '.length) : ''];",
+    "replace": "const secrets = [c.token, c.password, auth?.startsWith('Basic ') ? auth.slice('Basic '.length) : ''];",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review ntfy: a short token or the plain password"
   },
   {
     "label": "#394 bufferState: a disabled camera with a stale ring reads ready",
