@@ -1,0 +1,161 @@
+name: Mutation testing (full catalogue, sharded)
+
+# Runs scripts/mutants.json (~1,900 mutants, ~15 s each, ~7 hours serially) as a matrix of parallel shards, so the
+# whole catalogue finishes in the time of one shard (~30 min of mutants plus the install). `scripts/mutate.mjs
+# --shard=i/n` hands shard i every n-th entry (round-robin), so the shards partition the catalogue.
+#
+# WHY NOT ON EVERY PR. Mutation testing is a tool for finding missing tests, not a merge gate: it costs
+# ~16 runner-hours per run. The cheap guard that runs on every PR is `mutate.mjs --check` (via
+# backend/test/mutants-catalogue.test.js), which proves every entry still APPLIES. This workflow proves the tests
+# still KILL them, weekly and on demand.
+#
+# HOW TO READ THE RESULT (docs/mutation-testing.md has the long version)
+#   * Each shard job uploads its full log as the artifact `mutation-shard-<i>`.
+#   * The final "Collect results" job prints every survivor in its log and in the run summary, and is red if a
+#     mutant survived unexpectedly, errored, a control was killed, a shard aborted, or a shard's log is missing.
+#   * A mutant marked `expect: "equivalent"` or `"survives"` in the catalogue is not a failure.
+#
+# LEAST PRIVILEGE. The token can only read the repository; there are no secrets and none are needed, because the
+# mutants run in a throwaway checkout on the runner and nothing is pushed. `workflow_dispatch` input is passed
+# through the environment, never interpolated into the script, so it cannot inject shell.
+#
+# THIS COPY ON `main` IS A STUB THAT REGISTERS THE WORKFLOW. GitHub only lets you dispatch a workflow whose file is on
+# the default branch (`gh workflow run` answered HTTP 404 before this), and a dispatch with `--ref dev` then runs dev's
+# copy of this file against dev's checkout. The weekly `schedule` trigger is deliberately NOT here: a scheduled run
+# always uses main's checkout, which has no `mutate.mjs --shard` until the next release, so it would fail every Sunday.
+# The release brings dev's copy (with the schedule) over this one.
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'Only mutants whose label contains this text (blank = the whole catalogue). Shards with nothing to run are skipped.'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep in step with the matrix below. Used by the collect job to prove every shard reported.
+  SHARD_COUNT: 16
+
+jobs:
+  shard:
+    name: Shard ${{ matrix.shard }} of 16
+    runs-on: ubuntu-latest
+    # ~1900/16 = ~120 mutants at ~15 s is ~30 min; the headroom is for a loaded runner, and a looping mutant is
+    # already bounded per mutant by mutate.mjs (5 min, then reported HANG).
+    timeout-minutes: 120
+    strategy:
+      # A red shard must not cancel the others: the point is the complete list of survivors.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Install front-end dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run this shard of the catalogue
+        env:
+          SHARD: ${{ matrix.shard }}
+          ONLY: ${{ inputs.only }}
+        run: |
+          mkdir -p out
+          args=("--shard=${SHARD}/${SHARD_COUNT}")
+          if [ -n "${ONLY}" ]; then args+=("--only=${ONLY}"); fi
+          # --list runs nothing and prints this shard's entries. An empty shard (a narrow --only) is not a failure,
+          # but it must still leave a log, or the collect job could not tell "nothing to do" from "never ran".
+          count=$(node scripts/mutate.mjs "${args[@]}" --list | wc -l)
+          if [ "${count}" -eq 0 ]; then
+            echo "0 mutants in shard ${SHARD}/${SHARD_COUNT}: nothing to run." | tee "out/shard-${SHARD}.log"
+            exit 0
+          fi
+          echo "shard ${SHARD}/${SHARD_COUNT}: ${count} mutants" | tee "out/shard-${SHARD}.log"
+          # `set -o pipefail` is the default for `run:` on bash, so tee does not swallow mutate.mjs's exit code
+          # (1 survivor/error, 3 catalogue drift, 5 a control was killed).
+          node scripts/mutate.mjs "${args[@]}" 2>&1 | tee -a "out/shard-${SHARD}.log"
+      - name: Upload this shard's log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-shard-${{ matrix.shard }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
+
+  collect:
+    name: Collect results
+    needs: shard
+    # Runs when shards failed too: listing the survivors is the whole job.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-shard-*
+          path: results
+          merge-multiple: true
+      - name: Report survivors and decide
+        env:
+          SHARDS_RESULT: ${{ needs.shard.result }}
+        run: |
+          fail=0
+          missing=0
+          for i in $(seq 1 "${SHARD_COUNT}"); do
+            [ -f "results/shard-${i}.log" ] || { echo "::error::no log from shard ${i}: it never reported"; missing=1; }
+          done
+          [ "${missing}" -eq 0 ] || fail=1
+
+          {
+            echo '## Mutation testing'
+            echo
+            echo '| Shard | Result |'
+            echo '| --- | --- |'
+            for f in $(ls results/shard-*.log 2>/dev/null | sort -V); do
+              echo "| $(basename "${f}" .log) | $(grep -E '^[0-9]+ mutants, |^0 mutants in shard' "${f}" | tail -1 || true) |"
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          # The exact lines mutate.mjs prints for each class of problem. SURVIVED / ERRORED / HANG lines are
+          # only printed in the final summary of a shard that got that far; the markers below also catch a shard
+          # that aborted part-way (exit 3 / 5), which prints no summary at all.
+          if grep -hE '^  SURVIVED: |^  ERRORED ' results/shard-*.log > survivors.txt 2>/dev/null && [ -s survivors.txt ]; then
+            fail=1
+            echo "::error::mutants survived unexpectedly or errored — see below"
+            cat survivors.txt
+            { echo; echo '### Survivors / errors'; echo '```'; cat survivors.txt; echo '```'; } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+          if grep -hE '^ABORT: |^STALE: |CONTROL MUTANT WAS KILLED|RESTORE FAILED' results/shard-*.log > aborts.txt 2>/dev/null && [ -s aborts.txt ]; then
+            fail=1
+            echo "::error::a shard aborted or its harness is void — see below"
+            cat aborts.txt
+            { echo; echo '### Aborted / void'; echo '```'; cat aborts.txt; echo '```'; } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+          if grep -hE '^  HANG ' results/shard-*.log > hangs.txt 2>/dev/null && [ -s hangs.txt ]; then
+            # Counted as killed by mutate.mjs; listed because a kill by the clock is a weaker kill.
+            echo "::warning::some mutants were killed only by the timeout"
+            cat hangs.txt
+          fi
+
+          if [ "${SHARDS_RESULT}" != "success" ]; then
+            echo "::error::shard jobs finished as '${SHARDS_RESULT}'"
+            fail=1
+          fi
+          exit "${fail}"
