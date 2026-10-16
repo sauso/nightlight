@@ -91,7 +91,7 @@ export const MEDIAMTX_ICE_LINE = 'webrtcICEServers2: []';
  * wrong list, which is exactly what this module exists to prevent.
  */
 export function renderMediamtxConfig(baseText, urls) {
-  const re = new RegExp(`^${MEDIAMTX_ICE_LINE.replace(/[[\]]/g, '\\$&')}[ \\t]*$`, 'm');
+  const re = new RegExp(`^${MEDIAMTX_ICE_LINE.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}[ \\t]*$`, 'm');
   if (!re.test(baseText)) throw new Error(`mediamtx.yml has no "${MEDIAMTX_ICE_LINE}" line to fill in`);
   const block = urls.length
     ? `webrtcICEServers2:\n${urls.map((u) => `  - url: ${u}`).join('\n')}`
