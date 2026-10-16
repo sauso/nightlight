@@ -7,7 +7,22 @@ import { logger } from './logger.js';
 // Supports HTTP Basic auth embedded in the URL (http://user:pass@host/...), which WHATWG fetch
 // rejects if left in the URL, so we strip the credentials into an Authorization header. Digest auth
 // is not supported (use a snapshot URL that accepts Basic or no auth).
-export async function fetchHttpSnapshot(rawUrl, { timeoutMs = 5000 } = {}) {
+//
+// Hardening (#536): the body is read as a stream and abandoned at MAX_SNAPSHOT_BYTES, and redirects are
+// NOT followed. The URL is admin-set, but the camera behind it is a LAN device we do not control: a
+// compromised one (or a redirect it answers with) could otherwise make us buffer an unbounded body per
+// alert, or send this request, Authorization header included, to any other host on the network.
+// The 5 s timer bounds the time of a read, not its size.
+//
+// 5 MB: a full-resolution camera JPEG is roughly 0.1-2 MB (a 4K frame at typical camera quality is ~1-2 MB;
+// that range is from general knowledge of camera output, NOT measured on the cameras this was built
+// against), so 5 MB leaves a few times the headroom of the largest realistic frame, and it is also the
+// largest image the Pushover attachment API takes, so a bigger body could not be delivered anyway.
+// A camera whose snapshot really is larger gets no HTTP snapshot and falls back to the ffmpeg grab
+// from the stream (see grabLiveFrame / the alert callers), which is why refusing is safe.
+export const MAX_SNAPSHOT_BYTES = 5 * 1024 * 1024;
+
+export async function fetchHttpSnapshot(rawUrl, { timeoutMs = 5000, maxBytes = MAX_SNAPSHOT_BYTES } = {}) {
   let url;
   try {
     url = new URL(String(rawUrl).trim());
@@ -25,18 +40,49 @@ export async function fetchHttpSnapshot(rawUrl, { timeoutMs = 5000 } = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { headers, signal: ctrl.signal, redirect: 'follow' });
+    // 'manual' hands back the 3xx itself instead of following it (undici does not throw for it), so a
+    // redirect lands in the !res.ok branch below and is refused like any other non-200.
+    const res = await fetch(url, { headers, signal: ctrl.signal, redirect: 'manual' });
+    if (res.status >= 300 && res.status < 400) {
+      logger.info(`[snapshot] camera URL answered with a redirect (HTTP ${res.status}); redirects are not followed, so use the final address as the snapshot URL`);
+      return null;
+    }
     if (!res.ok) {
       logger.info(`[snapshot] camera URL returned HTTP ${res.status}`);
       return null;
     }
-    const buf = Buffer.from(await res.arrayBuffer());
-    return buf.length ? buf : null;
+    // A declared length over the cap is refused before reading a byte. It is only a hint (it can be absent
+    // with chunked encoding, or lie), so the streaming count below is the actual guard.
+    const declared = Number(res.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      logger.info(`[snapshot] camera URL declares ${declared} bytes, over the ${maxBytes} byte limit; ignored`);
+      return null;
+    }
+    const chunks = [];
+    let total = 0;
+    if (!res.body) return null;
+    for await (const chunk of res.body) {
+      total += chunk.length;
+      if (total > maxBytes) {
+        // Returning out of the for-await cancels the body stream, which closes the connection, so a body
+        // that never ends cannot keep a socket open (snapshot-http-limits.test.js watches the server side).
+        logger.info(`[snapshot] camera URL body passed the ${maxBytes} byte limit; abandoned`);
+        return null;
+      }
+      chunks.push(chunk);
+    }
+    return total ? Buffer.concat(chunks, total) : null;
   } catch (e) {
     logger.info(`[snapshot] camera URL fetch failed: ${e.name === 'AbortError' ? 'timed out' : e.message}`);
     return null;
   } finally {
     clearTimeout(timer);
+    // Every exit path, early returns included (a redirect, a non-200, a declared length over the cap),
+    // must leave no connection behind. Clearing the timer above removed the only thing that used to close
+    // an unread body (the 5 s abort), so without this a camera that answers and then keeps its body open
+    // would stay connected and streaming after we returned (PR #702 review, verified with a real HTTP
+    // probe). Aborting after a body that was read to the end is a no-op.
+    ctrl.abort();
   }
 }
 

@@ -106,6 +106,23 @@ export async function stopOnvifMotion(cameraId) {
   try { entry.handle?.stop(); } catch { /* ignore */ }
 }
 
+// Forget a camera's cooldown stamp (#555 bullet 10). `lastAlert` is keyed by camera id and nothing removed an
+// entry, so each deleted camera left a number behind for the life of the process (a few bytes: housekeeping, not
+// a leak anyone has seen). The camera DELETE route is the ONLY caller. stopOnvifMotion must NOT do this: a settings
+// save stops and restarts the subscription, and the cooldown has to survive that (the same reasoning as
+// motionDetector.forgetMotionAlert, #454).
+export function forgetOnvifAlert(cameraId) {
+  lastAlert.delete(cameraId);
+}
+
+// Test-only views of the store, like motionDetector's _..ForTests helpers: nothing else shows what it holds.
+export function _onvifAlertStampForTests(cameraId) {
+  return lastAlert.get(cameraId);
+}
+export function _setOnvifAlertStampForTests(cameraId, ms) {
+  lastAlert.set(cameraId, ms);
+}
+
 export async function stopAllOnvifMotion() {
   for (const id of [...subs.keys()]) await stopOnvifMotion(id);
 }

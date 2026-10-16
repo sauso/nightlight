@@ -17,6 +17,11 @@ on:
   pull_request:
   workflow_dispatch: {}
 
+# Least privilege (#566 bullet 5): this workflow only reads the repository, so the token it is handed is
+# limited to that instead of the repository default (which may include write).
+permissions:
+  contents: read
+
 concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true

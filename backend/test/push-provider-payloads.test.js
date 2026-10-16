@@ -64,22 +64,25 @@ describe('Gotify', () => {
     });
   });
 
-  test('the request is a JSON POST to /message with the token in the query, and the payload carries the title and message', async () => {
+  test('the request is a JSON POST to /message with the token in the X-Gotify-Key header, and the payload carries the title and message', async () => {
     const r = await sendGotify({ title: 'Nursery — motion', message: 'Motion detected' });
     assert.deepEqual(r, { ok: true });
     assert.equal(received.length, 1);
     assert.equal(received[0].method, 'POST');
-    assert.equal(received[0].url, '/message?token=tok-abc');
+    assert.equal(received[0].url, '/message'); // no token in the URL (#555 bullet 4; gotify-token-header.test.js)
+    assert.equal(received[0].headers['x-gotify-key'], 'tok-abc');
     assert.match(received[0].headers['content-type'], /^application\/json/);
     assert.deepEqual(JSON.parse(received[0].body), { title: 'Nursery — motion', message: 'Motion detected', priority: 5 });
   });
 
-  test('the token is URL-encoded and a trailing slash on the server URL does not double up', async () => {
-    // A token containing & or # would otherwise end the query early and Gotify would answer 401 for a token that
-    // is correct; a stored "http://host:port/" would otherwise request "//message".
+  test('the token is sent as-is in the header and a trailing slash on the server URL does not double up', async () => {
+    // The token used to be URL-encoded into the query (a & or # would end the query early); since #555 bullet 4 it
+    // travels in a header, where it must arrive byte for byte, unencoded. A stored "http://host:port/" would
+    // otherwise request "//message".
     setting({ gotify_app_token: 'a&b#c', gotify_server_url: `http://127.0.0.1:${gotify.address().port}///` });
     await sendGotify({ title: 't', message: 'm' });
-    assert.equal(received[0].url, '/message?token=a%26b%23c');
+    assert.equal(received[0].url, '/message');
+    assert.equal(received[0].headers['x-gotify-key'], 'a&b#c');
   });
 
   test('★ a priority of 0 is sent as 0, not replaced by the saved default (0 is "no priority", a real choice)', async () => {

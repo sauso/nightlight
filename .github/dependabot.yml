@@ -10,6 +10,20 @@ updates:
     schedule:
       interval: "weekly"
 
+  # Base images (#566 bullet 3): the Dockerfile's FROM lines (node, mediamtx) were never watched, so a
+  # new base tag or digest arrived only when someone remembered. Dependabot proposes tag bumps; it does
+  # not pin digests (the Dockerfile still uses floating tags - see the PR for that open question).
+  - package-ecosystem: "docker"
+    directory: "/"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    ignore:
+      # Node 24 is the only version tested (CLAUDE.md, .nvmrc, node-version-pin.test.js); a bump to the next
+      # major is a deliberate change across five places, not a Dependabot PR. Patch/minor still come through.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+
   # Watches for known vulnerabilities and available updates in the actual app
   # dependencies - the ongoing, automatic equivalent of periodically running
   # `npm audit` yourself.
