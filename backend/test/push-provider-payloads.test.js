@@ -107,10 +107,14 @@ describe('Gotify', () => {
   });
 
   test('a refusal comes back as { ok:false } naming the status and the server\'s words, and does not throw', async () => {
-    reply = { status: 401, body: 'invalid token' };
+    // Gotify's own 401 body. Only its JSON message fields come back since the Opus review of PR #742: a reply is never
+    // quoted raw (describeErrorReply in httpNotify.js), so a plain-text one is reported as its status alone.
+    reply = { status: 401, body: JSON.stringify({ error: 'Unauthorized', errorCode: 401, errorDescription: 'you need to provide a valid access token or user credentials to access this api' }) };
     const r = await sendGotify({ title: 't', message: 'm' });
     assert.equal(r.ok, false);
-    assert.equal(r.error, 'HTTP 401 — invalid token');
+    assert.equal(r.error, 'HTTP 401 Unauthorized — error: Unauthorized; errorDescription: you need to provide a valid access token or user credentials to access this api');
+    reply = { status: 401, body: 'invalid token' };
+    assert.deepEqual(await sendGotify({ title: 't', message: 'm' }), { ok: false, error: 'HTTP 401 Unauthorized' });
   });
 
   test('without a server URL or a token nothing is sent at all', async () => {

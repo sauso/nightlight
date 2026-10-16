@@ -67,6 +67,28 @@ describe('#558 parseStunServers', () => {
     assert.ok(r.warning.includes('Using stun:ok.example.org:3478'));
   });
 
+  // Post-merge review of PR #701 (mutant ST1): with the `^` dropped from STUN_URL every test above still passed, and
+  // this value was accepted and written into the MediaMTX config as a NEW top-level key that runs a command. The
+  // `$` end anchor is pinned the same way (a valid URL followed by a line break and more YAML).
+  test('#701 review: an entry must be a stun: URL from its first character to its last (no YAML smuggled in around one)', () => {
+    const injected = 'x\nrunOnInit: sh -c "id > /tmp/pwned"\n  - url: stun:h.example.org';
+    const refused = [
+      injected,
+      'junkstun:h.example.org',
+      'turn:relay.example.org stun:h.example.org',
+      'stun:h.example.org\nrunOnInit: id',
+      'stun:h.example.org\n',
+      '\nstun:h.example.org',
+    ];
+    for (const bad of refused) assert.equal(parseStunUrl(bad), null, JSON.stringify(bad));
+    const r = parseStunServers(injected);
+    assert.deepEqual(r.urls, []);
+    assert.match(r.warning, /STUN is OFF/);
+    const yml = renderMediamtxConfig(fs.readFileSync(BASE_YML, 'utf8'), r.urls);
+    assert.ok(!yml.includes('runOnInit: sh'), 'the injected key reached the MediaMTX config');
+    assert.deepEqual(parseStunServers('stun:h.example.org\nrunOnInit: id').urls, []);
+  });
+
   test('#558 every entry invalid = STUN OFF (never Google), and the warning says so', () => {
     const r = parseStunServers('stun.l.google.com:19302');
     assert.deepEqual(r.urls, []);

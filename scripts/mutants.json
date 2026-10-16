@@ -18192,8 +18192,8 @@
   {
     "label": "#567 chown: only the user id is compared, not the group",
     "file": "backend/entrypoint.sh",
-    "find": "stat -L -c %u:%g \"$DATA_DIR/$f\" 2>/dev/null)\" != \"$PUID:$PGID\"",
-    "replace": "stat -L -c %u:%u \"$DATA_DIR/$f\" 2>/dev/null)\" != \"$PUID:$PUID\"",
+    "find": "stat -L -c %u:%g \"$DATA_DIR/$f\" 2>/dev/null)\" != \"$WANT_OWNER\"",
+    "replace": "stat -L -c %u \"$DATA_DIR/$f\" 2>/dev/null)\" != \"${WANT_OWNER%%:*}\"",
     "expect": "killed",
     "tests": [
       "entrypoint-chown.test.js"
@@ -18298,6 +18298,384 @@
       "entrypoint-chown.test.js"
     ],
     "namePattern": "#701 chown: the sentinel loop"
+  },
+  {
+    "label": "#701 review chown: only the data directory is checked, not the files in it (mutant E1, which survived every non-root run)",
+    "file": "backend/entrypoint.sh",
+    "find": "stat -L -c %u:%g \"$DATA_DIR/$f\" 2>/dev/null)\" != \"$WANT_OWNER\"",
+    "replace": "stat -L -c %u:%g \"$DATA_DIR\" 2>/dev/null)\" != \"$WANT_OWNER\"",
+    "expect": "killed",
+    "tests": ["entrypoint-chown.test.js"],
+    "namePattern": "or .jwt_secret owned by someone else walks the tree, as any user"
+  },
+  {
+    "label": "#701 review chown: PUID/PGID are compared as written again (PUID=099 walks the whole tree on every start)",
+    "file": "backend/entrypoint.sh",
+    "find": "WANT_OWNER=\"$(canonical_id \"$PUID\"):$(canonical_id \"$PGID\")\"",
+    "replace": "WANT_OWNER=\"$PUID:$PGID\"",
+    "expect": "killed",
+    "tests": ["entrypoint-chown.test.js"],
+    "namePattern": "a PUID and PGID written with leading zeros are compared as numbers"
+  },
+  {
+    "label": "#701 review chown: an all-zero PUID canonicalises to an empty id instead of 0",
+    "file": "backend/entrypoint.sh",
+    "find": "printf '%s' \"${_cid:-0}\"",
+    "replace": "printf '%s' \"$_cid\"",
+    "expect": "killed",
+    "tests": ["entrypoint-chown.test.js"],
+    "namePattern": "PUID=000 PGID=00 is 0:0"
+  },
+  {
+    "label": "#701 review STUN parser: the start anchor is dropped (YAML smuggled in before a valid URL is accepted)",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "const STUN_URL = /^stun:",
+    "replace": "const STUN_URL = /stun:",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "#701 review: an entry must be a stun: URL from its first character"
+  },
+  {
+    "label": "#701 review STUN parser: the pattern is multi-line (a valid first line lets YAML through after a line break)",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "(?::(\\d{1,5}))?$/;",
+    "replace": "(?::(\\d{1,5}))?$/m;",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "#701 review: an entry must be a stun: URL from its first character"
+  },
+  {
+    "label": "#701 review iceServers.js: an /about with no stunServers field is remembered as success (no STUN until a reload)",
+    "file": "frontend/src/lib/iceServers.js",
+    "find": "if (!urls) throw new Error('no stunServers in /about');",
+    "replace": "if (!urls) return [];",
+    "expect": "killed",
+    "tests": ["iceServers.test.jsx"],
+    "namePattern": "#701 review an /about with no stunServers field is NOT remembered"
+  },
+  {
+    "label": "#701 review iceServers.js: entries that are not text are passed to the peer connection",
+    "file": "frontend/src/lib/iceServers.js",
+    "find": "about.stunServers.filter((u) => typeof u === 'string')",
+    "replace": "about.stunServers",
+    "expect": "killed",
+    "tests": ["iceServers.test.jsx"],
+    "namePattern": "#701 review entries that are not text are dropped"
+  },
+  {
+    "label": "#742 review httpNotify.js: redactSecrets drops the JSON-escaped spelling (a quote or backslash in the token is echoed back escaped and survives)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "const spellings = [s, JSON.stringify(s).slice(1, -1)];",
+    "replace": "const spellings = [s];",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets"
+  },
+  {
+    "label": "#742 review httpNotify.js: redactSecrets drops the percent-encoded spelling (a space or symbol echoed as %XX survives)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "spellings.push(enc, enc.replace(/%20/g, '+'));",
+    "replace": "void enc;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets"
+  },
+  {
+    "label": "#742 review httpNotify.js: the JSON spelling keeps its closing quote (R1: matches only where a quote follows, and eats it)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "JSON.stringify(s).slice(1, -1)];",
+    "replace": "JSON.stringify(s).slice(1)];",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets: the JSON-escaped spelling is cut exactly"
+  },
+  {
+    "label": "#742 review httpNotify.js: only the first space of a form-encoded echo becomes + (R2)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "enc.replace(/%20/g, '+')",
+    "replace": "enc.replace(/%20/, '+')",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets: a token with two spaces"
+  },
+  {
+    "label": "#742 review httpNotify.js: encodeURIComponent is not guarded (D4: a lone surrogate throws out of a catch block)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "    try {\n      const enc = encodeURIComponent(s);\n      spellings.push(enc, enc.replace(/%20/g, '+'));\n    } catch { /* a lone surrogate: see above */ }\n",
+    "replace": "    const enc = encodeURIComponent(s);\n    spellings.push(enc, enc.replace(/%20/g, '+'));\n",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets: a secret holding a lone surrogate"
+  },
+  {
+    "label": "#742 review httpNotify.js: a secret of any length is cut out of free text (D2: a 1-character token shreds words)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "if (typeof s !== 'string' || s.length < MIN_SECRET_RUN) continue;\n    // The secret as a server",
+    "replace": "if (typeof s !== 'string' || s.length < 1) continue;\n    // The secret as a server",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets: a secret shorter than 8|#742 review ntfy: a short token"
+  },
+  {
+    "label": "#742 review httpNotify.js: the credential run length is 9, not 8 (an 8-character echo survives)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "export const MIN_SECRET_RUN = 8;",
+    "replace": "export const MIN_SECRET_RUN = 9;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: a kept field that repeats 8|#742 review redactSecrets: a secret shorter than 8"
+  },
+  {
+    "label": "#742 review httpNotify.js: a reply that is not JSON is quoted raw (the first 140 characters)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "  } catch {\n    return head;\n  }",
+    "replace": "  } catch {\n    return `${head} — ${String(text).slice(0, 140)}`;\n  }",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: only the whitelisted|#742 review gotify: an echo of the token"
+  },
+  {
+    "label": "#742 review httpNotify.js: every field of a JSON reply is kept (the whitelist is bypassed)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "for (const f of fields) {",
+    "replace": "for (const f of Object.keys(body)) {",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: only the whitelisted|#742 review gotify: an echo of the token"
+  },
+  {
+    "label": "#742 review httpNotify.js: a kept field that repeats part of a credential is no longer withheld",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "sharesRun(kept, secrets) ? WITHHELD :",
+    "replace": "false ? WITHHELD :",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: a kept field that repeats|#742 review gotify: a kept field|#742 review ntfy: Basic credentials"
+  },
+  {
+    "label": "#742 review httpNotify.js: a kept field is not cut to 200 characters",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "v.slice(0, REPLY_FIELD_MAX)",
+    "replace": "v",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: each kept field is cut"
+  },
+  {
+    "label": "#742 review httpNotify.js: the standard status phrase is dropped from a refusal",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "const head = `HTTP ${status}${STATUS_CODES[status] ? ` ${STATUS_CODES[status]}` : ''}`;",
+    "replace": "const head = `HTTP ${status}`;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: only the whitelisted"
+  },
+  {
+    "label": "#702 review photo.js: the allowlist loses its start anchor (an SVG with a PNG prefix later in it is stored)",
+    "file": "backend/src/lib/photo.js",
+    "find": "const PHOTO_PREFIX = /^data:image",
+    "replace": "const PHOTO_PREFIX = /data:image",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "namePattern": "#702 review photo: the allowed type must be at the START"
+  },
+  {
+    "label": "#742 review photo.js: the allowlist is multi-line (PHm: `^` also matches after a line break in an SVG)",
+    "file": "backend/src/lib/photo.js",
+    "find": "(?:jpeg|png|webp);base64,/;",
+    "replace": "(?:jpeg|png|webp);base64,/m;",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "namePattern": "#702 review photo: the allowed type must be at the START"
+  },
+  {
+    "label": "#702 review snapshot.js: the timer is cleared once the headers arrive (a dripping body is read for ever)",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "    const res = await fetch(url, { headers, signal: ctrl.signal, redirect: 'manual' });\n",
+    "replace": "    const res = await fetch(url, { headers, signal: ctrl.signal, redirect: 'manual' });\n    clearTimeout(timer);\n",
+    "expect": "killed",
+    "tests": ["snapshot-http-limits.test.js"],
+    "namePattern": "#702 review snapshot: a body that arrives one byte at a time"
+  },
+  {
+    "label": "#702 review onvifMotion.js: stopOnvifMotion forgets the cooldown stamp (an edit re-arms alerts; mutant CD3b)",
+    "file": "backend/src/lib/onvifMotion.js",
+    "find": "export async function stopOnvifMotion(cameraId) {\n",
+    "replace": "export async function stopOnvifMotion(cameraId) {\n  lastAlert.delete(cameraId);\n",
+    "expect": "killed",
+    "tests": ["camera-delete-cooldown-maps.test.js"],
+    "namePattern": "of an ENABLED camera"
+  },
+  {
+    "label": "#702 review children.js: the birthday shape check is removed (expanded years like +010000-01 pass the round trip)",
+    "file": "backend/src/routes/children.js",
+    "find": "if (typeof birthday !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(birthday)) return true;",
+    "replace": "if (typeof birthday !== 'string') return true;",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "010000-01|000001-01"
+  },
+  {
+    "label": "#702 review httpNotify.js: a request fetch cannot build is rethrown with its own message, which quotes the header value",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "    if (e instanceof TypeError && e.message !== 'fetch failed') throw new Error(REQUEST_NOT_BUILT);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review postWithTimeout: a request fetch cannot build"
+  },
+  {
+    "label": "#702 review httpNotify.js: every TypeError is replaced, a real network failure included",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "if (e instanceof TypeError && e.message !== 'fetch failed') throw",
+    "replace": "if (e instanceof TypeError) throw",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review postWithTimeout: a network failure keeps"
+  },
+  {
+    "label": "#702 review httpNotify.js: redactSecrets does not skip an empty secret (it shreds every message)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "if (typeof s !== 'string' || s.length < MIN_SECRET_RUN) continue;\n    // The secret as a server",
+    "replace": "if (typeof s !== 'string') continue;\n    // The secret as a server",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review redactSecrets"
+  },
+  {
+    "label": "#702 review gotify.js: a send error is logged and returned unredacted",
+    "file": "backend/src/lib/gotify.js",
+    "find": "const reason = redactSecrets(e.message, [c.appToken]);",
+    "replace": "const reason = e.message;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify: an error that quotes the token"
+  },
+  {
+    "label": "#742 review gotify.js: a server's error reply is logged and returned raw again (the first 140 characters)",
+    "file": "backend/src/lib/gotify.js",
+    "find": "const reply = describeErrorReply(res.status, res.text, [c.appToken]);",
+    "replace": "const reply = `HTTP ${res.status} — ${res.text.slice(0, 140)}`;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review gotify: an echo of the token in any spelling|#702 review gotify: a server that echoes"
+  },
+  {
+    "label": "#742 review gotify.js: the reply filter is not told the token (a partial echo in a kept field survives)",
+    "file": "backend/src/lib/gotify.js",
+    "find": "describeErrorReply(res.status, res.text, [c.appToken])",
+    "replace": "describeErrorReply(res.status, res.text, [])",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review gotify: a kept field that repeats part"
+  },
+  {
+    "label": "#702 review routes/gotify.js: the token's characters are not checked on save",
+    "file": "backend/src/routes/gotify.js",
+    "find": "if (newToken && !GOTIFY_TOKEN.test(newToken)) return",
+    "replace": "if (false) return",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: a token with a line break"
+  },
+  {
+    "label": "#702 review routes/gotify.js: the token allow-list loses its start anchor",
+    "file": "backend/src/routes/gotify.js",
+    "find": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+$/;",
+    "replace": "const GOTIFY_TOKEN = /[A-Za-z0-9._-]+$/;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: a token with a line break"
+  },
+  {
+    "label": "#702 review routes/gotify.js: the token allow-list loses its end anchor",
+    "file": "backend/src/routes/gotify.js",
+    "find": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+$/;",
+    "replace": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+/;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: a token with a line break"
+  },
+  {
+    "label": "#742 review routes/gotify.js: the token allow-list is widened to \" & < > (G4: characters an echo escapes differently)",
+    "file": "backend/src/routes/gotify.js",
+    "find": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+$/;",
+    "replace": "const GOTIFY_TOKEN = /^[A-Za-z0-9._\"&<>-]+$/;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: a token with a line break"
+  },
+  {
+    "label": "#702 review routes/gotify.js: the dot is dropped from the allow-list (an older Gotify's tokens are refused)",
+    "file": "backend/src/routes/gotify.js",
+    "find": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+$/;",
+    "replace": "const GOTIFY_TOKEN = /^[A-Za-z0-9_-]+$/;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: the tokens Gotify generates"
+  },
+  {
+    "label": "#702 review routes/gotify.js: a non-text token reaches .trim() again (a 500)",
+    "file": "backend/src/routes/gotify.js",
+    "find": "if (rawToken && typeof rawToken !== 'string') return",
+    "replace": "if (false) return",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: a token that is not text"
+  },
+  {
+    "label": "#702 review ntfy.js: a send error is logged and returned unredacted",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const reason = redactSecrets(e.message, secrets);",
+    "replace": "const reason = e.message;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review ntfy: an error that quotes the token"
+  },
+  {
+    "label": "#742 review ntfy.js: a server's error reply is logged and returned raw again (the first 140 characters)",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const reply = describeErrorReply(res.status, res.text, secrets, NTFY_REPLY_FIELDS);",
+    "replace": "const reply = `HTTP ${res.status} — ${res.text.slice(0, 140)}`;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "an echo of the credential in any spelling|#702 review ntfy: a server that echoes"
+  },
+  {
+    "label": "#742 review ntfy.js: ntfy's code and http numbers are dropped from a refusal",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const NTFY_REPLY_FIELDS = [...REPLY_FIELDS, 'code', 'http'];",
+    "replace": "const NTFY_REPLY_FIELDS = [...REPLY_FIELDS];",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "own error reply keeps its words and numbers"
+  },
+  {
+    "label": "#742 review ntfy.js: the token is not a secret (N1: a token echoed in an error survives)",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const secrets = [c.token, auth?.startsWith('Basic ')",
+    "replace": "const secrets = [auth?.startsWith('Basic ')",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review ntfy: an error that quotes the token"
+  },
+  {
+    "label": "#742 review ntfy.js: base64(user:password) is not a secret (N4: Basic credentials echoed back survive)",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const secrets = [c.token, auth?.startsWith('Basic ') ? auth.slice('Basic '.length) : ''];",
+    "replace": "const secrets = [c.token];",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review ntfy: Basic credentials"
+  },
+  {
+    "label": "#742 review ntfy.js: the plain password is cut out of text again (N2/D2: it never travels, and it shreds ordinary words)",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const secrets = [c.token, auth?.startsWith('Basic ') ? auth.slice('Basic '.length) : ''];",
+    "replace": "const secrets = [c.token, c.password, auth?.startsWith('Basic ') ? auth.slice('Basic '.length) : ''];",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review ntfy: a short token or the plain password"
   },
   {
     "label": "#394 bufferState: a disabled camera with a stale ring reads ready",
