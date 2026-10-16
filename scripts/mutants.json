@@ -17826,6 +17826,42 @@
     "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
   },
   {
+    "label": "#563 gate: PUT /api/cameras/:id without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id', asyncHandler(async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review found that 4 of the 43 admin gates still had no removal entry (the other 39 are above): existing entries anchored to these lines change cooldown state or reorder guards, none removes the gate."
+  },
+  {
+    "label": "#563 gate: PUT /api/cameras/:id/detection without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/:id/detection', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id/detection', asyncHandler(async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review (see the PUT /api/cameras/:id entry)."
+  },
+  {
+    "label": "#563 gate: DELETE /api/logs without requireAdmin",
+    "file": "backend/src/routes/logs.js",
+    "find": "router.delete('/', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review (see the PUT /api/cameras/:id entry)."
+  },
+  {
+    "label": "#563 gate: DELETE /api/timelapses/:id without requireAdmin",
+    "file": "backend/src/routes/timelapses.js",
+    "find": "router.delete('/:id', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/:id', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review (see the PUT /api/cameras/:id entry)."
+  },
+  {
     "label": "#666 exit probe: stopActivityTracker leaves the flush timer running (the probe child must be killed, not exit)",
     "file": "backend/src/lib/activityTracker.js",
     "find": "      writeMinute(cameraId, s);\n    }\n  }\n  clearInterval(flushTimer);",
