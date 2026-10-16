@@ -17644,5 +17644,93 @@
     "expect": "killed",
     "tests": ["csp-directives.test.js"],
     "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#W3 --shard: the modulus compares against i instead of i - 1 (shard n gets nothing, shard 1 misses entry 0)",
+    "file": "scripts/mutate.mjs",
+    "find": "idx % shard.n === shard.i - 1",
+    "replace": "idx % shard.n === shard.i",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: sharding happens on the whole catalogue before --only is applied",
+    "file": "scripts/mutate.mjs",
+    "find": "const mutants = shard ? filtered.filter(",
+    "replace": "const mutants = shard ? catalogue.filter(",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: i > n is accepted (a shard that can never exist runs nothing and says so late)",
+    "file": "scripts/mutate.mjs",
+    "find": "return i <= n ? { i, n } : null;",
+    "replace": "return { i, n };",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: an index above 2^53 is accepted (it rounds, so i > n compares equal)",
+    "file": "scripts/mutate.mjs",
+    "find": "if (!Number.isSafeInteger(i) || !Number.isSafeInteger(n)) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --only: a filter that matches no control carries none (a broken suite reports everything killed)",
+    "file": "scripts/mutate.mjs",
+    "find": "&& !matched.some((m) => m.expect === 'survives') ? [...matched, control] : matched;",
+    "replace": "&& false ? [...matched, control] : matched;",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --only: the control is added even when the filter matches nothing (a typo runs just the control)",
+    "file": "scripts/mutate.mjs",
+    "find": "const filtered = only && matched.length && control",
+    "replace": "const filtered = only && control",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: a leading 0 / zero index is accepted",
+    "file": "scripts/mutate.mjs",
+    "find": "/^([1-9]\\d*)\\/([1-9]\\d*)$/",
+    "replace": "/^(\\d+)\\/([1-9]\\d*)$/",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --list ignores --only and --shard (prints the whole catalogue)",
+    "file": "scripts/mutate.mjs",
+    "find": "for (const m of mutants) console.log(`${m.expect === 'survives'",
+    "replace": "for (const m of catalogue) console.log(`${m.expect === 'survives'",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
   }
 ]
