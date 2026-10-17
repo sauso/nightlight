@@ -3099,7 +3099,7 @@
   {
     "label": "#455 M2: Playwright browser image falls behind the package",
     "file": "e2e/docker-compose.e2e.yml",
-    "find": "    image: mcr.microsoft.com/playwright:v1.63.0-jammy",
+    "find": "    image: mcr.microsoft.com/playwright:v1.64.0-jammy",
     "replace": "    image: mcr.microsoft.com/playwright:v1.62.1-jammy",
     "expect": "killed",
     "tests": ["dependency-hygiene.test.js"],
@@ -3108,8 +3108,8 @@
   {
     "label": "#455 M3: Playwright pin becomes a range",
     "file": "e2e/playwright/package.json",
-    "find": "\"@playwright/test\": \"1.63.0\"",
-    "replace": "\"@playwright/test\": \"^1.63.0\"",
+    "find": "\"@playwright/test\": \"1.64.0\"",
+    "replace": "\"@playwright/test\": \"^1.64.0\"",
     "expect": "killed",
     "tests": ["dependency-hygiene.test.js"],
     "namePattern": "^T2:"
@@ -3126,7 +3126,7 @@
   {
     "label": "#455 M5: direct backend uuid lock regresses",
     "file": "backend/package-lock.json",
-    "find": "\"version\": \"14.0.2\"",
+    "find": "\"version\": \"14.0.3\"",
     "replace": "\"version\": \"9.0.1\"",
     "expect": "killed",
     "tests": ["dependency-hygiene.test.js"],
@@ -3144,7 +3144,7 @@
   {
     "label": "#455 M6: Playwright pin regresses below its advisory floor",
     "file": "e2e/playwright/package.json",
-    "find": "\"@playwright/test\": \"1.63.0\"",
+    "find": "\"@playwright/test\": \"1.64.0\"",
     "replace": "\"@playwright/test\": \"1.49.0\"",
     "expect": "killed",
     "tests": ["dependency-hygiene.test.js"],

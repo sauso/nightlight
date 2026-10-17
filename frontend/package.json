@@ -19,10 +19,10 @@
     "@dnd-kit/sortable": "^8.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "hls.js": "^1.7.3",
-    "lucide-react": "^1.47.0",
+    "lucide-react": "^1.56.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^7.18.3"
+    "react-router-dom": "^7.18.4"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.1",
@@ -30,9 +30,9 @@
     "@testing-library/user-event": "^14.6.7",
     "@vitejs/plugin-react": "^6.1.1",
     "@vitest/coverage-v8": "^5.0.2",
-    "jsdom": "^30.1.1",
+    "jsdom": "^30.1.2",
     "vite": "^8.3.4",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.4"
   },
   "allowScripts": {
     "esbuild@0.28.2": true
