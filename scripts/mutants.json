@@ -6610,13 +6610,22 @@
     "namePattern": "empty night says so"
   },
   {
-    "label": "nobody-in-bed frontend: SleepDetail's ReviewNightButton gate ignores `corrected`",
+    "label": "nobody-in-bed frontend: SleepDetail's empty-night ReviewNightButton gate never opens (re-anchored by #355)",
     "file": "frontend/src/pages/SleepDetail.jsx",
-    "find": "{night.corrected && (",
-    "replace": "{false && (",
+    "find": "{!night.in_progress && (\r\n          <div style={{ padding: '0 14px 14px' }}>",
+    "replace": "{false && (\r\n          <div style={{ padding: '0 14px 14px' }}>",
     "expect": "killed",
     "tests": ["sleepDetail.test.jsx"],
     "namePattern": "empty night says so"
+  },
+  {
+    "label": "#355 corrected empty (fix round): SleepDetail offers the review on an empty night only once it is corrected",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "{!night.in_progress && (\r\n          <div style={{ padding: '0 14px 14px' }}>",
+    "replace": "{night.corrected && (\r\n          <div style={{ padding: '0 14px 14px' }}>",
+    "expect": "killed",
+    "tests": ["sleepDetail.test.jsx"],
+    "namePattern": "detector-empty night offers the review"
   },
   {
     "label": "nobody-in-bed frontend: SleepSummaryCard drops the frontend `nobody_in_bed` copy split",
