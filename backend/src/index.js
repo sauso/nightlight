@@ -41,6 +41,7 @@ import { stopAllRecordingsForShutdown, reconcileStaleRecordings } from './lib/re
 import { startClipStorage, stopClipStorage } from './lib/clipStorage.js';
 import { initPush } from './lib/push.js';
 import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
+import { parseStunServers, writeMediamtxConfig } from './lib/stunServers.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
 import { startSensorSampler, stopSensorSampler } from './lib/sensorSampler.js';
 import { startActivityTracker, stopActivityTracker } from './lib/activityTracker.js';
@@ -68,7 +69,13 @@ const DATA_DIR = process.env.DATA_DIR || '/app/data';
 // means there's no persisted copy that could ever end up stale or corrupted (this is
 // exactly the class of bug that caused MediaMTX to fail to start after the single-image
 // migration - an old path baked into a data-volume copy that never got updated).
-const mediamtxConfigPath = path.join(__dirname, '..', 'mediamtx.yml');
+const mediamtxBasePath = path.join(__dirname, '..', 'mediamtx.yml');
+// STUN_SERVERS (#558): MediaMTX starts from a copy of that file with the configured STUN list filled in. The
+// same parse feeds the browser (GET /api/about) and the CSP (lib/cspDirectives.js), so none can disagree.
+const stun = parseStunServers(process.env.STUN_SERVERS);
+if (stun.warning) logger.warn(`[stun] ${stun.warning}`);
+logger.info(stun.urls.length ? `[stun] STUN servers: ${stun.urls.join(', ')}` : '[stun] STUN is off (STUN_SERVERS is blank)');
+const mediamtxConfigPath = writeMediamtxConfig(mediamtxBasePath, stun.urls, { log: logger });
 startMediaMTX(mediamtxConfigPath);
 refreshMqttConnection(); // no-ops if no broker is configured
 startSensorSampler(); // persist MQTT temp/humidity over time (Stage-2 sleep-tracking groundwork)

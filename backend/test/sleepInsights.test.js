@@ -43,6 +43,19 @@ function layNights(childId, specs) {
   });
 }
 
+// (#365) c nights clearly cooler than the median, m nights AT the median, w clearly warmer. The median
+// split drops nights equal to the median from BOTH groups, so a fixture with c/w nights per group needs
+// m >= 1 of them, and enough that sorted[floor(n / 2)] is one of them (see the case table). The test
+// below asserts the groups it got, so a fixture that drifts cannot pass for the boundary it names.
+// Wakes rise with temperature, which is a real positive link for the verdict to find.
+function groupSpecs(c, w, m) {
+  const out = [];
+  for (let i = 0; i < c; i++) out.push([18 + i * 0.1, i % 3, 600 - 5 * (i % 3), 40 + i]);
+  for (let i = 0; i < m; i++) out.push([20, 1 + (i % 2), 590, null]);
+  for (let i = 0; i < w; i++) out.push([22 + i * 0.1, 2 + (i % 3), 560 - 5 * (i % 3), 50 + i]);
+  return out;
+}
+
 // --- A camera + real activity data, used only by the issue #351 (provisional report) tests below.
 // Everything else in this file computes a night with no camera at all ('no_data'), which is enough for
 // most of these job tests — but a 'no_data' row still carries a real window_end, which is all
@@ -122,13 +135,13 @@ test('nights with no temperature reading are not counted towards the minimum', (
 });
 
 test('a warm room linked to more waking is reported as such', () => {
-  // Temperature and wake-ups rise together — a strong positive correlation.
-  layNights(KID, [[17, 0, 660], [18, 1, 640], [19, 1, 630], [21, 3, 590], [22, 4, 570], [23, 5, 540]]);
+  // Temperature and wake-ups rise together — a strong positive correlation, with both groups at the minimum.
+  layNights(KID, groupSpecs(10, 10, 1));
   const r = sleepInsights(KID);
   assert.equal(r.status, 'ok');
   assert.equal(r.verdict, 'warm_more_wakes');
   assert.ok(r.temp_wake_r > 0.35, `expected a strong positive r, got ${r.temp_wake_r}`);
-  assert.equal(r.nights_analyzed, 6);
+  assert.equal(r.nights_analyzed, 21);
   // The median split has to put nights on both sides, or the UI has nothing to compare.
   assert.ok(r.cooler && r.warmer, 'both halves must be populated');
   assert.ok(r.warmer.avg_temp > r.cooler.avg_temp);
@@ -136,7 +149,9 @@ test('a warm room linked to more waking is reported as such', () => {
 });
 
 test('the opposite link is reported as the opposite, not as "no link"', () => {
-  layNights(KID, [[17, 5, 540], [18, 4, 570], [19, 3, 590], [21, 1, 630], [22, 1, 640], [23, 0, 660]]);
+  // Same temperatures, wake counts mirrored: the coolest nights wake most.
+  const specs = groupSpecs(10, 10, 1).map(([t, wk, as, h]) => [t, 5 - wk, as, h]);
+  layNights(KID, specs);
   const r = sleepInsights(KID);
   assert.equal(r.verdict, 'warm_fewer_wakes');
   assert.ok(r.temp_wake_r < -0.35);
@@ -165,7 +180,7 @@ test('an identical temperature every night yields no correlation rather than NaN
 
 test('an identical wake count every night also yields no correlation', () => {
   // The same divide-by-zero from the other side: the temperature varies, the outcome does not.
-  layNights(KID, [[17, 2, 600], [19, 2, 600], [21, 2, 600], [23, 2, 600], [25, 2, 600]]);
+  layNights(KID, groupSpecs(10, 10, 1).map(([t, , as, h]) => [t, 2, as, h]));
   const r = sleepInsights(KID);
   assert.equal(r.temp_wake_r, null, 'zero wake variance must give null, never NaN');
   assert.equal(r.verdict, 'none', 'temperature DID vary, so this is "no link found", not "too flat"');
@@ -215,6 +230,96 @@ test('the nights limit is clamped rather than trusted', () => {
       `nights=${n} must not throw or return garbage`);
   }
   assert.equal(sleepInsights(KID, { nights: 9999 }).nights_analyzed, 5);
+});
+
+// --- #365: a verdict needs INSIGHT_MIN_GROUP_NIGHTS (10) nights in EACH group ---------------------------
+
+// Fixture self-check: the sizes of the groups the median split actually produced.
+const groupSizes = (r) => [r.cooler?.nights ?? 0, r.warmer?.nights ?? 0];
+
+test('#365 the boundary: 9 nights in a group withholds the verdict, 10 shows it (both groups)', () => {
+  // [cooler, warmer, tied-at-median] -> expected verdict. The median is sorted[floor(n / 2)], so it only
+  // lands inside the tied block (and the groups come out as named) for these counts; the sizes are asserted.
+  const cases = [
+    [10, 10, 1, 'warm_more_wakes'], // exactly at the minimum, both groups
+    [9, 10, 2, 'not_enough_nights'], // cooler group one short
+    [10, 9, 2, 'not_enough_nights'], // warmer group one short
+    [9, 9, 1, 'not_enough_nights'], // both short
+    // 20 nights in the two groups together, but one group short: the minimum is per group, not a total of
+    // 20 (a sum gate passes both of these; review of #718).
+    [9, 11, 3, 'not_enough_nights'],
+    [11, 9, 3, 'not_enough_nights'],
+    [11, 12, 2, 'warm_more_wakes'], // above the minimum
+  ];
+  for (const [c, w, m, want] of cases) {
+    db.prepare('DELETE FROM sleep_nights').run();
+    layNights(KID, groupSpecs(c, w, m));
+    const r = sleepInsights(KID);
+    assert.deepEqual(groupSizes(r), [c, w], `fixture ${c}/${w}/${m} must produce those groups`);
+    assert.equal(r.verdict, want, `cooler ${c} / warmer ${w}`);
+    assert.equal(r.min_group_nights, 10);
+  }
+});
+
+test('#365 a short group withholds every verdict, "no link" included (no r, and a weak r)', () => {
+  // Every other short-group fixture here has a strong r, so a gate that held back only the strong links
+  // (and let "no clear link" through on a group of one) passed them all (review of #718). "No link" from
+  // nine nights is a claim too. Both fixtures are 9/9 (one tied at the median); r is asserted, so a fixture
+  // that drifts into a strong link cannot pass for this case.
+  layNights(KID, groupSpecs(9, 9, 1).map(([t, , as, h]) => [t, 2, as, h])); // the same wakes every night
+  let r = sleepInsights(KID);
+  assert.deepEqual(groupSizes(r), [9, 9]);
+  assert.equal(r.temp_wake_r, null, 'fixture: constant wakes give no r');
+  assert.equal(r.verdict, 'not_enough_nights');
+
+  db.prepare('DELETE FROM sleep_nights').run();
+  layNights(KID, groupSpecs(9, 9, 1).map(([t, , as, h], i) => [t, i % 3, as, h])); // wakes unrelated to temperature
+  r = sleepInsights(KID);
+  assert.deepEqual(groupSizes(r), [9, 9]);
+  assert.ok(r.temp_wake_r != null && Math.abs(r.temp_wake_r) < 0.35, `fixture: expected a weak r, got ${r.temp_wake_r}`);
+  assert.equal(r.verdict, 'not_enough_nights');
+});
+
+test('#365 one unusual night is not a headline (the shape the issue filed)', () => {
+  // Four nights at 20C with two wakes, one at 22C with eight: r = 1, a warmer group of ONE, a cooler
+  // group of none (the 20s equal the median). Before the minimum this said warm_more_wakes.
+  layNights(KID, [[20, 2, 600], [20, 2, 600], [20, 2, 600], [20, 2, 600], [22, 8, 520]]);
+  const r = sleepInsights(KID);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.verdict, 'not_enough_nights');
+  assert.equal(r.temp_wake_r, 1, 'the arithmetic is untouched; only the verdict is withheld');
+});
+
+test('#365 golden: at and above the minimum the whole output is what it was before the minimum existed', () => {
+  // Hard-coded from the code BEFORE this change (same fixture, run on the previous commit), so this
+  // fails if the computation moves, and is not derived from the constant it pins. Only `min_group_nights`
+  // is new.
+  layNights(KID, groupSpecs(10, 10, 1));
+  assert.deepEqual(sleepInsights(KID), {
+    status: 'ok', nights_analyzed: 21, verdict: 'warm_more_wakes', min_group_nights: 10,
+    temp_wake_r: 0.76, temp_asleep_r: -0.97, temp_spread: 4.9,
+    overall: { avg_temp: 20.4, min_temp: 18, max_temp: 22.9, avg_humidity: 50 },
+    cooler: { nights: 10, avg_temp: 18.5, avg_wakes: 0.9, avg_asleep_minutes: 596 },
+    warmer: { nights: 10, avg_temp: 22.5, avg_wakes: 2.9, avg_asleep_minutes: 556 },
+  });
+  db.prepare('DELETE FROM sleep_nights').run();
+  layNights(KID, groupSpecs(12, 11, 1));
+  assert.deepEqual(sleepInsights(KID), {
+    status: 'ok', nights_analyzed: 24, verdict: 'warm_more_wakes', min_group_nights: 10,
+    temp_wake_r: 0.77, temp_asleep_r: -0.97, temp_spread: 5,
+    overall: { avg_temp: 20.4, min_temp: 18, max_temp: 23, avg_humidity: 50 },
+    cooler: { nights: 12, avg_temp: 18.6, avg_wakes: 1, avg_asleep_minutes: 595 },
+    warmer: { nights: 11, avg_temp: 22.5, avg_wakes: 2.9, avg_asleep_minutes: 555 },
+  });
+});
+
+test('#365 a room that never changes still says "flat", not "not enough nights"', () => {
+  // Identical temperatures leave BOTH groups empty (nights equal to the median join neither). The honest
+  // answer is that the room did not change enough to compare, so telling that house to keep tracking
+  // would be wrong.
+  layNights(KID, Array.from({ length: 12 }, (_, i) => [20, i % 4, 600]));
+  const r = sleepInsights(KID);
+  assert.equal(r.verdict, 'flat');
 });
 
 // --- runNightlySleepJob: the only thing that ever writes a stored night ------------------------------
@@ -278,7 +383,15 @@ test('an unparseable sleep window falls back to a default instead of crashing th
   assert.doesNotThrow(() => runNightlySleepJob());
   const row = db.prepare('SELECT window_start FROM sleep_nights WHERE child_id = ?').get(KID);
   assert.ok(row, 'the night is still computed, on the fallback window');
+  // ⚠️ #564: "a row exists" is also true on ANY fallback hour, so a parseHm default moved from 19 to 20 (or
+  // to midnight) stayed green while every child with a corrupt window was scored on the wrong hours.
+  // The fallback is documented as 19:00 (parseHm), so the same night recomputed on an explicit '19:00'
+  // must land on the identical window start.
+  db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(KID);
   db.prepare('UPDATE children SET sleep_window_start = ? WHERE id = ?').run('19:00', KID);
+  runNightlySleepJob();
+  const explicit = db.prepare('SELECT window_start FROM sleep_nights WHERE child_id = ?').get(KID);
+  assert.equal(row.window_start, explicit.window_start, 'the fallback window is not the documented 19:00');
 });
 
 test('a night already stored is left alone even if it was stored as no_data', () => {

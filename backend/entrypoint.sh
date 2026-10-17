@@ -13,6 +13,21 @@ PUID=${PUID:-99}
 PGID=${PGID:-100}
 DATA_DIR=${DATA_DIR:-/app/data}
 
+# PUID=0 (#555) is accepted and `usermod -o -u 0` makes the "nightlight" user another uid 0, so the app, FFmpeg
+# and MediaMTX would run as root, which this script exists to avoid and docs/architecture.md says never happens.
+# It is a WARNING only, on purpose: refusing to start, or quietly substituting 99, would stop or re-own the data
+# of an install that has run as 0 for years (an owner decision, listed in the PR), and a baby monitor must not
+# fail to start over it. Matches 0, 00, 000 ...; a non-number is left to usermod to reject, as before.
+case "$PUID" in
+  ''|*[!0-9]*) ;;
+  *)
+    # Digits only, so "nothing left once the zeros are removed" means zero (no bash-only 10#, this is sh).
+    if [ -z "$(printf '%s' "$PUID" | tr -d 0)" ]; then
+      printf '[entrypoint] warning: PUID=0 runs the app as root. Set PUID to a non-zero user id (the default is 99); the app is meant never to run as root\n' >&2
+    fi
+    ;;
+esac
+
 # --- Who can read the data directory (#549) ---------------------------------------------------
 # The database holds every secret the app has, in plaintext by design (camera passwords, provider
 # tokens, MFA secrets, sessions), and the snapshots and clips show a child's bedroom. The FILE MODE
@@ -63,10 +78,57 @@ umask "$UMASK"
 # #689). Before #549 they were 0755 too. Only the data directory itself takes the mask.
 ( umask 022; mkdir -p "$(dirname "$DATA_DIR")" )
 mkdir -p "$DATA_DIR"
-# Runs on every start, not just first install - this is also what makes it safe to
-# adopt on an existing deployment: any files left over from an earlier root-only setup
-# get fixed up automatically, no separate migration step needed.
-chown -R nightlight:nightlight "$DATA_DIR"
+# --- Ownership of the data directory (#567) ---------------------------------------------------
+# This used to be an unconditional `chown -R` on every start. It rewrites every file's inode (so every clip,
+# snapshot and recording is touched, and a spinning disk holding many GB of clips spends minutes at boot, which
+# also delays the app's self-heal after a restart) to change nothing once ownership is right, which is nearly
+# every start. Now the walk happens only when something at the TOP says ownership is not right:
+#   - the data directory itself: new install (mkdir above made it root-owned), or PUID/PGID changed (the
+#     directory still belongs to the old ids); this is the check that catches the cases the walk exists for;
+#   - the database, its -wal/-shm and .jwt_secret, if present: the files a backup restore or a hand-copy as
+#     root is most likely to drop in, and the ones the app cannot run without.
+# Compared with $PUID:$PGID, not `id nightlight`: the usermod/groupmod above made them the same, and this reads
+# the same in the tests, where those tools are stubbed. Compared NUMERICALLY (canonical_id below): stat prints 99,
+# so PUID=099 (which usermod reads as uid 99, and entrypoint-puid-root.test.js keeps legitimate) never matched as
+# text and walked the tree on every start (post-merge review of PR #701).
+# stat -L reports the file a symlink points to (the one the app opens). A symlinked DATA_DIR is judged by its
+# TARGET whatever the flag, because the path checked is "$DATA_DIR/.", which resolves through the link. Note that
+# this is NOT what the chown below changes: `chown -R` without -H/-L does not follow a top-level link (it re-owns
+# the link itself: BusyBox's chown.c switches to lchown for -R without -H in a DESKTOP build such as Alpine's, and
+# GNU's default -P does the same; the #549 note further down says it of the chmod walk), so a symlinked DATA_DIR, or a
+# symlinked database, whose target has the wrong owner logs "fixing" on every start and stays as it is. Re-own
+# the target on the host in that layout.
+# ⚠️ TRADE-OFF, stated plainly: a file or folder DEEPER in the tree that has the wrong owner while all of the
+# above are right (say a clip restored as root into a correctly-owned data directory) is no longer repaired at
+# start. Before #567 it was. Run `chown -R <PUID>:<PGID> <data dir>` on the host, or change PUID/PGID once and
+# back, to force a full pass. (The mode tightening below still walks the whole tree on every start; it only
+# reads, it does not rewrite.)
+# Leading zeros removed by hand, not with $((...)): sh arithmetic reads a leading 0 as OCTAL (099 is an error,
+# 010 is 8). Digits only; anything else is compared as written (usermod above has already accepted it).
+canonical_id() {
+  case "$1" in
+    ''|*[!0-9]*) printf '%s' "$1" ;;
+    *)
+      _cid=$1
+      while [ "${_cid#0}" != "$_cid" ]; do _cid=${_cid#0}; done
+      printf '%s' "${_cid:-0}"
+      ;;
+  esac
+}
+WANT_OWNER="$(canonical_id "$PUID"):$(canonical_id "$PGID")"
+NEEDS_CHOWN=
+for f in . babymonitor.db babymonitor.db-wal babymonitor.db-shm .jwt_secret; do
+  if [ -e "$DATA_DIR/$f" ] && [ "$(stat -L -c %u:%g "$DATA_DIR/$f" 2>/dev/null)" != "$WANT_OWNER" ]; then
+    NEEDS_CHOWN="$f"
+    break
+  fi
+done
+if [ -n "$NEEDS_CHOWN" ]; then
+  printf '[entrypoint] ownership of %s is not %s; fixing the whole data directory\n' "$DATA_DIR/$NEEDS_CHOWN" "$WANT_OWNER"
+  chown -R nightlight:nightlight "$DATA_DIR"
+else
+  printf '[entrypoint] data directory already owned by %s; not walking it\n' "$WANT_OWNER"
+fi
 
 # A umask only shapes NEW files. An install upgraded from before #549 has every file 0644 and every
 # folder 0755, so at the default 077 the group/other bits come off whatever still has any. Why each

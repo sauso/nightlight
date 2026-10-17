@@ -170,20 +170,31 @@ describe('listWebrtcSessions', () => {
 });
 
 describe('kickWebrtcSession', () => {
-  test('a successful kick resolves without throwing', async () => {
+  // ⚠️ #564: both cases below used to be `assert.doesNotReject(() => kickWebrtcSession('mtx-1'))` and nothing
+  // else. A kick that never sent a request resolves too, so making the function a no-op left them green
+  // (proved by mutation, see the PR): and a no-op here means a revoked login's live camera view keeps
+  // streaming, which is the whole reason this module exists. They now assert WHAT WAS SENT.
+  const record = (status) => {
+    const seen = [];
     handler = (req, res) => {
-      res.statusCode = 200;
+      seen.push({ method: req.method, url: req.url });
+      res.statusCode = status;
       res.end();
     };
-    await assert.doesNotReject(() => kickWebrtcSession('mtx-1'));
+    return seen;
+  };
+
+  test('a successful kick POSTs to MediaMTX\'s kick endpoint for exactly that session id, once', async () => {
+    const seen = record(200);
+    await kickWebrtcSession('mtx-1');
+    assert.deepEqual(seen, [{ method: 'POST', url: '/v3/webrtc/sessions/kick/mtx-1' }]);
   });
 
-  test('a 404 (already gone by the time this runs) is treated as success, not an error', async () => {
-    handler = (req, res) => {
-      res.statusCode = 404;
-      res.end();
-    };
-    await assert.doesNotReject(() => kickWebrtcSession('mtx-1'));
+  test('a 404 (already gone by the time this runs) is treated as success, not an error, and the kick was still attempted', async () => {
+    const seen = record(404);
+    await kickWebrtcSession('mtx-1'); // rejecting here fails the test, which is the "not an error" half
+    assert.equal(seen.length, 1, 'a 404 is only meaningful if the request was actually sent');
+    assert.equal(seen[0].url, '/v3/webrtc/sessions/kick/mtx-1');
   });
 
   test('any other failure status throws', async () => {

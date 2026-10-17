@@ -22,7 +22,7 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within, fireEvent, act } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
-import { renderAsAdmin } from './helpers/render.jsx';
+import { renderAsAdmin, renderAsCaregiver, renderAs, forEachRole } from './helpers/render.jsx';
 import SleepDetail, { addDays } from '../src/pages/SleepDetail.jsx';
 import { api } from '../src/lib/api.js';
 
@@ -639,17 +639,18 @@ describe('★ the empty states each say a different thing', () => {
     expect(await screen.findByText(/No sleep data for this night/)).toBeTruthy();
   });
 
-  test('★ a failed request also reads as no data rather than a blank screen', async () => {
-    // The catch sets `null`, which lands on the same message. Not ideal — it cannot distinguish "no
-    // night" from "could not ask" — but it is pinned because the alternative it must never do is stay
-    // on "Loading night…" forever.
+  test('★ a failed request says it could not load, with Retry - not "no data", not "Loading…" forever (#375)', async () => {
+    // It used to set `null`, the same value as "no night recorded", so an outage read as "it predates
+    // tracking". The other thing it must never do is stay on "Loading night…" forever.
     vi.spyOn(api, 'get').mockImplementation((path) => {
       if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'last', night: { night_date: '2026-08-30' } });
       if (path.includes('/sleep/insights')) return Promise.resolve(null);
       return Promise.reject(new Error('boom'));
     });
     mount();
-    expect(await screen.findByText(/No sleep data for this night/)).toBeTruthy();
+    expect(await screen.findByText(/Couldn’t load this night/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy();
+    expect(screen.queryByText(/No sleep data for this night/)).toBeNull();
     expect(screen.queryByText('Loading night…')).toBeNull();
   });
 
@@ -664,6 +665,77 @@ describe('★ the empty states each say a different thing', () => {
     expect(await screen.findByText('Loading night…')).toBeTruthy();
     resolveNight(NIGHT);
     await waitFor(() => expect(screen.queryByText('Loading night…')).toBeNull());
+  });
+});
+
+// #521: Recompute used to be unreachable on any `empty` night, because that branch returns before the
+// `ok`-night render where the control lives. Same component as on an `ok` night, so these tests only pin
+// what is different here: that it is REACHABLE, that the two-step flow (press previews, second press
+// applies) and the locked dialog survive the move, and that it stays admin-only.
+describe('#521 Recompute is reachable on an empty night', () => {
+  const EMPTY = { ...NIGHT, status: 'empty', coverage_minutes: 720, onset_at: null, wake_at: null };
+  // What is SAVED for that night: an earlier, scored pass. Differs from the empty night, so the dialog has
+  // something to offer.
+  const SAVED = { night_date: '2026-08-30', status: 'ok', onset_at: '2026-08-30 09:30:00', wake_at: '2026-08-30 20:15:00',
+    asleep_minutes: 600, awake_minutes: 20, wake_count: 1 };
+
+  // Routes by query, because the dialog asks for three different things of the same path.
+  function mockEmpty({ night = EMPTY, locked = false } = {}) {
+    const get = vi.fn((path) => {
+      if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'last', night: { night_date: '2026-08-30' } });
+      if (path.includes('/sleep/insights')) return Promise.resolve(null);
+      if (path.includes('stored=1')) return Promise.resolve({ night: SAVED, locked });
+      return Promise.resolve(night); // the page's own read, and the post-store re-fetch
+    });
+    vi.spyOn(api, 'get').mockImplementation(get);
+    return get;
+  }
+  const storeCalls = (get) => get.mock.calls.map((c) => c[0]).filter((p) => p.includes('store=1') && !p.includes('stored=1'));
+
+  test('★ a detector-empty night offers it; the first press PREVIEWS and writes nothing, the second applies', async () => {
+    const get = mockEmpty();
+    mount();
+    const btn = await screen.findByRole('button', { name: /recompute this night/i });
+    fireEvent.click(btn);
+    // Step 1: the dialog opens on the saved-vs-now comparison, and nothing has been stored yet.
+    expect(await screen.findByRole('button', { name: /save the new numbers/i })).toBeInTheDocument();
+    expect(storeCalls(get)).toHaveLength(0);
+    // Step 2: only this press writes (the route's allowDowngrade / lock refusals are the server's call).
+    fireEvent.click(screen.getByRole('button', { name: /save the new numbers/i }));
+    await waitFor(() => expect(storeCalls(get)).toHaveLength(1));
+  });
+
+  test('a PARENT-flagged night opens on "locked" and offers no way to store', async () => {
+    const get = mockEmpty({ night: { ...EMPTY, corrected: true, nobody_in_bed: true }, locked: true });
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: /recompute this night/i }));
+    expect(await screen.findByText(/This night is locked because you corrected it/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save the new numbers/i })).not.toBeInTheDocument();
+    expect(storeCalls(get)).toHaveLength(0);
+    // The note under the button must not talk about "times" on a night that has none.
+    expect(screen.getByText(/Your answer that no one was in the bed is kept/)).toBeInTheDocument();
+    expect(screen.queryByText(/These times are the ones you told us/)).not.toBeInTheDocument();
+  });
+
+  test('★ still admin-only: a caregiver sees the empty night and no Recompute control', async () => {
+    mockEmpty();
+    renderAsCaregiver(
+      <Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes>,
+      { kids: [KID], settings: { timezone: 'Australia/Melbourne' }, route: '/children/kid-1/sleep' }
+    );
+    expect(await screen.findByText(/No one in the bed for this night/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+  });
+
+  test('it is not added to the other empty states (no_data, no_sleep, off)', async () => {
+    for (const status of ['no_data', 'no_sleep', 'off']) {
+      mockEmpty({ night: { ...NIGHT, status } });
+      const { unmount } = mount();
+      await screen.findByText(/No sleep data|No clear sleep|tracking is off/);
+      expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+      unmount();
+      vi.restoreAllMocks();
+    }
   });
 });
 
@@ -809,5 +881,73 @@ describe('what a night lists', () => {
     });
     mount();
     expect(await screen.findByText(/100%/)).toBeTruthy();
+  });
+});
+
+// #365: the temperature insight shows no verdict until BOTH groups (cooler, warmer) have enough nights.
+// The server decides (verdict 'not_enough_nights' + min_group_nights); this is what the card does with it.
+describe('★ the temperature insight with too few nights in a group (#365)', () => {
+  const half = (nights, avg_temp, avg_wakes) => ({ nights, avg_temp, avg_wakes, avg_asleep_minutes: 600 });
+  const base = {
+    status: 'ok', nights_analyzed: 21, min_group_nights: 10, temp_wake_r: 1, temp_asleep_r: -1, temp_spread: 2,
+    overall: { avg_temp: 21, min_temp: 20, max_temp: 22, avg_humidity: null },
+  };
+  const mountAs = (who) =>
+    renderAs(who, <Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes>,
+      { kids: [KID], settings: { timezone: 'Australia/Melbourne' }, route: '/children/kid-1/sleep' });
+
+  test('says "not enough nights yet" with the counts, and shows no verdict or comparison, for both roles', async () => {
+    await forEachRole(async (_name, who) => {
+      mockSleep({ insights: { ...base, verdict: 'not_enough_nights', cooler: half(9, 19, 1), warmer: half(10, 22, 6) } });
+      const { unmount } = mountAs(who);
+      const card = (await screen.findByText(/Not enough nights yet/)).closest('.sleep-insight');
+      expect(card.textContent).toMatch(/needs 10 of each/);
+      expect(card.textContent).toMatch(/9 cooler and 10 warmer/);
+      expect(within(card).queryByText(/tend to mean more wake-ups|saw fewer wake-ups|No clear link/)).toBeNull();
+      expect(within(card).queryByText(/Cooler nights/), 'no averages to read as a finding').toBeNull();
+      unmount();
+      vi.restoreAllMocks();
+    });
+  });
+
+  // A group with NO nights arrives as null, not as { nights: 0 } (sleepAnalysis.js: `cool.length ? half(cool) :
+  // null`). That is reachable: most nights at the median and a few a degree above it give an empty cooler group
+  // and no 'flat'. The card must print 0 for the missing half and the real count for the other, and still show
+  // nothing to compare. Both null cannot come with this verdict from today's server (a one-degree spread puts a
+  // night on at least one side of the median), but the card should not depend on that. Admin only: the role
+  // does not reach this branch, and the test above already runs it for both roles.
+  const expectCountsOnly = async (groups, counts) => {
+    mockSleep({ insights: { ...base, verdict: 'not_enough_nights', ...groups } });
+    mount();
+    const card = (await screen.findByText(/Not enough nights yet/)).closest('.sleep-insight');
+    expect(card.textContent).toMatch(/needs 10 of each/);
+    expect(card.textContent).toMatch(counts);
+    expect(card.querySelector('.sleep-insight__cmp'), 'no comparison columns').toBeNull();
+    expect(within(card).queryByText(/Cooler nights|Warmer nights|wake-ups avg|°C/), 'no averages to read as a finding').toBeNull();
+    expect(within(card).queryByText(/tend to mean more wake-ups|saw fewer wake-ups|No clear link/)).toBeNull();
+  };
+
+  test('a missing cooler group (null) counts as 0 nights, next to the real warmer count, with no comparison', async () => {
+    await expectCountsOnly({ cooler: null, warmer: half(7, 22, 6) }, /so far 0 cooler and 7 warmer\./);
+  });
+
+  test('a missing warmer group (null) counts as 0 nights, next to the real cooler count, with no comparison', async () => {
+    await expectCountsOnly({ cooler: half(4, 19, 1), warmer: null }, /so far 4 cooler and 0 warmer\./);
+  });
+
+  test('both groups missing (null) count as 0 and 0, with no comparison', async () => {
+    await expectCountsOnly({ cooler: null, warmer: null }, /so far 0 cooler and 0 warmer\./);
+  });
+
+  test('at the minimum the same card shows the verdict and the comparison as before', async () => {
+    await forEachRole(async (_name, who) => {
+      mockSleep({ insights: { ...base, verdict: 'warm_more_wakes', cooler: half(10, 19, 1), warmer: half(10, 22, 6) } });
+      const { unmount } = mountAs(who);
+      expect(await screen.findByText(/Warmer nights tend to mean more wake-ups/)).toBeTruthy();
+      expect(screen.getByText(/Cooler nights/)).toBeTruthy();
+      expect(screen.queryByText(/Not enough nights yet/)).toBeNull();
+      unmount();
+      vi.restoreAllMocks();
+    });
   });
 });
