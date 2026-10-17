@@ -245,6 +245,10 @@ test('#365 the boundary: 9 nights in a group withholds the verdict, 10 shows it 
     [9, 10, 2, 'not_enough_nights'], // cooler group one short
     [10, 9, 2, 'not_enough_nights'], // warmer group one short
     [9, 9, 1, 'not_enough_nights'], // both short
+    // 20 nights in the two groups together, but one group short: the minimum is per group, not a total of
+    // 20 (a sum gate passes both of these; review of #718).
+    [9, 11, 3, 'not_enough_nights'],
+    [11, 9, 3, 'not_enough_nights'],
     [11, 12, 2, 'warm_more_wakes'], // above the minimum
   ];
   for (const [c, w, m, want] of cases) {
@@ -255,6 +259,25 @@ test('#365 the boundary: 9 nights in a group withholds the verdict, 10 shows it 
     assert.equal(r.verdict, want, `cooler ${c} / warmer ${w}`);
     assert.equal(r.min_group_nights, 10);
   }
+});
+
+test('#365 a short group withholds every verdict, "no link" included (no r, and a weak r)', () => {
+  // Every other short-group fixture here has a strong r, so a gate that held back only the strong links
+  // (and let "no clear link" through on a group of one) passed them all (review of #718). "No link" from
+  // nine nights is a claim too. Both fixtures are 9/9 (one tied at the median); r is asserted, so a fixture
+  // that drifts into a strong link cannot pass for this case.
+  layNights(KID, groupSpecs(9, 9, 1).map(([t, , as, h]) => [t, 2, as, h])); // the same wakes every night
+  let r = sleepInsights(KID);
+  assert.deepEqual(groupSizes(r), [9, 9]);
+  assert.equal(r.temp_wake_r, null, 'fixture: constant wakes give no r');
+  assert.equal(r.verdict, 'not_enough_nights');
+
+  db.prepare('DELETE FROM sleep_nights').run();
+  layNights(KID, groupSpecs(9, 9, 1).map(([t, , as, h], i) => [t, i % 3, as, h])); // wakes unrelated to temperature
+  r = sleepInsights(KID);
+  assert.deepEqual(groupSizes(r), [9, 9]);
+  assert.ok(r.temp_wake_r != null && Math.abs(r.temp_wake_r) < 0.35, `fixture: expected a weak r, got ${r.temp_wake_r}`);
+  assert.equal(r.verdict, 'not_enough_nights');
 });
 
 test('#365 one unusual night is not a headline (the shape the issue filed)', () => {
@@ -291,8 +314,9 @@ test('#365 golden: at and above the minimum the whole output is what it was befo
 });
 
 test('#365 a room that never changes still says "flat", not "not enough nights"', () => {
-  // Identical temperatures leave BOTH groups empty for ever; more nights cannot fix that, so telling
-  // that house to keep tracking would be wrong.
+  // Identical temperatures leave BOTH groups empty (nights equal to the median join neither). The honest
+  // answer is that the room did not change enough to compare, so telling that house to keep tracking
+  // would be wrong.
   layNights(KID, Array.from({ length: 12 }, (_, i) => [20, i % 4, 600]));
   const r = sleepInsights(KID);
   assert.equal(r.verdict, 'flat');

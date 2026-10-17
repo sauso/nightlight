@@ -2551,9 +2551,10 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
   });
 
   // Verdict the UI turns into a sentence. 'flat' = temperature barely varied, so we can't say anything.
-  // 'flat' stays FIRST (#365): it makes no claim about sleep, only that the room did not change, and a
-  // room that never changes has empty cooler/warmer groups for ever (nights equal to the median join
-  // neither), so gating it would tell that house "not enough nights yet" when more nights cannot help.
+  // 'flat' stays FIRST (#365): it says nothing about sleep, only that the room barely varied. A room
+  // that barely varies leaves one or both groups short or empty (nights equal to the median join
+  // neither), so gating it would tell that house "not enough nights yet" when the honest answer is
+  // "the room did not change enough to compare".
   // 'not_enough_nights' withholds every actual verdict until both groups reach the minimum; the
   // arithmetic below it is unchanged once they do.
   let verdict = 'none';
