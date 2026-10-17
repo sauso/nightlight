@@ -10,7 +10,7 @@ import { actorOf } from '../lib/actor.js';
 import { noteSilence, sendLongSilenceNotice } from '../lib/silences.js';
 import { startSubStream, stopSubStream, subConfigured } from '../lib/subStream.js';
 import { startMotionDetector, stopMotionDetector, motionLegWanted, forgetMotionAlert } from '../lib/motionDetector.js';
-import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted } from '../lib/onvifMotion.js';
+import { startOnvifMotion, stopOnvifMotion, onvifMotionWanted, forgetOnvifAlert } from '../lib/onvifMotion.js';
 import { startSoundDetector, stopSoundDetector } from '../lib/soundDetector.js';
 import { forgetObservationClocks } from '../lib/observationClock.js';
 import { startClipCapture, stopClipCapture, isClipCapturing, reconcileClipRing } from '../lib/clipCapture.js';
@@ -24,7 +24,7 @@ import {
   getClips,
 } from '../lib/detectionEvents.js';
 import { verifyTalkCreds, talkConfigured, verifyBackchannel } from '../lib/twoWayAudio.js';
-import { getReading, subscribeAllCameraTopics, refreshMqttConnection } from '../lib/mqttClient.js';
+import { getReading, subscribeAllCameraTopics, refreshMqttConnection, forgetMqttMotionAlert } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport, rebootCamera } from '../lib/onvif.js';
 import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rtspProbe.js';
 import { grabLiveFrame } from '../lib/snapshot.js';
@@ -34,6 +34,7 @@ import { stripUrlPassword, urlHasPassword, resolveUrlPassword, scrubSecrets, fin
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { clearStalePrimaryPointers } from '../lib/primaryCamera.js';
 import { purgeCamera } from '../lib/entityPurge.js';
+import { recordingReadiness } from '../lib/recordingReadiness.js';
 
 const router = Router();
 
@@ -695,6 +696,17 @@ router.get('/:id/activity-history', requireAuth, (req, res) => {
   res.json({ hours, samples: rows });
 });
 
+// What this camera is READY to save right now (#394), for the "Recording and alerts" panel on its settings
+// page. Read-only, additive, no setting and no write. ADMIN-ONLY because that page is: the panel's
+// "set up" half comes from the camera's own fields, which an admin already gets, and this route says
+// nothing a caregiver's screens use. Booleans and enums only (lib/recordingReadiness.js says why).
+// Literal suffix after /:id, so it cannot be mistaken for the /alerts or /clips routes above.
+router.get('/:id/recording-readiness', requireAuth, requireAdmin, (req, res) => {
+  const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!cam) return res.status(404).json({ error: 'Camera not found' });
+  res.json(recordingReadiness(cam));
+});
+
 // Bulk-delete clips (admin — this lives on the admin Settings screen). Body: { ids: [eventId, ...] }.
 router.post('/clips/delete', requireAdmin, (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
@@ -1280,6 +1292,10 @@ router.delete('/:id', requireAdmin, asyncHandler(async (req, res) => {
   // once: a known, documented residual (one number per UUID), not guarded. The ORDER (stop, then forget) is not
   // covered by a test: the route tests plant a stamp and have no running detector to race.
   forgetMotionAlert(req.params.id);
+  // #555 bullet 10: the two other per-camera cooldown maps (ONVIF and MQTT motion), cleared here for the same reason
+  // and the same reason only: a deleted camera's id is never seen again. Not on a stop or an edit.
+  forgetOnvifAlert(req.params.id);
+  forgetMqttMotionAlert(req.params.id);
   stopClipCapture(req.params.id);
   try {
     await removePath(existing.mediamtx_path);

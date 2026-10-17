@@ -210,6 +210,21 @@ therefore sends a line break in a camera or child name, or in a message that tra
 (an emoji in a camera name does not appear in the ntfy title). The message **body** is not affected: the
 multi-line nightly sleep report keeps its line breaks.
 
+The **access token** travels in a header too. If the saved one contains a character a header cannot carry (a
+line break or another control character pasted into the middle of it, say), every ntfy send fails and
+**Send test** reports that the request could not be sent: "the request could not be built" for a line break or
+a NUL, plain "fetch failed" for the other control characters. Neither quotes the token, and the log does not
+either. Re-enter the token to fix it.
+
+**What Send test (and the log) shows when ntfy or Gotify refuses a message.** `HTTP <status>` with its standard
+name (`HTTP 401 Unauthorized`), followed by the server's own short message fields if its reply is JSON:
+`error`, `errorDescription`, `message`, `detail` and `title` (each cut to 200 characters), plus `code` and `http`
+for ntfy. Nothing else from the reply is ever shown or logged, not a link, not an HTML error page, not any
+other field: a server or proxy that echoes the request back could otherwise hand your token or password back in
+the reply. A message field that repeats eight or more characters of your token (or, with a user name and
+password, of the encoded pair that is actually sent) is shown as `[withheld: it repeats part of a saved
+credential]`.
+
 ## Option D: Gotify
 
 [Gotify](https://gotify.net) is a lightweight **self-hosted** push server with its own Android app.
@@ -222,6 +237,18 @@ multi-line nightly sleep report keeps its line breaks.
    **Save**, and **Send test**. Higher priorities show more prominently in the Gotify app and can
    bypass its quiet settings; **0 still delivers**, just quietly — it is a valid choice here, not
    "unset". Out-of-range values are clamped to 0–10 by the server.
+
+   The **application token** may contain only letters (`A–Z`, `a–z`), digits, `.`, `-` and `_`,
+   which are the characters Gotify builds its tokens from. A token with any other character (a
+   space or line break pasted in the middle, an accented letter) is refused when you save, with a
+   message that does not repeat it; spaces and line breaks around it are simply removed. Leaving the
+   field blank keeps the saved token. The token is sent in the `X-Gotify-Key` header, never in the
+   address, and it is never written to the log or shown in a Test result: a token saved by an older
+   version that cannot be sent makes **Send test** report that the request could not be sent ("the
+   request could not be built", or plain "fetch failed" for some control characters) without quoting
+   it. Re-enter the token from Gotify's **Apps** page to fix that. When Gotify refuses a message,
+   Send test shows the status and Gotify's own `error` / `errorDescription` words only, as described
+   for ntfy above.
 
 Gotify alerts are **text only** (no image — Gotify has no native attachments); tapping one opens the
 camera. Only the short message passes through your Gotify server; the other notifications do too,
@@ -275,6 +302,10 @@ About that one shared address:
 **Cameras → edit** a camera. Motion and sound are independent detectors — either can be enabled
 without the other, and each has its own sensitivity, confirmation delay and cooldown.
 
+The camera's page also carries a read-only **Recording and alerts** summary of what the camera alerts on,
+whether alerts save a clip, and whether it is ready right now; see
+[the panel](recording.md#the-recording-and-alerts-panel-per-camera-read-only).
+
 ### Changes save automatically
 
 The Motion, Sound and Alert schedule screens have no Save button — every change (a slider, a switch,
@@ -306,6 +337,13 @@ saved is what the camera is still using).
 | **Sound confirm** | 4 s | 0–30 s | Loudness must stay above that margin, *on average*, for this long — so a pulsing cry still counts while a single bang does not. |
 | **Sound cooldown** | 120 s | 1–3600 s | Minimum gap between sound alerts from this camera. |
 
+**What these settings do for each motion source.** A camera whose motion source is **MQTT** or **ONVIF**
+accepts the motion events the camera itself reports, and applies only the app's alert schedule and the
+**Motion cooldown**; it does not use the frame-difference **Motion confirm** rule (or sensitivity), which
+belong to the video-comparison source. A **Sound confirm** of 0 still averages over a minimum of about
+three analysis windows (about 0.6 s), in addition to the detector's initial calibration of the room's
+ambient level (about 5 s after it starts), so it is never a literal first-window trigger.
+
 ### Alert image URL (optional)
 
 If your camera exposes an HTTP snapshot endpoint, put it here and alert images are grabbed from it
@@ -316,6 +354,13 @@ Leave it blank to use a stream frame.
 |---|---|---|
 | **Alert image URL** | blank | e.g. `http://192.168.1.50/snapshot.jpg`. If the endpoint needs a username, include it: `http://admin@192.168.1.50/snapshot.jpg`. |
 | **Alert image password** | blank | Only if the endpoint needs one. Blank means *keep whatever is already saved*. |
+
+Two limits protect the server from a misbehaving camera (#536). **Redirects are not followed**: if the
+address answers with a redirect (for example `http://` to `https://`), the image is not used and the alert
+falls back to a stream frame, so enter the final address. **The image may be at most 5 MB**; a larger one is
+abandoned part-way through and the alert falls back to a stream frame too. A normal camera JPEG is well
+under that (typically 0.1–2 MB; not measured on every model). Either case is a line in the log
+starting `[snapshot]`.
 
 **The password is stored but never shown again.** Like the camera's RTSP and two-way-audio passwords,
 it is never sent back to the browser — the field stays blank and the label says *(saved)* when one is
@@ -377,6 +422,27 @@ Turn on **Only alert during set hours** and set a **From** and **To** time.
 Sound is measured **relative to each room's own ambient level**, which the app learns continuously —
 not as an absolute loudness. A room next to a busy road and a silent room both settle at "0 over
 ambient", so the same sensitivity means the same thing in both.
+
+### The Sound detection screen shows its calibration and its limits
+
+With sound detection on, **Sound detection** (the camera's settings, no Save button) carries two things
+that have no setting of their own, so there is nothing to turn on, nothing to configure and no default to
+change:
+
+| Shown | What it says | Where the figure comes from |
+|---|---|---|
+| **Calibration**: *Listening* | Sound readings are coming in (the detector has stored some in the last **10 minutes**); this does not claim the room's level has been learned. With it: the average and the peak sound over the last **5 minutes**, as **dB above the room's own level** (never absolute loudness), and the alert line at the current sensitivity (about +18 dB at 1, +11 at 50, +4 at 100). | The per-minute history the server already serves (`GET /cameras/:id/activity-history`). Refreshed every **30 seconds** while the screen is open. |
+| **Calibration**: *No sound readings yet* | Nothing stored in the last 10 minutes. That is the first ~5 seconds after the detector starts or after you change a setting here (it listens that long to learn the room's level), a camera with no microphone, or a detector that is not running. The screen cannot tell these apart. | The same history, empty. |
+| **What this detector can and can't do** | The limits in the rest of this page, in plain words: loudness only (no telling a cry from speech or a television), a loud room at start-up sets the starting level high, a steady noise is absorbed after about **45 seconds** (a moderate one after about **5 minutes**), sustained noise can be absorbed during the cooldown with no separate follow-up alert, and the learned level can restart after a detector restart. The cooldown shown is this camera's own. | Fixed text; only the cooldown is read from the camera. |
+
+Two things this does **not** show: the ambient level itself (it lives in the detector's memory and no route
+serves it; the container log prints it every 15 seconds, see below), and an exact "calibrated" flag. *Listening*
+means readings are being stored, which only starts once the detector has its first level, with one exception: a
+muted microphone (digital silence) is stored as quiet before it has any level, so it reads *Listening* too, with
+levels of zero, and it is not calibrated. For that reason the box says only that readings are coming in and never
+that the room's level has been learned. The boundaries are inclusive: a reading exactly 10 minutes old still counts
+as *Listening*, one exactly 5 minutes old is still in the average, and a reading dated in the future is ignored.
+The figures are from the last whole minutes, so the minute in progress is not in them.
 
 ### Bed exits and entries use a fixed threshold
 

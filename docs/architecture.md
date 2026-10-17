@@ -31,6 +31,45 @@ HLS can't carry at all — WebRTC can). This drives a specific pipeline, in orde
 4. **Frontend** picks WebRTC (`WhepPlayer.jsx`, "Low latency") or HLS (`HlsPlayer.jsx`,
    "Compatibility") per camera tile, toggled by the user.
 
+## Child process environment (`backend/src/lib/childEnv.js`, #553)
+
+Camera streams are untrusted input, and ffmpeg/ffprobe parse whatever a (possibly compromised) camera
+sends. So **no child is handed the backend's environment**. Every ffmpeg, ffprobe and MediaMTX process is
+started through `spawnChild()`, which builds the environment from an allowlist; `JWT_SECRET`,
+`FIREBASE_CREDENTIALS`, `DATA_DIR`, `PUBLIC_HOST` and everything else the operator set are not passed to a
+child. This narrows what a child *inherits*; it does not stop a child reading the backend's own environment
+(see "What this does not do" below).
+
+| Variable | ffmpeg / ffprobe | MediaMTX | Why |
+|---|---|---|---|
+| `PATH` | yes | yes | finds the binary and what it execs |
+| `TZ` | yes | yes | segment and log times agree with the app |
+| `LANG`, `LC_ALL` | yes | yes | locale only |
+| `MTX_*` (operator's own) | **no** | yes | MediaMTX's documented override mechanism, e.g. `MTX_WEBRTCLOCALUDPADDRESS` |
+| `MTX_WEBRTCADDITIONALHOSTS` | no | yes | computed by `mediamtxProcess.js` at every launch from `PUBLIC_HOST` and the detected host IPs; it replaces an inherited value whenever that list is non-empty |
+| `MTX_WEBRTCLOCALUDPADDRESS` | no | yes | the operator's own value when they set one: it wins, and `WEBRTC_UDP_PORT` is then ignored with a warning; otherwise `:<port>` from a valid `WEBRTC_UDP_PORT`; otherwise unset, so MediaMTX keeps `:8189` from `mediamtx.yml` |
+| `HOME`, `LIBVA_*`, `NVIDIA_*`, `HTTP(S)_PROXY`, `LD_LIBRARY_PATH`, `RTSP_*` | no | no | nothing in the app documents or sets them (ffmpeg runs with software decoding; cameras are reached directly on the LAN; `RTSP_*` is MediaMTX's legacy override prefix, which it still reads: use the `MTX_*` spelling) |
+
+A name that is unset in the backend stays unset in the child. A caller-supplied `env` option is ignored.
+
+**To add a variable:** add the name to `ALLOWED_NAMES` in `childEnv.js` with a comment saying which setup
+needs it, add a row to the table above, and update `backend/test/child-env.test.js` (it pins the list on
+purpose). For a per-launch computed value (MediaMTX's) pass it as `extra` instead. **To add a new spawn
+site:** call `spawnChild()`, never `child_process` directly; the source test in `child-env.test.js` fails
+on any other import of it under `backend/src`.
+
+**What this does not do:**
+
+- **It is not a sandbox.** The children still run as the same operating-system user as the backend, so a
+  child that a camera managed to take over could still read the backend's own environment through the
+  process table (`/proc` on Linux), `JWT_SECRET` included. The allowlist narrows what a child *inherits*:
+  what a bug that discloses the child's own memory or environment (in a demuxer, a crash report or log
+  output) could expose, and what a command run by a MediaMTX hook inherits from MediaMTX.
+- **It does not protect the files.** For the same reason a child can read the database and `.jwt_secret`
+  from disk. A separate user was considered and not done (#553 (b)).
+
+Keep cameras on their own VLAN, as the README advises.
+
 ## ONVIF, PTZ, and camera credentials (`backend/src/lib/onvif.js`, `rtspProbe.js`)
 
 Cameras are added/edited by **components** (IP / port / path / username / password), not a
@@ -82,6 +121,20 @@ reconciliation. Three independent mechanisms keep the pipeline alive without man
 When editing this area, preserve the "only write when actually broken" invariant — an
 unconditional reconcile-on-every-tick would cause constant disconnects.
 
+**Reading readiness without reconciling (`backend/src/lib/recordingReadiness.js`, #394).** The camera
+settings page's read-only "Recording and alerts" panel asks `GET /api/cameras/:id/recording-readiness`
+(admin only) whether the ring buffer, the detectors and the alert window are up *right now*. The route
+only reads: it asks `clipCapture`, `motionDetector`, `onvifMotion`, `soundDetector` and `detectSchedule`
+for their own answers and never starts, stops or reconciles anything, so it cannot cause the path
+reloads the invariant above is about. It returns booleans and fixed words only. `alerting_now` is false
+for a silenced camera, one outside its schedule, and a disabled one (which runs no detector);
+`alert_pause_reason` is `null` while alerts fire, else `"silenced"`, `"schedule"` or `"disabled"`
+(checked in that order of precedence: disabled, silenced, schedule), computed from the same instant as
+`alerting_now`. It is an added field: `alerting_now` is unchanged in meaning for existing clients, and the
+panel falls back to guessing the reason from the camera row only if the field is absent. Its one restated
+condition, manual recording availability, mirrors `can_record` in `routes/cameras.js`, and
+`recording-readiness.test.js` fails if the two disagree.
+
 ## Auth (`backend/src/middleware/auth.js`, `backend/src/routes/auth.js`)
 
 JWT-based, but a valid JWT alone isn't sufficient — every request also checks a `sessions` row
@@ -130,9 +183,30 @@ camera-specific exposure tests cover those. The validation behind the settings, 
 routes (documented ranges, `#RRGGBB` colours, known timezones, the 12-hour snooze cap, no second enrolment
 while MFA is on) is pinned in `backend/test/input-validation.test.js`.
 
+A child's **colour** must be `#RRGGBB` and **birthday** a real `YYYY-MM-DD` date (blank still means default /
+clear), and an avatar **photo** (child or user) must be a base64 `data:image/jpeg`, `png` or `webp` URL of at
+most 90 KB (#555). The photo cap is 90 KB, not the 700 KB it once said, because `express.json()` refuses a body
+over its 100 KB default first. For colour, birthday and photo, a value identical to the one stored is accepted
+unchecked, so a record saved before the rule can still be edited
+(`children-field-validation.test.js`, `input-validation.test.js`).
+
 The JWT signing secret is auto-generated and persisted to `DATA_DIR/.jwt_secret` if
 `JWT_SECRET` isn't set — deliberately avoiding a hardcoded fallback, since this image is
 publicly distributed and a baked-in secret would be a shared key across every install.
+
+
+**Client startup (#382).** The SPA decides "signed in" from `/auth/me` and "which form" from `/auth/status`.
+Only a **401** from `/auth/me` means signed out. A network failure, a timeout or a 5xx (or a proxy's 502 while
+the backend restarts) leaves the stored token alone and shows `ServerUnreachable` ("Can't reach Nightlight")
+instead, retried by `lib/useAutoRetry.js` (5 s, 10 s, 20 s, then every 30 s) and by a **Try again** button. A
+failed `/auth/status` does the same on the sign-in screen: it no longer guesses "established install" and shows
+the sign-in form. The demo's tokenless path and the native app's (same web code, same stored token) are unchanged.
+Once someone is signed in, a failed `refresh()` (Account and UserSettings call it after a save) sets the same flag
+but keeps the user, so the app stays on screen: `Shell` shows `ServerUnreachable` only while nobody is signed in.
+**Sign out** and a 401 on any request clear the flag and cancel the pending retry, and a failed `/auth/me` that
+lands after the sign-in has ended (no stored token any more) is ignored, so neither leaves a signed-out device on
+"Can't reach Nightlight". On the sign-in screen, once a status check has started the demo's guest sign-in no later
+check runs, so a retry timer that comes due in the same moment cannot open a second guest session.
 
 ## Data layer (`backend/src/db.js`)
 
@@ -177,9 +251,11 @@ page and only a 4xx message reaches the person:
   `http-errors` / body-parser / `send` convention), capped at 200 characters; otherwise a generic message
   for that status is used. Two exceptions: a **401** on a thrown error is never honoured (the web UI signs
   the user out on any 401, and a library error can carry its upstream's status), so 401 comes only from
-  `middleware/auth.js`; and a **403** is honoured only when the error is `expose: true`, which is what
-  `res.sendFile` throws for a denied dotfile or a `..` path (a bare `{ status: 403 }` from some other
-  library stays a 500).
+  `middleware/auth.js` and the pre-sign-in `/login` steps; and a **403** is honoured only when the error is
+  `expose: true`, which is what `res.sendFile` throws for a denied dotfile or a `..` path (a bare
+  `{ status: 403 }` from some other library stays a 500). For the reason behind the first exception, a wrong
+  *confirmation* password on a signed-in route (`PUT /auth/me/password`, `POST /auth/me/mfa/disable`) answers
+  **400**, never 401: the sign-in is still valid, only the typed password is wrong (#697).
 - **5xx: a server bug.** The response is `500` with a generic message. The real error (message and stack)
   is written to the log with the method and path (never the query string, which can hold a media token) and
   is never sent to the client, because a SQLite message names tables and columns and a stack names source
@@ -189,6 +265,30 @@ page and only a 4xx message reaches the person:
 - If the response has already started streaming when the error happens, Express's default handler closes
   the connection so the client sees a failure rather than a truncated body that looks complete. If the
   reply already finished, the error is only logged.
+
+**Log lines are single lines (`lib/logger.js`, #539).** Every line passes one choke point, which first
+redacts credentials and then escapes line breaks and control characters, so a camera name containing a
+newline cannot forge a second timestamped line in `docker logs`, the in-app log viewer or the diagnostics
+bundle. The escapes are visible text, not removals:
+
+| Character | Written as |
+|---|---|
+| LF, CR | `\n`, `\r` |
+| other C0 controls (including ESC), DEL, the C1 block | `\xNN` (for example ESC is `\x1b`) |
+| U+2028, U+2029 (Unicode line / paragraph separators) | `\u2028`, `\u2029` |
+| tab, zero-width and other format characters (U+200B, U+FEFF, the soft hyphen, the bidirectional controls), and everything else | unchanged |
+
+This also applies to the stack of a 5xx error and to multi-line child-process output: a stack is now one
+log line with `\n` where the breaks were, so it reads on a single (long) line in the viewer. A literal
+backslash is not doubled, so a typed `\n` looks the same as an escaped newline; that cannot forge a line.
+There is no length cap in the logger (child-process lines are capped upstream).
+
+The diagnostics bundle's name replacement (`lib/identityRedaction.js`) reads these escaped lines, so it knows
+the escapes without restating them: it calls the logger's own `neutraliseControlChars` on every UTF-16 code
+unit once, searches for each name's escaped spelling as well as the name as typed, and treats an escape as a
+word boundary. A name that contains a line break (`Name\nTwo`) or follows one (a multi-line error, a stack) is
+therefore still replaced and still caught by the bundle's privacy check, and a change to the escaping here
+needs no edit there (#539, found in review).
 
 **Example of "4xx before any write": the morning review's frame ids** (`PUT /api/children/:id/review/:date`,
 #522). `true_onset_transition_id`, `true_wake_transition_id` and `true_in_bed_transition_id` each name one
@@ -212,6 +312,9 @@ Container starts as root, remaps a pre-baked user to `PUID`/`PGID` (default 99/1
 "nobody"/"users" convention) via `usermod`/`groupmod`, `chown`s the data dir, then execs the
 app via `su-exec` — the app process itself never runs as root. `tini` is PID 1 to reap zombies
 from the MediaMTX + per-camera-FFmpeg child process tree and forward signals correctly.
+
+`PUID=0` is accepted but logs a warning (`[entrypoint] warning: PUID=0 runs the app as root`) and starts anyway;
+refusing it, or substituting the default, is not done (#555, `entrypoint-puid-root.test.js`).
 
 Before the `mkdir`/`chown` it sets the **umask** from `UMASK` (default `077`, validated, #549), so
 the data dir, the database (SQLite gives `-wal`/`-shm` the database file's own mode), snapshots,
@@ -240,6 +343,37 @@ stalled connection fails with a "took too long to respond" error instead of hang
 is allowed to run long (camera probes and saves, recomputing a night, photo uploads, stopping a recording, diagnostics, the clip list and bulk delete) passes
 `{ timeoutMs: SLOW_REQUEST_TIMEOUT_MS }` (90 s) as its last argument.
 
+**What is in the first download, and what is fetched later (#386).** The entry chunk used to carry every
+screen plus hls.js (about 560 kB of its 1,098 kB). Screens are now split by route with `lazyPage()`
+(`lib/lazyPage.jsx`), and hls.js is imported only when `HlsPlayer` actually needs it:
+
+| | Loaded with the first page | Fetched on first use |
+|---|---|---|
+| Screens | Sign-in, the live monitor, the nav bar, the Children, Cameras, Settings hub and Account roots, "Page not found" | Child detail, sleep detail, night review, child settings, camera settings, detection settings, every Settings sub-page, clips, About |
+| hls.js | Never | Only by a camera in **Compatibility (HLS)** mode on a browser without native HLS. The default WebRTC view and Safari/iOS (native HLS) never download it |
+
+While a screen's chunk loads, its slot shows "Loading…" with the nav bar and live monitor still on screen. If the
+fetch fails (the phone is offline), the slot shows "Couldn't load this screen" with a **Reload** button that
+reloads the page; it does not blank the page. It reloads rather than importing again because a browser remembers a
+module URL that failed once for the life of the page, so a second import replays the first failure. Only
+chunk-fetch failures (recognised by the browsers' "failed to fetch dynamically imported module" messages) are caught
+there: a screen whose code loads but throws when it starts, and any other render error
+still reach the app-level crash page. A Compatibility (HLS) tile whose hls.js fetch fails shows the same kind of
+message with a **Reload** button and stops retrying on its own, for the same reason. If the chunk is an old one that
+a new deploy has replaced, the reload is what fixes it too (the app also reloads itself after being backgrounded for
+15 s).
+
+**Unsaved form edits survive the background reload (#377).** `App.jsx` reloads the page after 15 s in the
+background to repair stale media connections, and that empties React state. The child form, the camera form
+and Settings → Recording therefore store what is different from the saved values in `sessionStorage`
+(`lib/formDraft.js`, kept in step by `lib/useFormDraft.js`) and restore it on mount. Rules that must hold:
+**no secret is ever written** (each form passes an allow-list of fields, credential-named keys are dropped
+even if allowed, and a camera password is lost on reload by design); a draft is **per signed-in user**, expires
+after 6 hours, and is removed by a successful save, an explicit discard, removing the thing, and sign-out
+(an expired sign-in keeps it, so signing back in resumes). "Unsaved" is always derived (form versus last
+saved), never a flag set by `onChange`. Forms with an explicit Save show `components/UnsavedNotice.jsx`.
+The forms not yet covered are listed in `docs/design-language.md` (§6, Forms with a Save button).
+
 ## CSP is enforced — keep it that way
 
 `backend/src/index.js` serves an **enforcing** Content-Security-Policy via helmet (it was
@@ -249,7 +383,8 @@ is built by `backend/src/lib/cspDirectives.js` (#562): index.js cannot be import
 policy lives where `csp-directives.test.js` can serve it and read the header back. The directives
 are tuned to this app and the reasoning is in the comment at the top of that file — read it before
 changing anything there. Two things that bite: hls.js needs `worker-src blob:` + `media-src blob:`,
-and WebRTC's STUN server is gated by `connect-src`. Never add `unsafe-inline`/`unsafe-eval` to
+and WebRTC's STUN servers are gated by `connect-src`, one entry per server in the `STUN_SERVERS` setting
+(`lib/stunServers.js`, #558: the same parse also feeds MediaMTX's config and `GET /api/about` for the browser). Never add `unsafe-inline`/`unsafe-eval` to
 `script-src`; theming is safe because it uses CSSOM `setProperty`, which CSP doesn't police.
 Violations are logged to the container log via `POST /api/csp-report` (at most 10 a minute), so
 check there if a new dependency breaks.

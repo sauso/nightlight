@@ -48,6 +48,8 @@ import { usePullToRefresh } from '../lib/usePullToRefresh.js';
 import { api } from '../lib/api.js';
 import AppHeader from './AppHeader.jsx';
 import SortableCameraTile from './SortableCameraTile.jsx';
+import LoadFailed from './LoadFailed.jsx';
+import { loadState } from '../lib/loadState.js';
 
 // This component is mounted once for the entire logged-in session (see App.jsx) so that
 // switching to Settings/Children/Cameras/Account never tears down the WebRTC connections
@@ -56,7 +58,7 @@ import SortableCameraTile from './SortableCameraTile.jsx';
 export default function LiveMonitor() {
   const location = useLocation();
   const isActive = location.pathname === '/';
-  const { kids, cameras, error } = useCameras();
+  const { kids, cameras, error, loaded, refresh } = useCameras();
   const { settings } = useSettings();
   // Reordering is admin-only (#552): the camera order also picks the camera each child's sleep is measured
   // from, so a caregiver's tiles get no drag handle and their sortables are disabled, and no PUT is ever
@@ -91,6 +93,9 @@ export default function LiveMonitor() {
   // stream. Filter them out for display only; orderedCameras stays the full list so drag
   // reordering keeps their saved position rather than dropping them out of the order.
   const visibleCameras = orderedCameras.filter((cam) => !cam.disabled);
+  // "No cameras yet" only after a request SUCCEEDED with none (#375); an outage keeps the last grid (stale) or
+  // says it could not load, and a cold start says it is loading.
+  const listState = loadState({ loaded, error, count: visibleCameras.length });
 
   // The newest order, readable from an event handler between renders (#562). handleDragEnd closes over
   // `orderedCameras` from the render it was created in, so two drops reported inside ONE React batch (before
@@ -236,9 +241,13 @@ export default function LiveMonitor() {
       </div>
 
       <main className="app-main app-main--wide">
-        {error && <div className="error-banner">{error}</div>}
+        {(listState === 'error' || listState === 'stale') && (
+          <LoadFailed what="cameras" error={error} onRetry={refresh} stale={listState === 'stale'} />
+        )}
 
-        {visibleCameras.length === 0 && (
+        {listState === 'loading' && <div className="empty-state">Loading…</div>}
+
+        {listState === 'empty' && (
           <div className="empty-state">
             {/* Adding a camera is admin-only (the server refuses a caregiver's POST /cameras, and the
                 Cameras tab shows them no Add button), so telling a caregiver to "add one" sends them to

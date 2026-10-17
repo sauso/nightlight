@@ -28,6 +28,11 @@ on:
       - 'backend/test/clock-shift.test.js'
       - 'frontend/test/setup.js'
 
+# Least privilege (#566 bullet 5): this workflow only reads the repository, so the token it is handed is
+# limited to that instead of the repository default (which may include write).
+permissions:
+  contents: read
+
 concurrency:
   group: future-clock-${{ github.ref }}
   cancel-in-progress: true

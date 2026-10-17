@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawnChild } from './childEnv.js';
 import { networkInterfaces } from 'os';
 import { logger } from './logger.js';
 import { killIfSpawned } from './processGuards.js';
@@ -103,7 +103,9 @@ export async function startMediaMTX(configPath) {
     // detected host IP, so WebRTC clients get a reachable candidate independently of MediaMTX's own
     // detection timing (see detectHostIPv4s — and note its warning: if the list is EMPTY here, this
     // launch advertises nothing and stays that way until a relaunch). Recomputed on every (re)launch.
-    const env = { ...process.env };
+    // Only the values THIS launch computes go in `extra`; the operator's own MTX_* overrides are inherited
+    // by childEnv({ mediamtx: true }), and nothing else of ours (JWT_SECRET, ...) is (#553).
+    const extra = {};
     const hosts = [];
     if (process.env.PUBLIC_HOST) {
       for (const h of process.env.PUBLIC_HOST.split(',')) {
@@ -117,7 +119,7 @@ export async function startMediaMTX(configPath) {
     // the flood described there — and this one is info, i.e. pure noise once it has been said once.
     const advertisedKey = advertised.join(',');
     if (advertised.length) {
-      env.MTX_WEBRTCADDITIONALHOSTS = advertisedKey;
+      extra.MTX_WEBRTCADDITIONALHOSTS = advertisedKey;
       if (advertisedKey !== lastAdvertised) logger.info(`[mediamtx] advertising WebRTC hosts: ${advertised.join(', ')}`);
     } else if (lastAdvertised !== '') {
       logger.error('[mediamtx] no routable host IP found - WebRTC may only advertise loopback');
@@ -127,14 +129,14 @@ export async function startMediaMTX(configPath) {
     // The WebRTC media port. Only set when WEBRTC_UDP_PORT is valid; otherwise MediaMTX keeps the
     // mediamtx.yml default and the (already-inherited) raw MTX_ override, if any, is left untouched.
     const udp = resolveWebrtcUdpAddress(process.env);
-    if (udp.value) env.MTX_WEBRTCLOCALUDPADDRESS = udp.value;
+    if (udp.value) extra.MTX_WEBRTCLOCALUDPADDRESS = udp.value;
     if (udp.warning && udp.warning !== lastUdpWarning) logger.warn(`[mediamtx] ${udp.warning}`);
     lastUdpWarning = udp.warning ?? '';
 
     // Both streams piped (not 'ignore'/'inherit') so every line can be forwarded
     // through our own logger - this is what makes MediaMTX's output show up in both
     // `docker logs` and the in-app log viewer, rather than being silently discarded.
-    proc = spawn('mediamtx', [configPath], { stdio: ['ignore', 'pipe', 'pipe'], env });
+    proc = spawnChild('mediamtx', [configPath], { stdio: ['ignore', 'pipe', 'pipe'] }, { mediamtx: true, extra });
 
     // A spawn that never started. Node emits 'error' INSTEAD OF 'exit', so the restart below never
     // runs — and an EventEmitter 'error' with no listener THROWS, taking the whole backend down before

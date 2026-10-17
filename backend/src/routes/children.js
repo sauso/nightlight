@@ -80,6 +80,35 @@ router.get('/', (req, res) => {
 // "required" on POST). The only answers that change are the ones that used to crash (a truthy non-string)
 // and a POST of `0` or `false`, which was already a 400 and now says "must be text" instead of "required".
 const NAME_NOT_TEXT = 'Name must be text';
+
+// #555 bullet 1: colour and birthday were stored as any string (`red;background:url(//evil/x)` returned 201). The
+// SPA sets the colour through a style object and the CSP blocks external images, so no injection was found; this
+// is defence in depth, matching what the settings colours already do (routes/settings.js HEX_COLOR).
+//   - colour: #RRGGBB, the form every palette entry (ChildSettings.jsx COLORS) and the default use. NOT 3-digit or
+//     named colours: nothing produces them, and a narrower rule is a simpler one.
+//   - birthday: a real calendar date YYYY-MM-DD, what <input type="date"> sends and ageLabel() parses. '' stays
+//     legal because it is how the form CLEARS a birthday (children-route.test.js). A future date is accepted:
+//     ageLabel already shows no age for one, and a clock-dependent rule would be a fixture with a shelf life.
+// null / undefined / '' mean "not sent" / default / clear exactly as before; only a non-blank value is checked, and
+// (as for photos and the primary camera) only when it CHANGES: the edit form re-sends the whole record, so a value
+// stored before this check must not block every later save of that child.
+const CHILD_COLOR = /^#[0-9a-fA-F]{6}$/;
+const COLOR_INVALID = 'Colour must be a hex colour like #F5D9A8';
+const BIRTHDAY_INVALID = 'Birthday must be a date like 2023-04-01';
+const isBlank = (v) => v === undefined || v === null || v === '';
+function badColor(color, existing) {
+  if (isBlank(color) || color === existing) return false;
+  return typeof color !== 'string' || !CHILD_COLOR.test(color);
+}
+function badBirthday(birthday, existing) {
+  if (isBlank(birthday) || birthday === existing) return false;
+  if (typeof birthday !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(birthday)) return true;
+  // Round-trip through Date so 2023-02-31 (right shape, no such day) is refused. UTC, so the host's zone
+  // cannot move the day. A year like 0001 passes: harmless (ageLabel shows an age for it), and only the SHAPE
+  // and the calendar are this check's job.
+  const d = new Date(`${birthday}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== birthday;
+}
 const isNotText = (name) => name !== undefined && name !== null && typeof name !== 'string';
 
 // Adding a child is admin-only (owner decision 2026-10-10, #542): a caregiver can watch and act in the
@@ -89,6 +118,8 @@ router.post('/', requireAdmin, (req, res) => {
   const { name, birthday, color, track_sleep, sleep_window_start, sleep_window_end } = req.body || {};
   if (isNotText(name)) return res.status(400).json({ error: NAME_NOT_TEXT });
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+  if (badColor(color, null)) return res.status(400).json({ error: COLOR_INVALID });
+  if (badBirthday(birthday, null)) return res.status(400).json({ error: BIRTHDAY_INVALID });
   let photo;
   try { photo = normalizePhoto(req.body?.photo, null); } catch (e) { return res.status(400).json({ error: e.message }); }
   if (sleep_window_start !== undefined && !HHMM.test(sleep_window_start)) return res.status(400).json({ error: 'Bedtime must be a time like 19:00' });
@@ -125,6 +156,8 @@ router.put('/:id', (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Child not found' });
   const { name, birthday, color, track_sleep, sleep_window_start, sleep_window_end } = req.body || {};
   if (isNotText(name)) return res.status(400).json({ error: NAME_NOT_TEXT });
+  if (badColor(color, existing.color)) return res.status(400).json({ error: COLOR_INVALID });
+  if (badBirthday(birthday, existing.birthday)) return res.status(400).json({ error: BIRTHDAY_INVALID });
   let photo;
   try { photo = normalizePhoto(req.body?.photo, existing.photo); } catch (e) { return res.status(400).json({ error: e.message }); }
   if (sleep_window_start !== undefined && !HHMM.test(sleep_window_start)) return res.status(400).json({ error: 'Bedtime must be a time like 19:00' });

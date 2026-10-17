@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
+import { useAutoRetry } from '../lib/useAutoRetry.js';
+import ServerUnreachable from '../components/ServerUnreachable.jsx';
 
 export default function Login() {
   const [needsSetup, setNeedsSetup] = useState(null);
@@ -14,6 +16,13 @@ export default function Login() {
   const [busy, setBusy] = useState(false);
   const [demoSignIn, setDemoSignIn] = useState(false);
   const signInStarted = useRef(false);
+  const statusCheckInFlight = useRef(false);
+  // Set once a status check has started the demo's guest sign-in; never cleared while this screen is up (see
+  // chooseSignIn). The demo screen's own Try again calls handleDemoSignIn directly and is not affected.
+  const guestSignInBegun = useRef(false);
+  // #382: /auth/status failed (network, timeout, 5xx). `statusFailures` drives useAutoRetry's backoff.
+  const [statusFailures, setStatusFailures] = useState(0);
+  const [statusRetrying, setStatusRetrying] = useState(false);
   // When a login needs a second factor, /auth/login hands back a short-lived token instead of a
   // session; we hold it here and swap the form for the code step.
   const [mfaToken, setMfaToken] = useState(null);
@@ -27,25 +36,53 @@ export default function Login() {
     // probe from minting two guest sessions and consuming two of the shared demo's active slots.
     if (signInStarted.current) return;
     signInStarted.current = true;
-    async function chooseSignIn() {
-      let status;
-      try {
-        status = await api.get('/auth/status');
-      } catch {
-        // An unavailable status endpoint most likely belongs to an established normal install;
-        // preserve the existing usable sign-in fallback instead of leaving a blank screen.
-        setNeedsSetup(false);
-        return;
-      }
-      if (!status.demo) {
-        setNeedsSetup(status.needsSetup);
-        return;
-      }
-
-      handleDemoSignIn();
-    }
     chooseSignIn();
   }, []);
+
+  // Also the retry target. Only the first call is guarded by signInStarted; the two guards at the top keep a
+  // retry from minting a second guest session.
+  async function chooseSignIn() {
+    // At most one status check at a time. After the first failure `statusFailures` stays positive, so the
+    // automatic retry timer is armed while a manual "Try again" is pending; without this guard the timer
+    // launched a second GET beside it, and when both answered { demo: true } both called handleDemoSignIn()
+    // and posted /auth/guest twice, consuming two of the shared demo's active slots (the thing signInStarted
+    // exists to prevent). A skipped call loses nothing: the check in flight either succeeds, or fails and
+    // bumps statusFailures, which re-arms the timer.
+    // And none at all once a guest sign-in has begun. statusCheckInFlight only covers a check still pending: if
+    // the retry timer comes due after a successful check's continuation (flag already false) but before React
+    // has committed statusFailures = 0 (which is what clears the timer), the timer's call started a second GET
+    // and a second POST /auth/guest, two of the shared demo's slots again (found in the review of #715). Once
+    // the demo sign-in has started there is nothing left for a status check to decide. Only the guest sign-in is
+    // guarded this way: on an ordinary install a late extra check would only set the same form again.
+    if (guestSignInBegun.current) return;
+    if (statusCheckInFlight.current) return;
+    statusCheckInFlight.current = true;
+    setStatusRetrying(true);
+    let status;
+    try {
+      status = await api.get('/auth/status');
+    } catch {
+      // Used to fall open to the sign-in form (needsSetup = false), on the guess that a failing status
+      // endpoint belongs to an established install. That showed a password form that could not work to
+      // someone whose server was just down (#382), and on a fresh install it hid the setup form. Say the
+      // server is unreachable and retry; the form appears once the server has actually answered.
+      statusCheckInFlight.current = false;
+      setStatusFailures((n) => n + 1);
+      setStatusRetrying(false);
+      return;
+    }
+    statusCheckInFlight.current = false;
+    setStatusFailures(0);
+    setStatusRetrying(false);
+    if (!status.demo) {
+      setNeedsSetup(status.needsSetup);
+      return;
+    }
+    guestSignInBegun.current = true;
+    handleDemoSignIn();
+  }
+
+  useAutoRetry(statusFailures, chooseSignIn);
 
   async function handleDemoSignIn() {
     // The public demo has exactly one seeded identity. Do not render or populate the credential
@@ -113,6 +150,10 @@ export default function Login() {
     setCode('');
     setPassword('');
     setError('');
+  }
+
+  if (statusFailures > 0 && needsSetup === null && !demoSignIn) {
+    return <ServerUnreachable onRetry={chooseSignIn} retrying={statusRetrying} />;
   }
 
   if (needsSetup === null && !demoSignIn) return null;

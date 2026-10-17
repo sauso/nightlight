@@ -58,6 +58,49 @@ and [Silencing a camera's alerts](camera-controls.md#silencing-a-cameras-alerts-
 
 ---
 
+## The "Recording and alerts" panel (per camera, read-only)
+
+**Cameras → edit** a camera → **Recording and alerts**, under Detection. It shows, in one place, what
+this camera is set up to alert on and record, and whether it is **ready right now**. It is a summary
+only: it has no switch, changes nothing, and adds no setting (so there is no default or range). Admin
+only, like the page it sits on; a caregiver cannot open that page.
+
+The two groups answer different questions, and the difference is the point:
+
+| | **Set up** | **Ready right now** |
+|---|---|---|
+| What it is | What is switched on, read from the camera's own settings | Whether the thing behind each switch is actually running |
+| Where it comes from | The camera's fields, the child assigned to it, and **Settings → Recording** | The server, asked each time (and again with **Check again**) |
+| Fresh? | As of the page load | As of the last check; it is a snapshot, so press **Check again** after changing something |
+
+| Row | Set up says | Ready right now says |
+|---|---|---|
+| Motion alerts | The source: Nightlight compares frames, the camera's own events (ONVIF) or (MQTT), or off | Whether that detector is running. For MQTT it says *Reported by the camera*: the camera decides and Nightlight only listens, so there is no process to check |
+| Sound alerts | On or off | Whether the sound detector is running |
+| Schedule and timezone | The alert hours and the **app's** timezone (Settings → General), or *Always* | *Alerts firing now*: yes, or why not (*Silenced*, *Outside the schedule*) |
+| Silence | Until when, and who set it | (the same *Alerts firing now* row) |
+| Alerts save a clip | The per-camera **Save a clip when triggered** | Whether the buffer is ready to cut one |
+| Wake clips | Eligible only with the global option on, a child assigned, **and** sleep tracking on for that child, with every missing piece named | Whether the buffer is ready for one |
+| Manual recording | The global **Show a Record button on each camera** | Whether Record would work right now |
+| Recording buffer | | *Ready*, *Not running*, *Not needed*, *Storage unavailable* or *Camera disabled* |
+
+**Why the buffer row exists.** Alert clips, the Record button and wake clips all cut their footage from
+the same rolling buffer (see *A note on buffering* under Wake clips). A camera can have all three switched
+on and still have no buffer, because the clips folder is not usable or the buffer has not started. The
+three rows are then shown as **Waiting on the buffer**, not as off. *Not needed* is the opposite and is
+not a problem: nothing is set up to record from that camera.
+
+**What it deliberately does not do.** It does not change how alerts, clips or notifications behave. In
+particular, **a silence or the schedule still stops the alert itself, and with it the alert clip**; the
+panel states this beside the rows. Keeping every alert clip while muting only the notification would need
+separate controls for notifying and for recording events, which was considered and **not adopted**. The panel
+exists so that "stop the notifications" is not mistaken for "keep every alert clip".
+
+It reads `GET /api/cameras/:id/recording-readiness` (admin only), which returns booleans and fixed words
+only: no name, address, path or credential.
+
+---
+
 ## Wake clips (recorded, never announced)
 
 When sleep tracking sees your child **wake up**, Nightlight saves a short clip of the moment it
@@ -106,6 +149,14 @@ that gap without making alerts noisier.
   before the first footage it holds), so it can be a few seconds before the wake's minute on the timeline; the review page still
   matches it to that wake. See "Where a wake clip starts" in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 
+**Clips are capture candidates, not a one-to-one copy of the timeline.** The live watcher records a clip
+as it happens and cannot look back the way the nightly analysis does, so a wake on the sleep timeline can
+have no clip and a clip can sit where the timeline shows no wake. The two apply the same thresholds but
+not the same rules: the nightly analysis also counts movement **outside the bed** as activity (the live
+watcher sees only bed motion and sound), scores **one camera** (the child's primary), and applies the
+put-down and onset rules (including how it treats sound around bedtime and just after falling asleep)
+that the live watcher does not have. The live watcher tracks **every camera assigned to the child**.
+
 **Settings → Recording → Wake clips**
 
 | Setting | Default | Range | What it does |
@@ -123,7 +174,7 @@ night — which is why the clip is deliberately bounded to its opening rather th
 
 **A note on buffering.** Capturing a wake-up's *opening* means Nightlight has to already be holding a
 few seconds of recent video before the wake-up is even confirmed — the same rolling buffer that powers
-on-demand recording and detection clips. Turning "Record wake-ups without alerting" on keeps that
+on-demand recording and detection clips. Turning "Record wake-ups without alerting" on (and saving) keeps that
 buffer running on each of the child's assigned cameras, the same as switching on-demand recording on
 would, even if both of the other two recording features are off. Turning it off immediately stops any
 *new* wake-up from holding that buffer open, but the buffering itself only drops once nothing else on
@@ -171,19 +222,30 @@ Capture a moment yourself. Because every camera keeps a rolling buffer, pressing
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
-| Show a Record button on each camera | On | — | Switching this off also stops the per-camera buffering (see *When the buffering starts*, below, for exactly when) |
+| Show a Record button on each camera | On | — | Switching this off and saving also stops the per-camera buffering (see *When the buffering starts*, below, for exactly when). Applies on **Save changes**, like every other control on the page |
 | Capture before (seconds) | 30 | 0–60 | How far back pressing Record reaches |
 | Auto-stop after (seconds) | 120 | 5–600 | Stops a recording someone forgot to end |
 
-**"Show a Record button on each camera" applies the instant you flip it — unlike every other
-control on this page.** The Clip length/retention fields above, the wake-clip switch, and *Capture
-before*/*Auto-stop after* here all wait for **Save changes**; this one switch writes immediately, the
-same way the two-state pill shape is used elsewhere in the app for an instant toggle. Flipping it does
-**not** touch anything you've typed but not yet saved elsewhere on this page — those edits are still
-there, unsent, when you come back to Save them. The switch is also briefly **disabled** while its own
-request is in flight, so a second click can't race the first — and **Save changes** is briefly
-disabled too while the switch's request is in flight (and vice versa), so the two can't overlap and
-have one write's confirmation land after the other's and revert it on screen.
+**Every control on this page waits for Save changes — the switches included (#391).** *Show a Record
+button on each camera* and *Record wake-ups without alerting* are drafts like the number fields:
+flipping one changes nothing on the server, and nothing is switched off, until you press
+**Save changes** and it succeeds. (Before this change the Record-button switch wrote the moment you flipped
+it while the wake-up switch beside it waited, so two identical-looking switches behaved differently.)
+While anything on screen differs from what is stored, a line at the top says **Unsaved changes**; put
+a value back and the line goes away. If a save fails, the error is shown, the line stays, and the
+stored settings — and so what is actually recording — are unchanged. **Save changes** sends the whole
+page in one request, so either every change on it applies or none does.
+
+Don't confuse this with the camera's **Motion, Sound and Alert schedule** screens, which are the
+opposite on purpose: no Save button, every change applies about a second after you make it (see
+[Changes save automatically](notifications.md#changes-save-automatically)).
+
+**If you leave without saving.** The page, like the child and camera forms, keeps what you typed in
+that browser tab for **6 hours** (not configurable) so a phone that returns from the background — the
+app reloads itself after 15 seconds away — or a trip to another screen doesn't lose it. Coming back
+shows **Unsaved changes restored** with a **Discard changes** button. Closing the tab, signing out,
+pressing Save successfully or pressing **Discard changes** removes it. The draft lives on that
+device only and is never sent anywhere.
 
 Recordings appear in the **Recordings** card on the child's page. **They are never deleted
 automatically** — unlike the other two kinds, these are keepsakes someone chose to keep, so deleting
@@ -202,7 +264,7 @@ edit, or switching on-demand or wake clips on or off, resizes each camera's buff
 stopping and restarting it — so a recording, a wake-clip capture or a detection clip that's already
 under way keeps everything it needs, and a finished recording always reports the pre-roll length it
 actually started with, not whatever the setting has since been changed to.
-Turning **Show a Record button on each camera** off stops the buffering on every camera that isn't also
+Turning **Show a Record button on each camera** off (and pressing **Save changes**) stops the buffering on every camera that isn't also
 saving detection clips or wake clips — but *not instantly* if that camera has a capture already in
 progress: the buffer keeps running until every such capture finishes, then stops at Nightlight's next
 periodic check, which runs about **every 5 minutes**. What "finishes" can take varies with what's in

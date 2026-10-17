@@ -153,6 +153,7 @@ const ROUTE_GATES = {
   'GET /api/cameras/clips': SIGNED_IN,
   'GET /api/cameras/:id/sensor-history': SIGNED_IN,
   'GET /api/cameras/:id/activity-history': SIGNED_IN,
+  'GET /api/cameras/:id/recording-readiness': ADMIN, //        #394: read-only status for the camera settings page, which is admin-only
   'POST /api/cameras/clips/delete': ADMIN,
   'PUT /api/cameras/reorder': ADMIN, //                         #552: sort_order picks the scoring, timelapse and review camera
   'POST /api/cameras/verify-talk': ADMIN,
