@@ -45,16 +45,6 @@
     "namePattern": "sound percentile burst boundary"
   },
   {
-    "label": "sound percentile: remove defensive upper clamp (equivalent for p <= 1)",
-    "file": "backend/src/lib/activityTracker.js",
-    "find": "Math.min(n - 1, Math.ceil(p * n) - 1)",
-    "replace": "Math.ceil(p * n) - 1",
-    "expect": "equivalent",
-    "tests": ["activityTracker.test.js"],
-    "namePattern": "sound percentile burst boundary",
-    "note": "For nonempty n and p in {0.75, 0.90}, ceil(p*n) <= n; the clamp cannot bind. Empty buckets never call this helper."
-  },
-  {
     "label": "sound percentile: sd loses its negative-round-off variance guard",
     "file": "backend/src/lib/activityTracker.js",
     "find": "Math.max(0, s.soundSumSq / s.soundWindows - soundMean * soundMean)",
@@ -530,17 +520,6 @@
       "suite-exits-cleanly.test.js"
     ],
     "note": "The exact shape of the original wiring bug: the rule's strings-intact view is destroyed before it can take it."
-  },
-  {
-    "label": "the periodic sweep hands COMMENT-stripped source to the rule",
-    "file": "backend/test/helpers/sourceScan.js",
-    "find": "    offenders.push(...unstoppableTimerOffences(rel, src));",
-    "replace": "    offenders.push(...unstoppableTimerOffences(rel, stripCommentsOnly(src)));",
-    "expect": "equivalent",
-    "tests": [
-      "suite-exits-cleanly.test.js"
-    ],
-    "note": "EQUIVALENT: unstoppableTimerOffences re-derives both views from what it is given, and stripCommentsOnly is idempotent — stripping comments twice, and blanking strings in already-comment-free source, gives the identical pair. Only pre-blanking STRINGS does damage."
   },
   {
     "label": "timelapse: the sampler loses its stop again",
@@ -2485,15 +2464,6 @@
     "namePattern": "links back to the lobby"
   },
   {
-    "label": "demo frontend: blocked-write response keeps the server policy wording",
-    "file": "frontend/src/lib/api.js",
-    "find": "const message = res.status === 403",
-    "replace": "const message = res.status === 401",
-    "expect": "killed",
-    "tests": ["demoMode.test.jsx"],
-    "namePattern": "friendly, actionable copy"
-  },
-  {
     "label": "request timeout: a LATE 401 after the timeout is acted on (aborted-signal check removed)",
     "file": "frontend/src/lib/api.js",
     "find": "if (signal.aborted) {",
@@ -3497,28 +3467,6 @@
     "tests": ["lib-helpers.test.js", "childCards.test.jsx"]
   },
   {
-    "label": "#E2 M1: describeDevice mislabels iPhone as iPad",
-    "file": "backend/src/routes/auth.js",
-    "find": "  if (/iPhone/.test(userAgent)) os = 'iPhone';",
-    "replace": "  if (/iPhone/.test(userAgent)) os = 'iPad';",
-    "expect": "killed",
-    "tests": [
-      "auth-routes-branches.test.js"
-    ],
-    "note": "The iPhone UA case in the device-labels test asserts the exact string \"Safari on iPhone\" — a wrong OS assignment fails it directly."
-  },
-  {
-    "label": "#E2 M2: describeDevice mislabels Edge as Chrome",
-    "file": "backend/src/routes/auth.js",
-    "find": "  if (/Edg\\//.test(userAgent)) browser = 'Edge';",
-    "replace": "  if (/Edg\\//.test(userAgent)) browser = 'Chrome';",
-    "expect": "killed",
-    "tests": [
-      "auth-routes-branches.test.js"
-    ],
-    "note": "The Edge-on-Windows case uses a real Edge UA (contains \"Chrome/\" and \"Safari/\" too) and asserts \"Edge on Windows\" exactly — losing the Edge branch would read it as Chrome instead."
-  },
-  {
     "label": "#E2 M3: describeDevice drops the Chromium-vs-Chrome guard",
     "file": "backend/src/routes/auth.js",
     "find": "  else if (/CriOS\\//.test(userAgent) || (/Chrome\\//.test(userAgent) && !/Chromium/.test(userAgent))) browser = 'Chrome';",
@@ -3572,17 +3520,6 @@
       "auth-routes-branches.test.js"
     ],
     "note": "The temp-trigger test aborts the DELETE and asserts a 500, not 204 — deleting `throw e` would falsely report the account removed while it still exists."
-  },
-  {
-    "label": "#E2 M8: appName() fallback string changed",
-    "file": "backend/src/routes/auth.js",
-    "find": "  return db.prepare(\"SELECT app_name FROM settings WHERE id = 'app'\").get()?.app_name || 'Nightlight';",
-    "replace": "  return db.prepare(\"SELECT app_name FROM settings WHERE id = 'app'\").get()?.app_name || 'NightlightFallbackBroken';",
-    "expect": "killed",
-    "tests": [
-      "auth-routes-branches.test.js"
-    ],
-    "note": "The blank-app_name test asserts the otpauth_uri contains \"Nightlight\" specifically — a different fallback literal fails it."
   },
   {
     "label": "#E2 M9: demoMaxGuests() nullish-fallback changed from 25 to 30",
@@ -4927,16 +4864,6 @@
     "expect": "killed",
     "tests": ["observation-clock.test.js"],
     "namePattern": "H3"
-  },
-  {
-    "label": "#373 M-R2-34: H3 provenanceMany's pruned-record check (R4-4) off by one slot",
-    "file": "backend/src/lib/observationClock.js",
-    "find": "      if (!cand || (this.prunedMaxN > cand.n && this.prunedMaxSlot <= t)) return { cls: 'unknown', reason: 'no-source' };",
-    "replace": "      if (!cand || (this.prunedMaxN > cand.n && this.prunedMaxSlot < t)) return { cls: 'unknown', reason: 'no-source' };",
-    "expect": "equivalent",
-    "tests": ["observation-clock.test.js"],
-    "namePattern": "H3",
-    "note": "The R4-4 pruned-record guard never fires, so its boundary cannot change an answer: expiry keeps the newest record below tMin and every record at or above it, the count cap removes the oldest, and tMin never falls, so no pruned record is ever NEWER than a remaining candidate. Checked (fix round 2 builder, scratch r44.mjs): 3,000 fuzzed motion streams, 601 with backwards pts, stalls to 45 s: the guard fired 0 times. Phase A had no mutant on the same guard in provenance()."
   },
   {
     "label": "#373 M-R2-35: G3 the coverage cap evicts BEFORE merging again (an interval the union already covers costs the earliest one)",
@@ -6601,15 +6528,6 @@
     "namePattern": "FLAG-ONLY save still shows the receipt"
   },
   {
-    "label": "nobody-in-bed frontend: SleepDetail drops the frontend `nobody_in_bed` copy split",
-    "file": "frontend/src/pages/SleepDetail.jsx",
-    "find": "{night.nobody_in_bed\r\n            ? 'You said no one was in the bed for this night.'",
-    "replace": "{false\r\n            ? 'You said no one was in the bed for this night.'",
-    "expect": "killed",
-    "tests": ["sleepDetail.test.jsx"],
-    "namePattern": "empty night says so"
-  },
-  {
     "label": "nobody-in-bed frontend: SleepDetail's empty-night ReviewNightButton gate never opens (re-anchored by #355)",
     "file": "frontend/src/pages/SleepDetail.jsx",
     "find": "{!night.in_progress && (\r\n          <div style={{ padding: '0 14px 14px' }}>",
@@ -6626,15 +6544,6 @@
     "expect": "killed",
     "tests": ["sleepDetail.test.jsx"],
     "namePattern": "detector-empty night offers the review"
-  },
-  {
-    "label": "nobody-in-bed frontend: SleepSummaryCard drops the frontend `nobody_in_bed` copy split",
-    "file": "frontend/src/components/SleepSummaryCard.jsx",
-    "find": "{night.nobody_in_bed\r\n            ? 'You said no one was in the bed.'",
-    "replace": "{false\r\n            ? 'You said no one was in the bed.'",
-    "expect": "killed",
-    "tests": ["childCards.test.jsx"],
-    "namePattern": "PARENT-flagged empty night says"
   },
   {
     "label": "nobody-in-bed frontend: ReviewReceipt drops the nobodyInBed branch (reads as \"You said — to —\")",
@@ -6698,24 +6607,6 @@
     "expect": "killed",
     "tests": ["MorningReview.test.jsx"],
     "namePattern": "does NOT claim the flag was set"
-  },
-  {
-    "label": "nobody-in-bed fix round #2: SleepDetail keys the empty-night copy on `corrected` again",
-    "file": "frontend/src/pages/SleepDetail.jsx",
-    "find": "          {night.nobody_in_bed\r\n            ? 'You said no one was in the bed for this night.'",
-    "replace": "          {night.corrected\r\n            ? 'You said no one was in the bed for this night.'",
-    "expect": "killed",
-    "tests": ["sleepDetail.test.jsx"],
-    "namePattern": "TIME correction on an already-empty night"
-  },
-  {
-    "label": "nobody-in-bed fix round #2: SleepSummaryCard keys the empty-night copy on `corrected` again",
-    "file": "frontend/src/components/SleepSummaryCard.jsx",
-    "find": "          {night.nobody_in_bed\r\n            ? 'You said no one was in the bed.'",
-    "replace": "          {night.corrected\r\n            ? 'You said no one was in the bed.'",
-    "expect": "killed",
-    "tests": ["childCards.test.jsx"],
-    "namePattern": "TIME correction on an already-empty night"
   },
   {
     "label": "nobody-in-bed fix round #4: saveNobody drops the typed note again",
@@ -7807,24 +7698,6 @@
     "namePattern": "#508 T6"
   },
   {
-    "label": "#508 A21: the Recompute refusal always gives the coverage message for no_data (claims data is there when it aged out)",
-    "file": "backend/src/routes/children.js",
-    "find": "    const watchedSome = summary.coverage_minutes > 0;",
-    "replace": "    const watchedSome = true;",
-    "expect": "killed",
-    "tests": ["recompute-night.test.js"],
-    "namePattern": "refused recompute"
-  },
-  {
-    "label": "#508 A22: the Recompute refusal always says the data aged out for no_data (the pre-#508 message)",
-    "file": "backend/src/routes/children.js",
-    "find": "    const watchedSome = summary.coverage_minutes > 0;",
-    "replace": "    const watchedSome = false;",
-    "expect": "killed",
-    "tests": ["recompute-night.test.js"],
-    "namePattern": "refused recompute"
-  },
-  {
     "label": "#508 A23: the Recompute refusal branches on coverage only (a fully watched no_sleep night is told its video was missing)",
     "file": "backend/src/routes/children.js",
     "find": "summary.status !== 'no_data' ? 'no_longer_scored' : watchedSome",
@@ -7832,15 +7705,6 @@
     "expect": "killed",
     "tests": ["recompute-night.test.js"],
     "namePattern": "#508 T11a2"
-  },
-  {
-    "label": "#508 A24: the too-little-watched message only names the no_data line (a stored empty night at 85% is told 'too few to score')",
-    "file": "backend/src/routes/children.js",
-    "find": "        + `${pct(MIN_COVERAGE_FRAC)}% of its window watched to be scored at all, and ${pct(EMPTY_MIN_COVERAGE_FRAC)}% `\r\n        + 'before it can be called \"no one in the bed\"); the video",
-    "replace": "        + `${pct(MIN_COVERAGE_FRAC)}% of its window watched to be scored at all); the video",
-    "expect": "killed",
-    "tests": ["recompute-night.test.js"],
-    "namePattern": "#508 T11a3"
   },
   {
     "label": "#508 A25: every Recompute refusal says the data aged out (the pre-#508 route)",
@@ -8848,16 +8712,6 @@
     "namePattern": "every time and frame sent as null"
   },
   {
-    "label": "#522 M12: the route stores the raw body value instead of the parsed id",
-    "file": "backend/src/routes/children.js",
-    "find": "    trueWakeTransitionId: wakeFrameId,",
-    "replace": "    trueWakeTransitionId: body.true_wake_transition_id,",
-    "expect": "equivalent",
-    "tests": ["review-in-bed-and-lock.test.js"],
-    "namePattern": "number or as a string of digits",
-    "note": "EQUIVALENT, verified by running it against a scratch copy (#522 build, 2026-10-12; all 205 tests of the five files that reach the review route survive it): every malformed value is refused by transitionInstant before the patch is built, '' is turned into NULL by previewNightReview's blankToNull, and a digit string is stored as the integer by the column's INTEGER affinity. Storing the parsed value is for the reader, not a behaviour."
-  },
-  {
     "label": "#522 M13: transitionInstant drops its NaN guard",
     "file": "backend/src/lib/sleepReviews.js",
     "find": "  if (Number.isNaN(n)) return undefined;",
@@ -9478,26 +9332,6 @@
     "namePattern": "#453"
   },
   {
-    "label": "#453 EQ1 (fix round 1): a silent window skips the below-band EMA step",
-    "file": "backend/src/lib/soundBaseline.js",
-    "find": "        baseline += BASELINE_ALPHA * (rms - baseline);\r\n        frozenSince = 0;",
-    "replace": "        if (!silent) baseline += BASELINE_ALPHA * (rms - baseline);\r\n        frozenSince = 0;",
-    "expect": "equivalent",
-    "note": "a silent window runs with rms equal to the baseline, so the step it skips is BASELINE_ALPHA * 0: exactly zero, no input can tell",
-    "tests": ["soundBaseline.test.js"],
-    "namePattern": "#453"
-  },
-  {
-    "label": "#453 EQ2 (fix round 1): a silent window skips the dead-band escape step",
-    "file": "backend/src/lib/soundBaseline.js",
-    "find": "        if (now - frozenSince >= DEAD_BAND_MAX_MS) baseline += BASELINE_ALPHA * (rms - baseline);",
-    "replace": "        if (!silent && now - frozenSince >= DEAD_BAND_MAX_MS) baseline += BASELINE_ALPHA * (rms - baseline);",
-    "expect": "equivalent",
-    "note": "a silent window runs with rms equal to the baseline, so the escape step it skips is BASELINE_ALPHA * 0: exactly zero, no input can tell",
-    "tests": ["soundBaseline.test.js"],
-    "namePattern": "#453"
-  },
-  {
     "label": "#453 D2 (fix round 1): the level line's maxAvgOver leaves silent windows out",
     "file": "backend/src/lib/soundDetector.js",
     "find": "      if (r.confirmed && r.over > windowMaxOver) windowMaxOver = r.over;",
@@ -10060,16 +9894,6 @@
     "namePattern": "#452"
   },
   {
-    "label": "#452 M19b: the cancel path does not clear oobQuietFrom (equivalent: every open sets it again)",
-    "file": "backend/src/lib/bedTransitionTracker.js",
-    "find": "oobQuietFrom = 0;\r\n        oobEvidence = EMPTY_EVIDENCE;\r\n      } else if (gap) {",
-    "replace": "oobEvidence = EMPTY_EVIDENCE;\r\n      } else if (gap) {",
-    "expect": "equivalent",
-    "tests": ["bedTransitionTracker.test.js"],
-    "namePattern": "#452",
-    "note": "oobQuietFrom is written at every candidate open and read only while a candidate is pending, so the 0 written on cancel is hygiene that no read can observe."
-  },
-  {
     "label": "#452 M20: the median window counts clump deltas (deltas of 0 are recorded)",
     "file": "backend/src/lib/bedTransitionRules.js",
     "find": "if (delta > minDeltaMs) {",
@@ -10166,14 +9990,6 @@
     "expect": "killed",
     "tests": ["bedTransitionTracker.test.js"],
     "namePattern": "#452"
-  },
-  {
-    "label": "#452 M29: a backward clock step is logged as a hole (the gapText sign test is inverted)",
-    "file": "backend/src/lib/motionDetector.js",
-    "find": "(gapMs < 0 ? `system clock stepped back",
-    "replace": "(gapMs > 0 ? `system clock stepped back",
-    "expect": "killed",
-    "tests": ["motion-frame-gap.test.js"]
   },
   {
     "label": "#452 M30: the detector reads the window one delta early (K-1 held instead of K: 8 of 16)",
@@ -10469,15 +10285,6 @@
     "namePattern": "^C(21|12b)"
   },
   {
-    "label": "#578 M4b: a mixed outcome drops the \"detector kill refused\" note from the one WARN line",
-    "file": "backend/src/lib/cameraWatchdogs.js",
-    "find": "${kill && !restarted ? `; detector kill ${threw ? 'threw' : 'refused'}` : ''}",
-    "replace": "",
-    "expect": "killed",
-    "tests": ["detector-watchdog.test.js"],
-    "namePattern": "^C(21|12b)"
-  },
-  {
     "label": "#578 M5: the publisher request is not posted when a kill is attempted (as if it waited on the lever's success)",
     "file": "backend/src/lib/cameraWatchdogs.js",
     "find": "if (requestKind) deps.restartRequests.post(",
@@ -10744,16 +10551,6 @@
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "^C17e:"
-  },
-  {
-    "label": "#448 W4: a run ended by an older label logs nothing (the reason is dropped)",
-    "file": "backend/src/lib/wakeWatcher.js",
-    "find": "endRun(cameraId, st, st.run?.captured ? null : 'the clock went back');",
-    "replace": "endRun(cameraId, st, null);",
-    "expect": "killed",
-    "tests": ["wake-watcher.test.js"],
-    "namePattern": "^C17d:",
-    "note": "Same find as M11, which replaces the whole call; this one keeps the call and drops only the log reason."
   },
   {
     "label": "#448 W33: the older-label guard ignores a step back of up to 3 minutes (`at < lastAt` becomes `at < lastAt - 3 min`)",
@@ -11865,16 +11662,6 @@
     "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)"
   },
   {
-    "label": "#412 M-412-30: the new run's initializer carries the anchor as lastActiveMs (EQUIVALENT: the next statement overwrites it)",
-    "file": "backend/src/lib/wakeWatcher.js",
-    "find": "activeCount: 0, lastActiveMs: at, captured: false, holding: false };",
-    "replace": "activeCount: 0, lastActiveMs: anchor, captured: false, holding: false };",
-    "expect": "equivalent",
-    "tests": ["wake-watcher.test.js"],
-    "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)",
-    "note": "handleMinute runs `st.run.lastActiveMs = at` right after creating the run, so the initializer's value is never read. The real mutant is M-412-29, which changes that overwrite."
-  },
-  {
     "label": "#412 M-412-31: the hold goes back to `at - 15 s` (the #447 formula)",
     "file": "backend/src/lib/wakeWatcher.js",
     "find": "holdRing(cameraId, RING_OWNER.WAKE, clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC));",
@@ -12507,30 +12294,6 @@
     "note": "Only R590-10 reads lastAt after every payload; the next label then reads as a first reading."
   },
   {
-    "label": "#590 M-590-24: the limiter's first-line check is dropped (equivalent)",
-    "file": "backend/src/lib/wakeWatcher.js",
-    "find": "st.restartLogAt == null || at - st.restartLogAt",
-    "replace": "at - st.restartLogAt",
-    "expect": "equivalent",
-    "tests": [
-      "wake-watcher.test.js"
-    ],
-    "namePattern": "R590-",
-    "note": "at - null is `at`, an epoch in ms, always >= 15 minutes: the first line logs either way."
-  },
-  {
-    "label": "#590 M-590-25: a new slot starts with restartLogAt 0 instead of null (equivalent)",
-    "file": "backend/src/lib/wakeWatcher.js",
-    "find": "lastAt: null, restartLogAt: null,",
-    "replace": "lastAt: null, restartLogAt: 0,",
-    "expect": "equivalent",
-    "tests": [
-      "wake-watcher.test.js"
-    ],
-    "namePattern": "R590-",
-    "note": "at - 0 is an epoch in ms, always >= 15 minutes: the first line logs either way. reset() sets null explicitly."
-  },
-  {
     "label": "#590 M-590-26: a label EQUAL to the last line's is let through (`<=` on the backward-step clause)",
     "file": "backend/src/lib/wakeWatcher.js",
     "find": " || at < st.restartLogAt) {",
@@ -12927,18 +12690,6 @@
     ],
     "namePattern": "R588-W9:",
     "note": "Log-only. Distinct from #448 M11/W4, whose find is the ordering guard's `st.run?.captured` spelling: the unobserved branch writes `st.run.captured` (it already checked `st.run`) so both anchors stay unique."
-  },
-  {
-    "label": "#588 M-588-29: the unobserved path claims an outage again (\"no video for N min\", the first wording)",
-    "file": "backend/src/lib/wakeWatcher.js",
-    "find": "video not observed; readings ${Math.round(sinceObservedMs / MINUTE_MS)} min apart",
-    "replace": "no video for ${Math.round(sinceObservedMs / MINUTE_MS)} min",
-    "expect": "killed",
-    "tests": [
-      "wake-watcher.test.js"
-    ],
-    "namePattern": "R588-W2(a|b):",
-    "note": "Code review round 2 (Opus): a forward clock excursion logged `no video for 61 min`, claiming an outage the watcher cannot see."
   },
   {
     "label": "#509 M-509-01: the veto is removed entirely (the whole fix reverted)",
@@ -15538,15 +15289,6 @@
     "namePattern": "does not revive on reassignment"
   },
   {
-    "label": "#655 UI: the copy drops last night's re-score (back to 'saved summaries keep their numbers')",
-    "file": "frontend/src/pages/ChildSettings.jsx",
-    "find": "be updated for a few hours after the wake time, and a review correction or a Recompute",
-    "replace": "keep their numbers, and a review correction or a Recompute",
-    "expect": "killed",
-    "tests": ["childSettings.test.jsx"],
-    "namePattern": "says truthfully which saved nights"
-  },
-  {
     "label": "#552 no-id N1: the GET review sends the stored row whole (the answerer's account id included)",
     "file": "backend/src/lib/sleepReviews.js",
     "find": "review: reviewForBrowser(getReviewStmt.get(childId, nightDate)),",
@@ -15899,15 +15641,6 @@
     "namePattern": "double tap on the confirm button"
   },
   {
-    "label": "unlock-correction F13: .field is inline again (the margin under the note field does nothing)",
-    "file": "frontend/src/index.css",
-    "find": "  display: block;\r\n  margin-bottom: 14px;",
-    "replace": "  margin-bottom: 14px;",
-    "expect": "killed",
-    "tests": ["reviewFieldSpacing.test.js"],
-    "namePattern": "is a block"
-  },
-  {
     "label": "unlock-correction B1: a null time no longer clears a stored time (the six nulls would keep the correction)",
     "file": "backend/src/lib/sleepReviews.js",
     "find": "const pick = (key, val) => blankToNull(val === undefined ? (existing[key] ?? null) : (val ?? null));",
@@ -16171,15 +15904,6 @@
     "expect": "killed",
     "tests": ["diagnostics-identity.test.js"],
     "namePattern": "timezone"
-  },
-  {
-    "label": "#547 card: the copy no longer says names are replaced",
-    "file": "frontend/src/components/DiagnosticsCard.jsx",
-    "find": "appear as Child 1, Camera 1 and User 1, with birthdays left out.",
-    "replace": "are not included.",
-    "expect": "killed",
-    "tests": ["logsScreen.test.jsx"],
-    "namePattern": "#547"
   },
   {
     "label": "#378 Modal: the error prop is not rendered",
@@ -16587,60 +16311,6 @@
     "namePattern": "label is tied to ITS OWN select"
   },
   {
-    "label": "#381 index.css: the over-video controls' hit area shrinks to 36px",
-    "file": "frontend/src/index.css",
-    "find": "  inset: -7px;",
-    "replace": "  inset: -3px;",
-    "expect": "killed",
-    "tests": ["touchTargets.test.js"],
-    "namePattern": "one shared ::after rule"
-  },
-  {
-    "label": "#381 index.css: the drag handle's hit area shrinks to 34px",
-    "file": "frontend/src/index.css",
-    "find": "  inset: -10px;",
-    "replace": "  inset: -5px;",
-    "expect": "killed",
-    "tests": ["touchTargets.test.js"],
-    "namePattern": "is the positioning anchor"
-  },
-  {
-    "label": "#381 index.css: the drag handle loses its positioning anchor",
-    "file": "frontend/src/index.css",
-    "find": "  position: relative;\r\n}\r\n\r\n/* The handle is 24px",
-    "replace": "}\r\n\r\n/* The handle is 24px",
-    "expect": "killed",
-    "tests": ["touchTargets.test.js"],
-    "namePattern": "is the positioning anchor"
-  },
-  {
-    "label": "#381 index.css: Picture-in-Picture moves back beside Fullscreen (overlapping hit areas)",
-    "file": "frontend/src/index.css",
-    "find": "right: 54px; /* was 48; 54",
-    "replace": "right: 48px; /* was 48; 54",
-    "expect": "killed",
-    "tests": ["touchTargets.test.js"],
-    "namePattern": "neighbours are far enough apart"
-  },
-  {
-    "label": "#381 index.css: Record moves back beside Mute (overlapping hit areas)",
-    "file": "frontend/src/index.css",
-    "find": "right: 54px; /* was 48; see",
-    "replace": "right: 48px; /* was 48; see",
-    "expect": "killed",
-    "tests": ["touchTargets.test.js"],
-    "namePattern": "neighbours are far enough apart"
-  },
-  {
-    "label": "#381 index.css: PTZ moves back beside Settings (overlapping hit areas)",
-    "file": "frontend/src/index.css",
-    "find": "left: 54px; /* was 48; 54",
-    "replace": "left: 48px; /* was 48; 54",
-    "expect": "killed",
-    "tests": ["touchTargets.test.js"],
-    "namePattern": "neighbours are far enough apart"
-  },
-  {
     "label": "#562 LiveMonitor: the handler reads the render closure, not the ref (two drops in one batch undo each other)",
     "file": "frontend/src/components/LiveMonitor.jsx",
     "find": "reorderCameras(orderRef.current, active.id, over.id)",
@@ -16684,24 +16354,6 @@
     "expect": "killed",
     "tests": ["cameraSettings.test.jsx"],
     "namePattern": "pressing Remove again clears"
-  },
-  {
-    "label": "#381 index.css: the tile buttons' ::after cannot receive a tap (pointer-events: none)",
-    "file": "frontend/src/index.css",
-    "find": ".rec-btn::after {\r\n  content: '';",
-    "replace": ".rec-btn::after {\r\n  pointer-events: none;\r\n  content: '';",
-    "expect": "killed",
-    "tests": ["touchTargets.test.js"],
-    "namePattern": "one shared ::after rule"
-  },
-  {
-    "label": "#381 index.css: the drag handle's ::after cannot receive a tap (pointer-events: none)",
-    "file": "frontend/src/index.css",
-    "find": ".drag-handle::after {\r\n  content: '';",
-    "replace": ".drag-handle::after {\r\n  pointer-events: none;\r\n  content: '';",
-    "expect": "killed",
-    "tests": ["touchTargets.test.js"],
-    "namePattern": "is the positioning anchor"
   },
   {
     "label": "#562 WHEP resource: the origin check is dropped (another host, port or scheme is accepted)",
@@ -20706,17 +20358,6 @@
     "file": "frontend/src/components/RecomputeNight.jsx",
     "find": "user?.role !== 'admin' || !childId",
     "replace": "!childId",
-    "expect": "killed",
-    "tests": [
-      "sleepDetail.test.jsx"
-    ],
-    "namePattern": "#521 Recompute is reachable"
-  },
-  {
-    "label": "#521 recompute on an empty night: a flagged night's note talks about times",
-    "file": "frontend/src/components/RecomputeNight.jsx",
-    "find": "{night.nobody_in_bed",
-    "replace": "{false",
     "expect": "killed",
     "tests": [
       "sleepDetail.test.jsx"

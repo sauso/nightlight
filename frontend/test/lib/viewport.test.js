@@ -17,8 +17,8 @@ import { resolve } from 'node:path';
 import { applyViewportPolicy, relaxedViewportContent, isIosBrowser } from '../../src/lib/viewport.js';
 import * as nativeBridge from '../../src/lib/nativeBridge.js';
 
-// `process.cwd()` is the frontend folder (vitest runs from there); see touchTargets.test.js for why not
-// import.meta.url under jsdom.
+// `process.cwd()` is the frontend folder (vitest runs from there); under jsdom `import.meta.url` is not a file: URL,
+// so a lookup relative to this file throws.
 const INDEX_HTML = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
 const SHIPPED = /<meta name="viewport" content="([^"]*)"/.exec(INDEX_HTML)?.[1];
 const RELAXED = 'width=device-width, initial-scale=1, viewport-fit=cover';
