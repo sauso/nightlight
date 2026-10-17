@@ -140,7 +140,7 @@ export default function DetectionSettings() {
           <div className="save-flag">{save.state === 'saving' ? 'Saving…' : save.state === 'saved' ? 'Saved ✓' : ''}</div>
         )}
         {kind === 'motion' && <MotionForm d={d} apply={apply} cameraId={id} cam={cam} />}
-        {kind === 'sound' && <SoundForm d={d} apply={apply} />}
+        {kind === 'sound' && <SoundForm d={d} apply={apply} cameraId={id} />}
         {kind === 'schedule' && <ScheduleForm d={d} apply={apply} />}
       </main>
     </>
@@ -295,7 +295,7 @@ function MotionForm({ d, apply, cameraId, cam }) {
   );
 }
 
-function SoundForm({ d, apply }) {
+function SoundForm({ d, apply, cameraId }) {
   return (
     <>
       <EnableToggle checked={d.sound_enabled} onChange={(v) => apply({ sound_enabled: v })}
@@ -310,6 +310,7 @@ function SoundForm({ d, apply }) {
           </div>
           <Slider label="Sensitivity" value={d.sound_sensitivity} onChange={(v) => apply({ sound_sensitivity: v })}
             lowLabel="Needs loud noise" highLabel="Triggers easily" />
+          <SoundCalibration cameraId={cameraId} sensitivity={d.sound_sensitivity} />
           <div className="section-title">Timing</div>
           <div style={{ display: 'flex', gap: 10 }}>
             <div className="field" style={{ flex: 1 }}>
@@ -328,8 +329,146 @@ function SoundForm({ d, apply }) {
             minimum gap between alerts. Longer than motion by default.
           </div>
           <RecordClipsToggle d={d} apply={apply} />
+          <SoundLimits cooldownS={d.sound_cooldown_s} />
         </>
       )}
+    </>
+  );
+}
+
+// #371: how many dB over the room's ambient level the sound must average to alert, for a sensitivity.
+// A copy of backend/src/lib/soundBaseline.js marginDb (4 dB at 100 .. 18 dB at 1, ~11 at the 50 default),
+// pinned against the documented figures in detectionSettings.test.jsx. It is only used to tell the person
+// where the alert line sits next to the level they are reading; if the backend curve ever changes, this
+// number goes stale while the alerting itself does not, which is why it is shown as "about".
+export function alertMarginDb(sensitivity) {
+  const s = Math.min(100, Math.max(1, Number(sensitivity) || 50));
+  return 4 + 14 * ((100 - s) / 99);
+}
+
+// #371: the camera's recent sound level, relative to its own ambient level, and whether the detector has
+// started producing readings at all. No new setting and no new endpoint: `GET /cameras/:id/activity-history`
+// (any signed-in user) already returns, per minute, `sound_level` (the average dB ABOVE the learned ambient
+// level, never the absolute loudness) and `sound_windows` (how many readings that minute held).
+//
+// ⚠️ WHAT "CALIBRATED" CAN AND CANNOT MEAN HERE. The live ambient level is held in the detector's memory and
+// is not served by any route, so this does not show it. What it can show is whether readings are being
+// STORED: the analyser stores nothing for an audible window until it has seeded its ambient (25 windows,
+// about 5 seconds), so a minute with readings means the detector is listening and has a baseline. Two
+// honest exceptions, both worded in the text rather than hidden: digital silence is stored as 0 over
+// ambient even before a baseline exists (#453, so a muted microphone reads as "listening, quiet"), and the
+// minute in progress is not in the history yet (it appears about 7 s after it ends). "No readings" is
+// therefore one of: still learning after a start or save (seconds), no microphone, or the detector not
+// running; the history cannot tell them apart, so the text names all three instead of guessing one.
+// For the same reason the "Listening" box says only that readings are coming in and NEVER that the room's
+// level "has been learned": a muted microphone stores zero-level readings without ever seeding a baseline
+// (review of #711), so stored readings do not prove calibration.
+//
+// BOUNDARIES (pinned in test/soundCalibration.test.jsx): a reading exactly READINGS_FRESH_MIN old is still
+// fresh (the cut-off is `>`), a reading exactly LEVEL_WINDOW_MIN old is still averaged (`<=`), and a reading
+// dated after `nowMs` (clock skew between the server's minute and this browser) is ignored, not counted.
+const LEVEL_WINDOW_MIN = 5; // the span the level is averaged over
+const READINGS_FRESH_MIN = 10; // no stored minute this recent = "no readings"
+const POLL_MS = 30000; // history gains a minute each minute; half a minute keeps the figure within one of it
+
+// `t` is 'YYYY-MM-DD HH:MM:SS' in UTC (activity_samples.bucket_start); null when it does not parse.
+function bucketMs(t) {
+  const ms = Date.parse(`${String(t).replace(' ', 'T')}Z`);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+// Pure so the maths is testable without a clock or a fetch. `samples` is the activity-history array.
+export function summariseSoundLevel(samples, nowMs) {
+  const rows = (Array.isArray(samples) ? samples : [])
+    .map((r) => ({ ms: bucketMs(r.t), windows: Number(r.sound_windows) || 0, level: Number(r.sound_level), peak: Number(r.sound_peak) }))
+    .filter((r) => r.ms !== null && r.windows > 0 && r.ms <= nowMs);
+  const newest = rows.reduce((m, r) => Math.max(m, r.ms), -Infinity);
+  if (!rows.length || nowMs - newest > READINGS_FRESH_MIN * 60000) return { ready: false };
+  const recent = rows.filter((r) => nowMs - r.ms <= LEVEL_WINDOW_MIN * 60000);
+  // Weighted by readings per minute, so a minute that held 3 readings does not count as much as one with 300.
+  const total = recent.reduce((n, r) => n + r.windows, 0);
+  if (!total) return { ready: true, avg: null, peak: null };
+  return {
+    ready: true,
+    avg: recent.reduce((n, r) => n + (Number.isFinite(r.level) ? r.level : 0) * r.windows, 0) / total,
+    peak: recent.reduce((m, r) => Math.max(m, Number.isFinite(r.peak) ? r.peak : 0), 0),
+  };
+}
+
+function SoundCalibration({ cameraId, sensitivity }) {
+  const [state, setState] = useState({ phase: 'loading' }); // loading | ok | error
+  useEffect(() => {
+    let live = true;
+    const load = () =>
+      api
+        .get(`/cameras/${cameraId}/activity-history?hours=1`)
+        .then((r) => live && setState({ phase: 'ok', ...summariseSoundLevel(r?.samples, Date.now()) }))
+        .catch(() => live && setState({ phase: 'error' }));
+    load();
+    const timer = setInterval(load, POLL_MS);
+    return () => { live = false; clearInterval(timer); };
+  }, [cameraId]);
+
+  const margin = Math.round(alertMarginDb(sensitivity));
+  return (
+    <>
+      <div className="section-title">Calibration</div>
+      {/* role="status": it changes on its own every half minute, and a screen reader should get the new
+          state without the person having to go looking for it. */}
+      <div className="card" role="status" style={{ marginBottom: 0 }}>
+        {state.phase === 'loading' && <div className="camera-tile__sub">Checking…</div>}
+        {state.phase === 'error' && (
+          <div className="camera-tile__sub">Couldn’t read the recent sound levels. The detector itself is not affected.</div>
+        )}
+        {state.phase === 'ok' && !state.ready && (
+          <div className="camera-tile__sub">
+            <strong>No sound readings yet.</strong> After the detector starts, or after you change a setting here,
+            it listens for about 5 seconds to learn the room’s level before it reports anything. If this stays
+            blank, the camera may have no microphone or the detector may not be running.
+          </div>
+        )}
+        {state.phase === 'ok' && state.ready && (
+          <div className="camera-tile__sub">
+            <strong>Listening.</strong> Sound readings are coming in.
+            {state.avg !== null && (
+              <>
+                {' '}Over the last {LEVEL_WINDOW_MIN} minutes the sound averaged{' '}
+                <strong>{state.avg.toFixed(1)} dB above</strong> the room’s level, and peaked{' '}
+                <strong>{state.peak.toFixed(1)} dB above</strong> it. An alert needs about{' '}
+                <strong>{margin} dB</strong> at this sensitivity, held for the confirm time.
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// #371: the detector's deliberate limits, in plain words and always visible. Every one of them is an
+// existing, documented trade-off (docs/notifications.md, "Sound sensitivity also changes sleep tracking"),
+// not a defect found here; the 45 s / 5 min / 25 readings figures are REBASELINE_MS, DEAD_BAND_MAX_MS and
+// SEED_WINDOWS in backend/src/lib/soundBaseline.js. They were measured on two cameras in one house: they are
+// stated as what the detector does, not as what suits every room.
+function SoundLimits({ cooldownS }) {
+  return (
+    <>
+      <div className="section-title">What this detector can and can’t do</div>
+      <ul className="camera-tile__sub" style={{ paddingLeft: 18, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <li><strong>It measures loudness, not crying.</strong> It can’t tell a cry from speech, a television, or a
+          sound from another room; anything that stays louder than the room’s level counts.</li>
+        <li><strong>It learns the room’s level at the start.</strong> That takes about 5 seconds of listening. If the
+          room is already loud then, the starting level is set high, and quieter sounds won’t alert until it adjusts.</li>
+        <li><strong>A steady noise stops alerting.</strong> A sound that stays well above the alert level is treated as
+          part of the room after about 45 seconds; a moderate one (above half the alert level, below it) after about
+          5 minutes. That is how a fan or white-noise machine is learned, and it also means a long, steady cry fades
+          into the background.</li>
+        <li><strong>Sustained noise may not alert again.</strong> After an alert there is a {cooldownS}-second wait
+          before the next one. Noise that carries on through it can be absorbed before another alert is possible, and
+          there is no separate “still noisy” follow-up alert.</li>
+        <li><strong>The level can be relearned.</strong> If the detector restarts, for example when the camera
+          reconnects, it keeps what it learned, but a restart at the wrong moment can start the learning over.</li>
+      </ul>
     </>
   );
 }

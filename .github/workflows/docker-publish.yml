@@ -6,6 +6,11 @@ on:
     tags: ['v*']
   workflow_dispatch: {}
 
+# Least privilege (#566 bullet 5): this workflow only reads the repository (the Docker Hub push uses its own secrets, not this token), so the token it is handed is
+# limited to that instead of the repository default (which may include write).
+permissions:
+  contents: read
+
 # A release pushes a commit to main AND a v* tag - two push events, two runs of
 # identical code. The tag run's published tags are a superset of the branch run's
 # (latest + sha + semver vs latest + sha), so keying concurrency on the commit lets
@@ -62,5 +67,12 @@ jobs:
             GIT_SHA=${{ github.sha }}
             GIT_REF=${{ github.ref_name }}
             BUILD_TIME=${{ steps.bmeta.outputs.date }}
+          # SBOM and provenance attestations (#566 bullet 4), attached to the image in the registry: what is in
+          # the image, and which workflow run built it from which commit. Free with build-push-action; the image is
+          # publicly distributed. mode=max records the build arguments too (none are secret: GIT_SHA, GIT_REF,
+          # BUILD_TIME). Side effect to know about: each tag becomes an index that also lists the attestation
+          # manifests, shown as "unknown/unknown" by registry UIs; `docker pull` ignores them.
+          sbom: true
+          provenance: mode=max
           cache-from: type=gha
           cache-to: type=gha,mode=max

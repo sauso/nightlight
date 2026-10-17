@@ -29,6 +29,7 @@ function Probe() {
   return (
     <div>
       <span data-testid="error">{ctx.error}</span>
+      <span data-testid="loaded">{String(ctx.loaded)}</span>
       <span data-testid="kids">{ctx.kids.map((k) => k.name).join(',')}</span>
       <span data-testid="levels">{ctx.cameras.map((c) => `${c.id}:${c.statusLevel}`).join(' ')}</span>
     </div>
@@ -165,6 +166,30 @@ describe('status hysteresis', () => {
 });
 
 describe('backend outage', () => {
+  // #375: `loaded` is "a request has SUCCEEDED", which is what lets a screen tell a failed first request from a
+  // genuinely empty install - both leave kids/cameras as [].
+  test('★ #375 loaded stays false while the first request fails, and turns true on the first success', async () => {
+    const state = stubApi({ fail: true });
+    renderProvider();
+    await waitFor(() => expect(screen.getByTestId('error')).toHaveTextContent('backend unreachable'));
+    expect(screen.getByTestId('loaded')).toHaveTextContent('false');
+
+    state.fail = false;
+    await tick();
+    await waitFor(() => expect(screen.getByTestId('loaded')).toHaveTextContent('true'));
+  });
+
+  test('★ #375 loaded is NOT reset by a later failure (the screen keeps the last list, as stale)', async () => {
+    const state = stubApi({ cams: [cam('c1', true)] });
+    renderProvider();
+    await waitFor(() => expect(screen.getByTestId('loaded')).toHaveTextContent('true'));
+
+    state.fail = true;
+    await tick();
+    await waitFor(() => expect(screen.getByTestId('error')).toHaveTextContent('backend unreachable'));
+    expect(screen.getByTestId('loaded')).toHaveTextContent('true');
+  });
+
   test('surfaces the error message and keeps the last known cameras on screen', async () => {
     const state = stubApi({ cams: [cam('c1', true)] });
     renderProvider();

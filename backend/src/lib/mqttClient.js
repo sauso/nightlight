@@ -137,6 +137,21 @@ function handleMotionMessage(topic, str) {
   }
 }
 
+// Forget a camera's MQTT-motion cooldown stamp (#555 bullet 10): the map is keyed by camera id and nothing removed
+// an entry, so a deleted camera left one behind for the life of the process. Called ONLY by the camera DELETE
+// route; an edit or a reconnect must keep the cooldown, so nothing else clears it.
+export function forgetMqttMotionAlert(cameraId) {
+  motionLastAlert.delete(cameraId);
+}
+
+// Test-only views of the store (nothing else shows what it holds).
+export function _mqttMotionStampForTests(cameraId) {
+  return motionLastAlert.get(cameraId);
+}
+export function _setMqttMotionStampForTests(cameraId, ms) {
+  motionLastAlert.set(cameraId, ms);
+}
+
 // Called on startup, after a settings save, and after any camera add/edit/delete that
 // touches an MQTT topic - cheap to call liberally, since it no-ops if nothing actually
 // changed (aside from re-subscribing, which is itself a no-op for already-subscribed

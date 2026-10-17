@@ -11,7 +11,7 @@
 // fact that it works is why LiveMonitor is no longer on the coverage exclude list. What it does NOT
 // test is anything about video actually playing; that belongs to the Playwright suite in e2e/.
 import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import { HashRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
@@ -24,6 +24,7 @@ import App from '../src/App.jsx';
 // picks a starting route.
 const app = () => <HashRouter><App /></HashRouter>;
 import { api, setToken, getToken, getMediaToken, clearMediaToken } from '../src/lib/api.js';
+import { RETRY_BASE_MS } from '../src/lib/useAutoRetry.js';
 import * as nativeBridge from '../src/lib/nativeBridge.js';
 import * as push from '../src/lib/pushNotifications.js';
 
@@ -35,7 +36,7 @@ const SETTINGS = { app_name: 'Nightlight', timezone: 'Australia/Melbourne', temp
 function mockApi(me, over = {}) {
   vi.spyOn(api, 'get').mockImplementation((path) => {
     const p = String(path);
-    if (p.startsWith('/auth/me')) return me ? Promise.resolve(me) : Promise.reject(new Error('401'));
+    if (p.startsWith('/auth/me')) return me ? Promise.resolve(me) : Promise.reject(Object.assign(new Error('401'), { status: 401 }));
     if (p === '/auth/status') return Promise.resolve({ needsSetup: false, demo: false });
     if (p.startsWith('/settings/mqtt/status')) return Promise.resolve({ enabled: false, connected: false });
     if (p.startsWith('/settings')) return Promise.resolve(SETTINGS);
@@ -122,6 +123,165 @@ describe('booting the app', () => {
     mockApi(ADMIN);
     await boot('/');
     await waitFor(() => expect(push.initPushNotifications).toHaveBeenCalled());
+  });
+});
+
+describe('#382: a server that cannot be reached is not "signed out"', () => {
+  // Every case has a STORED sign-in and an /auth/me that fails; only the failure differs. The old code
+  // turned all of them into user = null, and the Protected wrapper then showed the sign-in form.
+  const meFails = (err) => {
+    mockApi(ADMIN);
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((p) => (String(p).startsWith('/auth/me') ? Promise.reject(err) : base(p)));
+  };
+  const timedOut = Object.assign(new Error('The server took too long to respond.'), { timedOut: true });
+  const http500 = Object.assign(new Error('Request failed (500)'), { status: 500 });
+  const http502 = Object.assign(new Error('Request failed (502)'), { status: 502 });
+
+  test.each([
+    ['a network failure', new TypeError('Failed to fetch')],
+    ['a timeout', timedOut],
+    ['a 500', http500],
+    ['a 502 from a proxy with the backend down', http502],
+  ])('%s shows the retrying state, keeps the stored sign-in, and never the sign-in form', async (_n, err) => {
+    setToken('a-token');
+    meFails(err);
+    render(app());
+    expect(await screen.findByText(/Can't reach Nightlight/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/username/i)).not.toBeInTheDocument();
+    expect(document.querySelector('.app-shell')).toBeNull();
+    expect(getToken(), 'a blip must not end the sign-in').toBe('a-token');
+  });
+
+  test('a real 401 still shows the sign-in form', async () => {
+    setToken('a-token');
+    meFails(Object.assign(new Error('Request failed (401)'), { status: 401 }));
+    render(app());
+    expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Can't reach/)).toBeNull();
+  });
+
+  test('Try again recovers into the app when the server is back', async () => {
+    setToken('a-token');
+    meFails(http500);
+    const user = userEvent.setup();
+    render(app());
+    await user.click(await screen.findByRole('button', { name: 'Try again' }));
+    // Still down: still the retrying state, not a sign-in form.
+    expect(await screen.findByText(/Can't reach Nightlight/)).toBeInTheDocument();
+
+    mockApi(ADMIN); // server back
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(document.querySelector('.app-shell')).not.toBeNull());
+    expect(screen.queryByText(/Can't reach/)).toBeNull();
+  });
+
+  test('★ a real 401 on another request, after an unreachable refresh, shows the sign-in form at once', async () => {
+    // refresh() failed (500): `unreachable` is true and a backoff retry is pending. A different request then
+    // answers 401. The unauthorized listener used to clear only `user`, so the shell kept showing
+    // "Can't reach Nightlight" until the next retry (up to 30 s) instead of the sign-in form.
+    const realFetch = globalThis.fetch;
+    try {
+      setToken('a-token');
+      meFails(http500);
+      render(app());
+      await screen.findByText(/Can't reach Nightlight/);
+      // /auth/status is public and never 401s on a real server, so the sign-in screen can load it.
+      globalThis.fetch = vi.fn(async (url) => (String(url).endsWith('/auth/status')
+        ? { ok: true, status: 200, text: async () => JSON.stringify({ needsSetup: false }) }
+        : { ok: false, status: 401, text: async () => JSON.stringify({ error: 'Invalid or expired session' }) }));
+      api.get.mockRestore(); // from here on, requests go through the real client
+      await act(async () => { await api.get('/cameras').catch(() => {}); });
+
+      expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
+      expect(screen.queryByText(/Can't reach/)).toBeNull();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  test('it retries on its own and recovers without a tap', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      setToken('a-token');
+      meFails(http500);
+      render(app());
+      await screen.findByText(/Can't reach Nightlight/);
+      mockApi(ADMIN); // server back
+      await act(async () => { await vi.advanceTimersByTimeAsync(RETRY_BASE_MS); });
+      await waitFor(() => expect(document.querySelector('.app-shell')).not.toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // --- Review of #715: an OPEN session whose refresh() fails. Account and UserSettings call refresh() after a
+  // save; a 5xx there sets `unreachable` while the user stays signed in.
+  const meCalls = () => api.get.mock.calls.filter(([p]) => p === '/auth/me').length;
+  // Signed in on Account, with /auth/me answering; set `outage.on` and every /auth/me from then on gets a 502.
+  async function openAccount() {
+    const outage = { on: false };
+    setToken('a-token');
+    mockApi(ADMIN, { '/auth/sessions': [] });
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((p) => (outage.on && String(p).startsWith('/auth/me') ? Promise.reject(http502) : base(p)));
+    window.location.hash = '#/account';
+    render(app());
+    await screen.findByRole('button', { name: 'Save name' });
+    return outage;
+  }
+  // The save finished (its refresh() has returned), or the unreachable screen replaced the page.
+  const saveSettled = () => waitFor(() => expect(
+    screen.queryByText(/Can't reach/) || screen.queryByRole('button', { name: /Saved/ }),
+  ).toBeTruthy());
+
+  test('★ an open session whose refresh() fails keeps its user and stays in the app', async () => {
+    // The unreachable screen is for a device nobody is signed in on yet. Replacing an open app with it on a blip
+    // (or dropping the user there) would throw someone off the live view for a server hiccup after a save.
+    const outage = await openAccount();
+    const user = userEvent.setup();
+    outage.on = true;
+    const before = meCalls();
+    await user.click(screen.getByRole('button', { name: 'Save name' }));
+    await saveSettled();
+    expect(meCalls(), 'precondition: the refresh() after the save asked /auth/me and got the 502').toBe(before + 1);
+    expect(screen.queryByText(/Can't reach/), 'a blip must not take the app away from someone signed in').toBeNull();
+    expect(document.querySelector('.app-shell')).not.toBeNull();
+    expect(screen.getByRole('button', { name: /Saved/ })).toBeInTheDocument();
+    expect(getToken()).toBe('a-token');
+  });
+
+  test('★ Sign out after a failed refresh() shows the sign-in form at once, not "Can\'t reach"', async () => {
+    // Sign out used to drop only the user, leaving `unreachable` set from the failed refresh(): Shell then showed
+    // "Can't reach Nightlight" until the pending retry (5 s here, up to 30 s) found no token.
+    const outage = await openAccount();
+    const user = userEvent.setup();
+    outage.on = true;
+    await user.click(screen.getByRole('button', { name: 'Save name' }));
+    await saveSettled();
+    outage.on = false;
+    await user.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Can't reach/)).toBeNull();
+    expect(getToken()).toBeNull();
+  });
+
+  test('★ Try again says "Trying…" and is disabled while its check is out, so a second tap sends nothing', async () => {
+    setToken('a-token');
+    meFails(http500);
+    const user = userEvent.setup();
+    render(app());
+    const tryAgain = await screen.findByRole('button', { name: 'Try again' });
+    // The server now takes its time: this check stays out.
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((p) => (String(p).startsWith('/auth/me') ? new Promise(() => {}) : base(p)));
+    const before = meCalls();
+    await user.click(tryAgain);
+    const busy = await screen.findByRole('button', { name: 'Trying…' });
+    expect(busy).toBeDisabled();
+    fireEvent.click(busy);
+    expect(meCalls(), 'one /auth/me for one tap').toBe(before + 1);
   });
 });
 
@@ -278,7 +438,11 @@ describe('★ #562 a request answered 401 while the app is open', () => {
   test('★ shows the sign-in form at once, without a reload, and drops the token and the media token', async () => {
     await signedInShell();
     const reset = vi.spyOn(push, 'resetPushRegistration');
-    globalThis.fetch = vi.fn(async () => reply(401, { error: 'Invalid or expired session' }));
+    // /auth/status is public and never answers 401 on a real server; if this fake did, the sign-in screen
+    // would (correctly, since #382) read it as an unreachable server instead of showing the form.
+    globalThis.fetch = vi.fn(async (url) => (String(url).endsWith('/auth/status')
+      ? reply(200, { needsSetup: false })
+      : reply(401, { error: 'Invalid or expired session' })));
 
     await act(async () => { await api.get('/cameras').catch(() => {}); });
 
