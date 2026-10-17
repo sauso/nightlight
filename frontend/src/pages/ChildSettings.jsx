@@ -356,8 +356,12 @@ export default function ChildSettings() {
             <li>recordings, wake clips and timelapses, including the video files</li>
             <li>their profile, photo and sleep settings</li>
           </ul>
+          {/* #719 review: "everything for this child" must be true, and alerts are the camera's, not the child's
+              (lib/entityPurge.js keeps them), so the dialog says so. */}
           <p>
-            Their cameras are kept and become unassigned. This can't be undone. <strong>Are you sure?</strong>
+            Their cameras are kept and become unassigned. Alert clips and photos from those cameras belong to the
+            camera, so they are kept until their retention removes them (or the camera is removed). This can't be
+            undone. <strong>Are you sure?</strong>
           </p>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button className="btn" type="button" onClick={() => setRemoving(false)} disabled={removeBusy}>Cancel</button>

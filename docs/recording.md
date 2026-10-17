@@ -414,7 +414,7 @@ confirm and asks "Are you sure?". The two are **different**, and so is what each
 
 | | Removing a **child** | Removing a **camera** |
 |---|---|---|
-| Sleep nights and morning reviews (with their notes) | Deleted | Kept (they belong to the child) |
+| Sleep nights and morning reviews (with their notes) | Deleted | Each night's saved summary, and the review's answers and notes, are kept (they belong to the child). **The night's detail and the review's photos are lost** for every night the camera recorded: both are built from its activity history and bed transitions, which go |
 | Bed transitions and their snapshot photos | Deleted, for the cameras assigned to the child | Deleted |
 | Activity history (the per-minute motion and sound the sleep summary is built from) | Deleted, for the cameras assigned to the child | Deleted |
 | Recordings and wake clips (video files included) | Deleted | Deleted |
@@ -430,17 +430,30 @@ Things that behave in ways you might not expect:
   retention rule, and removing the child or camera is not retention.
 - **A camera that was moved from one child to another keeps one history for both.** Bed transitions and
   activity samples record the camera, not the child, so removing the *current* child clears all of the
-  camera's history, including nights from before it was assigned to them. Known limit, not fixable without
-  recording the child on every sample.
+  camera's history, **including another child's**: the nights it recorded for whoever had it before keep
+  their saved summary and review notes, but lose their detail and review photos, exactly as if the camera
+  had been removed. Known limit, not fixable without recording the child on every sample.
+- **Alerts are the camera's, not the child's.** Removing a child keeps the alert clips and alert photos
+  its cameras recorded; they go when their retention removes them, or when the camera is removed. The
+  child's Remove dialog says so.
+- **Removing is refused while a camera is recording.** If the camera, or any camera assigned to the child,
+  has an on-demand recording running, the dialog says "Stop the recording first" and nothing is deleted.
+  A clip or photo that is *still being saved* when its child or camera is removed (a recording already
+  stopped, a wake clip, an alert clip or photo, a bed-transition frame) deletes its own file when it
+  finishes, because nothing is left to file it under.
 - **If something cannot be deleted, nothing further is.** A file that is already gone is fine. Any other
-  failure (a permissions problem on the data folder, say) stops the removal, the dialog shows the error,
+  failure (a permissions problem on the data folder, say) stops the removal, the dialog shows the reason,
   the child or camera is still there, and you can retry. Files are removed before the entries that name
   them, so a failed removal never leaves an entry pointing at a deleted file. It can leave a partly emptied
   child or camera: some of its history already deleted.
 - **Only files inside Nightlight's own data and clips folders are ever deleted**, whatever a stored path
-  says.
-- A recording or clip that is *still being made* when its camera is removed can finish after the removal and
-  leave its file behind. Stop recording first. Known limit.
+  says. If `timelapse`, `.ring` or `.timelapse-frames` inside the clips folder is a link to a folder
+  somewhere else, removing a child or camera is **refused** before anything is deleted (the dialog says
+  why). Make it a real folder, or point the whole clips folder (`CLIPS_DIR`) at the other place, and retry.
+- **Folders are swept only for ids Nightlight made.** Every child and camera gets a random id (a UUID), and
+  its folders in the clips folder are named after it. A child or camera with any other id (from an edited
+  or imported database) still has its entries, and every file they name, deleted; files nothing names in
+  its folders are left. Known limit: this is what stops an id like `timelapse` emptying a shared folder.
 
 ### Who can delete
 

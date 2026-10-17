@@ -527,7 +527,32 @@ describe('removing a camera', () => {
     expect(items.join('|')).toMatch(/event log and temperature and humidity history/);
     expect(within(dialog).getByText('Are you sure?')).toBeTruthy();
     expect(within(dialog).getByText(/none of this comes back/)).toBeTruthy();
+    // #719 review: the nights it recorded are the child's and keep their summary, but not their detail or photos.
+    expect(within(dialog).getByText(/Nights it recorded keep their saved summary but lose their detail and their morning-review photos/)).toBeTruthy();
     expect(delSpy).not.toHaveBeenCalled();
+  });
+
+  // ★ #719 review. The server refuses with a 409 and a reason (a 5xx body is stripped by Cloudflare). Through the
+  // REAL api.js (only fetch is stubbed), so the seam is tested: the dialog must show the server's own words, never
+  // "Request failed (409)".
+  test('★ #719 a refused delete (409) shows the server\'s reason inside the dialog', async () => {
+    const reason = 'This camera is recording. Stop the recording first, then remove the camera.';
+    delSpy.mockRestore();
+    const fetchSpy = vi.fn(async () => ({ ok: false, status: 409, text: async () => JSON.stringify({ error: reason }) }));
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      const { user, camerasValue } = mount();
+      await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+      await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
+      const dialog = screen.getByRole('dialog');
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent(reason);
+      expect(within(dialog).queryByText(/Request failed/)).toBeNull();
+      expect(fetchSpy).toHaveBeenCalledWith('/api/cameras/cam-1', expect.objectContaining({ method: 'DELETE' }));
+      expect(camerasValue.refresh).not.toHaveBeenCalled();
+      expect(screen.getByText('at /cameras/cam-1')).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   test('confirming deletes it, refreshes the list and returns to the Cameras tab', async () => {

@@ -456,6 +456,11 @@ export default function CameraSettings() {
             <li>recordings and wake clips, including the video files</li>
             <li>its event log and temperature and humidity history</li>
           </ul>
+          {/* #719 review: a child's nights are the child's, so their saved summary stays, but the night's detail
+              and its review photos are built from this camera's activity history and bed transitions, which go. */}
+          <p>
+            Nights it recorded keep their saved summary but lose their detail and their morning-review photos.
+          </p>
           <p>
             You can add the camera again, but none of this comes back. <strong>Are you sure?</strong>
           </p>
