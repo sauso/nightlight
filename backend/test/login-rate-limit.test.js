@@ -25,7 +25,7 @@ import {
 useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
-const { default: authRouter } = await import('../src/routes/auth.js');
+const { default: authRouter, resetMfaUserLimit } = await import('../src/routes/auth.js');
 const { generateSecret, verifyToken } = await import('../src/lib/mfa.js');
 
 let server;
@@ -44,6 +44,12 @@ beforeEach(() => {
   db.prepare('DELETE FROM users').run();
   makeUser(db, { id: 'u-a', username: 'alice', role: 'admin', password: 'correct-horse' });
   makeUser(db, { id: 'u-b', username: 'bob', role: 'caregiver', password: 'correct-horse' });
+  // #550: the per-USER MFA limiter ignores the source address, and these cases deliberately burn u-a's
+  // per-source budget from a fresh address each. Without a reset their failures would add up to one user
+  // budget across the file and 429 cases unrelated to it. The per-user limit itself is pinned in
+  // mfa-replay-and-async-bcrypt.test.js.
+  resetMfaUserLimit('u-a');
+  resetMfaUserLimit('u-b');
 });
 
 const login = (username, password = 'wrong-password') =>

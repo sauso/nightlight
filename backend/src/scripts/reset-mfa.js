@@ -8,6 +8,10 @@
 //   docker exec nightlight node src/scripts/reset-mfa.js --all            # clear everyone
 //
 // (Staging container name is nightlight-dev.) See docs/mfa.md.
+//
+// What it does NOT clear: the per-user second-step attempt limit (#550). That count lives in the memory of
+// the running server, and this script is a separate process, so it cannot reach it. The admin reset in the
+// app does clear it (routes/auth.js, resetMfaUserLimit); so does a restart of the container.
 import Database from 'better-sqlite3';
 import path from 'path';
 
@@ -21,10 +25,10 @@ const arg = process.argv[2];
 // static, and the only variable (a user id) is bound as a parameter. (The clause was always a
 // hardcoded literal, never user input, but keeping the SQL constant leaves no room for doubt.)
 const clearAllStmt = db.prepare(
-  'UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL WHERE mfa_enabled = 1'
+  'UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL, mfa_last_step = NULL WHERE mfa_enabled = 1'
 );
 const clearOneStmt = db.prepare(
-  'UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL WHERE id = ?'
+  'UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL, mfa_last_step = NULL WHERE id = ?'
 );
 
 if (!arg || arg === '--help' || arg === '-h') {
