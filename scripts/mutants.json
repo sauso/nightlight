@@ -18112,6 +18112,18 @@
     "note": "Review of #720 (Opus, verified by running). One mutant for the shared helper; the describe runs one case per route that calls it."
   },
   {
+    "label": "#548 routes: a demoted admin's in-flight write is no longer refused",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (callerRole.get(req.user.id)?.role === 'admin') return false;",
+    "replace": "  return false;",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "an admin demoted while their request awaits bcrypt",
+    "note": "Review of #720, round 2 (Opus, verified by running): an admin demoted while their own PUT /users/<self> {role:'admin'} was hashing became admin again (#261's self-re-promotion)."
+  },
+  {
     "label": "#548 password change: the request that loses the race answers 401 again (signs the person out)",
     "file": "backend/src/routes/auth.js",
     "find": "if (swapped.changes !== 1) return res.status(400).json({ error: 'Current password is incorrect' });",

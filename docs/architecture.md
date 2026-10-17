@@ -162,7 +162,10 @@ writes uses a compare-and-swap or re-checks after the await (login re-reads the 
 password or a just-enabled second factor decides; password change, backup codes; `/setup`;
 `/me/mfa/enable`, whose write is bound to MFA still being off AND to the secret its code was checked
 against). Every signed-in route that awaits bcrypt and then writes re-checks its own session first
-(`signInEnded`: the middleware's `isLiveSessionId` rule) and answers 401 if it ended meanwhile.
+(`signInEnded`: the middleware's `isLiveSessionId` rule) and answers 401 if it ended meanwhile; the two
+admin routes that hash (`POST /users`, `PUT /users/:id`) also re-read the caller's live role
+(`adminRightsEnded`) and answer 403 if they were demoted meanwhile, so an in-flight request cannot undo a
+demotion (#261).
 `/me/mfa/enable` also allows one request per user at a time, refused before any hashing, because each
 one costs ten hashes in the shared worker. The worker module keeps each worker's pending jobs separately,
 so a crashed worker rejects only its own jobs. The TOTP replay check (`users.mfa_last_step`, nullable) is

@@ -132,8 +132,11 @@ budget comes back when its 15 minutes are up (a sign-in token already issued sta
 minutes). The password can be changed from a device that is still signed in (Account) or by an admin
 (Settings → Caregivers). An admin resetting two-factor for the account also empties the budget at once,
 and so does a restart of the container (the limits are held in memory); neither stops someone who still
-has the password from using it up again. The console reset script (`reset-mfa.js`) runs in its own
-process and does not clear the budget. They have beaten the first factor already; the alternative, no
+has the password from using it up again. ⚠️ **Never reset two-factor on its own in this situation:** a
+reset turns two-factor **off**, so someone who has the password could then sign in with the password
+alone and set up their own authenticator. Reset it only together with a password change, and change the
+password first; then reset two-factor if it is still needed. The console reset script (`reset-mfa.js`) runs
+in its own process and does not clear the budget. They have beaten the first factor already; the alternative, no
 per-account limit, left the 6-digit code open to a guesser with many addresses. There are no settings to
 change these numbers.
 

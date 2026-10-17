@@ -160,7 +160,10 @@ const perClientLimiter = rateLimit({
 // and can do it again in every window, so the block lasts as long as they keep doing it: waiting does
 // not end it. Changing the password does (no new MFA token can be obtained; one already issued lives
 // 5 minutes). An admin reset (DELETE /users/:id/mfa) or a restart empties the current bucket, but does not
-// stop someone who still has the password from filling it again. Backup codes share the budget. That
+// stop someone who still has the password from filling it again, and a reset ON ITS OWN is worse than
+// nothing against them: it turns two-factor off, so the password alone signs in and they could enrol their
+// own authenticator. Against a password holder, reset only together with (or after) a password change; the
+// docs say so. Backup codes share the budget. That
 // attacker has already beaten the first factor; without a per-account limit the 6-digit code was open to
 // anyone with many addresses.
 // The per-source limiters are untouched: nothing here loosens them.
@@ -467,6 +470,20 @@ function signInEnded(req, res) {
   return true;
 }
 
+// The same re-check for the two admin routes that hash (POST /users, PUT /users/:id), plus the caller's
+// LIVE role: requireAdmin read it when the request arrived, and an admin demoted while their own request was
+// hashing could otherwise still write, including PUT /users/<self> {role:'admin'}, which undid the demotion
+// (review of #720, verified by running). That is the self-re-promotion middleware/auth.js's #261 comment
+// exists to prevent; it was impossible while these routes were synchronous. Same 403 body as requireAdmin.
+// Called, like signInEnded, with NO await between the call and the write.
+const callerRole = db.prepare('SELECT role FROM users WHERE id = ?');
+function adminRightsEnded(req, res) {
+  if (signInEnded(req, res)) return true;
+  if (callerRole.get(req.user.id)?.role === 'admin') return false;
+  res.status(403).json({ error: 'Admin access required' });
+  return true;
+}
+
 router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   const { username, password } = req.body || {};
   const user =
@@ -611,7 +628,7 @@ router.post('/users', requireAuth, requireAdmin, asyncHandler(async (req, res) =
   // would let two simultaneous creates of one name both pass and the second die on the UNIQUE index (500).
   // Everything from the check to the INSERT stays synchronous.
   const password_hash = await passwordHash.hash(password, 10);
-  if (signInEnded(req, res)) return;
+  if (adminRightsEnded(req, res)) return;
   const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
   if (existing) return res.status(400).json({ error: 'That username is already taken' });
   let photo;
@@ -660,8 +677,8 @@ router.put('/users/:id', requireAuth, requireAdmin, asyncHandler(async (req, res
   const password_hash = password ? (newHash ?? (await passwordHash.hash(password, 10))) : existing.password_hash;
   let photo;
   try { photo = normalizePhoto(req.body?.photo, existing.photo); } catch (e) { return res.status(400).json({ error: e.message }); }
-  // After the last await above, before any write (see signInEnded).
-  if (signInEnded(req, res)) return;
+  // After the last await above, before any write (see adminRightsEnded).
+  if (adminRightsEnded(req, res)) return;
 
   // #441: the password-driven deletes below AND the role UPDATE both run inside keepingAnAdmin, so a
   // demotion that would leave the install with no admin rolls back BOTH — otherwise a rejected
@@ -737,9 +754,11 @@ router.put('/me/password', requireAuth, sessionActionLimiter, asyncHandler(async
   if (signInEnded(req, res)) return;
   // Compare-and-swap on the hash that was verified (#548): both bcrypt calls yield, so a second change
   // could have landed in between. Without this, two simultaneous changes would both "verify" the same
-  // current password and the later one would silently win. Losing the race gets the same 400 as a wrong
-  // current password, which is what a serial second request would have received. 400, NOT 401, for the
-  // #697 reason above: this request's sign-in is still fine, and a 401 would sign the person out.
+  // current password and the later one would silently win. Losing the race from the SAME device (one
+  // session) gets the same 400 as a wrong current password, which is what a serial second request would
+  // have received. 400, NOT 401, for the #697 reason above: this request's sign-in is still fine, and a 401
+  // would sign the person out. Losing it from ANOTHER device ends at signInEnded above instead, with a 401
+  // that is correct: the winner has just signed every other session out, the loser's included.
   const swapped = db
     .prepare('UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?')
     .run(password_hash, req.user.id, user.password_hash);

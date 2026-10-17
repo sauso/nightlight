@@ -546,6 +546,50 @@ describe('#548 a session signed out while its request awaits bcrypt: nothing is 
   }
 });
 
+// FAILS WITHOUT the live-role re-check in adminRightsEnded (review of #720, verified by running): admin X's
+// own request was parked on bcrypt while admin Y demoted X (a real PUT, which needs no hashing and so
+// completes meanwhile); X's request then wrote anyway. On PUT /users/X {role:'admin'} that made X an admin
+// again, undoing the demotion; on POST /users {role:'admin'} it created a new admin after X had lost the
+// right to. The whole users table is compared with what it was just after the demotion.
+describe('#548 an admin demoted while their request awaits bcrypt: refused, nothing written', () => {
+  const cases = [
+    {
+      name: 'PUT /users/:id on themselves, asking for admin again',
+      send: (token) => call(`${server.url}/api/auth/users/dem-x`, {
+        method: 'PUT', token, body: { role: 'admin', password: 'x-new-long-password' }, headers: { 'x-forwarded-for': freshIp() },
+      }),
+    },
+    {
+      name: 'POST /users creating another admin',
+      send: (token) => call(`${server.url}/api/auth/users`, {
+        method: 'POST', token, body: { username: 'made-by-demoted', password: 'a-long-enough-password', role: 'admin' }, headers: { 'x-forwarded-for': freshIp() },
+      }),
+    },
+  ];
+
+  for (const c of cases) {
+    test(`${c.name}: answers 403 once demoted`, async () => {
+      makeUser(db, { id: 'dem-x', username: 'dem-x', role: 'admin' });
+      makeUser(db, { id: 'dem-y', username: 'dem-y', role: 'admin' });
+      const xToken = sessionToken('dem-x', 'admin');
+      const yToken = sessionToken('dem-y', 'admin');
+      let demotion;
+      let before;
+      const res = await whileHandlerAwaitsBcrypt(() => c.send(xToken), async () => {
+        demotion = await call(`${server.url}/api/auth/users/dem-x`, {
+          method: 'PUT', token: yToken, body: { role: 'caregiver' }, headers: { 'x-forwarded-for': freshIp() },
+        });
+        before = db.prepare('SELECT * FROM users ORDER BY id').all();
+      });
+      assert.equal(demotion.status, 200, `precondition: the demotion went through: ${JSON.stringify(demotion.body)}`);
+      assert.equal(res.status, 403, `the demoted admin's in-flight request answered ${res.status}`);
+      assert.deepEqual(res.body, { error: 'Admin access required' });
+      assert.deepEqual(db.prepare('SELECT * FROM users ORDER BY id').all(), before, 'the demoted admin\'s write landed');
+      assert.equal(db.prepare('SELECT role FROM users WHERE id = ?').get('dem-x').role, 'caregiver', 'the demotion was undone');
+    });
+  }
+});
+
 describe('#548 lib/passwordHash.js (the worker)', () => {
   test('hashes are ordinary bcrypt at the same cost, interchangeable with bcryptjs in both directions', async () => {
     const h = await passwordHash.hash('some password', 10);
