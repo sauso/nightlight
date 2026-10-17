@@ -10,6 +10,7 @@ import MediaPlayerModal from '../components/MediaPlayerModal.jsx';
 import RecomputeNight from '../components/RecomputeNight.jsx';
 import ReviewNightButton from '../components/ReviewNightButton.jsx';
 import ReviewReceipt from '../components/ReviewReceipt.jsx';
+import LoadFailed from '../components/LoadFailed.jsx';
 import { showsInBed } from '../lib/inBed.js';
 
 // Sleep detail: a to-scale timeline of one night for a child, with the wake-ups marked, plus a date
@@ -52,7 +53,12 @@ export default function SleepDetail() {
   const [searchParams] = useSearchParams();
   const [maxDate, setMaxDate] = useState(null); // latest browsable night (last completed)
   const [date, setDate] = useState(null); // selected night's local start date
-  const [night, setNight] = useState(undefined); // undefined = loading
+  const [night, setNight] = useState(undefined); // undefined = loading (or failed: see nightError)
+  // The failure of the night request, kept apart from `night` (#375). A failed request used to become
+  // `null`, the very value the server's "nothing recorded" answer produces, so an outage read as "No sleep
+  // data for this night - either it predates tracking...". `night` is now only ever set by an answer.
+  const [nightError, setNightError] = useState('');
+  const [nightRetry, setNightRetry] = useState(0); // bumped by Retry to re-run the fetch effect
   // The receipt for a correction just saved, when we arrived here from the review screen.
   const [receipt, setReceipt] = useState(null);
   // Bumped each time the receipt is dropped because the correction it quotes was removed (#679). The receipt
@@ -97,18 +103,28 @@ export default function SleepDetail() {
     return () => { alive = false; };
   }, [id, todayLocal, searchParams]);
 
+  // Forget the night only when the child or the date CHANGES. This used to be the first lines of the fetch
+  // effect below, which Retry (nightRetry) also re-runs: Retry on the "may be out of date" banner then blanked
+  // a night that was on screen, and a retry that failed again became a blocking first-load error that
+  // unmounted NightContent (an open clip modal with it). Declared BEFORE the fetch effect so a date change
+  // resets and then fetches within the same commit. (Review finding on PR #716.)
+  useEffect(() => {
+    setNight(undefined);
+    setNightError('');
+  }, [id, date]);
+
   useEffect(() => {
     if (!date) return;
     let alive = true;
-    setNight(undefined);
     const load = () => api.get(`/children/${id}/sleep/${date}?detail=1`)
-      .then((r) => { if (alive) setNight(r || null); })
-      .catch(() => { if (alive) setNight(null); });
+      .then((r) => { if (alive) { setNight(r || null); setNightError(''); } })
+      // A failed 2-minute refresh leaves the night already on screen in place (stale) rather than blanking it.
+      .catch((err) => { if (alive) setNightError(err?.message || 'Request failed'); });
     load();
     // Keep the live (in-progress) night fresh — only the latest night can still be changing.
     const t = date === maxDate ? setInterval(load, 2 * 60 * 1000) : null;
     return () => { alive = false; if (t) clearInterval(t); };
-  }, [id, date, maxDate]);
+  }, [id, date, maxDate, nightRetry]);
 
   // ⚠️ THE RECEIPT HAS TO FOLLOW YOU HERE, and this is not a nicety.
   //
@@ -206,7 +222,7 @@ export default function SleepDetail() {
             fmtTime={fmtTime} onOpen={() => navigate(`/children/${id}/review/${date}`)} />
         )}
 
-        <NightBody night={night} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit}
+        <NightBody night={night} error={nightError} onRetry={() => setNightRetry((n) => n + 1)} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit}
           childId={id} date={date} onRecomputed={setNight} onCorrectionRemoved={() => { receiptRemovals.current += 1; setReceipt(null); }} />
 
         <SleepInsights childId={id} tempUnit={settings.temp_unit} childName={kid?.name} />
@@ -220,12 +236,32 @@ export default function SleepDetail() {
   );
 }
 
-function NightBody({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed, onCorrectionRemoved }) {
+function NightBody({ night, error, onRetry, ...rest }) {
+  // "Displayable" = something worth keeping on screen beside a stale banner. A null / `no_data` answer is the
+  // EMPTY result: its copy ("No sleep data for this night") cannot be verified once a refresh fails, so a
+  // failure after it is a blocking `error`, the same rule as loadState (docs/design-language.md, #375). The
+  // other statuses (`ok`, `empty`, `no_sleep`, `off`) are real answers and stay as stale. (Review finding on PR #716.)
+  const displayable = !!night && night.status !== 'no_data';
+  if (!displayable) {
+    if (error) return <LoadFailed what="this night" error={error} onRetry={onRetry} />;
+    if (night === undefined) return <div className="card"><div className="empty-state" style={{ padding: 20 }}>Loading night…</div></div>;
+  }
+  // A refresh failed but the last night is still shown: say it may be out of date, then render it as usual.
+  // One fragment shape whether or not the banner is there, so NightContent keeps its state (an open clip
+  // modal) when the banner comes and goes.
+  return (
+    <>
+      {error && <LoadFailed what="this night" error={error} onRetry={onRetry} stale />}
+      <NightContent night={night} {...rest} />
+    </>
+  );
+}
+
+function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed, onCorrectionRemoved }) {
   // The wake↔alert clip currently open in the shared player (or null). Lives here so it survives a
   // 2-min live refresh of `night` without tearing the modal down mid-watch.
   const [clipFor, setClipFor] = useState(null);
   const [wakeClip, setWakeClip] = useState(null);
-  if (night === undefined) return <div className="card"><div className="empty-state" style={{ padding: 20 }}>Loading night…</div></div>;
   if (night && night.status === 'off') {
     return (
       <div className="card">
@@ -275,6 +311,19 @@ function NightBody({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed, 
             <ReviewNightButton childId={childId} date={date} corrected={night.corrected} />
           </div>
         )}
+        {/* #521: Recompute used to be unreachable here, because this branch returns before the `ok`-night
+            render below where it lives. An admin who tuned a threshold had no way to ask "does the detector
+            still call this night empty?" short of un-flagging the night first. It is the SAME component as on
+            an `ok` night, so every guard comes with it and none is re-implemented: admin-only, the dialog
+            previews the saved row against this one before anything is written (the second press applies),
+            and the server's allowDowngrade / locked refusals still decide what can be stored. A flagged night
+            is a corrected night, so it normally opens on "locked" (nothing to recompute until the correction
+            is removed). Not offered on no_data / no_sleep: the issue is about `empty`, and those are a
+            coverage or scoring question, not a "did the detector change its mind" one. */}
+        <div style={{ padding: '0 14px 14px' }}>
+          <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime} onRecomputed={onRecomputed}
+            onCorrectionRemoved={onCorrectionRemoved} />
+        </div>
       </div>
     );
   }

@@ -31,6 +31,7 @@ import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import WhepPlayer from '../src/components/WhepPlayer.jsx';
 import { setToken } from '../src/lib/api.js';
+import { resetIceServersCache } from '../src/lib/iceServers.js';
 
 // A marker that can only have come from this test, so "the token went nowhere else" is checkable.
 const TOKEN = 'TOKEN-562-must-stay-on-this-site';
@@ -77,6 +78,11 @@ const headersWith = (location) => ({ get: (name) => (name.toLowerCase() === 'loc
 // The modelled server: answers the POST like MediaMTX (201, an SDP answer, a Location), the DELETE with
 // `deleteAnswer`.
 function answer(url, init) {
+  // The player asks the server which STUN servers to use before it connects (#558): an unrelated GET that
+  // must not be mistaken for the DELETE answer below. No STUN, so the peer connection is built as before.
+  if (init.method === 'GET' && url === '/api/about') {
+    return { ok: true, status: 200, headers: headersWith(null), text: async () => JSON.stringify({ stunServers: [] }) };
+  }
   if (init.method === 'POST') {
     return { ok: true, status: 201, headers: headersWith(locationHeader), text: async () => 'v=0 answer' };
   }
@@ -104,6 +110,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   vi.stubGlobal('RTCPeerConnection', FakePeerConnection);
   setToken(TOKEN);
+  resetIceServersCache();
 });
 
 afterEach(() => {
@@ -122,7 +129,8 @@ async function mountAnswerAndUnmount(location, camera = 'cam1') {
   await new Promise((resolve) => { setTimeout(resolve, 0); });
   // The cleanup ran (it closes the peer connection before it decides on the DELETE).
   expect(peers[0].closed).toBe(true);
-  const calls = fetchMock.mock.calls.map(([url, init = {}]) => ({
+  // Not the STUN-list lookup (#558): these assertions are about the requests that carry the token to MediaMTX.
+  const calls = fetchMock.mock.calls.filter(([url]) => url !== '/api/about').map(([url, init = {}]) => ({
     url,
     method: init.method,
     authorization: init.headers?.Authorization,
@@ -187,5 +195,113 @@ describe('WhepPlayer session DELETE (#562)', () => {
     // What the flag prevents: without it the modelled browser would replay the DELETE, token and all, at /api.
     expect(followed).toEqual([]);
     expectTokenStayedOnThisSite(calls);
+  });
+});
+
+// ★ #694. The Location used to be stored in one ref shared by every run of the connect effect, before the
+// `cancelled` check, so a slow POST from a torn-down run could overwrite a newer run's address.
+describe('WhepPlayer late POST answer from a torn-down run (#694)', () => {
+  // A POST whose answer the test releases by hand; the DELETE is answered at once. `holdBody`: the answer's
+  // headers (and so its Location) arrive, but its SDP body stays out until the entry's releaseBody().
+  function holdPosts() {
+    const held = [];
+    fetchMock.mockImplementation((url, init = {}) => {
+      if (init.method !== 'POST') return Promise.resolve(deleteAnswer);
+      return new Promise((resolve) => {
+        const entry = { url };
+        entry.release = (location, { holdBody = false } = {}) => {
+          let bodyArrives;
+          const body = holdBody ? new Promise((r) => { bodyArrives = r; }) : Promise.resolve('v=0 answer');
+          entry.releaseBody = () => bodyArrives('v=0 answer');
+          resolve({ ok: true, status: 201, headers: headersWith(location), text: () => body });
+        };
+        held.push(entry);
+      });
+    });
+    return held;
+  }
+  const deletes = () =>
+    fetchMock.mock.calls.filter(([, init = {}]) => init.method === 'DELETE').map(([url, init]) => ({ url, redirect: init.redirect }));
+  const settle = () => new Promise((resolve) => { setTimeout(resolve, 0); });
+
+  test("★ a late answer from the old run neither replaces the new run's address nor leaves its own session open", async () => {
+    const held = holdPosts();
+    const { rerender, unmount } = render(<WhepPlayer mediamtxPath="cam1" active muted />);
+    await waitFor(() => expect(held).toHaveLength(1));
+    // Run A is torn down (camera switch) while its POST is still in flight: nothing stored, so no DELETE yet.
+    rerender(<WhepPlayer mediamtxPath="cam2" active muted />);
+    await waitFor(() => expect(held).toHaveLength(2));
+    expect(deletes()).toEqual([]);
+    // Run B is answered and applied.
+    held[1].release('/live/cam2/whep/new');
+    await waitFor(() => expect(peers[1].remoteDescription).toEqual({ type: 'answer', sdp: 'v=0 answer' }));
+    // Run A's slow answer arrives now. It is the only cleanup that session will ever get, so it is DELETEd at once
+    // (and ONLY that one; B is still live).
+    held[0].release('/live/cam1/whep/old');
+    await settle();
+    expect(deletes()).toEqual([{ url: '/live/cam1/whep/old', redirect: 'error' }]);
+    expect(peers[0].remoteDescription).toBeNull();
+    // B's cleanup ends B's own session, not A's.
+    unmount();
+    await settle();
+    expect(deletes()).toEqual([
+      { url: '/live/cam1/whep/old', redirect: 'error' },
+      { url: '/live/cam2/whep/new', redirect: 'error' },
+    ]);
+  });
+
+  test('a late answer after unmount DELETEs its own session once', async () => {
+    const held = holdPosts();
+    const { unmount } = render(<WhepPlayer mediamtxPath="cam1" active muted />);
+    await waitFor(() => expect(held).toHaveLength(1));
+    unmount();
+    await settle();
+    expect(deletes()).toEqual([]);
+    held[0].release('/live/cam1/whep/late');
+    await settle();
+    expect(deletes()).toEqual([{ url: '/live/cam1/whep/late', redirect: 'error' }]);
+    // The late DELETE carries the session token like every other cleanup (it goes through the shared helper):
+    // a hand-written fetch without it would leave the viewer session open (found by the #704 review).
+    const late = fetchMock.mock.calls.find(([, init = {}]) => init.method === 'DELETE');
+    expect(late[1].headers?.Authorization).toBe(`Bearer ${TOKEN}`);
+  });
+
+  test('a late answer whose Location fails the #562 guard sends no DELETE at all', async () => {
+    const held = holdPosts();
+    const { unmount } = render(<WhepPlayer mediamtxPath="cam1" active muted />);
+    await waitFor(() => expect(held).toHaveLength(1));
+    unmount();
+    held[0].release('/api/users/1');
+    await settle();
+    expect(deletes()).toEqual([]);
+    // And the torn-down run's answer is not applied either (found by the #704 review: only the DELETE was checked).
+    expect(peers[0].remoteDescription).toBeNull();
+  });
+
+  test('★ cancelled while the answer body is being read: exactly one DELETE', async () => {
+    // The headers have arrived and this run has stored its session address, but `await res.text()` is still out
+    // when the run is torn down, so the cleanup DELETEs. Two lines keep it to one: the `cancelled` check sits
+    // BEFORE the body read, and the cleanup sets `resourceUrl = null`. Either alone is enough; with neither (the
+    // check moved after the read AND no reset), the cancelled run's continuation DELETEd the same session a
+    // second time (found in the review of #694; the pair is one catalogue entry).
+    const held = holdPosts();
+    const { unmount } = render(<WhepPlayer mediamtxPath="cam1" active muted />);
+    await waitFor(() => expect(held).toHaveLength(1));
+    held[0].release('/live/cam1/whep/s1', { holdBody: true });
+    await settle();
+    unmount();
+    await settle();
+    expect(deletes(), 'precondition: the cleanup ended the session this run had stored').toEqual([
+      { url: '/live/cam1/whep/s1', redirect: 'error' },
+    ]);
+    held[0].releaseBody();
+    await settle();
+    expect(deletes()).toEqual([{ url: '/live/cam1/whep/s1', redirect: 'error' }]);
+    expect(peers[0].closed).toBe(true);
+  });
+
+  test('normal connect then disconnect is unchanged: one DELETE, at unmount, after the answer was applied', async () => {
+    const calls = await mountAnswerAndUnmount('/live/cam1/whep/abc');
+    expect(calls.filter((c) => c.method === 'DELETE')).toEqual([deleteTo('/live/cam1/whep/abc')]);
   });
 });

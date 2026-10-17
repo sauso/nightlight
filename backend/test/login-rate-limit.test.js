@@ -333,7 +333,7 @@ describe('an extraneous identity field cannot open a fresh bucket (S06)', () => 
         new_password: 'new-password-123',
         username: `spoof-${i}`,
       }, token);
-      assert.equal(attempt.status, 401, `attempt ${i + 1} should reach current-password verification`);
+      assert.equal(attempt.status, 400, `attempt ${i + 1} should reach current-password verification`);
       assert.equal(attempt.body?.error, 'Current password is incorrect');
     }
     const blocked = await from(ip, '/me/password', {
@@ -354,7 +354,7 @@ describe('an extraneous identity field cannot open a fresh bucket (S06)', () => 
         password: 'wrong-password',
         username: `spoof-${i}`,
       }, token);
-      assert.equal(attempt.status, 401, `attempt ${i + 1} should reach password verification`);
+      assert.equal(attempt.status, 400, `attempt ${i + 1} should reach password verification`);
       assert.equal(attempt.body?.error, 'Password is incorrect');
     }
     const blocked = await from(ip, '/me/mfa/disable', {
@@ -382,14 +382,18 @@ describe('an extraneous identity field cannot open a fresh bucket (S06)', () => 
     let last;
     for (let i = 0; i < 20; i++) {
       last = await attempt(alice);
-      assert.equal(last.status, 401, `alice's attempt ${i + 1} should reach current-password verification`);
+      assert.equal(last.status, 400, `alice's attempt ${i + 1} should reach current-password verification`);
+      // The text too, not just the 400 (#697): on this route a 400 also comes from the new-password length check,
+      // which runs BEFORE the current password is verified, so a status alone does not prove verification ran.
+      assert.equal(last.body?.error, 'Current password is incorrect');
     }
     const aliceBlocked = await attempt(alice);
     assert.equal(aliceBlocked.status, 429, "alice's own budget never ran out");
 
     const bobsTurn = await attempt(bob);
     assert.notEqual(bobsTurn.status, 429, "alice's exhausted budget blocked bob from his own account, sharing one IP");
-    assert.equal(bobsTurn.status, 401, `expected bob's own current-password check to run, got ${bobsTurn.status}`);
+    assert.equal(bobsTurn.status, 400, `expected bob's own current-password check to run, got ${bobsTurn.status}`);
+    assert.equal(bobsTurn.body?.error, 'Current password is incorrect');
   });
 
   test('★ THE FIX: POST /me/mfa/disable — two different accounts sharing one source IP do not share a bucket', async () => {
@@ -401,14 +405,16 @@ describe('an extraneous identity field cannot open a fresh bucket (S06)', () => 
     let last;
     for (let i = 0; i < 20; i++) {
       last = await attempt(alice);
-      assert.equal(last.status, 401, `alice's attempt ${i + 1} should reach password verification`);
+      assert.equal(last.status, 400, `alice's attempt ${i + 1} should reach password verification`);
+      assert.equal(last.body?.error, 'Password is incorrect'); // the text, as above: the status alone is not the proof
     }
     const aliceBlocked = await attempt(alice);
     assert.equal(aliceBlocked.status, 429, "alice's own budget never ran out");
 
     const bobsTurn = await attempt(bob);
     assert.notEqual(bobsTurn.status, 429, "alice's exhausted budget blocked bob from his own account, sharing one IP");
-    assert.equal(bobsTurn.status, 401, `expected bob's own password check to run, got ${bobsTurn.status}`);
+    assert.equal(bobsTurn.status, 400, `expected bob's own password check to run, got ${bobsTurn.status}`);
+    assert.equal(bobsTurn.body?.error, 'Password is incorrect');
   });
 
   test('/login itself is not newly exposed to a forged mfaToken', async () => {

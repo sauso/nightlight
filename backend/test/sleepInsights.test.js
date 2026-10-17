@@ -359,7 +359,15 @@ test('an unparseable sleep window falls back to a default instead of crashing th
   assert.doesNotThrow(() => runNightlySleepJob());
   const row = db.prepare('SELECT window_start FROM sleep_nights WHERE child_id = ?').get(KID);
   assert.ok(row, 'the night is still computed, on the fallback window');
+  // ⚠️ #564: "a row exists" is also true on ANY fallback hour, so a parseHm default moved from 19 to 20 (or
+  // to midnight) stayed green while every child with a corrupt window was scored on the wrong hours.
+  // The fallback is documented as 19:00 (parseHm), so the same night recomputed on an explicit '19:00'
+  // must land on the identical window start.
+  db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(KID);
   db.prepare('UPDATE children SET sleep_window_start = ? WHERE id = ?').run('19:00', KID);
+  runNightlySleepJob();
+  const explicit = db.prepare('SELECT window_start FROM sleep_nights WHERE child_id = ?').get(KID);
+  assert.equal(row.window_start, explicit.window_start, 'the fallback window is not the documented 19:00');
 });
 
 test('a night already stored is left alone even if it was stored as no_data', () => {
