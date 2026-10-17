@@ -13,6 +13,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 - **Developer tooling (not part of the image): `scripts/use-node.sh` puts the Node major from `.nvmrc` on PATH in a sandbox that came with an older Node (#751).** The cloud builders ship Node 22, where the backend suite fails in ways that look unrelated to a change; `nightlight/CLAUDE.md` now tells a session to source the script first. It uses nvm, fnm or volta if present, otherwise downloads the release from nodejs.org and checks its SHA-256. Not yet run on a Linux sandbox.
 
+### Fixed
+
+- **Typing the wrong current password when changing your password, or the wrong password when turning off two-factor, no longer signs you out (#697).** The server answered 401, which the web app reads as "this sign-in is over", so a typo cleared your session and showed the sign-in form. It now answers 400 with the same message, shown next to the field, and you stay signed in. Only the status code changed; the response body, rate limits and sessions are as before.
+
 ### Security
 
 - **`proxy-addr` updated 2.0.7 → 2.0.8 (GHSA-jqcg-44mw-7w3h).** Not listed in `backend/package.json`; `express`'s own `~2.0.7` range admits the patch, so only the lockfile changes. One behaviour change for `TRUST_PROXY`: an IPv6 range is now compared with IPv4 peers only if it is an IPv4-mapped range of /96 or longer (such as `::ffff:a00:0/104`), which behaves like the IPv4 range it maps. Any other IPv6 range, such as `::/1`, no longer matches IPv4 peers, and a mapped-form range shorter than /96 (such as `::ffff:0:0/80`) now matches no peer. IPv4 ranges, the named ranges, hop counts and `true`/`false` are unchanged (README, `TRUST_PROXY`).
