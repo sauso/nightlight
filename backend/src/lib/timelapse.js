@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawnChild } from './childEnv.js';
 import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
@@ -51,7 +51,7 @@ function rmrf(dir) {
 
 function runFfmpeg(args) {
   return new Promise((resolve, reject) => {
-    const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    const proc = spawnChild('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
     const err = [];
     proc.stderr.on('data', (c) => err.push(c));
     proc.on('error', reject);

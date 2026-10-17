@@ -78,7 +78,10 @@ describe('probeVideoFlowing (#369 claim 19): a diagnosis, never proof', () => {
       '-of', 'csv=p=0',
       '-i', 'rtsp://127.0.0.1:8554/cam_v-sub',
     ]);
-    assert.deepEqual(spawned[0].opts, { stdio: ['ignore', 'pipe', 'ignore'] });
+    // #553: spawnChild adds the allowlisted env to every spawn; what this test pins is the stdio wiring.
+    const { env, ...rest } = spawned[0].opts;
+    assert.deepEqual(rest, { stdio: ['ignore', 'pipe', 'ignore'] });
+    assert.equal('JWT_SECRET' in env, false);
   });
 
   test('V2: at least one VIDEO packet => true, whatever else arrived', async () => {

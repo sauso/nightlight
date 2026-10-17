@@ -8,14 +8,15 @@ iOS** ([nightlight-mobile](https://github.com/sauso/nightlight-mobile)) for reli
 background audio and picture-in-picture (see [Mobile apps](#mobile-apps-android--ios)
 below). No cloud, no subscription, no account anywhere but your own network.
 
-> **One thing to know about "no cloud".** Nightlight has no cloud service of its own, but the
-> **Low latency (WebRTC)** live view is set up to use Google's public STUN server
+> **One thing to know about "no cloud".** Nightlight has no cloud service of its own, but by default
+> the **Low latency (WebRTC)** live view uses Google's public STUN server
 > (`stun.l.google.com:19302`), both in the browser and in the bundled MediaMTX. STUN is how WebRTC
 > works out a public address: the browser asks that server, so Google can see the viewer's public IP
-> address and when each live view connected. It does nothing useful on a home network, and there is
-> **no setting to turn it off** in this version (it is fixed in the frontend and in
-> `mediamtx/mediamtx.yml`). **Compatibility (HLS)** viewing does not use WebRTC and does not contact
-> it. Push notifications, if you enable a provider, also leave your network: see
+> address and when each live view connected. **Watching on your home network needs no STUN**; a viewer
+> outside it, behind NAT, may. Set `STUN_SERVERS` to a blank value to use none (nothing then contacts
+> Google), or to your own server: see [`STUN_SERVERS`](#stun_servers--which-stun-servers-low-latency-webrtc-uses).
+> **Compatibility (HLS)** viewing does not use WebRTC and never contacts a STUN server. Push
+> notifications, if you enable a provider, also leave your network: see
 > [Push notifications](docs/notifications.md).
 
 > **⚠️ Not a safety device.** Nightlight is a convenience tool, not a safety device. It is
@@ -84,7 +85,8 @@ Recording*. Video defaults to `<data dir>/clips`; you can point it at your array
 PUID/PGID control which user/group owns files this container creates in your data
 directory - the defaults above (99/100) match Unraid's own "nobody"/"users" convention,
 so they're usually already correct there. On another system, find your own with
-`id your_username`. TZ (e.g. `Australia/Melbourne`) affects log timestamps only -
+`id your_username`. Do not set `PUID=0`: it runs the app as root, and the container logs a warning at start
+if you do. TZ (e.g. `Australia/Melbourne`) affects log timestamps only -
 [full list of values](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
 
 `UMASK` (optional, default `077`) decides who else can read what the container writes there. The
@@ -264,8 +266,13 @@ shouldn't be there, see [SECURITY.md](SECURITY.md) for how to report it privatel
 **Cameras are trusted input.** Nightlight trusts everything a camera sends it: the video and audio
 stream, the ONVIF replies and the snapshot images. The stream is parsed by FFmpeg and ffprobe, and
 the rest by the server itself, all as the same user that owns the data directory (the database, the
-saved secrets and the recordings) and with the container's environment: nothing separates the media
-processes from the data. Cameras are often the least-updated devices on a network, so put them on
+saved secrets and the recordings): nothing separates the media processes from the data on disk. They
+are not handed the server's environment: FFmpeg and ffprobe start with only `PATH`, `TZ`, `LANG` and
+`LC_ALL`, MediaMTX with the same plus your `MTX_*` overrides
+([details](docs/architecture.md#child-process-environment-backendsrclibchildenvjs-553)). That narrows what
+a bug in one of them could leak, but it is not a sandbox: running as the same user, a media process that a
+camera managed to take over could still read the server's own environment (`JWT_SECRET` included) through
+the process table, as well as the files. Cameras are often the least-updated devices on a network, so put them on
 **their own VLAN or network segment**, ideally with no route to the internet and no access to your
 other devices, and let only the Nightlight host reach them (RTSP, plus ONVIF and the snapshot URL if
 you use them). This is advice: Nightlight does not check or enforce it.
@@ -611,6 +618,12 @@ measurement**, and (like everything here) never a safety device — see the warn
     | Sleep detail page | worked out fresh each time | still worked out fresh each time, with your times laid over it |
     | Editing or removing your correction | — | always allowed |
 
+    **Recompute this night** (admins only) is on every night that was scored, including one that shows
+    **No one in the bed**, whether the detector scored it empty or you flagged it. It works the same way
+    there: the first press compares the saved summary with the current one and saves nothing, the second
+    saves. A flagged night is a corrected night, so it normally opens on "locked" until you remove the correction (once its saved summary is final, see above). It is
+    not offered on nights with no data, no clear sleep, or with sleep tracking off.
+
     - **What gets locked is the night as it is when you save.** If last night's saved summary was still
       being refined (the first ~3 hours after the window closes), saving your correction first stores the
       night freshly worked out at that moment, then locks it, so an early rough pass isn't what gets kept.
@@ -850,9 +863,23 @@ measurement**, and (like everything here) never a safety device — see the warn
 - **Room temperature (optional).** If a camera reports temperature/humidity over **MQTT** (set
   up under **Settings → MQTT**, e.g. via Zigbee2MQTT — the readings also show on the camera
   tile), the sleep detail overlays the night's room temperature beneath the timeline, aligned to
-  the same time axis. After a handful of tracked nights, a **"Sleep & room temperature"** card
-  compares wake-ups on the child's warmer vs cooler nights, so you can spot whether a warm room
-  tends to mean more waking — a pattern, not a cause.
+  the same time axis. A **"Sleep & room temperature"** card compares wake-ups on the child's warmer
+  vs cooler nights, so you can spot whether a warm room tends to mean more waking — a pattern, not
+  a cause. It reads the child's 30 most recent tracked nights with a temperature (fixed, not a
+  setting). From the first such night until there are 5 it reads "Collecting nights" with the count
+  so far. From 5, a room whose temperature varied by less than 1°C across those nights is reported
+  as "barely changed": that says nothing about sleep, only that the room did not change enough to
+  compare. Otherwise the nights are split at the median temperature, and the card needs **at least
+  10 nights in each of the cooler group and the warmer group before it says anything about sleep**
+  (fixed, not a setting; the figure is a judgement, not a measurement, and counts nights only, so it
+  is the same in any home or climate). Nights at exactly the median temperature belong to neither
+  group, so the first comparison needs at least 21 nights (10 cooler, 10 warmer and one at the
+  median). Until both groups reach 10 the card reads "Not enough nights yet" with how many it has
+  of each, and shows no verdict and no averages. Once both groups have 10, the wording and numbers
+  are exactly what they were before. Known limit: each night's average temperature is rounded to
+  0.1°C, so in a very steady room where many nights share the median value (all of which join
+  neither group) one group can stay under 10, and the card keeps saying "Not enough nights yet",
+  for as long as the room stays that steady.
 
 ## Adding caregivers
 
@@ -980,12 +1007,40 @@ Set it to the address your proxy connects *from*:
 > `X-Forwarded-For` and slip the login rate limit entirely, which is worse than leaving it unset. If
 > you are not sure, leave it alone.
 
+**IPv6 ranges and IPv4 clients (changed with the `proxy-addr` 2.0.8 update).** An IPv6 range is now
+compared with IPv4 peers only if it is an IPv4-mapped range of /96 or longer, such as `::ffff:a00:0/104`,
+and that behaves exactly like the IPv4 range it maps (`10.0.0.0/8`). Any other IPv6 range, such as `::/1`,
+no longer matches IPv4 peers, and a range written in mapped form but shorter than /96, such as
+`::ffff:0:0/80`, now matches no peer at all. IPv4 addresses and ranges, the named ranges, hop counts and
+`true`/`false` behave as before. If you relied on an IPv6 range to cover IPv4 peers, list the IPv4 address
+or range instead.
+
 A value Nightlight can't make sense of is **ignored, with a warning in the log**, and the safe default
 is used instead — a typo here will never stop the app starting.
 
 **You do not have to set it.** Login attempts are limited per account *and* per source, so even with
 every remote user sharing the proxy's address, one person mistyping their password cannot lock anyone
 else out. Setting `TRUST_PROXY` makes the per-source half meaningful as well.
+
+### `STUN_SERVERS` — which STUN servers Low latency (WebRTC) uses
+
+| Variable | Default | What it does |
+|---|---|---|
+| `STUN_SERVERS` | `stun:stun.l.google.com:19302` (Google's public server) | Comma-separated list of `stun:host` or `stun:host:port` URLs, used by the browser **and** by the bundled MediaMTX, and the only STUN hosts the browser is allowed to contact. |
+
+| You set | Result |
+|---|---|
+| nothing (variable unset) | Google's public STUN server, as in earlier versions |
+| blank (`STUN_SERVERS=`, or the field cleared on Unraid) | **No STUN server.** Nothing contacts Google or anyone else |
+| `stun:stun.example.org:3478` or a comma-separated list | exactly those servers (port defaults to 3478) |
+| anything that is not a `stun:` URL (`turn:`, `stuns:`, a typo) | that entry is ignored, with **one** warning in the log; if no entry is valid, STUN is **off** (never silently back to Google) |
+
+STUN is only how a WebRTC peer learns its public address. **Watching on your home network never needs it.** A viewer
+outside your network who is behind NAT may fail to connect without it (Compatibility (HLS) mode still works). With the
+default, Google sees the viewer's public IP address and when each live view connected. `turn:` relay servers are not
+supported. Change takes effect on restart. The log shows `[stun] ...` at start-up.
+
+On Unraid it is the **STUN Servers** field: it ships with the Google URL, so clear the field to turn STUN off.
 
 ### `CLOUDFLARE_ANALYTICS` — Cloudflare Web Analytics through Cloudflare's proxy
 
@@ -1198,6 +1253,13 @@ browser you happen to be using.
 
 - **Camera shows "No signal"**: double check the RTSP URL works with a tool like VLC
   (Media → Open Network Stream) first — if VLC can't play it, the app won't either.
+- **The app shows "Can't reach Nightlight" instead of the sign-in screen**: the app could not get an answer
+  from the server (it is restarting, off, or this device is not on the home network), so it does not know
+  whether you are signed in and does not ask for a password that could not be checked anyway. It retries
+  by itself (after 5 seconds, then 10, 20, and every 30 seconds from then on) and you can press **Try again**
+  at any time; once the server answers you land in the app, or on the sign-in screen if you really were signed
+  out. Your sign-in is kept while it retries. Only a server that answers "not signed in" shows the sign-in screen,
+  and so does **Sign out**, at once.
 - **Video won't connect from a phone but the pages load fine**: confirm the device is on
   the same LAN (for Low latency mode) — see "Remote / internet access" above if it's
   actually a different network.
@@ -1240,6 +1302,16 @@ cd nightlight
 docker build -t nightlight .
 docker run -d --name nightlight --network host --stop-timeout 30 \
   -e PUID=99 -e PGID=100 -v ./data:/app/data nightlight
+```
+
+### Running the tests
+
+The tests need **Node 24** (the version in `.nvmrc`; `engines` in both `package.json` files says `>=24`, and the Docker image and CI use the same). On an older Node the backend suite does not fail in one place with one reason: 16 test files fail in ways that look unrelated (`The requested module 'child_process' does not provide an export named 'spawn'`, `mock.module is not a function`). The cause is that the tests replace modules with `mock.module(name, { exports })`, and Node 22 ignores `exports`, so the mocked module has no named exports to import. `backend/test/node-version-pin.test.js` fails first, with that explanation, when the suite runs on a Node that cannot do it.
+
+```bash
+nvm use                      # reads .nvmrc
+cd backend && npm ci && npm test
+cd ../frontend && npm ci && npm test
 ```
 
 ## Project layout

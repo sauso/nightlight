@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { requireAuth } from '../middleware/auth.js';
+import { parseStunServers } from '../lib/stunServers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,7 +31,10 @@ const build = {
 const router = Router();
 
 router.get('/', requireAuth, (req, res) => {
-  res.json({ version, ...build });
+  // stunServers (#558): the ICE servers the live-view player must use, from the STUN_SERVERS setting. Here
+  // (signed-in, and already fetched by the app) rather than baked into the frontend build, so the browser
+  // follows the operator's setting. Read per request, not at load, so a test can change the environment.
+  res.json({ version, ...build, stunServers: parseStunServers(process.env.STUN_SERVERS).urls });
 });
 
 export default router;

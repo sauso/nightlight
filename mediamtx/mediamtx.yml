@@ -37,10 +37,14 @@ webrtcLocalUDPAddress: :8189
 # Safe to leave empty for LAN-only use.
 webrtcAdditionalHosts: []
 
-# Public STUN server, so both sides of the connection can discover their public-facing
-# address when connecting over the internet. Harmless and unused for LAN-only viewing.
-webrtcICEServers2:
-  - url: stun:stun.l.google.com:19302
+# STUN servers, so both sides of the connection can discover their public-facing address when
+# connecting over the internet. Not needed for LAN-only viewing.
+# ⚠️ EMPTY ON PURPOSE. The list comes from the STUN_SERVERS setting (a public server by default,
+# none when blank; see backend/src/lib/stunServers.js and the README). At start the backend copies this file to
+# the temp directory with this exact line replaced by the configured list, and starts MediaMTX from the
+# copy. Do not put a server here: it would be replaced, and if the copy could not be written it would be the
+# one MediaMTX used, contacting a server the operator may have turned off (#558).
+webrtcICEServers2: []
 
 # --- HLS output (pure HTTP/TCP - for remote viewing through the reverse proxy on
 # port 443 only, trading some latency for not needing any UDP port forwarded at all) ---

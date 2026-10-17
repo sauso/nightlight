@@ -190,7 +190,11 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
           corrected night: recomputing never replaces a person's own times. */}
       {night?.corrected && (
         <div className="sleep-detail__recompute-note">
-          These times are the ones you told us, and recomputing never replaces them. To change them, use{' '}
+          {/* #521: Recompute is now reachable on a night flagged "no one was in the bed", where there are no
+              times to speak of; "these times" would be false there. */}
+          {night.nobody_in_bed
+            ? 'Your answer that no one was in the bed is kept, and recomputing never replaces it. To change it, use '
+            : 'These times are the ones you told us, and recomputing never replaces them. To change them, use '}
           <strong>Change what you told us about this night</strong>.
         </div>
       )}

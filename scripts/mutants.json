@@ -1094,7 +1094,7 @@
   {
     "label": "WEBRTC_UDP_PORT: a valid port is never copied into the MediaMTX child's env",
     "file": "backend/src/lib/mediamtxProcess.js",
-    "find": "if (udp.value) env.MTX_WEBRTCLOCALUDPADDRESS = udp.value;",
+    "find": "if (udp.value) extra.MTX_WEBRTCLOCALUDPADDRESS = udp.value;",
     "replace": "void udp.value;",
     "expect": "killed",
     "tests": ["webrtc-udp-port-launch.test.js"]
@@ -1298,13 +1298,206 @@
   {
     "label": "logger: stop redacting credentials at the choke point",
     "file": "backend/src/lib/logger.js",
-    "find": "const line = redactCredentials(`${timestamp()}",
-    "replace": "const line = ((x)=>x)(`${timestamp()}",
+    "find": "const line = neutraliseControlChars(redactCredentials(`${timestamp()}",
+    "replace": "const line = neutraliseControlChars(((x)=>x)(`${timestamp()}",
     "expect": "killed",
     "tests": [
       "camera-report-route.test.js"
     ],
     "note": "server_logs is republished verbatim inside the diagnostics bundle, under a note promising no passwords. Per-producer redaction was tried and lib/onvif.js immediately defeated it."
+  },
+  {
+    "label": "#539 logger: do not neutralise control characters at the choke point",
+    "file": "backend/src/lib/logger.js",
+    "find": "const line = neutraliseControlChars(redactCredentials(`${timestamp()}",
+    "replace": "const line = ((x) => x)(redactCredentials(`${timestamp()}",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "note": "A camera name with a newline forged a second timestamped line in docker logs and the support bundle."
+  },
+  {
+    "label": "#539 logger: leave C1 controls (U+0080-U+009F, incl. NEL U+0085) unescaped",
+    "file": "backend/src/lib/logger.js",
+    "find": "\\u007f-\\u009f\\u2028",
+    "replace": "\\u007f\\u2028",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "note": "NEL is a line break to some viewers; the class test walks every C1 code point."
+  },
+  {
+    "label": "#539 logger: leave U+2028 / U+2029 unescaped",
+    "file": "backend/src/lib/logger.js",
+    "find": "\\u009f\\u2028\\u2029]",
+    "replace": "\\u009f]",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "note": "Unicode line and paragraph separators break lines in JS-based viewers."
+  },
+  {
+    "label": "#539 logger: also escape tab (would change ordinary child-process lines)",
+    "file": "backend/src/lib/logger.js",
+    "find": "[\\u0000-\\u0008\\u000a-",
+    "replace": "[\\u0000-\\u000a-",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "note": "Pins the deliberate choice to keep tab, so normal lines stay byte-identical."
+  },
+  {
+    "label": "#539 logger: escape before redacting instead of after",
+    "file": "backend/src/lib/logger.js",
+    "find": "const line = neutraliseControlChars(redactCredentials(`${timestamp()} [${level}] ${args\n    .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))\n    .join(' ')}`));",
+    "replace": "const line = redactCredentials(neutraliseControlChars(`${timestamp()} [${level}] ${args\n    .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))\n    .join(' ')}`));",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "namePattern": "redaction sees the real newline",
+    "note": "Escaped first, the newline becomes printable text and the query-stripping redaction swallows the rest of the line."
+  },
+  {
+    "label": "#539 logger: also escape U+200B (zero-width space)",
+    "file": "backend/src/lib/logger.js",
+    "find": "\\u2028\\u2029]/g",
+    "replace": "\\u2028\\u2029\\u200b]/g",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "namePattern": "byte-for-byte unchanged",
+    "note": "Survived the first review of PR #709: nothing said what must NOT change outside the control classes."
+  },
+  {
+    "label": "#539 logger: also escape U+2027 (the code point before the line separator)",
+    "file": "backend/src/lib/logger.js",
+    "find": "\\u2028\\u2029]/g",
+    "replace": "\\u2027-\\u2029]/g",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "namePattern": "byte-for-byte unchanged",
+    "note": "Pins the upper edge of the separator pair."
+  },
+  {
+    "label": "#539 logger: widen the C1 block by one, to U+00A0 (no-break space)",
+    "file": "backend/src/lib/logger.js",
+    "find": "\\u007f-\\u009f",
+    "replace": "\\u007f-\\u00a0",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "namePattern": "byte-for-byte unchanged",
+    "note": "Pins the upper edge of the C1 range: U+00A0 is printable and common in typed names."
+  },
+  {
+    "label": "#539 logger: widen DEL down to U+007E (tilde)",
+    "file": "backend/src/lib/logger.js",
+    "find": "\\u001f\\u007f-",
+    "replace": "\\u001f\\u007e-",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "namePattern": "byte-for-byte unchanged",
+    "note": "Pins the lower edge of the DEL/C1 range."
+  },
+  {
+    "label": "#539 logger: ERROR-level lines skip neutralising",
+    "file": "backend/src/lib/logger.js",
+    "find": "const line = neutraliseControlChars(redactCredentials(",
+    "replace": "const line = (level === 'ERROR' ? (x) => x : neutraliseControlChars)(redactCredentials(",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "namePattern": "ERROR level is neutralised",
+    "note": "Survived the first review of PR #709: the ERROR fixtures were JSON objects, already escaped by JSON.stringify. The new fixtures are a string message and the stacks errorHandler and reportGuardFailure really log."
+  },
+  {
+    "label": "#539 redactor: a name's logged spelling (control characters escaped) is not searched for",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "if (logged !== literal) out.push(logged);",
+    "replace": "if (false) out.push(logged);",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "control character",
+    "note": "PR #709 review (P1): a camera, child or account name containing a newline reached the diagnostics bundle as Private\\nName, and findLeak (same matcher) passed it."
+  },
+  {
+    "label": "#539 redactor: a logger escape is not a word boundary (a name right after an escaped line break)",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "|(?<=${escapesTheLoggerWrites().map(escapeRe).join('|')})",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "control character",
+    "note": "The escape ends in a letter or digit, so a name after a newline in a multi-line error or stack read as the tail of a longer word and was published."
+  },
+  {
+    "label": "#539 redactor: the logger's escapes are probed over Latin-1 only (misses U+2028 / U+2029)",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "unit <= 0xffff",
+    "replace": "unit <= 0xff",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js"],
+    "namePattern": "right after an escaped control character",
+    "note": "The probe must cover every UTF-16 code unit the logger's class can match."
+  },
+  {
+    "label": "#539 redactor: alternatives ordered by the name's length, not the matched spelling's",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "b.v.length - a.v.length",
+    "replace": "b.e.text.length - a.e.text.length",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js"],
+    "namePattern": "longest SPELLING first",
+    "note": "A logged spelling is up to six times longer than its name; a shorter name that is a prefix of it would win and publish the rest."
+  },
+  {
+    "label": "#539 redactor: the escape probe starts at U+0001 (NUL's escape is not a boundary)",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "for (let unit = 0; unit <= 0xffff; unit++)",
+    "replace": "for (let unit = 1; unit <= 0xffff; unit++)",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "#709 exhaustive",
+    "note": "Round-2 review of PR #709: survived the nine sampled classes; a name right after an escaped NUL was published."
+  },
+  {
+    "label": "#539 redactor: a name's logged spelling keeps NUL raw",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "const logged = neutraliseControlChars(literal);",
+    "replace": "const logged = neutraliseControlChars(literal).split('\\\\x00').join(String.fromCharCode(0));",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "#709 exhaustive",
+    "note": "Round-2 review of PR #709: the logged spelling must be exactly what the logger writes for every unit it escapes."
+  },
+  {
+    "label": "#539 redactor: the first escape (NUL) is dropped from the boundary set",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "loggerEscapes = [...out];",
+    "replace": "loggerEscapes = [...out].slice(1);",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "#709 exhaustive"
+  },
+  {
+    "label": "#539 redactor: the last escape (U+2029) is dropped from the boundary set",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "loggerEscapes = [...out];",
+    "replace": "loggerEscapes = [...out].slice(0, -1);",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "#709 exhaustive"
+  },
+  {
+    "label": "#539 redactor: one middle escape (ESC) is dropped from the boundary set",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "if (written !== ch) out.add(written);",
+    "replace": "if (written !== ch && unit !== 0x1b) out.add(written);",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
+    "namePattern": "#709 exhaustive"
+  },
+  {
+    "label": "#539 logger: widen the separator pair to U+2028-U+2030",
+    "file": "backend/src/lib/logger.js",
+    "find": "\\u2028\\u2029]/g",
+    "replace": "\\u2028-\\u2030]/g",
+    "expect": "killed",
+    "tests": ["logger-control-chars.test.js"],
+    "namePattern": "exhaustive walk of the BMP",
+    "note": "Round-2 review of PR #709: survived the sampled code points; U+202F and U+2030 in ordinary text would be mangled."
   },
   {
     "label": "logger raw: bypass the credential-redacting choke point",
@@ -2620,34 +2813,10 @@
     "tests": ["settingsRecording.test.jsx"]
   },
   {
-    "label": "#449 M5: the on-demand switch ignores the optimistic pendingOndemand value",
-    "file": "frontend/src/pages/SettingsRecording.jsx",
-    "find": "  const ondemandOn = pendingOndemand ?? (form.ondemand_enabled ?? true);",
-    "replace": "  const ondemandOn = form.ondemand_enabled ?? true;",
-    "expect": "killed",
-    "tests": ["settingsRecording.test.jsx"]
-  },
-  {
-    "label": "#449 M6: the on-demand switch is not disabled while its toggle is in flight",
-    "file": "frontend/src/pages/SettingsRecording.jsx",
-    "find": "                disabled={toggleBusy || busy}",
-    "replace": "                disabled={busy}",
-    "expect": "killed",
-    "tests": ["settingsRecording.test.jsx"]
-  },
-  {
     "label": "#449 M7: Save drops commit(response) and relies on refresh() instead",
     "file": "frontend/src/pages/SettingsRecording.jsx",
     "find": "        commit(response);\r\n        markSaved(payload);",
     "replace": "        refresh();\r\n        markSaved(payload);",
-    "expect": "killed",
-    "tests": ["settingsRecording.test.jsx"]
-  },
-  {
-    "label": "#449 M8: Save is not disabled while the toggle is in flight",
-    "file": "frontend/src/pages/SettingsRecording.jsx",
-    "find": "disabled={busy || toggleBusy}",
-    "replace": "disabled={busy}",
     "expect": "killed",
     "tests": ["settingsRecording.test.jsx"]
   },
@@ -13836,8 +14005,8 @@
   {
     "label": "W5 role UI M19: the Children tab shows Add child to a caregiver",
     "file": "frontend/src/pages/Children.jsx",
-    "find": "        {isAdmin && (\r\n          <button className=\"btn btn-primary\" onClick={() => navigate('/children/new')}",
-    "replace": "        {true && (\r\n          <button className=\"btn btn-primary\" onClick={() => navigate('/children/new')}",
+    "find": "        {isAdmin && !blocked && (\r\n          <button className=\"btn btn-primary\" onClick={() => navigate('/children/new')}",
+    "replace": "        {true && !blocked && (\r\n          <button className=\"btn btn-primary\" onClick={() => navigate('/children/new')}",
     "expect": "killed",
     "tests": ["children.test.jsx"],
     "namePattern": "only an admin gets Add child"
@@ -15901,8 +16070,8 @@
   {
     "label": "#547 lib: shortest literal first, so a longer name is split",
     "file": "backend/src/lib/identityRedaction.js",
-    "find": ".sort((a, b) => b.text.length - a.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));",
-    "replace": ".sort((a, b) => a.text.length - b.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));",
+    "find": "alternatives.sort((a, b) => b.v.length - a.v.length || Number(b.e.keep) - Number(a.e.keep) || a.v.localeCompare(b.v));",
+    "replace": "alternatives.sort((a, b) => a.v.length - b.v.length || Number(b.e.keep) - Number(a.e.keep) || a.v.localeCompare(b.v));",
     "expect": "killed",
     "tests": ["identity-redaction.test.js"],
     "namePattern": "longest literal first"
@@ -15919,8 +16088,8 @@
   {
     "label": "#547 lib: no boundary before a name",
     "file": "backend/src/lib/identityRedaction.js",
-    "find": "const NOT_BEFORE = '(?<![\\\\p{L}\\\\p{N}])';",
-    "replace": "const NOT_BEFORE = '';",
+    "find": "(?:(?<![\\\\p{L}\\\\p{N}])|",
+    "replace": "(?:(?<=)|",
     "expect": "killed",
     "tests": ["identity-redaction.test.js"],
     "namePattern": "word"
@@ -15979,8 +16148,8 @@
   {
     "label": "#547 lib: an issued alias beats a longer name that starts with it (Camera 1 Nursery leaks Nursery)",
     "file": "backend/src/lib/identityRedaction.js",
-    "find": ".sort((a, b) => b.text.length - a.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));",
-    "replace": ".sort((a, b) => Number(b.keep) - Number(a.keep) || b.text.length - a.text.length || a.text.localeCompare(b.text));",
+    "find": "alternatives.sort((a, b) => b.v.length - a.v.length || Number(b.e.keep) - Number(a.e.keep) || a.v.localeCompare(b.v));",
+    "replace": "alternatives.sort((a, b) => Number(b.e.keep) - Number(a.e.keep) || b.v.length - a.v.length || a.v.localeCompare(b.v));",
     "expect": "killed",
     "tests": ["identity-redaction.test.js", "diagnostics-identity.test.js"],
     "namePattern": "Camera 1"
@@ -16575,8 +16744,8 @@
   {
     "label": "#562 WHEP player: the call site stores the raw Location header again",
     "file": "frontend/src/components/WhepPlayer.jsx",
-    "find": "resourceUrlRef.current = resolveWhepResource(",
-    "replace": "resourceUrlRef.current = ((rawLocation) => rawLocation)(",
+    "find": "resourceUrl = resolveWhepResource(",
+    "replace": "resourceUrl = ((rawLocation) => rawLocation)(",
     "expect": "killed",
     "tests": ["whepPlayer.test.jsx"],
     "namePattern": "WhepPlayer session DELETE"
@@ -17743,5 +17912,3242 @@
       "corrected-empty.test.js"
     ],
     "namePattern": "an `empty` night with a correction becomes ok"
+  },
+  {
+    "label": "#553 childEnv: JWT_SECRET joins the allowlist",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "['PATH', 'TZ', 'LANG', 'LC_ALL']);\nexport const MEDIAMTX",
+    "replace": "['PATH', 'TZ', 'LANG', 'LC_ALL', 'JWT_SECRET']);\nexport const MEDIAMTX",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "a spawned child receives exactly the allowlist|childEnv\\(\\) as data"
+  },
+  {
+    "label": "#553 childEnv: MTX_* is passed to every child, not only MediaMTX",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "  if (mediamtx) {",
+    "replace": "  if (true) {",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "a spawned child receives exactly the allowlist|childEnv\\(\\) as data"
+  },
+  {
+    "label": "#553 childEnv: the MTX_ prefix match becomes a substring match",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "name.startsWith(MEDIAMTX_PREFIX)",
+    "replace": "name.includes(MEDIAMTX_PREFIX)",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "childEnv\\(\\) as data"
+  },
+  {
+    "label": "#553 childEnv: an inherited value beats the launch-computed one",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "return { ...env, ...extra };",
+    "replace": "return { ...extra, ...env };",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "a spawned child receives exactly the allowlist|childEnv\\(\\) as data"
+  },
+  {
+    "label": "#553 childEnv: unset names are copied as undefined",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "if (parent[name] !== undefined) env[name] = parent[name];\n  }\n  if (mediamtx)",
+    "replace": "env[name] = parent[name];\n  }\n  if (mediamtx)",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "a spawned child receives exactly the allowlist|childEnv\\(\\) as data"
+  },
+  {
+    "label": "#553 spawnChild: the allowlisted env is not applied (full environment inherited)",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "{ ...rest, env: childEnv({ mediamtx, extra }) }",
+    "replace": "{ ...rest }",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "a spawned child receives exactly the allowlist"
+  },
+  {
+    "label": "#553 spawnChild: a caller-supplied env wins over the allowlist",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "{ ...rest, env: childEnv({ mediamtx, extra }) }",
+    "replace": "{ ...rest, env: options.env ?? childEnv({ mediamtx, extra }) }",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "a spawned child receives exactly the allowlist"
+  },
+  {
+    "label": "#553 mediamtxProcess: MediaMTX is launched without its MTX_* overrides",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "{ mediamtx: true, extra }",
+    "replace": "{ extra }",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "every process the backend starts goes through the helper"
+  },
+  {
+    "label": "#553 motionDetector: ffmpeg is also handed the MediaMTX overrides",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "spawnChild('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] })",
+    "replace": "spawnChild('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] }, { mediamtx: true })",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "every process the backend starts goes through the helper"
+  },
+  {
+    "label": "#553 childEnv: the MTX_ prefix loses its underscore (MTXFOO reaches MediaMTX)",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "export const MEDIAMTX_PREFIX = 'MTX_';",
+    "replace": "export const MEDIAMTX_PREFIX = 'MTX';",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "childEnv\\(\\) as data"
+  },
+  {
+    "label": "#553 childEnv: an MTX_* name with no value is copied as an undefined key",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "name.startsWith(MEDIAMTX_PREFIX) && parent[name] !== undefined) env[name]",
+    "replace": "name.startsWith(MEDIAMTX_PREFIX)) env[name]",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "childEnv\\(\\) as data"
+  },
+  {
+    "label": "#553 mediamtxProcess: an inherited MTX_WEBRTCADDITIONALHOSTS beats the host list computed at launch",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "      extra.MTX_WEBRTCADDITIONALHOSTS = advertisedKey;",
+    "replace": "      if (process.env.MTX_WEBRTCADDITIONALHOSTS === undefined) extra.MTX_WEBRTCADDITIONALHOSTS = advertisedKey;",
+    "expect": "killed",
+    "tests": [
+      "webrtc-udp-port-launch.test.js"
+    ],
+    "namePattern": "#553 the MediaMTX child gets the host list computed at launch"
+  },
+  {
+    "label": "#553 mediamtxProcess: the host list computed at launch never reaches MediaMTX",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "      extra.MTX_WEBRTCADDITIONALHOSTS = advertisedKey;",
+    "replace": "      void advertisedKey;",
+    "expect": "killed",
+    "tests": [
+      "webrtc-udp-port-launch.test.js"
+    ],
+    "namePattern": "#553 the MediaMTX child gets the host list computed at launch"
+  },
+  {"label": "#365 insights: the minimum-nights gate is removed (a group of one gets a verdict again)", "file": "backend/src/lib/sleepAnalysis.js", "find": "  else if (cool.length < INSIGHT_MIN_GROUP_NIGHTS || warm.length < INSIGHT_MIN_GROUP_NIGHTS) verdict = 'not_enough_nights';\n", "replace": "", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 the boundary"},
+  {"label": "#365 insights: the cooler group is off by one (9 nights pass)", "file": "backend/src/lib/sleepAnalysis.js", "find": "cool.length < INSIGHT_MIN_GROUP_NIGHTS ||", "replace": "cool.length < INSIGHT_MIN_GROUP_NIGHTS - 1 ||", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 the boundary"},
+  {"label": "#365 insights: the cooler group is off by one the other way (10 nights fail)", "file": "backend/src/lib/sleepAnalysis.js", "find": "cool.length < INSIGHT_MIN_GROUP_NIGHTS ||", "replace": "cool.length <= INSIGHT_MIN_GROUP_NIGHTS ||", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 the boundary"},
+  {"label": "#365 insights: the warmer group is off by one (9 nights pass)", "file": "backend/src/lib/sleepAnalysis.js", "find": "|| warm.length < INSIGHT_MIN_GROUP_NIGHTS)", "replace": "|| warm.length < INSIGHT_MIN_GROUP_NIGHTS - 1)", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 the boundary"},
+  {"label": "#365 insights: the warmer group is off by one the other way (10 nights fail)", "file": "backend/src/lib/sleepAnalysis.js", "find": "|| warm.length < INSIGHT_MIN_GROUP_NIGHTS)", "replace": "|| warm.length <= INSIGHT_MIN_GROUP_NIGHTS)", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 the boundary"},
+  {"label": "#365 insights: one short group is enough to pass (|| becomes &&)", "file": "backend/src/lib/sleepAnalysis.js", "find": "cool.length < INSIGHT_MIN_GROUP_NIGHTS || warm.length < INSIGHT_MIN_GROUP_NIGHTS)", "replace": "cool.length < INSIGHT_MIN_GROUP_NIGHTS && warm.length < INSIGHT_MIN_GROUP_NIGHTS)", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 the boundary"},
+  {"label": "#365 insights: the minimum is 20 nights in total, not 10 in each group (9 cooler + 11 warmer passes)", "file": "backend/src/lib/sleepAnalysis.js", "find": "cool.length < INSIGHT_MIN_GROUP_NIGHTS || warm.length < INSIGHT_MIN_GROUP_NIGHTS) verdict", "replace": "cool.length + warm.length < 2 * INSIGHT_MIN_GROUP_NIGHTS) verdict", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 the boundary"},
+  {"label": "#365 insights: only a strong link is withheld (a short group still gets \"no clear link\")", "file": "backend/src/lib/sleepAnalysis.js", "find": "(cool.length < INSIGHT_MIN_GROUP_NIGHTS || warm.length < INSIGHT_MIN_GROUP_NIGHTS) verdict = 'not_enough_nights';", "replace": "((cool.length < INSIGHT_MIN_GROUP_NIGHTS || warm.length < INSIGHT_MIN_GROUP_NIGHTS) && rWakes != null && Math.abs(rWakes) >= INSIGHT_R) verdict = 'not_enough_nights';", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 a short group withholds every verdict"},
+  {"label": "#365 insights: the minimum is 9, not 10", "file": "backend/src/lib/sleepAnalysis.js", "find": "const INSIGHT_MIN_GROUP_NIGHTS = 10;", "replace": "const INSIGHT_MIN_GROUP_NIGHTS = 9;", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 the boundary"},
+  {"label": "#365 insights: the gate runs before 'flat' (a room that never changes is told to keep tracking)", "file": "backend/src/lib/sleepAnalysis.js", "find": "  if (spread < INSIGHT_TEMP_SPREAD) verdict = 'flat';\n  else if (cool.length < INSIGHT_MIN_GROUP_NIGHTS || warm.length < INSIGHT_MIN_GROUP_NIGHTS) verdict = 'not_enough_nights';\n", "replace": "  if (cool.length < INSIGHT_MIN_GROUP_NIGHTS || warm.length < INSIGHT_MIN_GROUP_NIGHTS) verdict = 'not_enough_nights';\n  else if (spread < INSIGHT_TEMP_SPREAD) verdict = 'flat';\n", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 a room that never changes"},
+  {"label": "#365 insights: the correlation threshold moves once enough nights exist (golden output changes)", "file": "backend/src/lib/sleepAnalysis.js", "find": "const INSIGHT_R = 0.35;", "replace": "const INSIGHT_R = 0.8;", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 golden"},
+  {"label": "#365 insights: min_group_nights is not returned", "file": "backend/src/lib/sleepAnalysis.js", "find": "    min_group_nights: INSIGHT_MIN_GROUP_NIGHTS, // additive", "replace": "    // additive", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 golden"},
+  {"label": "#365 card: the not-enough-nights verdict is ignored and the comparison is shown", "file": "frontend/src/pages/SleepDetail.jsx", "find": "if (ins.verdict === 'not_enough_nights') {", "replace": "if (false) {", "expect": "killed", "tests": ["sleepDetail.test.jsx"], "namePattern": "too few nights in a group"},
+  {"label": "#365 card: the target is hard-written instead of read from the server", "file": "frontend/src/pages/SleepDetail.jsx", "find": "const need = ins.min_group_nights;", "replace": "const need = 5;", "expect": "killed", "tests": ["sleepDetail.test.jsx"], "namePattern": "too few nights in a group"},
+  {"label": "#365 card: a missing (null) cooler group is shown as 1 night, not 0", "file": "frontend/src/pages/SleepDetail.jsx", "find": "cool?.nights ?? 0", "replace": "cool?.nights ?? 1", "expect": "killed", "tests": ["sleepDetail.test.jsx"], "namePattern": "a missing cooler group"},
+  {"label": "#365 card: a missing (null) warmer group is shown as 1 night, not 0", "file": "frontend/src/pages/SleepDetail.jsx", "find": "warm?.nights ?? 0", "replace": "warm?.nights ?? 1", "expect": "killed", "tests": ["sleepDetail.test.jsx"], "namePattern": "a missing warmer group"},
+  {
+    "label": "#697 /me/password: a wrong current password answers 401 again (signs the person out)",
+    "file": "backend/src/routes/auth.js",
+    "find": "return res.status(400).json({ error: 'Current password is incorrect' });",
+    "replace": "return res.status(401).json({ error: 'Current password is incorrect' });",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "PUT /me/password: wrong password answers a 4xx",
+    "note": "api.js clears the token and shows the sign-in form on ANY 401, so this status turns a typo into a sign-out."
+  },
+  {
+    "label": "#697 /me/mfa/disable: a wrong password answers 401 again (signs the person out)",
+    "file": "backend/src/routes/auth.js",
+    "find": "return res.status(400).json({ error: 'Password is incorrect' });",
+    "replace": "return res.status(401).json({ error: 'Password is incorrect' });",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "POST /me/mfa/disable: wrong password answers a 4xx",
+    "note": "Same defect on the two-factor turn-off route."
+  },
+  {
+    "label": "#697 /me/password: a wrong current password signs the user's OTHER devices out",
+    "file": "backend/src/routes/auth.js",
+    "find": "return res.status(400).json({ error: 'Current password is incorrect' });",
+    "replace": "db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.user.id, req.user.sid); return res.status(400).json({ error: 'Current password is incorrect' });",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "PUT /me/password: a wrong password signs no OTHER device out",
+    "note": "Review of #706: survived while every fixture had ONE session, where this delete matches nothing. Killed by a second session for the same user."
+  },
+  {
+    "label": "#697 /me/mfa/disable: a wrong password signs the user's OTHER devices out",
+    "file": "backend/src/routes/auth.js",
+    "find": "return res.status(400).json({ error: 'Password is incorrect' });",
+    "replace": "db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.user.id, req.user.sid); return res.status(400).json({ error: 'Password is incorrect' });",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "POST /me/mfa/disable: a wrong password signs no OTHER device out",
+    "note": "Same two-session test, on the two-factor turn-off route."
+  },
+  {
+    "label": "#697 /me/mfa/disable: a wrong password clears the two-factor secret but leaves mfa_enabled on",
+    "file": "backend/src/routes/auth.js",
+    "find": "return res.status(400).json({ error: 'Password is incorrect' });",
+    "replace": "db.prepare('UPDATE users SET mfa_secret = NULL WHERE id = ?').run(user.id); return res.status(400).json({ error: 'Password is incorrect' });",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "POST /me/mfa/disable: a wrong password leaves the second factor exactly as it was",
+    "note": "Review of #706: survived because the tests checked only mfa_enabled. The account can no longer finish its own second step."
+  },
+  {
+    "label": "#697 /me/mfa/disable: a wrong password clears the backup codes but leaves mfa_enabled on",
+    "file": "backend/src/routes/auth.js",
+    "find": "return res.status(400).json({ error: 'Password is incorrect' });",
+    "replace": "db.prepare('UPDATE users SET mfa_backup_codes = NULL WHERE id = ?').run(user.id); return res.status(400).json({ error: 'Password is incorrect' });",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "POST /me/mfa/disable: a wrong password leaves the second factor exactly as it was",
+    "note": "Needs PLANTED backup codes: the shared fixture's are NULL, and a cleared NULL looks unchanged."
+  },
+  {
+    "label": "#697 api.js: a 401 no longer sends the person to the sign-in form (#/login redirect removed)",
+    "file": "frontend/src/lib/api.js",
+    "find": "window.location.hash = '#/login';",
+    "replace": "void '#/login';",
+    "expect": "killed",
+    "tests": ["wrongPassword697.test.jsx"],
+    "namePattern": "control: a real 401",
+    "note": "Review of #706: survived while the control asserted only the cleared token. Without the redirect, the 'not signed out' checks prove nothing."
+  },
+  {
+    "label": "#697 api.js: api.post sends PUT (verb swap)",
+    "file": "frontend/src/lib/api.js",
+    "find": "  post: (url, body, opts) => request('POST', url, body, opts),",
+    "replace": "  post: (url, body, opts) => request('PUT', url, body, opts),",
+    "expect": "killed",
+    "tests": ["wrongPassword697.test.jsx"],
+    "namePattern": "turning two-factor off: wrong password",
+    "note": "Review of #706: survived while the fake fetch answered the route on any non-GET method. The fake is now strict on method and path."
+  },
+  {
+    "label": "#697 api.js: api.put sends POST (verb swap)",
+    "file": "frontend/src/lib/api.js",
+    "find": "  put: (url, body, opts) => request('PUT', url, body, opts),",
+    "replace": "  put: (url, body, opts) => request('POST', url, body, opts),",
+    "expect": "killed",
+    "tests": ["wrongPassword697.test.jsx"],
+    "namePattern": "Account: wrong current password",
+    "note": "The other half of the verb swap: PUT /auth/me/password."
+  },
+  {
+    "label": "#697 /login/mfa: a backup code is verified but never consumed (replayable)",
+    "file": "backend/src/routes/auth.js",
+    "find": "      db.prepare('UPDATE users SET mfa_backup_codes = ? WHERE id = ?').run(result.hashesJson, user.id);",
+    "replace": "      void result.hashesJson;",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "a backup code is single-use",
+    "note": "Review of #706: killed on 036f6f1, then SURVIVED once the first #697 tests spent alice's 20-login budget (the replay's sign-in got a 429, so it was refused as an expired step). The #697 tests now mint their tokens, and the single-use test asserts a 200 sign-in and an 'Incorrect code' refusal."
+  },
+  {
+    "label": "#536 snapshot.js: redirects are followed again",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "redirect: 'manual'",
+    "replace": "redirect: 'follow'",
+    "expect": "killed",
+    "tests": ["snapshot-http-limits.test.js"],
+    "namePattern": "redirect is not followed"
+  },
+  {
+    "label": "#536 snapshot.js: the streaming cap is off by one (>= instead of >)",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (total > maxBytes) {",
+    "replace": "if (total >= maxBytes) {",
+    "expect": "killed",
+    "tests": ["snapshot-http-limits.test.js"],
+    "namePattern": "streaming boundary"
+  },
+  {
+    "label": "#536 snapshot.js: the streaming cap is removed (an endless body is read until the timeout)",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (total > maxBytes) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["snapshot-http-limits.test.js"],
+    "namePattern": "never ends"
+  },
+  {
+    "label": "#536 snapshot.js: the default cap is 6 MB",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "export const MAX_SNAPSHOT_BYTES = 5 * 1024 * 1024;",
+    "replace": "export const MAX_SNAPSHOT_BYTES = 6 * 1024 * 1024;",
+    "expect": "killed",
+    "tests": ["snapshot-http-limits.test.js"],
+    "namePattern": "default cap is 5 MB"
+  },
+  {
+    "label": "#536 snapshot.js: the declared-length guard is removed (a huge declared body is waited on until the timeout)",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "if (Number.isFinite(declared) && declared > maxBytes) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["snapshot-http-limits.test.js"],
+    "namePattern": "refused without waiting for the body"
+  },
+  {
+    "label": "#536 snapshot.js: an early return leaves the connection open (no abort in the finally)",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "\n    ctrl.abort();\n",
+    "replace": "\n",
+    "expect": "killed",
+    "tests": ["snapshot-http-limits.test.js"],
+    "namePattern": "the connection is closed"
+  },
+  {
+    "label": "#555 photo.js: svg+xml joins the allowlist",
+    "file": "backend/src/lib/photo.js",
+    "find": "(?:jpeg|png|webp);base64,",
+    "replace": "(?:jpeg|png|webp|svg\\+xml);base64,",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "namePattern": "svg and other image types"
+  },
+  {
+    "label": "#555 photo.js: the allowlist is any image/ again",
+    "file": "backend/src/lib/photo.js",
+    "find": "if (!PHOTO_PREFIX.test(photo)) throw",
+    "replace": "if (false) throw",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "svg, gif"
+  },
+  {
+    "label": "#555 photo.js: the cap is back to 700 KB (unreachable behind express.json)",
+    "file": "backend/src/lib/photo.js",
+    "find": "export const MAX_PHOTO_LEN = 90 * 1024;",
+    "replace": "export const MAX_PHOTO_LEN = 700 * 1024;",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "namePattern": "characters is accepted; one more is refused"
+  },
+  {
+    "label": "#555 photo.js: a photo equal to the stored one is checked again",
+    "file": "backend/src/lib/photo.js",
+    "find": "if (typeof photo === 'string' && photo === existing) return existing;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "stored before the allowlist"
+  },
+  {
+    "label": "#555 children.js: PUT no longer checks the colour",
+    "file": "backend/src/routes/children.js",
+    "find": "  if (badColor(color, existing.color)) return res.status(400).json({ error: COLOR_INVALID });\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "PUT with colour"
+  },
+  {
+    "label": "#555 children.js: POST no longer checks the colour",
+    "file": "backend/src/routes/children.js",
+    "find": "  if (badColor(color, null)) return res.status(400).json({ error: COLOR_INVALID });\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "POST with colour"
+  },
+  {
+    "label": "#555 children.js: PUT no longer checks the birthday",
+    "file": "backend/src/routes/children.js",
+    "find": "  if (badBirthday(birthday, existing.birthday)) return res.status(400).json({ error: BIRTHDAY_INVALID });\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "PUT with birthday"
+  },
+  {
+    "label": "#555 children.js: POST no longer checks the birthday",
+    "file": "backend/src/routes/children.js",
+    "find": "  if (badBirthday(birthday, null)) return res.status(400).json({ error: BIRTHDAY_INVALID });\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "POST with birthday"
+  },
+  {
+    "label": "#555 children.js: a non-existent calendar day (2023-02-31) passes the birthday check",
+    "file": "backend/src/routes/children.js",
+    "find": "|| d.toISOString().slice(0, 10) !== birthday;",
+    "replace": "|| false;",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "PUT with birthday"
+  },
+  {
+    "label": "#555 children.js: an unchanged stored colour is checked again",
+    "file": "backend/src/routes/children.js",
+    "find": "if (isBlank(color) || color === existing) return false;",
+    "replace": "if (isBlank(color)) return false;",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "stored before this check"
+  },
+  {
+    "label": "#555 children.js: a blank birthday is refused (the form could no longer clear it)",
+    "file": "backend/src/routes/children.js",
+    "find": "if (isBlank(birthday) || birthday === existing) return false;",
+    "replace": "if (birthday === undefined || birthday === existing) return false;",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "blank clears"
+  },
+  {
+    "label": "#555 children.js: an unchanged stored birthday is checked again",
+    "file": "backend/src/routes/children.js",
+    "find": "if (isBlank(birthday) || birthday === existing) return false;",
+    "replace": "if (isBlank(birthday)) return false;",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "birthday stored before this check"
+  },
+  {
+    "label": "#555 photo.js: an unchanged stored photo above the cap is checked again (the shortcut is length-bounded)",
+    "file": "backend/src/lib/photo.js",
+    "find": "if (typeof photo === 'string' && photo === existing) return existing;",
+    "replace": "if (typeof photo === 'string' && photo === existing && photo.length <= MAX_PHOTO_LEN) return existing;",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "stored earlier is accepted when re-sent unchanged"
+  },
+  {
+    "label": "#555 gotify.js: the token goes back into the query string",
+    "file": "backend/src/lib/gotify.js",
+    "find": "`${c.serverUrl}/message`,",
+    "replace": "`${c.serverUrl}/message?token=${encodeURIComponent(c.appToken)}`,",
+    "expect": "killed",
+    "tests": ["gotify-token-header.test.js"],
+    "namePattern": "X-Gotify-Key"
+  },
+  {
+    "label": "#555 gotify.js: the key header is empty",
+    "file": "backend/src/lib/gotify.js",
+    "find": "'X-Gotify-Key': c.appToken",
+    "replace": "'X-Gotify-Key': ''",
+    "expect": "killed",
+    "tests": ["gotify-token-header.test.js"],
+    "namePattern": "X-Gotify-Key"
+  },
+  {
+    "label": "#555 cameras.js: DELETE leaves the ONVIF cooldown stamp",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  forgetOnvifAlert(req.params.id);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["camera-delete-cooldown-maps.test.js"],
+    "namePattern": "DELETE clears"
+  },
+  {
+    "label": "#555 cameras.js: DELETE leaves the MQTT cooldown stamp",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  forgetMqttMotionAlert(req.params.id);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["camera-delete-cooldown-maps.test.js"],
+    "namePattern": "DELETE clears"
+  },
+  {
+    "label": "#555 onvifMotion.js: forgetOnvifAlert clears every camera",
+    "file": "backend/src/lib/onvifMotion.js",
+    "find": "  lastAlert.delete(cameraId);",
+    "replace": "  lastAlert.clear();",
+    "expect": "killed",
+    "tests": ["camera-delete-cooldown-maps.test.js"],
+    "namePattern": "DELETE clears"
+  },
+  {
+    "label": "#555 mqttClient.js: forgetMqttMotionAlert clears every camera",
+    "file": "backend/src/lib/mqttClient.js",
+    "find": "  motionLastAlert.delete(cameraId);",
+    "replace": "  motionLastAlert.clear();",
+    "expect": "killed",
+    "tests": ["camera-delete-cooldown-maps.test.js"],
+    "namePattern": "DELETE clears"
+  },
+  {
+    "label": "#555 entrypoint.sh: PUID=0 no longer warns",
+    "file": "backend/entrypoint.sh",
+    "find": "if [ -z \"$(printf '%s' \"$PUID\" | tr -d 0)\" ]; then",
+    "replace": "if false; then",
+    "expect": "killed",
+    "tests": ["entrypoint-puid-root.test.js"],
+    "namePattern": "PUID=0"
+  },
+  {
+    "label": "#555 entrypoint.sh: any PUID containing a 0 warns (10, 1000)",
+    "file": "backend/entrypoint.sh",
+    "find": "if [ -z \"$(printf '%s' \"$PUID\" | tr -d 0)\" ]; then",
+    "replace": "if [ \"$(printf '%s' \"$PUID\" | tr -d 0)\" != \"$PUID\" ]; then",
+    "expect": "killed",
+    "tests": ["entrypoint-puid-root.test.js"],
+    "namePattern": "does not warn"
+  },
+  {
+    "label": "#558 STUN: a blank STUN_SERVERS falls back to the Google default instead of meaning none",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "if (raw === undefined) return { urls: [...DEFAULT_STUN_SERVERS], warning: null };",
+    "replace": "if (!String(raw ?? '').trim()) return { urls: [...DEFAULT_STUN_SERVERS], warning: null };",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 blank and whitespace"
+  },
+  {
+    "label": "#558 STUN: a value with no valid entry falls back to Google instead of STUN off",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "  if (bad.length === 0) return { urls, warning: null };",
+    "replace": "  if (bad.length === 0) return { urls, warning: null };\n  if (urls.length === 0) return { urls: [...DEFAULT_STUN_SERVERS], warning: null };",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 every entry invalid"
+  },
+  {
+    "label": "#558 STUN: the host check accepts a space (a value reaches YAML and the CSP unescaped)",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "[0-9A-Fa-f:.]+\\]",
+    "replace": "[0-9A-Fa-f:. ]+\\]",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 stun URL host/port rules"
+  },
+  {
+    "label": "#558 STUN: a missing port is not defaulted to 3478 in the CSP source",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "const port = m[2] === undefined ? DEFAULT_STUN_PORT : Number(m[2]);",
+    "replace": "const port = m[2] === undefined ? 443 : Number(m[2]);",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 stun URL host/port rules"
+  },
+  {
+    "label": "#558 STUN: the MediaMTX template placeholder missing is silently ignored",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "if (!re.test(baseText)) throw new Error(`mediamtx.yml has no \"${MEDIAMTX_ICE_LINE}\" line to fill in`);",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 a template that lost its placeholder"
+  },
+  {
+    "label": "#558 STUN: a failed config write starts MediaMTX from nothing instead of the base file",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "    return basePath;\n  }\n}",
+    "replace": "    return path.join(tmpDir, 'missing.yml');\n  }\n}",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 when the copy cannot be written"
+  },
+  {
+    "label": "#558 STUN CSP: connect-src keeps Google whatever STUN_SERVERS says",
+    "file": "backend/src/lib/cspDirectives.js",
+    "find": "connectSrc: [\"'self'\", ...stunConnect, ...cfConnect],",
+    "replace": "connectSrc: [\"'self'\", 'stun.l.google.com:19302', ...cfConnect],",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 a custom list replaces Google"
+  },
+  {
+    "label": "#558 STUN about: /api/about reports the default list whatever STUN_SERVERS says",
+    "file": "backend/src/routes/about.js",
+    "find": "stunServers: parseStunServers(process.env.STUN_SERVERS).urls",
+    "replace": "stunServers: ['stun:stun.l.google.com:19302']",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 custom: /api/about"
+  },
+  {
+    "label": "#558 STUN index: MediaMTX starts from the raw base file, not the written copy",
+    "file": "backend/src/index.js",
+    "find": "startMediaMTX(mediamtxConfigPath);",
+    "replace": "startMediaMTX(mediamtxBasePath);",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 index.js wiring"
+  },
+  {
+    "label": "#558 STUN frontend: a failed /about lookup falls back to Google instead of no STUN",
+    "file": "frontend/src/lib/iceServers.js",
+    "find": "      if (cached === attempt) cached = null;\n      return [];",
+    "replace": "      if (cached === attempt) cached = null;\n      return [{ urls: ['stun:stun.l.google.com:19302'] }];",
+    "expect": "killed",
+    "tests": [
+      "iceServers.test.jsx"
+    ],
+    "namePattern": "#558 if /api/about cannot be read"
+  },
+  {
+    "label": "#558 STUN frontend: an empty list is turned into a one-entry list with no URLs",
+    "file": "frontend/src/lib/iceServers.js",
+    "find": "return urls.length ? [{ urls }] : [];",
+    "replace": "return [{ urls }];",
+    "expect": "killed",
+    "tests": [
+      "iceServers.test.jsx"
+    ],
+    "namePattern": "#558 an EMPTY list"
+  },
+  {
+    "label": "#567 chown: the whole data directory is walked on every start again",
+    "file": "backend/entrypoint.sh",
+    "find": "if [ -n \"$NEEDS_CHOWN\" ]; then",
+    "replace": "if true; then",
+    "expect": "killed",
+    "tests": [
+      "entrypoint-chown.test.js"
+    ],
+    "namePattern": "#567 chown: a data directory already owned"
+  },
+  {
+    "label": "#567 chown: only the user id is compared, not the group",
+    "file": "backend/entrypoint.sh",
+    "find": "stat -L -c %u:%g \"$DATA_DIR/$f\" 2>/dev/null)\" != \"$WANT_OWNER\"",
+    "replace": "stat -L -c %u \"$DATA_DIR/$f\" 2>/dev/null)\" != \"${WANT_OWNER%%:*}\"",
+    "expect": "killed",
+    "tests": [
+      "entrypoint-chown.test.js"
+    ],
+    "namePattern": "#567 chown: a different PGID"
+  },
+  {
+    "label": "#701 STUN frontend: the ICE-server lookup is not bounded, so a hung /api/about holds the connection back",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "await getIceServersWithin(ICE_LOOKUP_BUDGET_MS)",
+    "replace": "await getIceServersWithin(1e9)",
+    "expect": "killed",
+    "tests": [
+      "iceServers.test.jsx"
+    ],
+    "namePattern": "#701 the lookup gives up after 1s"
+  },
+  {
+    "label": "#701 STUN frontend: the 2s first-connection timer is armed only after an unbounded lookup (the original defect)",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "let pc = null;",
+    "replace": "let pc = null;\n        await getIceServersWithin(1e9);",
+    "expect": "killed",
+    "tests": [
+      "iceServers.test.jsx"
+    ],
+    "namePattern": "#701 onFirstConnectFailed fires at 2s"
+  },
+  {
+    "label": "#701 STUN frontend: the first-connection deadline is 3s instead of 2s",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "}, 2000);",
+    "replace": "}, 3000);",
+    "expect": "killed",
+    "tests": [
+      "iceServers.test.jsx"
+    ],
+    "namePattern": "#701 onFirstConnectFailed fires at 2s"
+  },
+  {
+    "label": "#701 STUN frontend: a player unmounted during the lookup still builds a peer connection",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "getIceServersWithin(ICE_LOOKUP_BUDGET_MS);\n        if (cancelled) return;\n        pc = new",
+    "replace": "getIceServersWithin(ICE_LOOKUP_BUDGET_MS);\n        pc = new",
+    "expect": "killed",
+    "tests": [
+      "iceServers.test.jsx"
+    ],
+    "namePattern": "#701 unmounting while the lookup is pending"
+  },
+  {
+    "label": "#701 STUN frontend: a lookup that takes too long falls back to Google instead of no STUN",
+    "file": "frontend/src/lib/iceServers.js",
+    "find": "setTimeout(() => resolve([]), ms)",
+    "replace": "setTimeout(() => resolve([{ urls: ['stun:stun.l.google.com:19302'] }]), ms)",
+    "expect": "killed",
+    "tests": [
+      "iceServers.test.jsx"
+    ],
+    "namePattern": "#701 the lookup gives up after 1s|#701 getIceServersWithin answers"
+  },
+  {
+    "label": "#701 STUN index: the MediaMTX start is commented out but its text is still in the file (a substring test passed)",
+    "file": "backend/src/index.js",
+    "find": "startMediaMTX(mediamtxConfigPath);",
+    "replace": "void 0; // startMediaMTX(mediamtxConfigPath);",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#558 MediaMTX is started from the config written"
+  },
+  {
+    "label": "#701 STUN parser: the first DNS label has no length limit",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "^stun:((?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}",
+    "replace": "^stun:((?:[A-Za-z0-9](?:[A-Za-z0-9-]*",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#701 a DNS label is at most 63"
+  },
+  {
+    "label": "#701 STUN parser: a later DNS label has no length limit",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}",
+    "replace": "(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*",
+    "expect": "killed",
+    "tests": [
+      "stun-servers.test.js"
+    ],
+    "namePattern": "#701 a DNS label is at most 63"
+  },
+  {
+    "label": "#701 chown: the -shm file is dropped from the ownership sentinel list",
+    "file": "backend/entrypoint.sh",
+    "find": "for f in . babymonitor.db babymonitor.db-wal babymonitor.db-shm .jwt_secret; do",
+    "replace": "for f in . babymonitor.db babymonitor.db-wal .jwt_secret; do",
+    "expect": "killed",
+    "tests": [
+      "entrypoint-chown.test.js"
+    ],
+    "namePattern": "#701 chown: the sentinel loop"
+  },
+  {
+    "label": "#701 review chown: only the data directory is checked, not the files in it (mutant E1, which survived every non-root run)",
+    "file": "backend/entrypoint.sh",
+    "find": "stat -L -c %u:%g \"$DATA_DIR/$f\" 2>/dev/null)\" != \"$WANT_OWNER\"",
+    "replace": "stat -L -c %u:%g \"$DATA_DIR\" 2>/dev/null)\" != \"$WANT_OWNER\"",
+    "expect": "killed",
+    "tests": ["entrypoint-chown.test.js"],
+    "namePattern": "or .jwt_secret owned by someone else walks the tree, as any user"
+  },
+  {
+    "label": "#701 review chown: PUID/PGID are compared as written again (PUID=099 walks the whole tree on every start)",
+    "file": "backend/entrypoint.sh",
+    "find": "WANT_OWNER=\"$(canonical_id \"$PUID\"):$(canonical_id \"$PGID\")\"",
+    "replace": "WANT_OWNER=\"$PUID:$PGID\"",
+    "expect": "killed",
+    "tests": ["entrypoint-chown.test.js"],
+    "namePattern": "a PUID and PGID written with leading zeros are compared as numbers"
+  },
+  {
+    "label": "#701 review chown: an all-zero PUID canonicalises to an empty id instead of 0",
+    "file": "backend/entrypoint.sh",
+    "find": "printf '%s' \"${_cid:-0}\"",
+    "replace": "printf '%s' \"$_cid\"",
+    "expect": "killed",
+    "tests": ["entrypoint-chown.test.js"],
+    "namePattern": "PUID=000 PGID=00 is 0:0"
+  },
+  {
+    "label": "#701 review STUN parser: the start anchor is dropped (YAML smuggled in before a valid URL is accepted)",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "const STUN_URL = /^stun:",
+    "replace": "const STUN_URL = /stun:",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "#701 review: an entry must be a stun: URL from its first character"
+  },
+  {
+    "label": "#701 review STUN parser: the pattern is multi-line (a valid first line lets YAML through after a line break)",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "(?::(\\d{1,5}))?$/;",
+    "replace": "(?::(\\d{1,5}))?$/m;",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "#701 review: an entry must be a stun: URL from its first character"
+  },
+  {
+    "label": "#701 review iceServers.js: an /about with no stunServers field is remembered as success (no STUN until a reload)",
+    "file": "frontend/src/lib/iceServers.js",
+    "find": "if (!urls) throw new Error('no stunServers in /about');",
+    "replace": "if (!urls) return [];",
+    "expect": "killed",
+    "tests": ["iceServers.test.jsx"],
+    "namePattern": "#701 review an /about with no stunServers field is NOT remembered"
+  },
+  {
+    "label": "#701 review iceServers.js: entries that are not text are passed to the peer connection",
+    "file": "frontend/src/lib/iceServers.js",
+    "find": "about.stunServers.filter((u) => typeof u === 'string')",
+    "replace": "about.stunServers",
+    "expect": "killed",
+    "tests": ["iceServers.test.jsx"],
+    "namePattern": "#701 review entries that are not text are dropped"
+  },
+  {
+    "label": "#742 review httpNotify.js: redactSecrets drops the JSON-escaped spelling (a quote or backslash in the token is echoed back escaped and survives)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "const spellings = [s, JSON.stringify(s).slice(1, -1)];",
+    "replace": "const spellings = [s];",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets"
+  },
+  {
+    "label": "#742 review httpNotify.js: redactSecrets drops the percent-encoded spelling (a space or symbol echoed as %XX survives)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "spellings.push(enc, enc.replace(/%20/g, '+'));",
+    "replace": "void enc;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets"
+  },
+  {
+    "label": "#742 review httpNotify.js: the JSON spelling keeps its closing quote (R1: matches only where a quote follows, and eats it)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "JSON.stringify(s).slice(1, -1)];",
+    "replace": "JSON.stringify(s).slice(1)];",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets: the JSON-escaped spelling is cut exactly"
+  },
+  {
+    "label": "#742 review httpNotify.js: only the first space of a form-encoded echo becomes + (R2)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "enc.replace(/%20/g, '+')",
+    "replace": "enc.replace(/%20/, '+')",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets: a token with two spaces"
+  },
+  {
+    "label": "#742 review httpNotify.js: encodeURIComponent is not guarded (D4: a lone surrogate throws out of a catch block)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "    try {\n      const enc = encodeURIComponent(s);\n      spellings.push(enc, enc.replace(/%20/g, '+'));\n    } catch { /* a lone surrogate: see above */ }\n",
+    "replace": "    const enc = encodeURIComponent(s);\n    spellings.push(enc, enc.replace(/%20/g, '+'));\n",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets: a secret holding a lone surrogate"
+  },
+  {
+    "label": "#742 review httpNotify.js: a secret of any length is cut out of free text (D2: a 1-character token shreds words)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "if (typeof s !== 'string' || s.length < MIN_SECRET_RUN) continue;\n    // The secret as a server",
+    "replace": "if (typeof s !== 'string' || s.length < 1) continue;\n    // The secret as a server",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review redactSecrets: a secret shorter than 8|#742 review ntfy: a short token"
+  },
+  {
+    "label": "#742 review httpNotify.js: the credential run length is 9, not 8 (an 8-character echo survives)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "export const MIN_SECRET_RUN = 8;",
+    "replace": "export const MIN_SECRET_RUN = 9;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: a kept field that repeats 8|#742 review redactSecrets: a secret shorter than 8"
+  },
+  {
+    "label": "#742 review httpNotify.js: a reply that is not JSON is quoted raw (the first 140 characters)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "  } catch {\n    return head;\n  }",
+    "replace": "  } catch {\n    return `${head} — ${String(text).slice(0, 140)}`;\n  }",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: only the whitelisted|#742 review gotify: an echo of the token"
+  },
+  {
+    "label": "#742 review httpNotify.js: every field of a JSON reply is kept (the whitelist is bypassed)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "for (const f of fields) {",
+    "replace": "for (const f of Object.keys(body)) {",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: only the whitelisted|#742 review gotify: an echo of the token"
+  },
+  {
+    "label": "#742 review httpNotify.js: a kept field that repeats part of a credential is no longer withheld",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "sharesRun(kept, secrets) ? WITHHELD :",
+    "replace": "false ? WITHHELD :",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: a kept field that repeats|#742 review gotify: a kept field|#742 review ntfy: Basic credentials"
+  },
+  {
+    "label": "#742 review httpNotify.js: a kept field is not cut to 200 characters",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "v.slice(0, REPLY_FIELD_MAX)",
+    "replace": "v",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: each kept field is cut"
+  },
+  {
+    "label": "#742 review httpNotify.js: the standard status phrase is dropped from a refusal",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "const head = `HTTP ${status}${STATUS_CODES[status] ? ` ${STATUS_CODES[status]}` : ''}`;",
+    "replace": "const head = `HTTP ${status}`;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review describeErrorReply: only the whitelisted"
+  },
+  {
+    "label": "#702 review photo.js: the allowlist loses its start anchor (an SVG with a PNG prefix later in it is stored)",
+    "file": "backend/src/lib/photo.js",
+    "find": "const PHOTO_PREFIX = /^data:image",
+    "replace": "const PHOTO_PREFIX = /data:image",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "namePattern": "#702 review photo: the allowed type must be at the START"
+  },
+  {
+    "label": "#742 review photo.js: the allowlist is multi-line (PHm: `^` also matches after a line break in an SVG)",
+    "file": "backend/src/lib/photo.js",
+    "find": "(?:jpeg|png|webp);base64,/;",
+    "replace": "(?:jpeg|png|webp);base64,/m;",
+    "expect": "killed",
+    "tests": ["input-validation.test.js"],
+    "namePattern": "#702 review photo: the allowed type must be at the START"
+  },
+  {
+    "label": "#702 review snapshot.js: the timer is cleared once the headers arrive (a dripping body is read for ever)",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "    const res = await fetch(url, { headers, signal: ctrl.signal, redirect: 'manual' });\n",
+    "replace": "    const res = await fetch(url, { headers, signal: ctrl.signal, redirect: 'manual' });\n    clearTimeout(timer);\n",
+    "expect": "killed",
+    "tests": ["snapshot-http-limits.test.js"],
+    "namePattern": "#702 review snapshot: a body that arrives one byte at a time"
+  },
+  {
+    "label": "#702 review onvifMotion.js: stopOnvifMotion forgets the cooldown stamp (an edit re-arms alerts; mutant CD3b)",
+    "file": "backend/src/lib/onvifMotion.js",
+    "find": "export async function stopOnvifMotion(cameraId) {\n",
+    "replace": "export async function stopOnvifMotion(cameraId) {\n  lastAlert.delete(cameraId);\n",
+    "expect": "killed",
+    "tests": ["camera-delete-cooldown-maps.test.js"],
+    "namePattern": "of an ENABLED camera"
+  },
+  {
+    "label": "#702 review children.js: the birthday shape check is removed (expanded years like +010000-01 pass the round trip)",
+    "file": "backend/src/routes/children.js",
+    "find": "if (typeof birthday !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(birthday)) return true;",
+    "replace": "if (typeof birthday !== 'string') return true;",
+    "expect": "killed",
+    "tests": ["children-field-validation.test.js"],
+    "namePattern": "010000-01|000001-01"
+  },
+  {
+    "label": "#702 review httpNotify.js: a request fetch cannot build is rethrown with its own message, which quotes the header value",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "    if (e instanceof TypeError && e.message !== 'fetch failed') throw new Error(REQUEST_NOT_BUILT);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review postWithTimeout: a request fetch cannot build"
+  },
+  {
+    "label": "#702 review httpNotify.js: every TypeError is replaced, a real network failure included",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "if (e instanceof TypeError && e.message !== 'fetch failed') throw",
+    "replace": "if (e instanceof TypeError) throw",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review postWithTimeout: a network failure keeps"
+  },
+  {
+    "label": "#702 review httpNotify.js: redactSecrets does not skip an empty secret (it shreds every message)",
+    "file": "backend/src/lib/httpNotify.js",
+    "find": "if (typeof s !== 'string' || s.length < MIN_SECRET_RUN) continue;\n    // The secret as a server",
+    "replace": "if (typeof s !== 'string') continue;\n    // The secret as a server",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review redactSecrets"
+  },
+  {
+    "label": "#702 review gotify.js: a send error is logged and returned unredacted",
+    "file": "backend/src/lib/gotify.js",
+    "find": "const reason = redactSecrets(e.message, [c.appToken]);",
+    "replace": "const reason = e.message;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify: an error that quotes the token"
+  },
+  {
+    "label": "#742 review gotify.js: a server's error reply is logged and returned raw again (the first 140 characters)",
+    "file": "backend/src/lib/gotify.js",
+    "find": "const reply = describeErrorReply(res.status, res.text, [c.appToken]);",
+    "replace": "const reply = `HTTP ${res.status} — ${res.text.slice(0, 140)}`;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review gotify: an echo of the token in any spelling|#702 review gotify: a server that echoes"
+  },
+  {
+    "label": "#742 review gotify.js: the reply filter is not told the token (a partial echo in a kept field survives)",
+    "file": "backend/src/lib/gotify.js",
+    "find": "describeErrorReply(res.status, res.text, [c.appToken])",
+    "replace": "describeErrorReply(res.status, res.text, [])",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review gotify: a kept field that repeats part"
+  },
+  {
+    "label": "#702 review routes/gotify.js: the token's characters are not checked on save",
+    "file": "backend/src/routes/gotify.js",
+    "find": "if (newToken && !GOTIFY_TOKEN.test(newToken)) return",
+    "replace": "if (false) return",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: a token with a line break"
+  },
+  {
+    "label": "#702 review routes/gotify.js: the token allow-list loses its start anchor",
+    "file": "backend/src/routes/gotify.js",
+    "find": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+$/;",
+    "replace": "const GOTIFY_TOKEN = /[A-Za-z0-9._-]+$/;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: a token with a line break"
+  },
+  {
+    "label": "#702 review routes/gotify.js: the token allow-list loses its end anchor",
+    "file": "backend/src/routes/gotify.js",
+    "find": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+$/;",
+    "replace": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+/;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: a token with a line break"
+  },
+  {
+    "label": "#742 review routes/gotify.js: the token allow-list is widened to \" & < > (G4: characters an echo escapes differently)",
+    "file": "backend/src/routes/gotify.js",
+    "find": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+$/;",
+    "replace": "const GOTIFY_TOKEN = /^[A-Za-z0-9._\"&<>-]+$/;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: a token with a line break"
+  },
+  {
+    "label": "#702 review routes/gotify.js: the dot is dropped from the allow-list (an older Gotify's tokens are refused)",
+    "file": "backend/src/routes/gotify.js",
+    "find": "const GOTIFY_TOKEN = /^[A-Za-z0-9._-]+$/;",
+    "replace": "const GOTIFY_TOKEN = /^[A-Za-z0-9_-]+$/;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: the tokens Gotify generates"
+  },
+  {
+    "label": "#702 review routes/gotify.js: a non-text token reaches .trim() again (a 500)",
+    "file": "backend/src/routes/gotify.js",
+    "find": "if (rawToken && typeof rawToken !== 'string') return",
+    "replace": "if (false) return",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review gotify save: a token that is not text"
+  },
+  {
+    "label": "#702 review ntfy.js: a send error is logged and returned unredacted",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const reason = redactSecrets(e.message, secrets);",
+    "replace": "const reason = e.message;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review ntfy: an error that quotes the token"
+  },
+  {
+    "label": "#742 review ntfy.js: a server's error reply is logged and returned raw again (the first 140 characters)",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const reply = describeErrorReply(res.status, res.text, secrets, NTFY_REPLY_FIELDS);",
+    "replace": "const reply = `HTTP ${res.status} — ${res.text.slice(0, 140)}`;",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "an echo of the credential in any spelling|#702 review ntfy: a server that echoes"
+  },
+  {
+    "label": "#742 review ntfy.js: ntfy's code and http numbers are dropped from a refusal",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const NTFY_REPLY_FIELDS = [...REPLY_FIELDS, 'code', 'http'];",
+    "replace": "const NTFY_REPLY_FIELDS = [...REPLY_FIELDS];",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "own error reply keeps its words and numbers"
+  },
+  {
+    "label": "#742 review ntfy.js: the token is not a secret (N1: a token echoed in an error survives)",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const secrets = [c.token, auth?.startsWith('Basic ')",
+    "replace": "const secrets = [auth?.startsWith('Basic ')",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#702 review ntfy: an error that quotes the token"
+  },
+  {
+    "label": "#742 review ntfy.js: base64(user:password) is not a secret (N4: Basic credentials echoed back survive)",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const secrets = [c.token, auth?.startsWith('Basic ') ? auth.slice('Basic '.length) : ''];",
+    "replace": "const secrets = [c.token];",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review ntfy: Basic credentials"
+  },
+  {
+    "label": "#742 review ntfy.js: the plain password is cut out of text again (N2/D2: it never travels, and it shreds ordinary words)",
+    "file": "backend/src/lib/ntfy.js",
+    "find": "const secrets = [c.token, auth?.startsWith('Basic ') ? auth.slice('Basic '.length) : ''];",
+    "replace": "const secrets = [c.token, c.password, auth?.startsWith('Basic ') ? auth.slice('Basic '.length) : ''];",
+    "expect": "killed",
+    "tests": ["notify-secret-leak.test.js"],
+    "namePattern": "#742 review ntfy: a short token or the plain password"
+  },
+  {
+    "label": "#394 bufferState: a disabled camera with a stale ring reads ready",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (disabled) return 'camera_disabled';",
+    "replace": "if (false) return 'camera_disabled';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "bufferState: each answer"
+  },
+  {
+    "label": "#394 bufferState: a running ring is only ready while something still wants it",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (running) return 'ready';",
+    "replace": "if (running && wanted) return 'ready';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "bufferState: each answer"
+  },
+  {
+    "label": "#394 bufferState: a ring nobody wants is reported as not running",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (!wanted) return 'not_needed';",
+    "replace": "if (false) return 'not_needed';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "bufferState: each answer"
+  },
+  {
+    "label": "#394 bufferState: bad storage is reported as not running",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (!storageReady) return 'storage_unavailable';",
+    "replace": "if (false) return 'storage_unavailable';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "bufferState: each answer"
+  },
+  {
+    "label": "#394 motionState: the MQTT source is claimed to be running or not",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (cam.detect_source === 'mqtt') return 'camera_side';",
+    "replace": "if (false) return 'camera_side';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "motionState: off, camera-side"
+  },
+  {
+    "label": "#394 motionState: the ONVIF source reads the frame-diff process",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (cam.detect_source === 'onvif') return onvifRunning ? 'running' : 'not_running';",
+    "replace": "if (cam.detect_source === 'onvif') return framediffRunning ? 'running' : 'not_running';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "motionState: off, camera-side"
+  },
+  {
+    "label": "#394 motionState: a disabled camera reports its motion source as on",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (cam.disabled || !cam.detect_motion_enabled) return 'off';",
+    "replace": "if (!cam.detect_motion_enabled) return 'off';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "motionState: off, camera-side"
+  },
+  {
+    "label": "#394 soundState: a disabled camera reports sound detection as on",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (cam.disabled || !cam.detect_sound_enabled) return 'off';",
+    "replace": "if (!cam.detect_sound_enabled) return 'off';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "soundState: off, running"
+  },
+  {
+    "label": "#394 readiness: storage_ready is always true",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "storage_ready: storageReady,",
+    "replace": "storage_ready: true,",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "a ring is wanted but the clips folder is not usable"
+  },
+  {
+    "label": "#394 readiness: the buffer is told a ring is always wanted",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "wanted: clipRingWanted(cam), storageReady",
+    "replace": "wanted: true, storageReady",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "nothing wants a ring: not_needed"
+  },
+  {
+    "label": "#394 readiness: wake clip counts as ready without a ring",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "wake_clip_ready: wakeCapable && running,",
+    "replace": "wake_clip_ready: wakeCapable,",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "all inputs present but NO ring"
+  },
+  {
+    "label": "#394 readiness: wake eligibility ignores whether the child tracks sleep",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "!!cam.child_id && childTracksSleep(cam.child_id) && getWakeClipSettings().enabled",
+    "replace": "!!cam.child_id && getWakeClipSettings().enabled",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "not ready when the child does not track sleep"
+  },
+  {
+    "label": "#394 readiness: wake eligibility ignores the global option",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "!!cam.child_id && childTracksSleep(cam.child_id) && getWakeClipSettings().enabled",
+    "replace": "!!cam.child_id && childTracksSleep(cam.child_id)",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "not ready when the global option is off"
+  },
+  {
+    "label": "#394 readiness: wake eligibility ignores a disabled camera",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "const wakeCapable = !disabled && !!cam.child_id",
+    "replace": "const wakeCapable = !!cam.child_id",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "a disabled camera is never wake-ready"
+  },
+  {
+    "label": "#394 readiness: manual recording ignores the global option",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "manual_recording_available: getOndemandSettings().enabled && running && !disabled,",
+    "replace": "manual_recording_available: running && !disabled,",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "a ring that is up makes the buffer ready"
+  },
+  {
+    "label": "#394 readiness: manual recording is offered without a running ring",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "manual_recording_available: getOndemandSettings().enabled && running && !disabled,",
+    "replace": "manual_recording_available: getOndemandSettings().enabled && !disabled,",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "a ring is wanted, storage is fine, and none is running"
+  },
+  {
+    "label": "#394 readiness: alerting_now ignores silences and the schedule",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "alerting_now: pauseReason === null,",
+    "replace": "alerting_now: true,",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "a silence in the future stops alerting"
+  },
+  {
+    "label": "#394 route: the readiness route lets a caregiver in",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.get('/:id/recording-readiness', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.get('/:id/recording-readiness', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "an anonymous caller gets 401"
+  },
+  {
+    "label": "#394 route: the answer carries the camera row as well",
+    "file": "backend/src/routes/cameras.js",
+    "find": "res.json(recordingReadiness(cam));",
+    "replace": "res.json({ ...cam, ...recordingReadiness(cam) });",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "exactly the documented keys"
+  },
+  {
+    "label": "#394 panel: start == end is read as a closed window instead of always",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "cam.detect_schedule_enabled && (cam.detect_start | 0) !== (cam.detect_end | 0)",
+    "replace": "cam.detect_schedule_enabled",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: the schedule omits the app's timezone",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "`${minToHHMM(cam.detect_start)}–${minToHHMM(cam.detect_end)} (${zone})`",
+    "replace": "`${minToHHMM(cam.detect_start)}–${minToHHMM(cam.detect_end)}`",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: an ended silence is shown as active",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "cam.alerts_snoozed_until && cam.alerts_snoozed_until > now ? cam.alerts_snoozed_until : null",
+    "replace": "cam.alerts_snoozed_until || null",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: wake clips default to off before settings arrive",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "const wakeOn = settings.wake_clips_enabled ?? true;",
+    "replace": "const wakeOn = settings.wake_clips_enabled ?? false;",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: manual recording defaults to off before settings arrive",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "const manualOn = settings.ondemand_enabled ?? true;",
+    "replace": "const manualOn = settings.ondemand_enabled ?? false;",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: wake eligibility ignores the child's sleep tracking",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "else if (kid && !kid.track_sleep)",
+    "replace": "else if (false)",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: wake eligibility ignores the global option",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "if (!wakeOn) wakeWhy.push(",
+    "replace": "if (false) wakeWhy.push(",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: wake eligibility ignores a missing child",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "if (!cam.child_id) wakeWhy.push(",
+    "replace": "if (false) wakeWhy.push(",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeSetup: configuration"
+  },
+  {
+    "label": "#394 panel: a detector that is not running is shown as neutral",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "not_running: { state: 'bad', text: 'Not running' },",
+    "replace": "not_running: { state: 'off', text: 'Not running' },",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: a ready buffer is shown as neutral",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "ready: { state: 'ok', text: 'Ready', note: null },",
+    "replace": "ready: { state: 'off', text: 'Ready', note: null },",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: the buffer counts as ready whenever the server names one",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "const bufferReady = readiness.buffer === 'ready';",
+    "replace": "const bufferReady = readiness.buffer != null;",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: a disabled camera reads as waiting on the buffer",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "if (disabled) return { state: 'off', text: 'Camera disabled' };",
+    "replace": "if (false) return { state: 'off', text: 'Camera disabled' };",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: a recording feature that is off is shown as a problem",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "if (!wanted) return { state: 'off', text: offText };",
+    "replace": "if (false) return { state: 'off', text: offText };",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: alerts firing now is always yes",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "else if (readiness.alerting_now) alerting",
+    "replace": "else if (true) alerting",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: one alert switch on is read as nothing to alert on",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "if (!on('motion') && !on('sound')) alerting",
+    "replace": "if (!on('motion') || !on('sound')) alerting",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: a silence is not named as the reason alerts are paused",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "else if (reason === 'silenced' || (reason !== 'schedule' && on('snooze'))) alerting",
+    "replace": "else if (false) alerting",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: wake clips are ready whenever they are eligible",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "...clip(on('wake'), readiness.wake_clip_ready,",
+    "replace": "...clip(on('wake'), true,",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: manual recording is available whenever the option is on",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "...clip(on('manual'), readiness.manual_recording_available,",
+    "replace": "...clip(on('manual'), true,",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "describeReady: runtime"
+  },
+  {
+    "label": "#394 panel: asks a different route",
+    "file": "frontend/src/components/RecordingScopePanel.jsx",
+    "find": "`/cameras/${cam.id}/recording-readiness`",
+    "replace": "`/cameras/${cam.id}/readiness`",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "the panel, as an admin"
+  },
+  {
+    "label": "#394 page: the panel is not rendered",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "<RecordingScopePanel cam={cam} />",
+    "replace": "null",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "the panel, as an admin"
+  },
+  {
+    "label": "#394 readiness: a disabled camera is reported as alerting",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (disabled) return 'disabled';",
+    "replace": "if (false) return 'disabled';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "#713 review"
+  },
+  {
+    "label": "#394 readiness: a silence is never named as the reason",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (isSnoozed(cam.id)) return 'silenced';",
+    "replace": "if (false) return 'silenced';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "#713 review"
+  },
+  {
+    "label": "#394 readiness: outside the schedule is never named as the reason",
+    "file": "backend/src/lib/recordingReadiness.js",
+    "find": "if (!inActiveWindow(cam)) return 'schedule';",
+    "replace": "if (false) return 'schedule';",
+    "expect": "killed",
+    "tests": [
+      "recording-readiness.test.js"
+    ],
+    "namePattern": "#713 review"
+  },
+  {
+    "label": "#394 panel: a failed recheck keeps showing the older answer",
+    "file": "frontend/src/components/RecordingScopePanel.jsx",
+    "find": "failed ? null : describeReady(",
+    "replace": "describeReady(",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "#713 review"
+  },
+  {
+    "label": "#394 panel: the pause reason is guessed from the camera row, ignoring the server's",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "reason === 'silenced' || (reason !== 'schedule' && on('snooze'))",
+    "replace": "on('snooze')",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "#713 review"
+  },
+  {
+    "label": "#394 panel: a disabled camera is shown as alerting",
+    "file": "frontend/src/lib/recordingScope.js",
+    "find": "disabled || reason === 'disabled'",
+    "replace": "false",
+    "expect": "killed",
+    "tests": [
+      "recordingScope.test.jsx"
+    ],
+    "namePattern": "a disabled camera is never"
+  },
+  {
+    "label": "#386 lazyPage: the failed-screen button does nothing, so the screen can never recover after an offline failure",
+    "file": "frontend/src/lib/lazyPage.jsx",
+    "find": "onClick={() => window.location.reload()}",
+    "replace": "onClick={() => {}}",
+    "expect": "killed",
+    "tests": ["lazyPage.test.jsx"]
+  },
+  {
+    "label": "#386 lazyPage: every factory rejection is tagged as a chunk failure, so a module that throws on evaluation reads as a connection problem",
+    "file": "frontend/src/lib/lazyPage.jsx",
+    "find": "throw isChunkFetchFailure(e) ? new ChunkLoadError(e) : e;",
+    "replace": "throw new ChunkLoadError(e);",
+    "expect": "killed",
+    "tests": ["lazyPage.test.jsx"]
+  },
+  {
+    "label": "#386 lazyPage: a TypeError is no longer required for a fetch-failure message, so any error quoting one is tagged",
+    "file": "frontend/src/lib/lazyPage.jsx",
+    "find": "if (error.name === 'TypeError') return FETCH_FAILURE.test(message);",
+    "replace": "if (FETCH_FAILURE.test(message)) return true;",
+    "expect": "killed",
+    "tests": ["lazyPage.test.jsx"]
+  },
+  {
+    "label": "#386 lazyPage: an error named ChunkLoadError is no longer recognised as a failed load",
+    "file": "frontend/src/lib/lazyPage.jsx",
+    "find": "if (error.name === 'ChunkLoadError') return true;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["lazyPage.test.jsx"]
+  },
+  {
+    "label": "#386 HlsPlayer: a failed hls.js fetch goes to the auto-retry state, which re-imports the same failed URL every 5 s forever",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": "if (!cancelled) setState('load-failed');",
+    "replace": "if (!cancelled) setState('error');",
+    "expect": "killed",
+    "tests": ["hlsPlayerLoadFailed.test.jsx"]
+  },
+  {
+    "label": "#386 HlsPlayer: coming back to the tab re-imports the failed hls.js URL instead of leaving the reload prompt up",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": " && stateRef.current !== 'load-failed') {",
+    "replace": ") {",
+    "expect": "killed",
+    "tests": ["hlsPlayerLoadFailed.test.jsx"]
+  },
+  {
+    "label": "#386 lazyPage: every render error is treated as a chunk failure, hiding crashes from the app ErrorBoundary",
+    "file": "frontend/src/lib/lazyPage.jsx",
+    "find": "if (!(error instanceof ChunkLoadError)) throw error;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["lazyPage.test.jsx"]
+  },
+  {
+    "label": "#386 HlsPlayer: a torn-down effect still builds an hls.js player once the lazy import resolves",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": "        if (cancelled) return;\n        if (!Hls.isSupported()) {",
+    "replace": "        if (!Hls.isSupported()) {",
+    "expect": "killed",
+    "tests": ["lazyPage.test.jsx"]
+  },
+  {
+    "label": "#384 photo save also sends the form's name, birthday and colour",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "{ photo }, { timeoutMs",
+    "replace": "{ name: form.name, birthday: form.birthday, color: form.color, photo }, { timeoutMs",
+    "expect": "killed",
+    "tests": [
+      "childSettings.test.jsx"
+    ],
+    "namePattern": "#384"
+  },
+  {
+    "label": "#382 AuthContext: any /auth/me failure counts as signed out (the old behaviour)",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "if (err?.status === 401) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 AuthContext: a 401 is treated as unreachable",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "if (err?.status === 401) {",
+    "replace": "if (err?.status === 999) {",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 App shell: the unreachable state is not shown",
+    "file": "frontend/src/App.jsx",
+    "find": "if (unreachable && !user) return",
+    "replace": "if (false && unreachable && !user) return",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 Login: a failed /auth/status falls open to the sign-in form again",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "if (statusFailures > 0 && needsSetup === null && !demoSignIn) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": [
+      "login.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 Login: no guard against a second status check in flight (timer beside a manual Try again)",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "if (statusCheckInFlight.current) return;",
+    "replace": "if (false) return;",
+    "expect": "killed",
+    "tests": [
+      "login.test.jsx"
+    ],
+    "namePattern": "Try again pressed just before the timer fires"
+  },
+  {
+    "label": "#382 AuthContext: a real 401 leaves the unreachable state set",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    setUnreachable(false);\n    setFailures(0);\n  }), []);",
+    "replace": "  }), []);",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "a real 401 on another request, after an unreachable refresh"
+  },
+  {
+    "label": "#382 useAutoRetry: never schedules a retry",
+    "file": "frontend/src/lib/useAutoRetry.js",
+    "find": "if (failures < 1) return undefined;",
+    "replace": "return undefined;",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx",
+      "login.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 AuthContext: the stored token is dropped on an unreachable server",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "        setUnreachable(true);\n",
+    "replace": "        setUnreachable(true); setToken(null);\n",
+    "expect": "killed",
+    "tests": [
+      "appShell.test.jsx"
+    ],
+    "namePattern": "#382"
+  },
+  {
+    "label": "#382 review M-A3: AuthContext: a failed refresh() on an open session also drops the user",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "        setUnreachable(true);\n",
+    "replace": "        setUser(null); setUnreachable(true);\n",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "keeps its user and stays in the app"
+  },
+  {
+    "label": "#382 review M-A17: App shell: the unreachable screen replaces an open session's app too",
+    "file": "frontend/src/App.jsx",
+    "find": "if (unreachable && !user) return",
+    "replace": "if (unreachable) return",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "keeps its user and stays in the app"
+  },
+  {
+    "label": "#382 review M-A22: AuthContext: the failure count is set to 1 instead of counted, so retrying stops after one retry",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "setFailures((n) => n + 1);",
+    "replace": "setFailures(1);",
+    "expect": "killed",
+    "tests": ["lib/AuthContext.test.jsx"],
+    "namePattern": "while the server stays down it retries"
+  },
+  {
+    "label": "#382 review M-A21: Login: the status failure count is set to 1 instead of counted, so retrying stops after one retry",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "setStatusFailures((n) => n + 1);",
+    "replace": "setStatusFailures(1);",
+    "expect": "killed",
+    "tests": ["login.test.jsx"],
+    "namePattern": "keeps failing it retries"
+  },
+  {
+    "label": "#382 review M-A11: useAutoRetry: the backoff has no 30 s cap",
+    "file": "frontend/src/lib/useAutoRetry.js",
+    "find": "return Math.min(RETRY_BASE_MS * 2 ** (failures - 1), RETRY_MAX_MS);",
+    "replace": "return RETRY_BASE_MS * 2 ** (failures - 1);",
+    "expect": "killed",
+    "tests": ["lib/useAutoRetry.test.jsx", "lib/AuthContext.test.jsx", "login.test.jsx"],
+    "namePattern": "for every attempt after that|while the server stays down it retries|keeps failing it retries"
+  },
+  {
+    "label": "#382 review M-A10: useAutoRetry: a new count or an unmount no longer cancels the scheduled retry",
+    "file": "frontend/src/lib/useAutoRetry.js",
+    "find": "    return () => clearTimeout(timer);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["lib/useAutoRetry.test.jsx", "lib/AuthContext.test.jsx", "login.test.jsx"],
+    "namePattern": "unmounting|replaces the scheduled retry|a count back at 0|a Try again that succeeds cancels"
+  },
+  {
+    "label": "#382 review M-A16: Login: a successful status check leaves the failure count (and its armed retry) in place",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "    setStatusFailures(0);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["login.test.jsx"],
+    "namePattern": "a Try again that succeeds cancels"
+  },
+  {
+    "label": "#382 review M-A6: AuthContext: an answering /auth/me leaves the unreachable flag and the failure count set",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "      setUser(me);\n      setUnreachable(false);\n      setFailures(0);\n",
+    "replace": "      setUser(me);\n",
+    "expect": "killed",
+    "tests": ["lib/AuthContext.test.jsx"],
+    "namePattern": "the backoff starts over"
+  },
+  {
+    "label": "#382 review M-A7: AuthContext: a refresh() with no token leaves the unreachable flag and the failure count set",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "      setUser(null);\n      setUnreachable(false);\n      setFailures(0);\n      setLoading(false);\n",
+    "replace": "      setUser(null);\n      setLoading(false);\n",
+    "expect": "killed",
+    "tests": ["lib/AuthContext.test.jsx"],
+    "namePattern": "signed out in another tab"
+  },
+  {
+    "label": "#382 review M-A19: AuthContext: refresh() no longer marks itself as retrying (Try again stays enabled)",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    setRetrying(true);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx"],
+    "namePattern": "is disabled while its check is out"
+  },
+  {
+    "label": "#382 review A1: Sign out leaves the unreachable state from a failed refresh() set",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    setUnreachable(false);\n    setFailures(0);\n  }\n\n  return (",
+    "replace": "  }\n\n  return (",
+    "expect": "killed",
+    "tests": ["appShell.test.jsx", "lib/AuthContext.test.jsx"],
+    "namePattern": "Sign out after a failed refresh"
+  },
+  {
+    "label": "#382 review A1b: Sign out clears the unreachable flag but leaves the failed refresh()'s retry armed",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    setUnreachable(false);\n    setFailures(0);\n  }\n\n  return (",
+    "replace": "    setUnreachable(false);\n  }\n\n  return (",
+    "expect": "killed",
+    "tests": ["lib/AuthContext.test.jsx"],
+    "namePattern": "Sign out cancels the retry"
+  },
+  {
+    "label": "#382 review A2: a stale /auth/me failure after the sign-in ended sets unreachable again",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "} else if (!getToken()) {",
+    "replace": "} else if (false) {",
+    "expect": "killed",
+    "tests": ["lib/AuthContext.test.jsx"],
+    "namePattern": "THEN the earlier"
+  },
+  {
+    "label": "#382 review A3: Login: a status check may still start after the guest sign-in began (no guard)",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "if (guestSignInBegun.current) return;",
+    "replace": "if (false) return;",
+    "expect": "killed",
+    "tests": ["login.test.jsx"],
+    "namePattern": "land in the same tick"
+  },
+  {
+    "label": "#382 review A3: Login: the guest sign-in never marks itself begun",
+    "file": "frontend/src/pages/Login.jsx",
+    "find": "    guestSignInBegun.current = true;\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["login.test.jsx"],
+    "namePattern": "land in the same tick"
+  },
+  {
+    "label": "#391 recording: Save leaves the on/off switch out of the payload",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "    const payload = shown;",
+    "replace": "    const { ondemand_enabled, ...payload } = shown;",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx",
+      "settingsForms.test.jsx"
+    ]
+  },
+  {
+    "label": "#391 recording: the on/off switch writes by itself again",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "onChange={(e) => setField('ondemand_enabled', e.target.checked)}",
+    "replace": "onChange={(e) => { setField('ondemand_enabled', e.target.checked); api.put('/settings', { ondemand_enabled: e.target.checked }); }}",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx",
+      "settingsForms.test.jsx"
+    ]
+  },
+  {
+    "label": "#391 recording: the unsaved-changes notice is never shown",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "{unsaved && <UnsavedNotice restored={restored} onDiscard={discardChanges} />}",
+    "replace": "{false && <UnsavedNotice restored={restored} onDiscard={discardChanges} />}",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx",
+      "settingsForms.test.jsx"
+    ]
+  },
+  {
+    "label": "#391 recording: the on/off switch is not disabled while Save is in flight",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "                disabled={busy}\n                onChange={(e) => setField('ondemand_enabled', e.target.checked)}",
+    "replace": "                onChange={(e) => setField('ondemand_enabled', e.target.checked)}",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx"
+    ]
+  },
+  {
+    "label": "#391 recording: a stored 1/0 switch is compared raw, so flipping it twice stays \"unsaved\"",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "    ondemand_enabled: !!(src.ondemand_enabled ?? true),",
+    "replace": "    ondemand_enabled: src.ondemand_enabled ?? true,",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx"
+    ]
+  },
+  {
+    "label": "#391 recording: the on/off switch defaults to off when nothing is stored",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "    ondemand_enabled: !!(src.ondemand_enabled ?? true),",
+    "replace": "    ondemand_enabled: !!(src.ondemand_enabled ?? false),",
+    "expect": "killed",
+    "tests": [
+      "settingsRecording.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 recording: Discard changes does not discard",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "    discard();\n",
+    "replace": "    /* not discarded */\n",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 recording: the draft is judged against the placeholder settings before they load",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "ready: loaded !== false",
+    "replace": "ready: true",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 recording: the draft is not restored on mount",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "useSettingsDraft(settings, restoredDraft || {})",
+    "replace": "useSettingsDraft(settings, {})",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 formDraft: a credential-named field is stored when a caller allows it",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "    if (SECRET_KEY_RE.test(k)) continue;\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: the credential pattern forgets passwords",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "/pass|secret|token|key|credential|auth/i",
+    "replace": "/secret|token|key|credential|auth/i",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: the credential pattern forgets tokens",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "/pass|secret|token|key|credential|auth/i",
+    "replace": "/pass|secret|key|credential|auth/i",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: the allow-list is not applied (every field of the form is stored)",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "  for (const k of allow) {",
+    "replace": "  for (const k of Object.keys(values || {})) {",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: an object value (a photo) is stored",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "if (v === null || ['string', 'number', 'boolean'].includes(typeof v)) out[k] = v;",
+    "replace": "out[k] = v;",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: a draft never expires",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "Date.now() - parsed.at > DRAFT_TTL_MS",
+    "replace": "false",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: a draft expires one millisecond early",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "Date.now() - parsed.at > DRAFT_TTL_MS",
+    "replace": "Date.now() - parsed.at >= DRAFT_TTL_MS",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: the key is not scoped to the signed-in person",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "return `${DRAFT_PREFIX}${userId ?? 'anon'}:${formId}`;",
+    "replace": "return `${DRAFT_PREFIX}${formId}`;",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: clearAllDrafts removes everything in sessionStorage",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "if (k.startsWith(DRAFT_PREFIX)) s.removeItem(k);",
+    "replace": "s.removeItem(k);",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 formDraft: clearAllDrafts removes nothing",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "if (k.startsWith(DRAFT_PREFIX)) s.removeItem(k);",
+    "replace": "if (false) s.removeItem(k);",
+    "expect": "killed",
+    "tests": [
+      "lib/formDraft.test.js"
+    ]
+  },
+  {
+    "label": "#377 useFormDraft: every field is stored, not just the ones that differ",
+    "file": "frontend/src/lib/useFormDraft.js",
+    "find": "    if (String(picked[k] ?? '') !== String(base[k] ?? '')) changed[k] = picked[k];",
+    "replace": "    changed[k] = picked[k];",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 useFormDraft: a draft is written before the form has loaded",
+    "file": "frontend/src/lib/useFormDraft.js",
+    "find": "    if (!ready) return;\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 useFormDraft: a typed secret does not count as an unsaved edit",
+    "file": "frontend/src/lib/useFormDraft.js",
+    "find": "(storable || hasUnsavedEdits({}, {}, secrets))",
+    "replace": "storable",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 camera: Save does not move the baseline, so the draft outlives it",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "      setBaseline({ ...form, rtsp_password: '', talk_password: '' });",
+    "replace": "      /* baseline not moved */",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 camera: a removed camera's draft is kept",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "      clearDraft(draftKey);\n      await refresh();",
+    "replace": "      await refresh();",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 camera: the draft is not restored once the camera has loaded",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "    setForm({ ...loaded, ...draft });",
+    "replace": "    setForm(loaded);",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 camera: Discard changes does not reset the form",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "  function discardDraft() {\n    setForm(baseline);",
+    "replace": "  function discardDraft() {\n    setForm(form);",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 child: Save does not move the baseline, so the draft outlives it",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "      setBaseline(form);\n      await refresh();",
+    "replace": "      await refresh();",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 child: the draft is not restored once the child has loaded",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "    setForm({ ...loaded, ...draft });",
+    "replace": "    setForm(loaded);",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 child: a new child's draft is not restored",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "useState(() => (isNew ? loadDraft(draftKey, DRAFT_FIELDS) : null))",
+    "replace": "useState(() => null)",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 child: Discard changes does not reset the form",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "  function discardDraft() {\n    setForm(baseline);",
+    "replace": "  function discardDraft() {\n    setForm(form);",
+    "expect": "killed",
+    "tests": [
+      "formDrafts.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 auth: signing out keeps the drafts",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    clearAllDrafts();\n    setToken(null);",
+    "replace": "    setToken(null);",
+    "expect": "killed",
+    "tests": [
+      "lib/AuthContext.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 auth: an expired sign-in clears the drafts",
+    "file": "frontend/src/lib/AuthContext.jsx",
+    "find": "    resetPushRegistration();\n    setUser(null);",
+    "replace": "    resetPushRegistration();\n    clearAllDrafts();\n    setUser(null);",
+    "expect": "killed",
+    "tests": [
+      "lib/AuthContext.test.jsx"
+    ]
+  },
+  {
+    "label": "#377 child: a removed child's draft is kept",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "      clearDraft(draftKey); // a removed child's half-typed edits must not outlive it\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["formDrafts.test.jsx"]
+  },
+  {
+    "label": "#371 sound calibration: a reading 11 minutes old still counts as listening",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "nowMs - newest > READINGS_FRESH_MIN * 60000",
+    "replace": "false",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: a minute with zero readings counts as listening",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "r.windows > 0 && r.ms <= nowMs",
+    "replace": "r.windows >= 0 && r.ms <= nowMs",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: the level averages minutes unweighted by readings",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "recent.reduce((n, r) => n + (Number.isFinite(r.level) ? r.level : 0) * r.windows, 0) / total,",
+    "replace": "recent.reduce((n, r) => n + (Number.isFinite(r.level) ? r.level : 0), 0) / recent.length,",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: the level averages the whole history, not the last five minutes",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "nowMs - r.ms <= LEVEL_WINDOW_MIN * 60000",
+    "replace": "true",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: a quiet five minutes shows 0 dB instead of no figure",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "if (!total) return { ready: true, avg: null, peak: null };",
+    "replace": "if (!total) return { ready: true, avg: 0, peak: 0 };",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: the alert line rises with sensitivity",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "4 + 14 * ((100 - s) / 99)",
+    "replace": "4 + 14 * (s / 99)",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 alertMarginDb"
+  },
+  {
+    "label": "#371 sound limits: the cooldown shown is a fixed 120 s, not the camera's",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "a {cooldownS}-second wait",
+    "replace": "a 120-second wait",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#371 sound calibration: a camera with readings is told it has none",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "{state.phase === 'ok' && !state.ready && (",
+    "replace": "{state.phase === 'ok' && state.ready && (",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#371 sound calibration: a failed history request shows nothing",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "{state.phase === 'error' && (",
+    "replace": "{state.phase === 'never' && (",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#371 sound calibration: the refresh timer is not cleared on leaving the screen",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "return () => { live = false; clearInterval(timer); };",
+    "replace": "return () => { live = false; };",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#371 sound calibration: the history is requested for no particular camera",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "`/cameras/${cameraId}/activity-history?hours=1`",
+    "replace": "`/cameras/x/activity-history?hours=1`",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#371 sound calibration: a reading dated in the future is counted",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": ".filter((r) => r.ms !== null && r.windows > 0 && r.ms <= nowMs);",
+    "replace": ".filter((r) => r.ms !== null && r.windows > 0);",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: a reading exactly ten minutes old has expired",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "nowMs - newest > READINGS_FRESH_MIN * 60000",
+    "replace": "nowMs - newest >= READINGS_FRESH_MIN * 60000",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: a reading exactly five minutes old is left out of the average",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "nowMs - r.ms <= LEVEL_WINDOW_MIN * 60000",
+    "replace": "nowMs - r.ms < LEVEL_WINDOW_MIN * 60000",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 summariseSoundLevel"
+  },
+  {
+    "label": "#371 sound calibration: the listening box claims the room's level has been learned",
+    "file": "frontend/src/pages/DetectionSettings.jsx",
+    "find": "<strong>Listening.</strong> Sound readings are coming in.",
+    "replace": "<strong>Listening.</strong> The room’s level has been learned.",
+    "expect": "killed",
+    "tests": [
+      "soundCalibration.test.jsx"
+    ],
+    "namePattern": "#371 the Sound detection screen"
+  },
+  {
+    "label": "#521 recompute on an empty night: the control is not rendered (unreachable again)",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "          <RecomputeNight childId={childId}",
+    "replace": "          <RecomputeNight childId={null}",
+    "expect": "killed",
+    "tests": [
+      "sleepDetail.test.jsx"
+    ],
+    "namePattern": "#521 Recompute is reachable"
+  },
+  {
+    "label": "#521 recompute on an empty night: a caregiver is offered it",
+    "file": "frontend/src/components/RecomputeNight.jsx",
+    "find": "user?.role !== 'admin' || !childId",
+    "replace": "!childId",
+    "expect": "killed",
+    "tests": [
+      "sleepDetail.test.jsx"
+    ],
+    "namePattern": "#521 Recompute is reachable"
+  },
+  {
+    "label": "#521 recompute on an empty night: a flagged night's note talks about times",
+    "file": "frontend/src/components/RecomputeNight.jsx",
+    "find": "{night.nobody_in_bed",
+    "replace": "{false",
+    "expect": "killed",
+    "tests": [
+      "sleepDetail.test.jsx"
+    ],
+    "namePattern": "#521 Recompute is reachable"
+  },
+  {
+    "label": "#375 loadState: a failed request with rows reads as stale even if nothing ever loaded",
+    "file": "frontend/src/lib/loadState.js",
+    "find": "loaded && count > 0 ? 'stale' : 'error'",
+    "replace": "count > 0 ? 'stale' : 'error'",
+    "expect": "killed",
+    "tests": ["lib/loadState.test.js"],
+    "namePattern": "#375 loadState"
+  },
+  {
+    "label": "#375 loadState: a failure after a good EMPTY load keeps the empty copy (stale instead of error)",
+    "file": "frontend/src/lib/loadState.js",
+    "find": "loaded && count > 0 ? 'stale' : 'error'",
+    "replace": "loaded ? 'stale' : 'error'",
+    "expect": "killed",
+    "tests": ["lib/loadState.test.js"],
+    "namePattern": "#375 loadState"
+  },
+  {
+    "label": "#375 loadState: the error branch is skipped, so a failed first request reads as loading",
+    "file": "frontend/src/lib/loadState.js",
+    "find": "if (error) return",
+    "replace": "if (false) return",
+    "expect": "killed",
+    "tests": ["lib/loadState.test.js"],
+    "namePattern": "#375 loadState"
+  },
+  {
+    "label": "#375 loadState: a successful empty answer reads as ready",
+    "file": "frontend/src/lib/loadState.js",
+    "find": "return count > 0 ? 'ready' : 'empty';",
+    "replace": "return 'ready';",
+    "expect": "killed",
+    "tests": ["lib/loadState.test.js"],
+    "namePattern": "#375 loadState"
+  },
+  {
+    "label": "#375 loadState: an unanswered request reads as empty",
+    "file": "frontend/src/lib/loadState.js",
+    "find": "if (!loaded) return 'loading';",
+    "replace": "if (!loaded) return 'empty';",
+    "expect": "killed",
+    "tests": ["lib/loadState.test.js"],
+    "namePattern": "#375 loadState"
+  },
+  {
+    "label": "#375 children: Add child is offered while the children failed to load",
+    "file": "frontend/src/pages/Children.jsx",
+    "find": "{isAdmin && !blocked && (",
+    "replace": "{isAdmin && (",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "failed: the error and Retry, NOT \"No children yet\""
+  },
+  {
+    "label": "#375 CamerasContext: loaded is never set, so a successful empty install reads as still loading",
+    "file": "frontend/src/lib/CamerasContext.jsx",
+    "find": "      setLoaded(true);\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["lib/CamerasContext.test.jsx"],
+    "namePattern": "#375 loaded"
+  },
+  {
+    "label": "#375 child detail: the alerts feed is asked before the camera list has loaded",
+    "file": "frontend/src/pages/ChildDetail.jsx",
+    "find": "if (!camerasLoaded) return undefined;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "not asked before the camera list"
+  },
+  {
+    "label": "#375 child detail: a failed alerts request keeps the empty copy",
+    "file": "frontend/src/pages/ChildDetail.jsx",
+    "find": "setAlertsError(err?.message || 'Request failed');",
+    "replace": "setAlertsLoaded(true);",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Child detail: alerts feed"
+  },
+  {
+    "label": "#375 sleep detail: a failed night request becomes null (the no-data copy)",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": ".catch((err) => { if (alive) setNightError(err?.message || 'Request failed'); });",
+    "replace": ".catch(() => { if (alive) setNight(null); });",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Sleep detail"
+  },
+  {
+    "label": "#375 child detail: a missing child with other children cached reads as stale (no failure UI) instead of error",
+    "file": "frontend/src/pages/ChildDetail.jsx",
+    "find": "error: camerasError, count: 0 });",
+    "replace": "error: camerasError, count: kids.length });",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "a failed refresh with OTHER children cached"
+  },
+  {
+    "label": "#375 sleep detail: Retry re-runs the reset effect, so a night on screen is blanked",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "  }, [id, date]);",
+    "replace": "  }, [id, date, nightRetry]);",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Retry on the stale banner keeps the night on screen"
+  },
+  {
+    "label": "#375 sleep detail: a failed refresh after an EMPTY answer keeps the stale banner and the no-data copy",
+    "file": "frontend/src/pages/SleepDetail.jsx",
+    "find": "const displayable = !!night && night.status !== 'no_data';",
+    "replace": "const displayable = night !== undefined;",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "a failed refresh after an EMPTY"
+  },
+  {
+    "label": "#375 cameras tab: Retry is wired to a no-op instead of refresh",
+    "file": "frontend/src/pages/Cameras.jsx",
+    "find": "onRetry={refresh}",
+    "replace": "onRetry={() => {}}",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Cameras tab: Retry calls refresh"
+  },
+  {
+    "label": "#375 live: Retry is wired to a no-op instead of refresh",
+    "file": "frontend/src/components/LiveMonitor.jsx",
+    "find": "onRetry={refresh}",
+    "replace": "onRetry={() => {}}",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Live: Retry calls refresh"
+  },
+  {
+    "label": "#375 clip management: a failed list request becomes an empty list",
+    "file": "frontend/src/pages/ClipManagement.jsx",
+    "find": "      setError(e.message || 'Failed to load clips');\n    }\n  }",
+    "replace": "      setError(e.message || 'Failed to load clips');\n      setClips([]);\n    }\n  }",
+    "expect": "killed",
+    "tests": ["loadStates.test.jsx"],
+    "namePattern": "Clip management"
+  },
+  {
+    "label": "#694 WHEP player: a late answer from a torn-down run is not DELETEd (its session is left open)",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "late answer from the old run|late answer after unmount"
+  },
+  {
+    "label": "#694 WHEP player: a late answer carries on into setRemoteDescription on the closed peer",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "if (resourceUrl) deleteWhepSession(resourceUrl);",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "late answer from the old run"
+  },
+  {
+    "label": "#694 WHEP player: a late answer DELETEs even when the Location was refused (fetch(null))",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "deleteWhepSession(resourceUrl);\n          return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "fails the #562 guard"
+  },
+  {
+    "label": "#694 WHEP player: a refused late Location no longer returns, so the cancelled run's answer is applied",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (cancelled) {\n          if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "if (cancelled && resourceUrl) {\n          deleteWhepSession(resourceUrl);\n          return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "fails the #562 guard",
+    "note": "Found by the #704 review: the refused-Location test only checked that no DELETE was sent."
+  },
+  {
+    "label": "#694 WHEP player: the late-answer DELETE is a bare fetch without the session token",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;",
+    "replace": "if (resourceUrl) fetch(resourceUrl, { method: 'DELETE', redirect: 'error' }).catch(() => {});\n          return;",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "a late answer after unmount",
+    "note": "Found by the #704 review: the race tests projected each DELETE to its URL and redirect mode, so a missing Authorization header passed."
+  },
+  {
+    "label": "#694 WHEP player: the cleanup no longer DELETEs this run's own session",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "      if (resourceUrl) {\n        deleteWhepSession(resourceUrl);",
+    "replace": "      if (false) {\n        deleteWhepSession(resourceUrl);",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "normal connect then disconnect|late answer from the old run"
+  },
+  {
+    "label": "#694 review W3+W5 (a pair): the `cancelled` check moved after the body read AND the cleanup no longer resets resourceUrl, so a run cancelled mid-read DELETEs twice",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "        if (cancelled) {\n          if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;\n        }\n        const answerSdp = await res.text();\n        await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });\n      } catch (err) {\n        if (!cancelled) {\n          setState('error');\n          setErrorMsg(err.message || 'Could not connect to camera');\n          if (!everConnectedRef.current) onFirstConnectFailed?.();\n        }\n      }\n    }\n\n    connect();\n\n    return () => {\n      cancelled = true;\n      clearTimeout(firstConnectTimeoutId);\n      if (pcRef.current) {\n        pcRef.current.close();\n        pcRef.current = null;\n      }\n      if (resourceUrl) {\n        deleteWhepSession(resourceUrl);\n        resourceUrl = null;\n      }",
+    "replace": "        const answerSdp = await res.text();\n        if (cancelled) {\n          if (resourceUrl) deleteWhepSession(resourceUrl);\n          return;\n        }\n        await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });\n      } catch (err) {\n        if (!cancelled) {\n          setState('error');\n          setErrorMsg(err.message || 'Could not connect to camera');\n          if (!everConnectedRef.current) onFirstConnectFailed?.();\n        }\n      }\n    }\n\n    connect();\n\n    return () => {\n      cancelled = true;\n      clearTimeout(firstConnectTimeoutId);\n      if (pcRef.current) {\n        pcRef.current.close();\n        pcRef.current = null;\n      }\n      if (resourceUrl) {\n        deleteWhepSession(resourceUrl);\n      }",
+    "expect": "killed",
+    "tests": ["whepPlayer.test.jsx"],
+    "namePattern": "while the answer body is being read",
+    "note": "One entry because the two edits only fail together. W3 alone (no reset) is equivalent: the only DELETE besides the cleanup's is the one in the `cancelled` check, which runs BEFORE the body read, so before the cleanup can have DELETEd this address. W5 alone (check after the read) is equivalent: the cleanup's reset leaves nothing for that check to DELETE again. Found by the review of #694."
+  },
+  {
+    "label": "#564 webrtcSessions: kickWebrtcSession sends nothing, so a revoked login's live view keeps streaming",
+    "file": "backend/src/lib/webrtcSessions.js",
+    "find": "  const res = await fetch(`${MEDIAMTX_API}/v3/webrtc/sessions/kick/${id}`, {",
+    "replace": "  if (id) return;\n  const res = await fetch(`${MEDIAMTX_API}/v3/webrtc/sessions/kick/${id}`, {",
+    "expect": "killed",
+    "tests": ["webrtcSessions.test.js"],
+    "namePattern": "kickWebrtcSession"
+  },
+  {
+    "label": "#564 webrtcSessions: the kick targets the wrong session id",
+    "file": "backend/src/lib/webrtcSessions.js",
+    "find": "/v3/webrtc/sessions/kick/${id}`, {",
+    "replace": "/v3/webrtc/sessions/kick/${String(id).slice(1)}`, {",
+    "expect": "killed",
+    "tests": ["webrtcSessions.test.js"],
+    "namePattern": "kickWebrtcSession"
+  },
+  {
+    "label": "#564 recordings route: the thumbnail route serves the video file (still a 200)",
+    "file": "backend/src/routes/recordings.js",
+    "find": "  const file = getRecordingThumbFile(req.params.id);",
+    "replace": "  const file = getRecordingVideoFile(req.params.id);",
+    "expect": "killed",
+    "tests": ["recordings-routes.test.js"],
+    "namePattern": "a ready recording streams"
+  },
+  {
+    "label": "#564 identityRedaction: a name that cannot be percent-encoded is dropped from the matcher instead of redacted as typed",
+    "file": "backend/src/lib/identityRedaction.js",
+    "find": "function variants(literal) {\n  const out = [literal];",
+    "replace": "function variants(literal) {\n  try { encodeURIComponent(literal); } catch { return []; }\n  const out = [literal];",
+    "expect": "killed",
+    "tests": ["identity-redaction.test.js"],
+    "namePattern": "lone surrogate"
+  },
+  {
+    "label": "#564 sleepAnalysis: the fallback for an unparseable window hour is 20 instead of the documented 19",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "return { h: Number.isFinite(h) ? h : 19, m: Number.isFinite(m) ? m : 0 };",
+    "replace": "return { h: Number.isFinite(h) ? h : 20, m: Number.isFinite(m) ? m : 0 };",
+    "expect": "killed",
+    "tests": ["sleepInsights.test.js"],
+    "namePattern": "unparseable sleep window"
+  },
+  {
+    "label": "#564 clipStorage: the age sweep expires clips younger than the retention (cutoff = now)",
+    "file": "backend/src/lib/clipStorage.js",
+    "find": "    for (const { id, clip_path } of getExpiredClips(days)) {",
+    "replace": "    for (const { id, clip_path } of getExpiredClips(0)) {",
+    "expect": "killed",
+    "tests": ["clip-storage.test.js"],
+    "namePattern": "a sweep with nothing to do"
+  },
+  {
+    "label": "#564 clipStorage: the size pass has no cap, so it deletes clips while storage is far under it",
+    "file": "backend/src/lib/clipStorage.js",
+    "find": "    if (bytes > cap) {\n      for (const c of getReadyClipsOldestFirst()) {\n        if (bytes <= cap) break;",
+    "replace": "    if (true) {\n      for (const c of getReadyClipsOldestFirst()) {",
+    "expect": "killed",
+    "tests": ["clip-storage.test.js"],
+    "namePattern": "a sweep with nothing to do"
+  },
+  {
+    "label": "#564 gotify: a priority of 0 is replaced by the saved default (truthiness check)",
+    "file": "backend/src/lib/gotify.js",
+    "find": "priority: priority != null ? priority : c.priority,",
+    "replace": "priority: priority || c.priority,",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "a priority of 0 is sent as 0"
+  },
+  {
+    "label": "#564 gotify: a trailing slash on the server URL is no longer trimmed (//message)",
+    "file": "backend/src/lib/gotify.js",
+    "find": ".replace(/\\/+$/, '')",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "trailing slash on the server URL"
+  },
+  {
+    "label": "#564 pushover: a blank device is sent (Pushover refuses it) instead of omitted",
+    "file": "backend/src/lib/pushover.js",
+    "find": "if (c.device) form.set('device', c.device);",
+    "replace": "form.set('device', c.device);",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "a blank device is OMITTED"
+  },
+  {
+    "label": "#564 pushover: an empty image buffer is attached",
+    "file": "backend/src/lib/pushover.js",
+    "find": "if (image && image.length) {\n      form.set('attachment'",
+    "replace": "if (image) {\n      form.set('attachment'",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "a snapshot is attached as snapshot"
+  },
+  {
+    "label": "#564 pushover: validate sends a comma-separated device list (users/validate checks one at a time)",
+    "file": "backend/src/lib/pushover.js",
+    "find": "if (dev && !dev.includes(',')) params.device = dev;",
+    "replace": "if (dev) params.device = dev;",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "validate: both fields are required"
+  },
+  {
+    "label": "#564 pushover: validate swaps the application token and the user key",
+    "file": "backend/src/lib/pushover.js",
+    "find": "const params = { token: appToken, user: userKey };",
+    "replace": "const params = { token: userKey, user: appToken };",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "validate: both fields are required",
+    "note": "Found by the #714 review: the fake edge answered ok whatever it was sent, so the test did not look at the form."
+  },
+  {
+    "label": "#564 pushover: validate is sent as a GET",
+    "file": "backend/src/lib/pushover.js",
+    "find": "`${API}/users/validate.json`, { method: 'POST', body }",
+    "replace": "`${API}/users/validate.json`, { method: 'GET', body }",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "validate: both fields are required"
+  },
+  {
+    "label": "#564 pushover: the attachment is a same-length buffer of zeros (a corrupt snapshot)",
+    "file": "backend/src/lib/pushover.js",
+    "find": "new Blob([image], { type: 'image/jpeg' })",
+    "replace": "new Blob([Buffer.alloc(image.length)], { type: 'image/jpeg' })",
+    "expect": "killed",
+    "tests": ["push-provider-payloads.test.js"],
+    "namePattern": "a snapshot is attached as snapshot",
+    "note": "Found by the #714 review: both tests compared only the attachment's size."
+  },
+  {
+    "label": "#564 snapshot: URL credentials stay in the URL, so fetch refuses a camera that needs a login",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "    url.username = '';\n    url.password = '';\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["snapshot-http-fetch.test.js"],
+    "namePattern": "credentials in the URL become a Basic header"
+  },
+  {
+    "label": "#564 snapshot: a non-2xx answer is accepted as a picture",
+    "file": "backend/src/lib/snapshot.js",
+    "find": "    if (!res.ok) {\n      logger.info(`[snapshot] camera URL returned",
+    "replace": "    if (false) {\n      logger.info(`[snapshot] camera URL returned",
+    "expect": "killed",
+    "tests": ["snapshot-http-fetch.test.js"],
+    "namePattern": "a non-2xx answer is null"
+  },
+  {
+    "label": "#564 detectionAlert: the public server address is never stamped on the tap target",
+    "file": "backend/src/lib/detectionAlert.js",
+    "find": "const server = getPublicBaseUrl();",
+    "replace": "const server = null;",
+    "expect": "killed",
+    "tests": ["detection-alert.test.js"],
+    "namePattern": "once the app has taught the server"
+  },
+  {
+    "label": "#564 detectionAlert: Gotify fires although it is switched off",
+    "file": "backend/src/lib/detectionAlert.js",
+    "find": "  if (fireGotify) {",
+    "replace": "  if (true) {",
+    "expect": "killed",
+    "tests": ["detection-alert.test.js"],
+    "namePattern": "ntfy alone"
+  },
+  {
+    "label": "#564 onvifMotion: every detect_source is treated as ONVIF",
+    "file": "backend/src/lib/onvifMotion.js",
+    "find": "&& camera.detect_source === 'onvif';",
+    "replace": ";",
+    "expect": "killed",
+    "tests": ["onvif-motion-wanted.test.js"],
+    "namePattern": "each condition alone refuses"
+  },
+  {
+    "label": "#505 CamerasContext: status.unknown is ignored (an unknown status is treated like offline)",
+    "file": "frontend/src/lib/CamerasContext.jsx",
+    "find": "if (cam.status?.unknown) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"]
+  },
+  {
+    "label": "#505 CamerasContext: an unknown camera is not flagged for the tile",
+    "file": "frontend/src/lib/CamerasContext.jsx",
+    "find": "statusLevel: 'connecting', statusUnknown: true",
+    "replace": "statusLevel: 'connecting'",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"]
+  },
+  {
+    "label": "#505 WhepPlayer: the service-unavailable notice never shows",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "{statusUnknown && state !== 'idle' ? (",
+    "replace": "{false ? (",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"]
+  },
+  {
+    "label": "#563 gate: GET /api/auth/sessions/all without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.get('/sessions/all', requireAuth, requireAdmin, ",
+    "replace": "router.get('/sessions/all', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/auth/users without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.post('/users', requireAuth, requireAdmin, ",
+    "replace": "router.post('/users', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: PUT /api/auth/users/:id without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.put('/users/:id', requireAuth, requireAdmin, ",
+    "replace": "router.put('/users/:id', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: DELETE /api/auth/users/:id/mfa without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.delete('/users/:id/mfa', requireAuth, requireAdmin, ",
+    "replace": "router.delete('/users/:id/mfa', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: DELETE /api/auth/users/:id without requireAdmin",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.delete('/users/:id', requireAuth, requireAdmin, ",
+    "replace": "router.delete('/users/:id', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/cameras/onvif-probe without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/onvif-probe', requireAdmin, ",
+    "replace": "router.post('/onvif-probe', ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/cameras/probe-report without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/probe-report', requireAdmin, ",
+    "replace": "router.post('/probe-report', ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: DELETE /api/cameras/alerts without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.delete('/alerts', requireAuth, requireAdmin, ",
+    "replace": "router.delete('/alerts', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/cameras/clips/delete without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/clips/delete', requireAdmin, ",
+    "replace": "router.post('/clips/delete', ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/cameras/verify-talk without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/verify-talk', requireAdmin, ",
+    "replace": "router.post('/verify-talk', ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: GET /api/gotify/config without requireAdmin",
+    "file": "backend/src/routes/gotify.js",
+    "find": "router.get('/config', requireAuth, requireAdmin, ",
+    "replace": "router.get('/config', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: PUT /api/gotify/config without requireAdmin",
+    "file": "backend/src/routes/gotify.js",
+    "find": "router.put('/config', requireAuth, requireAdmin, ",
+    "replace": "router.put('/config', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: GET /api/notifications/status without requireAdmin",
+    "file": "backend/src/routes/notifications.js",
+    "find": "router.get('/status', requireAuth, requireAdmin, ",
+    "replace": "router.get('/status', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: PUT /api/ntfy/config without requireAdmin",
+    "file": "backend/src/routes/ntfy.js",
+    "find": "router.put('/config', requireAuth, requireAdmin, ",
+    "replace": "router.put('/config', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/ntfy/test without requireAdmin",
+    "file": "backend/src/routes/ntfy.js",
+    "find": "router.post('/test', requireAuth, requireAdmin, ",
+    "replace": "router.post('/test', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: GET /api/pushover/config without requireAdmin",
+    "file": "backend/src/routes/pushover.js",
+    "find": "router.get('/config', requireAuth, requireAdmin, ",
+    "replace": "router.get('/config', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: POST /api/pushover/test without requireAdmin",
+    "file": "backend/src/routes/pushover.js",
+    "find": "router.post('/test', requireAuth, requireAdmin, ",
+    "replace": "router.post('/test', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: GET /api/settings/mqtt/status without requireAdmin",
+    "file": "backend/src/routes/settings.js",
+    "find": "router.get('/mqtt/status', requireAuth, requireAdmin, ",
+    "replace": "router.get('/mqtt/status', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: GET /api/settings/clip-storage without requireAdmin",
+    "file": "backend/src/routes/settings.js",
+    "find": "router.get('/clip-storage', requireAuth, requireAdmin, ",
+    "replace": "router.get('/clip-storage', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: PUT /api/settings without requireAdmin",
+    "file": "backend/src/routes/settings.js",
+    "find": "router.put('/', requireAuth, requireAdmin, ",
+    "replace": "router.put('/', requireAuth, ",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Found by deleting every requireAdmin in turn (the sweep behind #563): the pin killed all 43, but only some had a catalogue entry to keep it that way."
+  },
+  {
+    "label": "#563 gate: PUT /api/cameras/:id without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id', asyncHandler(async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review found that 4 of the 43 admin gates still had no removal entry (the other 39 are above): existing entries anchored to these lines change cooldown state or reorder guards, none removes the gate."
+  },
+  {
+    "label": "#563 gate: PUT /api/cameras/:id/detection without requireAdmin",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.put('/:id/detection', requireAdmin, asyncHandler(async (req, res) => {",
+    "replace": "router.put('/:id/detection', asyncHandler(async (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review (see the PUT /api/cameras/:id entry)."
+  },
+  {
+    "label": "#563 gate: DELETE /api/logs without requireAdmin",
+    "file": "backend/src/routes/logs.js",
+    "find": "router.delete('/', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review (see the PUT /api/cameras/:id entry)."
+  },
+  {
+    "label": "#563 gate: DELETE /api/timelapses/:id without requireAdmin",
+    "file": "backend/src/routes/timelapses.js",
+    "find": "router.delete('/:id', requireAuth, requireAdmin, (req, res) => {",
+    "replace": "router.delete('/:id', requireAuth, (req, res) => {",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js"],
+    "note": "Added after the #707 review (see the PUT /api/cameras/:id entry)."
+  },
+  {
+    "label": "#666 exit probe: stopActivityTracker leaves the flush timer running (the probe child must be killed, not exit)",
+    "file": "backend/src/lib/activityTracker.js",
+    "find": "      writeMinute(cameraId, s);\n    }\n  }\n  clearInterval(flushTimer);",
+    "replace": "      writeMinute(cameraId, s);\n    }\n  }\n  // MUTANT: clearInterval(flushTimer);",
+    "expect": "killed",
+    "tests": [
+      "suite-exits-cleanly.test.js"
+    ],
+    "namePattern": "a process that starts and then STOPS the tracker exits on its own",
+    "note": "Guards the #666 rewrite of childExitsOnItsOwn (deadline measured from BODY-DONE, not from spawn): the new harness must still see a leaked timer. Checked by hand against the full file too: 5 of 64 tests fail with the timer left running, the nested node --test run only after its 150s ceiling."
+  },
+  {
+    "label": "#W3 --shard: the modulus compares against i instead of i - 1 (shard n gets nothing, shard 1 misses entry 0)",
+    "file": "scripts/mutate.mjs",
+    "find": "idx % shard.n === shard.i - 1",
+    "replace": "idx % shard.n === shard.i",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: sharding happens on the whole catalogue before --only is applied",
+    "file": "scripts/mutate.mjs",
+    "find": "const mutants = shard ? filtered.filter(",
+    "replace": "const mutants = shard ? catalogue.filter(",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: i > n is accepted (a shard that can never exist runs nothing and says so late)",
+    "file": "scripts/mutate.mjs",
+    "find": "return i <= n ? { i, n } : null;",
+    "replace": "return { i, n };",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: an index above 2^53 is accepted (it rounds, so i > n compares equal)",
+    "file": "scripts/mutate.mjs",
+    "find": "if (!Number.isSafeInteger(i) || !Number.isSafeInteger(n)) return null;",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --only: a filter that matches no control carries none (a broken suite reports everything killed)",
+    "file": "scripts/mutate.mjs",
+    "find": "&& !matched.some((m) => m.expect === 'survives') ? [...matched, control] : matched;",
+    "replace": "&& false ? [...matched, control] : matched;",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --only: the control is added even when the filter matches nothing (a typo runs just the control)",
+    "file": "scripts/mutate.mjs",
+    "find": "const filtered = only && matched.length && control",
+    "replace": "const filtered = only && control",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --shard: a leading 0 / zero index is accepted",
+    "file": "scripts/mutate.mjs",
+    "find": "/^([1-9]\\d*)\\/([1-9]\\d*)$/",
+    "replace": "/^(\\d+)\\/([1-9]\\d*)$/",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#W3 --list ignores --only and --shard (prints the whole catalogue)",
+    "file": "scripts/mutate.mjs",
+    "find": "for (const m of mutants) console.log(`${m.expect === 'survives'",
+    "replace": "for (const m of catalogue) console.log(`${m.expect === 'survives'",
+    "expect": "killed",
+    "tests": [
+      "mutate-args.test.js"
+    ],
+    "namePattern": "the CI matrix"
+  },
+  {
+    "label": "#708 trustProxy: an IPv4-mapped IPv6 range is rejected, so TRUST_PROXY silently falls back to loopback",
+    "file": "backend/src/lib/trustProxy.js",
+    "find": "const v6 = /^[0-9a-fA-F:]+$/.test(addr) && addr.includes(':');",
+    "replace": "const v6 = /^[0-9a-fA-F:]+$/.test(addr) && addr.includes(':') && !/ffff/i.test(addr);",
+    "expect": "killed",
+    "tests": [
+      "dep-bump-proxy.test.js"
+    ],
+    "namePattern": "a mapped IPv4 range still trusts the matching IPv4 peer",
+    "note": "Survived the PR #708 test file before it checked the applied value: the loopback fallback also trusts 127.0.0.1, so the trusted result looked right. trust-proxy.test.js has no IPv6 case."
+  },
+  {
+    "label": "#708 trustProxy: every IPv6 address or range is rejected (falls back to loopback)",
+    "file": "backend/src/lib/trustProxy.js",
+    "find": "const v6 = /^[0-9a-fA-F:]+$/.test(addr) && addr.includes(':');",
+    "replace": "const v6 = false;",
+    "expect": "killed",
+    "tests": [
+      "dep-bump-proxy.test.js"
+    ],
+    "namePattern": "an IPv6 range that cannot contain an IPv4 peer does not trust it",
+    "note": "trust-proxy.test.js and login-rate-limit.test.js both pass with this mutant (no IPv6 value in either); only the PR #708 file kills it."
+  },
+  {
+    "label": "#751 use-node.sh: a Node whose major equals .nvmrc is not accepted (-ge becomes -gt)",
+    "file": "scripts/use-node.sh",
+    "find": "if [ \"$nl_have\" -ge \"$nl_want\" ] 2>/dev/null; then",
+    "replace": "if [ \"$nl_have\" -gt \"$nl_want\" ] 2>/dev/null; then",
+    "expect": "killed",
+    "tests": ["use-node-script.test.js"],
+    "namePattern": "already satisfies .nvmrc is left alone"
+  },
+  {
+    "label": "#751 use-node.sh: a bad .nvmrc exits the caller's shell instead of returning",
+    "file": "scripts/use-node.sh",
+    "find": "(got '$nl_want')\" >&2\n    return 1 2>/dev/null || exit 1",
+    "replace": "(got '$nl_want')\" >&2\n    exit 1",
+    "expect": "killed",
+    "tests": ["use-node-script.test.js"],
+    "namePattern": "not a bare major version is refused"
+  },
+  {
+    "label": "#751 use-node.sh: an empty .nvmrc is accepted as a version",
+    "file": "scripts/use-node.sh",
+    "find": "  '' | *[!0-9]*)",
+    "replace": "  *[!0-9]*)",
+    "expect": "killed",
+    "tests": ["use-node-script.test.js"],
+    "namePattern": "not a bare major version is refused"
+  },
+  {
+    "label": "#751 use-node.sh: with no download for this OS the script reports success",
+    "file": "scripts/use-node.sh",
+    "find": "install Node $nl_want by hand\" >&2\n  return 1 2>/dev/null || exit 1",
+    "replace": "install Node $nl_want by hand\" >&2\n  return 0 2>/dev/null || exit 0",
+    "expect": "killed",
+    "tests": ["use-node-script.test.js"],
+    "namePattern": "fails, says what to do, and leaves PATH exactly as it was"
   }
 ]

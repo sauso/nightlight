@@ -108,6 +108,13 @@ files says `>=24` (npm only warns). Only 24 is tested: on Node 22 three backend 
 (`detector-observation-wiring`, `transcoder-log-redaction`, `sleepInsights`; the cause was never
 established, #565). `backend/test/node-version-pin.test.js` fails if the five places drift apart.
 
+**Sandbox with an older Node (the cloud builders came with 22).** Before `npm ci` or any test run, `node -v`;
+if the major is below `.nvmrc`'s, run `. scripts/use-node.sh` (sourced, so it can change PATH). It uses nvm,
+fnm or volta if present, else downloads that major from nodejs.org into `~/.cache/nightlight-node`, checks the
+SHA-256, and puts it first on PATH. If it fails it says why and changes nothing: then set the Node version in the
+sandbox's own setup script. Red tests on Node 22 are an artefact of the Node version, not of your change. The
+script was written on Windows and has not yet run on a Linux sandbox (#751).
+
 ```bash
 # Backend (Node/Express, ESM, port 4000)
 cd backend && npm install
