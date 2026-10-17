@@ -17835,6 +17835,86 @@
     "note": "Same defect on the two-factor turn-off route."
   },
   {
+    "label": "#697 /me/password: a wrong current password signs the user's OTHER devices out",
+    "file": "backend/src/routes/auth.js",
+    "find": "return res.status(400).json({ error: 'Current password is incorrect' });",
+    "replace": "db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.user.id, req.user.sid); return res.status(400).json({ error: 'Current password is incorrect' });",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "PUT /me/password: a wrong password signs no OTHER device out",
+    "note": "Review of #706: survived while every fixture had ONE session, where this delete matches nothing. Killed by a second session for the same user."
+  },
+  {
+    "label": "#697 /me/mfa/disable: a wrong password signs the user's OTHER devices out",
+    "file": "backend/src/routes/auth.js",
+    "find": "return res.status(400).json({ error: 'Password is incorrect' });",
+    "replace": "db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.user.id, req.user.sid); return res.status(400).json({ error: 'Password is incorrect' });",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "POST /me/mfa/disable: a wrong password signs no OTHER device out",
+    "note": "Same two-session test, on the two-factor turn-off route."
+  },
+  {
+    "label": "#697 /me/mfa/disable: a wrong password clears the two-factor secret but leaves mfa_enabled on",
+    "file": "backend/src/routes/auth.js",
+    "find": "return res.status(400).json({ error: 'Password is incorrect' });",
+    "replace": "db.prepare('UPDATE users SET mfa_secret = NULL WHERE id = ?').run(user.id); return res.status(400).json({ error: 'Password is incorrect' });",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "POST /me/mfa/disable: a wrong password leaves the second factor exactly as it was",
+    "note": "Review of #706: survived because the tests checked only mfa_enabled. The account can no longer finish its own second step."
+  },
+  {
+    "label": "#697 /me/mfa/disable: a wrong password clears the backup codes but leaves mfa_enabled on",
+    "file": "backend/src/routes/auth.js",
+    "find": "return res.status(400).json({ error: 'Password is incorrect' });",
+    "replace": "db.prepare('UPDATE users SET mfa_backup_codes = NULL WHERE id = ?').run(user.id); return res.status(400).json({ error: 'Password is incorrect' });",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "POST /me/mfa/disable: a wrong password leaves the second factor exactly as it was",
+    "note": "Needs PLANTED backup codes: the shared fixture's are NULL, and a cleared NULL looks unchanged."
+  },
+  {
+    "label": "#697 api.js: a 401 no longer sends the person to the sign-in form (#/login redirect removed)",
+    "file": "frontend/src/lib/api.js",
+    "find": "window.location.hash = '#/login';",
+    "replace": "void '#/login';",
+    "expect": "killed",
+    "tests": ["wrongPassword697.test.jsx"],
+    "namePattern": "control: a real 401",
+    "note": "Review of #706: survived while the control asserted only the cleared token. Without the redirect, the 'not signed out' checks prove nothing."
+  },
+  {
+    "label": "#697 api.js: api.post sends PUT (verb swap)",
+    "file": "frontend/src/lib/api.js",
+    "find": "  post: (url, body, opts) => request('POST', url, body, opts),",
+    "replace": "  post: (url, body, opts) => request('PUT', url, body, opts),",
+    "expect": "killed",
+    "tests": ["wrongPassword697.test.jsx"],
+    "namePattern": "turning two-factor off: wrong password",
+    "note": "Review of #706: survived while the fake fetch answered the route on any non-GET method. The fake is now strict on method and path."
+  },
+  {
+    "label": "#697 api.js: api.put sends POST (verb swap)",
+    "file": "frontend/src/lib/api.js",
+    "find": "  put: (url, body, opts) => request('PUT', url, body, opts),",
+    "replace": "  put: (url, body, opts) => request('POST', url, body, opts),",
+    "expect": "killed",
+    "tests": ["wrongPassword697.test.jsx"],
+    "namePattern": "Account: wrong current password",
+    "note": "The other half of the verb swap: PUT /auth/me/password."
+  },
+  {
+    "label": "#697 /login/mfa: a backup code is verified but never consumed (replayable)",
+    "file": "backend/src/routes/auth.js",
+    "find": "      db.prepare('UPDATE users SET mfa_backup_codes = ? WHERE id = ?').run(result.hashesJson, user.id);",
+    "replace": "      void result.hashesJson;",
+    "expect": "killed",
+    "tests": ["auth-routes.test.js"],
+    "namePattern": "a backup code is single-use",
+    "note": "Review of #706: killed on 036f6f1, then SURVIVED once the first #697 tests spent alice's 20-login budget (the replay's sign-in got a 429, so it was refused as an expired step). The #697 tests now mint their tokens, and the single-use test asserts a 200 sign-in and an 'Incorrect code' refusal."
+  },
+  {
     "label": "#536 snapshot.js: redirects are followed again",
     "file": "backend/src/lib/snapshot.js",
     "find": "redirect: 'manual'",
