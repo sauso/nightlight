@@ -29,11 +29,11 @@ import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport, r
 import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rtspProbe.js';
 import { grabLiveFrame } from '../lib/snapshot.js';
 import { logger } from '../lib/logger.js';
-import { startRecording, stopRecording, recordingState, getOndemandSettings } from '../lib/recordings.js';
+import { startRecording, stopRecording, recordingState, getOndemandSettings, isRecording } from '../lib/recordings.js';
 import { stripUrlPassword, urlHasPassword, resolveUrlPassword, scrubSecrets, findCredentialLeak } from '../lib/urlCredentials.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { clearStalePrimaryPointers } from '../lib/primaryCamera.js';
-import { purgeCamera } from '../lib/entityPurge.js';
+import { purgeCamera, purgeFailureReason } from '../lib/entityPurge.js';
 import { recordingReadiness } from '../lib/recordingReadiness.js';
 
 const router = Router();
@@ -60,7 +60,10 @@ try {
 // routes further down.
 router.get('/alerts/:id/snapshot', requireAuthQueryOrHeader, (req, res) => {
   const file = getEventSnapshotFile(req.params.id);
-  if (!file) return res.status(404).json({ error: 'No snapshot for this alert' });
+  // Only while its alert row exists, for the same reason as the bed-transition frame below (#719 review).
+  if (!file || !db.prepare('SELECT 1 FROM detection_events WHERE id = ?').get(Number(req.params.id))) {
+    return res.status(404).json({ error: 'No snapshot for this alert' });
+  }
   // { root, path } form: Express jails the send under root and rejects any `..`, on top of the
   // integer-only id validation upstream (belt-and-suspenders against path traversal).
   res.sendFile(file.path, { root: file.root, dotfiles: 'deny' });
@@ -71,7 +74,12 @@ router.get('/alerts/:id/snapshot', requireAuthQueryOrHeader, (req, res) => {
 // morning review — see lib/bedTransitions.js for why they are collected at all.
 router.get('/bed-transitions/:id/snapshot', requireAuthQueryOrHeader, (req, res) => {
   const file = transitionSnapshotPath(req.params.id);
-  if (!file) return res.status(404).json({ error: 'No frame for this transition' });
+  // Served only while its transition row exists (#719 review). The file is named by the id alone, so a frame
+  // left behind by any route (a capture that finished after its child or camera was removed, a pre-fix
+  // orphan) would otherwise stay viewable by any signed-in user for good.
+  if (!file || !db.prepare('SELECT 1 FROM bed_transitions WHERE id = ?').get(Number(req.params.id))) {
+    return res.status(404).json({ error: 'No frame for this transition' });
+  }
   // transitionSnapshotPath coerces the id to a positive integer and builds the path itself, so nothing
   // user-supplied reaches the filesystem; sendFile's dotfile guard is the second layer.
   res.sendFile(file, { dotfiles: 'deny' });
@@ -1277,6 +1285,14 @@ router.put('/:id/assign', requireAdmin, asyncHandler(async (req, res) => {
 router.delete('/:id', requireAdmin, asyncHandler(async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
+  // #719 review: an on-demand recording in progress would be cut AFTER the purge removed its row, leaving a video
+  // with no row and, since recordings have no retention, on disk for good. Refused before anything is stopped or
+  // deleted. A 409 with a readable reason, not a 5xx (Cloudflare strips 5xx bodies). A recording already stopped
+  // and still being cut, and a wake clip, are not refused here: their writers delete their own file when the
+  // row has gone (lib/recordings.js).
+  if (isRecording(existing.id)) {
+    return res.status(409).json({ error: 'This camera is recording. Stop the recording first, then remove the camera.' });
+  }
   await stopTranscoder(req.params.id);
   await stopSubStream(existing).catch(() => {});
   await stopMotionDetector(req.params.id).catch(() => {});
@@ -1309,14 +1325,16 @@ router.delete('/:id', requireAdmin, asyncHandler(async (req, res) => {
   // readings, clip dir and segment ring - then the camera row, last. See lib/entityPurge.js for the order
   // and why. The legs above are stopped first so nothing is still writing for it. If a file cannot be
   // removed the purge throws before the camera row goes: the camera stays (its processes are already
-  // stopped; whether a reconcile restarts them was not checked) and the admin can retry. A plain 500 body, so the Remove modal can show it.
+  // stopped; whether a reconcile restarts them was not checked) and the admin can retry. A 409, not a 500
+  // (#719 review): Cloudflare strips 5xx bodies, so the Remove modal would have shown "Request failed (500)"
+  // instead of this reason.
   try {
     purgeCamera(req.params.id);
   } catch (e) {
     logger.error(`Failed to delete camera ${req.params.id}:`, e.message);
-    return res.status(500).json({
-      error: 'Could not delete everything for this camera, so the camera was not removed. Try again, and '
-        + 'check the server log if it keeps failing.',
+    return res.status(409).json({
+      error: `Could not delete everything for this camera (${purgeFailureReason(e)}), so the camera was not `
+        + 'removed. Try again, and check the server log if it keeps failing.',
     });
   }
   res.status(204).end();

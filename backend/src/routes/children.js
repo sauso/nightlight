@@ -12,7 +12,8 @@ import {
 } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
 import { reconcileClipRing } from '../lib/clipCapture.js';
-import { purgeChild } from '../lib/entityPurge.js';
+import { purgeChild, purgeFailureReason } from '../lib/entityPurge.js';
+import { isRecording } from '../lib/recordings.js';
 import { TRANSITION } from '../lib/bedTransitions.js';
 import { getNightReview, saveNightReview, previewNightReview, inBedAfterOnset, asleepAfterWake, reviewCorrectsNight,
   reviewCardState, localHmToUtcSql, applyVerdicts, applyCorrection, applyCorrections, transitionInstant,
@@ -736,16 +737,24 @@ router.delete('/:id', requireAdmin, (req, res) => {
   // last. All of it - the ordering, why it is not one transaction, the jail on stored paths, the
   // unassigning of the child's cameras and the pointer cleanup (#655) - lives in lib/entityPurge.js. If a
   // file cannot be removed it throws BEFORE the child row goes, so the child is still there to retry and no
-  // surviving row names a deleted file. The response is a plain 500 JSON body (not a 5xx with no body
-  // that Cloudflare would strip), so the Remove modal can show it.
+  // surviving row names a deleted file. The answer is a 409 with the reason (#719 review: it was a 500, and
+  // Cloudflare strips 5xx bodies, so the Remove modal showed "Request failed (500)" instead).
+  //
+  // Refused, before anything is deleted, while one of the child's cameras is recording on demand (#719 review):
+  // the video is cut when the recording stops, by then its row would be gone, and recordings have no retention,
+  // so the file would stay on disk for good. Same rule and wording as DELETE /api/cameras/:id.
+  const recordingCam = db.prepare('SELECT id FROM cameras WHERE child_id = ?').all(id).find((c) => isRecording(c.id));
+  if (recordingCam) {
+    return res.status(409).json({ error: "One of this child's cameras is recording. Stop the recording first, then remove the child." });
+  }
   let affectedCameraIds;
   try {
     affectedCameraIds = purgeChild(id);
   } catch (e) {
     logger.error(`Failed to delete child ${id}:`, e.message);
-    return res.status(500).json({
-      error: 'Could not delete everything for this child, so nothing more was removed. The child is still '
-        + 'here: try again, and check the server log if it keeps failing.',
+    return res.status(409).json({
+      error: `Could not delete everything for this child (${purgeFailureReason(e)}), so the child was not `
+        + 'removed. Try again, and check the server log if it keeps failing.',
     });
   }
   // After the unassign, so a wake-only ring on one of these cameras is told to stop at once (issue #387

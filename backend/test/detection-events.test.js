@@ -108,6 +108,26 @@ test('saveEventSnapshot writes the image and flags the row', () => {
   assert.ok(ev.getEventSnapshotFile(id), 'the file should now resolve');
 });
 
+// #719 review: the snapshot is grabbed (awaited) before it is saved, and the camera can be removed in that
+// window, deleting the row. The file must not outlive it: nothing could name it to delete it afterwards.
+test('saveEventSnapshot for a row that is gone leaves no file behind', () => {
+  const id = ev.recordDetectionEvent('cam-1', 'Nursery', ev.ALERT.MOTION);
+  db.prepare('DELETE FROM detection_events WHERE id = ?').run(id);
+  ev.saveEventSnapshot(id, Buffer.from('fake-jpeg-bytes'));
+  assert.equal(ev.getEventSnapshotFile(id), null, 'a snapshot file was left with no alert row');
+});
+
+test('setClipReady for a row that is gone deletes the clip and its thumbnail', () => {
+  const id = ev.recordDetectionEvent('cam-1', 'Nursery', ev.ALERT.MOTION);
+  const rel = makeClipFile('orphan.mp4');
+  const thumb = path.join(CLIPS_DIR, rel.replace(/\.mp4$/, '.jpg'));
+  fs.writeFileSync(thumb, 'x');
+  db.prepare('DELETE FROM detection_events WHERE id = ?').run(id);
+  ev.setClipReady(id, rel, 5, 100);
+  assert.ok(!fs.existsSync(path.join(CLIPS_DIR, rel)), 'a clip was left with no alert row');
+  assert.ok(!fs.existsSync(thumb), 'its thumbnail was left with no alert row');
+});
+
 test('saveEventSnapshot ignores a missing buffer without flagging the row', () => {
   const id = ev.recordDetectionEvent('cam-1', 'Nursery', ev.ALERT.MOTION);
   ev.saveEventSnapshot(id, null);

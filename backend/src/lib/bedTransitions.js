@@ -94,7 +94,11 @@ async function attachSnapshot(id, cameraId) {
     const file = snapshotFile(id);
     if (!file) return;
     await fs.promises.writeFile(file, buf);
-    markSnapshotStmt.run(id);
+    // The row can be gone by now (#719 review, reproduced): the grab above can take seconds, and removing the
+    // child or camera in that window deletes the row first, so this write put back a frame no row names, still
+    // served by id. The UPDATE runs straight after the write with no await between, so a row it does not find
+    // is gone for good: remove the file just written. (A failure here is logged by the catch below.)
+    if (markSnapshotStmt.run(id).changes === 0) fs.rmSync(file, { force: true });
   } catch (err) {
     logger.info(`[bedtx] snapshot for transition ${id} failed: ${err.message}`);
   }

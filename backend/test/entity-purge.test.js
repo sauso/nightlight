@@ -14,15 +14,29 @@
 //
 // ★ A CONTROL ENTITY is populated identically and must come through untouched, or `DELETE FROM x` without
 // its WHERE would pass.
+//
+// ★ IDS ARE UUIDs wherever a test needs the per-id folders swept: the purge sweeps a folder named by an id only
+// for the UUID shape the app mints (#719 review, see idFolders in lib/entityPurge.js).
+//
+// ★ LINKS. Directory links are made as junctions (`fs.symlinkSync(target, path, 'junction')`): on Windows a
+// junction needs no privilege where a symlink does, and on Linux the type is ignored and a symlink is made. If
+// the link still cannot be made (EPERM / ENOTSUP), the test SKIPS with the reason, visibly, never passes.
+//
+// ⚠️ PATH IS EMPTIED before any import, as in recordings-lifecycle.test.js: the recording-guard test starts a
+// real on-demand recording, which needs a segmenter, and a segmenter spawns ffmpeg.
 import { test, describe, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import {
   useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, makeChild, makeCamera, signToken, mountRouter, call,
 } from './helpers/harness.js';
+
+const emptyBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-nobin-'));
+process.env.PATH = emptyBinDir;
 
 const dataDir = useTempDataDir();
 
@@ -32,9 +46,26 @@ await new Promise((r) => mediamtx.listen(0, '127.0.0.1', r));
 process.env.MEDIAMTX_API = `http://127.0.0.1:${mediamtx.address().port}`;
 
 const { default: db } = await import('../src/db.js');
-const { CLIPS_DIR } = await import('../src/lib/clipRecorder.js');
+const { CLIPS_DIR, startSegmenter, stopAllSegmenters } = await import('../src/lib/clipRecorder.js');
+const { checkClipStorage } = await import('../src/lib/clipStorage.js');
+const { recordBedTransition, TRANSITION } = await import('../src/lib/bedTransitions.js');
+const { startRecording, stopRecording, isRecording } = await import('../src/lib/recordings.js');
 const { default: childrenRouter } = await import('../src/routes/children.js');
 const { default: camerasRouter } = await import('../src/routes/cameras.js');
+
+// Make a directory link, or skip the test (visibly, with the reason) where the platform will not.
+function linkDirOrSkip(t, target, at) {
+  try {
+    fs.symlinkSync(target, at, 'junction');
+    return true;
+  } catch (e) {
+    if (e.code === 'EPERM' || e.code === 'ENOTSUP') {
+      t.skip(`cannot create a directory link here (${e.code}); this test needs one`);
+      return false;
+    }
+    throw e;
+  }
+}
 
 // Where a table's id-named snapshot JPEGs live. Only the DIRECTORY is spelled out; which tables have a
 // snapshot is read from the schema, and a table with a `snapshot` column missing from this map fails below.
@@ -56,10 +87,12 @@ before(async () => {
   token = signToken({ sub: admin.id, role: 'admin', sid: makeSession(db, admin.id) });
 });
 after(async () => {
+  stopAllSegmenters();
   await childServer?.close();
   await cameraServer?.close();
   await new Promise((r) => mediamtx.close(r));
   cleanupTempDataDirs();
+  try { fs.rmSync(emptyBinDir, { recursive: true, force: true }); } catch { /* best effort */ }
 });
 
 // --- schema-driven fixture ---------------------------------------------------------------------
@@ -158,8 +191,10 @@ function seedEntity(kind, id) {
 
 describe('deleting a child deletes everything for it', () => {
   test('after DELETE, no row in ANY table that references the child, and none of its files, remain; the control child is untouched', async () => {
-    const gone = seedEntity('child', 'child-gone');
-    const kept = seedEntity('child', 'child-kept');
+    const goneId = randomUUID();
+    const keptId = randomUUID();
+    const gone = seedEntity('child', goneId);
+    const kept = seedEntity('child', keptId);
 
     // Anti-vacuous: every referencing column really got a row before we delete, files really exist.
     for (const [k, n] of Object.entries(gone.counts)) assert.ok(n >= 1, `fixture put nothing in ${k}`);
@@ -167,15 +202,19 @@ describe('deleting a child deletes everything for it', () => {
     for (const f of gone.files) assert.ok(fs.existsSync(f), `fixture file missing: ${f}`);
 
     // The child's camera(s), read before they are unassigned.
-    const camIds = db.prepare("SELECT id FROM cameras WHERE child_id = 'child-gone'").all().map((r) => r.id);
+    const camIds = db.prepare('SELECT id FROM cameras WHERE child_id = ?').all(goneId).map((r) => r.id);
     assert.ok(camIds.length >= 1);
-    const keptCamIds = db.prepare("SELECT id FROM cameras WHERE child_id = 'child-kept'").all().map((r) => r.id);
+    const keptCamIds = db.prepare('SELECT id FROM cameras WHERE child_id = ?').all(keptId).map((r) => r.id);
     const keptCamCounts = keptCamIds.map((c) => countsFor('camera', c));
 
-    const res = await delChild('child-gone');
+    const res = await delChild(goneId);
     assert.equal(res.status, 204);
 
-    for (const [k, n] of Object.entries(countsFor('child', 'child-gone'))) assert.equal(n, 0, `${k} still names the deleted child`);
+    // The child's OWN row: it has no child_id column, so the schema-driven count below cannot see it (#719
+    // review: dropping the purge's final `DELETE FROM children` survived every test).
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM children WHERE id = ?').get(goneId).n, 0, 'the child row itself survived');
+    assert.ok(db.prepare('SELECT 1 FROM children WHERE id = ?').get(keptId), 'the control child row was deleted');
+    for (const [k, n] of Object.entries(countsFor('child', goneId))) assert.equal(n, 0, `${k} still names the deleted child`);
     for (const f of gone.files) assert.ok(!fs.existsSync(f), `file survived the child: ${f}`);
 
     // Rows recorded by the child's cameras (the bed they slept in) go too; the cameras themselves stay.
@@ -197,7 +236,7 @@ describe('deleting a child deletes everything for it', () => {
     for (const f of gone.camFiles.filter((x) => !bedSnaps.includes(x))) assert.ok(fs.existsSync(f), `the camera's own file was deleted with the child: ${f}`);
 
     // Control.
-    assert.deepEqual(countsFor('child', 'child-kept'), kept.counts, 'a row of ANOTHER child was deleted');
+    assert.deepEqual(countsFor('child', keptId), kept.counts, 'a row of ANOTHER child was deleted');
     // ...including what ITS cameras recorded (bed transitions, activity samples): deleting one child's must
     // not touch another camera's.
     assert.ok(keptCamIds.length >= 1);
@@ -214,27 +253,30 @@ describe('deleting a child deletes everything for it', () => {
     assert.equal((await delChild('child-judged')).status, 204);
     assert.ok(!fs.existsSync(jpg));
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM bed_transitions WHERE id = ?').get(id).n, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM children WHERE id = 'child-judged'").get().n, 0, 'the child row itself survived');
   });
 });
 
 describe('deleting a camera deletes everything for it', () => {
   test('after DELETE, no row in ANY table that references the camera, and none of its files, remain; the control camera is untouched', async () => {
-    const gone = seedEntity('camera', 'cam-gone');
-    const kept = seedEntity('camera', 'cam-kept');
+    const goneId = randomUUID();
+    const keptId = randomUUID();
+    const gone = seedEntity('camera', goneId);
+    const kept = seedEntity('camera', keptId);
     for (const [k, n] of Object.entries(gone.counts)) assert.ok(n >= 1, `fixture put nothing in ${k}`);
     assert.ok(referencing('camera').length >= 7, 'schema discovery found suspiciously few tables');
     for (const f of gone.files) assert.ok(fs.existsSync(f), `fixture file missing: ${f}`);
 
-    const res = await delCamera('cam-gone');
+    const res = await delCamera(goneId);
     assert.equal(res.status, 204);
 
-    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM cameras WHERE id = 'cam-gone'").get().n, 0);
-    for (const [k, n] of Object.entries(countsFor('camera', 'cam-gone'))) assert.equal(n, 0, `${k} still names the deleted camera`);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM cameras WHERE id = ?').get(goneId).n, 0);
+    for (const [k, n] of Object.entries(countsFor('camera', goneId))) assert.equal(n, 0, `${k} still names the deleted camera`);
     for (const f of gone.files) assert.ok(!fs.existsSync(f), `file survived the camera: ${f}`);
-    assert.ok(!fs.existsSync(path.join(CLIPS_DIR, 'cam-gone')), 'per-camera clip dir left behind');
-    assert.ok(!fs.existsSync(path.join(CLIPS_DIR, '.ring', 'cam-gone')), 'segment ring left behind');
+    assert.ok(!fs.existsSync(path.join(CLIPS_DIR, goneId)), 'per-camera clip dir left behind');
+    assert.ok(!fs.existsSync(path.join(CLIPS_DIR, '.ring', goneId)), 'segment ring left behind');
 
-    assert.deepEqual(countsFor('camera', 'cam-kept'), kept.counts, 'a row of ANOTHER camera was deleted');
+    assert.deepEqual(countsFor('camera', keptId), kept.counts, 'a row of ANOTHER camera was deleted');
     for (const f of kept.files) assert.ok(fs.existsSync(f), `a file of ANOTHER camera was deleted: ${f}`);
   });
 
@@ -260,6 +302,7 @@ describe('deleting a camera deletes everything for it', () => {
 describe('a stored path cannot make a delete reach outside the clips directory', () => {
   let outsideDir;
   let victims;
+  let linkError; // set when this platform refused the directory link: each test then skips, saying so
   beforeEach(() => {
     outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-victim-'));
     victims = {
@@ -268,13 +311,24 @@ describe('a stored path cannot make a delete reach outside the clips directory',
       viaLink: writeFile(path.join(outsideDir, 'victim-link', 'victim-via-link.txt')),
       aDir: writeFile(path.join(CLIPS_DIR, 'keep-me-dir', 'inner.txt')),
     };
-    fs.symlinkSync(path.join(outsideDir, 'victim-link'), path.join(CLIPS_DIR, 'escape-link'));
+    linkError = null;
+    try {
+      fs.symlinkSync(path.join(outsideDir, 'victim-link'), path.join(CLIPS_DIR, 'escape-link'), 'junction');
+    } catch (e) {
+      if (e.code !== 'EPERM' && e.code !== 'ENOTSUP') throw e;
+      linkError = e.code;
+    }
   });
   afterEach(() => {
     fs.rmSync(outsideDir, { recursive: true, force: true });
     fs.rmSync(path.join(CLIPS_DIR, 'escape-link'), { force: true });
     fs.rmSync(path.join(CLIPS_DIR, 'keep-me-dir'), { recursive: true, force: true });
   });
+  const skipIfNoLink = (t) => {
+    if (!linkError) return false;
+    t.skip(`cannot create a directory link here (${linkError}); this test needs one`);
+    return true;
+  };
 
   const hostilePaths = () => [
     path.relative(CLIPS_DIR, victims.sibling),                  // ../victim-sibling.txt
@@ -285,7 +339,8 @@ describe('a stored path cannot make a delete reach outside the clips directory',
     'x/../../victim-sibling.txt',                               // normalises out
   ];
 
-  test('child delete: recordings, timelapses and wake clips with hostile paths are skipped, their rows still deleted', async () => {
+  test('child delete: recordings, timelapses and wake clips with hostile paths are skipped, their rows still deleted', async (t) => {
+    if (skipIfNoLink(t)) return;
     makeChild(db, { id: 'child-h' });
     for (const p of hostilePaths()) {
       db.prepare("INSERT INTO recordings (camera_id, child_id, started_at, path, thumb_path) VALUES ('c', 'child-h', 'now', ?, ?)").run(p, p);
@@ -298,7 +353,8 @@ describe('a stored path cannot make a delete reach outside the clips directory',
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM timelapses WHERE child_id = 'child-h'").get().n, 0);
   });
 
-  test('camera delete: alert clips and recordings with hostile paths are skipped, their rows still deleted', async () => {
+  test('camera delete: alert clips and recordings with hostile paths are skipped, their rows still deleted', async (t) => {
+    if (skipIfNoLink(t)) return;
     makeCamera(db, { id: 'cam-h' });
     for (const p of hostilePaths()) {
       db.prepare("INSERT INTO detection_events (camera_id, camera_name, type, clip_path, clip_status) VALUES ('cam-h','n','motion',?, 'ready')").run(p);
@@ -311,11 +367,13 @@ describe('a stored path cannot make a delete reach outside the clips directory',
   });
 
   test('an id that is not one safe path segment never reaches a directory removal', async () => {
+    // (Needs no link, so it runs even where the link in beforeEach could not be made.)
     // A child id comes from the URL, and %2F decodes to a slash, so `..%2F.ring` arrives as `../.ring`.
     // Joined under clips/timelapse/ that is clips/.ring: INSIDE the clips dir, so the containment check
-    // alone would let it through and wipe every camera's segment ring. Only the one-safe-segment check
-    // stops it. (Plain `..` would resolve to the clips dir itself and be caught by containment, which is
-    // why this id is the one worth testing.)
+    // alone would let it through and wipe every camera's segment ring. Only the id check stops it (since the
+    // #719 review the UUID-shape rule, which this id fails; before it, a one-safe-segment rule). (Plain `..`
+    // would resolve to the clips dir itself and be caught by containment, which is why this id is the one
+    // worth testing.)
     //
     // The ids are planted straight into the tables: the app only ever mints UUIDs, but a database can be
     // restored or edited, and the delete must not trust the id it was given to name a directory.
@@ -367,8 +425,9 @@ describe('a failure part-way leaves nothing referencing a deleted file, and can 
     const [a, b, c] = threeRecordings('child-f');
     blocked = b.abs;
     const res = await delChild('child-f');
-    assert.equal(res.status, 500);
-    assert.equal(typeof res.body.error, 'string');
+    // A 4xx, never a 5xx: Cloudflare strips a 5xx body, and the Remove dialog shows this one (#719 review).
+    assert.equal(res.status, 409);
+    assert.match(res.body.error, /Could not delete everything for this child \(.*permission denied.*\), so the child was not removed/);
     assert.ok(db.prepare("SELECT 1 FROM children WHERE id = 'child-f'").get(), 'the child must survive a failed delete so it can be retried');
     // The ordering claim: file first, then its row, one at a time.
     assert.ok(!fs.existsSync(a.abs) && !rowExists(a.id), 'a: file and row both gone');
@@ -387,8 +446,8 @@ describe('a failure part-way leaves nothing referencing a deleted file, and can 
     const [a, b, c] = threeRecordings('cam-f');
     blocked = b.abs;
     const res = await delCamera('cam-f');
-    assert.equal(res.status, 500);
-    assert.equal(typeof res.body.error, 'string');
+    assert.equal(res.status, 409);
+    assert.match(res.body.error, /Could not delete everything for this camera \(.*permission denied.*\), so the camera was not removed/);
     assert.ok(db.prepare("SELECT 1 FROM cameras WHERE id = 'cam-f'").get(), 'the camera must survive a failed delete');
     for (const r of [a, b, c]) if (rowExists(r.id)) assert.ok(fs.existsSync(r.abs), 'a surviving row names a file that is gone');
     blocked = null;
@@ -403,5 +462,265 @@ describe('a failure part-way leaves nothing referencing a deleted file, and can 
     fs.rmSync(b.abs);
     assert.equal((await delChild('child-m')).status, 204);
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM recordings WHERE child_id = 'child-m'").get().n, 0);
+  });
+
+  // #719 review: both snapshot removals caught EVERY error and carried on (`catch {}` survived), so a photo that
+  // could not be deleted lost its row, and the id that names it, while the file stayed.
+  test('★ #719 a snapshot photo that cannot be deleted stops the delete, and its row stays to name it', async () => {
+    makeCamera(db, { id: 'cam-snapfail' });
+    const evId = db.prepare("INSERT INTO detection_events (camera_id, camera_name, type, snapshot) VALUES ('cam-snapfail', 'n', 'motion', 1)").run().lastInsertRowid;
+    const evJpg = writeFile(path.join(SNAPSHOT_DIRS.detection_events, `${evId}.jpg`));
+    const txId = db.prepare("INSERT INTO bed_transitions (camera_id, type, verdict, snapshot) VALUES ('cam-snapfail', 'into_bed', 'correct', 1)").run().lastInsertRowid;
+    const txJpg = writeFile(path.join(SNAPSHOT_DIRS.bed_transitions, `${txId}.jpg`));
+
+    blocked = evJpg; // alerts are purged first
+    assert.equal((await delCamera('cam-snapfail')).status, 409);
+    assert.ok(db.prepare('SELECT 1 FROM detection_events WHERE id = ?').get(evId), "the alert's row went while its photo stayed");
+    assert.ok(fs.existsSync(evJpg));
+
+    blocked = txJpg; // then the judged transition's frame
+    assert.equal((await delCamera('cam-snapfail')).status, 409);
+    assert.ok(db.prepare('SELECT 1 FROM bed_transitions WHERE id = ?').get(txId), "the transition's row went while its photo stayed");
+    assert.ok(fs.existsSync(txJpg));
+    assert.ok(db.prepare("SELECT 1 FROM cameras WHERE id = 'cam-snapfail'").get(), 'the camera must survive a failed delete');
+
+    blocked = null;
+    assert.equal((await delCamera('cam-snapfail')).status, 204, 'retry');
+    assert.ok(!fs.existsSync(evJpg) && !fs.existsSync(txJpg));
+  });
+
+  // #719 review: resolving a stored path's folder failed for a reason other than "missing" (EACCES here; ELOOP
+  // or EIO the same) and was treated as missing, so the row was deleted and the file stayed.
+  test('★ #719 a stored path whose folder cannot be resolved stops the delete, and its row stays', async () => {
+    makeChild(db, { id: 'child-rp' });
+    const rel = 'child-rp/a.mp4';
+    const abs = writeFile(path.join(CLIPS_DIR, rel));
+    const recId = db.prepare("INSERT INTO recordings (camera_id, child_id, started_at, path) VALUES ('c', 'child-rp', 'now', ?)").run(rel).lastInsertRowid;
+    const realRealpath = fs.realpathSync;
+    const unresolvable = path.join(CLIPS_DIR, 'child-rp');
+    fs.realpathSync = (p, ...rest) => {
+      if (String(p) === unresolvable) throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+      return realRealpath(p, ...rest);
+    };
+    try {
+      assert.equal((await delChild('child-rp')).status, 409);
+      assert.ok(db.prepare('SELECT 1 FROM recordings WHERE id = ?').get(recId), 'the row went while its file stayed');
+      assert.ok(fs.existsSync(abs));
+      assert.ok(db.prepare("SELECT 1 FROM children WHERE id = 'child-rp'").get(), 'the child must survive a failed delete');
+    } finally {
+      fs.realpathSync = realRealpath;
+    }
+    assert.equal((await delChild('child-rp')).status, 204, 'retry');
+    assert.ok(!fs.existsSync(abs));
+  });
+
+  // #719 review: the frames folder (a photo of the bed every 2 minutes) was removed by a helper that swallowed
+  // every error, so the child was deleted and the frames stayed. fs.rmSync is patched for the same reason as
+  // unlinkSync above: a real EACCES is not portable (root ignores permissions in CI).
+  test('★ #719 a frames folder that cannot be removed stops the delete, and the child stays', async () => {
+    const childId = randomUUID();
+    makeChild(db, { id: childId });
+    const frame = writeFile(path.join(CLIPS_DIR, '.timelapse-frames', childId, '2026-01-01', 'f-1.jpg'));
+    const realRm = fs.rmSync;
+    const isFramesDir = (p) => path.basename(String(p)) === childId && path.basename(path.dirname(String(p))) === '.timelapse-frames';
+    fs.rmSync = (p, ...rest) => {
+      if (isFramesDir(p)) throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+      return realRm(p, ...rest);
+    };
+    try {
+      const res = await delChild(childId);
+      assert.equal(res.status, 409);
+      assert.match(res.body.error, /permission denied/);
+      assert.ok(db.prepare('SELECT 1 FROM children WHERE id = ?').get(childId), 'the child was deleted while its frames stayed');
+      assert.ok(fs.existsSync(frame));
+    } finally {
+      fs.rmSync = realRm;
+    }
+    assert.equal((await delChild(childId)).status, 204, 'retry');
+    assert.ok(!fs.existsSync(frame));
+  });
+});
+
+// --- folder sweeps: links and shared folders (#719 review) -------------------------------------------------
+
+describe('★ #719 a folder sweep never follows a link out of the clips folder', () => {
+  let outside;
+  beforeEach(() => { outside = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-victim-')); });
+  afterEach(() => { fs.rmSync(outside, { recursive: true, force: true }); });
+
+  // For one test, clips/<shared> is a link to `outside`; the real folder is put back afterwards.
+  async function withSharedLinkedOut(t, shared, fn) {
+    const real = path.join(CLIPS_DIR, shared);
+    const aside = `${real}.aside-${++seq}`;
+    fs.mkdirSync(CLIPS_DIR, { recursive: true }); // run alone (a name pattern), nothing has made it yet
+    if (fs.existsSync(real)) fs.renameSync(real, aside);
+    try {
+      if (linkDirOrSkip(t, outside, real)) await fn();
+    } finally {
+      try { fs.unlinkSync(real); } catch (e) { if (e.code !== 'ENOENT') throw e; } // the link itself, never followed
+      if (fs.existsSync(aside)) fs.renameSync(aside, real);
+    }
+  }
+
+  // Each case: the shared folder made a link, the file outside that the old code deleted, and the delete.
+  for (const [shared, kind, victimRel] of [
+    ['timelapse', 'child', (id) => [id, 'night.mp4']],
+    ['.timelapse-frames', 'child', (id) => [id, '2026-01-01', 'f-1.jpg']],
+    ['.ring', 'camera', (id) => [id, 'seg-1.mkv']],
+  ]) {
+    test(`clips/${shared} linked outside: removing a ${kind} refuses with a 409 and deletes nothing`, async (t) => {
+      await withSharedLinkedOut(t, shared, async () => {
+        const id = randomUUID();
+        if (kind === 'child') makeChild(db, { id });
+        else makeCamera(db, { id });
+        const victim = writeFile(path.join(outside, ...victimRel(id)));
+        // A row with a file of its own: the refusal comes BEFORE anything is deleted, not halfway through.
+        const recRel = `pre-${id}/r.mp4`;
+        const recFile = writeFile(path.join(CLIPS_DIR, recRel));
+        db.prepare(`INSERT INTO recordings (camera_id, child_id, started_at, path) VALUES (?, ?, 'now', ?)`)
+          .run(kind === 'camera' ? id : 'c', kind === 'child' ? id : null, recRel);
+
+        const res = kind === 'child' ? await delChild(id) : await delCamera(id);
+        assert.equal(res.status, 409);
+        assert.match(res.body.error, /link to somewhere outside/);
+        assert.ok(fs.existsSync(victim), `a file outside the clips folder was deleted through clips/${shared}`);
+        const table = kind === 'child' ? 'children' : 'cameras';
+        assert.ok(db.prepare(`SELECT 1 FROM ${table} WHERE id = ?`).get(id), `the ${kind} must stay so it can be retried`);
+        assert.ok(fs.existsSync(recFile), 'the purge deleted a recording before it refused');
+      });
+    });
+  }
+
+  test('the per-id folder ITSELF being a link: the link is removed, what it points at is not', async (t) => {
+    const id = randomUUID();
+    makeCamera(db, { id });
+    const victim = writeFile(path.join(outside, 'seg-1.mkv'));
+    fs.mkdirSync(path.join(CLIPS_DIR, '.ring'), { recursive: true });
+    const link = path.join(CLIPS_DIR, '.ring', id);
+    if (!linkDirOrSkip(t, outside, link)) return;
+    assert.equal((await delCamera(id)).status, 204);
+    assert.ok(fs.existsSync(victim), 'the sweep followed the link');
+    assert.throws(() => fs.lstatSync(link), { code: 'ENOENT' }, 'the link itself was left');
+  });
+});
+
+describe('★ #719 an id that names a shared folder never sweeps it', () => {
+  // Every one passes the old one-safe-segment rule. `transition-snapshots` and `detection-snapshots` live in the
+  // data folder by default, not the clips folder; they are planted here because the clips folder is configurable
+  // and may be the data folder itself. `.hidden` stands for any leading-dot name.
+  const NAMES = ['timelapse', '.ring', '.timelapse-frames', 'transition-snapshots', 'detection-snapshots', '.hidden'];
+  test('cameras and children with these ids are deleted, and every shared folder keeps its files', async () => {
+    const keep = NAMES.map((n) => writeFile(path.join(CLIPS_DIR, n, 'someone-else', 'keep.bin')));
+    for (const id of NAMES) {
+      makeCamera(db, { id });
+      makeChild(db, { id });
+      assert.equal((await delCamera(encodeURIComponent(id))).status, 204, `camera ${id}`);
+      assert.equal((await delChild(encodeURIComponent(id))).status, 204, `child ${id}`);
+      for (const f of keep) assert.ok(fs.existsSync(f), `removing the camera or child with id ${JSON.stringify(id)} deleted ${f}`);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM cameras WHERE id = ?').get(id).n, 0, `camera ${id} row`);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM children WHERE id = ?').get(id).n, 0, `child ${id} row`);
+    }
+  });
+});
+
+// --- writers that finish after the delete, and a recording in progress (#719 review) ----------------------
+
+describe('★ #719 a photo that arrives after the delete leaves nothing behind', () => {
+  test('a bed-transition frame still being grabbed when its child is removed is deleted on arrival, and never served', async () => {
+    // A camera whose snapshot URL answers only when told to, so the grab is in flight across the delete.
+    let requested;
+    const gotRequest = new Promise((r) => { requested = r; });
+    let release;
+    const slow = createServer((req, res) => {
+      release = () => { res.setHeader('content-type', 'image/jpeg'); res.end(Buffer.from('jpeg-bytes')); };
+      requested();
+    });
+    await new Promise((r) => slow.listen(0, '127.0.0.1', r));
+    // Observe the write so the test knows when the late photo has landed (attachSnapshot is fire-and-forget).
+    const realWrite = fs.promises.writeFile;
+    let written;
+    const wrote = new Promise((r) => { written = r; });
+    fs.promises.writeFile = async (...a) => { try { return await realWrite(...a); } finally { written(); } };
+    try {
+      const childId = randomUUID();
+      makeChild(db, { id: childId });
+      makeCamera(db, { id: 'cam-slow', childId, extra: { snapshot_url: `http://127.0.0.1:${slow.address().port}/snap.jpg` } });
+      const txId = recordBedTransition('cam-slow', TRANSITION.INTO_BED, 0.2);
+      await gotRequest;
+      assert.equal((await delChild(childId)).status, 204);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM bed_transitions WHERE id = ?').get(txId).n, 0);
+
+      release();
+      // Bounded, so a grab that fails before writing fails this test instead of hanging the file.
+      let timer;
+      await Promise.race([wrote, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('the late frame was never written: the fixture did not reach the write')), 5000); })]);
+      clearTimeout(timer);
+      await new Promise((r) => setImmediate(r)); // let attachSnapshot finish what follows its write
+      assert.ok(!fs.existsSync(path.join(SNAPSHOT_DIRS.bed_transitions, `${txId}.jpg`)), 'the frame was written back with no row to name it');
+      assert.equal((await call(`${cameraServer.url}/api/cameras/bed-transitions/${txId}/snapshot`, { token })).status, 404);
+    } finally {
+      fs.promises.writeFile = realWrite;
+      slow.closeAllConnections?.();
+      await new Promise((r) => slow.close(r));
+    }
+  });
+
+  test('a photo whose row is gone is not served, even while its file is still on disk', async () => {
+    // A file left behind before this fix, or by any path not guarded yet. The id names the file, so without the
+    // row check it would be served to any signed-in user for good.
+    const orphanTx = 990001;
+    const orphanEv = 990002;
+    writeFile(path.join(SNAPSHOT_DIRS.bed_transitions, `${orphanTx}.jpg`));
+    writeFile(path.join(SNAPSHOT_DIRS.detection_events, `${orphanEv}.jpg`));
+    assert.equal((await call(`${cameraServer.url}/api/cameras/bed-transitions/${orphanTx}/snapshot`, { token })).status, 404);
+    assert.equal((await call(`${cameraServer.url}/api/cameras/alerts/${orphanEv}/snapshot`, { token })).status, 404);
+    // Control: with its row, the same kind of file IS served (so the 404s above are not the route being broken).
+    const txId = db.prepare("INSERT INTO bed_transitions (camera_id, type, snapshot) VALUES ('cam-x', 'into_bed', 1)").run().lastInsertRowid;
+    writeFile(path.join(SNAPSHOT_DIRS.bed_transitions, `${txId}.jpg`));
+    assert.equal((await call(`${cameraServer.url}/api/cameras/bed-transitions/${txId}/snapshot`, { token })).status, 200);
+    const evId = db.prepare("INSERT INTO detection_events (camera_id, camera_name, type, snapshot) VALUES ('cam-x', 'n', 'motion', 1)").run().lastInsertRowid;
+    writeFile(path.join(SNAPSHOT_DIRS.detection_events, `${evId}.jpg`));
+    assert.equal((await call(`${cameraServer.url}/api/cameras/alerts/${evId}/snapshot`, { token })).status, 200);
+  });
+});
+
+describe('★ #719 removing is refused while a recording is in progress', () => {
+  test('a camera recording on demand blocks removing it, and its child, with a 409; nothing is deleted', async () => {
+    // As recordings-lifecycle.test.js arms it: storage marked ready from a supplied mount table, a segmenter (no
+    // ffmpeg on PATH, so it never really runs) and one closed segment for the pre-roll.
+    const ABS = path.resolve(CLIPS_DIR);
+    assert.equal(checkClipStorage({ mounts: `/dev/sda1 / ext4 rw 0 0\n/dev/sdb1 ${ABS} xfs rw 0 0\n` }).ok, true);
+    const childId = randomUUID();
+    const camId = randomUUID();
+    makeChild(db, { id: childId });
+    makeCamera(db, { id: camId, childId });
+    startSegmenter(camId, `path_${camId}`);
+    const seg = writeFile(path.join(CLIPS_DIR, '.ring', camId, 'seg-fixture.mkv'));
+    const t0 = new Date(Date.now() - 3000);
+    fs.utimesSync(seg, t0, t0);
+    try {
+      startRecording(db.prepare('SELECT * FROM cameras WHERE id = ?').get(camId));
+      assert.ok(isRecording(camId), 'the fixture did not start a recording');
+      const recId = db.prepare('SELECT id FROM recordings WHERE camera_id = ?').get(camId).id;
+
+      const cam = await delCamera(camId);
+      assert.equal(cam.status, 409);
+      assert.match(cam.body.error, /Stop the recording first, then remove the camera/);
+      const kid = await delChild(childId);
+      assert.equal(kid.status, 409);
+      assert.match(kid.body.error, /Stop the recording first, then remove the child/);
+
+      assert.ok(db.prepare('SELECT 1 FROM cameras WHERE id = ?').get(camId), 'the camera was deleted');
+      assert.ok(db.prepare('SELECT 1 FROM children WHERE id = ?').get(childId), 'the child was deleted');
+      assert.ok(db.prepare('SELECT 1 FROM recordings WHERE id = ?').get(recId), 'the recording row was deleted');
+      assert.ok(fs.existsSync(seg), 'the segment ring was swept');
+      assert.ok(isRecording(camId), 'the refused delete stopped the recording');
+    } finally {
+      await stopRecording(camId, { settleMs: 0 });
+      stopAllSegmenters();
+    }
+    // Stopped: both can go.
+    assert.equal((await delChild(childId)).status, 204);
+    assert.equal((await delCamera(camId)).status, 204);
   });
 });

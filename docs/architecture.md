@@ -225,7 +225,13 @@ column with `PRAGMA`, fills a row and real files in each, deletes over HTTP and 
 the contract: per file-bearing row, file first and then the row (autocommit, not one transaction, because a rollback
 would restore rows whose files were already unlinked); rows with no file go in one transaction, the entity's own row
 last, so a failed delete leaves the entity in place to retry. Every stored path is resolved against its real parent
-directory and skipped unless it is a regular file inside `CLIPS_DIR`.
+directory and skipped unless it is a regular file inside `CLIPS_DIR`. The whole-folder sweeps (`<cameraId>/`,
+`.ring/<cameraId>/`, `timelapse/<childId>/`, `.timelapse-frames/<childId>/`) run only for a UUID-shaped id (the
+only kind the app mints; an id like `timelapse` would otherwise name a shared folder), and refuse the whole delete,
+before anything is removed, if a parent folder resolves outside the real `CLIPS_DIR`. A failed delete answers
+**409** with the reason (never 5xx: Cloudflare strips 5xx bodies), and so does a delete while one of the cameras
+is recording on demand. A writer that finishes after the delete (a bed-transition frame, an alert photo or clip,
+a recording or wake clip) checks that its `UPDATE` still found the row, and deletes the file it wrote if not.
 
 ## API errors (`backend/src/lib/asyncHandler.js`, `backend/src/middleware/errorHandler.js`)
 
