@@ -301,12 +301,18 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
             : `No one in the bed for this night. The cameras watched the whole window `
               + `(${night.coverage_minutes} minutes covered) and saw no one sleeping here, so there’s no sleep to report.`}
         </div>
-        {/* A flagged night MUST stay reachable here, or the flag could never be taken back — an `empty`
-            night otherwise returns above `ReviewNightButton` (see the `ok`-night render further down)
-            and has no way into the review at all. Deliberately NOT shown for a genuine detector-empty
-            night: that is the unrelated "reverse error" (detector says empty, child was really there),
-            which has no correction path anywhere yet — out of scope here, tracked separately. */}
-        {night.corrected && (
+        {/* The way into the review on an `empty` night, which otherwise returns above the `ok`-night render
+            and its `ReviewNightButton`. Two jobs. A flagged night MUST stay reachable here, or the flag could
+            never be taken back. And a detector-empty night is the "reverse error" (the detector says empty,
+            a child was really there), which #355 made correctable: giving it both an asleep and a wake-up
+            time turns it into a scored night (sleepReviews.js, asScoredFromEmpty). Before #355 this was shown
+            only on a `corrected` night, so that correction was unreachable from the app (PR #721 review): the
+            morning card never asks about an empty night (pendingReview offers `ok` nights only, on purpose),
+            and this was the one other way in. The review page opens on "Add the times" for a night with no
+            times, so both are offered. Same rule as on an `ok` night: not while the night is in progress
+            (nothing is promoted until it is over). Deliberately not added to a morning prompt for every
+            empty night. */}
+        {!night.in_progress && (
           <div style={{ padding: '0 14px 14px' }}>
             <ReviewNightButton childId={childId} date={date} corrected={night.corrected} />
           </div>
