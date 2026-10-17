@@ -137,8 +137,13 @@ test('matchTokenStep returns the step the code belongs to, and null for a wrong 
 
 test('★ matchTokenStep gives a step for a LEGACY 80-bit secret too', () => {
   const secret = 'JBSWY3DPEHPK3PXP';
-  const code = otplib.generateSync({ secret, guardrails: otplib.createGuardrails({ MIN_SECRET_BYTES: 10 }) });
-  assert.equal(mfa.matchTokenStep(secret, code), Math.floor(Date.now() / 30000));
+  // One clock reading for both the code and the expected step (review of #720): reading Date.now() again
+  // for the expectation failed the case whenever a 30 s step boundary passed in between.
+  const now = Date.now();
+  const code = otplib.generateSync({
+    secret, epoch: Math.floor(now / 1000), guardrails: otplib.createGuardrails({ MIN_SECRET_BYTES: 10 }),
+  });
+  assert.equal(mfa.matchTokenStep(secret, code), Math.floor(now / 30000));
 });
 
 // --- backup codes -----------------------------------------------------------------------------

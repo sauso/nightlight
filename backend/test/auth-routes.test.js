@@ -189,13 +189,21 @@ describe('POST /login/mfa — the code is actually verified', () => {
     // route's later `!user.mfa_enabled` test refuses her anyway — it passes for the wrong reason.
     // Killing the mutant needs a session token whose owner DOES have MFA on: then the only thing
     // standing between it and a freshly minted second session is the purpose check itself.
+    //
+    // ⚠️ And the code must be one that has NOT been used yet (review of #720). Since #550 a code works once,
+    // so re-sending the code that signed bob in is refused by the replay rule with or without the purpose
+    // check, and this case passed with the check deleted. The code for the NEXT 30 s step is still inside
+    // the drift allowance and newer than the one used, so only the purpose check can refuse it, and the
+    // refusal must be that check's own text.
     const start = await post('/login', { username: 'bob', password: PASSWORD });
     const sessionToken = (await post('/login/mfa', { mfaToken: start.body.mfaToken, code: totp(mfaSecret) })).body.token;
     assert.ok(sessionToken, 'precondition: bob is fully logged in');
     const before = sessionsFor('u-mfa').length;
 
-    const res = await post('/login/mfa', { mfaToken: sessionToken, code: totp(mfaSecret) });
+    const unusedCode = generateSync({ secret: mfaSecret, epoch: Math.floor(Date.now() / 1000) + 30 });
+    const res = await post('/login/mfa', { mfaToken: sessionToken, code: unusedCode });
     assert.equal(res.status, 401, "an MFA user's own session token was exchanged for another session");
+    assert.deepEqual(res.body, { error: 'Invalid verification token' }, 'refused, but not by the purpose check');
     assert.equal(sessionsFor('u-mfa').length, before, 'a second session was minted from a session token');
   });
 

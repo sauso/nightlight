@@ -17985,13 +17985,26 @@
   {
     "label": "#548 login: the post-compare re-read of the hash is removed (a reset mid-compare still signs in)",
     "file": "backend/src/routes/auth.js",
-    "find": "?.password_hash !== user.password_hash) {",
-    "replace": "?.password_hash === null) {",
+    "find": "if (!current || current.password_hash !== user.password_hash) {",
+    "replace": "if (!current) {",
     "expect": "killed",
     "tests": [
       "mfa-replay-and-async-bcrypt.test.js"
     ],
-    "namePattern": "password reset that lands DURING the compare"
+    "namePattern": "password reset that lands DURING the compare",
+    "note": "Re-anchored in the review of #720: /login now re-reads the whole row (`current`), not only password_hash."
+  },
+  {
+    "label": "#548 login: the two-factor branch uses mfa_enabled as read BEFORE the compare (a sign-in racing /me/mfa/enable gets a full session)",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (current.mfa_enabled) {",
+    "replace": "  if (user.mfa_enabled) {",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "two-factor switched on while the password is being checked",
+    "note": "Review of #720 (Codex, verified by running): the shipped branch was exactly this mutant."
   },
   {
     "label": "#548 password change: the compare-and-swap on the verified hash is removed",
@@ -18027,15 +18040,28 @@
     "namePattern": "two simultaneous /setup requests"
   },
   {
-    "label": "#548 enable: the 'MFA still off' guard on the write is removed",
+    "label": "#548 enable: the single-flight guard is removed (every simultaneous enable hashes ten backup codes)",
     "file": "backend/src/routes/auth.js",
-    "find": "WHERE id = ? AND mfa_enabled = 0')",
-    "replace": "WHERE id = ? AND ? IS NOT NULL')",
+    "find": "  if (mfaEnableInFlight.has(user.id)) return res.status(400).json({ error: 'Two-factor is already on.' });",
+    "replace": "  /* #548 mutant: single-flight guard removed */",
     "expect": "killed",
     "tests": [
       "mfa-replay-and-async-bcrypt.test.js"
     ],
-    "namePattern": "two simultaneous /me/mfa/enable"
+    "namePattern": "ten simultaneous /me/mfa/enable for one user",
+    "note": "Review of #720 (Codex): ten requests cost a hundred hashes. Killed by the hash count and by the losers' text."
+  },
+  {
+    "label": "#548 enable: the write is no longer bound to the secret the code was verified against",
+    "file": "backend/src/routes/auth.js",
+    "find": "AND mfa_enabled = 0 AND mfa_secret IS ?')",
+    "replace": "AND mfa_enabled = 0 AND ? IS NOT NULL')",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "a new set-up while the enable is hashing",
+    "note": "Review of #720 (Codex, verified by running): a /me/mfa/setup during the hashing let the enable switch two-factor on for the new, unverified secret."
   },
   {
     "label": "#548 worker: a stopped worker leaves callers in flight hanging",
@@ -18060,6 +18086,66 @@
     ],
     "namePattern": "hashes are ordinary bcrypt at the same cost",
     "note": "Callers pass 10 explicitly today; this pins the module default as well."
+  },
+  {
+    "label": "#548 worker: one pending map shared by every worker (a dying worker fails its replacement's jobs)",
+    "file": "backend/src/lib/passwordHash.js",
+    "find": "    const pending = new Map(); // THIS worker's jobs only: see the warning above",
+    "replace": "    const pending = (globalThis.sharedPendingMutant ??= new Map());",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "a crashed worker fails only its own jobs",
+    "note": "Review of #720 (Opus, verified by running): the shipped module had one shared map. The child process both rejects the new job and never exits; the test's 15 s spawn timeout ends it."
+  },
+  {
+    "label": "#548 routes: a session signed out during the bcrypt await no longer stops the write",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (isLiveSessionId(req.user?.sid)) return false;",
+    "replace": "  return false;",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "a session signed out while its request awaits bcrypt",
+    "note": "Review of #720 (Opus, verified by running). One mutant for the shared helper; the describe runs one case per route that calls it."
+  },
+  {
+    "label": "#548 password change: the request that loses the race answers 401 again (signs the person out)",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (swapped.changes !== 1) return res.status(400).json({ error: 'Current password is incorrect' });",
+    "replace": "if (swapped.changes !== 1) return res.status(401).json({ error: 'Current password is incorrect' });",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "two simultaneous password changes",
+    "note": "Review of #720 (Opus): merged with dev as written, this line was 401, the #697 sign-out bug on the race path."
+  },
+  {
+    "label": "#550 per-user limit: the admin two-factor reset leaves the in-memory budget in place",
+    "file": "backend/src/routes/auth.js",
+    "find": "  resetMfaUserLimit(req.params.id);",
+    "replace": "  void req.params.id;",
+    "expect": "killed",
+    "tests": [
+      "mfa-replay-and-async-bcrypt.test.js"
+    ],
+    "namePattern": "an admin two-factor reset also clears the per-user limit",
+    "note": "Review of #720 (Codex, verified by running): docs and CHANGELOG said an admin reset clears it; the code did not."
+  },
+  {
+    "label": "#550 /login/mfa: the purpose check is removed (a full session token is exchanged for another session)",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (payload.purpose !== 'mfa') return res.status(401).json({ error: 'Invalid verification token' });",
+    "replace": "/* #550 mutant: purpose check removed */",
+    "expect": "killed",
+    "tests": [
+      "auth-routes.test.js"
+    ],
+    "namePattern": "including a session token belonging to an MFA user",
+    "note": "Review of #720 (Opus): once codes became single-use, that test re-sent the code that had just signed in, so the replay rule refused it and this mutant survived. The test now sends an unused code."
   },
   {
     "label": "#553 childEnv: JWT_SECRET joins the allowlist",
@@ -18223,12 +18309,12 @@
   {
     "label": "#697 /me/password: a wrong current password answers 401 again (signs the person out)",
     "file": "backend/src/routes/auth.js",
-    "find": "return res.status(400).json({ error: 'Current password is incorrect' });",
-    "replace": "return res.status(401).json({ error: 'Current password is incorrect' });",
+    "find": "demo marker.\n    return res.status(400).json({ error: 'Current password is incorrect' });",
+    "replace": "demo marker.\n    return res.status(401).json({ error: 'Current password is incorrect' });",
     "expect": "killed",
     "tests": ["auth-routes.test.js"],
     "namePattern": "PUT /me/password: wrong password answers a 4xx",
-    "note": "api.js clears the token and shows the sign-in form on ANY 401, so this status turns a typo into a sign-out."
+    "note": "api.js clears the token and shows the sign-in form on ANY 401, so this status turns a typo into a sign-out. The find carries the comment line above it since the review of #720: the race loser's line now has the same 400 text."
   },
   {
     "label": "#697 /me/mfa/disable: a wrong password answers 401 again (signs the person out)",
@@ -18243,8 +18329,8 @@
   {
     "label": "#697 /me/password: a wrong current password signs the user's OTHER devices out",
     "file": "backend/src/routes/auth.js",
-    "find": "return res.status(400).json({ error: 'Current password is incorrect' });",
-    "replace": "db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.user.id, req.user.sid); return res.status(400).json({ error: 'Current password is incorrect' });",
+    "find": "demo marker.\n    return res.status(400).json({ error: 'Current password is incorrect' });",
+    "replace": "demo marker.\n    db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.user.id, req.user.sid); return res.status(400).json({ error: 'Current password is incorrect' });",
     "expect": "killed",
     "tests": ["auth-routes.test.js"],
     "namePattern": "PUT /me/password: a wrong password signs no OTHER device out",

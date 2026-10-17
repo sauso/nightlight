@@ -8,7 +8,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
-import { requireAuth, requireAdmin, JWT_SECRET, SESSION_TOKEN_TTL_DAYS, sessionAgeCondition } from '../middleware/auth.js';
+import {
+  requireAuth, requireAdmin, JWT_SECRET, SESSION_TOKEN_TTL_DAYS, sessionAgeCondition, isLiveSessionId,
+} from '../middleware/auth.js';
 import { isDemoModeActive } from '../middleware/demoMode.js';
 import {
   generateSecret, keyUri, verifyToken, matchTokenStep, qrDataUrl, isLegacySecret,
@@ -151,11 +153,16 @@ const perClientLimiter = rateLimit({
 //      spends the budget, however often they do it.
 //   3. The limit is deliberately well above the per-source one (20). A single source hits its own bucket
 //      first, so this only ever engages for a DISTRIBUTED guesser. 30 per 15 min caps them at about
-//      0.003% odds per window against a 6-digit code with three valid steps (30 x 3 / 1,000,000)
-//      and about 2,900 guesses a day. Residual cost, stated plainly: someone who already holds the password
-//      (so can obtain an MFA token) can spend the budget from many addresses and block that user's
-//      second step for the rest of the window. Backup codes share the budget. That attacker has already
-//      beaten the first factor; this trades a 15-minute nuisance for that, and is a known limit.
+//      0.009% odds per window against a 6-digit code with three valid steps (30 x 3 / 1,000,000), which
+//      is 2,880 guesses and about 0.86% odds a day (96 windows: 1 - (1 - 0.00009)^96).
+// Residual cost, stated plainly (a known limit, in docs/mfa.md): someone who already holds the password
+// (so can obtain an MFA token) can spend the budget from many addresses and block that user's second step,
+// and can do it again in every window, so the block lasts as long as they keep doing it: waiting does
+// not end it. Changing the password does (no new MFA token can be obtained; one already issued lives
+// 5 minutes). An admin reset (DELETE /users/:id/mfa) or a restart empties the current bucket, but does not
+// stop someone who still has the password from filling it again. Backup codes share the budget. That
+// attacker has already beaten the first factor; without a per-account limit the 6-digit code was open to
+// anyone with many addresses.
 // The per-source limiters are untouched: nothing here loosens them.
 const PER_USER_MFA_LIMIT = 30;
 
@@ -181,8 +188,11 @@ const mfaUserLimiter = rateLimit({
   keyGenerator: (req) => `mfa-user:${verifiedMfaUserId(req)}`,
 });
 
-// Test seam only: the store is in memory and module-level, so without this a test that exhausts one
-// user's budget would 429 every later test that reuses that user. Not reachable from any route.
+// Empties one user's per-user bucket. The admin MFA reset (DELETE /users/:id/mfa) calls it: the store is in
+// memory, so clearing the row alone left a locked-out user blocked for the rest of the window although the
+// docs said an admin reset clears it (review of #720, verified by running). The console script
+// (scripts/reset-mfa.js) runs in its own process and cannot reach this store. Tests also use it, because
+// the store is module-level and a test that exhausts one user's budget would otherwise 429 later tests.
 export function resetMfaUserLimit(userId) {
   mfaUserLimiter.resetKey(`mfa-user:${userId}`);
 }
@@ -440,7 +450,23 @@ const DUMMY_HASH = bcrypt.hashSync('timing-equalizer', 10);
 //
 // The price of yielding is that a request is no longer atomic from "read the row" to "act on it": the
 // row can change during the compare. Where that matters the code re-reads (login), or writes with a
-// compare-and-swap (password change, backup codes), or does its checks after the await (setup, create).
+// compare-and-swap (password change, backup codes, MFA enable), or does its checks after the await
+// (setup, create). A signed-in route also re-checks its own session after the await (signInEnded below).
+//
+// signInEnded: true (and the 401 already sent) when the requesting session ended while the handler was
+// awaiting bcrypt. requireAuth checked the session when the request arrived, but a sign-out, a revoke or
+// another device's password change can delete it during the ~80 ms hash, and the write used to land anyway
+// (review of #720, verified by running: session deleted at +112 ms, the password change from it written
+// at +577 ms). Every signed-in route that awaits bcrypt and then writes calls this with NO await between
+// the call and the write. Same liveness rule as the auth middleware (isLiveSessionId: the row exists and
+// is within SESSION_TTL_DAYS), and the same 401 body: here the sign-in really is over, so the web app's
+// "any 401 = signed out" handling is right (unlike the wrong-confirmation 400s of #697).
+function signInEnded(req, res) {
+  if (isLiveSessionId(req.user?.sid)) return false;
+  res.status(401).json({ error: 'Invalid or expired session' });
+  return true;
+}
+
 router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   const { username, password } = req.body || {};
   const user =
@@ -449,18 +475,24 @@ router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   if (!(await passwordHash.compare(String(password || ''), hashToCheck)) || !user) {
     return res.status(401).json({ error: 'Incorrect username or password' });
   }
-  // The compare took long enough for a password reset to land (it signs every other session out). Do
-  // not mint a session under a credential that was just replaced, or one for a user just deleted.
-  if (db.prepare('SELECT password_hash FROM users WHERE id = ?').get(user.id)?.password_hash !== user.password_hash) {
+  // The compare yields, long enough for the row to change under it, so everything below decides from the
+  // row as it is NOW (`current`), never from `user` as it was read before the await:
+  //   * a password reset landed (it signs every other session out): no session under a credential that
+  //     was just replaced; a user deleted meanwhile gets none either;
+  //   * two-factor was turned on meanwhile: the CURRENT mfa_enabled decides. Branching on the stale value
+  //     gave a password-only sign-in that started before /me/mfa/enable finished a full session, skipping
+  //     the second factor (review of #720, verified by running).
+  const current = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  if (!current || current.password_hash !== user.password_hash) {
     return res.status(401).json({ error: 'Incorrect username or password' });
   }
   // Password is correct. If the account has two-factor on, don't issue a session yet — hand back a
   // short-lived token the client exchanges at /login/mfa after the second step.
-  if (user.mfa_enabled) {
-    return res.json({ mfaRequired: true, mfaToken: signMfaToken(user.id) });
+  if (current.mfa_enabled) {
+    return res.json({ mfaRequired: true, mfaToken: signMfaToken(current.id) });
   }
-  const sessionId = createSession(user.id, req.headers['user-agent']);
-  res.json({ token: sign(user, sessionId), user: toPublicUser(user) });
+  const sessionId = createSession(current.id, req.headers['user-agent']);
+  res.json({ token: sign(current, sessionId), user: toPublicUser(current) });
 }));
 
 // Second login step for MFA accounts: verify the 6-digit authenticator code (or a one-time backup
@@ -579,6 +611,7 @@ router.post('/users', requireAuth, requireAdmin, asyncHandler(async (req, res) =
   // would let two simultaneous creates of one name both pass and the second die on the UNIQUE index (500).
   // Everything from the check to the INSERT stays synchronous.
   const password_hash = await passwordHash.hash(password, 10);
+  if (signInEnded(req, res)) return;
   const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
   if (existing) return res.status(400).json({ error: 'That username is already taken' });
   let photo;
@@ -627,6 +660,8 @@ router.put('/users/:id', requireAuth, requireAdmin, asyncHandler(async (req, res
   const password_hash = password ? (newHash ?? (await passwordHash.hash(password, 10))) : existing.password_hash;
   let photo;
   try { photo = normalizePhoto(req.body?.photo, existing.photo); } catch (e) { return res.status(400).json({ error: e.message }); }
+  // After the last await above, before any write (see signInEnded).
+  if (signInEnded(req, res)) return;
 
   // #441: the password-driven deletes below AND the role UPDATE both run inside keepingAnAdmin, so a
   // demotion that would leave the install with no admin rolls back BOTH — otherwise a rejected
@@ -699,14 +734,16 @@ router.put('/me/password', requireAuth, sessionActionLimiter, asyncHandler(async
     return res.status(400).json({ error: 'Current password is incorrect' });
   }
   const password_hash = await passwordHash.hash(new_password, 10);
+  if (signInEnded(req, res)) return;
   // Compare-and-swap on the hash that was verified (#548): both bcrypt calls yield, so a second change
   // could have landed in between. Without this, two simultaneous changes would both "verify" the same
-  // current password and the later one would silently win. Losing the race gets the same 401 as a wrong
-  // current password, which is what a serial second request would have received.
+  // current password and the later one would silently win. Losing the race gets the same 400 as a wrong
+  // current password, which is what a serial second request would have received. 400, NOT 401, for the
+  // #697 reason above: this request's sign-in is still fine, and a 401 would sign the person out.
   const swapped = db
     .prepare('UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?')
     .run(password_hash, req.user.id, user.password_hash);
-  if (swapped.changes !== 1) return res.status(401).json({ error: 'Current password is incorrect' });
+  if (swapped.changes !== 1) return res.status(400).json({ error: 'Current password is incorrect' });
   // Sign every other device out. Changing your password is exactly the move someone
   // makes when a logged-in device is lost or no longer trusted - leaving those
   // sessions valid for the rest of their lifetime (SESSION_TTL_DAYS) would defeat the point.
@@ -744,6 +781,14 @@ router.post('/me/mfa/setup', requireAuth, asyncHandler(async (req, res) => {
   res.json({ secret, otpauth_uri: uri, qr: await qrDataUrl(uri) });
 }));
 
+// Per-user single flight for /me/mfa/enable (review of #720, verified by running). generateBackupCodes() is
+// ten cost-10 hashes, about 0.8 s of the one worker's time, and this route has no attempt limiter, so every
+// simultaneous enable for one account queued ten more hashes ahead of everyone's sign-ins, only for the
+// compare-and-set below to refuse all but one of them. A second enable for a user while one is in flight is
+// now refused BEFORE any hashing, with the same 400 the losing compare-and-set used to give. In memory, per
+// process: the app is one process, and the compare-and-set still guards the write if that ever changes.
+const mfaEnableInFlight = new Set();
+
 // Confirm a code against the pending secret; on success, enable MFA and return one-time backup
 // codes to show the user once (only their hashes are kept).
 router.post('/me/mfa/enable', requireAuth, asyncHandler(async (req, res) => {
@@ -754,15 +799,28 @@ router.post('/me/mfa/enable', requireAuth, asyncHandler(async (req, res) => {
   if (!verifyToken(user.mfa_secret, code)) {
     return res.status(400).json({ error: "That code didn't match — check your authenticator app and try again." });
   }
-  const { codes, hashesJson } = await generateBackupCodes();
-  // The hashing above yields (#548); a second /enable could have finished meanwhile. Only the request that
-  // still finds MFA off may turn it on, otherwise the loser would overwrite the winner's backup codes and
-  // leave the user holding codes that no longer work. Same 400 a serial second request gets.
-  const enabled = db
-    .prepare('UPDATE users SET mfa_enabled = 1, mfa_backup_codes = ? WHERE id = ? AND mfa_enabled = 0')
-    .run(hashesJson, user.id);
-  if (enabled.changes !== 1) return res.status(400).json({ error: 'Two-factor is already on.' });
-  res.json({ backup_codes: codes });
+  // Checked and taken with no await in between, released whatever happens (finally).
+  if (mfaEnableInFlight.has(user.id)) return res.status(400).json({ error: 'Two-factor is already on.' });
+  mfaEnableInFlight.add(user.id);
+  try {
+    const { codes, hashesJson } = await generateBackupCodes();
+    if (signInEnded(req, res)) return;
+    // The hashing above yields (#548), so the row may have changed meanwhile. The write is a compare-and-set
+    // on BOTH things this request checked: MFA still off, and the pending secret still the one the code was
+    // verified against. Without the secret, a /me/mfa/setup that stored a new secret during the hashing let
+    // this request switch two-factor on for a secret no code was ever checked against (review of #720,
+    // verified by running), and the person's app, set up from the old QR, would then fail every sign-in.
+    // With the single flight above no other enable for this user can be in flight, so a lost write means
+    // the pending secret changed or was cleared: the user has to scan the current set-up, hence 'Start
+    // setup first.' (`IS ?`, not `= ?`, so a secret cleared to NULL also fails the compare.)
+    const enabled = db
+      .prepare('UPDATE users SET mfa_enabled = 1, mfa_backup_codes = ? WHERE id = ? AND mfa_enabled = 0 AND mfa_secret IS ?')
+      .run(hashesJson, user.id, user.mfa_secret);
+    if (enabled.changes !== 1) return res.status(400).json({ error: 'Start setup first.' });
+    res.json({ backup_codes: codes });
+  } finally {
+    mfaEnableInFlight.delete(user.id);
+  }
 }));
 
 // Turn MFA off. Requires the account password (not just the live session) so a borrowed unlocked
@@ -774,6 +832,7 @@ router.post('/me/mfa/disable', requireAuth, sessionActionLimiter, asyncHandler(a
     // 400 not 401, same reason as /me/password above (#697): a mistyped confirmation must not sign the person out.
     return res.status(400).json({ error: 'Password is incorrect' });
   }
+  if (signInEnded(req, res)) return;
   db.prepare('UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL, mfa_last_step = NULL WHERE id = ?').run(user.id);
   res.json({ ok: true });
 }));
@@ -784,6 +843,9 @@ router.delete('/users/:id/mfa', requireAuth, requireAdmin, (req, res) => {
   const u = db.prepare('SELECT id FROM users WHERE id = ?').get(req.params.id);
   if (!u) return res.status(404).json({ error: 'User not found' });
   db.prepare('UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL, mfa_last_step = NULL WHERE id = ?').run(req.params.id);
+  // And the in-memory per-user second-step budget, so a user locked out by it can sign in again once they
+  // re-enrol (see resetMfaUserLimit).
+  resetMfaUserLimit(req.params.id);
   res.json({ ok: true });
 });
 

@@ -120,12 +120,22 @@ Over the limit, the answer is the usual "Too many attempts - please wait a few m
 password was accepted; a made-up token is counted against its source address and cannot be used to run
 down someone else's budget.
 
-**Known limit:** someone who already has the password can still use up the per-user budget from many
-addresses and so block that person's second step for the rest of the 15 minutes (backup codes share the
-budget). They have beaten the first factor already; the alternative, no per-account limit, left the
-6-digit code open to a guesser with many addresses. Waiting 15 minutes, or an admin resetting
-two-factor, clears it. The limits are held in memory, so a restart of the container also clears them.
-There are no settings to change these numbers.
+What the per-user limit leaves a distributed guesser: 30 guesses per 15 minutes against a 6-digit code
+that is valid in three 30-second steps at once, so odds of about 30 × 3 / 1,000,000 = **0.009% per
+window**, which over a day (96 windows, 2,880 guesses) is about **0.86%**.
+
+**Known limit:** someone who already has the password can use up the per-user budget from many
+addresses and so block that person's second step (backup codes share the budget), and they can do it
+again in every 15-minute window, so the block lasts **for as long as they keep doing it**. Waiting does
+not end it. **Changing the password does**: without it no new sign-in token can be obtained, and the
+budget comes back when its 15 minutes are up (a sign-in token already issued stays usable for up to 5
+minutes). The password can be changed from a device that is still signed in (Account) or by an admin
+(Settings → Caregivers). An admin resetting two-factor for the account also empties the budget at once,
+and so does a restart of the container (the limits are held in memory); neither stops someone who still
+has the password from using it up again. The console reset script (`reset-mfa.js`) runs in its own
+process and does not clear the budget. They have beaten the first factor already; the alternative, no
+per-account limit, left the 6-digit code open to a guesser with many addresses. There are no settings to
+change these numbers.
 
 Starting a new set-up, turning two-factor off, or an admin or console reset clears the remembered step,
 so a new authenticator's first code is never refused because of an old one.
