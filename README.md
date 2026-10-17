@@ -835,9 +835,23 @@ measurement**, and (like everything here) never a safety device — see the warn
 - **Room temperature (optional).** If a camera reports temperature/humidity over **MQTT** (set
   up under **Settings → MQTT**, e.g. via Zigbee2MQTT — the readings also show on the camera
   tile), the sleep detail overlays the night's room temperature beneath the timeline, aligned to
-  the same time axis. After a handful of tracked nights, a **"Sleep & room temperature"** card
-  compares wake-ups on the child's warmer vs cooler nights, so you can spot whether a warm room
-  tends to mean more waking — a pattern, not a cause.
+  the same time axis. A **"Sleep & room temperature"** card compares wake-ups on the child's warmer
+  vs cooler nights, so you can spot whether a warm room tends to mean more waking — a pattern, not
+  a cause. It reads the child's 30 most recent tracked nights with a temperature (fixed, not a
+  setting). From the first such night until there are 5 it reads "Collecting nights" with the count
+  so far. From 5, a room whose temperature varied by less than 1°C across those nights is reported
+  as "barely changed": that says nothing about sleep, only that the room did not change enough to
+  compare. Otherwise the nights are split at the median temperature, and the card needs **at least
+  10 nights in each of the cooler group and the warmer group before it says anything about sleep**
+  (fixed, not a setting; the figure is a judgement, not a measurement, and counts nights only, so it
+  is the same in any home or climate). Nights at exactly the median temperature belong to neither
+  group, so the first comparison needs at least 21 nights (10 cooler, 10 warmer and one at the
+  median). Until both groups reach 10 the card reads "Not enough nights yet" with how many it has
+  of each, and shows no verdict and no averages. Once both groups have 10, the wording and numbers
+  are exactly what they were before. Known limit: each night's average temperature is rounded to
+  0.1°C, so in a very steady room where many nights share the median value (all of which join
+  neither group) one group can stay under 10, and the card keeps saying "Not enough nights yet",
+  for as long as the room stays that steady.
 
 ## Adding caregivers
 

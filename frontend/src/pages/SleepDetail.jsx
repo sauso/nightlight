@@ -779,6 +779,24 @@ function SleepInsights({ childId, tempUnit, childName }) {
 
   const warm = ins.warmer;
   const cool = ins.cooler;
+
+  // #365: the server withholds the verdict until BOTH the cooler and the warmer group have enough nights.
+  // Show the counts and no comparison columns: two averages from one or two nights each would read as a
+  // finding, which is the thing being held back. The target comes from the server (min_group_nights), so
+  // the number is never written in two places.
+  if (ins.verdict === 'not_enough_nights') {
+    const need = ins.min_group_nights;
+    return (
+      <div className="card sleep-insight">
+        <div className="sleep-insight__title"><Sparkles size={15} aria-hidden="true" /> Sleep &amp; room temperature</div>
+        <div className="sleep-insight__body">
+          Not enough nights yet to compare {name}’s wake-ups on warmer vs cooler nights. It needs {need} of each:
+          so far {cool?.nights ?? 0} cooler and {warm?.nights ?? 0} warmer.
+        </div>
+      </div>
+    );
+  }
+
   let headline;
   if (ins.verdict === 'warm_more_wakes') headline = `Warmer nights tend to mean more wake-ups for ${name}.`;
   else if (ins.verdict === 'warm_fewer_wakes') headline = `Warmer nights actually saw fewer wake-ups for ${name}.`;
