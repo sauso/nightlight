@@ -20,6 +20,8 @@ function snapshotFile(id) {
   if (!Number.isInteger(n) || n <= 0) return null;
   return path.join(SNAPSHOT_DIR, `${n}.jpg`);
 }
+// The path alone, existing or not, for a delete (lib/entityPurge.js): see transitionSnapshotFile in bedTransitions.js.
+export { snapshotFile as eventSnapshotFile };
 
 // Persistent "Recent alerts" history — motion (and later sound) detections, surfaced in
 // the app as its own list, separate from the camera up/down/restart history in
@@ -120,7 +122,10 @@ export function saveEventSnapshot(id, buffer) {
   if (!file || !buffer) return;
   try {
     fs.writeFileSync(file, buffer);
-    markSnapshotStmt.run(id);
+    // The alert row can be gone by now: the caller awaits the snapshot grab first, and removing the camera in
+    // that window deletes the row (#719 review). A file no row names is an orphan nothing can reach to delete,
+    // so remove it.
+    if (markSnapshotStmt.run(id).changes === 0) fs.rmSync(file, { force: true });
   } catch (err) {
     logger.error(`Failed to save detection snapshot for event ${id}:`, err.message);
   }
@@ -149,7 +154,9 @@ export function markClipPending(id) {
 }
 export function setClipReady(id, relPath, durationS, bytes) {
   try {
-    setClipReadyStmt.run({ clip_path: relPath, dur: Math.round(durationS) || null, bytes: bytes || null }, id);
+    const { changes } = setClipReadyStmt.run({ clip_path: relPath, dur: Math.round(durationS) || null, bytes: bytes || null }, id);
+    // Same as saveEventSnapshot: a clip cut after its camera was removed has no row left to name it (#719 review).
+    if (changes === 0) unlinkClip(relPath);
   } catch (e) {
     logger.error(`clip ready mark failed (${id}):`, e.message);
   }

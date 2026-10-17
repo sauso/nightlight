@@ -52,6 +52,10 @@ function snapshotFile(id) {
   return path.join(SNAPSHOT_DIR, `${n}.jpg`);
 }
 
+// The path alone, existing or not: for a delete, which must not use an existence check that answers "no" for a
+// file it merely cannot stat (lib/entityPurge.js, #719 re-review).
+export { snapshotFile as transitionSnapshotFile };
+
 export function transitionSnapshotPath(id) {
   const file = snapshotFile(id);
   return file && fs.existsSync(file) ? file : null;
@@ -94,7 +98,11 @@ async function attachSnapshot(id, cameraId) {
     const file = snapshotFile(id);
     if (!file) return;
     await fs.promises.writeFile(file, buf);
-    markSnapshotStmt.run(id);
+    // The row can be gone by now (#719 review, reproduced): the grab above can take seconds, and removing the
+    // child or camera in that window deletes the row first, so this write put back a frame no row names, still
+    // served by id. The UPDATE runs straight after the write with no await between, so a row it does not find
+    // is gone for good: remove the file just written. (A failure here is logged by the catch below.)
+    if (markSnapshotStmt.run(id).changes === 0) fs.rmSync(file, { force: true });
   } catch (err) {
     logger.info(`[bedtx] snapshot for transition ${id} failed: ${err.message}`);
   }

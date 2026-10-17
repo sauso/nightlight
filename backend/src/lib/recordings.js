@@ -132,9 +132,26 @@ export function startRecording(camera, userId = null) {
   return recordingState(camera.id);
 }
 
+// The cut finished but its row is gone (#719 review): the child or camera was removed while the video was being
+// cut, and the purge deleted the row first. The files just written have nothing left to name them, and these
+// have no retention sweep (on-demand) or only one that works from rows (wake), so they would stay on disk for
+// good: remove them. Returns true when it did. Never throws, like its callers (a failure is logged).
+// ⚠️ Not exercised by a unit test: the success branch it sits in needs a real encoder (see the header of
+// recordings-lifecycle.test.js). The same rule in bedTransitions.js and detectionEvents.js is tested.
+function discardIfRowGone(changes, res, what) {
+  if (changes !== 0) return false;
+  for (const f of [res.file, res.thumb]) {
+    if (!f) continue;
+    try { fs.rmSync(f, { force: true }); } catch (e) { logger.error(`[rec] could not remove ${f}: ${e.message}`); }
+  }
+  logger.info(`[rec] ${what} was removed while it was being cut; its files were deleted`);
+  return true;
+}
+
 /**
  * End an on-demand recording and cut the video. Resolves the finished row id, or null when nothing was
- * recording (a Stop with no active recording is a no-op, not an error). Never throws: a capture failure
+ * recording (a Stop with no active recording is a no-op, not an error), or when its row was deleted (its child
+ * or camera removed) before the cut finished. Never throws: a capture failure
  * marks the row 'failed' and is logged, it doesn't surface as a request error the user can't act on.
  */
 export async function stopRecording(cameraId, { settleMs = SEGMENT_SETTLE_MS } = {}) {
@@ -167,7 +184,7 @@ export async function stopRecording(cameraId, { settleMs = SEGMENT_SETTLE_MS } =
     // extractClip writes under CLIPS_DIR/<cameraId>/<outBase>.{mp4,jpg}; store paths relative to
     // CLIPS_DIR (posix separators) so the serving route can re-jail them.
     const rel = (abs) => (abs ? path.relative(CLIPS_DIR, abs).split(path.sep).join('/') : null);
-    db.prepare(
+    const { changes } = db.prepare(
       `UPDATE recordings SET status='ready', path=@path, thumb_path=@thumb_path, bytes=@bytes,
          duration_s=@duration_s WHERE id=@id`
     ).run({
@@ -177,6 +194,7 @@ export async function stopRecording(cameraId, { settleMs = SEGMENT_SETTLE_MS } =
       bytes: res.probe?.bytes ?? null,
       duration_s: res.probe?.durationSec != null ? Math.round(res.probe.durationSec) : preRollSec + postRollSec,
     });
+    if (discardIfRowGone(changes, res, `recording ${a.id}`)) return null;
     logger.info(
       `[rec] recording ${a.id} ready for "${cam.name}": ${res.probe?.durationSec?.toFixed(1) ?? '?'}s, ` +
         `${res.probe?.bytes ? (res.probe.bytes / 1e6).toFixed(2) : '?'}MB, ${res.segments} segs`
@@ -371,7 +389,7 @@ async function captureWakeClipInner(camera, wakeStartMs) {
       settleMs: WAKE_SETTLE_MS,
     });
     const rel = (abs) => (abs ? path.relative(CLIPS_DIR, abs).split(path.sep).join('/') : null);
-    db.prepare(
+    const { changes } = db.prepare(
       `UPDATE recordings SET status='ready', ended_at=datetime('now'), path=@path, thumb_path=@thumb_path,
          bytes=@bytes, duration_s=@duration_s WHERE id=@id`
     ).run({
@@ -382,6 +400,7 @@ async function captureWakeClipInner(camera, wakeStartMs) {
       duration_s:
         res.probe?.durationSec != null ? Math.round(res.probe.durationSec) : WAKE_CLIP_LEAD_SEC + clipSeconds,
     });
+    if (discardIfRowGone(changes, res, `wake clip ${id}`)) return null;
     logger.info(
       `[wake] clip ${id} ready for "${camera.name}" (${res.probe?.durationSec?.toFixed(1) ?? '?'}s from ${startedAt}Z)`
     );
