@@ -527,8 +527,9 @@ describe('removing a camera', () => {
     expect(items.join('|')).toMatch(/event log and temperature and humidity history/);
     expect(within(dialog).getByText('Are you sure?')).toBeTruthy();
     expect(within(dialog).getByText(/none of this comes back/)).toBeTruthy();
-    // #719 review: the nights it recorded are the child's and keep their summary, but not their detail or photos.
-    expect(within(dialog).getByText(/Nights it recorded keep their saved summary but lose their detail and their morning-review photos/)).toBeTruthy();
+    // #719 review: the nights it recorded are the child's and keep their summary and timelapse, but not their
+    // detail or photos.
+    expect(within(dialog).getByText(/Nights it recorded keep their saved summary and their timelapse but lose their detail and their morning-review photos/)).toBeTruthy();
     expect(delSpy).not.toHaveBeenCalled();
   });
 

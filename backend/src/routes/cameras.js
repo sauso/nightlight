@@ -33,7 +33,7 @@ import { startRecording, stopRecording, recordingState, getOndemandSettings, isR
 import { stripUrlPassword, urlHasPassword, resolveUrlPassword, scrubSecrets, findCredentialLeak } from '../lib/urlCredentials.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { clearStalePrimaryPointers } from '../lib/primaryCamera.js';
-import { purgeCamera, purgeFailureReason } from '../lib/entityPurge.js';
+import { purgeCamera, preflightCameraPurge, purgeFailureReason } from '../lib/entityPurge.js';
 import { recordingReadiness } from '../lib/recordingReadiness.js';
 
 const router = Router();
@@ -1056,6 +1056,23 @@ router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
   res.json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id), true));
 }));
 
+// Start every leg of a camera that is about to run: the transcoder, the sub-stream, motion, ONVIF motion, sound
+// and the clip ring, each only if the camera wants it. Its MediaMTX path must already exist. Extracted from the
+// enable route below, unchanged, so the DELETE route can bring a camera straight back when its delete fails
+// part-way (#719 re-review). The 5-minute reconcileCameraPaths in index.js keeps the same legs alive, but its
+// per-camera body is inline there (index.js cannot be imported by a test, and structural tests and catalogue
+// entries are anchored on that body), so it is not shared with this.
+async function startCameraLegs(cam) {
+  await startTranscoder(cam.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
+  if (subConfigured(cam)) await startSubStream(cam).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
+  if (motionLegWanted(cam)) await startMotionDetector(cam).catch(() => {});
+  if (onvifMotionWanted(cam)) await startOnvifMotion(cam).catch(() => {});
+  if (cam.detect_sound_enabled) await startSoundDetector(cam).catch(() => {});
+  // Re-arm the ring on whichever grounds want it (clipRingWanted, not detect_record_clips alone —
+  // otherwise re-enabling a camera silently left its Record button missing).
+  startClipCapture(cam);
+}
+
 // Turn a camera fully on/off server-side (admin-only, like editing). Disabling stops the
 // transcoder and drops the MediaMTX path, so it stops pulling from the camera and streaming
 // entirely; enabling re-registers the path and restarts the transcoder. The row (and its
@@ -1082,14 +1099,7 @@ router.put('/:id/enabled', requireAdmin, asyncHandler(async (req, res) => {
     // The UPDATE deliberately stays at the bottom: a failed upsertPath above returns 502 and must
     // leave the camera recorded as disabled, so the flag is corrected here rather than written early.
     const cam = { ...existing, disabled: 0 };
-    await startTranscoder(req.params.id, cam.rtsp_url, cam.mediamtx_path, cam.name);
-    if (subConfigured(cam)) await startSubStream(cam).catch((e) => logger.error(`[substream] enable failed: ${e.message}`));
-    if (motionLegWanted(cam)) await startMotionDetector(cam).catch(() => {});
-    if (onvifMotionWanted(cam)) await startOnvifMotion(cam).catch(() => {});
-    if (cam.detect_sound_enabled) await startSoundDetector(cam).catch(() => {});
-    // Re-arm the ring on whichever grounds want it (clipRingWanted, not detect_record_clips alone —
-    // otherwise re-enabling a camera silently left its Record button missing).
-    startClipCapture(cam);
+    await startCameraLegs(cam);
   } else {
     await stopTranscoder(req.params.id);
     await stopSubStream(existing).catch(() => {});
@@ -1293,6 +1303,18 @@ router.delete('/:id', requireAdmin, asyncHandler(async (req, res) => {
   if (isRecording(existing.id)) {
     return res.status(409).json({ error: 'This camera is recording. Stop the recording first, then remove the camera.' });
   }
+  const refusal = (e) => `Could not delete everything for this camera (${purgeFailureReason(e)}), so the camera was not `
+    + 'removed. Try again, and check the server log if it keeps failing.';
+  // #719 re-review: the purge's folder check (a link inside the clips folder leading outside it) is pure, so it
+  // runs HERE, before any leg is stopped. Found only inside purgeCamera, the refusal came after the stops below,
+  // and the camera stayed dark (no stream, no alerts, no activity samples) until the 5-minute reconcile, with
+  // every retry starting the gap again. Same 409 and reason as a failure in the purge itself.
+  try {
+    preflightCameraPurge(existing.id);
+  } catch (e) {
+    logger.error(`Refused to delete camera ${req.params.id}:`, e.message);
+    return res.status(409).json({ error: refusal(e) });
+  }
   await stopTranscoder(req.params.id);
   await stopSubStream(existing).catch(() => {});
   await stopMotionDetector(req.params.id).catch(() => {});
@@ -1324,18 +1346,26 @@ router.delete('/:id', requireAdmin, asyncHandler(async (req, res) => {
   // JPEGs, activity samples, alert history with its clips and snapshots, recordings, camera events, sensor
   // readings, clip dir and segment ring - then the camera row, last. See lib/entityPurge.js for the order
   // and why. The legs above are stopped first so nothing is still writing for it. If a file cannot be
-  // removed the purge throws before the camera row goes: the camera stays (its processes are already
-  // stopped; whether a reconcile restarts them was not checked) and the admin can retry. A 409, not a 500
-  // (#719 review): Cloudflare strips 5xx bodies, so the Remove modal would have shown "Request failed (500)"
+  // removed the purge throws before the camera row goes: the camera stays and the admin can retry. A 409, not a
+  // 500 (#719 review): Cloudflare strips 5xx bodies, so the Remove modal would have shown "Request failed (500)"
   // instead of this reason.
   try {
     purgeCamera(req.params.id);
   } catch (e) {
     logger.error(`Failed to delete camera ${req.params.id}:`, e.message);
-    return res.status(409).json({
-      error: `Could not delete everything for this camera (${purgeFailureReason(e)}), so the camera was not `
-        + 'removed. Try again, and check the server log if it keeps failing.',
-    });
+    // The camera stays, so bring it straight back (#719 re-review) rather than leave it dark until the 5-minute
+    // reconcile: its MediaMTX path (removed above) and its legs, as the enable route does. Not if it was
+    // disabled: then nothing was running. A failure here is logged; the reconcile is still the backstop.
+    const cam = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+    if (cam && !cam.disabled) {
+      try {
+        await upsertPath(cam.mediamtx_path);
+        await startCameraLegs(cam);
+      } catch (re) {
+        logger.error(`Could not restart camera ${req.params.id} after the failed delete (the reconcile will):`, re.message);
+      }
+    }
+    return res.status(409).json({ error: refusal(e) });
   }
   res.status(204).end();
 }));

@@ -3,8 +3,8 @@ import path from 'path';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { CLIPS_DIR } from './clipRecorder.js';
-import { transitionSnapshotPath } from './bedTransitions.js';
-import { getEventSnapshotFile } from './detectionEvents.js';
+import { transitionSnapshotFile } from './bedTransitions.js';
+import { eventSnapshotFile } from './detectionEvents.js';
 
 // Deleting a child or a camera deletes EVERYTHING that belongs to it (owner decision, issues #540 and
 // #554): rows AND files. Before this, DELETE /api/children/:id removed the child and its nights and
@@ -97,17 +97,25 @@ function removeFileUnder(root, rel) {
 
 const removeClipFile = (rel) => removeFileUnder(CLIPS_DIR, rel);
 
-// A snapshot JPEG named by its row id. The accessors validate the id (positive integer) and return the
-// file only if it exists, so a row with no image costs nothing and the name cannot be steered.
+// A snapshot JPEG named by its row id. The path builders validate the id (positive integer), so the name
+// cannot be steered. Unlinked STRAIGHT AWAY, with no existence check first (#719 re-review): the old check was
+// fs.existsSync, which answers false for a file it cannot stat (EACCES on its folder, EIO), so such a photo
+// counted as missing, its row was deleted and the file stayed. The unlink itself tells the truth: only
+// ENOENT / ENOTDIR mean "not there" (the same rule as realOrNull above); anything else stops the purge.
+function unlinkUnlessMissing(file) {
+  try {
+    fs.unlinkSync(file);
+  } catch (e) {
+    if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR') throw e;
+  }
+}
 function removeTransitionSnapshot(id) {
-  const file = transitionSnapshotPath(id);
-  if (!file) return;
-  try { fs.unlinkSync(file); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  const file = transitionSnapshotFile(id);
+  if (file) unlinkUnlessMissing(file);
 }
 function removeEventSnapshot(id) {
-  const f = getEventSnapshotFile(id);
-  if (!f) return;
-  try { fs.unlinkSync(path.join(f.root, f.path)); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  const file = eventSnapshotFile(id);
+  if (file) unlinkUnlessMissing(file);
 }
 
 // --- per-id folders ---------------------------------------------------------------------------------------
@@ -208,6 +216,14 @@ function purgeTransitionsOfCameras(cameraIds) {
 // so a link leading out refuses the whole purge up front instead of after half the history is gone.
 function preflightFolders(folders) {
   for (const parts of folders) jailedUnderClips(parts);
+}
+
+// The same folder check on its own, for the camera DELETE route to run BEFORE it stops the camera (#719
+// re-review). It is pure (it deletes nothing), and a refusal found only inside purgeCamera came after every leg
+// was stopped, so the camera stayed dark (no stream, no alerts, no activity) until the 5-minute reconcile, and
+// every retry restarted the gap. purgeCamera still runs it again itself. Throws as purgeCamera would.
+export function preflightCameraPurge(cameraId) {
+  preflightFolders(idFolders('camera', cameraId));
 }
 
 // Everything that belongs to a camera, then the camera. Throws (leaving the camera in place, so the admin

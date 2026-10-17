@@ -228,7 +228,8 @@ last, so a failed delete leaves the entity in place to retry. Every stored path 
 directory and skipped unless it is a regular file inside `CLIPS_DIR`. The whole-folder sweeps (`<cameraId>/`,
 `.ring/<cameraId>/`, `timelapse/<childId>/`, `.timelapse-frames/<childId>/`) run only for a UUID-shaped id (the
 only kind the app mints; an id like `timelapse` would otherwise name a shared folder), and refuse the whole delete,
-before anything is removed, if a parent folder resolves outside the real `CLIPS_DIR`. A failed delete answers
+before anything is removed, if a parent folder resolves outside the real `CLIPS_DIR` (the camera route runs this
+check, `preflightCameraPurge`, before it stops the camera; a purge that still fails part-way restarts it at once). A failed delete answers
 **409** with the reason (never 5xx: Cloudflare strips 5xx bodies), and so does a delete while one of the cameras
 is recording on demand. A writer that finishes after the delete (a bed-transition frame, an alert photo or clip,
 a recording or wake clip) checks that its `UPDATE` still found the row, and deletes the file it wrote if not.

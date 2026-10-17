@@ -20,6 +20,8 @@ function snapshotFile(id) {
   if (!Number.isInteger(n) || n <= 0) return null;
   return path.join(SNAPSHOT_DIR, `${n}.jpg`);
 }
+// The path alone, existing or not, for a delete (lib/entityPurge.js): see transitionSnapshotFile in bedTransitions.js.
+export { snapshotFile as eventSnapshotFile };
 
 // Persistent "Recent alerts" history — motion (and later sound) detections, surfaced in
 // the app as its own list, separate from the camera up/down/restart history in

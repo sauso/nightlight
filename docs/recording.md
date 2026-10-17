@@ -418,7 +418,7 @@ confirm and asks "Are you sure?". The two are **different**, and so is what each
 | Bed transitions and their snapshot photos | Deleted, for the cameras assigned to the child | Deleted |
 | Activity history (the per-minute motion and sound the sleep summary is built from) | Deleted, for the cameras assigned to the child | Deleted |
 | Recordings and wake clips (video files included) | Deleted | Deleted |
-| Timelapses, and frames collected for a night not yet assembled | Deleted | Not applicable |
+| Timelapses, and frames collected for a night not yet assembled | Deleted | **Kept** (they belong to the child), including the ones made from this camera's frames |
 | Alerts, with their clips and snapshots | **Kept** (they belong to the camera) | Deleted |
 | Camera event log and temperature and humidity history | **Kept** (they belong to the camera) | Deleted |
 | The child's profile, photo and sleep-tracking settings | Deleted | Not applicable |
@@ -448,8 +448,9 @@ Things that behave in ways you might not expect:
   child or camera: some of its history already deleted.
 - **Only files inside Nightlight's own data and clips folders are ever deleted**, whatever a stored path
   says. If `timelapse`, `.ring` or `.timelapse-frames` inside the clips folder is a link to a folder
-  somewhere else, removing a child or camera is **refused** before anything is deleted (the dialog says
-  why). Make it a real folder, or point the whole clips folder (`CLIPS_DIR`) at the other place, and retry.
+  somewhere else, removing a child or camera is **refused** before anything is deleted or stopped (the
+  dialog says why). Make it a real folder, or point the whole clips folder (`CLIPS_DIR`) at the other place,
+  and retry. A camera whose removal fails part-way (a file it could not delete) is restarted straight away.
 - **Folders are swept only for ids Nightlight made.** Every child and camera gets a random id (a UUID), and
   its folders in the clips folder are named after it. A child or camera with any other id (from an edited
   or imported database) still has its entries, and every file they name, deleted; files nothing names in

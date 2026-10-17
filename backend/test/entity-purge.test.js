@@ -41,13 +41,24 @@ process.env.PATH = emptyBinDir;
 const dataDir = useTempDataDir();
 
 // A stand-in MediaMTX that answers at once (see camera-delete-observation.test.js).
-const mediamtx = createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end('{}'); });
+// Every request it gets is logged, so a test can see a camera's path being removed and registered again.
+const mtxLog = [];
+const mediamtx = createServer((req, res) => { mtxLog.push(`${req.method} ${req.url}`); res.setHeader('content-type', 'application/json'); res.end('{}'); });
 await new Promise((r) => mediamtx.listen(0, '127.0.0.1', r));
 process.env.MEDIAMTX_API = `http://127.0.0.1:${mediamtx.address().port}`;
 
 const { default: db } = await import('../src/db.js');
-const { CLIPS_DIR, startSegmenter, stopAllSegmenters } = await import('../src/lib/clipRecorder.js');
+const { CLIPS_DIR, startSegmenter, stopAllSegmenters, holdRing } = await import('../src/lib/clipRecorder.js');
+const { holdOwners, ondemandHoldOwner } = await import('../src/lib/ringHolds.js');
 const { checkClipStorage } = await import('../src/lib/clipStorage.js');
+
+// Clip storage marked ready from a supplied mount table (host-independent, as clip-storage.test.js does it), so
+// startRecording and startClipCapture accept. With no ffmpeg on PATH a segmenter is registered but never runs.
+const readyStorage = () => {
+  const abs = path.resolve(CLIPS_DIR);
+  fs.mkdirSync(abs, { recursive: true });
+  assert.equal(checkClipStorage({ mounts: `/dev/sda1 / ext4 rw 0 0\n/dev/sdb1 ${abs} xfs rw 0 0\n` }).ok, true, 'clip storage did not come up ready');
+};
 const { recordBedTransition, TRANSITION } = await import('../src/lib/bedTransitions.js');
 const { startRecording, stopRecording, isRecording } = await import('../src/lib/recordings.js');
 const { default: childrenRouter } = await import('../src/routes/children.js');
@@ -539,6 +550,67 @@ describe('a failure part-way leaves nothing referencing a deleted file, and can 
     assert.equal((await delChild(childId)).status, 204, 'retry');
     assert.ok(!fs.existsSync(frame));
   });
+
+  // #719 re-review: the snapshot removals used to ask fs.existsSync first, which answers false for a file it
+  // cannot stat, so such a photo counted as missing: its row was deleted and the file stayed. Simulated as the
+  // real cause behaves (a folder the app may not search): existsSync false, stat and lstat EACCES, unlink EACCES.
+  test('★ #719 a snapshot photo the server cannot even stat stops the delete, and its row stays', async () => {
+    makeCamera(db, { id: 'cam-nostat' });
+    const evId = db.prepare("INSERT INTO detection_events (camera_id, camera_name, type, snapshot) VALUES ('cam-nostat', 'n', 'motion', 1)").run().lastInsertRowid;
+    const evJpg = writeFile(path.join(SNAPSHOT_DIRS.detection_events, `${evId}.jpg`));
+    const txId = db.prepare("INSERT INTO bed_transitions (camera_id, type, verdict, snapshot) VALUES ('cam-nostat', 'into_bed', 'wrong', 1)").run().lastInsertRowid;
+    const txJpg = writeFile(path.join(SNAPSHOT_DIRS.bed_transitions, `${txId}.jpg`));
+    const real = { existsSync: fs.existsSync, statSync: fs.statSync, lstatSync: fs.lstatSync };
+    const eacces = () => Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    let hidden = null;
+    fs.existsSync = (p) => (String(p) === hidden ? false : real.existsSync(p));
+    fs.statSync = (p, ...r) => { if (String(p) === hidden) throw eacces(); return real.statSync(p, ...r); };
+    fs.lstatSync = (p, ...r) => { if (String(p) === hidden) throw eacces(); return real.lstatSync(p, ...r); };
+    try {
+      hidden = blocked = evJpg; // alerts are purged first
+      assert.equal((await delCamera('cam-nostat')).status, 409);
+      assert.ok(db.prepare('SELECT 1 FROM detection_events WHERE id = ?').get(evId), "the alert's row went while its photo stayed");
+      assert.ok(real.existsSync(evJpg));
+      hidden = blocked = txJpg; // the alert's photo can go now, so this pass reaches the transitions
+      assert.equal((await delCamera('cam-nostat')).status, 409);
+      assert.ok(db.prepare('SELECT 1 FROM bed_transitions WHERE id = ?').get(txId), "the transition's row went while its photo stayed");
+      assert.ok(real.existsSync(txJpg));
+    } finally {
+      Object.assign(fs, real);
+      hidden = blocked = null;
+    }
+    assert.equal((await delCamera('cam-nostat')).status, 204, 'retry');
+    assert.ok(!fs.existsSync(evJpg) && !fs.existsSync(txJpg));
+  });
+
+  // #719 re-review: the route stops every leg and removes the camera's MediaMTX path before the purge, so a purge
+  // that fails part-way used to leave the camera dark until the 5-minute reconcile. Observed at the stand-in
+  // MediaMTX: after the path is removed, it is registered again, and the transcoder start asks about its sibling
+  // HLS path. (No ffmpeg on PATH here, so the legs themselves cannot be seen running.)
+  test('★ #719 a camera delete that fails part-way brings the camera straight back', async () => {
+    readyStorage();
+    const id = randomUUID();
+    makeCamera(db, { id });
+    const rel = `fail-${id}/r.mp4`;
+    const abs = writeFile(path.join(CLIPS_DIR, rel));
+    db.prepare("INSERT INTO recordings (camera_id, started_at, path) VALUES (?, 'now', ?)").run(id, rel);
+    blocked = abs;
+    const from = mtxLog.length;
+    try {
+      assert.equal((await delCamera(id)).status, 409);
+    } finally {
+      blocked = null;
+      stopAllSegmenters();
+    }
+    assert.ok(db.prepare('SELECT 1 FROM cameras WHERE id = ?').get(id), 'the camera must survive a failed delete');
+    const seen = mtxLog.slice(from);
+    const removed = seen.indexOf(`DELETE /v3/config/paths/delete/path_${id}`);
+    assert.ok(removed >= 0, 'the fixture is wrong: the delete never removed the path');
+    const after = seen.slice(removed + 1);
+    assert.ok(after.includes(`PATCH /v3/config/paths/patch/path_${id}`), 'the failed delete left the camera\'s stream path removed');
+    assert.ok(after.includes(`GET /v3/config/paths/get/path_${id}-hls`), 'the failed delete did not restart the camera\'s transcoder');
+    assert.equal((await delCamera(id)).status, 204, 'retry');
+  });
 });
 
 // --- folder sweeps: links and shared folders (#719 review) -------------------------------------------------
@@ -590,6 +662,31 @@ describe('★ #719 a folder sweep never follows a link out of the clips folder',
       });
     });
   }
+
+  // #719 re-review: found only inside the purge, this refusal came after every leg of the camera was stopped and its
+  // stream path removed, and the camera stayed dark until the 5-minute reconcile. The route now runs the same
+  // check first. Observed two ways: a hold on its clip ring is still there (stopping the ring clears every hold,
+  // and a restart does not bring one back; with no ffmpeg here the ring's own entry cannot be watched, it goes
+  // when the spawn fails), and the stand-in MediaMTX was never asked to remove its path.
+  test('★ #719 a camera delete refused by the folder check stops nothing first', async (t) => {
+    await withSharedLinkedOut(t, '.ring', async () => {
+      readyStorage();
+      const id = randomUUID();
+      makeCamera(db, { id });
+      startSegmenter(id, `path_${id}`);
+      assert.ok(holdRing(id, 'test-hold', Date.now() - 10_000), 'the fixture could not hold the ring');
+      const from = mtxLog.length;
+      try {
+        const res = await delCamera(id);
+        assert.equal(res.status, 409);
+        assert.match(res.body.error, /link to somewhere outside/);
+        assert.ok(holdOwners(id).includes('test-hold'), "the ring's holds were cleared: it was stopped before the refusal");
+        assert.ok(!mtxLog.slice(from).some((l) => l.startsWith('DELETE ')), 'its stream path was removed before the refusal');
+      } finally {
+        stopAllSegmenters();
+      }
+    });
+  });
 
   test('the per-id folder ITSELF being a link: the link is removed, what it points at is not', async (t) => {
     const id = randomUUID();
@@ -688,8 +785,7 @@ describe('★ #719 removing is refused while a recording is in progress', () => 
   test('a camera recording on demand blocks removing it, and its child, with a 409; nothing is deleted', async () => {
     // As recordings-lifecycle.test.js arms it: storage marked ready from a supplied mount table, a segmenter (no
     // ffmpeg on PATH, so it never really runs) and one closed segment for the pre-roll.
-    const ABS = path.resolve(CLIPS_DIR);
-    assert.equal(checkClipStorage({ mounts: `/dev/sda1 / ext4 rw 0 0\n/dev/sdb1 ${ABS} xfs rw 0 0\n` }).ok, true);
+    readyStorage();
     const childId = randomUUID();
     const camId = randomUUID();
     makeChild(db, { id: childId });
@@ -715,6 +811,11 @@ describe('★ #719 removing is refused while a recording is in progress', () => 
       assert.ok(db.prepare('SELECT 1 FROM recordings WHERE id = ?').get(recId), 'the recording row was deleted');
       assert.ok(fs.existsSync(seg), 'the segment ring was swept');
       assert.ok(isRecording(camId), 'the refused delete stopped the recording');
+      // The refusal comes BEFORE anything is stopped (#719 re-review): with the guard moved below the stops, the
+      // checks above still pass, because stopping the ring only drops its registry entry and its holds. The hold
+      // is what shows it (the registry entry itself goes anyway here, when the ffmpeg spawn fails).
+      assert.ok(holdOwners(camId).includes(ondemandHoldOwner(recId)), "the recording's hold on the ring was cleared before the refusal");
+      assert.ok(!mtxLog.some((l) => l === `DELETE /v3/config/paths/delete/path_${camId}`), 'its stream path was removed before the refusal');
     } finally {
       await stopRecording(camId, { settleMs: 0 });
       stopAllSegmenters();

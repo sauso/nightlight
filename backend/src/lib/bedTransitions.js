@@ -52,6 +52,10 @@ function snapshotFile(id) {
   return path.join(SNAPSHOT_DIR, `${n}.jpg`);
 }
 
+// The path alone, existing or not: for a delete, which must not use an existence check that answers "no" for a
+// file it merely cannot stat (lib/entityPurge.js, #719 re-review).
+export { snapshotFile as transitionSnapshotFile };
+
 export function transitionSnapshotPath(id) {
   const file = snapshotFile(id);
   return file && fs.existsSync(file) ? file : null;

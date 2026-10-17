@@ -457,9 +457,11 @@ export default function CameraSettings() {
             <li>its event log and temperature and humidity history</li>
           </ul>
           {/* #719 review: a child's nights are the child's, so their saved summary stays, but the night's detail
-              and its review photos are built from this camera's activity history and bed transitions, which go. */}
+              and its review photos are built from this camera's activity history and bed transitions, which go.
+              Timelapses (and their frames) are keyed by child, not camera, so they stay too (#719 re-review). */}
           <p>
-            Nights it recorded keep their saved summary but lose their detail and their morning-review photos.
+            Nights it recorded keep their saved summary and their timelapse but lose their detail and their
+            morning-review photos.
           </p>
           <p>
             You can add the camera again, but none of this comes back. <strong>Are you sure?</strong>
