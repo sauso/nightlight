@@ -838,6 +838,35 @@ describe('★ the temperature insight with too few nights in a group (#365)', ()
     });
   });
 
+  // A group with NO nights arrives as null, not as { nights: 0 } (sleepAnalysis.js: `cool.length ? half(cool) :
+  // null`). That is reachable: most nights at the median and a few a degree above it give an empty cooler group
+  // and no 'flat'. The card must print 0 for the missing half and the real count for the other, and still show
+  // nothing to compare. Both null cannot come with this verdict from today's server (a one-degree spread puts a
+  // night on at least one side of the median), but the card should not depend on that. Admin only: the role
+  // does not reach this branch, and the test above already runs it for both roles.
+  const expectCountsOnly = async (groups, counts) => {
+    mockSleep({ insights: { ...base, verdict: 'not_enough_nights', ...groups } });
+    mount();
+    const card = (await screen.findByText(/Not enough nights yet/)).closest('.sleep-insight');
+    expect(card.textContent).toMatch(/needs 10 of each/);
+    expect(card.textContent).toMatch(counts);
+    expect(card.querySelector('.sleep-insight__cmp'), 'no comparison columns').toBeNull();
+    expect(within(card).queryByText(/Cooler nights|Warmer nights|wake-ups avg|°C/), 'no averages to read as a finding').toBeNull();
+    expect(within(card).queryByText(/tend to mean more wake-ups|saw fewer wake-ups|No clear link/)).toBeNull();
+  };
+
+  test('a missing cooler group (null) counts as 0 nights, next to the real warmer count, with no comparison', async () => {
+    await expectCountsOnly({ cooler: null, warmer: half(7, 22, 6) }, /so far 0 cooler and 7 warmer\./);
+  });
+
+  test('a missing warmer group (null) counts as 0 nights, next to the real cooler count, with no comparison', async () => {
+    await expectCountsOnly({ cooler: half(4, 19, 1), warmer: null }, /so far 4 cooler and 0 warmer\./);
+  });
+
+  test('both groups missing (null) count as 0 and 0, with no comparison', async () => {
+    await expectCountsOnly({ cooler: null, warmer: null }, /so far 0 cooler and 0 warmer\./);
+  });
+
   test('at the minimum the same card shows the verdict and the comparison as before', async () => {
     await forEachRole(async (_name, who) => {
       mockSleep({ insights: { ...base, verdict: 'warm_more_wakes', cooler: half(10, 19, 1), warmer: half(10, 22, 6) } });
