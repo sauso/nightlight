@@ -109,6 +109,11 @@ player components, or the camera tile.
 
 A failure here blocks the release the same as a red gate in §2.
 
+The automated part of the touch-target check (`e2e/playwright/tests/14-touch-targets.spec.js`: Record, Picture-in-Picture,
+Fullscreen, Mute, Settings and the drag handle each stay tappable 21px beyond their centre) runs only on **PRs into
+`main` and nightly**, not on PRs into `dev`, so a layout regression is caught at the release PR. It does not cover the
+Talk and PTZ buttons (the e2e fake camera has neither), real touch input, or anything about playback; this checklist does.
+
 ---
 
 ## 2. The release to `main`

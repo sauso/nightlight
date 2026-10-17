@@ -4866,6 +4866,16 @@
     "namePattern": "H3"
   },
   {
+    "label": "#373 M-R2-34: H3 provenanceMany's pruned-record check (R4-4) off by one slot",
+    "file": "backend/src/lib/observationClock.js",
+    "find": "      if (!cand || (this.prunedMaxN > cand.n && this.prunedMaxSlot <= t)) return { cls: 'unknown', reason: 'no-source' };",
+    "replace": "      if (!cand || (this.prunedMaxN > cand.n && this.prunedMaxSlot < t)) return { cls: 'unknown', reason: 'no-source' };",
+    "expect": "equivalent",
+    "tests": ["observation-clock.test.js"],
+    "namePattern": "H3",
+    "note": "The R4-4 pruned-record guard never fires, so its boundary cannot change an answer: expiry keeps the newest record below tMin and every record at or above it, the count cap removes the oldest, and tMin never falls, so no pruned record is ever NEWER than a remaining candidate. Checked (fix round 2 builder, scratch r44.mjs): 3,000 fuzzed motion streams, 601 with backwards pts, stalls to 45 s: the guard fired 0 times. Phase A had no mutant on the same guard in provenance()."
+  },
+  {
     "label": "#373 M-R2-35: G3 the coverage cap evicts BEFORE merging again (an interval the union already covers costs the earliest one)",
     "file": "backend/src/lib/observationClock.js",
     "find": "    const iv = this.iv;",
@@ -8710,6 +8720,16 @@
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "every time and frame sent as null"
+  },
+  {
+    "label": "#522 M12: the route stores the raw body value instead of the parsed id",
+    "file": "backend/src/routes/children.js",
+    "find": "    trueWakeTransitionId: wakeFrameId,",
+    "replace": "    trueWakeTransitionId: body.true_wake_transition_id,",
+    "expect": "equivalent",
+    "tests": ["review-in-bed-and-lock.test.js"],
+    "namePattern": "number or as a string of digits",
+    "note": "EQUIVALENT, verified by running it against a scratch copy (#522 build, 2026-10-12; all 205 tests of the five files that reach the review route survive it): every malformed value is refused by transitionInstant before the patch is built, '' is turned into NULL by previewNightReview's blankToNull, and a digit string is stored as the integer by the column's INTEGER affinity. Storing the parsed value is for the reader, not a behaviour."
   },
   {
     "label": "#522 M13: transitionInstant drops its NaN guard",

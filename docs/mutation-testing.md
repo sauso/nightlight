@@ -80,6 +80,11 @@ Known limits of the sharded run:
   first full run on GitHub's runners had not happened when this was written. Expect to adjust the shard count or the
   120-minute job limit after seeing real timings.
 
+Not part of the catalogue, but removed in the same change: the CSS-text tests `touchTargets` and `reviewFieldSpacing`.
+Their replacement is a rendered-size check in Playwright (`e2e/playwright/tests/14-touch-targets.spec.js`, and a layout
+block in `07-morning-review.spec.js`). Those run on **PRs into `main` and nightly, not on PRs into `dev`**, so a layout
+regression is caught at the release PR; the real-device checklist (`planning/deploy-runbook.md` §1.6) covers the rest.
+
 ## What belongs in the catalogue
 
 An entry earns its place by the consequential fault it detects. Keep entries that guard sign-in, sessions, tokens and
@@ -100,7 +105,6 @@ but different tests were kept on purpose: each proves a different test kills the
 | #E2 M1: describeDevice mislabels iPhone as iPad | display string / wording only |
 | #E2 M2: describeDevice mislabels Edge as Chrome | display string / wording only |
 | #E2 M8: appName() fallback string changed | display string / wording only |
-| #373 M-R2-34: H3 provenanceMany's pruned-record check (R4-4) off by one slot | provably equivalent (see its note): no observable fault to detect |
 | nobody-in-bed frontend: SleepDetail drops the frontend `nobody_in_bed` copy split | which empty-night sentence is shown; the empty-night state itself stays covered |
 | nobody-in-bed frontend: SleepSummaryCard drops the frontend `nobody_in_bed` copy split | which empty-night sentence is shown; the empty-night state itself stays covered |
 | nobody-in-bed fix round #2: SleepDetail keys the empty-night copy on `corrected` again | which empty-night sentence is shown; the empty-night state itself stays covered |
@@ -108,7 +112,6 @@ but different tests were kept on purpose: each proves a different test kills the
 | #508 A21: the Recompute refusal always gives the coverage message for no_data (claims data is there when it aged out) | wording of a refusal message; the refusal itself stays covered |
 | #508 A22: the Recompute refusal always says the data aged out for no_data (the pre-#508 message) | wording of a refusal message; the refusal itself stays covered |
 | #508 A24: the too-little-watched message only names the no_data line (a stored empty night at 85% is told 'too few to score') | wording of a refusal message; the refusal itself stays covered |
-| #522 M12: the route stores the raw body value instead of the parsed id | provably equivalent (see its note): no observable fault to detect |
 | #453 EQ1 (fix round 1): a silent window skips the below-band EMA step | provably equivalent (see its note): no observable fault to detect |
 | #453 EQ2 (fix round 1): a silent window skips the dead-band escape step | provably equivalent (see its note): no observable fault to detect |
 | #452 M19b: the cancel path does not clear oobQuietFrom (equivalent: every open sets it again) | provably equivalent (see its note): no observable fault to detect |
