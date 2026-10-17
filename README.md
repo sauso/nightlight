@@ -266,8 +266,13 @@ shouldn't be there, see [SECURITY.md](SECURITY.md) for how to report it privatel
 **Cameras are trusted input.** Nightlight trusts everything a camera sends it: the video and audio
 stream, the ONVIF replies and the snapshot images. The stream is parsed by FFmpeg and ffprobe, and
 the rest by the server itself, all as the same user that owns the data directory (the database, the
-saved secrets and the recordings) and with the container's environment: nothing separates the media
-processes from the data. Cameras are often the least-updated devices on a network, so put them on
+saved secrets and the recordings): nothing separates the media processes from the data on disk. They
+are not handed the server's environment: FFmpeg and ffprobe start with only `PATH`, `TZ`, `LANG` and
+`LC_ALL`, MediaMTX with the same plus your `MTX_*` overrides
+([details](docs/architecture.md#child-process-environment-backendsrclibchildenvjs-553)). That narrows what
+a bug in one of them could leak, but it is not a sandbox: running as the same user, a media process that a
+camera managed to take over could still read the server's own environment (`JWT_SECRET` included) through
+the process table, as well as the files. Cameras are often the least-updated devices on a network, so put them on
 **their own VLAN or network segment**, ideally with no route to the internet and no access to your
 other devices, and let only the Nightlight host reach them (RTSP, plus ONVIF and the snapshot URL if
 you use them). This is advice: Nightlight does not check or enforce it.

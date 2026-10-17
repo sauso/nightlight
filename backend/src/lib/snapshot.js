@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawnChild } from './childEnv.js';
 import { logger } from './logger.js';
 
 // Fetch a JPEG straight from a camera's own HTTP snapshot endpoint (thingino, sonoff-hack, and most
@@ -141,7 +141,7 @@ export function captureSnapshot(pathName, { timeoutMs = 8000, onExit } = {}) {
     ];
     let proc;
     try {
-      proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      proc = spawnChild('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (e) {
       logger.error('[snapshot] spawn failed:', e.message);
       exitOnce(); // nothing was started, so nothing is left running

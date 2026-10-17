@@ -1094,7 +1094,7 @@
   {
     "label": "WEBRTC_UDP_PORT: a valid port is never copied into the MediaMTX child's env",
     "file": "backend/src/lib/mediamtxProcess.js",
-    "find": "if (udp.value) env.MTX_WEBRTCLOCALUDPADDRESS = udp.value;",
+    "find": "if (udp.value) extra.MTX_WEBRTCLOCALUDPADDRESS = udp.value;",
     "replace": "void udp.value;",
     "expect": "killed",
     "tests": ["webrtc-udp-port-launch.test.js"]
@@ -17813,6 +17813,149 @@
     "expect": "killed",
     "tests": ["csp-directives.test.js"],
     "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#553 childEnv: JWT_SECRET joins the allowlist",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "['PATH', 'TZ', 'LANG', 'LC_ALL']);\nexport const MEDIAMTX",
+    "replace": "['PATH', 'TZ', 'LANG', 'LC_ALL', 'JWT_SECRET']);\nexport const MEDIAMTX",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "a spawned child receives exactly the allowlist|childEnv\\(\\) as data"
+  },
+  {
+    "label": "#553 childEnv: MTX_* is passed to every child, not only MediaMTX",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "  if (mediamtx) {",
+    "replace": "  if (true) {",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "a spawned child receives exactly the allowlist|childEnv\\(\\) as data"
+  },
+  {
+    "label": "#553 childEnv: the MTX_ prefix match becomes a substring match",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "name.startsWith(MEDIAMTX_PREFIX)",
+    "replace": "name.includes(MEDIAMTX_PREFIX)",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "childEnv\\(\\) as data"
+  },
+  {
+    "label": "#553 childEnv: an inherited value beats the launch-computed one",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "return { ...env, ...extra };",
+    "replace": "return { ...extra, ...env };",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "a spawned child receives exactly the allowlist|childEnv\\(\\) as data"
+  },
+  {
+    "label": "#553 childEnv: unset names are copied as undefined",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "if (parent[name] !== undefined) env[name] = parent[name];\n  }\n  if (mediamtx)",
+    "replace": "env[name] = parent[name];\n  }\n  if (mediamtx)",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "a spawned child receives exactly the allowlist|childEnv\\(\\) as data"
+  },
+  {
+    "label": "#553 spawnChild: the allowlisted env is not applied (full environment inherited)",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "{ ...rest, env: childEnv({ mediamtx, extra }) }",
+    "replace": "{ ...rest }",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "a spawned child receives exactly the allowlist"
+  },
+  {
+    "label": "#553 spawnChild: a caller-supplied env wins over the allowlist",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "{ ...rest, env: childEnv({ mediamtx, extra }) }",
+    "replace": "{ ...rest, env: options.env ?? childEnv({ mediamtx, extra }) }",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "a spawned child receives exactly the allowlist"
+  },
+  {
+    "label": "#553 mediamtxProcess: MediaMTX is launched without its MTX_* overrides",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "{ mediamtx: true, extra }",
+    "replace": "{ extra }",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "every process the backend starts goes through the helper"
+  },
+  {
+    "label": "#553 motionDetector: ffmpeg is also handed the MediaMTX overrides",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "spawnChild('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] })",
+    "replace": "spawnChild('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] }, { mediamtx: true })",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "every process the backend starts goes through the helper"
+  },
+  {
+    "label": "#553 childEnv: the MTX_ prefix loses its underscore (MTXFOO reaches MediaMTX)",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "export const MEDIAMTX_PREFIX = 'MTX_';",
+    "replace": "export const MEDIAMTX_PREFIX = 'MTX';",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "childEnv\\(\\) as data"
+  },
+  {
+    "label": "#553 childEnv: an MTX_* name with no value is copied as an undefined key",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "name.startsWith(MEDIAMTX_PREFIX) && parent[name] !== undefined) env[name]",
+    "replace": "name.startsWith(MEDIAMTX_PREFIX)) env[name]",
+    "expect": "killed",
+    "tests": [
+      "child-env.test.js"
+    ],
+    "namePattern": "childEnv\\(\\) as data"
+  },
+  {
+    "label": "#553 mediamtxProcess: an inherited MTX_WEBRTCADDITIONALHOSTS beats the host list computed at launch",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "      extra.MTX_WEBRTCADDITIONALHOSTS = advertisedKey;",
+    "replace": "      if (process.env.MTX_WEBRTCADDITIONALHOSTS === undefined) extra.MTX_WEBRTCADDITIONALHOSTS = advertisedKey;",
+    "expect": "killed",
+    "tests": [
+      "webrtc-udp-port-launch.test.js"
+    ],
+    "namePattern": "#553 the MediaMTX child gets the host list computed at launch"
+  },
+  {
+    "label": "#553 mediamtxProcess: the host list computed at launch never reaches MediaMTX",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "      extra.MTX_WEBRTCADDITIONALHOSTS = advertisedKey;",
+    "replace": "      void advertisedKey;",
+    "expect": "killed",
+    "tests": [
+      "webrtc-udp-port-launch.test.js"
+    ],
+    "namePattern": "#553 the MediaMTX child gets the host list computed at launch"
   },
   {"label": "#365 insights: the minimum-nights gate is removed (a group of one gets a verdict again)", "file": "backend/src/lib/sleepAnalysis.js", "find": "  else if (cool.length < INSIGHT_MIN_GROUP_NIGHTS || warm.length < INSIGHT_MIN_GROUP_NIGHTS) verdict = 'not_enough_nights';\n", "replace": "", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 the boundary"},
   {"label": "#365 insights: the cooler group is off by one (9 nights pass)", "file": "backend/src/lib/sleepAnalysis.js", "find": "cool.length < INSIGHT_MIN_GROUP_NIGHTS ||", "replace": "cool.length < INSIGHT_MIN_GROUP_NIGHTS - 1 ||", "expect": "killed", "tests": ["sleepInsights.test.js"], "namePattern": "#365 the boundary"},
