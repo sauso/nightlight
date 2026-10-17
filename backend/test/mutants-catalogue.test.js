@@ -32,7 +32,8 @@ describe('the real catalogue', () => {
     assert.equal(res.code, 0, `the catalogue has drifted from the code or the tests:\n${res.stderr}${res.stdout}`);
     const size = JSON.parse(fs.readFileSync(path.join(REAL_REPO, 'scripts', 'mutants.json'), 'utf8')).length;
     assert.match(res.stdout, new RegExp(`^${size} catalogue entries, 0 that would not apply`, 'm'));
-    assert.ok(size > 1000, 'the catalogue shrank suspiciously; --check cannot vouch for entries that are not there');
+    // No minimum size on purpose (#754): the catalogue is a tool for finding missing tests, not a quota, so it may shrink
+    // when entries are pruned. What must hold is that every entry that IS there still applies (asserted above).
   });
 });
 

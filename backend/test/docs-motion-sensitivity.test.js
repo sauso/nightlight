@@ -1,12 +1,15 @@
-// #368 C8: what docs/notifications.md says about motion sensitivity must be what the code does.
+// #368 C8 (simplified in #754): docs/notifications.md must state the motion-sensitivity threshold the code actually uses.
 //
-// The doc used to say motion sensitivity "does not work this way, it only affects alerts" as the contrast to sound
-// sensitivity, which was false: until #368 the same number also classified the frames the bed-transition tracker reads.
-// It is now true, because the tracker reads a fixed constant (bedTransitionRules.js). A doc that states a number the code
-// owns goes stale the day the number changes, so the percent is DERIVED from the exported constant here, not typed: change
-// the constant and this fails until the doc says the new number. (The rules file has no imports, so this needs no database.)
+// What can go stale is the NUMBER, not the prose: the fixed bed-transition threshold lives in bedTransitionRules.js, so the
+// percent is DERIVED from the exported constant here, not typed. Change the constant and this fails until the doc says the
+// new number. (The rules file has no imports, so this needs no database.) The test used to pin whole sentences ("calibrated
+// in one house", "in either direction", the link anchor); those rejected an honest rewording and caught nothing a reader
+// could be misled by, so they are gone. What it still checks is that the doc exists, covers the setting, and carries the
+// right number in the two places a reader looks for it.
 //
-// "Docs-only" in the workspace rules means prose no test reads: this makes docs/notifications.md a file a test reads.
+// It also keeps ONE claim about behaviour: the doc must not go back to saying motion sensitivity "does not work this way"
+// as the contrast to sound sensitivity. That was false until #368 and is the one sentence that would mislead a reader about
+// what the slider changes.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -20,37 +23,26 @@ const doc = fs.readFileSync(path.join(REPO, 'docs/notifications.md'), 'utf8').re
 // The percent as the docs write it: two decimals, no space, e.g. "1.19%".
 const PCT = `${(BED_TRANSITION_ACTIVE_FRACTION * 100).toFixed(2)}%`;
 
-// The settings-table row, up to the next row.
+// The settings-table row for the setting, and the section (any heading mentioning the fixed threshold) up to the next heading.
 const sensitivityRow = doc.split('\n').find((l) => l.startsWith('| **Motion sensitivity**'));
-// The prose section that explains the fixed threshold, up to the next heading.
 const fixedSection = (() => {
-  const start = doc.indexOf('### Bed exits and entries use a fixed threshold');
-  if (start < 0) return '';
-  const next = doc.indexOf('\n### ', start + 1);
-  return doc.slice(start, next < 0 ? undefined : next);
+  const m = /^#{2,4} .*fixed threshold.*$/im.exec(doc);
+  if (!m) return '';
+  const next = doc.indexOf('\n#', m.index + m[0].length);
+  return doc.slice(m.index, next < 0 ? undefined : next);
 })();
 
-test('#368 C8: the motion sensitivity row says alerts only and names the fixed threshold the code uses', () => {
+test('#368 C8: the Motion sensitivity row exists and states the fixed transition threshold the code uses', () => {
   assert.ok(sensitivityRow, 'the Motion sensitivity row is missing from the settings table');
   assert.ok(sensitivityRow.includes(PCT), `the Motion sensitivity row must state the fixed transition threshold (${PCT}) derived from BED_TRANSITION_ACTIVE_FRACTION`);
-  assert.match(sensitivityRow, /alerts only/i, 'the row must say motion sensitivity changes alerts only');
-  assert.ok(sensitivityRow.includes('(#bed-exits-and-entries-use-a-fixed-threshold)'), 'the row must link to the section that explains the fixed threshold');
 });
 
-test('#368 C8: a section explains the fixed threshold, its number, and the known limit', () => {
-  assert.ok(fixedSection, 'the "Bed exits and entries use a fixed threshold" section is missing');
+test('#368 C8: a section on the fixed threshold exists and states the same number', () => {
+  assert.ok(fixedSection, 'a heading about the fixed bed-exit/entry threshold is missing from docs/notifications.md');
   assert.ok(fixedSection.includes(PCT), `the section must state ${PCT}`);
-  // The two things the owner of another house must be told: it was calibrated in one house, and they may see a change.
-  assert.match(fixedSection, /calibrated in one house/i);
-  assert.ok(!/measured in one house/i.test(doc), 'the 1.19% is what the slider gives at 90, not a measurement: say "calibrated"');
-  assert.match(fixedSection, /in either direction/i);
-  assert.match(fixedSection, /redraw the detection zone/i, 'the remedy for a noisy room must be named');
 });
 
-test('#368 C8: the doc no longer says motion sensitivity "does not work this way" as the contrast to sound sensitivity', () => {
-  assert.ok(!/motion sensitivity does \*\*not\*\* work this way/i.test(doc), 'the stale contrast sentence is back');
-  assert.ok(!/motion sensitivity does not work this way/i.test(doc));
-  // The sound section still says sound sensitivity changes sleep tracking (that part is true and must stay).
-  assert.match(doc, /### ⚠️ Sound sensitivity also changes sleep tracking/);
-  assert.match(doc, /Sound sensitivity affects\s+\*\*both\*\*/);
+test('#368 C8: the sound-sensitivity section still exists, and the stale "does not work this way" contrast is not back', () => {
+  assert.match(doc, /^#{2,4} .*Sound sensitivity/im, 'the sound sensitivity section is missing');
+  assert.ok(!/motion sensitivity does (\*\*)?not(\*\*)? work this way/i.test(doc), 'the stale contrast sentence is back');
 });

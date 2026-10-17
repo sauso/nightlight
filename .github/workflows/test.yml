@@ -4,13 +4,11 @@ name: Tests and checks
 # enough to run on every push and every PR, unlike e2e.yml which spins up containers and a browser.
 #
 # Separate jobs on purpose:
-#   * `unit`  — everything must pass. A red suite blocks the merge.
+#   * `unit`  — everything must pass, and the core-logic coverage gate (>= 95% lines) is enforced by the same run
+#     (#754: the gate used to be a second job running the suite again). A red suite or thin coverage blocks the merge.
 #   * `changelog` — CHANGELOG.md structure. Duplicate `### Added` blocks are invisible in a PR diff
 #     (each looks like a correct single addition on its own) and only show up when someone reads the
 #     whole rendered section, which nobody does every time. It happened across #179-#186.
-#   * `core-coverage` — the CORE-LOGIC COVERAGE GATE. Nightlight's rule is that core logic stays at
-#     >= 95% line coverage, and that this is checked BEFORE code is promoted to production. Enforcing
-#     it here rather than in a checklist means it can't be forgotten during a release.
 on:
   push:
     branches: [dev, main]
@@ -39,9 +37,14 @@ jobs:
       - name: Install backend dependencies
         working-directory: backend
         run: npm ci
-      - name: Run the test suite
+      # ONE run of the whole backend suite, with coverage on and the thresholds enforced (#754). `test:core` is
+      # `node --test … test/*.test.js` plus the coverage flags, so it runs exactly the files `npm test` runs and exits
+      # non-zero for a failing test OR for coverage under 95% lines / 90% functions / 80% branches over the include list in
+      # backend/package.json (which IS the definition of "core logic": grow it as modules qualify, never shrink it to go
+      # green). It used to be two jobs, `unit` (plain) and `core-coverage`, running the same files twice.
+      - name: Run the test suite with the core-logic coverage gate
         working-directory: backend
-        run: npm test
+        run: npm run test:core
       # #549: entrypoint.sh's file-mode block is shell, so neither the JS mutation catalogue nor a Windows dev
       # machine can exercise it (entrypoint-umask.test.js is skipped where there are no POSIX modes). This step is
       # where it gets its evidence:
@@ -68,26 +71,6 @@ jobs:
             || { cat "$RUNNER_TEMP/busybox-chown.tap"; echo "::error::the BusyBox chown run (as root) skipped tests"; exit 1; }
           tail -9 "$RUNNER_TEMP/busybox-chown.tap"
           bash scripts/entrypoint-umask.mutants.sh
-
-  core-coverage:
-    name: Core-logic coverage gate (>= 95%)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: backend/package-lock.json
-      - name: Install backend dependencies
-        working-directory: backend
-        run: npm ci
-      # Exits non-zero if the modules listed in the `test:core` script fall below the thresholds.
-      # The include list in backend/package.json IS the definition of "core logic" — extend it as
-      # each further module reaches the bar.
-      - name: Enforce core-logic coverage thresholds
-        working-directory: backend
-        run: npm run test:core
 
   frontend:
     name: Front-end component tests

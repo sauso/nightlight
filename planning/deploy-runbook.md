@@ -19,7 +19,7 @@ you read when something does not look right, and it records the traps that have 
 | ☐ | The **detection holdout has closed** (~2026-09-09) | Deploying to staging changes nothing on prod, but the release that follows does, and the holdout's whole purpose is an unbiased measure of the current detector. See `ROADMAP.md` §1. |
 | ☐ | **Explicit go-ahead from the owner** for anything touching `main` | Standing rule. `dev` merges do not need it; `main` is production and always does. |
 | ☐ | `git status --short` clean, local `dev` fast-forwarded to `origin/dev` | A stale local `dev` silently reverts the tree on checkout, and the branch you cut next is then based on old code. Hit for real at 0.25.0, 29 commits behind. |
-| ☐ | `cd backend && npm test && npm run test:core` green | The gate is an **aggregate** across the include list, not per file — read a module's own row if you care about one. |
+| ☐ | `cd backend && npm run test:core` green (the whole suite with coverage; one run, as CI does) | The gate is an **aggregate** across the include list, not per file — read a module's own row if you care about one. |
 | ☐ | `node scripts/check-changelog.mjs` exit 0 | |
 | ☐ | `df -h /c \| tail -1` shows > 2 GB free | C: hit 100% mid-release once; fastest safe fix is `npm cache clean --force`. |
 
@@ -93,6 +93,27 @@ The `nightlight-soak` container on the Windows box is a third environment that r
 image against a synthetic camera — good for fault injection (hide `ffmpeg`, hide `mediamtx`), useless
 for detection quality. ⚠️ **Never point it at a bedroom camera.**
 
+### 1.6 Real-device check — for any release touching streaming
+Nothing in CI proves a real browser or phone decodes the video (the e2e camera test checks that a live HLS
+playlist is served, not that it plays), so this is done by a person on staging, on real devices, and not
+replaced by an assertion. "Touching streaming" means the transcoder, MediaMTX config, WebRTC/WHEP/HLS, the
+player components, or the camera tile.
+
+| ☐ | check |
+|---|---|
+| ☐ | Start playback on a **phone** and on a **desktop browser**; video and audio both play |
+| ☐ | **Disconnect and reconnect the camera** (power or network); video **and audio** recover without reloading the page |
+| ☐ | **Android app:** picture-in-picture by double-tap works |
+| ☐ | **Android app:** pinch-zoom works in a browser view |
+| ☐ | **Android app:** a camera tile loads and plays |
+
+A failure here blocks the release the same as a red gate in §2.
+
+The automated part of the touch-target check (`e2e/playwright/tests/14-touch-targets.spec.js`: Record, Picture-in-Picture,
+Fullscreen, Mute, Settings and the drag handle each stay tappable 21px beyond their centre) runs only on **PRs into
+`main` and nightly**, not on PRs into `dev`, so a layout regression is caught at the release PR. It does not cover the
+Talk and PTZ buttons (the e2e fake camera has neither), real touch input, or anything about playback; this checklist does.
+
 ---
 
 ## 2. The release to `main`
@@ -100,6 +121,8 @@ for detection quality. ⚠️ **Never point it at a bedroom camera.**
 Use `/release`, which encodes all of this with its gates. What follows is what it does and why.
 
 ### 2.1 Decide the version
+Before anything else on a release that touches streaming: §1.6 (real-device check) is done and clean.
+
 While on 0.x: **minor** if `[Unreleased]` contains any `### Added`, else **patch**.
 
 ### 2.2 Release-prep, on a branch off `dev`
