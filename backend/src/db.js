@@ -340,6 +340,14 @@ if (!usersColumns.includes('mfa_secret')) {
 if (!usersColumns.includes('mfa_backup_codes')) {
   db.exec('ALTER TABLE users ADD COLUMN mfa_backup_codes TEXT');
 }
+// Newest TOTP time step already accepted for this user (#550). /login/mfa refuses a code whose step is
+// not GREATER than this, so a code cannot be replayed inside its ~90 s validity window. Nullable with no
+// default on purpose: NULL means "no code accepted yet", every existing row keeps working untouched, and
+// the first login after upgrade simply sets it. Reset to NULL whenever the secret is cleared, so a new
+// secret never inherits an old secret's step.
+if (!usersColumns.includes('mfa_last_step')) {
+  db.exec('ALTER TABLE users ADD COLUMN mfa_last_step INTEGER');
+}
 // Optional caregiver/admin avatar photo — same browser-resized base64 data-URL as children.photo.
 if (!usersColumns.includes('photo')) {
   db.exec('ALTER TABLE users ADD COLUMN photo TEXT');

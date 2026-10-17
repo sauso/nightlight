@@ -153,6 +153,27 @@ attach headers). Roles are `admin` / `caregiver`; `requireAdmin` gates account/s
 the routes registered *after* it: cameras.js's four media routes sit above that line on purpose, so
 moving a route across it changes who can reach it.
 
+**Password hashing runs off the main loop (#548).** Every bcrypt hash and compare on a request path goes
+through `lib/passwordHash.js`, which runs the same `bcryptjs` (cost 10, so existing hashes still verify)
+in one persistent worker thread. bcryptjs's own async API does not help: it yields only after 100 ms of
+work and a cost-10 compare takes about 82 ms, so `bcrypt.compare` blocked the event loop exactly as
+`compareSync` did. Because a handler now yields mid-request, each place that reads a row, awaits, then
+writes uses a compare-and-swap or re-checks after the await (login re-reads the whole row, so a reset
+password or a just-enabled second factor decides; password change, backup codes; `/setup`;
+`/me/mfa/enable`, whose write is bound to MFA still being off AND to the secret its code was checked
+against). Every signed-in route that awaits bcrypt and then writes re-checks its own session first
+(`signInEnded`: the middleware's `isLiveSessionId` rule) and answers 401 if it ended meanwhile; the two
+admin routes that hash (`POST /users`, `PUT /users/:id`) also re-read the caller's live role
+(`adminRightsEnded`) and answer 403 if they were demoted meanwhile, so an in-flight request cannot undo a
+demotion (#261).
+`/me/mfa/enable` also allows one request per user at a time, refused before any hashing, because each
+one costs ten hashes in the shared worker. The worker module keeps each worker's pending jobs separately,
+so a crashed worker rejects only its own jobs. The TOTP replay check (`users.mfa_last_step`, nullable) is
+a single `UPDATE ... WHERE mfa_last_step IS NULL OR mfa_last_step < ?` whose row count is the verdict. The
+per-user MFA limiter sits beside the per-source ones in `routes/auth.js` and is keyed on a *verified* MFA
+token; the admin MFA reset also empties it. User-facing rules:
+[mfa.md](mfa.md#replayed-codes-and-limits-on-guessing-550).
+
 **Every route's gate is pinned** by `backend/test/route-permissions.test.js` (issue #563). It enumerates
 the real route table (index.js's registrations read from its source, and every mounted router's actual
 `router.stack`), classifies each route as public / optional / media / signed-in / signed-in+admin, and

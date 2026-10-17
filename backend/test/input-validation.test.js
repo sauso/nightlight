@@ -396,6 +396,10 @@ describe('MFA enrolment cannot replace a second factor that is already on', () =
     db.prepare("UPDATE users SET mfa_enabled = 1, mfa_secret = ?, mfa_backup_codes = '[\"kept\"]' WHERE id = 'u-mfa'").run(secret);
     const res = await api('/api/auth/me/mfa/enable', { method: 'POST', token, body: { code: generateSync({ secret }) } });
     assert.equal(res.status, 400);
+    // The text too (review of #720): since #548 the write is a compare-and-set that also refuses an account
+    // with MFA on, so without this guard the codes stay untouched anyway, but only after ten backup-code
+    // hashes, and with the set-up text ('Start setup first.') instead of this one.
+    assert.equal(res.body.error, 'Two-factor is already on.');
     assert.equal(res.body.backup_codes, undefined);
     assert.equal(row().mfa_backup_codes, '["kept"]', 'the backup codes were regenerated');
   });
