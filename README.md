@@ -308,8 +308,7 @@ which is set up automatically from the ONVIF probe using the camera's own stream
 one** — it's never sent back to your browser. Changing the address re-tests the stream, the
 same as adding.
 
-**Removing** — Remove asks for confirmation, then stops the stream and deletes the camera.
-You can always add it again.
+**Removing** — Remove asks for confirmation, then stops the stream and **permanently deletes everything for the camera**: its bed transitions and snapshot photos, activity history, alerts with their clips and snapshots, recordings, event log and sensor history. You can add the camera again, but none of that comes back. See [Removing a child or a camera](docs/recording.md#removing-a-child-or-a-camera).
 
 **Assigning to a child** — use the "Assigned to" dropdown on each camera (admin only; a caregiver
 sees the assignment as text). It is more than grouping: a camera's nights are tracked only while it is
@@ -915,7 +914,7 @@ destroy or reconfigure.**
 | Answer the morning sleep review (the review shows who last answered it) | Yes | Yes |
 | Delete an alert clip, a recording or a wake clip | No | Yes |
 | Delete a timelapse | No | Yes |
-| Delete a child and its media | No | Yes |
+| Delete a child and everything recorded for them (nights, reviews, bed transitions, recordings, timelapses) | No | Yes |
 | Change global settings (detection, notifications, providers, recording retention) | No | Yes |
 | Manage caregiver/admin accounts and sessions | No | Yes |
 

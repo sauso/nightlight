@@ -343,8 +343,25 @@ export default function ChildSettings() {
 
       {removing && (
         <Modal title="Remove child" placement="top" error={removeError} onClose={() => (removeBusy ? null : setRemoving(false))}>
+          {/* #540: removing a child deletes EVERYTHING recorded for them, files included. The list is the
+              contract with lib/entityPurge.js: if the server starts deleting (or keeping) something else,
+              change both. "Are you sure?" is a sentence in the dialog, not a browser confirm(). */}
           <p style={{ marginTop: 0 }}>
-            Remove <strong>{kid?.name}</strong>? Cameras assigned to them become unassigned. This can't be undone.
+            Remove <strong>{kid?.name}</strong>? This permanently deletes everything for this child:
+          </p>
+          <ul style={{ margin: '0 0 12px', paddingLeft: 20 }}>
+            <li>sleep nights and morning reviews, with their notes</li>
+            <li>bed transitions and their snapshot photos</li>
+            <li>the activity history their cameras recorded</li>
+            <li>recordings, wake clips and timelapses, including the video files</li>
+            <li>their profile, photo and sleep settings</li>
+          </ul>
+          {/* #719 review: "everything for this child" must be true, and alerts are the camera's, not the child's
+              (lib/entityPurge.js keeps them), so the dialog says so. */}
+          <p>
+            Their cameras are kept and become unassigned. Alert clips and photos from those cameras belong to the
+            camera, so they are kept until their retention removes them (or the camera is removed). This can't be
+            undone. <strong>Are you sure?</strong>
           </p>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button className="btn" type="button" onClick={() => setRemoving(false)} disabled={removeBusy}>Cancel</button>

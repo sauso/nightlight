@@ -499,6 +499,49 @@ describe('removing a child', () => {
     expect(delSpy).not.toHaveBeenCalled();
   });
 
+  // ★ #540. The server now deletes everything recorded for the child, files included. The dialog must
+  // say so and list it; "Cameras assigned to them become unassigned" alone read as if that were the whole
+  // consequence. One assertion per category: a regex over the paragraph would survive a dropped line.
+  test('★ #540 the dialog says plainly that everything for the child is deleted, lists what, and asks', async () => {
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Remove child' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/permanently deletes everything for this child/)).toBeTruthy();
+    const items = within(dialog).getAllByRole('listitem').map((li) => li.textContent);
+    expect(items).toHaveLength(5);
+    expect(items.join('|')).toMatch(/sleep nights and morning reviews, with their notes/);
+    expect(items.join('|')).toMatch(/bed transitions and their snapshot photos/);
+    expect(items.join('|')).toMatch(/activity history their cameras recorded/);
+    expect(items.join('|')).toMatch(/recordings, wake clips and timelapses, including the video files/);
+    expect(items.join('|')).toMatch(/profile, photo and sleep settings/);
+    expect(within(dialog).getByText('Are you sure?')).toBeTruthy();
+    // #719 review: "everything for this child" has one exception, and the dialog has to name it to be true.
+    expect(within(dialog).getByText(/Alert clips and photos from those cameras belong to the camera, so they are kept until their retention removes them \(or the camera is removed\)/)).toBeTruthy();
+    expect(delSpy).not.toHaveBeenCalled();
+  });
+
+  // ★ #719 review. Through the REAL api.js (only fetch is stubbed): a 409 refusal shows the server's reason inside
+  // the dialog, never "Request failed (409)". (A 5xx body would be stripped by Cloudflare, which is why it is 409.)
+  test('★ #719 a refused delete (409) shows the server\'s reason inside the dialog', async () => {
+    const reason = "Could not delete everything for this child (a file was in use), so the child was not removed.";
+    delSpy.mockRestore();
+    const fetchSpy = vi.fn(async () => ({ ok: false, status: 409, text: async () => JSON.stringify({ error: reason }) }));
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      const { user, camerasValue } = mount();
+      await user.click(await screen.findByRole('button', { name: 'Remove child' }));
+      await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
+      const dialog = screen.getByRole('dialog');
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent(reason);
+      expect(within(dialog).queryByText(/Request failed/)).toBeNull();
+      expect(fetchSpy).toHaveBeenCalledWith('/api/children/kid-1', expect.objectContaining({ method: 'DELETE' }));
+      expect(camerasValue.refresh).not.toHaveBeenCalled();
+      expect(screen.getByText('at /children/kid-1')).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   test('confirming deletes, refreshes and goes back', async () => {
     const { user, camerasValue } = mount();
     await user.click(await screen.findByRole('button', { name: 'Remove child' }));

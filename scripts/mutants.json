@@ -10821,8 +10821,8 @@
   {
     "label": "#454 M17d: PUT /:id/enabled (enabled=true) forgets the stamp ahead of the detector start",
     "file": "backend/src/routes/cameras.js",
-    "find": "    if (motionLegWanted(cam)) await startMotionDetector(cam).catch(() => {});",
-    "replace": "    forgetMotionAlert(req.params.id);\r\n    if (motionLegWanted(cam)) await startMotionDetector(cam).catch(() => {});",
+    "find": "  if (motionLegWanted(cam)) await startMotionDetector(cam).catch(() => {});",
+    "replace": "  forgetMotionAlert(cam.id);\r\n  if (motionLegWanted(cam)) await startMotionDetector(cam).catch(() => {});",
     "expect": "killed",
     "tests": ["motion-alert-cooldown-routes.test.js"],
     "namePattern": "^#454 C5:.*enabled=true"
@@ -15301,9 +15301,9 @@
   },
   {
     "label": "#655 DELETE child: another child's stale pointer to its cameras is left behind (and revives on reassignment)",
-    "file": "backend/src/routes/children.js",
-    "find": "for (const camId of affectedCameraIds) clearStalePrimaryPointers(camId);",
-    "replace": "",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": ".run(camId, camId);",
+    "replace": ".run('no-such-camera', 'no-such-camera');",
     "expect": "killed",
     "tests": ["children-primary-camera.test.js"],
     "namePattern": "does not revive on reassignment"
@@ -17494,6 +17494,405 @@
     "expect": "killed",
     "tests": ["csp-directives.test.js"],
     "namePattern": "#562 CSP wiring"
+  },
+  {
+    "label": "#540 entityPurge: a stored path outside the clips dir, or leaving it through a symlink, is followed",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "if (realParent !== realRoot && !inside(realRoot, realParent)) {\n    logger.warn(",
+    "replace": "if (false) {\n    logger.warn(",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "a stored path cannot make"
+  },
+  {
+    "label": "#540 entityPurge: a stored path that names a directory is unlinked (throws) instead of skipped",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "if (!st.isFile() && !st.isSymbolicLink()) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "a stored path cannot make"
+  },
+  {
+    "label": "#540 entityPurge: the row is deleted BEFORE its file (a failing file leaves a file nothing can name)",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "    removeFiles(row);\n    del.run(row.id);",
+    "replace": "    del.run(row.id);\n    removeFiles(row);",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "a failure part-way"
+  },
+  {
+    "label": "#540 entityPurge: a file that cannot be removed is swallowed and the row deleted anyway",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "    removeFiles(row);",
+    "replace": "    try { removeFiles(row); } catch { /* ignore */ }",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "a failure part-way"
+  },
+  {
+    "label": "#540 entityPurge: a file that is already missing is an error",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "    if (e.code === 'ENOENT') return false;\n    throw e;\n  }\n  if (!st.isFile()",
+    "replace": "    throw e;\n  }\n  if (!st.isFile()",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "a file that is already missing"
+  },
+  {
+    "label": "#540 entityPurge: an id that is not one safe path segment names a directory to remove",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "const isUuid = (s) => typeof s === 'string' && UUID.test(s);",
+    "replace": "const isUuid = () => true;",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "a stored path cannot make"
+  },
+  {
+    "label": "#540 entityPurge: a child delete skips the recordings and wake clips",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "purgeRecordingsWhere('child_id', childId);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a child deletes everything"
+  },
+  {
+    "label": "#540 entityPurge: a child delete leaves the bed transitions and their snapshot JPEGs of its cameras",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "purgeTransitionsOfCameras(cameraIds);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a child deletes everything"
+  },
+  {
+    "label": "#540 entityPurge: a child delete leaves the activity samples of its cameras",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "for (const camId of cameraIds) db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(camId);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a child deletes everything"
+  },
+  {
+    "label": "#540 entityPurge: a child delete leaves its sleep nights",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(childId);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a child deletes everything"
+  },
+  {
+    "label": "#540 entityPurge: a child delete leaves its sleep reviews (with their notes)",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "db.prepare('DELETE FROM sleep_reviews WHERE child_id = ?').run(childId);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a child deletes everything"
+  },
+  {
+    "label": "#540 entityPurge: a child delete leaves the finished timelapse directory",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "[['timelapse', id], ['.timelapse-frames', id]]",
+    "replace": "[['.timelapse-frames', id]]",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a child deletes everything"
+  },
+  {
+    "label": "#540 entityPurge: a child delete deletes EVERY child's sleep reviews",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "db.prepare('DELETE FROM sleep_reviews WHERE child_id = ?').run(childId);",
+    "replace": "db.prepare('DELETE FROM sleep_reviews WHERE child_id = ? OR 1').run(childId);",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a child deletes everything"
+  },
+  {
+    "label": "#540 entityPurge: deleting a transition deletes every camera's transitions",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "'DELETE FROM bed_transitions WHERE id = ?'",
+    "replace": "'DELETE FROM bed_transitions WHERE id = ? OR 1'",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a child deletes everything"
+  },
+  {
+    "label": "#540 children route: the purge is not called",
+    "file": "backend/src/routes/children.js",
+    "find": "affectedCameraIds = purgeChild(id);",
+    "replace": "affectedCameraIds = [];",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a child deletes everything"
+  },
+  {
+    "label": "#540 children route: a failed purge answers 5xx (a body Cloudflare strips, so the dialog cannot show it)",
+    "file": "backend/src/routes/children.js",
+    "find": "    return res.status(409).json({\n      error: `Could not delete everything for this child",
+    "replace": "    return res.status(500).json({\n      error: `Could not delete everything for this child",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "a failure part-way"
+  },
+  {
+    "label": "#554 entityPurge: a camera delete leaves the alert history (rows, snapshot JPEGs and clips)",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "purgeRows(\n    'SELECT id, clip_path FROM detection_events WHERE camera_id = ?', cameraId,",
+    "replace": "purgeRows(\n    'SELECT id, clip_path FROM detection_events WHERE camera_id = ? AND 0', cameraId,",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#554 entityPurge: a camera delete leaves the alert snapshot JPEGs",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "removeEventSnapshot(r.id);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#554 entityPurge: a camera delete leaves the alert clip's thumbnail",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "removeClipFile(clipSiblingJpg(r.clip_path));",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#554 entityPurge: a camera delete leaves its recordings and wake clips",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "purgeRecordingsWhere('camera_id', cameraId);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#554 entityPurge: a camera delete leaves its bed transitions and their snapshot JPEGs",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "purgeTransitionsOfCameras([cameraId]);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#554 entityPurge: a camera delete leaves its clip directory",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "[[id], ['.ring', id]]",
+    "replace": "[['.ring', id]]",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#554 entityPurge: a camera delete leaves its segment ring",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "[[id], ['.ring', id]]",
+    "replace": "[[id]]",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#554 entityPurge: a camera delete leaves its activity samples",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(cameraId);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#554 entityPurge: a camera delete leaves its camera events",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "db.prepare('DELETE FROM camera_events WHERE camera_id = ?').run(cameraId);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#554 entityPurge: a camera delete leaves its sensor readings",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "db.prepare('DELETE FROM sensor_readings WHERE camera_id = ?').run(cameraId);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#554 entityPurge: a camera delete leaves a child's primary-camera pointer at it",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "db.prepare('UPDATE children SET primary_camera_id = NULL WHERE primary_camera_id = ?').run(cameraId);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#554 entityPurge: a camera delete deletes EVERY camera's sensor readings",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "db.prepare('DELETE FROM sensor_readings WHERE camera_id = ?').run(cameraId);",
+    "replace": "db.prepare('DELETE FROM sensor_readings WHERE camera_id = ? OR 1').run(cameraId);",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#554 cameras route: the purge is not called",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    purgeCamera(req.params.id);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#554 cameras route: a failed purge answers 5xx (a body Cloudflare strips, so the dialog cannot show it)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "      }\n    }\n    return res.status(409).json({ error: refusal(e) });",
+    "replace": "      }\n    }\n    return res.status(500).json({ error: refusal(e) });",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "a failure part-way"
+  },
+  {
+    "label": "#540 ChildSettings: the Remove dialog stops asking \"Are you sure?\"",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "<strong>Are you sure?</strong>",
+    "replace": "<strong>Done?</strong>",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"]
+  },
+  {
+    "label": "#540 ChildSettings: the Remove dialog drops the activity-history line",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "            <li>the activity history their cameras recorded</li>\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"]
+  },
+  {
+    "label": "#540 ChildSettings: the Remove dialog drops the snapshot-photos line",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "            <li>bed transitions and their snapshot photos</li>\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["childSettings.test.jsx"]
+  },
+  {
+    "label": "#554 CameraSettings: the Remove dialog stops asking \"Are you sure?\"",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "<strong>Are you sure?</strong>",
+    "replace": "<strong>Done?</strong>",
+    "expect": "killed",
+    "tests": ["cameraSettings.test.jsx"]
+  },
+  {
+    "label": "#554 CameraSettings: the Remove dialog drops the event-log line",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "            <li>its event log and temperature and humidity history</li>\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["cameraSettings.test.jsx"]
+  },
+  {
+    "label": "#554 CameraSettings: the Remove dialog promises adding the camera back restores it",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "You can add the camera again, but none of this comes back.",
+    "replace": "You can add the camera again.",
+    "expect": "killed",
+    "tests": ["cameraSettings.test.jsx"]
+  },
+  {
+    "label": "#719 entityPurge: a folder sweep follows a link out of the clips folder (its parent is not jail-checked)",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "  if (realParent !== realRoot && !inside(realRoot, realParent)) {\n    throw Object.assign(",
+    "replace": "  if (false) {\n    throw Object.assign(",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "a folder sweep never follows a link"
+  },
+  {
+    "label": "#719 entityPurge: purgeChild leaves the child row itself",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "    db.prepare('DELETE FROM children WHERE id = ?').run(childId);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a child deletes everything"
+  },
+  {
+    "label": "#719 bedTransitions: a frame grabbed after its transition was deleted is left on disk",
+    "file": "backend/src/lib/bedTransitions.js",
+    "find": "if (markSnapshotStmt.run(id).changes === 0) fs.rmSync(file, { force: true });",
+    "replace": "markSnapshotStmt.run(id);",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "a photo that arrives after the delete"
+  },
+  {
+    "label": "#719 cameras route: removing a camera that is recording on demand is not refused",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  if (isRecording(existing.id)) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "removing is refused while a recording"
+  },
+  {
+    "label": "#719 cameras route: the folder check runs only inside the purge, after the camera is stopped (it goes dark)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    preflightCameraPurge(existing.id);",
+    "replace": "    /* the route's own folder check removed */",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "stops nothing first"
+  },
+  {
+    "label": "#719 entityPurge: a folder sweep that fails is swallowed (the child goes, its frames stay)",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "  fs.rmSync(dir, { recursive: true, force: true });\n}",
+    "replace": "  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* swallowed */ }\n}",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "a frames folder that cannot be removed"
+  },
+  {
+    "label": "#719 entityPurge: an id that names a shared folder (timelapse, .ring) is swept (the old safe-segment rule)",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "const isUuid = (s) => typeof s === 'string' && UUID.test(s);",
+    "replace": "const isUuid = (s) => typeof s === 'string' && s !== '.' && s !== '..' && /^[A-Za-z0-9._-]+$/.test(s);",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "an id that names a shared folder"
+  },
+  {
+    "label": "#719 entityPurge: a snapshot photo that cannot be deleted is swallowed and its row deleted",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "    if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR') throw e;",
+    "replace": "    /* swallowed */",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "a snapshot photo that cannot be deleted"
+  },
+  {
+    "label": "#719 entityPurge: a path that cannot be resolved (EACCES, ELOOP) is read as missing and its row deleted",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "    if (e.code === 'ENOENT' || e.code === 'ENOTDIR') return null;\n    throw e;",
+    "replace": "    return null;",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "a stored path whose folder cannot be resolved"
   },
   {
     "label": "#550 replay: a step EQUAL to the stored one is accepted again",
