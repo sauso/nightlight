@@ -17881,26 +17881,37 @@
     "namePattern": "an `empty` night with a correction becomes ok"
   },
   {
-    "label": "#355 corrected empty: unwatched window minutes are not subtracted",
+    "label": "#355 corrected empty (fix round): the window's unwatched minutes are subtracted from the span again",
     "file": "backend/src/lib/sleepReviews.js",
-    "find": "const unknown = Math.max(0, windowMin - (night.coverage_minutes ?? windowMin));",
-    "replace": "const unknown = 0;",
+    "find": "out.asleep_minutes = span;",
+    "replace": "out.asleep_minutes = Math.max(0, span - (Math.round((Date.parse(`${night.window_end.replace(' ', 'T')}Z`) - Date.parse(`${night.window_start.replace(' ', 'T')}Z`)) / 60000) - night.coverage_minutes));",
     "expect": "killed",
     "tests": [
       "corrected-empty.test.js"
     ],
-    "namePattern": "window minutes the cameras did not watch"
+    "namePattern": "camera gap is not subtracted"
   },
   {
-    "label": "#355 corrected empty: longest stretch is the raw span, not the total",
+    "label": "#355 corrected empty (fix round): a corrected no_sleep night is promoted too",
     "file": "backend/src/lib/sleepReviews.js",
-    "find": "out.longest_stretch_minutes = out.asleep_minutes;",
-    "replace": "out.longest_stretch_minutes = span;",
+    "find": "night.status === 'empty' && span > 0 && !nightNotOverYet(night)",
+    "replace": "(night.status === 'empty' || night.status === 'no_sleep') && span > 0 && !nightNotOverYet(night)",
     "expect": "killed",
     "tests": [
       "corrected-empty.test.js"
     ],
-    "namePattern": "window minutes the cameras did not watch"
+    "namePattern": "only `empty` is promoted"
+  },
+  {
+    "label": "#355 corrected empty (fix round): a stored row's open window is not read (in_progress only)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "night.status === 'empty' && span > 0 && !nightNotOverYet(night)",
+    "replace": "night.status === 'empty' && span > 0 && !night.in_progress",
+    "expect": "killed",
+    "tests": [
+      "corrected-empty.test.js"
+    ],
+    "namePattern": "STORED row whose window has not closed"
   },
   {
     "label": "#355 corrected empty: wake count is left null",
