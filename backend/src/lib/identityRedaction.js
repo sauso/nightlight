@@ -23,11 +23,46 @@
 //     words). Same trade-off as scrubSecrets' 4-character floor. The structured fields are still aliased.
 //   - A name that exists ONLY in the in-memory log buffer and is no longer in the database (a child or an
 //     account renamed since the line was logged) is unknowable here. Documented in SECURITY.md.
+//   - A name inside a NON-string log argument is in the log as JSON.stringify wrote it (`\u0001`, `\"`), a
+//     spelling not searched for. No call site logs a name that way (checked by grep, PR #709 review).
+
+import { neutraliseControlChars } from './logger.js';
 
 // A letter or digit on either side means "inside a longer word": `Eli` must not hit `elimination`, `Zed`
 // must hit `Zed's`. \p{L}\p{N} needs the `u` flag, which also makes `i` fold non-ASCII case.
-const NOT_BEFORE = '(?<![\\p{L}\\p{N}])';
 const NOT_AFTER = '(?![\\p{L}\\p{N}])';
+
+// THE LOGGER'S ESCAPES (#539, found in review of PR #709). Since #539 the logger writes every line break and
+// control character as visible text (`\n`, `\x1b`, and a backslash-u escape for U+2028), and the diagnostics
+// bundle's `server_logs` is that escaped text. Two things followed that this module did not know about, both
+// of which published a name and passed findLeak(), because the check asks the same matcher:
+//   1. a name that CONTAINS one ("Private" + newline + "Name") is in the log as `Private\nName`, a spelling
+//      that is neither the name as typed nor percent-encoded. variants() now adds it.
+//   2. a name that FOLLOWS one ("...failed:" + newline + "Zed Room", a multi-line error or a stack) has the
+//      escape's last character, a letter or digit, on its left, so the whole-word rule read it as the tail of
+//      a longer word and skipped it. Before #539 that was a real newline, which is a boundary.
+// Both are DERIVED from the logger's own exported function, never copied from its rules: the set below is
+// whatever it does to each of the 65,536 UTF-16 code units (its character class has no `u` flag, so it can
+// only ever match one code unit at a time, which makes this exhaustive). A character the logger starts
+// escaping tomorrow is redacted here with no edit. Built once, lazily (about 15 ms, measured on Windows,
+// Node 24), and only by a process that builds a bundle. The walk starts at U+0000 on purpose: NUL is one of
+// the units the logger escapes (`\x00`), and a probe from 1 left a name right after an escaped NUL unredacted
+// (round-2 review of PR #709; the exhaustive tests walk every escaped unit).
+// The cache is a speed choice only: rebuilding on every call gives the same set, so no test can tell (a
+// mutant that always rebuilds survives; that is expected, unverified by design).
+let loggerEscapes = null;
+function escapesTheLoggerWrites() {
+  if (!loggerEscapes) {
+    const out = new Set();
+    for (let unit = 0; unit <= 0xffff; unit++) {
+      const ch = String.fromCharCode(unit);
+      const written = neutraliseControlChars(ch);
+      if (written !== ch) out.add(written);
+    }
+    loggerEscapes = [...out];
+  }
+  return loggerEscapes;
+}
 
 // Not identity on their own, whoever types them: the defaults a fresh install ships with and the words an
 // operator picks for a role. Without this an account called "admin" would turn the camera's own login
@@ -52,11 +87,16 @@ function encoded(s) {
   }
 }
 
-/** Every form of a literal that can appear in a published string: as typed, and percent-encoded (an RTSP path). */
+/**
+ * Every form of a literal that can appear in a published string: as typed, percent-encoded (an RTSP path), and
+ * as the logger writes it into `server_logs` (control characters escaped, #539; see escapesTheLoggerWrites).
+ */
 function variants(literal) {
   const out = [literal];
   const e = encoded(literal);
   if (e) out.push(e);
+  const logged = neutraliseControlChars(literal);
+  if (logged !== literal) out.push(logged);
   return out;
 }
 
@@ -132,23 +172,27 @@ export function createIdentityRedactor({ children = [], cameras = [], users = []
     // A literal equal to an issued alias IS that alias: nothing to replace.
     .filter(([key]) => !issuedKeys.has(key))
     .map(([, e]) => ({ text: e.text, alias: [...e.aliases].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)).join(' / '), keep: false }));
-  const entries = [...literalEntries, ...[...issued].map((a) => ({ text: a, alias: a, keep: true }))]
-    // Longest first: "Zed Room" must win over "Zed" at the same position, because an alternation takes
-    // the first branch that matches, not the longest. At equal length an issued alias wins.
-    .sort((a, b) => b.text.length - a.text.length || Number(b.keep) - Number(a.keep) || a.text.localeCompare(b.text));
+  const entries = [...literalEntries, ...[...issued].map((a) => ({ text: a, alias: a, keep: true }))];
 
   // One alternation, one pass: a replacement is never rescanned, so a camera named like another entity's
   // alias cannot be rewritten twice.
-  const branches = []; // per capture group, in group order: { alias, keep }
-  const parts = [];
+  const alternatives = [];
   for (const e of entries) {
-    for (const v of e.keep ? [e.text] : variants(e.text)) {
-      parts.push(`(${escapeRe(v)})`);
-      branches.push(e);
-    }
+    for (const v of e.keep ? [e.text] : variants(e.text)) alternatives.push({ v, e });
   }
-  // Nothing to search for unless at least one real name exists.
-  const scrubRe = literalEntries.length ? new RegExp(`${NOT_BEFORE}(?:${parts.join('|')})${NOT_AFTER}`, 'giu') : null;
+  // Longest first: "Zed Room" must win over "Zed" at the same position, because an alternation takes the
+  // first branch that matches, not the longest. At equal length an issued alias wins. Sorted by the SPELLING
+  // that is matched, not by the name: a logged spelling is up to six times longer than the name (U+2028 is
+  // written as six characters), so ordering by the name could put a shorter, different name that is a
+  // prefix of that spelling first and publish the rest of it (#709).
+  alternatives.sort((a, b) => b.v.length - a.v.length || Number(b.e.keep) - Number(a.e.keep) || a.v.localeCompare(b.v));
+  const branches = alternatives.map((x) => x.e); // per capture group, in group order: { alias, keep }
+  const parts = alternatives.map((x) => `(${escapeRe(x.v)})`);
+  // Nothing to search for unless at least one real name exists. The left boundary: no letter or digit before
+  // the name, OR the escape the logger wrote for a control character (see escapesTheLoggerWrites). Cost, in the
+  // safe direction: the same text typed literally (a path segment like `\name`) also counts as a boundary.
+  const notBefore = () => `(?:(?<![\\p{L}\\p{N}])|(?<=${escapesTheLoggerWrites().map(escapeRe).join('|')}))`;
+  const scrubRe = literalEntries.length ? new RegExp(`${notBefore()}(?:${parts.join('|')})${NOT_AFTER}`, 'giu') : null;
 
   const matchedBranch = (args) => branches[args.slice(1, 1 + branches.length).findIndex((g) => g !== undefined)];
   const replaceIn = (s) => {

@@ -123,10 +123,15 @@ describe('GET /child/:childId', () => {
 describe('GET /:id/video and /:id/thumb', () => {
   test('a ready recording streams, and so does its thumbnail', async () => {
     const r = makeRecording();
+    // ⚠️ #564: this asserted only `status === 200` for both. A 200 is what you get from serving the WRONG file
+    // (the thumbnail route pointed at the video, or the other way round) or an empty one, so the bytes are
+    // compared: makeRecording writes different content to each, which is what lets a swap be seen.
     const video = await call(url(`/${r.id}/video`), { token });
     assert.equal(video.status, 200);
+    assert.equal(video.body, 'mp4 bytes', 'the video route did not serve the recording\'s video file');
     const thumb = await call(url(`/${r.id}/thumb`), { token });
     assert.equal(thumb.status, 200);
+    assert.equal(thumb.body, 'jpg bytes', 'the thumb route did not serve the recording\'s thumbnail');
   });
 
   test('★ a MEDIA-scoped token may arrive in the QUERY STRING, because <video> cannot send a header', async () => {
@@ -286,6 +291,7 @@ describe('DELETE /:id', () => {
     const r = makeRecording();
     const res = await call(url(`/${r.id}/video`), { token: caregiverToken });
     assert.equal(res.status, 200);
+    assert.equal(res.body, 'mp4 bytes', 'a caregiver got a 200 that was not the recording');
   });
 
   test('signed out cannot', async () => {

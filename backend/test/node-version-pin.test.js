@@ -10,6 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -45,4 +46,35 @@ test('every workflow that sets up Node uses that major', () => {
   }
   assert.ok(found.length >= 1, 'no `node-version:` found in any workflow');
   for (const [f, v] of found) assert.equal(v, major, `${f} sets up Node ${v}, .nvmrc says ${major}`);
+});
+
+// WHY A RUNNING-VERSION CHECK TOO (issue #565, the "cause unexplained" half). The five places above say what
+// the project SUPPORTS; nothing said what the suite is RUN on, so a contributor on Node 22 saw 16 files
+// fail with errors that read as unrelated bugs. Measured on Node 22.22 against 24.21 (2026-10-13): 18
+// failures in 16 files on 22 (15 whole files plus 3 sleepInsights tests), none on 24. One cause: the tests replace modules with `mock.module(name, { exports })`,
+// and 22 only understands the older `defaultExport` / `namedExports` options, so it silently builds a mock
+// with NO named exports and `import { spawn } from 'child_process'` fails to link. Probed directly below
+// rather than inferred from the version number, so the day Node 22 gains `exports` this stops failing for
+// the right reason, and a bump of .nvmrc is not what makes it green.
+test('the Node running this suite honours mock.module({ exports }), which many test files rely on', () => {
+  const probe = [
+    "import { mock } from 'node:test';",
+    "mock.module('node:child_process', { exports: { spawn: () => 'mocked' } });",
+    "const m = await import('node:child_process');",
+    "console.log(typeof m.spawn === 'function' && m.spawn() === 'mocked' ? 'honoured' : 'ignored');",
+  ].join('\n');
+  // A child, not this process: mock.module needs the flag, and an already-imported module cannot be mocked.
+  const r = spawnSync(process.execPath, ['--experimental-test-module-mocks', '--input-type=module', '-e', probe], { encoding: 'utf8' });
+  assert.equal(
+    r.stdout.trim(),
+    'honoured',
+    `Node ${process.versions.node} ignores the "exports" option of mock.module, so every test that mocks a module ` +
+      `(16 files on 22.22) fails to link with "does not provide an export named ...". The project needs Node ${major} ` +
+      `(.nvmrc): run \`nvm use\`, or in a sandbox without nvm \`. scripts/use-node.sh\`. stderr: ${r.stderr.slice(-300)}`
+  );
+});
+
+test('the running Node is at least the pinned major', () => {
+  const running = Number(process.versions.node.split('.')[0]);
+  assert.ok(running >= major, `running Node ${process.versions.node}, but .nvmrc / engines say ${major}: run \`nvm use\`, or in a sandbox without nvm \`. scripts/use-node.sh\``);
 });

@@ -692,7 +692,11 @@ router.put('/me/password', requireAuth, sessionActionLimiter, asyncHandler(async
   }
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (!user || !(await passwordHash.compare(current_password || '', user.password_hash))) {
-    return res.status(401).json({ error: 'Current password is incorrect' });
+    // 400, NOT 401 (#697). frontend/src/lib/api.js treats ANY 401 as "this sign-in is over": it clears the
+    // token and sends the person to the sign-in form. Here the sign-in is fine (requireAuth just passed) and
+    // only the typed confirmation is wrong, so a typo must show a message next to the field, not sign them out.
+    // 400 matches the other validation errors on this route; 403 is left to role gates and the demo marker.
+    return res.status(400).json({ error: 'Current password is incorrect' });
   }
   const password_hash = await passwordHash.hash(new_password, 10);
   // Compare-and-swap on the hash that was verified (#548): both bcrypt calls yield, so a second change
@@ -767,7 +771,8 @@ router.post('/me/mfa/disable', requireAuth, sessionActionLimiter, asyncHandler(a
   const { password } = req.body || {};
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (!user || !(await passwordHash.compare(String(password || ''), user.password_hash))) {
-    return res.status(401).json({ error: 'Password is incorrect' });
+    // 400 not 401, same reason as /me/password above (#697): a mistyped confirmation must not sign the person out.
+    return res.status(400).json({ error: 'Password is incorrect' });
   }
   db.prepare('UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL, mfa_last_step = NULL WHERE id = ?').run(user.id);
   res.json({ ok: true });

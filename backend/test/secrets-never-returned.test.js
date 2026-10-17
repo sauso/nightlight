@@ -363,13 +363,17 @@ describe('every API response, for every role', () => {
         test('a secret of eight characters or fewer is masked completely, through the route', async () => {
           // maskSecret shows four characters only when there are more than eight; four of eight would be half.
           const field = Object.keys(p.masked)[0];
-          const short = { ...fresh, [field]: 'Ab3$Ab3$' };
-          await api(`/api/${p.name}/config`, { method: 'PUT', token: adminToken, body: p.body(short) });
+          // Letters, digits, '-' and '_' only: a Gotify token outside its own alphabet is refused on save since the
+          // post-merge review of #702 (this used to be 'Ab3$Ab3$', and the refused save then left the long token
+          // in place). The PUT's status is asserted so a refusal can never again look like a masking failure.
+          const short = { ...fresh, [field]: 'Ab3-Ab3_' };
+          const put = await api(`/api/${p.name}/config`, { method: 'PUT', token: adminToken, body: p.body(short) });
           try {
+            assert.equal(put.status, 200, `the 8-character ${field} was not saved: ${JSON.stringify(put.body)}`);
             const res = await api(`/api/${p.name}/config`, { token: adminToken });
             assert.equal(res.status, 200);
             assert.equal(res.body[p.masked[field]], '•'.repeat(8), `an 8-character ${field} was not fully masked`);
-            assert.ok(!JSON.stringify(res.body).includes('Ab3$'), 'part of a short secret escaped');
+            assert.ok(!JSON.stringify(res.body).includes('Ab3-'), 'part of a short secret escaped');
           } finally {
             db.prepare(`UPDATE settings SET ${p.secrets[field]} = ? WHERE id = 'app'`).run(fresh[field]);
           }
