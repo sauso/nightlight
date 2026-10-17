@@ -34,9 +34,11 @@ HLS can't carry at all — WebRTC can). This drives a specific pipeline, in orde
 ## Child process environment (`backend/src/lib/childEnv.js`, #553)
 
 Camera streams are untrusted input, and ffmpeg/ffprobe parse whatever a (possibly compromised) camera
-sends. So **no child gets the backend's environment**. Every ffmpeg, ffprobe and MediaMTX process is
+sends. So **no child is handed the backend's environment**. Every ffmpeg, ffprobe and MediaMTX process is
 started through `spawnChild()`, which builds the environment from an allowlist; `JWT_SECRET`,
-`FIREBASE_CREDENTIALS`, `DATA_DIR`, `PUBLIC_HOST` and everything else the operator set never reach a child.
+`FIREBASE_CREDENTIALS`, `DATA_DIR`, `PUBLIC_HOST` and everything else the operator set are not passed to a
+child. This narrows what a child *inherits*; it does not stop a child reading the backend's own environment
+(see "What this does not do" below).
 
 | Variable | ffmpeg / ffprobe | MediaMTX | Why |
 |---|---|---|---|
@@ -44,8 +46,9 @@ started through `spawnChild()`, which builds the environment from an allowlist; 
 | `TZ` | yes | yes | segment and log times agree with the app |
 | `LANG`, `LC_ALL` | yes | yes | locale only |
 | `MTX_*` (operator's own) | **no** | yes | MediaMTX's documented override mechanism, e.g. `MTX_WEBRTCLOCALUDPADDRESS` |
-| `MTX_WEBRTCADDITIONALHOSTS`, `MTX_WEBRTCLOCALUDPADDRESS` computed at launch | no | yes | set by `mediamtxProcess.js` from `PUBLIC_HOST`/detected IPs/`WEBRTC_UDP_PORT`; wins over an inherited value |
-| `HOME`, `LIBVA_*`, `NVIDIA_*`, `HTTP(S)_PROXY`, `LD_LIBRARY_PATH` | no | no | nothing in the app documents or sets them (ffmpeg runs with software decoding; cameras are reached directly on the LAN) |
+| `MTX_WEBRTCADDITIONALHOSTS` | no | yes | computed by `mediamtxProcess.js` at every launch from `PUBLIC_HOST` and the detected host IPs; it replaces an inherited value whenever that list is non-empty |
+| `MTX_WEBRTCLOCALUDPADDRESS` | no | yes | the operator's own value when they set one: it wins, and `WEBRTC_UDP_PORT` is then ignored with a warning; otherwise `:<port>` from a valid `WEBRTC_UDP_PORT`; otherwise unset, so MediaMTX keeps `:8189` from `mediamtx.yml` |
+| `HOME`, `LIBVA_*`, `NVIDIA_*`, `HTTP(S)_PROXY`, `LD_LIBRARY_PATH`, `RTSP_*` | no | no | nothing in the app documents or sets them (ffmpeg runs with software decoding; cameras are reached directly on the LAN; `RTSP_*` is MediaMTX's legacy override prefix, which it still reads: use the `MTX_*` spelling) |
 
 A name that is unset in the backend stays unset in the child. A caller-supplied `env` option is ignored.
 
@@ -55,9 +58,17 @@ purpose). For a per-launch computed value (MediaMTX's) pass it as `extra` instea
 site:** call `spawnChild()`, never `child_process` directly; the source test in `child-env.test.js` fails
 on any other import of it under `backend/src`.
 
-**What this does not do:** the children still run as the same user as the backend, so they can read the
-database and `.jwt_secret` from disk. A separate uid was considered and not done (#553 (b)). Keep cameras
-on their own VLAN, as the README advises.
+**What this does not do:**
+
+- **It is not a sandbox.** The children still run as the same operating-system user as the backend, so a
+  child that a camera managed to take over could still read the backend's own environment through the
+  process table (`/proc` on Linux), `JWT_SECRET` included. The allowlist narrows what a child *inherits*:
+  what a bug that discloses the child's own memory or environment (in a demuxer, a crash report or log
+  output) could expose, and what a command run by a MediaMTX hook inherits from MediaMTX.
+- **It does not protect the files.** For the same reason a child can read the database and `.jwt_secret`
+  from disk. A separate user was considered and not done (#553 (b)).
+
+Keep cameras on their own VLAN, as the README advises.
 
 ## ONVIF, PTZ, and camera credentials (`backend/src/lib/onvif.js`, `rtspProbe.js`)
 

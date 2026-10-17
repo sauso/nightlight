@@ -36,6 +36,21 @@ function withParentEnv(vars, fn) {
   });
 }
 
+// On Windows, libuv copies these names from the parent into ANY custom environment it is handed (uv_spawn's
+// "required variables": without SYSTEMROOT and friends many Windows programs cannot start), so a child there
+// always reports them. They are the OS's, not ours, and the Linux image never sees them (#553 review: test 1
+// could not pass on win32). Exactly these names are dropped, and only on win32, instead of skipping the test:
+// scripts/mutate.mjs runs on win32 too, and a test that always failed there would count every #553 mutant
+// as killed.
+const WIN32_LIBUV_FORCED = new Set([
+  'HOMEDRIVE', 'HOMEPATH', 'LOGONSERVER', 'SYSTEMDRIVE', 'SYSTEMROOT', 'TEMP', 'USERDOMAIN', 'USERNAME', 'USERPROFILE', 'WINDIR',
+]);
+function withoutOsForced(seen) {
+  if (process.platform !== 'win32') return seen;
+  // Windows variable names are case-insensitive, so compare upper-cased.
+  return Object.fromEntries(Object.entries(seen).filter(([k]) => !WIN32_LIBUV_FORCED.has(k.toUpperCase())));
+}
+
 const SECRETS = {
   JWT_SECRET: 'planted-jwt-secret',
   FIREBASE_CREDENTIALS: '{"private_key":"planted"}',
@@ -50,7 +65,7 @@ const SECRETS = {
 describe('a spawned child receives exactly the allowlist (#553)', () => {
   test('its whole environment is the allowlisted names that are set, and nothing else', async () => {
     await withParentEnv({ ...SECRETS, TZ: 'Europe/Paris', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' }, async () => {
-      const seen = await runAndReadEnv({});
+      const seen = withoutOsForced(await runAndReadEnv({}));
       // Under `npm run test:core` the child is a NODE process, and node itself puts NODE_V8_COVERAGE into
       // its own environment before user code runs (found by that gate, #553). It is the runtime's, not ours.
       delete seen.NODE_V8_COVERAGE;
@@ -71,16 +86,9 @@ describe('a spawned child receives exactly the allowlist (#553)', () => {
     });
   });
 
-  test('a variable that is unset in the parent is unset in the child, not the string "undefined"', async () => {
-    const savedTz = process.env.TZ;
-    delete process.env.TZ;
-    try {
-      const seen = await runAndReadEnv({});
-      assert.equal('TZ' in seen, false);
-    } finally {
-      if (savedTz !== undefined) process.env.TZ = savedTz;
-    }
-  });
+  // "Unset in the parent stays unset in the child" is NOT tested here through a real child: spawn() itself
+  // drops an undefined env value, so such a test passes with or without childEnv()'s guard (#553 review). The
+  // guard is pinned as data instead, in "a name with no value produces no key at all" below.
 
   test('a caller-supplied options.env cannot bring a variable back in', async () => {
     await withParentEnv(SECRETS, async () => {
@@ -108,9 +116,22 @@ describe('childEnv() as data (#553)', () => {
   });
 
   test('MTX_* is matched by prefix, case-sensitively, and only when asked for', () => {
-    const parent = { PATH: '/bin', MTX_A: '1', mtx_b: '2', XMTX_C: '3', JWT_SECRET: 's' };
+    // MTXFOO and a bare MTX: the underscore is part of the prefix (MediaMTX reads MTX_<KEY>), so a name that
+    // merely starts with the three letters is not an override and must not reach MediaMTX (#553 review).
+    const parent = { PATH: '/bin', MTX_A: '1', mtx_b: '2', XMTX_C: '3', MTXFOO: '4', MTX: '5', JWT_SECRET: 's' };
     assert.deepEqual(childEnv({ parent }), { PATH: '/bin' });
     assert.deepEqual(childEnv({ parent, mediamtx: true }), { PATH: '/bin', MTX_A: '1' });
+  });
+
+  test('a name with no value produces no key at all, not an undefined one (allowlist and MTX_* alike)', () => {
+    // Only a data-level check can see this: spawn() drops undefined env values, so a real child looks the same
+    // with or without the guard. A plain object, because process.env cannot hold undefined (assigning it
+    // stores the string "undefined"); `parent` is a parameter, so the guard is the helper's contract.
+    const parent = { PATH: '/bin', TZ: undefined, LANG: undefined, MTX_UNSET: undefined, MTX_SET: '1' };
+    const env = childEnv({ parent, mediamtx: true });
+    assert.deepEqual(Object.keys(env).sort(), ['MTX_SET', 'PATH']);
+    assert.equal('TZ' in env, false);
+    assert.equal('MTX_UNSET' in env, false);
   });
 
   test('extra wins over the inherited value and is the only way to add a name', () => {
@@ -123,21 +144,53 @@ describe('every process the backend starts goes through the helper (#553, source
   const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true })
     .flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : e.name.endsWith('.js') ? [path.join(dir, e.name)] : []));
   // Strip comments so prose that mentions spawn() is not a hit, and a commented-out call is not a pass.
-  const code = (f) => fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, '');
+  const strip = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, '');
+  const code = (f) => strip(fs.readFileSync(f, 'utf8'));
   const rel = (f) => path.relative(SRC, f).replaceAll('\\', '/');
+  // The module specifier as a string in ANY quote style, so one pattern covers a static import, import() with
+  // a template literal (the case the first version missed, #553 review), require() and createRequire()(),
+  // and with them every alias (`import { spawn as run }`, `const cp = ...; cp.spawn()`): an alias cannot be
+  // reached without naming the module. NOT caught: a specifier built at run time ('child_' + 'process') and
+  // process.binding(); nothing in src does either, and a reviewer has to catch one that tries.
+  const IMPORTS_CHILD_PROCESS = /[`'"](?:node:)?child_process[`'"]/;
+  // db.exec( is node:sqlite; .exec( on a regex is a method call and is excluded by the lookbehind.
+  const CALLS_SPAWN = /(?<![\w.$])(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\(/;
+
+  test('the detectors fire on every import shape and on a direct call, and not on prose (fixtures)', () => {
+    // A detector that has only ever seen a clean tree has not been shown to detect anything.
+    const imports = [
+      "import { spawn } from 'child_process';",
+      'import { spawn as run } from "node:child_process";\nrun("ffmpeg", []);',
+      'const { execFile } = await import(`node:child_process`);',
+      'const cp = await import(`child_process`);\ncp.spawn("ffmpeg", []);',
+      "const cp = require('child_process');",
+      'const cp = createRequire(import.meta.url)(`node:child_process`);',
+    ];
+    for (const src of imports) assert.ok(IMPORTS_CHILD_PROCESS.test(strip(src)), `not flagged as an import: ${src}`);
+    const notImports = [
+      '// this used to import child_process directly',
+      '/* `node:child_process` is imported by childEnv.js only */',
+      "const label = 'child_process_count';",
+      "import { spawnChild } from './childEnv.js';",
+    ];
+    for (const src of notImports) assert.equal(IMPORTS_CHILD_PROCESS.test(strip(src)), false, `flagged as an import: ${src}`);
+    for (const src of ['spawn("ffmpeg", [])', 'x = execFileSync("ffprobe")', 'fork("./worker.js")']) {
+      assert.ok(CALLS_SPAWN.test(strip(src)), `not flagged as a call: ${src}`);
+    }
+    for (const src of ['db.exec("VACUUM")', 're.exec(line)', 'spawnChild("ffmpeg", [])', '// spawn("ffmpeg")']) {
+      assert.equal(CALLS_SPAWN.test(strip(src)), false, `flagged as a call: ${src}`);
+    }
+  });
 
   test('only childEnv.js imports child_process', () => {
-    const offenders = walk(SRC).filter((f) => rel(f) !== 'lib/childEnv.js' && /['"](node:)?child_process['"]/.test(code(f)));
+    const offenders = walk(SRC).filter((f) => rel(f) !== 'lib/childEnv.js' && IMPORTS_CHILD_PROCESS.test(code(f)));
     assert.deepEqual(offenders.map(rel), []);
+    // ...and the walk really reaches the helper, so an empty offender list is not an empty walk.
+    assert.ok(walk(SRC).some((f) => rel(f) === 'lib/childEnv.js' && IMPORTS_CHILD_PROCESS.test(code(f))));
   });
 
   test('no file calls spawn/exec/execFile/fork (sync or not) directly', () => {
-    const re = /(?<![\w.$])(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\(/;
-    const offenders = walk(SRC).filter((f) => {
-      const src = code(f);
-      // db.exec( is node:sqlite; .exec( on a regex is a method call and is excluded by the lookbehind.
-      return rel(f) !== 'lib/childEnv.js' && re.test(src);
-    });
+    const offenders = walk(SRC).filter((f) => rel(f) !== 'lib/childEnv.js' && CALLS_SPAWN.test(code(f)));
     assert.deepEqual(offenders.map(rel), []);
   });
 
