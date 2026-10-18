@@ -141,6 +141,9 @@ describe('the screen as a whole', () => {
     const grid = container.querySelector('.live-monitor');
     expect(grid.getAttribute('aria-hidden')).toBe('true');
     expect(grid.className).toContain('live-monitor--hidden');
+    // aria-hidden alone leaves its buttons in the Tab order (#376); inert takes them out of that and of the
+    // accessibility tree while the streams stay mounted.
+    expect(grid.hasAttribute('inert')).toBe(true);
   });
 
   test('on its own route it is active and exposed', () => {
@@ -148,6 +151,7 @@ describe('the screen as a whole', () => {
     const grid = container.querySelector('.live-monitor');
     expect(grid.getAttribute('aria-hidden')).toBe('false');
     expect(grid.className).toContain('live-monitor--active');
+    expect(grid.hasAttribute('inert')).toBe(false);
   });
 });
 
