@@ -21578,8 +21578,8 @@
   {
     "label": "#765 mfa setup rotates the secret even when one is pending",
     "file": "backend/src/routes/auth.js",
-    "find": "const resumed = !!user.mfa_secret && !restart;",
-    "replace": "const resumed = false;",
+    "find": "return { user, resume: !!resumablePendingSecret(user) && !restart };",
+    "replace": "return { user, resume: false };",
     "expect": "killed",
     "tests": ["mfa-setup-resume.test.js"],
     "namePattern": "a second call returns the SAME secret"
@@ -21587,10 +21587,46 @@
   {
     "label": "#765 mfa setup restart flag does not rotate",
     "file": "backend/src/routes/auth.js",
-    "find": "const resumed = !!user.mfa_secret && !restart;",
-    "replace": "const resumed = !!user.mfa_secret;",
+    "find": "return { user, resume: !!resumablePendingSecret(user) && !restart };",
+    "replace": "return { user, resume: !!resumablePendingSecret(user) };",
     "expect": "killed",
     "tests": ["mfa-setup-resume.test.js"],
     "namePattern": "restart: true returns a DIFFERENT secret"
+  },
+  {
+    "label": "#765 mfa setup resume hands the pending secret back without the password",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (!(await passwordHash.compare(String(req.body?.password || ''), user.password_hash))) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["mfa-setup-resume.test.js"],
+    "namePattern": "no password, or a wrong one"
+  },
+  {
+    "label": "#765 a password change keeps a pending two-factor set-up",
+    "file": "backend/src/routes/auth.js",
+    "find": "discardPendingSetup.run(req.user.id);",
+    "replace": "/* #765 mutant: pending set-up kept */",
+    "expect": "killed",
+    "tests": ["mfa-setup-resume.test.js"],
+    "namePattern": "changing your own password clears it"
+  },
+  {
+    "label": "#765 a pending legacy (80-bit) secret is resumed",
+    "file": "backend/src/routes/auth.js",
+    "find": "u.mfa_secret && !isLegacySecret(u.mfa_secret) ? u.mfa_secret : null",
+    "replace": "u.mfa_secret ? u.mfa_secret : null",
+    "expect": "killed",
+    "tests": ["mfa-setup-resume.test.js"],
+    "namePattern": "a fresh 160-bit secret"
+  },
+  {
+    "label": "#765 mfa setup hands out a secret that two-factor was switched on for meanwhile",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (!now || now.mfa_enabled) return",
+    "replace": "if (false) return",
+    "expect": "killed",
+    "tests": ["mfa-setup-resume.test.js"],
+    "namePattern": "two-factor switched on meanwhile"
   }
 ]

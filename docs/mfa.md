@@ -34,13 +34,34 @@ On a phone the authenticator is on the same device as the page, so you switch ap
 
 | Button | What it does |
 |---|---|
-| **Continue set-up** | Shows the **same** QR code and key again. The entry already in your authenticator keeps working; just enter its code. |
-| **Start over** | Makes a **new** key. The entry you already added stops matching, so delete it from your authenticator and add the new one. |
+| **Continue set-up** | Asks for your **account password**, then shows the **same** QR code and key again. The entry already in your authenticator keeps working; just enter its code. |
+| **Start over** | Makes a **new** key, with no password. The entry you already added stops matching, so delete it from your authenticator and add the new one. |
 
-A pending set-up has no expiry: it stays until you finish it, start over, turn two-factor off, or an admin
-(or the console reset script, `--all` included) resets two-factor, which also discards it. Asking to set up
-again never replaces the pending key unless you choose **Start over**. Pending is not on: sign-in still
-asks only for the password until a code is confirmed.
+**Why Continue asks for your password.** Showing the pending key again would otherwise let *any* device
+signed in to your account (a borrowed, unlocked phone, a browser you forgot to sign out of) read it, and
+once you finish the set-up as normal, that device could make valid codes for your second factor. Turning
+two-factor off asks for the password for the same reason. Starting a set-up and **Start over** do not: they
+make a new key, so nothing you have already added is revealed. A wrong password is shown in the dialog
+(HTTP 400, `Password is incorrect`); it does **not** sign you out, and the key is not in the answer.
+Wrong passwords here count against the same limit as changing your password and turning two-factor off:
+**20 attempts per 15 minutes per source address and account** (and the per-source 100), shared by all
+three. Starting a set-up and Start over are never counted.
+
+A pending set-up has no expiry: it stays until you finish it, start over, turn two-factor off, **change your
+password** (or an admin sets a new one for you), or an admin (or the console reset script, `--all`
+included) resets two-factor; each of these discards it. A password change discards it because it is what
+you do when a signed-in device is lost, and that device may have seen the key; start the set-up again
+afterwards. A password change never touches two-factor that is already **on**. Asking to set up again never
+replaces the pending key unless you choose **Start over**. Pending is not on: sign-in still asks only for the
+password until a code is confirmed.
+
+Two less common cases:
+
+- A set-up left pending by a version **before 0.26.0** holds an older, weaker (80-bit) key. It is not
+  offered for continuing: the card shows **Set up two-factor**, which makes a new 160-bit key.
+- If the set-up changes on another device while you are continuing it (two-factor switched on, a start
+  over, a reset), you get "Two-factor is already on…" or "The set-up was changed meanwhile, on this or
+  another device. Try again." instead of a key that would no longer work.
 
 At the next login you'll enter your password, then the 6-digit code. A backup code can be entered in
 the same field instead of an app code.

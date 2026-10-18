@@ -388,23 +388,49 @@ describe('two-factor authentication', () => {
     expect(isReloadHeld()).toBe(false);
   });
 
-  test('★ a pending set-up offers Continue (same key, no restart flag) and Start over (restart: true) (#765)', async () => {
+  test('★ a pending set-up offers Continue (password first, then the same key) and Start over (one tap, restart: true) (#765)', async () => {
     const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0, setup_pending: true });
     postSpy.mockResolvedValue({ ...SETUP, resumed: true });
     const cont = await enabledButton('Continue set-up');
     expect(screen.queryByRole('button', { name: 'Set up two-factor' })).toBeNull();
 
+    // Review of #765: the server hands a pending key back only with the account password, so Continue asks
+    // for it BEFORE calling set-up (FAILS on the passwordless Continue: it posted {} on the first tap).
     await user.click(cont);
+    const dialog = await screen.findByRole('dialog');
+    const pw = within(dialog).getByLabelText('Password');
+    expect(pw.type).toBe('password');
+    expect(pw.required).toBe(true);
+    expect(postSpy).not.toHaveBeenCalled();
+    await user.type(pw, 'hunter22');
+    await user.click(within(dialog).getByRole('button', { name: 'Continue set-up' }));
     await screen.findByLabelText(/Enter the 6-digit code/);
-    expect(postSpy).toHaveBeenCalledWith('/auth/me/mfa/setup', {});
+    expect(postSpy).toHaveBeenCalledWith('/auth/me/mfa/setup', { password: 'hunter22' });
     expect(screen.getByText(SETUP.secret)).toBeTruthy();
+    expect(screen.queryByLabelText('Password'), 'the password dialog stayed open over the set-up').toBeNull();
     await user.click(screen.getByRole('button', { name: 'Close' }));
     await waitFor(() => expect(screen.queryByLabelText(/Enter the 6-digit code/)).toBeNull());
 
-    // Closing the panel leaves the set-up pending, so the way back is still offered.
+    // Closing the panel leaves the set-up pending, so the way back is still offered. Start over is one tap: it
+    // replaces the key rather than revealing it, so it asks for nothing.
+    postSpy.mockClear();
     await user.click(await enabledButton('Start over'));
     await screen.findByLabelText(/Enter the 6-digit code/);
+    expect(postSpy).toHaveBeenCalledTimes(1);
     expect(postSpy).toHaveBeenLastCalledWith('/auth/me/mfa/setup', { restart: true });
+  });
+
+  test('a wrong password on Continue shows the message in the password dialog and keeps it open (#765)', async () => {
+    const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0, setup_pending: true });
+    postSpy.mockRejectedValue(new Error('Password is incorrect'));
+    await user.click(await enabledButton('Continue set-up'));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Password'), 'wrong');
+    await user.click(within(dialog).getByRole('button', { name: 'Continue set-up' }));
+
+    expect(await within(dialog).findByText('Password is incorrect')).toBeTruthy();
+    expect(within(dialog).getByLabelText('Password'), 'the dialog closed on a wrong password').toBeTruthy();
+    expect(screen.queryByLabelText(/Enter the 6-digit code/), 'the set-up opened without a key').toBeNull();
   });
 
   describe('opening the key in an authenticator app (#765)', () => {
