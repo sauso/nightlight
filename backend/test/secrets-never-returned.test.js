@@ -434,7 +434,7 @@ describe('every API response, for every role', () => {
       const state = await api('/api/auth/me/mfa', { token: second.body.token });
       assert.equal(state.status, 200);
       assert.equal(leakIn(state.body), null, `GET /me/mfa: ${leakIn(state.body)}`);
-      assert.deepEqual(state.body, { enabled: true, backup_codes_remaining: 9, needs_reenrolment: false });
+      assert.deepEqual(state.body, { enabled: true, backup_codes_remaining: 9, needs_reenrolment: false, setup_pending: false });
     });
 
     test('GET /me/mfa says OFF for an account without MFA (the flag is read, not assumed)', async () => {
@@ -459,7 +459,7 @@ describe('every API response, for every role', () => {
       assert.deepEqual(Object.keys(enable.body), ['backup_codes']);
       assert.equal(enable.body.backup_codes.length, 10);
       const state = await api('/api/auth/me/mfa', { token });
-      assert.deepEqual(state.body, { enabled: true, backup_codes_remaining: 10, needs_reenrolment: false });
+      assert.deepEqual(state.body, { enabled: true, backup_codes_remaining: 10, needs_reenrolment: false, setup_pending: false });
     });
 
     test('GET /users: every account in the public shape, with mfa_enabled matching the database', async () => {

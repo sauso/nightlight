@@ -21574,5 +21574,23 @@
     "expect": "killed",
     "tests": ["use-node-script.test.js"],
     "namePattern": "fails, says what to do, and leaves PATH exactly as it was"
+  },
+  {
+    "label": "#765 mfa setup rotates the secret even when one is pending",
+    "file": "backend/src/routes/auth.js",
+    "find": "const resumed = !!user.mfa_secret && !restart;",
+    "replace": "const resumed = false;",
+    "expect": "killed",
+    "tests": ["mfa-setup-resume.test.js"],
+    "namePattern": "a second call returns the SAME secret"
+  },
+  {
+    "label": "#765 mfa setup restart flag does not rotate",
+    "file": "backend/src/routes/auth.js",
+    "find": "const resumed = !!user.mfa_secret && !restart;",
+    "replace": "const resumed = !!user.mfa_secret;",
+    "expect": "killed",
+    "tests": ["mfa-setup-resume.test.js"],
+    "namePattern": "restart: true returns a DIFFERENT secret"
   }
 ]

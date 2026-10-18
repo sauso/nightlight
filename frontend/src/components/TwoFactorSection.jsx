@@ -2,6 +2,12 @@ import { useEffect, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { api } from '../lib/api.js';
 import Modal from './Modal.jsx';
+import { holdReload } from '../lib/reloadGuard.js';
+import { isNativeApp } from '../lib/nativeBridge.js';
+
+// A touch device, where the authenticator is likely on the same phone and a QR code cannot be scanned from
+// the screen it is on. Guarded because jsdom (and old browsers) have no matchMedia.
+const isTouchDevice = () => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
 
 // Account → Two-factor authentication. Self-service TOTP: set up (QR + manual key → confirm a code →
 // one-time backup codes), and turn off (password-confirmed). Works everywhere (no secure-context
@@ -28,11 +34,19 @@ export default function TwoFactorSection() {
   }
   useEffect(() => { loadStatus(); }, []);
 
-  async function startSetup() {
+  // While the set-up panel is open the page must not reload itself after a spell in the background (#765):
+  // on a phone the person leaves for the authenticator app and comes back, and a reload would lose the
+  // secret, the QR and the typed code. The cleanup releases it on confirm, cancel or leaving the page.
+  const setupOpen = !!setup;
+  useEffect(() => (setupOpen ? holdReload() : undefined), [setupOpen]);
+
+  // `restart` true replaces any pending key; without it the server hands back the pending one (#765).
+  async function startSetup(restart = false) {
     setError(''); setBusy(true);
     try {
-      setSetup(await api.post('/auth/me/mfa/setup', {}));
+      setSetup(await api.post('/auth/me/mfa/setup', restart ? { restart: true } : {}));
       setCode('');
+      setStatus((st) => (st ? { ...st, setup_pending: true } : st));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -108,8 +122,21 @@ export default function TwoFactorSection() {
             <button className="btn btn-danger" onClick={() => { setPassword(''); setError(''); setDisabling(true); }}>
               Turn off two-factor
             </button>
+          ) : status?.setup_pending ? (
+            <>
+              <button className="btn btn-primary" onClick={() => startSetup(false)} disabled={busy}>
+                {busy ? 'Please wait…' : 'Continue set-up'}
+              </button>
+              <button className="btn btn-secondary" onClick={() => startSetup(true)} disabled={busy} style={{ marginTop: 8 }}>
+                Start over
+              </button>
+              <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                Start over makes a new key and replaces the one you may already have added to your authenticator
+                app, so delete that entry and add the new one.
+              </div>
+            </>
           ) : (
-            <button className="btn btn-primary" onClick={startSetup} disabled={busy || !status}>
+            <button className="btn btn-primary" onClick={() => startSetup(false)} disabled={busy || !status}>
               {busy ? 'Please wait…' : 'Set up two-factor'}
             </button>
           )}
@@ -125,6 +152,13 @@ export default function TwoFactorSection() {
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
             <img src={setup.qr} alt="Two-factor setup QR code" width={200} height={200} style={{ borderRadius: 8, background: '#fff' }} />
           </div>
+          {isTouchDevice() && !isNativeApp() && (
+            // Not in the native app: a WebView navigating to an unknown scheme can replace the app with an
+            // error page. On a phone the QR cannot be scanned from its own screen; this hands the key over.
+            <div style={{ textAlign: 'center', marginBottom: 12 }}>
+              <a href={setup.otpauth_uri}>Open in your authenticator app</a>
+            </div>
+          )}
           <div className="field">
             <label>Manual key</label>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, wordBreak: 'break-all', background: 'var(--bg-elevated-2)', padding: '8px 10px', borderRadius: 8 }}>

@@ -22,6 +22,8 @@ import { renderAs, ADMIN, enabledButton } from './helpers/render.jsx';
 import Account from '../src/pages/Account.jsx';
 import TwoFactorSection from '../src/components/TwoFactorSection.jsx';
 import { api } from '../src/lib/api.js';
+import { isReloadHeld } from '../src/lib/reloadGuard.js';
+import * as nativeBridge from '../src/lib/nativeBridge.js';
 
 const USER = { ...ADMIN, first_name: 'Nacho', last_name: 'Leone', photo: null };
 
@@ -371,6 +373,70 @@ describe('two-factor authentication', () => {
 
     expect(await screen.findByText('That code is not valid')).toBeTruthy();
     expect(screen.getByLabelText(/Enter the 6-digit code/), 'still enrolling').toBeTruthy();
+  });
+
+  test('★ the page may not reload itself while the set-up panel is open, and may again once it is closed (#765)', async () => {
+    const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0 });
+    postSpy.mockResolvedValue(SETUP);
+    expect(isReloadHeld()).toBe(false);
+    await user.click(await enabledButton('Set up two-factor'));
+    await screen.findByLabelText(/Enter the 6-digit code/);
+    expect(isReloadHeld()).toBe(true);
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByLabelText(/Enter the 6-digit code/)).toBeNull());
+    expect(isReloadHeld()).toBe(false);
+  });
+
+  test('★ a pending set-up offers Continue (same key, no restart flag) and Start over (restart: true) (#765)', async () => {
+    const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0, setup_pending: true });
+    postSpy.mockResolvedValue({ ...SETUP, resumed: true });
+    const cont = await enabledButton('Continue set-up');
+    expect(screen.queryByRole('button', { name: 'Set up two-factor' })).toBeNull();
+
+    await user.click(cont);
+    await screen.findByLabelText(/Enter the 6-digit code/);
+    expect(postSpy).toHaveBeenCalledWith('/auth/me/mfa/setup', {});
+    expect(screen.getByText(SETUP.secret)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByLabelText(/Enter the 6-digit code/)).toBeNull());
+
+    // Closing the panel leaves the set-up pending, so the way back is still offered.
+    await user.click(await enabledButton('Start over'));
+    await screen.findByLabelText(/Enter the 6-digit code/);
+    expect(postSpy).toHaveBeenLastCalledWith('/auth/me/mfa/setup', { restart: true });
+  });
+
+  describe('opening the key in an authenticator app (#765)', () => {
+    const coarse = (matches) => { window.matchMedia = vi.fn().mockReturnValue({ matches }); };
+    const open = async () => {
+      const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0 });
+      postSpy.mockResolvedValue(SETUP);
+      await user.click(await enabledButton('Set up two-factor'));
+      await screen.findByLabelText(/Enter the 6-digit code/);
+    };
+    afterEach(() => { delete window.matchMedia; });
+
+    test('shown on a touch device in the browser, linking to the otpauth uri', async () => {
+      coarse(true);
+      vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
+      await open();
+      expect(screen.getByRole('link', { name: /authenticator app/i }).getAttribute('href')).toBe(SETUP.otpauth_uri);
+    });
+
+    test('not shown inside the native app, nor on a mouse device', async () => {
+      coarse(true);
+      vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(true);
+      await open();
+      expect(screen.queryByRole('link', { name: /authenticator app/i })).toBeNull();
+    });
+
+    test('not shown without a coarse pointer', async () => {
+      coarse(false);
+      vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
+      await open();
+      expect(screen.queryByRole('link', { name: /authenticator app/i })).toBeNull();
+    });
   });
 
   test('★ turning it off requires the password, and sends it', async () => {

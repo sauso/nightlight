@@ -442,7 +442,8 @@ describe('#548 bcrypt on a request path does not block the event loop', () => {
     let setup;
     const res = await whileHandlerAwaitsBcrypt(
       () => post('/me/mfa/enable', { code: codeAtOffset(secretA) }, { token }),
-      async () => { setup = await post('/me/mfa/setup', {}, { token }); },
+      // restart: true, the explicit start-over (#765): a plain set-up now resumes the pending secret instead.
+      async () => { setup = await post('/me/mfa/setup', { restart: true }, { token }); },
     );
     assert.equal(setup.status, 200, 'precondition: the second set-up ran');
     assert.equal(res.status, 400);

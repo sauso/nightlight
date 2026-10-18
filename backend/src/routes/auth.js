@@ -786,18 +786,38 @@ router.get('/me/mfa', requireAuth, (req, res) => {
     // True for an account still on a pre-0.26.0 (80-bit) secret. It keeps working — this is a
     // prompt to re-enrol into a stronger one when convenient, not a lockout. See lib/mfa.js.
     needs_reenrolment: !!u?.mfa_enabled && isLegacySecret(u?.mfa_secret),
+    // A set-up was begun and not finished (#765), so "Continue set-up" can offer the same QR again after a
+    // reload. A boolean ONLY: the secret itself is never in this response.
+    setup_pending: !u?.mfa_enabled && !!u?.mfa_secret,
   });
 });
 
 // Begin enrolment: generate + stash a secret (still disabled) and return the QR + manual key. The
 // secret only becomes active once a code is confirmed at /me/mfa/enable.
+//
+// IDEMPOTENT while an enrolment is pending (#765). On a phone the person leaves for the authenticator app
+// and the page reloads on return (or the browser discards the tab), losing the secret from the page; asking
+// for set-up again used to mint a NEW secret and overwrite the pending one, so the entry they had just added
+// to their authenticator held a secret the server had already replaced and its codes never confirmed. Now a
+// pending secret (two-factor off, secret stored) is handed back unchanged, with `resumed: true`, and
+// mfa_last_step is left alone. It is rotated only when none is pending or the body says `restart: true`
+// (the explicit "Start over"). The owner already received this secret from the first call, so nothing new is
+// exposed; the enable route's secret-bound compare-and-set is untouched, so an enable that began before a
+// start-over still fails.
 router.post('/me/mfa/setup', requireAuth, asyncHandler(async (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (user.mfa_enabled) return res.status(400).json({ error: 'Two-factor is already on. Turn it off first to re-enrol.' });
-  const secret = generateSecret();
-  db.prepare('UPDATE users SET mfa_secret = ?, mfa_last_step = NULL WHERE id = ?').run(secret, user.id);
+  // Strictly boolean true: a string "false" or 1 from a sloppy client must not rotate (or fail to) by accident.
+  const restart = req.body?.restart === true;
+  const resumed = !!user.mfa_secret && !restart;
+  let secret = user.mfa_secret;
+  if (!resumed) {
+    secret = generateSecret();
+    db.prepare('UPDATE users SET mfa_secret = ?, mfa_last_step = NULL WHERE id = ?').run(secret, user.id);
+  }
   const uri = keyUri(user.username, secret, appName());
-  res.json({ secret, otpauth_uri: uri, qr: await qrDataUrl(uri) });
+  const qr = await qrDataUrl(uri);
+  res.json(resumed ? { secret, otpauth_uri: uri, qr, resumed: true } : { secret, otpauth_uri: uri, qr });
 }));
 
 // Per-user single flight for /me/mfa/enable (review of #720, verified by running). generateBackupCodes() is

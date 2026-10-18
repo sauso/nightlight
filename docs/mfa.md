@@ -20,6 +20,28 @@ a domain, are a separate planned feature.)
    button: tapping outside it or pressing Escape does nothing, and it has no ✕ (unlike Nightlight's other
    dialogs, so a stray tap can't throw the codes away). Use **Copy codes** to put them on the clipboard before you close it.
 
+### Setting up on a phone
+
+On a phone the authenticator is on the same device as the page, so you switch apps in the middle of set-up.
+
+- **The page stays on the setup screen while you switch apps.** Normally Nightlight reloads itself when you
+  come back after more than 15 seconds away; while the set-up dialog is open it does not, so the key and the
+  code you were typing are still there. (Closing the dialog, confirming, or leaving the page lifts this.)
+- On a touch screen in the browser, **Open in your authenticator app** under the QR code hands the key to the
+  authenticator directly. It is not shown inside the Android/iOS app.
+- If the page is reloaded anyway (the browser discarded the tab, or you reloaded it), set-up is still
+  **pending** on the server and the card shows two buttons:
+
+| Button | What it does |
+|---|---|
+| **Continue set-up** | Shows the **same** QR code and key again. The entry already in your authenticator keeps working; just enter its code. |
+| **Start over** | Makes a **new** key. The entry you already added stops matching, so delete it from your authenticator and add the new one. |
+
+A pending set-up has no expiry: it stays until you finish it, start over, turn two-factor off, or an admin
+(or the console reset script, `--all` included) resets two-factor, which also discards it. Asking to set up
+again never replaces the pending key unless you choose **Start over**. Pending is not on: sign-in still
+asks only for the password until a code is confirmed.
+
 At the next login you'll enter your password, then the 6-digit code. A backup code can be entered in
 the same field instead of an app code.
 

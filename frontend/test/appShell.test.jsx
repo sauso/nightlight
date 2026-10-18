@@ -26,6 +26,7 @@ const app = () => <HashRouter><App /></HashRouter>;
 import { api, setToken, getToken, getMediaToken, clearMediaToken } from '../src/lib/api.js';
 import { RETRY_BASE_MS } from '../src/lib/useAutoRetry.js';
 import * as nativeBridge from '../src/lib/nativeBridge.js';
+import { holdReload } from '../src/lib/reloadGuard.js';
 import * as push from '../src/lib/pushNotifications.js';
 
 const ADMIN = { id: 'u1', username: 'nacho', role: 'admin', first_name: 'Nacho' };
@@ -659,5 +660,22 @@ describe('reloading after a spell in the background', () => {
     nativeBridge.hasActiveBackgroundAudio.mockReturnValue(false);
     showAgain();
     expect(reload).toHaveBeenCalled();
+  });
+
+  test('★ a HELD reload (#765) does not reload on return; once released, the next long absence does', async () => {
+    // The two-factor set-up panel holds the reload: its secret and typed code live only in React state, and a
+    // phone returning from the authenticator app was reloading the page and losing them.
+    await bootShell();
+    const release = holdReload();
+    hide();
+    await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+    showAgain();
+    expect(reload).not.toHaveBeenCalled();
+
+    release();
+    hide();
+    await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+    showAgain();
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 });
