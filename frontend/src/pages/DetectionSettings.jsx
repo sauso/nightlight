@@ -121,7 +121,10 @@ export default function DetectionSettings() {
   // camera that does not exist. Both used to render this screen blank or on "Loading…" forever. An unknown
   // kind needs no data, so it is decided at once; a missing camera only once the list has actually loaded
   // (before that, or after a failed load, it may well exist: see ChildDetail for why count is 0).
-  if (!Object.hasOwn(TITLES, kind)) return <NotFound />;
+  // hasOwnProperty.call, not Object.hasOwn: the latter is Safari 15.4+ / Chrome 93+ and nothing else in the app's
+  // source uses it, so an older WebView would throw on every render of this route (review of #379). Own
+  // properties only, so `constructor` and `__proto__` are unknown kinds, not titles.
+  if (!Object.prototype.hasOwnProperty.call(TITLES, kind)) return <NotFound />;
   const missing = !cam ? loadState({ loaded: camerasLoaded, error: camerasError, count: 0 }) : null;
   if (missing === 'empty') return <NotFound />;
   if (missing === 'error') {
