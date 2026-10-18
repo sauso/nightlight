@@ -191,8 +191,8 @@ function Shell() {
                     <Route path="/about" element={<About />} />
                     {/* Catch-all, LAST (#379). react-router ranks by specificity, not order, so every
                         route above still wins; this only receives an address nothing else matched.
-                        Known gap, not fixed here (the #375 bundle): /cameras/<id>/<unknown kind>
-                        matches /cameras/:id/:kind above and renders DetectionSettings, not this. */}
+                        /cameras/<id>/<unknown kind> matches /cameras/:id/:kind above, so DetectionSettings
+                        itself renders NotFound for a kind it does not know and for a camera that is not there. */}
                     <Route path="*" element={<NotFound />} />
                   </Routes>
                   <NavBar />

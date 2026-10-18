@@ -258,7 +258,7 @@ describe('reading a camera into the form', () => {
     // nothing and could write those blanks over a configured camera on the first touch.
     renderAsAdmin(
       <Routes><Route path="/cameras/:id/:kind" element={<DetectionSettings />} /></Routes>,
-      { cameras: [], route: '/cameras/cam-1/motion' }
+      { cameras: [], camerasLoaded: false, route: '/cameras/cam-1/motion' }
     );
     expect(screen.getByText('Loading…')).toBeTruthy();
     expect(screen.queryByLabelText(/Sensitivity/)).toBeNull();
