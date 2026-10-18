@@ -70,7 +70,7 @@ function mount({ cam = CAM, isNew = false, from = null } = {}) {
         <Route path="*" element={<div>elsewhere</div>} />
       </Routes>
     </>,
-    { cameras: cam ? [cam] : [], kids: KIDS, route: from ? { pathname, state: { from } } : pathname }
+    { cameras: cam ? [cam] : [], camerasLoaded: !!cam, kids: KIDS, route: from ? { pathname, state: { from } } : pathname }
   );
 }
 
