@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- **The MQTT connection can now use TLS (`mqtts://`) (#537).** Until now Nightlight always connected to the broker in plain text, so the username, password and every reading crossed your network readable. **Settings → MQTT** has a new **Use TLS** switch, an optional **CA certificate** box (PEM text, for a broker with your own or a self-signed certificate) and **Verify the broker's certificate**, which is on by default. TLS is off by default, so an upgrade keeps connecting exactly as before. A certificate that is not trusted, has expired, or does not match the host is no longer a silent red badge: the page says why under the form (new `error` and `tls` fields on `GET /api/settings/mqtt/status`, which only add to what it returned). Text that is not a certificate, and above all a private key, is refused with a message next to the box; the certificate text is never logged, and the password is handled as before. Not changed: who may publish to a topic is still the broker's access rules. Verified against local test servers, not against a real broker such as Mosquitto.
+
 ### Changed
 
 - **Routine dependency updates, no behaviour change intended.** Backend: `express-rate-limit` 8.7.0 → 8.7.1, `uuid` 14.0.2 → 14.0.3. Web app: `react-router-dom` 7.18.3 → 7.18.4, `lucide-react` 1.47.0 → 1.56.0. Test and CI tooling (not part of the image): `vitest` 5.0.2 → 5.0.4, `jsdom` 30.1.1 → 30.1.2, `@playwright/test` 1.63.0 → 1.64.0, and the mutation workflow's `actions/upload-artifact` v4 → v7 and `actions/download-artifact` v4 → v8. `express` 5 and `react-dom` 19 are deliberately not part of this.

@@ -4,9 +4,18 @@ import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 
 export default function SettingsMqtt() {
-  const [form, setForm] = useState({ mqtt_enabled: false, mqtt_host: '', mqtt_port: '', mqtt_username: '', mqtt_password: '' });
+  const [form, setForm] = useState({
+    mqtt_enabled: false, mqtt_host: '', mqtt_port: '', mqtt_username: '', mqtt_password: '',
+    // TLS (#537). Off by default, as for every install that existed before it; verification on.
+    mqtt_tls: false, mqtt_tls_ca: '', mqtt_tls_verify: true,
+  });
   const [passwordSet, setPasswordSet] = useState(false);
   const [error, setError] = useState('');
+  // A refusal that belongs to one control (the CA text) is shown beside it, not in the banner above the form.
+  const [caError, setCaError] = useState('');
+  // The live connection, so a certificate that is not trusted is explained here and not only in the server log.
+  const [status, setStatus] = useState(null);
+  const loadStatus = () => api.get('/settings/mqtt/status').then((r) => setStatus(r || null)).catch(() => setStatus(null));
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -23,16 +32,22 @@ export default function SettingsMqtt() {
         mqtt_host: cfg.mqtt_host,
         mqtt_port: cfg.mqtt_port,
         mqtt_username: cfg.mqtt_username,
+        // `!== false` / `!= null`: a server older than TLS support sends none of these, and that means "as before".
+        mqtt_tls: !!cfg.mqtt_tls,
+        mqtt_tls_ca: cfg.mqtt_tls_ca || '',
+        mqtt_tls_verify: cfg.mqtt_tls_verify !== false,
       };
       setForm((f) => ({ ...f, ...next }));
       setPasswordSet(cfg.mqtt_password_set);
     }).catch(() => {});
+    loadStatus();
   }, []);
 
   async function save(e) {
     e.preventDefault();
     setBusy(true);
     setError('');
+    setCaError('');
     setSaved(false);
     try {
       const payload = {
@@ -40,6 +55,9 @@ export default function SettingsMqtt() {
         mqtt_host: form.mqtt_host,
         mqtt_port: form.mqtt_port,
         mqtt_username: form.mqtt_username,
+        mqtt_tls: !!form.mqtt_tls,
+        mqtt_tls_ca: form.mqtt_tls_ca,
+        mqtt_tls_verify: !!form.mqtt_tls_verify,
       };
       // Only send a new password if one was actually typed — blank means "keep current".
       if (form.mqtt_password) payload.mqtt_password = form.mqtt_password;
@@ -48,8 +66,12 @@ export default function SettingsMqtt() {
       if (form.mqtt_password) setPasswordSet(true);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
+      // The broker is dialled right after the save; give the handshake a moment, then say how it went.
+      loadStatus();
+      setTimeout(loadStatus, 2500);
     } catch (err) {
-      setError(err.message);
+      if (err.data?.field === 'mqtt_tls_ca') setCaError(err.message);
+      else setError(err.message);
     } finally {
       setBusy(false);
     }
@@ -107,7 +129,7 @@ export default function SettingsMqtt() {
                 onChange={(e) => setForm({ ...form, mqtt_username: e.target.value })}
               />
             </div>
-            <div className="field" style={{ marginBottom: 0 }}>
+            <div className="field">
               <label htmlFor="mqtt-password">Password (optional)</label>
               <input
                 id="mqtt-password"
@@ -117,7 +139,69 @@ export default function SettingsMqtt() {
                 onChange={(e) => setForm({ ...form, mqtt_password: e.target.value })}
               />
             </div>
+
+            {/* TLS (#537). Off by default: a plain mqtt:// connection, as before. */}
+            <label className="log-viewer__toggle" style={{ marginBottom: 6 }}>
+              <Switch
+                checked={!!form.mqtt_tls}
+                onChange={(e) => setForm({ ...form, mqtt_tls: e.target.checked })}
+              />
+              Use TLS (mqtts://)
+            </label>
+            <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
+              Encrypts the connection, including the username and password. Your broker must have TLS turned on,
+              usually on port 8883. With the port left blank, 8883 is used when this is on.
+            </div>
+            {form.mqtt_tls && (
+              <>
+                <label className="log-viewer__toggle" style={{ marginBottom: 6 }}>
+                  <Switch
+                    checked={!!form.mqtt_tls_verify}
+                    onChange={(e) => setForm({ ...form, mqtt_tls_verify: e.target.checked })}
+                  />
+                  Verify the broker's certificate
+                </label>
+                <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
+                  Keep this on. Turned off, the connection is still encrypted but Nightlight no longer checks who
+                  it is talking to, so anyone on your network who answers as the broker is trusted.
+                </div>
+                <div className="field" style={{ marginBottom: 0 }}>
+                  <label htmlFor="mqtt-tls-ca">CA certificate (optional)</label>
+                  <textarea
+                    id="mqtt-tls-ca"
+                    rows={6}
+                    spellCheck={false}
+                    autoComplete="off"
+                    placeholder={'-----BEGIN CERTIFICATE-----\n…\n-----END CERTIFICATE-----'}
+                    style={{ fontFamily: 'monospace', fontSize: 12 }}
+                    value={form.mqtt_tls_ca || ''}
+                    onChange={(e) => { setCaError(''); setForm({ ...form, mqtt_tls_ca: e.target.value }); }}
+                    aria-invalid={caError ? 'true' : undefined}
+                    aria-describedby="mqtt-tls-ca-help"
+                  />
+                  {caError && <div className="error-banner" role="alert" style={{ marginTop: 8 }}>{caError}</div>}
+                  <div id="mqtt-tls-ca-help" className="camera-tile__sub" style={{ marginTop: 6 }}>
+                    Only needed when your broker uses a certificate from your own authority or a self-signed one.
+                    Paste the authority's certificate (or the broker's own certificate) in PEM form. Leave blank to
+                    trust the usual public authorities. When filled in, only this certificate is trusted for this
+                    connection. A certificate is not a secret; never paste a private key here.
+                  </div>
+                </div>
+              </>
+            )}
           </div>
+
+          {/* Why it is not connected, in words (#537). Nothing is shown while it is connected or switched off. */}
+          {status?.enabled && !status.connected && status.error && (
+            <div className="error-banner" role="status" style={{ marginBottom: 12 }}>
+              Not connected: {status.error}
+            </div>
+          )}
+          {status?.enabled && status.connected && (
+            <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
+              Connected{status.tls ? ' over TLS' : ''}.
+            </div>
+          )}
 
           <button className="btn btn-primary" type="submit" disabled={busy}>
             {busy ? 'Saving…' : 'Save changes'}

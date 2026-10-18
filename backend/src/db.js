@@ -491,6 +491,27 @@ if (!settingsColumns.includes('mqtt_host')) {
   db.exec('ALTER TABLE settings ADD COLUMN mqtt_username TEXT');
   db.exec('ALTER TABLE settings ADD COLUMN mqtt_password TEXT');
 }
+// TLS to the MQTT broker (#537). All three are additive and default to what every install does today, so an upgrade
+// keeps connecting over plain mqtt:// until an admin changes it:
+//   mqtt_tls         0 = plain mqtt:// (today), 1 = mqtts://
+//   mqtt_tls_ca      optional PEM text of the CA (or the broker's own certificate) to trust INSTEAD of the system
+//                    list, for a broker with a private or self-signed certificate. A certificate is public
+//                    information, so this is not a secret and is returned to the admin form; NULL = use the
+//                    system's trusted authorities
+//   mqtt_tls_verify  1 = refuse a broker whose certificate does not check out (the default, and the only safe
+//                    setting), 0 = connect anyway (encryption without identity: it stops a passive eavesdropper,
+//                    not someone impersonating the broker)
+// The names deliberately avoid password/secret/token/key words: the secrets-never-returned test derives the secret
+// columns from the schema by name, and none of these is one.
+if (!settingsColumns.includes('mqtt_tls')) {
+  db.exec('ALTER TABLE settings ADD COLUMN mqtt_tls INTEGER NOT NULL DEFAULT 0');
+}
+if (!settingsColumns.includes('mqtt_tls_ca')) {
+  db.exec('ALTER TABLE settings ADD COLUMN mqtt_tls_ca TEXT');
+}
+if (!settingsColumns.includes('mqtt_tls_verify')) {
+  db.exec('ALTER TABLE settings ADD COLUMN mqtt_tls_verify INTEGER NOT NULL DEFAULT 1');
+}
 // Separate on/off switch rather than "blank host means off" - lets the broker
 // config stay saved while MQTT is temporarily disabled (e.g. broker down for
 // maintenance) instead of the client endlessly retrying a dead broker.

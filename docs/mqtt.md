@@ -16,13 +16,44 @@ Neither requires the other — use one, both, or neither.
 | Field | Notes |
 |---|---|
 | Broker host | Required. IP or hostname, **only** (no `user@`, path or query). Letters, digits, `.`, `-` and `_` are accepted (an internationalised name such as `bücher.example` too), and an IPv6 address goes in square brackets (`[fe80::1]`); spaces before or after the host are removed. Anything else (a space or line break inside the name, `;`, `'`, `%`, `:` and so on) is refused when you press Save, with the reason, and nothing is stored. |
-| Broker port | Default **1883** if left blank. Otherwise a whole number from **1 to 65535**; anything else is refused when you press Save, and nothing is stored. |
+| Broker port | Default **1883** if left blank, or **8883** if left blank with **Use TLS** on. Otherwise a whole number from **1 to 65535**; anything else is refused when you press Save, and nothing is stored. |
 | Username / password | Optional, only if your broker requires auth. |
+| Use TLS (`mqtts://`) | **Off** by default (a plain `mqtt://` connection, as it has always been). Turn on to encrypt the connection, including the username and password. Your broker must have TLS enabled, usually on port 8883. |
+| Verify the broker's certificate | Shown when TLS is on. **On** by default. Keep it on: with it off the connection is encrypted, but anyone on your network who answers as the broker is trusted. |
+| CA certificate | Shown when TLS is on. Optional PEM text (`-----BEGIN CERTIFICATE-----`). **Blank** trusts the usual public authorities, which suits a broker with a certificate from a public authority. For a broker with a certificate from your own authority, or a self-signed one, paste that authority's certificate (or the broker's own certificate). **When filled in, only that certificate is trusted** for this connection (the public list is not used). Up to 10 certificates and 100 000 characters. |
 
-⚠️ **The connection is always plain `mqtt://` — TLS (`mqtts://`) is not supported.** If your
-broker is on a different host than Nightlight, that traffic (including the username/password,
-if set) is unencrypted on your LAN. This is fine for a broker running locally on your network;
-it's not something to expose across the internet.
+⚠️ **Unless you turn on Use TLS, the connection is plain `mqtt://`.** If your broker is on a
+different host than Nightlight, that traffic (including the username/password, if set) is
+unencrypted on your LAN. That is how every install worked before TLS was added, and **upgrading
+changes nothing**: TLS stays off until you turn it on. Plain `mqtt://` is fine for a broker on the
+same machine or a network you trust, and it is not something to expose across the internet.
+
+### Using TLS
+
+1. On the broker, enable a TLS listener (Mosquitto: a `listener 8883` with `certfile`, `keyfile`
+   and, if you use your own authority, `cafile`).
+2. In **Settings → MQTT** turn on **Use TLS**, set the port (8883 if you left it blank), and, if the
+   certificate is not from a public authority, paste the **CA certificate**.
+3. Save. Under the form Nightlight says **Connected over TLS**, or **Not connected** with the reason.
+
+What Nightlight refuses at Save, with the reason shown next to the CA box and nothing stored:
+text that is not a certificate; extra text around a certificate; a block that is not a valid
+certificate; **a private key** (never paste the key; it is refused by name and never stored or
+logged); more than 10 certificates. The certificate itself is not a secret, so it is shown back to
+admins in the form. **The password is treated as before: never returned, a blank box keeps the
+current one.** The certificate text is never written to the log.
+
+| Reason shown | What it means |
+|---|---|
+| The broker's certificate is self-signed / its issuer is not trusted | Add the CA certificate, or (less safely) turn off verification |
+| The broker's certificate has expired / is not valid yet | Renew it on the broker / check the clocks |
+| The certificate is not valid for the host name or address entered | Use the name the certificate was issued for (an IP address only works if the certificate lists it) |
+| The broker did not answer with TLS | TLS is on here but the port is a plain `mqtt://` listener (usually 1883); use the broker's TLS port |
+
+Turning **Verify** off is a downgrade you should only make knowingly (for example while testing a
+self-signed broker): it keeps eavesdroppers out but lets anyone who can answer as the broker in. TLS
+protects the connection to the broker; it does **not** change who may publish to a topic, which is
+still your broker's access rules (see [Camera-native motion](#camera-native-motion)).
 
 Saving reconnects automatically (retry every 5 seconds while down) — no restart needed. The
 **Settings** hub shows a status badge next to MQTT:

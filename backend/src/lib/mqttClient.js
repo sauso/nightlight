@@ -1,5 +1,6 @@
 import mqtt from 'mqtt';
 import { domainToASCII } from 'node:url';
+import { X509Certificate } from 'node:crypto';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { inActiveWindow } from './detectSchedule.js';
@@ -20,8 +21,89 @@ function shortPayload(str) {
 
 function getMqttSettings() {
   return db
-    .prepare('SELECT mqtt_enabled, mqtt_host, mqtt_port, mqtt_username, mqtt_password FROM settings WHERE id = ?')
+    .prepare(
+      `SELECT mqtt_enabled, mqtt_host, mqtt_port, mqtt_username, mqtt_password,
+              mqtt_tls, mqtt_tls_ca, mqtt_tls_verify FROM settings WHERE id = ?`
+    )
     .get('app');
+}
+
+// The broker's most recent connection error, in words an admin can act on, or null. Kept so the Settings screen can
+// say WHY it is disconnected (a certificate that is not trusted is invisible otherwise: the badge only turns red, and
+// the reason lived only in the container log). Cleared on a successful connect and whenever the configuration changes.
+let lastError = null;
+
+// A short, safe description of a connection error. Never the raw TLS detail, never anything that could hold a
+// certificate: a recognised code gets a sentence written here, and an unrecognised one gets its message cut to 200
+// characters with any PEM block removed first.
+const MQTT_ERRORS = {
+  DEPTH_ZERO_SELF_SIGNED_CERT: "The broker's certificate is self-signed and not trusted. Add the CA certificate (or the broker's own certificate) below, or turn off \"Verify the broker's certificate\".",
+  SELF_SIGNED_CERT_IN_CHAIN: "The broker's certificate chain ends in an authority Nightlight does not trust. Add that CA certificate below, or turn off \"Verify the broker's certificate\".",
+  UNABLE_TO_VERIFY_LEAF_SIGNATURE: "The broker's certificate could not be verified: its issuer is not trusted. Add the CA certificate below, or turn off \"Verify the broker's certificate\".",
+  UNABLE_TO_GET_ISSUER_CERT_LOCALLY: "The broker's certificate could not be verified: its issuer is not trusted. Add the CA certificate below, or turn off \"Verify the broker's certificate\".",
+  UNABLE_TO_GET_ISSUER_CERT: "The broker's certificate could not be verified: its issuer is not trusted. Add the CA certificate below, or turn off \"Verify the broker's certificate\".",
+  CERT_HAS_EXPIRED: "The broker's certificate has expired. Renew it on the broker.",
+  CERT_NOT_YET_VALID: "The broker's certificate is not valid yet. Check the date and time on the broker and on this server.",
+  ERR_TLS_CERT_ALTNAME_INVALID: "The broker's certificate is not valid for the host name or address entered above. Use the name the certificate was issued for.",
+  ERR_SSL_WRONG_VERSION_NUMBER: 'The broker did not answer with TLS. Check the port (brokers usually use 8883 for TLS and 1883 for plain MQTT) and that TLS is enabled on the broker.',
+  ECONNREFUSED: 'The broker refused the connection. Check the host and port, and that the broker is running.',
+  ENOTFOUND: 'The broker host name could not be found.',
+  ETIMEDOUT: 'The broker did not answer in time.',
+  EHOSTUNREACH: 'The broker could not be reached.',
+};
+export function describeMqttError(err) {
+  const code = typeof err?.code === 'string' ? err.code : null;
+  const raw = String(err?.message ?? 'Connection error')
+    .replace(/-----BEGIN [A-Z ]+-----[\s\S]*?(-----END [A-Z ]+-----|$)/g, '[certificate removed]')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // `detail` is the underlying message, cleaned the same way, for the server log (which has always shown it).
+  const detail = raw.length > 200 ? `${raw.slice(0, 200)}…` : raw || 'Connection error';
+  if (code && Object.hasOwn(MQTT_ERRORS, code)) return { code, message: MQTT_ERRORS[code], detail };
+  // Node reports a TLS client talking to a plain-text server as EPROTO, with the OpenSSL reason only in the message
+  // (measured against a plain socket on Node 24: code 'EPROTO', "...ssl3_get_record:wrong version number"). Matched
+  // on that reason, so an EPROTO for any other cause keeps its own words.
+  if (code === 'EPROTO' && /wrong version number|packet length too long|record layer failure|http request/i.test(raw)) {
+    return { code: 'ERR_SSL_WRONG_VERSION_NUMBER', message: MQTT_ERRORS.ERR_SSL_WRONG_VERSION_NUMBER, detail };
+  }
+  return { code, message: detail, detail };
+}
+
+// Checks the CA text an admin pasted and returns it in a canonical form (certificates only, LF line ends, one per
+// block), `null` for blank (= use the system's authorities), or throws an Error whose message is safe to show.
+//
+// What it refuses and why, since the field takes pasted text and its content ends up in a TLS trust decision:
+//   - anything that is not PEM certificates: a stray line, a half-copied block, or two blocks run together would
+//     otherwise be silently dropped by the TLS layer, leaving a connection that looks configured and trusts nothing
+//     you meant it to;
+//   - a PRIVATE KEY block, named as such: pasting the wrong file from a certificate folder is the common mistake, and
+//     the key must never be stored or logged. It is refused before it is parsed or kept;
+//   - more than 10 certificates or 100 000 characters, which no broker chain needs.
+// Each block is parsed with Node's own X.509 parser, so a block that is PEM-shaped but not a certificate is refused.
+// ⚠️ No message here repeats any part of the input.
+export const MQTT_CA_MAX_CERTS = 10;
+export const MQTT_CA_MAX_CHARS = 100_000;
+export function parseMqttCa(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'string') throw new Error('The CA certificate must be text in PEM format.');
+  const text = raw.trim();
+  if (!text) return null;
+  if (text.length > MQTT_CA_MAX_CHARS) throw new Error('The CA certificate text is too long.');
+  if (/PRIVATE KEY/i.test(text)) {
+    throw new Error('That is a private key, not a certificate. Paste only the CA certificate (it begins with -----BEGIN CERTIFICATE-----) and never share the key.');
+  }
+  const blocks = text.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g) || [];
+  if (blocks.length === 0) throw new Error('No certificate found. Paste the CA certificate in PEM format, starting with -----BEGIN CERTIFICATE-----.');
+  if (text.replace(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g, '').trim() !== '') {
+    throw new Error('The CA certificate field contains text that is not a certificate. Remove everything except the -----BEGIN CERTIFICATE----- blocks.');
+  }
+  if (blocks.length > MQTT_CA_MAX_CERTS) throw new Error(`Too many certificates: at most ${MQTT_CA_MAX_CERTS} are accepted.`);
+  const canonical = blocks.map((b, i) => {
+    try { return new X509Certificate(b).toString().trim(); } catch {
+      throw new Error(`Certificate ${i + 1} of ${blocks.length} is not a valid certificate.`);
+    }
+  });
+  return `${canonical.join('\n')}\n`;
 }
 
 function configKey(cfg) {
@@ -160,9 +242,17 @@ export function _setMqttMotionStampForTests(cameraId, ms) {
 // flag (true once the broker handshake completes, false while retrying/down).
 export function mqttStatus() {
   const cfg = getMqttSettings();
+  const enabled = !!(cfg.mqtt_enabled && cfg.mqtt_host);
+  const connected = !!(client && client.connected);
   return {
-    enabled: !!(cfg.mqtt_enabled && cfg.mqtt_host),
-    connected: !!(client && client.connected),
+    enabled,
+    connected,
+    // Additive (#537): whether the connection uses TLS, and why it is not connected when it is not. `error` is null
+    // while connected, while disabled, and until the first failure; it is a sentence (describeMqttError), not a
+    // stack, and never holds any part of a certificate.
+    tls: enabled && !!cfg.mqtt_tls,
+    error: enabled && !connected ? lastError?.message ?? null : null,
+    error_code: enabled && !connected ? lastError?.code ?? null : null,
   };
 }
 
@@ -200,8 +290,11 @@ export function mqttStatus() {
 const BROKER_HOST_ALPHABET = /^(?:[\p{L}\p{N}_.-]+|\[[0-9A-Fa-f:.]+\])$/u;
 const BROKER_ASCII_HOST = /^[a-z0-9_.-]+$/;
 
-export function mqttBrokerUrl(rawHost, port) {
-  const p = port || 1883; // the default the settings screen documents for a blank port
+export function mqttBrokerUrl(rawHost, port, { tls = false } = {}) {
+  // The default the settings screen documents for a blank port: 1883, or 8883 (the port MQTT brokers conventionally
+  // use for TLS) when TLS is on.
+  const p = port || (tls ? 8883 : 1883);
+  const scheme = tls ? 'mqtts' : 'mqtt';
   if (!Number.isInteger(Number(p)) || Number(p) < 1 || Number(p) > 65535) {
     throw new Error(`the port ${JSON.stringify(p)} is not a whole number between 1 and 65535`);
   }
@@ -220,11 +313,11 @@ export function mqttBrokerUrl(rawHost, port) {
   const host = [...typed].every((ch) => ch.charCodeAt(0) < 128) ? typed : domainToASCII(typed);
   if (!host.startsWith('[') && !BROKER_ASCII_HOST.test(host.toLowerCase())) throw notAHost();
   let u;
-  try { u = new URL(`mqtt://${host}:${p}`); } catch { throw new Error(`the host ${shown} is not a valid hostname or address`); }
+  try { u = new URL(`${scheme}://${host}:${p}`); } catch { throw new Error(`the host ${shown} is not a valid hostname or address`); }
   if (!u.hostname || u.username || u.password || u.pathname || u.search || u.hash || u.port !== String(Number(p))) {
     throw new Error(`the host ${shown} must be just a hostname or address, with no user name, path or query`);
   }
-  return `mqtt://${host}:${Number(p)}`;
+  return `${scheme}://${host}:${Number(p)}`;
 }
 
 export function refreshMqttConnection() {
@@ -234,6 +327,7 @@ export function refreshMqttConnection() {
   // critically, don't leave a client endlessly retrying a broker that's deliberately
   // off. The saved broker config itself is untouched - re-enabling picks it back up.
   if (!cfg.mqtt_host || !cfg.mqtt_enabled) {
+    lastError = null;
     if (client) {
       client.end(true);
       client = null;
@@ -254,25 +348,44 @@ export function refreshMqttConnection() {
   if (client) client.end(true);
   currentConfigKey = key;
   readings.clear();
+  lastError = null;
 
   // ⚠️ MUST NOT THROW (#543). This runs at boot before the crash guards are installed, and after every settings
   // save and camera edit. A bad value that is ALREADY stored (saved by an older version, or written by hand) has to
   // leave MQTT off and the app up, not take the process down on every start. The cache key is reset so that the
   // next call, after the admin fixes the value, tries again instead of treating the failed attempt as connected.
   try {
-    client = mqtt.connect(mqttBrokerUrl(cfg.mqtt_host, cfg.mqtt_port), {
+    const tls = !!cfg.mqtt_tls;
+    const options = {
       username: cfg.mqtt_username || undefined,
       password: cfg.mqtt_password || undefined,
       reconnectPeriod: 5000,
-    });
+    };
+    if (tls) {
+      // Verification is ON unless the admin switched it off (stored 0). A stored CA replaces the system list for this
+      // connection, which is what a private or self-signed broker needs; blank keeps the system's authorities. The CA
+      // is re-checked here, not only at save: a value written by hand into the database must not be able to throw
+      // from the boot path (#543), and its text is never logged.
+      options.rejectUnauthorized = cfg.mqtt_tls_verify !== 0;
+      let ca;
+      try { ca = parseMqttCa(cfg.mqtt_tls_ca); } catch (e) {
+        throw Object.assign(new Error(`the stored CA certificate is not usable (${e.message})`), { isCa: true });
+      }
+      if (ca) options.ca = ca;
+      if (!options.rejectUnauthorized) {
+        logger.warn('[mqtt] Certificate verification is OFF: the connection is encrypted but the broker is not authenticated.');
+      }
+    }
+    client = mqtt.connect(mqttBrokerUrl(cfg.mqtt_host, cfg.mqtt_port, { tls }), options);
   } catch (e) {
     client = null;
     currentConfigKey = null;
-    logger.error(`[mqtt] Not connecting: ${e.message}. MQTT stays off until the broker host and port are fixed in Settings.`);
+    logger.error(`[mqtt] Not connecting: ${e.message}. MQTT stays off until the ${e.isCa ? 'CA certificate' : 'broker host and port'} ${e.isCa ? 'is' : 'are'} fixed in Settings.`);
     return;
   }
 
   client.on('connect', () => {
+    lastError = null;
     logger.info('[mqtt] Connected to broker.');
     subscribeAllCameraTopics();
   });
@@ -282,7 +395,8 @@ export function refreshMqttConnection() {
   });
 
   client.on('error', (err) => {
-    logger.error('[mqtt] Connection error:', err.message);
+    lastError = describeMqttError(err);
+    logger.error('[mqtt] Connection error:', lastError.detail);
   });
 
   client.on('message', (topic, payload) => {
