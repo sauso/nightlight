@@ -4,8 +4,8 @@
 //
 // How each case was shown to fail: run against the old route (a new secret on every call) the "same secret",
 // "resumed" and "last step untouched" cases fail; with the `restart` handling removed the restart case fails.
-// The review-round cases (password on resume, its limiter, the re-read after the awaits, a password change
-// discarding a pending set-up, a legacy pending secret) each say what they fail without.
+// The review-round cases (the password on every call, its limiter, the re-reads after the awaits, a password
+// change discarding a pending set-up, a legacy pending secret) each say what they fail without.
 import { test, describe, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -22,7 +22,7 @@ const { isLegacySecret } = await import('../src/lib/mfa.js');
 const passwordHash = await import('../src/lib/passwordHash.js');
 const { generateSync } = await import('otplib');
 
-// makeUser's default password: a resume needs it (review of #765).
+// makeUser's default password: every set-up call needs it (review of #765).
 const PASSWORD = 'hunter22';
 
 let server;
@@ -35,16 +35,19 @@ before(async () => {
 });
 after(async () => { await server?.close(); db.close(); cleanupTempDataDirs(); });
 
-// A fresh source address per request unless a case names one: a resume is rate limited per source + account
+// A fresh source address per request unless a case names one: set-up is rate limited per source + account
 // (the same in-memory buckets as turning two-factor off), and every case here reuses the account 'u-pend', so
 // without this the cases would spend one shared budget and 429 each other in file order.
 let ipCounter = 0;
 const freshIp = () => `203.0.113.${(ipCounter += 1)}`;
 
 const row = () => db.prepare("SELECT mfa_enabled, mfa_secret, mfa_last_step FROM users WHERE id = 'u-pend'").get();
-const setup = (body, { ip = freshIp(), as = token } = {}) =>
-  call(`${server.url}/api/auth/me/mfa/setup`, { method: 'POST', token: as, body, headers: { 'x-forwarded-for': ip } });
-const resume = (opts) => setup({ password: PASSWORD }, opts);
+// Sends the right password unless the body overrides it; `{ password: undefined }` sends none at all (JSON drops it).
+const setup = (body = {}, { ip = freshIp(), as = token } = {}) =>
+  call(`${server.url}/api/auth/me/mfa/setup`, {
+    method: 'POST', token: as, body: { password: PASSWORD, ...body }, headers: { 'x-forwarded-for': ip },
+  });
+const resume = (opts) => setup({}, opts);
 const enable = (code) => call(`${server.url}/api/auth/me/mfa/enable`, { method: 'POST', token, body: { code } });
 const status = () => call(`${server.url}/api/auth/me/mfa`, { token });
 
@@ -193,55 +196,62 @@ describe('GET /me/mfa setup_pending', () => {
   });
 });
 
-// Review of #765 (Opus, verified by running): without the password, ANY live session of the account (a
-// borrowed unlocked phone) could call setup {} and read the owner's pending secret; the owner then enables as
-// normal and the borrower can make valid codes. Each case FAILS on the passwordless resume.
-describe('resuming a pending set-up needs the account password', () => {
-  test('★ no password, or a wrong one: 400 "Password is incorrect", the secret is in no part of the answer, nothing rotates', async () => {
-    const first = await setup({});
-    assert.equal(first.status, 200, 'a start (nothing pending) needs no password');
-    for (const body of [{}, { password: 'not-the-password' }, { password: '' }, { password: null }]) {
+// Review of #765 (Opus, verified by running; owner's decision): once set-up hands a pending secret back, ANY
+// live session of the account (a borrowed unlocked phone) could READ the owner's pending secret, or PLANT one it
+// knows (start or restart) for the owner's "Continue set-up" to show and the owner to confirm. Either way it can
+// later make valid codes. So every call needs the password. Each case FAILS on a passwordless set-up.
+describe('every set-up call needs the account password', () => {
+  const REFUSED = [{ password: undefined }, { password: 'not-the-password' }, { password: '' }, { password: null }];
+
+  test('★ a first start without the right password: 400 "Password is incorrect", and nothing is stored (no plant)', async () => {
+    for (const body of REFUSED) {
       const res = await setup(body);
-      assert.equal(res.status, 400, `${JSON.stringify(body)} resumed: ${JSON.stringify(res.body)}`);
+      assert.equal(res.status, 400, `${JSON.stringify(body)} started a set-up: ${JSON.stringify(res.body)}`);
       assert.deepEqual(res.body, { error: 'Password is incorrect' });
-      assert.ok(!JSON.stringify(res.body).includes(first.body.secret));
     }
-    assert.equal(row().mfa_secret, first.body.secret, 'a refused resume replaced the pending secret');
+    assert.equal(row().mfa_secret, null, 'a refused start stored a secret');
+    const ok = await setup({});
+    assert.equal(ok.status, 200, 'the right password starts it');
+    assert.equal(row().mfa_secret, ok.body.secret);
   });
 
-  test('a session of the account that does not know the password cannot read the pending secret; the owner still can', async () => {
+  test('★ a resume or a restart without the right password: 400, the secret is in no part of the answer, nothing rotates', async () => {
+    const first = await setup({});
+    for (const extra of [{}, { restart: true }]) {
+      for (const body of REFUSED) {
+        const res = await setup({ ...extra, ...body });
+        assert.equal(res.status, 400, `${JSON.stringify({ ...extra, ...body })}: ${JSON.stringify(res.body)}`);
+        assert.deepEqual(res.body, { error: 'Password is incorrect' });
+        assert.ok(!JSON.stringify(res.body).includes(first.body.secret));
+      }
+    }
+    assert.equal(row().mfa_secret, first.body.secret, 'a refused call replaced the pending secret');
+  });
+
+  test('a session of the account that does not know the password can neither read nor replace the pending secret; the owner can', async () => {
     const first = await setup({});
     const borrowed = signToken({ id: 'u-pend', username: 'pending-user', role: 'caregiver', sid: makeSession(db, 'u-pend') });
-    const theirs = await setup({}, { as: borrowed });
-    assert.equal(theirs.status, 400);
-    assert.equal(theirs.body.secret, undefined);
+    for (const body of [{ password: undefined }, { password: undefined, restart: true }]) {
+      const theirs = await setup(body, { as: borrowed });
+      assert.equal(theirs.status, 400);
+      assert.equal(theirs.body.secret, undefined);
+    }
+    assert.equal(row().mfa_secret, first.body.secret);
     const mine = await resume();
     assert.equal(mine.status, 200);
     assert.equal(mine.body.secret, first.body.secret);
     assert.equal(mine.body.resumed, true);
   });
 
-  test('restart: true needs no password (a visible rotation, as before) and ignores a wrong one', async () => {
-    const first = await setup({});
-    const again = await setup({ restart: true, password: 'wrong' });
-    assert.equal(again.status, 200);
-    assert.notEqual(again.body.secret, first.body.secret);
-  });
-
-  // FAILS WITHOUT the limiter on the resume path (21 x 400, no 429), and FAILS if the limiter is applied to the
-  // whole route (the passwordless starts below would be counted and the 21st would be 429).
-  test('★ wrong-password resumes are limited per source + account (20); passwordless starts are never counted', async () => {
+  // FAILS WITHOUT the limiter on the route (21 x 400, no 429).
+  test('★ set-up calls are limited per source + account (20), whatever their path', async () => {
     const ip = freshIp();
-    for (let i = 0; i < 25; i += 1) {
-      const res = await setup({ restart: true }, { ip });
-      assert.equal(res.status, 200, `start ${i + 1} from one source was refused: starts are being counted`);
-    }
-    const statuses = [];
-    for (let i = 0; i < 21; i += 1) statuses.push((await setup({ password: 'wrong' }, { ip })).status);
-    assert.equal(statuses.filter((s) => s === 400).length, 20);
+    const statuses = [(await setup({}, { ip })).status, (await setup({ restart: true }, { ip })).status];
+    for (let i = 0; i < 19; i += 1) statuses.push((await setup({ password: 'wrong' }, { ip })).status);
+    assert.deepEqual(statuses.slice(0, 2), [200, 200]);
+    assert.equal(statuses.filter((s) => s === 400).length, 18);
     assert.equal(statuses[20], 429);
     assert.equal((await resume({ ip })).status, 429, 'the right password is refused too: it is the limiter refusing');
-    assert.equal((await setup({ restart: true }, { ip })).status, 200, 'a start was blocked by the resume budget');
     assert.equal((await resume()).status, 200, 'another source is not affected');
   });
 
@@ -259,10 +269,23 @@ describe('resuming a pending set-up needs the account password', () => {
   });
 });
 
-// Review of #765 (Codex): set-up reads the row and then awaits (the password check on a resume, the QR on
-// every path). The answer is decided from the row as it is AFTER the last await. Each case FAILS without the
-// re-read: the stale secret was handed out.
+// Review of #765 (Codex): set-up reads the row and then awaits (the password check, then the QR). The answer is
+// decided from the row as it is AFTER the last await, and a rotation is a compare-and-set. Each case FAILS
+// without its guard: the stale secret was handed out, or an active one replaced.
 describe('the row changes while set-up awaits', () => {
+  // FAILS WITHOUT `AND mfa_enabled = 0` on the rotation (the status is 400 either way, from the re-read; the
+  // stored secret is what tells them apart): the start replaced the ACTIVE secret, a lockout at the code step.
+  test('★ two-factor switched on during a START\'s password check: 400 "already on", and the active secret is kept', async () => {
+    const ACTIVE = 'KRUGS4ZANFZSA2LOEBUGK4TFEBRGKY3BOVZWKIDJ';
+    const res = await whileHandlerAwaitsBcrypt(
+      () => setup({}),
+      () => { db.prepare("UPDATE users SET mfa_enabled = 1, mfa_secret = ? WHERE id = 'u-pend'").run(ACTIVE); },
+    );
+    assert.equal(res.status, 400);
+    assert.deepEqual(res.body, { error: 'Two-factor is already on. Turn it off first to re-enrol.' });
+    assert.equal(row().mfa_secret, ACTIVE, 'the start replaced an active secret');
+  });
+
   test('★ two-factor switched on meanwhile: 400 "already on", the now-ACTIVE secret is not handed out', async () => {
     const first = await setup({});
     const res = await whileHandlerAwaitsBcrypt(
@@ -296,6 +319,19 @@ describe('the row changes while set-up awaits', () => {
     );
     assert.equal(res.status, 401);
     assert.equal(res.body.secret, undefined);
+  });
+
+  // FAILS WITHOUT the signInEnded between the password check and the write: the 401 still comes (from the
+  // re-check before the answer), but a secret had been stored for a device that was already signed out.
+  test('a START whose session signed out during the password check stores nothing', async () => {
+    const sid = makeSession(db, 'u-pend');
+    const leaving = signToken({ id: 'u-pend', username: 'pending-user', role: 'caregiver', sid });
+    const res = await whileHandlerAwaitsBcrypt(
+      () => setup({}, { as: leaving }),
+      () => { db.prepare('DELETE FROM sessions WHERE id = ?').run(sid); },
+    );
+    assert.equal(res.status, 401);
+    assert.equal(row().mfa_secret, null, 'a signed-out session stored a set-up secret');
   });
 });
 
@@ -344,10 +380,10 @@ describe('a password change discards a pending set-up, and only a pending one', 
 });
 
 // Review of #765: a set-up left pending by a version before 0.26.0 holds an 80-bit secret. Resuming it would
-// keep a weak key alive (and would now ask for a password to hand it back); it is discarded instead, which
-// reveals nothing, so no password is needed. FAILS on the branch before this round: it resumed the legacy key.
+// keep a weak key alive through the set-up that should replace it; it is discarded instead. FAILS without the
+// isLegacySecret check in resumablePendingSecret: it resumed the legacy key.
 describe('a pending LEGACY (80-bit) secret is not resumed', () => {
-  test('★ setup_pending is false, and set-up makes a fresh 160-bit secret without a password', async () => {
+  test('★ setup_pending is false, and set-up makes a fresh 160-bit secret instead of resuming it', async () => {
     const LEGACY = 'JBSWY3DPEHPK3PXP';
     assert.equal(isLegacySecret(LEGACY), true, 'precondition: the fixture is a legacy secret');
     db.prepare("UPDATE users SET mfa_enabled = 0, mfa_secret = ?, mfa_last_step = 5 WHERE id = 'u-pend'").run(LEGACY);

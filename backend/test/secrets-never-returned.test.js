@@ -450,7 +450,8 @@ describe('every API response, for every role', () => {
       const token = tokenFor('u-enrol', 'enrol', 'caregiver');
       // /setup returns the new secret ON PURPOSE (it is what the authenticator app scans), so its answer is
       // not checked here; what must never come back is the secret once it is ACTIVE, or any stored hash.
-      const setup = await api('/api/auth/me/mfa/setup', { method: 'POST', token });
+      // makeUser's default password: every set-up call needs it (review of #765).
+      const setup = await api('/api/auth/me/mfa/setup', { method: 'POST', token, body: { password: 'hunter22' } });
       assert.equal(setup.status, 200);
       const enable = await api('/api/auth/me/mfa/enable', { method: 'POST', token, body: { code: generateSync({ secret: setup.body.secret }) } });
       assert.equal(enable.status, 200, JSON.stringify(enable.body));

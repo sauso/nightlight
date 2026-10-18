@@ -12,9 +12,10 @@ a domain, are a separate planned feature.)
 
 **Settings → Account → Two-factor authentication → Set up two-factor.**
 
-1. Scan the QR code with an authenticator app, or type in the manual key.
-2. Enter the current 6-digit code to confirm.
-3. **Save the backup codes shown.** There are 10, each usable **once**, for signing in if you lose
+1. Enter your **account password** (see "Why every set-up asks for your password" below).
+2. Scan the QR code with an authenticator app, or type in the manual key.
+3. Enter the current 6-digit code to confirm.
+4. **Save the backup codes shown.** There are 10, each usable **once**, for signing in if you lose
    your authenticator. They're shown only at this moment and only their hashes are stored — Nightlight
    can't show them again. Because of that, this dialog can only be closed with its **I've saved them**
    button: tapping outside it or pressing Escape does nothing, and it has no ✕ (unlike Nightlight's other
@@ -35,17 +36,21 @@ On a phone the authenticator is on the same device as the page, so you switch ap
 | Button | What it does |
 |---|---|
 | **Continue set-up** | Asks for your **account password**, then shows the **same** QR code and key again. The entry already in your authenticator keeps working; just enter its code. |
-| **Start over** | Makes a **new** key, with no password. The entry you already added stops matching, so delete it from your authenticator and add the new one. |
+| **Start over** | Asks for your **account password**, then makes a **new** key. The entry you already added stops matching, so delete it from your authenticator and add the new one. |
 
-**Why Continue asks for your password.** Showing the pending key again would otherwise let *any* device
-signed in to your account (a borrowed, unlocked phone, a browser you forgot to sign out of) read it, and
-once you finish the set-up as normal, that device could make valid codes for your second factor. Turning
-two-factor off asks for the password for the same reason. Starting a set-up and **Start over** do not: they
-make a new key, so nothing you have already added is revealed. A wrong password is shown in the dialog
-(HTTP 400, `Password is incorrect`); it does **not** sign you out, and the key is not in the answer.
-Wrong passwords here count against the same limit as changing your password and turning two-factor off:
-**20 attempts per 15 minutes per source address and account** (and the per-source 100), shared by all
-three. Starting a set-up and Start over are never counted.
+**Why every set-up asks for your password.** **Set up two-factor**, **Continue set-up** and **Start over**
+all ask for it first. Because a set-up can now be continued, any device signed in to your account (a
+borrowed, unlocked phone, a browser you forgot to sign out of) could otherwise either *read* your pending key
+or *plant* one it knows (by starting or restarting a set-up, so that your next **Continue set-up** shows its
+key and you confirm it). Either way that device could later make valid codes for your second factor.
+Turning two-factor off asks for the password for the same reason. A wrong password is shown beside the field
+(HTTP 400, `Password is incorrect`); it does **not** sign you out, and no key is in the answer. Set-up
+attempts count against the same limit as changing your password and turning two-factor off: **20 per 15
+minutes per source address and account** (and the per-source 100), shared by all three.
+
+For API clients: `POST /api/auth/me/mfa/setup` now needs `{ "password": "…" }` in the body (with
+`"restart": true` added for a start-over). Without it the answer is 400 `Password is incorrect`, where it used
+to start a set-up.
 
 A pending set-up has no expiry: it stays until you finish it, start over, turn two-factor off, **change your
 password** (or an admin sets a new one for you), or an admin (or the console reset script, `--all`
@@ -59,9 +64,10 @@ Two less common cases:
 
 - A set-up left pending by a version **before 0.26.0** holds an older, weaker (80-bit) key. It is not
   offered for continuing: the card shows **Set up two-factor**, which makes a new 160-bit key.
-- If the set-up changes on another device while you are continuing it (two-factor switched on, a start
+- If the set-up changes on another device while yours is being prepared (two-factor switched on, a start
   over, a reset), you get "Two-factor is already on…" or "The set-up was changed meanwhile, on this or
-  another device. Try again." instead of a key that would no longer work.
+  another device. Try again." instead of a key that would no longer work, and a key that is already on is
+  never replaced.
 
 At the next login you'll enter your password, then the 6-digit code. A backup code can be entered in
 the same field instead of an app code.
@@ -133,7 +139,7 @@ RFC 4226 recommendation of at least 128 bits.
 authenticator app needs no attention. If you'd like the stronger secret, re-enrol at your convenience:
 
 1. **Account → Two-factor authentication → Turn off two-factor** (needs your password).
-2. Turn it back on and scan the new QR code.
+2. Turn it back on (your password again) and scan the new QR code.
 
 `GET /api/auth/me/mfa` reports `needs_reenrolment: true` for an account still on an older secret,
 which is the quickest way to check.

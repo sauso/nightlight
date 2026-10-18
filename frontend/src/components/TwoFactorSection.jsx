@@ -9,6 +9,16 @@ import { isNativeApp } from '../lib/nativeBridge.js';
 // the screen it is on. Guarded because jsdom (and old browsers) have no matchMedia.
 const isTouchDevice = () => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
 
+// The password step in front of each set-up entry point (review of #765): its title, and what the step leads to.
+const PASSWORD_STEP = {
+  start: { title: 'Set up two-factor', text: 'Enter your password to start setting up two-factor.' },
+  resume: { title: 'Continue set-up', text: 'Enter your password to show the same QR code and key again.' },
+  restart: {
+    title: 'Start over',
+    text: 'Enter your password to make a new key. The entry you may already have added to your authenticator app will stop working.',
+  },
+};
+
 // Account → Two-factor authentication. Self-service TOTP: set up (QR + manual key → confirm a code →
 // one-time backup codes), and turn off (password-confirmed). Works everywhere (no secure-context
 // requirement), unlike the passkeys planned for a later phase.
@@ -23,10 +33,12 @@ export default function TwoFactorSection() {
   const [copied, setCopied] = useState(false);
 
   const [disabling, setDisabling] = useState(false);
-  // "Continue set-up" asks for the password first (review of #765): the server hands a pending key back only
-  // with it, so a borrowed signed-in device cannot read the key the owner is setting up. Shares `password`
-  // with the turn-off dialog; the two are never open together (one needs two-factor on, the other off).
-  const [resuming, setResuming] = useState(false);
+  // Which set-up the password step is for: 'start' | 'resume' | 'restart' | null. Every set-up call needs the
+  // account password (review of #765): otherwise a borrowed signed-in device could read the key the owner is
+  // setting up, or plant one it knows for the owner to confirm. One small step serves all three entry points.
+  // Shares `password` with the turn-off dialog; the two are never open together (one needs two-factor on, the
+  // other off).
+  const [passwordStep, setPasswordStep] = useState(null);
   const [password, setPassword] = useState('');
 
   async function loadStatus() {
@@ -44,28 +56,26 @@ export default function TwoFactorSection() {
   const setupOpen = !!setup;
   useEffect(() => (setupOpen ? holdReload() : undefined), [setupOpen]);
 
-  // `restart` true replaces any pending key (no password: it reveals nothing). `resumePassword` continues the
-  // pending one, which the server hands back only with the account password (#765 and its review). Neither:
-  // a first set-up. A failure (a wrong password included) leaves whichever dialog is open where it is, with the
-  // message shown in it.
-  async function startSetup({ restart = false, resumePassword } = {}) {
-    setError(''); setBusy(true);
+  function openPasswordStep(kind) {
+    setPassword(''); setError(''); setPasswordStep(kind);
+  }
+
+  // Sends the set-up with the typed password. `restart` replaces any pending key; without it the server hands
+  // back the pending one, or makes a first one (#765). A failure (a wrong password included) keeps the password
+  // step open with the message in it, so the password can be retyped.
+  async function confirmPasswordStep(e) {
+    e.preventDefault(); setError(''); setBusy(true);
     try {
-      const body = restart ? { restart: true } : resumePassword !== undefined ? { password: resumePassword } : {};
+      const body = passwordStep === 'restart' ? { restart: true, password } : { password };
       setSetup(await api.post('/auth/me/mfa/setup', body));
       setCode('');
-      setResuming(false); setPassword('');
+      setPasswordStep(null); setPassword('');
       setStatus((st) => (st ? { ...st, setup_pending: true } : st));
     } catch (err) {
       setError(err.message);
     } finally {
       setBusy(false);
     }
-  }
-
-  function confirmResume(e) {
-    e.preventDefault();
-    return startSetup({ resumePassword: password });
   }
 
   async function confirmEnable(e) {
@@ -117,7 +127,7 @@ export default function TwoFactorSection() {
     <>
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="card-title">Two-factor authentication</div>
-        {error && !setup && !disabling && !resuming && <div className="error-banner" style={{ marginBottom: 10 }}>{error}</div>}
+        {error && !setup && !disabling && !passwordStep && <div className="error-banner" style={{ marginBottom: 10 }}>{error}</div>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <ShieldCheck size={22} color={enabled ? 'var(--live)' : 'var(--text-secondary)'} aria-hidden="true" />
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -138,10 +148,10 @@ export default function TwoFactorSection() {
             </button>
           ) : status?.setup_pending ? (
             <>
-              <button className="btn btn-primary" onClick={() => { setPassword(''); setError(''); setResuming(true); }} disabled={busy}>
+              <button className="btn btn-primary" onClick={() => openPasswordStep('resume')} disabled={busy}>
                 Continue set-up
               </button>
-              <button className="btn btn-secondary" onClick={() => startSetup({ restart: true })} disabled={busy} style={{ marginTop: 8 }}>
+              <button className="btn btn-secondary" onClick={() => openPasswordStep('restart')} disabled={busy} style={{ marginTop: 8 }}>
                 Start over
               </button>
               <div className="camera-tile__sub" style={{ marginTop: 6 }}>
@@ -150,8 +160,8 @@ export default function TwoFactorSection() {
               </div>
             </>
           ) : (
-            <button className="btn btn-primary" onClick={() => startSetup()} disabled={busy || !status}>
-              {busy ? 'Please wait…' : 'Set up two-factor'}
+            <button className="btn btn-primary" onClick={() => openPasswordStep('start')} disabled={busy || !status}>
+              Set up two-factor
             </button>
           )}
         </div>
@@ -213,22 +223,20 @@ export default function TwoFactorSection() {
         </Modal>
       )}
 
-      {resuming && (
+      {passwordStep && (
         // The same pattern as the turn-off dialog below: password field, the server's message inside the dialog,
         // and a wrong password keeps the dialog open so it can be retyped.
-        <Modal title="Continue set-up" onClose={() => (busy ? null : setResuming(false))}>
-          <form onSubmit={confirmResume}>
+        <Modal title={PASSWORD_STEP[passwordStep].title} onClose={() => (busy ? null : setPasswordStep(null))}>
+          <form onSubmit={confirmPasswordStep}>
             {error && <div className="error-banner" style={{ marginBottom: 10 }}>{error}</div>}
-            <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
-              Enter your password to show the same QR code and key again.
-            </div>
+            <div className="camera-tile__sub" style={{ marginBottom: 10 }}>{PASSWORD_STEP[passwordStep].text}</div>
             <div className="field">
-              <label htmlFor="mfa-resume-pass">Password</label>
-              <input id="mfa-resume-pass" type="password" value={password}
+              <label htmlFor="mfa-setup-pass">Password</label>
+              <input id="mfa-setup-pass" type="password" value={password}
                 onChange={(e) => setPassword(e.target.value)} required autoFocus />
             </div>
             <button className="btn btn-primary" type="submit" disabled={busy}>
-              {busy ? 'Please wait…' : 'Continue set-up'}
+              {busy ? 'Please wait…' : 'Continue'}
             </button>
           </form>
         </Modal>

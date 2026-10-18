@@ -28,6 +28,17 @@ describe('TwoFactorSection', () => {
 
   const withStatus = (status) => vi.spyOn(api, 'get').mockResolvedValue(status);
 
+  // "Set up two-factor" asks for the account password first (review of #765): click it, type the password,
+  // continue. `waitForPanel` waits for the set-up panel, the result of a set-up that worked.
+  async function startSetup(user, { waitForPanel = true } = {}) {
+    const button = await enabledButton('Set up two-factor');
+    await user.click(button);
+    const step = await screen.findByRole('dialog');
+    await user.type(within(step).getByLabelText('Password'), 'hunter22');
+    await user.click(within(step).getByRole('button', { name: 'Continue' }));
+    if (waitForPanel) await screen.findByLabelText('Enter the 6-digit code to confirm');
+  }
+
   test('an account without two-factor is offered set-up, and told what it does', async () => {
     withStatus({ enabled: false });
     renderAsAdmin(<TwoFactorSection />);
@@ -67,23 +78,26 @@ describe('TwoFactorSection', () => {
     withStatus({ enabled: false });
     vi.spyOn(api, 'post').mockResolvedValue(SETUP);
     const { user } = renderAsAdmin(<TwoFactorSection />);
-    await user.click(await enabledButton('Set up two-factor'));
+    await startSetup(user);
 
-    const dialog = await screen.findByRole('dialog');
+    const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByAltText('Two-factor setup QR code')).toHaveAttribute('src', SETUP.qr);
     // ⚠️ The manual key is not a nicety: a desktop browser cannot scan its own screen, and neither
     // can someone whose only camera is the phone holding the authenticator.
     expect(within(dialog).getByText(SETUP.secret)).toBeInTheDocument();
-    expect(api.post).toHaveBeenCalledWith('/auth/me/mfa/setup', {});
+    expect(api.post).toHaveBeenCalledWith('/auth/me/mfa/setup', { password: 'hunter22' });
   });
 
   test('a failed set-up says why and does not open an empty dialog', async () => {
     withStatus({ enabled: false });
     vi.spyOn(api, 'post').mockRejectedValue(new Error('Two-factor is disabled on this server'));
     const { user } = renderAsAdmin(<TwoFactorSection />);
-    await user.click(await enabledButton('Set up two-factor'));
+    await startSetup(user, { waitForPanel: false });
     expect(await screen.findByText('Two-factor is disabled on this server')).toBeInTheDocument();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // The password step stays open with the reason in it (review of #765); no set-up panel opens without a key.
+    expect(screen.getByRole('dialog', { name: 'Set up two-factor' })).toBeInTheDocument();
+    expect(screen.queryByAltText('Two-factor setup QR code')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Enter the 6-digit code to confirm')).not.toBeInTheDocument();
   });
 
   test('confirming trims the typed code, and the backup codes are then shown ONCE', async () => {
@@ -92,7 +106,7 @@ describe('TwoFactorSection', () => {
       .mockResolvedValueOnce(SETUP)
       .mockResolvedValueOnce({ backup_codes: CODES });
     const { user } = renderAsAdmin(<TwoFactorSection />);
-    await user.click(await enabledButton('Set up two-factor'));
+    await startSetup(user);
 
     api.get.mockResolvedValue({ enabled: true, backup_codes_remaining: 4 });
     await user.type(screen.getByLabelText('Enter the 6-digit code to confirm'), '  123456  ');
@@ -111,7 +125,7 @@ describe('TwoFactorSection', () => {
     withStatus({ enabled: false });
     vi.spyOn(api, 'post').mockResolvedValueOnce(SETUP).mockResolvedValueOnce({ backup_codes: CODES });
     const { user } = renderAsAdmin(<TwoFactorSection />);
-    await user.click(await enabledButton('Set up two-factor'));
+    await startSetup(user);
     await user.type(screen.getByLabelText('Enter the 6-digit code to confirm'), '123456');
     await user.click(screen.getByRole('button', { name: 'Turn on' }));
     await screen.findByText(CODES[0]);
@@ -154,7 +168,7 @@ describe('TwoFactorSection', () => {
     withStatus({ enabled: false });
     vi.spyOn(api, 'post').mockResolvedValueOnce(SETUP);
     const { user } = renderAsAdmin(<TwoFactorSection />);
-    await user.click(await enabledButton('Set up two-factor'));
+    await startSetup(user);
     await screen.findByText(SETUP.secret);
     await user.click(screen.getByRole('dialog').parentElement);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -166,7 +180,7 @@ describe('TwoFactorSection', () => {
       .mockResolvedValueOnce(SETUP)
       .mockRejectedValueOnce(new Error('That code is not right'));
     const { user } = renderAsAdmin(<TwoFactorSection />);
-    await user.click(await enabledButton('Set up two-factor'));
+    await startSetup(user);
     await user.type(screen.getByLabelText('Enter the 6-digit code to confirm'), '000000');
     await user.click(screen.getByRole('button', { name: 'Turn on' }));
 
@@ -186,7 +200,7 @@ describe('TwoFactorSection', () => {
     // stub, so a clipboard defined earlier is silently replaced and the spy is never called — the
     // assertion then fails against perfectly good code.
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-    await user.click(await enabledButton('Set up two-factor'));
+    await startSetup(user);
     await user.type(screen.getByLabelText('Enter the 6-digit code to confirm'), '123456');
     await user.click(screen.getByRole('button', { name: 'Turn on' }));
     await screen.findByText(CODES[0]);
@@ -208,7 +222,7 @@ describe('TwoFactorSection', () => {
     vi.spyOn(api, 'post').mockResolvedValueOnce(SETUP).mockResolvedValueOnce({ backup_codes: CODES });
     const { user } = renderAsAdmin(<TwoFactorSection />);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }); // after setup(), as above
-    await user.click(await enabledButton('Set up two-factor'));
+    await startSetup(user);
     await user.type(screen.getByLabelText('Enter the 6-digit code to confirm'), '123456');
     await user.click(screen.getByRole('button', { name: 'Turn on' }));
     await screen.findByText(CODES[0]);

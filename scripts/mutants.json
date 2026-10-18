@@ -13479,7 +13479,7 @@
     "replace": "/* #563 mutant: guard removed */",
     "expect": "killed",
     "tests": ["input-validation.test.js"],
-    "note": "/setup needs only a session, not the password: without this guard a signed-in device could swap in its own second factor. Had no test before #563's validation half."
+    "note": "Without this guard a signed-in device could swap in its own second factor. Had no test before #563's validation half. Since the review of #765 set-up also needs the password and its rotation is a compare-and-set, so the test kills this by the 'already on' TEXT given before any password check."
   },
   {
     "label": "#563 MFA: /me/mfa/enable regenerates the backup codes of an account that already has MFA on",
@@ -21578,8 +21578,8 @@
   {
     "label": "#765 mfa setup rotates the secret even when one is pending",
     "file": "backend/src/routes/auth.js",
-    "find": "return { user, resume: !!resumablePendingSecret(user) && !restart };",
-    "replace": "return { user, resume: false };",
+    "find": "const resume = !!resumablePendingSecret(user) && !restart;",
+    "replace": "const resume = false;",
     "expect": "killed",
     "tests": ["mfa-setup-resume.test.js"],
     "namePattern": "a second call returns the SAME secret"
@@ -21587,20 +21587,20 @@
   {
     "label": "#765 mfa setup restart flag does not rotate",
     "file": "backend/src/routes/auth.js",
-    "find": "return { user, resume: !!resumablePendingSecret(user) && !restart };",
-    "replace": "return { user, resume: !!resumablePendingSecret(user) };",
+    "find": "const resume = !!resumablePendingSecret(user) && !restart;",
+    "replace": "const resume = !!resumablePendingSecret(user);",
     "expect": "killed",
     "tests": ["mfa-setup-resume.test.js"],
     "namePattern": "restart: true returns a DIFFERENT secret"
   },
   {
-    "label": "#765 mfa setup resume hands the pending secret back without the password",
+    "label": "#765 mfa setup skips the password (a borrowed session can start, plant or read a secret)",
     "file": "backend/src/routes/auth.js",
     "find": "if (!(await passwordHash.compare(String(req.body?.password || ''), user.password_hash))) {",
     "replace": "if (false) {",
     "expect": "killed",
     "tests": ["mfa-setup-resume.test.js"],
-    "namePattern": "no password, or a wrong one"
+    "namePattern": "a first start without the right password"
   },
   {
     "label": "#765 a password change keeps a pending two-factor set-up",
@@ -21628,5 +21628,14 @@
     "expect": "killed",
     "tests": ["mfa-setup-resume.test.js"],
     "namePattern": "two-factor switched on meanwhile"
+  },
+  {
+    "label": "#765 mfa setup rotation replaces an ACTIVE secret switched on during the password check",
+    "file": "backend/src/routes/auth.js",
+    "find": "mfa_secret = ?, mfa_last_step = NULL WHERE id = ? AND mfa_enabled = 0",
+    "replace": "mfa_secret = ?, mfa_last_step = NULL WHERE id = ?",
+    "expect": "killed",
+    "tests": ["mfa-setup-resume.test.js"],
+    "namePattern": "two-factor switched on during a START"
   }
 ]

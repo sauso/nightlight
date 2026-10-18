@@ -809,34 +809,13 @@ router.get('/me/mfa', requireAuth, (req, res) => {
 // The pending secret a set-up may be RESUMED with (#765): two-factor off, a secret stored, and not a legacy
 // (pre-0.26.0, 80-bit) one. A legacy pending secret is never handed back (review of #765): continuing it would
 // keep a weak key alive through the very set-up that should replace it. The next set-up discards it and makes a
-// 160-bit one instead, which reveals nothing, so that path needs no password.
+// 160-bit one instead.
 function resumablePendingSecret(u) {
   return u && !u.mfa_enabled && u.mfa_secret && !isLegacySecret(u.mfa_secret) ? u.mfa_secret : null;
 }
 
-// Which path a /me/mfa/setup request takes, decided ONCE, from one read of the row, by the limiter below, and
-// then used by the handler: so a request that checks a password has always been counted, whatever the row does
-// in between. (Two reads could disagree, and the handler then check a password the limiter did not count.)
-function planMfaSetup(req) {
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-  // Strictly boolean true: a string "false" or 1 from a sloppy client must not rotate (or fail to) by accident.
-  const restart = req.body?.restart === true;
-  return { user, resume: !!resumablePendingSecret(user) && !restart };
-}
-
-// A resume checks the account password, so it is a guess at that password and spends the SAME budget as
-// /me/password and /me/mfa/disable: the same limiter instances (sessionActionLimiter), so one budget per source
-// and account for guessing this password, whichever of the three routes is used. Only a resume is counted: a
-// start or a restart checks no password and does no hashing, so there is nothing to guess and nothing to
-// throttle, and counting it would only spend the person's own budget on taps that guessed nothing.
-function limitMfaSetupResume(req, res, next) {
-  const plan = planMfaSetup(req);
-  res.locals.mfaSetupPlan = plan;
-  if (!plan.resume) return next();
-  const [accountLimiter, clientLimiter] = sessionActionLimiter;
-  accountLimiter(req, res, (err) => (err ? next(err) : clientLimiter(req, res, next)));
-}
-
+// The set-up route's answers after an await (the first check keeps its literal text, the same words).
+const SETUP_ALREADY_ON = 'Two-factor is already on. Turn it off first to re-enrol.';
 // The answer when the row changed under an in-flight set-up (see the end of the route). Not "already on": the
 // account is still off, so that text would send the person looking for a switch that is not there.
 const SETUP_CHANGED_MEANWHILE = 'The set-up was changed meanwhile, on this or another device. Try again.';
@@ -856,28 +835,47 @@ const WRONG_CONFIRMATION_PASSWORD = 'Password is incorrect';
 // (the explicit "Start over"). The enable route's secret-bound compare-and-set is untouched, so an enable that
 // began before a start-over still fails.
 //
-// A RESUME NEEDS THE ACCOUNT PASSWORD (review of #765, verified by running). Handing the pending secret back
-// does expose something new: ANY live session of the account (a borrowed unlocked phone, a forgotten signed-in
-// browser) could read it, and once the owner confirms the set-up as normal, that device can make valid codes
-// for the second factor it was meant to stop. Turning two-factor off asks for the password for the same reason.
-// A start (nothing pending) and a restart stay passwordless, exactly as before #765: they mint a NEW secret, so
-// nobody learns the one the owner is setting up, and a borrower's restart is visible (the owner's set-up stops
-// confirming and the card offers Continue/Start over), which is how every set-up behaved before this change.
-// Wrong or missing password: 400, not 401 (#697: a mistyped confirmation must not sign the person out), and the
-// secret is in no error.
-router.post('/me/mfa/setup', requireAuth, limitMfaSetupResume, asyncHandler(async (req, res) => {
-  const { user, resume } = res.locals.mfaSetupPlan;
+// EVERY CALL NEEDS THE ACCOUNT PASSWORD: a first start, a resume and a restart alike (review of #765, owner's
+// decision). Idempotency is what made this necessary. Once a pending secret can be handed back, any live session
+// of the account (a borrowed unlocked phone, a forgotten signed-in browser) could either READ it (call set-up and
+// get the owner's pending key) or PLANT one (start or restart, so the secret is one it knows, and wait: the
+// owner's "Continue set-up" then shows that planted key, the owner scans it and confirms). Either way that device
+// can later make valid codes for the second factor that was meant to stop it. Before #765 neither worked, because
+// the owner's next set-up always replaced whatever was pending; a password on the resume alone closed the read
+// but not the plant (verified in review). Turning two-factor off asks for the password for the same
+// borrowed-device reason. Wrong or missing password: 400, not 401 (#697: a mistyped confirmation must not sign the
+// person out), and the secret is in no error. A missing password used to be accepted: an API client calling
+// set-up now has to send one.
+//
+// sessionActionLimiter: the same limiter instances as /me/password and /me/mfa/disable, so guessing this
+// account's password has ONE budget per source and account whichever of the three routes is used. Every set-up
+// call is counted (each one checks the password), including the "already on" refusal, as disable counts its own.
+router.post('/me/mfa/setup', requireAuth, sessionActionLimiter, asyncHandler(async (req, res) => {
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (user.mfa_enabled) return res.status(400).json({ error: 'Two-factor is already on. Turn it off first to re-enrol.' });
+  // The same compare /me/mfa/disable uses (the worker-thread bcrypt of #548).
+  if (!(await passwordHash.compare(String(req.body?.password || ''), user.password_hash))) {
+    return res.status(400).json({ error: WRONG_CONFIRMATION_PASSWORD });
+  }
+  // After the await and before the write below (see signInEnded).
+  if (signInEnded(req, res)) return;
+  // Strictly boolean true: a string "false" or 1 from a sloppy client must not rotate (or fail to) by accident.
+  const restart = req.body?.restart === true;
+  // Decided from `user`, read before the compare; anything that changed meanwhile is caught below, by the
+  // compare-and-set on a rotation and by the re-read before the answer on a resume.
+  const resume = !!resumablePendingSecret(user) && !restart;
   let secret;
   if (resume) {
-    // The same compare /me/mfa/disable uses (the worker-thread bcrypt of #548).
-    if (!(await passwordHash.compare(String(req.body?.password || ''), user.password_hash))) {
-      return res.status(400).json({ error: WRONG_CONFIRMATION_PASSWORD });
-    }
     secret = user.mfa_secret;
   } else {
     secret = generateSecret();
-    db.prepare('UPDATE users SET mfa_secret = ?, mfa_last_step = NULL WHERE id = ?').run(secret, user.id);
+    // Compare-and-set on `mfa_enabled = 0`: the password check above yields, and two-factor may have been
+    // switched on meanwhile. An unconditional write would replace the ACTIVE secret, and the owner's
+    // authenticator would then fail every sign-in at the code step (a lockout); this refuses instead.
+    const stored = db
+      .prepare('UPDATE users SET mfa_secret = ?, mfa_last_step = NULL WHERE id = ? AND mfa_enabled = 0')
+      .run(secret, user.id);
+    if (stored.changes !== 1) return res.status(400).json({ error: SETUP_ALREADY_ON });
   }
   const uri = keyUri(user.username, secret, appName());
   const qr = await qrDataUrl(uri);
@@ -889,7 +887,7 @@ router.post('/me/mfa/setup', requireAuth, limitMfaSetupResume, asyncHandler(asyn
   // a device signed out during the awaits gets no secret.
   if (signInEnded(req, res)) return;
   const now = db.prepare('SELECT mfa_enabled, mfa_secret FROM users WHERE id = ?').get(user.id);
-  if (!now || now.mfa_enabled) return res.status(400).json({ error: 'Two-factor is already on. Turn it off first to re-enrol.' });
+  if (!now || now.mfa_enabled) return res.status(400).json({ error: SETUP_ALREADY_ON });
   if (now.mfa_secret !== secret) return res.status(400).json({ error: SETUP_CHANGED_MEANWHILE });
   res.json(resume ? { secret, otpauth_uri: uri, qr, resumed: true } : { secret, otpauth_uri: uri, qr });
 }));

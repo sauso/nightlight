@@ -715,7 +715,8 @@ describe('MFA enrolment', () => {
 
   test('★ enable requires a code that verifies against the pending secret', async () => {
     const token = await loginAs('alice');
-    const setup = await post('/me/mfa/setup', {}, token);
+    // Every set-up call needs the account password (review of #765).
+    const setup = await post('/me/mfa/setup', { password: PASSWORD }, token);
     assert.equal(setup.status, 200, JSON.stringify(setup.body));
     const wrong = await post('/me/mfa/enable', { code: '000000' }, token);
     assert.notEqual(wrong.status, 200, 'MFA was enabled with a wrong code');
@@ -735,7 +736,7 @@ describe('gaps found by review — the success paths nobody reached', () => {
     // code correctly but never persists the consumed list — making it infinitely replayable — left
     // the suite green. That is the whole point of a one-time code.
     const token = await loginAs('alice');
-    await post('/me/mfa/setup', {}, token);
+    await post('/me/mfa/setup', { password: PASSWORD }, token);
     const secret = db.prepare('SELECT mfa_secret FROM users WHERE id = ?').get('u-admin').mfa_secret;
     const enable = await post('/me/mfa/enable', { code: totp(secret) }, token);
     assert.equal(enable.status, 200, JSON.stringify(enable.body));
@@ -761,7 +762,7 @@ describe('gaps found by review — the success paths nobody reached', () => {
     // F6: the only "enable" case asserted the wrong-code rejection, so everything after the guard —
     // including generating and storing the backup codes — was untested.
     const token = await loginAs('alice');
-    await post('/me/mfa/setup', {}, token);
+    await post('/me/mfa/setup', { password: PASSWORD }, token);
     const secret = db.prepare('SELECT mfa_secret FROM users WHERE id = ?').get('u-admin').mfa_secret;
     const res = await post('/me/mfa/enable', { code: totp(secret) }, token);
     assert.equal(res.status, 200, JSON.stringify(res.body));
