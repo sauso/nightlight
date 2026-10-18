@@ -9,7 +9,7 @@ which is which.
 | **Automatic clips** | A motion/sound **alert** | Yes — it's an alert | 14 days / 5 GB (both configurable) | On the alert, in the Alerts feed |
 | **Wake clips** | Your child **waking up** | **No — silent by design** | 14 days (configurable) | On the wake-up, in the night's sleep detail |
 | **On-demand recordings** | You pressing **Record** | No | **Forever, until you delete them** | The **Recordings** card on the child's page |
-| **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days — **or forever once you judge one** | The morning review on the child's page |
+| **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days — **or forever once you judge one** (either way, gone when the camera or child is removed) | The morning review on the child's page |
 
 All three are configured under **Settings → Recording** (admin only), and all three write to the same
 place on disk — see [Where recordings are stored](#where-recordings-are-stored).
@@ -39,6 +39,31 @@ re-encode); only the clip's short audio track is re-encoded, once.
 | Post-roll (seconds) | 15 | 5–120 | How much *after* the trigger is included |
 | Keep clips for (days) | 14 | 0–365 | 0 = no day limit |
 | Storage cap (GB) | 5 | 0–2000 | 0 = no size limit; oldest deleted first |
+
+**Changing a limit can ask first.** Saving a different **Keep clips for** or **Storage cap** runs the
+cleanup straight away, and the cleanup applies *both* limits, so the clips outside them are deleted as soon
+as you press **Save changes**. That includes raising one limit: if the stored clips already exceed the other
+limit (for example the storage cap), the cleanup deletes them at that moment. So Nightlight does not judge
+by whether the number went up or down. When a limit differs from what is stored, it asks the server what the
+save would delete, and when that is more than zero clips it shows a **Delete saved clips?** box with how many
+alert clips will go, about how much space they use, and the date of the oldest. It saves only when you press
+**Save and delete clips**; if nothing would be deleted it just saves. The values it checked are exactly the
+values it saves, and the two limit fields are locked while the check or the box is open. The alerts and their
+pictures stay; only the video goes. The count is as of the moment you pressed Save and the size is "about": a
+new clip can arrive before you confirm. If the check itself fails you are still asked, without a number. If
+clip storage is not available at that moment (the unmapped-volume warning below) nothing can be deleted yet:
+the box says so, shows no count, and the limits take effect on the first cleanup after storage returns.
+Each field accepts whole numbers only (digits, no `1e2`, no decimals) within the range above; anything else
+is refused on the page and not sent. Only a limit you actually changed is sent, so a settings page left open
+in an old tab cannot overwrite a limit changed elsewhere, or trigger a cleanup, by saving something unrelated.
+The numbers come from the same queries the real cleanup uses (an
+admin-only read, `GET /api/settings/clip-retention-preview`, which changes no clips or settings and returns
+no file names).
+
+| | Asks before saving? | When it is applied |
+|---|---|---|
+| **Keep clips for** and **Storage cap** (alert clips) | Yes, when the check says the save would delete clips | Straight away on Save, then every 15 minutes |
+| **Keep wake clips for** | **No** | On the wake-clip cleanup's own schedule, not on Save |
 
 Alerts that have a clip show a **play button** on their thumbnail; tapping opens the clip in a player
 with a **Download** button. In the mobile app, Download saves the video into your phone's Downloads
@@ -306,14 +331,9 @@ in the **Recordings** card as a greyed entry reading *Couldn't be saved*, rather
 Tapping it explains what happened and, for an admin, offers to remove it (a caregiver is told that an
 admin can). There's nothing to play, so it has no thumbnail and no play button.
 
-⚠️ **Deleting a child deletes its recordings, its wake clips and its timelapses** — files and all,
-including frames already collected for a timelapse that hasn't been assembled yet. Recordings have no
-automatic retention, so they would otherwise sit on disk forever with nothing left able to list or
-remove them: the child page is the only place they appear. **Save anything you want to keep before
-removing a child**, and note that only an **admin** can remove one.
-
-Alert clips are the exception — they belong to the *camera*, not the child, so they survive and are
-swept by the normal retention rules.
+⚠️ **Removing a child deletes everything for them, and removing a camera deletes everything for it** — files
+and all. What exactly goes is listed in [Removing a child or a camera](#removing-a-child-or-a-camera). **Save
+anything you want to keep first**, and note that only an **admin** can remove either.
 
 **Removing a failed one doesn't ask twice** (admin only, like any delete). Deleting a recording that *worked* takes two taps — a
 confirmation, because the video is gone for good and there's no retention sweep that would have removed
@@ -410,6 +430,56 @@ Each kind ages out differently — this is the part most worth reading twice:
 
 There is also a **minimum-free-space guard** across all three: if the volume is nearly full, new video
 is skipped, so recording can never be the thing that fills your disk.
+
+### Removing a child or a camera
+
+⚠️ **This is not retention, and nothing here is kept.** Removing a child, or a camera, deletes everything
+that belongs to it, rows and files, and **cannot be undone**. The Remove dialog lists these before you
+confirm and asks "Are you sure?". The two are **different**, and so is what each leaves behind:
+
+| | Removing a **child** | Removing a **camera** |
+|---|---|---|
+| Sleep nights and morning reviews (with their notes) | Deleted | Each night's saved summary, and the review's answers and notes, are kept (they belong to the child). **The night's detail and the review's photos are lost** for every night the camera recorded: both are built from its activity history and bed transitions, which go |
+| Bed transitions and their snapshot photos | Deleted, for the cameras assigned to the child | Deleted |
+| Activity history (the per-minute motion and sound the sleep summary is built from) | Deleted, for the cameras assigned to the child | Deleted |
+| Recordings and wake clips (video files included) | Deleted | Deleted |
+| Timelapses, and frames collected for a night not yet assembled | Deleted | **Kept** (they belong to the child), including the ones made from this camera's frames |
+| Alerts, with their clips and snapshots | **Kept** (they belong to the camera) | Deleted |
+| Camera event log and temperature and humidity history | **Kept** (they belong to the camera) | Deleted |
+| The child's profile, photo and sleep-tracking settings | Deleted | Not applicable |
+| The camera itself | **Kept**, and becomes unassigned | Deleted, with its stream and its clip ring |
+
+Things that behave in ways you might not expect:
+
+- **Judged bed-transition frames go too.** They are kept forever by the 45-day sweep, but that is a
+  retention rule, and removing the child or camera is not retention.
+- **A camera that was moved from one child to another keeps one history for both.** Bed transitions and
+  activity samples record the camera, not the child, so removing the *current* child clears all of the
+  camera's history, **including another child's**: the nights it recorded for whoever had it before keep
+  their saved summary and review notes, but lose their detail and review photos, exactly as if the camera
+  had been removed. Known limit, not fixable without recording the child on every sample.
+- **Alerts are the camera's, not the child's.** Removing a child keeps the alert clips and alert photos
+  its cameras recorded; they go when their retention removes them, or when the camera is removed. The
+  child's Remove dialog says so.
+- **Removing is refused while a camera is recording.** If the camera, or any camera assigned to the child,
+  has an on-demand recording running, the dialog says "Stop the recording first" and nothing is deleted.
+  A clip or photo that is *still being saved* when its child or camera is removed (a recording already
+  stopped, a wake clip, an alert clip or photo, a bed-transition frame) deletes its own file when it
+  finishes, because nothing is left to file it under.
+- **If something cannot be deleted, nothing further is.** A file that is already gone is fine. Any other
+  failure (a permissions problem on the data folder, say) stops the removal, the dialog shows the reason,
+  the child or camera is still there, and you can retry. Files are removed before the entries that name
+  them, so a failed removal never leaves an entry pointing at a deleted file. It can leave a partly emptied
+  child or camera: some of its history already deleted.
+- **Only files inside Nightlight's own data and clips folders are ever deleted**, whatever a stored path
+  says. If `timelapse`, `.ring` or `.timelapse-frames` inside the clips folder is a link to a folder
+  somewhere else, removing a child or camera is **refused** before anything is deleted or stopped (the
+  dialog says why). Make it a real folder, or point the whole clips folder (`CLIPS_DIR`) at the other place,
+  and retry. A camera whose removal fails part-way (a file it could not delete) is restarted straight away.
+- **Folders are swept only for ids Nightlight made.** Every child and camera gets a random id (a UUID), and
+  its folders in the clips folder are named after it. A child or camera with any other id (from an edited
+  or imported database) still has its entries, and every file they name, deleted; files nothing names in
+  its folders are left. Known limit: this is what stops an id like `timelapse` emptying a shared folder.
 
 ### Who can delete
 

@@ -38,7 +38,8 @@
 //   - Decisions made INSIDE a handler are not gates and are not pinned: DELETE /api/auth/sessions/:id
 //     (your own session, or any if admin), GET /api/children/:id/sleep/:date?store=1 (admin-only store),
 //     PUT /api/children/:id (a caregiver may change a child's name, birthday, colour and photo, but not
-//     track_sleep, the sleep window or the primary camera: #542/#655, children-role-fields.test.js), and the admin-shaped responses
+//     track_sleep, the sleep window, the primary camera or the two sleep report switches sleep_report_enabled and
+//     sleep_report_show_name: #542/#655, children-role-fields.test.js; #397/#398, sleep-report-prefs.test.js), and the admin-shaped responses
 //     of GET /api/cameras and GET /api/settings. Most have their own tests (auth-routes.test.js,
 //     recompute-night.test.js, settings-exposure.test.js); the admin-vs-caregiver shape of the GET
 //     /api/cameras LIST has none that was found when this file was written (2026-10-09). PUT
@@ -122,7 +123,7 @@ const ROUTE_GATES = {
   // /api/children — `router.use(requireAuth)` gates the whole router; add and delete add requireAdmin.
   'GET /api/children': SIGNED_IN,
   'POST /api/children': ADMIN, //                        #542: a new child starts with sleep tracking on
-  'PUT /api/children/:id': SIGNED_IN, //                 name/colour/photo; tracking, window + primary camera refused in the handler (#542, #655)
+  'PUT /api/children/:id': SIGNED_IN, //                 name/colour/photo; tracking, window, primary camera + sleep report switches refused in the handler (#542, #655, #397/#398)
   'GET /api/children/:id/sleep/live': SIGNED_IN,
   'GET /api/children/:id/sleep/insights': SIGNED_IN,
   'GET /api/children/:id/sleep': SIGNED_IN,
@@ -168,6 +169,7 @@ const ROUTE_GATES = {
   'GET /api/settings/mqtt': ADMIN,
   'GET /api/settings/mqtt/status': ADMIN,
   'GET /api/settings/clip-storage': ADMIN,
+  'GET /api/settings/clip-retention-preview': ADMIN,
   'PUT /api/settings': ADMIN,
 
   'GET /api/logs': ADMIN,

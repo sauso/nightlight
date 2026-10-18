@@ -301,12 +301,18 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
             : `No one in the bed for this night. The cameras watched the whole window `
               + `(${night.coverage_minutes} minutes covered) and saw no one sleeping here, so there’s no sleep to report.`}
         </div>
-        {/* A flagged night MUST stay reachable here, or the flag could never be taken back — an `empty`
-            night otherwise returns above `ReviewNightButton` (see the `ok`-night render further down)
-            and has no way into the review at all. Deliberately NOT shown for a genuine detector-empty
-            night: that is the unrelated "reverse error" (detector says empty, child was really there),
-            which has no correction path anywhere yet — out of scope here, tracked separately. */}
-        {night.corrected && (
+        {/* The way into the review on an `empty` night, which otherwise returns above the `ok`-night render
+            and its `ReviewNightButton`. Two jobs. A flagged night MUST stay reachable here, or the flag could
+            never be taken back. And a detector-empty night is the "reverse error" (the detector says empty,
+            a child was really there), which #355 made correctable: giving it both an asleep and a wake-up
+            time turns it into a scored night (sleepReviews.js, asScoredFromEmpty). Before #355 this was shown
+            only on a `corrected` night, so that correction was unreachable from the app (PR #721 review): the
+            morning card never asks about an empty night (pendingReview offers `ok` nights only, on purpose),
+            and this was the one other way in. The review page opens on "Add the times" for a night with no
+            times, so both are offered. Same rule as on an `ok` night: not while the night is in progress
+            (nothing is promoted until it is over). Deliberately not added to a morning prompt for every
+            empty night. */}
+        {!night.in_progress && (
           <div style={{ padding: '0 14px 14px' }}>
             <ReviewNightButton childId={childId} date={date} corrected={night.corrected} />
           </div>
@@ -779,6 +785,24 @@ function SleepInsights({ childId, tempUnit, childName }) {
 
   const warm = ins.warmer;
   const cool = ins.cooler;
+
+  // #365: the server withholds the verdict until BOTH the cooler and the warmer group have enough nights.
+  // Show the counts and no comparison columns: two averages from one or two nights each would read as a
+  // finding, which is the thing being held back. The target comes from the server (min_group_nights), so
+  // the number is never written in two places.
+  if (ins.verdict === 'not_enough_nights') {
+    const need = ins.min_group_nights;
+    return (
+      <div className="card sleep-insight">
+        <div className="sleep-insight__title"><Sparkles size={15} aria-hidden="true" /> Sleep &amp; room temperature</div>
+        <div className="sleep-insight__body">
+          Not enough nights yet to compare {name}’s wake-ups on warmer vs cooler nights. It needs {need} of each:
+          so far {cool?.nights ?? 0} cooler and {warm?.nights ?? 0} warmer.
+        </div>
+      </div>
+    );
+  }
+
   let headline;
   if (ins.verdict === 'warm_more_wakes') headline = `Warmer nights tend to mean more wake-ups for ${name}.`;
   else if (ins.verdict === 'warm_fewer_wakes') headline = `Warmer nights actually saw fewer wake-ups for ${name}.`;

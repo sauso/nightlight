@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawnChild } from './childEnv.js';
 import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
@@ -51,7 +51,7 @@ function rmrf(dir) {
 
 function runFfmpeg(args) {
   return new Promise((resolve, reject) => {
-    const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    const proc = spawnChild('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
     const err = [];
     proc.stderr.on('data', (c) => err.push(c));
     proc.on('error', reject);
@@ -230,21 +230,10 @@ export function discardTimelapseFrames(childId, nightDate) {
   return frames.length;
 }
 
-// Every frame this child has on disk, assembled or not — for deleting the child itself (issue #259).
-//
-// ⚠️ NOT THE SAME AS deleting their `timelapses` rows, and that gap was found by adversarial review of
-// PR #284. Frames are sampled every 2 minutes into FRAMES_ROOT/<childId>/<nightDate>/ while a sleep
-// window is open, and a `timelapses` row only exists once the night is ASSEMBLED at the end of it. So
-// deleting a child mid-night leaves a scratch directory that nothing ever touches again: the only
-// things that clean it are assembleTimelapse's success path and discardTimelapseFrames, both driven by
-// the nightly job for a child that no longer exists. Same leak as #259, one directory along.
-export function discardAllTimelapseFrames(childId) {
-  const dir = path.join(FRAMES_ROOT, safeSeg(childId));
-  const nights = safeReaddir(dir).length;
-  rmrf(dir);
-  if (nights) logger.info(`[timelapse] child ${childId}: discarded frames for ${nights} night(s)`);
-  return nights;
-}
+// Deleting a child's frames (all nights, assembled or not: issue #259, PR #284) is NOT done here any more: it
+// moved to lib/entityPurge.js (#719 review), because rmrf above swallows every error, so an unremovable frames
+// folder let the child be deleted while a photo of the bed every 2 minutes stayed on disk. The purge's sweep
+// throws instead, and stops before the child's row goes.
 
 // Delete one timelapse: the row, the MP4 and its thumbnail. Admin-only at the route. The files are
 // resolved through the same CLIPS_DIR jail as playback, so a tampered stored path can't escape it.

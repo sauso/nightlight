@@ -70,7 +70,7 @@ function mount({ cam = CAM, isNew = false, from = null } = {}) {
         <Route path="*" element={<div>elsewhere</div>} />
       </Routes>
     </>,
-    { cameras: cam ? [cam] : [], kids: KIDS, route: from ? { pathname, state: { from } } : pathname }
+    { cameras: cam ? [cam] : [], camerasLoaded: !!cam, kids: KIDS, route: from ? { pathname, state: { from } } : pathname }
   );
 }
 
@@ -305,6 +305,35 @@ describe('★ an unreachable camera can still be saved', () => {
     expect(second).toEqual({ ...first, force: true });
   });
 
+  test('★★ after Save anyway ADDS a camera, its page shows Save changes and no stale warning (#496)', async () => {
+    // The page stays mounted from /cameras/new to /cameras/<new id> (same component, same position in the route
+    // table), so the state set by the failed first attempt used to survive onto the new camera's page.
+    const created = { ...CAM, id: 'cam-new', name: 'Playroom' };
+    postSpy = vi.spyOn(api, 'post')
+      .mockRejectedValueOnce(unreachable())
+      .mockResolvedValue({ id: 'cam-new' });
+    const { user } = renderAsAdmin(
+      <>
+        <Probe />
+        <Routes>
+          <Route path="/cameras/new" element={<CameraSettings />} />
+          <Route path="/cameras/:id" element={<CameraSettings />} />
+        </Routes>
+      </>,
+      { cameras: [CAM, created], kids: KIDS, route: '/cameras/new' }
+    );
+    await user.type(await screen.findByLabelText('Name'), 'Playroom');
+    await user.type(screen.getByLabelText('Camera IP address'), '10.0.0.9');
+    await user.click(screen.getByRole('button', { name: 'Add camera' }));
+    await user.click(await screen.findByRole('button', { name: 'Save anyway' }));
+
+    expect(await screen.findByText('at /cameras/cam-new')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Save changes' })).toBeTruthy();
+    expect(screen.queryByText(/Couldn't reach the camera stream/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save anyway' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry save' })).toBeNull();
+  });
+
   test('an ordinary failure is shown as an error, with no override offered', async () => {
     // Only `needsConfirm` earns the override. Offering "Save anyway" for, say, a duplicate name would
     // invite someone to force a save that cannot succeed.
@@ -501,12 +530,59 @@ describe('removing a camera', () => {
     // itself the deletion.
     const { user } = mount();
     await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
-    expect(await screen.findByText(/This stops its stream and deletes it/)).toBeTruthy();
+    expect(await screen.findByText(/This stops its stream and permanently deletes everything/)).toBeTruthy();
     expect(delSpy).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByText(/This stops its stream/)).toBeNull());
     expect(delSpy).not.toHaveBeenCalled();
+  });
+
+  // ★ #554. The server now deletes everything recorded by the camera, files included, so the dialog has
+  // to say so: the old copy ("deletes it from Nightlight ... you can always add it again") promised that
+  // adding it back was a full undo, which is no longer true. Each category is asserted on its own, because
+  // a single regex over the paragraph would stay green if one line of the list were dropped.
+  test('★ #554 the dialog says plainly that everything for the camera is deleted, lists what, and asks', async () => {
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/permanently deletes everything for this camera/)).toBeTruthy();
+    const items = within(dialog).getAllByRole('listitem').map((li) => li.textContent);
+    expect(items).toHaveLength(5);
+    expect(items.join('|')).toMatch(/bed transitions and their snapshot photos/);
+    expect(items.join('|')).toMatch(/activity history/);
+    expect(items.join('|')).toMatch(/alerts, with their clips and snapshots/);
+    expect(items.join('|')).toMatch(/recordings and wake clips, including the video files/);
+    expect(items.join('|')).toMatch(/event log and temperature and humidity history/);
+    expect(within(dialog).getByText('Are you sure?')).toBeTruthy();
+    expect(within(dialog).getByText(/none of this comes back/)).toBeTruthy();
+    // #719 review: the nights it recorded are the child's and keep their summary and timelapse, but not their
+    // detail or photos.
+    expect(within(dialog).getByText(/Nights it recorded keep their saved summary and their timelapse but lose their detail and their morning-review photos/)).toBeTruthy();
+    expect(delSpy).not.toHaveBeenCalled();
+  });
+
+  // ★ #719 review. The server refuses with a 409 and a reason (a 5xx body is stripped by Cloudflare). Through the
+  // REAL api.js (only fetch is stubbed), so the seam is tested: the dialog must show the server's own words, never
+  // "Request failed (409)".
+  test('★ #719 a refused delete (409) shows the server\'s reason inside the dialog', async () => {
+    const reason = 'This camera is recording. Stop the recording first, then remove the camera.';
+    delSpy.mockRestore();
+    const fetchSpy = vi.fn(async () => ({ ok: false, status: 409, text: async () => JSON.stringify({ error: reason }) }));
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      const { user, camerasValue } = mount();
+      await user.click(await screen.findByRole('button', { name: 'Remove camera' }));
+      await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
+      const dialog = screen.getByRole('dialog');
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent(reason);
+      expect(within(dialog).queryByText(/Request failed/)).toBeNull();
+      expect(fetchSpy).toHaveBeenCalledWith('/api/cameras/cam-1', expect.objectContaining({ method: 'DELETE' }));
+      expect(camerasValue.refresh).not.toHaveBeenCalled();
+      expect(screen.getByText('at /cameras/cam-1')).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   test('confirming deletes it, refreshes the list and returns to the Cameras tab', async () => {

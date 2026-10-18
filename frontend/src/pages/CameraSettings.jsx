@@ -12,6 +12,9 @@ import DetectionRow from '../components/DetectionRow.jsx';
 import CameraReportButton from '../components/CameraReportButton.jsx';
 import RecordingScopePanel from '../components/RecordingScopePanel.jsx';
 import { useDetectionSave, retry } from '../lib/detectionSaves.js';
+import { loadState } from '../lib/loadState.js';
+import LoadFailed from '../components/LoadFailed.jsx';
+import NotFound from './NotFound.jsx';
 import { TITLES as DETECTION_TITLES } from './DetectionSettings.jsx';
 
 const minToHHMM = (m) => `${String(Math.floor((m || 0) / 60)).padStart(2, '0')}:${String((m || 0) % 60).padStart(2, '0')}`;
@@ -38,7 +41,7 @@ export default function CameraSettings() {
   const isNew = !id || id === 'new';
   const navigate = useNavigate();
   const location = useLocation();
-  const { kids: children, cameras, refresh } = useCameras();
+  const { kids: children, cameras, loaded: camerasLoaded, error: camerasError, refresh } = useCameras();
   const cam = isNew ? null : cameras.find((c) => c.id === id);
 
   const draftKey = useDraftKey(isNew ? 'camera:new' : `camera:${id}`);
@@ -59,6 +62,9 @@ export default function CameraSettings() {
   const [confirmMsg, setConfirmMsg] = useState('');
   const [removing, setRemoving] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
+  // Set once this camera has been deleted, so the render that follows the list refresh (just before we
+  // navigate away) does not flash "Page not found" for a camera the person just removed on purpose.
+  const removedRef = useRef(false);
   // The Remove dialog's own failure, rendered inside it (#378): pageError is a banner in <main>, which sits
   // under the modal overlay, so a refused remove used to look like the button did nothing.
   const [removeError, setRemoveError] = useState('');
@@ -201,6 +207,12 @@ export default function CameraSettings() {
       // camera this same component stays mounted under /cameras/:newId, and without it the old form would be
       // re-stored there as an edit of the new camera.
       setBaseline({ ...form, rtsp_password: '', talk_password: '' });
+      // The save worked, so the "Couldn't reach the camera stream" question that Save anyway answered is over (#496).
+      // This is where that state lives, and it has to be cleared here because adding a camera does not remount the
+      // page: /cameras/new and /cameras/:id render this same component in the same place, so React keeps the instance
+      // (and its state) across the navigation below, and the new camera's page opened with the old warning on it and
+      // "Retry save" in place of "Save changes".
+      setConfirmMsg(''); setPageError('');
       await refresh();
       // New camera: drop into its own settings so motion/sound can be configured next.
       navigate(isNew ? `/cameras/${saved.id}` : back.to, isNew ? { state: { from: back } } : { state: { from: back } });
@@ -222,6 +234,7 @@ export default function CameraSettings() {
     setRemoveBusy(true); setPageError(''); setRemoveError('');
     try {
       await api.del(`/cameras/${id}`);
+      removedRef.current = true;
       clearDraft(draftKey);
       await refresh();
       navigate(back.to);
@@ -241,6 +254,21 @@ export default function CameraSettings() {
   // whose own submit does something completely different (saves the camera's connection settings),
   // and Retry must never be able to trigger that by being a descendant of it.
   const detSave = useDetectionSave(id);
+
+  // An address for a camera that does not exist (#379): the list has loaded and this id is not in it. Before
+  // that, or after a failed load, the camera may well exist, so those keep their own states rather than
+  // claiming it is missing. count is 0 for the reason ChildDetail gives: the requested camera is absent, so a
+  // cached list cannot vouch for it and any provider error is a blocking one.
+  const missing = !isNew && !cam && !removedRef.current ? loadState({ loaded: camerasLoaded, error: camerasError, count: 0 }) : null;
+  if (missing === 'empty') return <NotFound />;
+  if (missing === 'error') {
+    return (
+      <>
+        <AppHeader title="Camera" back={back} />
+        <main className="app-main"><LoadFailed what="this camera" error={camerasError} onRetry={refresh} /></main>
+      </>
+    );
+  }
 
   return (
     <>
@@ -444,8 +472,27 @@ export default function CameraSettings() {
 
       {removing && (
         <Modal title="Remove camera" placement="top" error={removeError} onClose={() => (removeBusy ? null : setRemoving(false))}>
+          {/* #554: removing a camera deletes EVERYTHING recorded by it, files included. The list is the
+              contract with lib/entityPurge.js. "Are you sure?" is a sentence in the dialog, not confirm(). */}
           <p style={{ marginTop: 0 }}>
-            Remove <strong>{cam?.name}</strong>? This stops its stream and deletes it from Nightlight. It can't be undone (you can always add it again).
+            Remove <strong>{cam?.name}</strong>? This stops its stream and permanently deletes everything for this camera:
+          </p>
+          <ul style={{ margin: '0 0 12px', paddingLeft: 20 }}>
+            <li>bed transitions and their snapshot photos</li>
+            <li>the activity history it recorded</li>
+            <li>alerts, with their clips and snapshots</li>
+            <li>recordings and wake clips, including the video files</li>
+            <li>its event log and temperature and humidity history</li>
+          </ul>
+          {/* #719 review: a child's nights are the child's, so their saved summary stays, but the night's detail
+              and its review photos are built from this camera's activity history and bed transitions, which go.
+              Timelapses (and their frames) are keyed by child, not camera, so they stay too (#719 re-review). */}
+          <p>
+            Nights it recorded keep their saved summary and their timelapse but lose their detail and their
+            morning-review photos.
+          </p>
+          <p>
+            You can add the camera again, but none of this comes back. <strong>Are you sure?</strong>
           </p>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button className="btn" type="button" onClick={() => setRemoving(false)} disabled={removeBusy}>Cancel</button>

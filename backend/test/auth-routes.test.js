@@ -29,7 +29,7 @@ useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
 const { default: authRouter } = await import('../src/routes/auth.js');
-const { generateSecret, keyUri } = await import('../src/lib/mfa.js');
+const { generateSecret, keyUri, generateBackupCodes } = await import('../src/lib/mfa.js');
 // The app verifies with otplib v13's verifySync; generate with the SAME library so the fixture cannot
 // drift from the implementation it is testing.
 const { generateSync } = await import('otplib');
@@ -189,13 +189,21 @@ describe('POST /login/mfa — the code is actually verified', () => {
     // route's later `!user.mfa_enabled` test refuses her anyway — it passes for the wrong reason.
     // Killing the mutant needs a session token whose owner DOES have MFA on: then the only thing
     // standing between it and a freshly minted second session is the purpose check itself.
+    //
+    // ⚠️ And the code must be one that has NOT been used yet (review of #720). Since #550 a code works once,
+    // so re-sending the code that signed bob in is refused by the replay rule with or without the purpose
+    // check, and this case passed with the check deleted. The code for the NEXT 30 s step is still inside
+    // the drift allowance and newer than the one used, so only the purpose check can refuse it, and the
+    // refusal must be that check's own text.
     const start = await post('/login', { username: 'bob', password: PASSWORD });
     const sessionToken = (await post('/login/mfa', { mfaToken: start.body.mfaToken, code: totp(mfaSecret) })).body.token;
     assert.ok(sessionToken, 'precondition: bob is fully logged in');
     const before = sessionsFor('u-mfa').length;
 
-    const res = await post('/login/mfa', { mfaToken: sessionToken, code: totp(mfaSecret) });
+    const unusedCode = generateSync({ secret: mfaSecret, epoch: Math.floor(Date.now() / 1000) + 30 });
+    const res = await post('/login/mfa', { mfaToken: sessionToken, code: unusedCode });
     assert.equal(res.status, 401, "an MFA user's own session token was exchanged for another session");
+    assert.deepEqual(res.body, { error: 'Invalid verification token' }, 'refused, but not by the purpose check');
     assert.equal(sessionsFor('u-mfa').length, before, 'a second session was minted from a session token');
   });
 
@@ -222,7 +230,7 @@ describe('PUT /me/password — the CURRENT password is required', () => {
     const token = await login();
     const before = db.prepare('SELECT password_hash FROM users WHERE id = ?').get('u-admin').password_hash;
     const res = await put('/me/password', { current_password: 'wrong', new_password: 'a-new-long-password' }, token);
-    assert.equal(res.status, 401, 'the current password was not verified');
+    assert.equal(res.status, 400, 'the current password was not verified');
     const after = db.prepare('SELECT password_hash FROM users WHERE id = ?').get('u-admin').password_hash;
     assert.equal(after, before, 'the password was changed despite the wrong current password');
   });
@@ -279,6 +287,148 @@ describe('PUT /me/password — the CURRENT password is required', () => {
   });
 });
 
+// #697. frontend/src/lib/api.js treats ANY 401 as "this sign-in is over" and clears the token, so a mistyped
+// confirmation password must never answer 401: the sign-in is fine, only the typed value is wrong.
+// MUTANTS THIS KILLS: either route going back to 401 (status), a wrong password revoking the caller's
+// session (it must stay usable), and the body drifting (same message, same single `error` field). Added
+// after review of #706: a wrong password signing the user's OTHER devices out (needs two sessions: with one,
+// `DELETE ... AND id != <caller>` deletes nothing), and a wrong password clearing the two-factor secret or
+// backup codes while leaving `mfa_enabled` at 1 (needs every MFA column compared, not only the flag).
+describe('#697 a wrong confirmation password does not look like a dead sign-in', () => {
+  const sessionRow = (token) => db.prepare('SELECT * FROM sessions WHERE id = ?').get(jwt.decode(token).sid);
+  // ⚠️ Every token in this block is MINTED (a session row plus the claims /login signs), never logged in, as
+  // loginAs below does. The whole file shares one per-account login budget (PER_ACCOUNT_LIMIT: 20 per IP and
+  // username per 15 min) and already runs at its edge: the first version of this block logged alice in three
+  // more times, her 21st login further down got a 429, and "a backup code is single-use" then passed for the
+  // wrong reason (the replay was refused as an expired step, not as a spent code), so a mutant that never
+  // consumed backup codes survived (review of #706; measured). So: not one /login call in this block.
+  const mint = (username) => {
+    const row = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+    return signToken({ id: row.id, username: row.username, role: row.role, sid: makeSession(db, row.id) });
+  };
+  const cases = [
+    {
+      name: 'PUT /me/password',
+      username: 'alice',
+      wrong: (t) => put('/me/password', { current_password: 'wrong', new_password: 'a-new-long-password' }, t),
+      right: (t) => put('/me/password', { current_password: PASSWORD, new_password: 'a-new-long-password' }, t),
+      message: 'Current password is incorrect',
+    },
+    {
+      name: 'POST /me/mfa/disable',
+      username: 'bob',
+      wrong: (t) => post('/me/mfa/disable', { password: 'wrong' }, t),
+      right: (t) => post('/me/mfa/disable', { password: PASSWORD }, t),
+      message: 'Password is incorrect',
+    },
+  ];
+
+  for (const c of cases) {
+    test(`★ ${c.name}: wrong password answers a 4xx that is not 401, with the same body`, async () => {
+      const res = await c.wrong(mint(c.username));
+      assert.notEqual(res.status, 401, 'a 401 makes the web client clear the token and show the sign-in form');
+      assert.equal(res.status, 400);
+      // Exactly one field, same text: additive-only response changes, and no rename.
+      assert.deepEqual(res.body, { error: c.message });
+    });
+
+    test(`★ ${c.name}: after a wrong password the token and session are still valid`, async () => {
+      const token = mint(c.username);
+      const sid = jwt.decode(token).sid;
+      // Stale on purpose: requireAuth's normal throttled touch (60 s) then runs on this request, and
+      // nothing else may touch the row, so the only change allowed is that normal one.
+      db.prepare("UPDATE sessions SET last_seen_at = datetime('now', '-10 minutes') WHERE id = ?").run(sid);
+      const before = sessionRow(token);
+
+      await c.wrong(token);
+
+      const after = sessionRow(token);
+      assert.ok(after, 'the wrong password deleted the caller’s session');
+      assert.equal(after.user_id, before.user_id);
+      assert.equal(after.created_at, before.created_at, 'the session was replaced rather than kept');
+      assert.equal(sessionsFor(before.user_id).length, 1, 'a session appeared or disappeared');
+      const me = await call(`${server.url}/api/auth/me`, { token });
+      assert.equal(me.status, 200, 'the token stopped working after a wrong password');
+    });
+
+    // Why TWO sessions: the test above has only the caller's, so a wrong-password branch that ran the success
+    // branch's "sign every other device out" delete early (`WHERE user_id = ? AND id != <caller>`) deleted
+    // nothing it could see, and survived (review of #706). A second device's session is what that delete hits.
+    test(`★ ${c.name}: a wrong password signs no OTHER device out, and the old password still works`, async () => {
+      // The old password is checked with bcrypt, not a /login, for the login-budget reason at the top of the block.
+      const row = db.prepare('SELECT * FROM users WHERE username = ?').get(c.username);
+      const token = mint(c.username);
+      const other = mint(c.username);
+      const sids = [jwt.decode(token).sid, jwt.decode(other).sid];
+      assert.notEqual(sids[0], sids[1], 'the fixture needs two distinct sessions for one user');
+
+      const res = await c.wrong(token);
+      assert.equal(res.status, 400);
+
+      assert.deepEqual(sessionsFor(row.id).map((r) => r.id).sort(), [...sids].sort(), 'a wrong password signed a session out');
+      const me = await call(`${server.url}/api/auth/me`, { token: other });
+      assert.equal(me.status, 200, 'a wrong password on one device signed the OTHER device out');
+      const hashAfter = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(row.id).password_hash;
+      assert.equal(hashAfter, row.password_hash, 'a wrong password changed the stored password');
+      // The same check /login makes, so this is "signing in with the old password still works".
+      assert.ok(bcrypt.compareSync(PASSWORD, hashAfter), 'the old password stopped working after a wrong one');
+    });
+
+    test(`${c.name}: the right password still works — the control`, async () => {
+      const res = await c.right(mint(c.username));
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.deepEqual(res.body, { ok: true });
+    });
+  }
+
+  // Both routes, and the WHOLE users row: `SELECT *`, so a column added later is covered without anyone
+  // listing it. Backup codes are planted for each user first, because the shared fixture leaves them NULL and
+  // a NULL that gets cleared looks unchanged. (The first version covered only /me/mfa/disable and compared
+  // only mfa_enabled and password_hash, so a branch that cleared the secret passed it; review of #706.)
+  test('a wrong password writes nothing on either route', async () => {
+    for (const c of cases) {
+      const { id } = db.prepare('SELECT id FROM users WHERE username = ?').get(c.username);
+      // `await`: generateBackupCodes is async since #548 (the hashing runs in a worker). Without it, `.hashesJson`
+      // of the Promise is undefined, better-sqlite3 binds that as NULL, and this test plants nothing.
+      const { hashesJson } = await generateBackupCodes(2);
+      assert.equal(JSON.parse(hashesJson).length, 2, 'the fixture did not plant two backup codes');
+      db.prepare('UPDATE users SET mfa_backup_codes = ? WHERE id = ?').run(hashesJson, id);
+      const before = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+      assert.equal(before.mfa_backup_codes, hashesJson, `${c.name}: the fixture did not plant`);
+
+      const res = await c.wrong(mint(c.username));
+      assert.equal(res.status, 400, `${c.name}: ${JSON.stringify(res.body)}`);
+
+      assert.deepEqual(db.prepare('SELECT * FROM users WHERE id = ?').get(id), before, `${c.name}: a wrong password changed the user's row`);
+    }
+  });
+
+  // The row check above shows the two-factor columns keep their bytes; this one shows the second factor still
+  // WORKS afterwards, which is what a cleared secret with `mfa_enabled` left at 1 breaks: the account can no
+  // longer finish its own sign-in. Real backup codes are planted for the reason given above. Two, not the
+  // default count: each is a bcrypt hash and only their bytes matter.
+  test('POST /me/mfa/disable: a wrong password leaves the second factor exactly as it was', async () => {
+    const { hashesJson } = await generateBackupCodes(2); // async since #548: see the test above
+    db.prepare('UPDATE users SET mfa_backup_codes = ? WHERE id = ?').run(hashesJson, 'u-mfa');
+    const columns = () => db.prepare('SELECT mfa_enabled, mfa_secret, mfa_backup_codes FROM users WHERE id = ?').get('u-mfa');
+    assert.deepEqual(columns(), { mfa_enabled: 1, mfa_secret: mfaSecret, mfa_backup_codes: hashesJson }, 'the fixture did not plant');
+
+    const res = await cases[1].wrong(mint('bob'));
+    assert.equal(res.status, 400);
+
+    // Strict string equality on TEXT columns: the same bytes, not merely "still set".
+    assert.deepEqual(columns(), { mfa_enabled: 1, mfa_secret: mfaSecret, mfa_backup_codes: hashesJson },
+      'a wrong password changed the two-factor columns');
+    // And the second step still completes with the planted secret. The first step (/login) is skipped: it
+    // reads only password_hash and mfa_enabled, both asserted unchanged by the row check above, and it would
+    // spend the login budget. The MFA token is the one /login would hand out (same claims, 5 min).
+    const mfaStep = signToken({ id: 'u-mfa', purpose: 'mfa' }, { expiresIn: '5m' });
+    const second = await post('/login/mfa', { mfaToken: mfaStep, code: totp(mfaSecret) });
+    assert.equal(second.status, 200, `the authenticator code stopped working: ${JSON.stringify(second.body)}`);
+    assert.ok(second.body.token);
+  });
+});
+
 describe('POST /me/mfa/disable — the password is required', () => {
   // MUTANT THIS KILLS: dropping the password check, so anyone holding a token can strip the second
   // factor off the account it belongs to.
@@ -286,7 +436,7 @@ describe('POST /me/mfa/disable — the password is required', () => {
     const { body } = await post('/login', { username: 'bob', password: PASSWORD });
     const token = (await post('/login/mfa', { mfaToken: body.mfaToken, code: totp(mfaSecret) })).body.token;
     const res = await post('/me/mfa/disable', { password: 'wrong' }, token);
-    assert.equal(res.status, 401, 'MFA was disabled without the password');
+    assert.equal(res.status, 400, 'MFA was disabled without the password');
     assert.equal(db.prepare('SELECT mfa_enabled FROM users WHERE id = ?').get('u-mfa').mfa_enabled, 1);
   });
 
@@ -565,7 +715,8 @@ describe('MFA enrolment', () => {
 
   test('★ enable requires a code that verifies against the pending secret', async () => {
     const token = await loginAs('alice');
-    const setup = await post('/me/mfa/setup', {}, token);
+    // Every set-up call needs the account password (review of #765).
+    const setup = await post('/me/mfa/setup', { password: PASSWORD }, token);
     assert.equal(setup.status, 200, JSON.stringify(setup.body));
     const wrong = await post('/me/mfa/enable', { code: '000000' }, token);
     assert.notEqual(wrong.status, 200, 'MFA was enabled with a wrong code');
@@ -585,7 +736,7 @@ describe('gaps found by review — the success paths nobody reached', () => {
     // code correctly but never persists the consumed list — making it infinitely replayable — left
     // the suite green. That is the whole point of a one-time code.
     const token = await loginAs('alice');
-    await post('/me/mfa/setup', {}, token);
+    await post('/me/mfa/setup', { password: PASSWORD }, token);
     const secret = db.prepare('SELECT mfa_secret FROM users WHERE id = ?').get('u-admin').mfa_secret;
     const enable = await post('/me/mfa/enable', { code: totp(secret) }, token);
     assert.equal(enable.status, 200, JSON.stringify(enable.body));
@@ -598,15 +749,20 @@ describe('gaps found by review — the success paths nobody reached', () => {
 
     // The same code again must NOT work.
     const second = await post('/login', { username: 'alice', password: PASSWORD });
+    // ⚠️ Pin WHY the replay fails. When the file's /login budget for alice ran out (review of #706: a block
+    // above logged her in three more times), this login got a 429, the replay was refused as "verification
+    // step expired" instead, and a mutant that never consumed the code survived behind a green test.
+    assert.equal(second.status, 200, `the second sign-in did not reach the MFA step: ${JSON.stringify(second.body)}`);
     const replay = await post('/login/mfa', { mfaToken: second.body.mfaToken, code: backup });
     assert.equal(replay.status, 401, 'a backup code was accepted twice — it is not being consumed');
+    assert.deepEqual(replay.body, { error: 'Incorrect code' }, 'the replay was refused, but not as a spent code');
   });
 
   test('POST /me/mfa/enable succeeds with a correct code, and hands back backup codes', async () => {
     // F6: the only "enable" case asserted the wrong-code rejection, so everything after the guard —
     // including generating and storing the backup codes — was untested.
     const token = await loginAs('alice');
-    await post('/me/mfa/setup', {}, token);
+    await post('/me/mfa/setup', { password: PASSWORD }, token);
     const secret = db.prepare('SELECT mfa_secret FROM users WHERE id = ?').get('u-admin').mfa_secret;
     const res = await post('/me/mfa/enable', { code: totp(secret) }, token);
     assert.equal(res.status, 200, JSON.stringify(res.body));

@@ -2,6 +2,22 @@ import { useEffect, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { api } from '../lib/api.js';
 import Modal from './Modal.jsx';
+import { holdReload } from '../lib/reloadGuard.js';
+import { isNativeApp } from '../lib/nativeBridge.js';
+
+// A touch device, where the authenticator is likely on the same phone and a QR code cannot be scanned from
+// the screen it is on. Guarded because jsdom (and old browsers) have no matchMedia.
+const isTouchDevice = () => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+
+// The password step in front of each set-up entry point (review of #765): its title, and what the step leads to.
+const PASSWORD_STEP = {
+  start: { title: 'Set up two-factor', text: 'Enter your password to start setting up two-factor.' },
+  resume: { title: 'Continue set-up', text: 'Enter your password to show the same QR code and key again.' },
+  restart: {
+    title: 'Start over',
+    text: 'Enter your password to make a new key. The entry you may already have added to your authenticator app will stop working.',
+  },
+};
 
 // Account → Two-factor authentication. Self-service TOTP: set up (QR + manual key → confirm a code →
 // one-time backup codes), and turn off (password-confirmed). Works everywhere (no secure-context
@@ -11,12 +27,18 @@ export default function TwoFactorSection() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const [setup, setSetup] = useState(null); // { secret, otpauth_uri, qr } while enrolling
+  const [setup, setSetup] = useState(null); // { secret, otpauth_uri, qr, resumed?, notContinued } while enrolling
   const [code, setCode] = useState('');
   const [backupCodes, setBackupCodes] = useState(null); // shown once after enabling
   const [copied, setCopied] = useState(false);
 
   const [disabling, setDisabling] = useState(false);
+  // Which set-up the password step is for: 'start' | 'resume' | 'restart' | null. Every set-up call needs the
+  // account password (review of #765): otherwise a borrowed signed-in device could read the key the owner is
+  // setting up, or plant one it knows for the owner to confirm. One small step serves all three entry points.
+  // Shares `password` with the turn-off dialog; the two are never open together (one needs two-factor on, the
+  // other off).
+  const [passwordStep, setPasswordStep] = useState(null);
   const [password, setPassword] = useState('');
 
   async function loadStatus() {
@@ -28,11 +50,33 @@ export default function TwoFactorSection() {
   }
   useEffect(() => { loadStatus(); }, []);
 
-  async function startSetup() {
-    setError(''); setBusy(true);
+  // While the set-up panel is open the page must not reload itself after a spell in the background (#765):
+  // on a phone the person leaves for the authenticator app and comes back, and a reload would lose the
+  // secret, the QR and the typed code. The cleanup releases it on confirm, cancel or leaving the page.
+  const setupOpen = !!setup;
+  useEffect(() => (setupOpen ? holdReload() : undefined), [setupOpen]);
+
+  // Always opens with an EMPTY field: a password typed and then abandoned (the dialog closed) must not be waiting
+  // pre-filled for whoever opens the step next, on a shared or borrowed device.
+  function openPasswordStep(kind) {
+    setPassword(''); setError(''); setPasswordStep(kind);
+  }
+
+  // Sends the set-up with the typed password. `restart` replaces any pending key; without it the server hands
+  // back the pending one, or makes a first one (#765). A failure (a wrong password included) keeps the password
+  // step open with the message in it, so the password can be retyped.
+  async function confirmPasswordStep(e) {
+    e.preventDefault(); setError(''); setBusy(true);
     try {
-      setSetup(await api.post('/auth/me/mfa/setup', {}));
+      const body = passwordStep === 'restart' ? { restart: true, password } : { password };
+      const res = await api.post('/auth/me/mfa/setup', body);
+      // "Continue set-up" chosen, but nothing was pending any more (an admin reset or a password change on
+      // another device discarded it), so the server made a NEW key: `resumed` is absent. Say so in the panel,
+      // or the person enters the code from the entry they already have, which can never match (review of #765).
+      setSetup({ ...res, notContinued: passwordStep === 'resume' && res.resumed !== true });
       setCode('');
+      setPasswordStep(null); setPassword('');
+      setStatus((st) => (st ? { ...st, setup_pending: true } : st));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -89,7 +133,7 @@ export default function TwoFactorSection() {
     <>
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="card-title">Two-factor authentication</div>
-        {error && !setup && !disabling && <div className="error-banner" style={{ marginBottom: 10 }}>{error}</div>}
+        {error && !setup && !disabling && !passwordStep && <div className="error-banner" style={{ marginBottom: 10 }}>{error}</div>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <ShieldCheck size={22} color={enabled ? 'var(--live)' : 'var(--text-secondary)'} aria-hidden="true" />
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -108,9 +152,22 @@ export default function TwoFactorSection() {
             <button className="btn btn-danger" onClick={() => { setPassword(''); setError(''); setDisabling(true); }}>
               Turn off two-factor
             </button>
+          ) : status?.setup_pending ? (
+            <>
+              <button className="btn btn-primary" onClick={() => openPasswordStep('resume')} disabled={busy}>
+                Continue set-up
+              </button>
+              <button className="btn btn-secondary" onClick={() => openPasswordStep('restart')} disabled={busy} style={{ marginTop: 8 }}>
+                Start over
+              </button>
+              <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                Start over makes a new key and replaces the one you may already have added to your authenticator
+                app, so delete that entry and add the new one.
+              </div>
+            </>
           ) : (
-            <button className="btn btn-primary" onClick={startSetup} disabled={busy || !status}>
-              {busy ? 'Please wait…' : 'Set up two-factor'}
+            <button className="btn btn-primary" onClick={() => openPasswordStep('start')} disabled={busy || !status}>
+              Set up two-factor
             </button>
           )}
         </div>
@@ -119,12 +176,25 @@ export default function TwoFactorSection() {
       {setup && (
         <Modal title="Set up two-factor" onClose={() => (busy ? null : setSetup(null))}>
           {error && <div className="error-banner" style={{ marginBottom: 10 }}>{error}</div>}
+          {setup.notContinued && (
+            <div className="form-warning" role="status">
+              There was no set-up to continue, so this is a new key. Add it to your authenticator app (delete any
+              entry you added before).
+            </div>
+          )}
           <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
             Scan this with an authenticator app (Google Authenticator, Authy, 1Password…), or type the key in by hand.
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
             <img src={setup.qr} alt="Two-factor setup QR code" width={200} height={200} style={{ borderRadius: 8, background: '#fff' }} />
           </div>
+          {isTouchDevice() && !isNativeApp() && (
+            // Not in the native app: a WebView navigating to an unknown scheme can replace the app with an
+            // error page. On a phone the QR cannot be scanned from its own screen; this hands the key over.
+            <div style={{ textAlign: 'center', marginBottom: 12 }}>
+              <a href={setup.otpauth_uri}>Open in your authenticator app</a>
+            </div>
+          )}
           <div className="field">
             <label>Manual key</label>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, wordBreak: 'break-all', background: 'var(--bg-elevated-2)', padding: '8px 10px', borderRadius: 8 }}>
@@ -162,6 +232,25 @@ export default function TwoFactorSection() {
             {copied ? 'Copied ✓' : 'Copy codes'}
           </button>
           <button className="btn btn-primary" onClick={() => setBackupCodes(null)}>I've saved them</button>
+        </Modal>
+      )}
+
+      {passwordStep && (
+        // The same pattern as the turn-off dialog below: password field, the server's message inside the dialog,
+        // and a wrong password keeps the dialog open so it can be retyped.
+        <Modal title={PASSWORD_STEP[passwordStep].title} onClose={() => (busy ? null : setPasswordStep(null))}>
+          <form onSubmit={confirmPasswordStep}>
+            {error && <div className="error-banner" style={{ marginBottom: 10 }}>{error}</div>}
+            <div className="camera-tile__sub" style={{ marginBottom: 10 }}>{PASSWORD_STEP[passwordStep].text}</div>
+            <div className="field">
+              <label htmlFor="mfa-setup-pass">Password</label>
+              <input id="mfa-setup-pass" type="password" value={password}
+                onChange={(e) => setPassword(e.target.value)} required autoFocus />
+            </div>
+            <button className="btn btn-primary" type="submit" disabled={busy}>
+              {busy ? 'Please wait…' : 'Continue'}
+            </button>
+          </form>
         </Modal>
       )}
 

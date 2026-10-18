@@ -141,28 +141,60 @@ describe('#543 the save refuses a host that is not just a hostname or address', 
     ['[1:2]', 'an IPv6 literal that is not an address'],
   ];
   for (const [host, label] of MISREAD_HOSTS) {
-    test(`#641 host ${label} is refused with a message naming the host, and nothing is saved`, async () => {
+    test(`#641 host ${label} is refused with a message saying what is wrong, and nothing is saved`, async () => {
       const before = stored();
       const res = await put({ mqtt_host: host, mqtt_port: 8883 });
       assert.equal(res.status, 400, `expected 400, got ${res.status}: ${JSON.stringify(res.body)}`);
-      assert.match(res.body.error, /MQTT broker is not usable: the host .* is not a valid hostname or address/);
+      assert.match(res.body.error, /MQTT broker is not usable: the host is not a valid hostname or address: \S/);
       assert.deepEqual(stored(), before);
     });
   }
 
-  test('#641 the unusable host is shown in the message as typed, escaped, so an invisible character can be seen', async () => {
-    const res = await put({ mqtt_host: 'local\nbroker' });
+  // #641 used to repeat the host, escaped, so an invisible character could be seen. #537's review found that echo sends
+  // a pasted `mqtt://user:password@broker` straight back (and into the log), so the message now names only the first
+  // character that is not allowed: by its code point when it cannot be seen. The #641 point (find the invisible one)
+  // still holds; the host itself is never repeated.
+  test('#641 a line break in the host is named by its code point, and the host is not repeated', async () => {
+    const res = await put({ mqtt_host: 'zqlocal\nzqbroker' });
     assert.equal(res.status, 400);
-    assert.ok(res.body.error.includes('"local\\nbroker"'), res.body.error);
+    assert.ok(res.body.error.includes('an invisible or control character (U+000A)'), res.body.error);
+    assert.ok(!/zqlocal|zqbroker/.test(res.body.error), res.body.error);
   });
 
-  test('#641 an invisible character in the host is spelled out in the message, a plain space is left alone', async () => {
+  test('#641 an invisible character in the host is spelled out by code point, a plain space is named as a space', async () => {
     const nbsp = String.fromCodePoint(0xa0);
-    const res = await put({ mqtt_host: `broker${nbsp}x` });
+    const res = await put({ mqtt_host: `zqbroker${nbsp}zqx` });
     assert.equal(res.status, 400);
-    assert.ok(res.body.error.includes('"broker\\u00a0x"'), res.body.error);
+    assert.ok(res.body.error.includes('(U+00A0)'), res.body.error);
     assert.ok(!res.body.error.includes(nbsp), 'the raw invisible character must not appear in the message');
-    assert.ok((await put({ mqtt_host: 'bro ker' })).body.error.includes('"bro ker"'));
+    assert.ok(!/zqbroker|zqx/.test(res.body.error), res.body.error);
+    assert.ok((await put({ mqtt_host: 'bro ker' })).body.error.includes('it contains a space'));
+  });
+
+  test('★ #537 the message never repeats the host: a pasted user:password@broker does not send the password back or log it', async () => {
+    const MARK = 'PWMARK-5d1c-secret';
+    const pasted = [
+      `mqtt://nightlight:${MARK}@broker.local`, `nightlight:${MARK}@broker.local:1883`, `broker.local:${MARK}`,
+      `${MARK} broker`, `${MARK} x`, `[${MARK}]`, `x[${MARK}]`, `${MARK};x`, `${MARK}%20x`,
+    ];
+    const logBefore = logger.getRecent().length;
+    for (const host of pasted) {
+      const before = stored();
+      const res = await put({ mqtt_host: host });
+      assert.equal(res.status, 400, `${host}: ${JSON.stringify(res.body)}`);
+      assert.ok(!JSON.stringify(res.body).includes(MARK), `the 400 repeated the host: ${res.body.error}`);
+      assert.deepEqual(stored(), before);
+    }
+    assert.match((await put({ mqtt_host: pasted[0] })).body.error, /looks like a full address; enter only the host name/);
+    // The same value already stored (the boot path): the "Not connecting" log line and the status say why, without it.
+    for (const host of pasted) {
+      db.prepare("UPDATE settings SET mqtt_enabled = 1, mqtt_host = ?, mqtt_port = 1883 WHERE id = 'app'").run(host);
+      refreshMqttConnection();
+      assert.ok(!JSON.stringify(mqttStatus()).includes(MARK), `the status repeated the host: ${JSON.stringify(mqttStatus())}`);
+    }
+    const logged = logger.getRecent().slice(logBefore).join('\n');
+    assert.match(logged, /\[mqtt\] Not connecting: the host is not a valid hostname or address/);
+    assert.ok(!logged.includes(MARK), 'the host reached the log');
   });
 
   test('#641 a letter the legacy parser cannot convert is refused rather than left to fail inside mqtt.js', async () => {
@@ -192,7 +224,7 @@ describe('#543 the save refuses a host that is not just a hostname or address', 
     assert.match(res.body.error, /port 188333/);
   });
 
-  test('#643 S5: a save that changes ONLY the port is refused while the STORED host is bad, with the host named', async () => {
+  test('#643 S5: a save that changes ONLY the port is refused while the STORED host is bad, with the host as the reason', async () => {
     // The mirror of the test above. The host is checked when the host OR the port is sent; a route that only checked
     // it when the host field was present would let a port-only save pass over a host that can never connect, and the
     // admin would think the broker was fixed. The bad host is written straight to the database (as an older version
@@ -200,7 +232,7 @@ describe('#543 the save refuses a host that is not just a hostname or address', 
     db.prepare("UPDATE settings SET mqtt_host = 'bro ker', mqtt_port = 1883 WHERE id = 'app'").run();
     const res = await put({ mqtt_port: 8883 });
     assert.equal(res.status, 400, JSON.stringify(res.body));
-    assert.match(res.body.error, /the host "bro ker"/);
+    assert.match(res.body.error, /the host is not a valid hostname or address: it contains a space/);
     assert.equal(stored().mqtt_port, 1883, 'the refused port must not be written');
     // And it is not the port that was refused: the same port over a good host is accepted.
     db.prepare("UPDATE settings SET mqtt_host = 'broker.local' WHERE id = 'app'").run();

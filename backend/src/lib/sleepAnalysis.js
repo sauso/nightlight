@@ -1,6 +1,6 @@
 import db from '../db.js';
 import { logger } from './logger.js';
-import { notifySleepReports, notifySleepReportUpdates, sleepAlertChannelsConfigured } from './sleepReportAlert.js';
+import { notifySleepReports, notifySleepReportUpdates, sleepAlertChannelsConfigured, sleepReportPrefs } from './sleepReportAlert.js';
 import { getBedTransitions, TRANSITION } from './bedTransitions.js';
 import { listChildWakeClips } from './recordings.js';
 import { primaryCameraRowFor } from './primaryCamera.js';
@@ -2473,6 +2473,16 @@ export function getStoredNights(childId, limit = 14) {
 const INSIGHT_MIN_NIGHTS = 5; // fewer than this and any correlation is noise — say "keep tracking"
 const INSIGHT_R = 0.35; // |Pearson r| at/above this counts as a real link (moderate)
 const INSIGHT_TEMP_SPREAD = 1; // need at least this much °C spread across nights, else "too flat to tell"
+// A verdict needs at least this many nights in EACH of the cooler and the warmer group (#365). A
+// JUDGEMENT, NOT A MEASUREMENT: it was chosen by the owner, not fitted to any household's data, and no
+// night anywhere set it. It is deliberately house-agnostic: it counts nights, never degrees, minutes or
+// a timezone, so it means the same thing in every home and climate. What it guards against: the median
+// split can leave a group of one (the case the issue filed: four nights at 20°C and one at 22°C gave
+// "warm_more_wakes" from a single warm night). Below it the card says "not enough nights yet" and shows
+// no verdict. Known limit: 10 per group is not a statistical guarantee, only a floor under the worst
+// case; the card is still "a pattern, not a cause". The median night(s) belong to neither group, so the
+// least that can ever qualify is 21 tracked nights.
+const INSIGHT_MIN_GROUP_NIGHTS = 10;
 
 function pearson(xs, ys) {
   const n = xs.length;
@@ -2541,8 +2551,15 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
   });
 
   // Verdict the UI turns into a sentence. 'flat' = temperature barely varied, so we can't say anything.
+  // 'flat' stays FIRST (#365): it says nothing about sleep, only that the room barely varied. A room
+  // that barely varies leaves one or both groups short or empty (nights equal to the median join
+  // neither), so gating it would tell that house "not enough nights yet" when the honest answer is
+  // "the room did not change enough to compare".
+  // 'not_enough_nights' withholds every actual verdict until both groups reach the minimum; the
+  // arithmetic below it is unchanged once they do.
   let verdict = 'none';
   if (spread < INSIGHT_TEMP_SPREAD) verdict = 'flat';
+  else if (cool.length < INSIGHT_MIN_GROUP_NIGHTS || warm.length < INSIGHT_MIN_GROUP_NIGHTS) verdict = 'not_enough_nights';
   else if (rWakes != null && rWakes >= INSIGHT_R) verdict = 'warm_more_wakes';
   else if (rWakes != null && rWakes <= -INSIGHT_R) verdict = 'warm_fewer_wakes';
 
@@ -2550,6 +2567,7 @@ export function sleepInsights(childId, { nights = 30 } = {}) {
     status: 'ok',
     nights_analyzed: rows.length,
     verdict,
+    min_group_nights: INSIGHT_MIN_GROUP_NIGHTS, // additive (#365): the UI says "N of 10" with it
     temp_wake_r: rWakes == null ? null : Math.round(rWakes * 100) / 100,
     temp_asleep_r: rAsleep == null ? null : Math.round(rAsleep * 100) / 100,
     temp_spread: Math.round(spread * 10) / 10,
@@ -2586,13 +2604,14 @@ export function runNightlySleepJob() {
     const toTimelapse = []; // freshly-closed nights to assemble a memories timelapse for
     const emptyNights = []; // ...and those with nobody in the bed, whose frames get thrown away
     const now = Date.now();
-    const notifyOn = db.prepare('SELECT sleep_report_alert_enabled FROM settings WHERE id = ?').get('app')?.sleep_report_alert_enabled;
-    // ROADMAP §1.6: `notifyOn` alone doesn't mean a notification can actually go out — it defaults ON
+    // ROADMAP §1.6: a report switched ON does not mean a notification can actually go out — it defaults ON
     // even on a fresh install with no push credential and every other provider off. Without this second
     // check, a night computed before push was ever configured would get stamped "notified" for nothing,
     // and the first real notification the owner ever saw once they DID configure push would be
-    // mislabelled "updated". Computed once (global settings, not per-child).
-    const canNotify = notifyOn && sleepAlertChannelsConfigured();
+    // mislabelled "updated". Whether a provider is configured is global; whether THIS child's report is on is
+    // per child (#397), so `canNotify` below is decided inside the loop from both. The old global
+    // `settings.sleep_report_alert_enabled` is no longer read: db.js carried its value into each existing child.
+    const channelsConfigured = sleepAlertChannelsConfigured();
     for (const kid of kids) {
       if (!childTracksSleep(kid.id)) continue; // sleep tracking off for this child
       // ROADMAP §1.6, found by adversarial review: this per-child body used to have no isolation of its
@@ -2606,6 +2625,9 @@ export function runNightlySleepJob() {
       // Isolating each child's failure here means the rest of the batch, and whatever was already
       // collected, still goes out.
       try {
+        // A child whose report is off is never stamped "notified" either (see channelsConfigured above): had it
+        // been, switching the report back on would mislabel its next message as an "update".
+        const canNotify = channelsConfigured && sleepReportPrefs(kid.id).enabled;
         const nightDate = lastCompletedNightDate(kid.id); // each child on their own window
         const existing = db
           .prepare(`SELECT status, window_end, computed_at, notified_at, notified_wake_at
@@ -2741,8 +2763,9 @@ export function runNightlySleepJob() {
       }
     }
     if (computed > 0) logger.info(`[sleep] Computed ${computed} sleep summary(ies).`);
-    if (notifyOn && fresh.length > 0) notifySleepReports(fresh);
-    if (notifyOn && followups.length > 0) notifySleepReportUpdates(followups);
+    // Which of these actually go out, and under what name, is decided per child inside the two functions (#397, #398).
+    if (fresh.length > 0) notifySleepReports(fresh);
+    if (followups.length > 0) notifySleepReportUpdates(followups);
     // Assemble each freshly-closed night's memories timelapse from the frames the sampler collected
     // overnight. Fire-and-forget (one FFmpeg pass each) and dynamically imported to avoid a static
     // import cycle (timelapse.js imports the window helpers from this module). Runs once per night —

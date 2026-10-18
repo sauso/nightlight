@@ -158,7 +158,20 @@ test('"no one was in the bed" replaces the correction, and undoing it restores t
 
   // Already-answered, so this opens straight into edit mode with the previous times filled in — the
   // flag button sits under the note field there too, not just in the fresh confirm-mode view.
-  await page.getByRole('button', { name: 'No one was in the bed' }).click();
+  const flag = page.getByRole('button', { name: 'No one was in the bed' });
+
+  // Layout, measured rather than read from the stylesheet (#754; replaces frontend/test/reviewFieldSpacing.test.js):
+  // each field's caption sits ABOVE its input, and the flag button is not flush against the note input.
+  // Written but not run where it was added (needs the e2e stack); confirm it before relying on it.
+  const note = page.getByLabel('Anything else worth noting');
+  const caption = page.locator('label.field', { hasText: 'Anything else worth noting' }).locator('.field__label');
+  const noteBox = await note.boundingBox();
+  const captionBox = await caption.boundingBox();
+  const flagBox = await flag.boundingBox();
+  expect(captionBox.y + captionBox.height, 'the caption is above its input, not inline beside it').toBeLessThanOrEqual(noteBox.y + 1);
+  expect(flagBox.y - (noteBox.y + noteBox.height), 'the flag button has room under the note input').toBeGreaterThanOrEqual(8);
+
+  await flag.click();
 
   await expect(page).toHaveURL(/\/sleep\?date=.*saved=1/);
   await expect(page.getByText('Thanks — that’s recorded')).toBeVisible();

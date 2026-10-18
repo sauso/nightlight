@@ -29,8 +29,10 @@ const del = (id) => call(`${server.url}/api/children/${id}`, { method: 'DELETE',
 
 const framesDir = (childId) => path.join(CLIPS_DIR, '.timelapse-frames', childId);
 
-const KEEP = 'kid-keep';
-const GONE = 'kid-gone';
+// UUIDs, the shape the app mints: since the #719 review the purge sweeps an id's folders (here the in-progress
+// frames) only for that shape, so an id like `timelapse` cannot name a shared folder (see lib/entityPurge.js).
+const KEEP = '00000000-0000-4000-8000-00000000cee1';
+const GONE = '00000000-0000-4000-8000-00000000901e';
 
 // Absolute paths of every file the fixture writes, so each can be asserted on individually.
 const files = {};

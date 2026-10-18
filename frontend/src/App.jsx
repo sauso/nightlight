@@ -5,6 +5,7 @@ import { SettingsProvider } from './lib/SettingsContext.jsx';
 import { CamerasProvider } from './lib/CamerasContext.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { isNativeApp, hasActiveBackgroundAudio } from './lib/nativeBridge.js';
+import { isReloadHeld } from './lib/reloadGuard.js';
 import { initPushNotifications } from './lib/pushNotifications.js';
 import { applyViewportPolicy } from './lib/viewport.js';
 import { useSwipeBack } from './lib/useSwipeBack.js';
@@ -66,6 +67,9 @@ const BACKGROUND_RELOAD_THRESHOLD_MS = 15000;
 // deliberately being kept live for background listening. In that case, trust the
 // WhepPlayer/HlsPlayer reconnect-if-actually-dead logic instead (see their own
 // visibilitychange handlers).
+//
+// Exception: a screen that holds state the server cannot give back can hold the reload off while it is open
+// (lib/reloadGuard.js) - the two-factor set-up panel, whose secret and half-typed code a reload would lose.
 function useReloadAfterBackground() {
   useEffect(() => {
     let hiddenAt = null;
@@ -80,7 +84,8 @@ function useReloadAfterBackground() {
         // stopped covering the rest of the backgrounded period, so this correctly
         // falls back to reload in that case.
         const keptAliveByBackgroundAudio = isNativeApp() && hasActiveBackgroundAudio();
-        if (hiddenFor > BACKGROUND_RELOAD_THRESHOLD_MS && !keptAliveByBackgroundAudio) {
+        // A screen holding unrecoverable state (the two-factor set-up panel) can hold the reload off (#765).
+        if (hiddenFor > BACKGROUND_RELOAD_THRESHOLD_MS && !keptAliveByBackgroundAudio && !isReloadHeld()) {
           window.location.reload();
         }
       }
@@ -191,8 +196,8 @@ function Shell() {
                     <Route path="/about" element={<About />} />
                     {/* Catch-all, LAST (#379). react-router ranks by specificity, not order, so every
                         route above still wins; this only receives an address nothing else matched.
-                        Known gap, not fixed here (the #375 bundle): /cameras/<id>/<unknown kind>
-                        matches /cameras/:id/:kind above and renders DetectionSettings, not this. */}
+                        /cameras/<id>/<unknown kind> matches /cameras/:id/:kind above, so DetectionSettings
+                        itself renders NotFound for a kind it does not know and for a camera that is not there. */}
                     <Route path="*" element={<NotFound />} />
                   </Routes>
                   <NavBar />

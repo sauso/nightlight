@@ -53,7 +53,7 @@ after a dozen threshold changes precisely because every constant states the nigh
 
 **Before opening a PR:**
 ```bash
-cd backend && npm test && npm run test:core   # suite green + core coverage not regressed
+cd backend && npm run test:core               # the WHOLE suite with coverage: green + core thresholds held (CI runs exactly this)
 cd ../frontend && npm test
 node scripts/check-changelog.mjs              # from the repo root
 git show HEAD                                 # READ IT: is the reasoning actually in the code?
@@ -93,8 +93,11 @@ what happens to everyone else. "Known limit, documented" is an acceptable answer
 **Review.** Every change gets an adversarial review sized to its risk: core-logic, detection/sleep,
 auth and concurrency changes get the most; docs-only changes get a read-through (say which in the PR).
 The workspace `CLAUDE.md` has the tiers and the reviewer brief. Point the reviewer at the PR body, tell
-it to *falsify* the claims, not confirm them, and to **mutate the source and check the tests actually
-kill the mutants** — coverage measures execution; mutation testing measures discrimination.
+it to *falsify* the claims, not confirm them. For core logic (sleep/detection, auth, concurrency, deletes,
+stored numbers) also have it **mutate the source and check the tests actually kill the mutants** — coverage
+measures execution; mutation testing measures discrimination. Verification scales with behavioural risk: a
+cosmetic, wording or docs change does not need a new automated test or a new mutant, and the mutation
+catalogue is a tool for finding missing tests, not a quota (`docs/mutation-testing.md`).
 
 ## Commands
 
@@ -107,6 +110,13 @@ coverage lives separately in `e2e/` (Playwright, needs Docker).
 files says `>=24` (npm only warns). Only 24 is tested: on Node 22 three backend suites fail
 (`detector-observation-wiring`, `transcoder-log-redaction`, `sleepInsights`; the cause was never
 established, #565). `backend/test/node-version-pin.test.js` fails if the five places drift apart.
+
+**Sandbox with an older Node (the cloud builders came with 22).** Before `npm ci` or any test run, `node -v`;
+if the major is below `.nvmrc`'s, run `. scripts/use-node.sh` (sourced, so it can change PATH). It uses nvm,
+fnm or volta if present, else downloads that major from nodejs.org into `~/.cache/nightlight-node`, checks the
+SHA-256, and puts it first on PATH. If it fails it says why and changes nothing: then set the Node version in the
+sandbox's own setup script. Red tests on Node 22 are an artefact of the Node version, not of your change. The
+script was written on Windows and has not yet run on a Linux sandbox (#751).
 
 ```bash
 # Backend (Node/Express, ESM, port 4000)
@@ -151,9 +161,10 @@ node scripts/scoreboard.mjs <snapshot.db> [--clock=<ISO>] [--unseen-after=<ISO>]
                                    # progress; read its n. See planning/sleep-marker-review-runbook.md §6.
 node scripts/mutate.mjs            # MUTATION TESTING. Breaks the source one way at a time (the
                                    # catalogue is scripts/mutants.json) and reports any mutant the
-                                   # tests fail to kill. NOT in CI — it is slow and it is a tool for
-                                   # writing tests, not a gate. Run it when you add tests to core
-                                   # logic, and add the mutants your change should be killing.
+                                   # tests fail to kill. Weekly + by hand in CI (mutation.yml), never
+                                   # per change — it is slow and it is a tool for writing tests, not a
+                                   # gate. When you add tests to core logic, run the few labels you touch
+                                   # (--only=) and add a mutant only for a fault that matters.
                                    #   --only=<substring>  just the mutants whose label matches
                                    #   --full              every mutant against the WHOLE suite
                                    #   --list              print the catalogue
@@ -236,8 +247,8 @@ before touching that subsystem.** These are the rules that must not be broken:
 
 ### CI/CD
 
-`.github/workflows/test.yml` runs on every push/PR: `unit` (backend), `core-coverage` (the
->=95% core-logic gate), `frontend` (component tests + coverage gate), `changelog` (structure
+`.github/workflows/test.yml` runs on every push/PR: `unit` (backend: ONE coverage-enabled run, `npm run test:core`, which
+enforces the >=95% core-logic gate, plus the container-specific entrypoint checks), `frontend` (component tests + coverage gate), `changelog` (structure
 check), and `definition-of-done` (a warning-only docs/tests reminder, not a hard gate).
 
 `.github/workflows/docker-publish.yml` is separate — it builds and pushes a multi-arch

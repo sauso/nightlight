@@ -266,8 +266,13 @@ shouldn't be there, see [SECURITY.md](SECURITY.md) for how to report it privatel
 **Cameras are trusted input.** Nightlight trusts everything a camera sends it: the video and audio
 stream, the ONVIF replies and the snapshot images. The stream is parsed by FFmpeg and ffprobe, and
 the rest by the server itself, all as the same user that owns the data directory (the database, the
-saved secrets and the recordings) and with the container's environment: nothing separates the media
-processes from the data. Cameras are often the least-updated devices on a network, so put them on
+saved secrets and the recordings): nothing separates the media processes from the data on disk. They
+are not handed the server's environment: FFmpeg and ffprobe start with only `PATH`, `TZ`, `LANG` and
+`LC_ALL`, MediaMTX with the same plus your `MTX_*` overrides
+([details](docs/architecture.md#child-process-environment-backendsrclibchildenvjs-553)). That narrows what
+a bug in one of them could leak, but it is not a sandbox: running as the same user, a media process that a
+camera managed to take over could still read the server's own environment (`JWT_SECRET` included) through
+the process table, as well as the files. Cameras are often the least-updated devices on a network, so put them on
 **their own VLAN or network segment**, ideally with no route to the internet and no access to your
 other devices, and let only the Nightlight host reach them (RTSP, plus ONVIF and the snapshot URL if
 you use them). This is advice: Nightlight does not check or enforce it.
@@ -303,8 +308,7 @@ which is set up automatically from the ONVIF probe using the camera's own stream
 one** — it's never sent back to your browser. Changing the address re-tests the stream, the
 same as adding.
 
-**Removing** — Remove asks for confirmation, then stops the stream and deletes the camera.
-You can always add it again.
+**Removing** — Remove asks for confirmation, then stops the stream and **permanently deletes everything for the camera**: its bed transitions and snapshot photos, activity history, alerts with their clips and snapshots, recordings, event log and sensor history. You can add the camera again, but none of that comes back. See [Removing a child or a camera](docs/recording.md#removing-a-child-or-a-camera).
 
 **Assigning to a child** — use the "Assigned to" dropdown on each camera (admin only; a caregiver
 sees the assignment as text). It is more than grouping: a camera's nights are tracked only while it is
@@ -662,8 +666,11 @@ measurement**, and (like everything here) never a safety device — see the warn
         sends the usual first sleep report and makes the night's timelapse. (Saving the correction does
         not save that summary itself, on purpose: the nightly update's first pass is the one that sends
         the report and makes the timelapse.) If that first summary says "no one in the bed" where a later
-        one would have found your child, it stays that way under your times; remove your correction
-        (while it is still last night) to let the nightly update look again. In the same way, if that
+        one would have found your child, the night is still not looked at again (it is locked). If your
+        correction has both an asleep and a wake-up time, the card and the detail page show it as a slept
+        night anyway (see the #355 point on correcting such a night, below); with only one of
+        them it stays "no one in the bed". Remove your correction (while it is still last night) to let the
+        nightly update look again. In the same way, if that
         first summary has no wake-up time yet (the morning's departure was still being confirmed when it
         was saved), the night keeps showing no wake-up time until you add one to your review.
       - The sleep detail page always works the night out fresh and lays your times over it, so its
@@ -675,6 +682,36 @@ measurement**, and (like everything here) never a safety device — see the warn
         recalculates its total to fit them, even if you only marked **In bed**. The sleep detail page,
         which works the night out fresh, may keep its own total instead. Each screen's total always fits
         the times it shows; they just aren't always the same total.
+      - **Correcting a night the app called "no one in the bed" makes it a slept night (#355).** Open the
+        night on the sleep detail page and press **Was this night right?** (the morning card on the child's
+        page never asks about such a night). Give both an asleep and a wake-up time and the night is shown
+        as a normal night on the child's card, marked **You corrected this**, and on the sleep detail page,
+        where the button then reads **Change what you told us about this night**. Your two times are taken
+        as given: asleep = your wake-up minus your asleep time; wake-ups 0; awake 0; longest stretch =
+        asleep. The app had measured no movement in the bed, which is what "no one in the bed" means, so 0
+        wake-ups is what it saw, not a count of what happened. **Known limit:** minutes with no video are
+        not subtracted on such a night, unlike on a night the app scored itself (next point), because the
+        app found no sleep of its own to count them against, so it cannot tell whether a gap fell inside
+        your times. If the cameras missed minutes inside the span you entered, they are counted as slept.
+        The detail page has no minute-by-minute timeline or wake list for such a night (none was recorded).
+        The saved summary is not rewritten: removing your correction brings back "no one in the bed"
+        exactly. Compared with the other corrections:
+
+        | | Night the app scored (slept) | Night the app called "no one in the bed" |
+        |---|---|---|
+        | Both times given | your times, total recalculated | becomes a slept night, figures as above |
+        | Only an asleep **or** only a wake-up time, or only **In bed** | your time laid over | stays "no one in the bed" (and locked); the night itself shows no times on the card or the detail page, and your time appears only in the "that's recorded" receipt and in the review |
+        | Wake-up not after asleep | total floored at 0 | stays "no one in the bed" |
+        | Night still in progress | your times laid over | stays as the cameras see it now |
+        | **No one was in the bed** (your answer) | "no one in the bed" | "no one in the bed" (your answer always wins) |
+
+        Only the child's card and the sleep detail page show such a night as slept: they lay your review over
+        the night. Everything that reads the saved summary instead still sees "no one in the bed", because a
+        correction never rewrites that summary (that is what lets removing it bring the night back, and why
+        the lock works as before). So the morning report and push, which are built from the app's own
+        summary, say "no one in the bed" for that night, even when you corrected it before they were sent;
+        and the sleep ↔ temperature averages, which read only nights the app saved as slept, leave it out.
+        Only a "no one in the bed" night is promoted; "no data" and "no sleep" nights are not.
       - A corrected total still subtracts every unwatched minute the detector counted for the night,
         even ones outside your corrected times (the camera-outage limit under "Minutes with no video are
         unknown" in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)). Locking makes that figure stop changing; it
@@ -750,7 +787,10 @@ measurement**, and (like everything here) never a safety device — see the warn
     recorded, and tapping it lets you change your mind.
   - **Any night can be reviewed, not just last night.** The sleep detail page has **Was this night
     right?** for whichever night you are looking at — that is how you correct a night you already
-    answered, since the card only ever offers nights you haven't. Saving from there keeps you on that
+    answered, since the card only ever offers nights you haven't. It is on every finished night shown as
+    slept or as "no one in the bed" (the card never asks about a "no one in the bed" night, so this is the
+    way to correct one, #355); a night still in progress, and a "no data" or "no sleep" night, have no
+    such button. Saving from there keeps you on that
     night and shows the receipt in place, so working back through a run of nights doesn't send you to
     re-pick the date each time.
   - **Reviews are kept forever** — unlike the sleep minute-data behind them (30 days) or the recorded
@@ -835,9 +875,23 @@ measurement**, and (like everything here) never a safety device — see the warn
 - **Room temperature (optional).** If a camera reports temperature/humidity over **MQTT** (set
   up under **Settings → MQTT**, e.g. via Zigbee2MQTT — the readings also show on the camera
   tile), the sleep detail overlays the night's room temperature beneath the timeline, aligned to
-  the same time axis. After a handful of tracked nights, a **"Sleep & room temperature"** card
-  compares wake-ups on the child's warmer vs cooler nights, so you can spot whether a warm room
-  tends to mean more waking — a pattern, not a cause.
+  the same time axis. A **"Sleep & room temperature"** card compares wake-ups on the child's warmer
+  vs cooler nights, so you can spot whether a warm room tends to mean more waking — a pattern, not
+  a cause. It reads the child's 30 most recent tracked nights with a temperature (fixed, not a
+  setting). From the first such night until there are 5 it reads "Collecting nights" with the count
+  so far. From 5, a room whose temperature varied by less than 1°C across those nights is reported
+  as "barely changed": that says nothing about sleep, only that the room did not change enough to
+  compare. Otherwise the nights are split at the median temperature, and the card needs **at least
+  10 nights in each of the cooler group and the warmer group before it says anything about sleep**
+  (fixed, not a setting; the figure is a judgement, not a measurement, and counts nights only, so it
+  is the same in any home or climate). Nights at exactly the median temperature belong to neither
+  group, so the first comparison needs at least 21 nights (10 cooler, 10 warmer and one at the
+  median). Until both groups reach 10 the card reads "Not enough nights yet" with how many it has
+  of each, and shows no verdict and no averages. Once both groups have 10, the wording and numbers
+  are exactly what they were before. Known limit: each night's average temperature is rounded to
+  0.1°C, so in a very steady room where many nights share the median value (all of which join
+  neither group) one group can stay under 10, and the card keeps saying "Not enough nights yet",
+  for as long as the room stays that steady.
 
 ## Adding caregivers
 
@@ -860,7 +914,7 @@ destroy or reconfigure.**
 | Answer the morning sleep review (the review shows who last answered it) | Yes | Yes |
 | Delete an alert clip, a recording or a wake clip | No | Yes |
 | Delete a timelapse | No | Yes |
-| Delete a child and its media | No | Yes |
+| Delete a child and everything recorded for them (nights, reviews, bed transitions, recordings, timelapses) | No | Yes |
 | Change global settings (detection, notifications, providers, recording retention) | No | Yes |
 | Manage caregiver/admin accounts and sessions | No | Yes |
 
@@ -964,6 +1018,14 @@ Set it to the address your proxy connects *from*:
 > client's IP. Too broad a value — or `true`, which trusts *every* upstream — lets anyone forge
 > `X-Forwarded-For` and slip the login rate limit entirely, which is worse than leaving it unset. If
 > you are not sure, leave it alone.
+
+**IPv6 ranges and IPv4 clients (changed with the `proxy-addr` 2.0.8 update).** An IPv6 range is now
+compared with IPv4 peers only if it is an IPv4-mapped range of /96 or longer, such as `::ffff:a00:0/104`,
+and that behaves exactly like the IPv4 range it maps (`10.0.0.0/8`). Any other IPv6 range, such as `::/1`,
+no longer matches IPv4 peers, and a range written in mapped form but shorter than /96, such as
+`::ffff:0:0/80`, now matches no peer at all. IPv4 addresses and ranges, the named ranges, hop counts and
+`true`/`false` behave as before. If you relied on an IPv6 range to cover IPv4 peers, list the IPv4 address
+or range instead.
 
 A value Nightlight can't make sense of is **ignored, with a warning in the log**, and the safe default
 is used instead — a typo here will never stop the app starting.

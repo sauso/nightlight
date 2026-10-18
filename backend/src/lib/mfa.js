@@ -23,7 +23,7 @@
 // Anything enrolled from here on is 160-bit. See docs/mfa.md.
 import { generateSecret as newSecret, generateURI, verifySync, createGuardrails } from 'otplib';
 import crypto from 'crypto';
-import bcrypt from 'bcryptjs';
+import * as passwordHash from './passwordHash.js';
 import QRCode from 'qrcode';
 
 // ±1 time step of clock drift, expressed in seconds — see the unit trap above.
@@ -58,22 +58,33 @@ export function keyUri(username, secret, issuer = 'Nightlight') {
   return generateURI({ type: 'totp', secret, label: username, issuer, algorithm: 'SHA1' });
 }
 
-export function verifyToken(secret, token) {
-  if (!secret || !token) return false;
+// The time step (RFC 6238's counter: floor(unix seconds / 30)) of the code that matched, or null when
+// nothing did. This is what a caller needs to refuse a REPLAY (#550): the same 6-digit code stays
+// valid for up to ~90 s (its own 30 s step plus one step of drift each side), so "is this code right"
+// is not enough on its own — the caller must also remember the newest step it has accepted. The step
+// reported is the one the code belongs to (otplib's `timeStep`), not the server's current one, so a
+// code from the previous step is recorded as that earlier step and cannot be used after a later one.
+export function matchTokenStep(secret, token) {
+  if (!secret || !token) return null;
   try {
-    return (
-      verifySync({
-        token: String(token).replace(/\s+/g, ''),
-        secret,
-        epochTolerance: EPOCH_TOLERANCE_SEC,
-        // Only a pre-v13 secret gets the relaxed floor. Passing the strict default here would make
-        // verifySync throw on it, which the catch below would turn into a silent "wrong code".
-        ...(isLegacySecret(secret) ? { guardrails: LEGACY_GUARDRAILS } : {}),
-      }).valid === true
-    );
+    const r = verifySync({
+      token: String(token).replace(/\s+/g, ''),
+      secret,
+      epochTolerance: EPOCH_TOLERANCE_SEC,
+      // Only a pre-v13 secret gets the relaxed floor. Passing the strict default here would make
+      // verifySync throw on it, which the catch below would turn into a silent "wrong code".
+      ...(isLegacySecret(secret) ? { guardrails: LEGACY_GUARDRAILS } : {}),
+    });
+    return r.valid === true && Number.isSafeInteger(r.timeStep) ? r.timeStep : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+// Stateless "is this code currently valid" — enrolment confirmation uses it (the pending secret has no
+// last-used step yet). Login must NOT use it alone: it cannot see a replay. See matchTokenStep.
+export function verifyToken(secret, token) {
+  return matchTokenStep(secret, token) !== null;
 }
 
 export function qrDataUrl(uri) {
@@ -83,13 +94,17 @@ export function qrDataUrl(uri) {
 // One-time recovery codes. Returns the plaintext codes to show the user ONCE, plus a JSON string of
 // their bcrypt hashes to store. Format is two groups of 4 hex chars ("a1b2-c3d4") for readability;
 // the dash/case are ignored on verification.
-export function generateBackupCodes(count = BACKUP_CODE_COUNT) {
+//
+// ASYNC (#548): bcryptjs is pure JavaScript, ~80 ms of blocked event loop per hash at cost 10, and ten
+// of them ran back to back on /me/mfa/enable. They now run in a worker thread (lib/passwordHash.js), so
+// camera/detection work keeps running. Cost factor is unchanged (10) — existing hashes still verify.
+export async function generateBackupCodes(count = BACKUP_CODE_COUNT) {
   const codes = [];
   const hashes = [];
   for (let i = 0; i < count; i += 1) {
     const raw = crypto.randomBytes(4).toString('hex'); // 8 hex chars
     codes.push(`${raw.slice(0, 4)}-${raw.slice(4)}`);
-    hashes.push(bcrypt.hashSync(raw, 10));
+    hashes.push(await passwordHash.hash(raw, 10));
   }
   return { codes, hashesJson: JSON.stringify(hashes) };
 }
@@ -99,7 +114,14 @@ const normalizeCode = (code) => String(code || '').toLowerCase().replace(/[^a-z0
 // Check a submitted backup code against the stored hashes. On a match, that hash is consumed
 // (removed) so the code can't be reused. Returns { ok, hashesJson } — hashesJson is the updated
 // list to persist when ok is true.
-export function verifyAndConsumeBackupCode(hashesJson, code) {
+//
+// ASYNC (#548): up to ten bcrypt compares (~0.8 s of blocked loop when it was synchronous), now in the
+// worker thread. Sequential on purpose, stopping at the first match, exactly as findIndex did. Because
+// this now yields, the caller
+// can no longer assume nothing else ran between reading `hashesJson` and writing the result back: it
+// must write with a compare-and-swap on the value it read (routes/auth.js does), or two simultaneous
+// submissions of one backup code would both succeed.
+export async function verifyAndConsumeBackupCode(hashesJson, code) {
   const normalized = normalizeCode(code);
   if (!normalized) return { ok: false };
   let hashes;
@@ -108,7 +130,13 @@ export function verifyAndConsumeBackupCode(hashesJson, code) {
   } catch {
     return { ok: false };
   }
-  const idx = hashes.findIndex((h) => bcrypt.compareSync(normalized, h));
+  let idx = -1;
+  for (let i = 0; i < hashes.length; i += 1) {
+    if (await passwordHash.compare(normalized, hashes[i])) {
+      idx = i;
+      break;
+    }
+  }
   if (idx === -1) return { ok: false };
   hashes.splice(idx, 1);
   return { ok: true, hashesJson: JSON.stringify(hashes) };

@@ -6,6 +6,9 @@ import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 import CribZonePicker from '../components/CribZonePicker.jsx';
 import { queuePatch, flush, retry, useDetectionSave, pendingPatch, minToHHMM } from '../lib/detectionSaves.js';
+import { loadState } from '../lib/loadState.js';
+import LoadFailed from '../components/LoadFailed.jsx';
+import NotFound from './NotFound.jsx';
 
 export const TITLES = { motion: 'Motion detection', sound: 'Sound detection', schedule: 'Alert schedule' };
 
@@ -77,7 +80,7 @@ function RecordClipsToggle({ d, apply }) {
 // timer owned by it (issue #444) — see `apply` below.
 export default function DetectionSettings() {
   const { id, kind } = useParams();
-  const { cameras, refresh } = useCameras();
+  const { cameras, loaded: camerasLoaded, error: camerasError, refresh } = useCameras();
   const cam = cameras.find((c) => c.id === id);
 
   const [d, setD] = useState(null);
@@ -113,6 +116,25 @@ export default function DetectionSettings() {
   }
 
   const back = { to: `/cameras/${id}`, label: 'Camera' };
+
+  // Two addresses that match this route but name nothing (#379): a screen kind that does not exist, and a
+  // camera that does not exist. Both used to render this screen blank or on "Loading…" forever. An unknown
+  // kind needs no data, so it is decided at once; a missing camera only once the list has actually loaded
+  // (before that, or after a failed load, it may well exist: see ChildDetail for why count is 0).
+  // hasOwnProperty.call, not Object.hasOwn: the latter is Safari 15.4+ / Chrome 93+ and nothing else in the app's
+  // source uses it, so an older WebView would throw on every render of this route (review of #379). Own
+  // properties only, so `constructor` and `__proto__` are unknown kinds, not titles.
+  if (!Object.prototype.hasOwnProperty.call(TITLES, kind)) return <NotFound />;
+  const missing = !cam ? loadState({ loaded: camerasLoaded, error: camerasError, count: 0 }) : null;
+  if (missing === 'empty') return <NotFound />;
+  if (missing === 'error') {
+    return (
+      <>
+        <AppHeader title={TITLES[kind]} back={back} />
+        <main className="app-main"><LoadFailed what="this camera" error={camerasError} onRetry={refresh} /></main>
+      </>
+    );
+  }
 
   if (!cam || !d) {
     return (

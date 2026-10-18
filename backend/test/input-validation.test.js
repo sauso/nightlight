@@ -370,10 +370,11 @@ describe('MFA: no code verifies against a missing secret', () => {
 });
 
 describe('MFA enrolment cannot replace a second factor that is already on', () => {
-  // POST /me/mfa/setup needs only a live session, not the password (turning MFA OFF needs the password).
   // If setup worked on an account that already has MFA on, whoever holds an unlocked, signed-in device
   // could swap in a secret of their own: the owner's authenticator would stop working and theirs would be
-  // the live second factor. These guards had no test.
+  // the live second factor. These guards had no test. (Since the review of #765 every set-up call also needs
+  // the account password, and a rotation is a compare-and-set on mfa_enabled = 0; the guard tested here still
+  // answers first, with "already on", before any password check, which is what the text assertion pins.)
   let token;
   const row = () => db.prepare("SELECT mfa_enabled, mfa_secret, mfa_backup_codes FROM users WHERE id = 'u-mfa'").get();
   beforeEach(() => {
@@ -387,6 +388,7 @@ describe('MFA enrolment cannot replace a second factor that is already on', () =
     db.prepare("UPDATE users SET mfa_enabled = 1, mfa_secret = ?, mfa_backup_codes = '[]' WHERE id = 'u-mfa'").run(secret);
     const res = await api('/api/auth/me/mfa/setup', { method: 'POST', token });
     assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'Two-factor is already on. Turn it off first to re-enrol.');
     assert.equal(res.body.secret, undefined, 'a new secret was handed out');
     assert.equal(row().mfa_secret, secret, 'the active secret was replaced');
   });
@@ -396,6 +398,10 @@ describe('MFA enrolment cannot replace a second factor that is already on', () =
     db.prepare("UPDATE users SET mfa_enabled = 1, mfa_secret = ?, mfa_backup_codes = '[\"kept\"]' WHERE id = 'u-mfa'").run(secret);
     const res = await api('/api/auth/me/mfa/enable', { method: 'POST', token, body: { code: generateSync({ secret }) } });
     assert.equal(res.status, 400);
+    // The text too (review of #720): since #548 the write is a compare-and-set that also refuses an account
+    // with MFA on, so without this guard the codes stay untouched anyway, but only after ten backup-code
+    // hashes, and with the set-up text ('Start setup first.') instead of this one.
+    assert.equal(res.body.error, 'Two-factor is already on.');
     assert.equal(res.body.backup_codes, undefined);
     assert.equal(row().mfa_backup_codes, '["kept"]', 'the backup codes were regenerated');
   });

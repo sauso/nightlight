@@ -278,7 +278,12 @@ describe('every API response, for every role', () => {
       assert.equal(res.body.mqtt_password_set, true);
       // The exact shape: a field added to this answer must be a decision, because the route it sits on
       // exists to serve a credential's neighbours.
-      assert.deepEqual(Object.keys(res.body).sort(), ['mqtt_enabled', 'mqtt_host', 'mqtt_password_set', 'mqtt_port', 'mqtt_username']);
+      // Extended on purpose for TLS (#537): mqtt_tls, mqtt_tls_ca and mqtt_tls_verify. The CA is a public
+      // certificate, not a credential (a private key is refused when it is saved), and none of the three columns
+      // has a secret-like name, so the derivation above still sees only the password as a secret here.
+      assert.deepEqual(Object.keys(res.body).sort(), [
+        'mqtt_enabled', 'mqtt_host', 'mqtt_password_set', 'mqtt_port', 'mqtt_tls', 'mqtt_tls_ca', 'mqtt_tls_verify', 'mqtt_username',
+      ]);
     });
 
     test('GET /mqtt says no password is set when none is (the flag is not a constant)', async () => {
@@ -404,7 +409,7 @@ describe('every API response, for every role', () => {
       // check, the GET sweep included, looks for their tails too.
       const mfa = await import('../src/lib/mfa.js');
       mfaSecret = mfa.generateSecret();
-      const generated = generateBackupCodes();
+      const generated = await generateBackupCodes();
       backupCodes = generated.codes;
       db.prepare(
         `INSERT INTO users (id, username, password_hash, role, mfa_enabled, mfa_secret, mfa_backup_codes)
@@ -434,7 +439,7 @@ describe('every API response, for every role', () => {
       const state = await api('/api/auth/me/mfa', { token: second.body.token });
       assert.equal(state.status, 200);
       assert.equal(leakIn(state.body), null, `GET /me/mfa: ${leakIn(state.body)}`);
-      assert.deepEqual(state.body, { enabled: true, backup_codes_remaining: 9, needs_reenrolment: false });
+      assert.deepEqual(state.body, { enabled: true, backup_codes_remaining: 9, needs_reenrolment: false, setup_pending: false });
     });
 
     test('GET /me/mfa says OFF for an account without MFA (the flag is read, not assumed)', async () => {
@@ -450,7 +455,8 @@ describe('every API response, for every role', () => {
       const token = tokenFor('u-enrol', 'enrol', 'caregiver');
       // /setup returns the new secret ON PURPOSE (it is what the authenticator app scans), so its answer is
       // not checked here; what must never come back is the secret once it is ACTIVE, or any stored hash.
-      const setup = await api('/api/auth/me/mfa/setup', { method: 'POST', token });
+      // makeUser's default password: every set-up call needs it (review of #765).
+      const setup = await api('/api/auth/me/mfa/setup', { method: 'POST', token, body: { password: 'hunter22' } });
       assert.equal(setup.status, 200);
       const enable = await api('/api/auth/me/mfa/enable', { method: 'POST', token, body: { code: generateSync({ secret: setup.body.secret }) } });
       assert.equal(enable.status, 200, JSON.stringify(enable.body));
@@ -459,7 +465,7 @@ describe('every API response, for every role', () => {
       assert.deepEqual(Object.keys(enable.body), ['backup_codes']);
       assert.equal(enable.body.backup_codes.length, 10);
       const state = await api('/api/auth/me/mfa', { token });
-      assert.deepEqual(state.body, { enabled: true, backup_codes_remaining: 10, needs_reenrolment: false });
+      assert.deepEqual(state.body, { enabled: true, backup_codes_remaining: 10, needs_reenrolment: false, setup_pending: false });
     });
 
     test('GET /users: every account in the public shape, with mfa_enabled matching the database', async () => {

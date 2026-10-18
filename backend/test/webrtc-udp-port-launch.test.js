@@ -7,10 +7,12 @@
 // fake spawn and reads the env the child was given.
 //
 // mock.module('node:child_process') is safe here: mediamtxProcess.js is not in test:core's include list, and
-// this is the only file in its import graph that touches child_process. Same pattern as
+// it reaches child_process only through lib/childEnv.js (#553), which is not in that list either. So the fake
+// sees the env childEnv() really built, and `env` below is what the child would get. Same pattern as
 // detector-observation-wiring.test.js, and the same FakeFfmpeg stand-in (it has the pid killIfSpawned needs).
 import { test, describe, after, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import { networkInterfaces } from 'node:os';
 import { useTempDataDir, cleanupTempDataDirs } from './helpers/harness.js';
 import { FakeFfmpeg } from './helpers/fakeFfmpeg.js';
 
@@ -29,7 +31,8 @@ mock.module('node:child_process', {
 
 const { startMediaMTX, stopMediaMTX } = await import('../src/lib/mediamtxProcess.js');
 
-const KEYS = ['WEBRTC_UDP_PORT', 'MTX_WEBRTCLOCALUDPADDRESS'];
+// PUBLIC_HOST and MTX_WEBRTCADDITIONALHOSTS are cleared too, so the host-list cases below see only what they set.
+const KEYS = ['WEBRTC_UDP_PORT', 'MTX_WEBRTCLOCALUDPADDRESS', 'PUBLIC_HOST', 'MTX_WEBRTCADDITIONALHOSTS'];
 const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
 
 // Launch once with the given environment and return the env the MediaMTX child was handed.
@@ -86,5 +89,28 @@ describe('the MediaMTX child gets the WebRTC UDP port', () => {
   test('an existing install that only sets the raw override is unchanged', async () => {
     const env = await childEnvFor({ MTX_WEBRTCLOCALUDPADDRESS: ':9000' });
     assert.equal(env.MTX_WEBRTCLOCALUDPADDRESS, ':9000');
+  });
+});
+
+// #553: since the child no longer inherits everything, the advertised host list reaches MediaMTX only because
+// launch() puts it in `extra`, and an operator's (or a stale) MTX_WEBRTCADDITIONALHOSTS is inherited by
+// childEnv({ mediamtx: true }) underneath it. child-env.test.js pins the merge order with a literal `extra`;
+// only driving launch() shows the computed value is put there at all. A review found two mutants of that one
+// line surviving: the assignment made conditional on no inherited value, and the assignment removed.
+describe('#553 the MediaMTX child gets the host list computed at launch', () => {
+  // The same filter detectHostIPv4s() applies, so the expectation holds on any machine (CI runner or laptop).
+  const detected = () => Object.values(networkInterfaces()).flat()
+    .filter((a) => a && a.family === 'IPv4' && !a.internal).map((a) => a.address);
+  const computed = (publicHost) => [...new Set([publicHost, ...detected()])].join(',');
+
+  test('PUBLIC_HOST and the detected IPs reach the child as MTX_WEBRTCADDITIONALHOSTS', async () => {
+    const env = await childEnvFor({ PUBLIC_HOST: 'nightlight.example' });
+    assert.equal(env.MTX_WEBRTCADDITIONALHOSTS, computed('nightlight.example'));
+  });
+
+  test('a stale inherited MTX_WEBRTCADDITIONALHOSTS is replaced by the computed value, not passed through', async () => {
+    const env = await childEnvFor({ PUBLIC_HOST: 'nightlight.example', MTX_WEBRTCADDITIONALHOSTS: 'stale.example' });
+    assert.equal(env.MTX_WEBRTCADDITIONALHOSTS, computed('nightlight.example'));
+    assert.doesNotMatch(env.MTX_WEBRTCADDITIONALHOSTS, /stale/);
   });
 });

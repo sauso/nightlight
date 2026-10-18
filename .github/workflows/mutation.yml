@@ -89,7 +89,7 @@ jobs:
           node scripts/mutate.mjs "${args[@]}" 2>&1 | tee -a "out/shard-${SHARD}.log"
       - name: Upload this shard's log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-shard-${{ matrix.shard }}
           path: out/
@@ -104,7 +104,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: mutation-shard-*
           path: results

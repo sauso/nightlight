@@ -31,6 +31,45 @@ HLS can't carry at all — WebRTC can). This drives a specific pipeline, in orde
 4. **Frontend** picks WebRTC (`WhepPlayer.jsx`, "Low latency") or HLS (`HlsPlayer.jsx`,
    "Compatibility") per camera tile, toggled by the user.
 
+## Child process environment (`backend/src/lib/childEnv.js`, #553)
+
+Camera streams are untrusted input, and ffmpeg/ffprobe parse whatever a (possibly compromised) camera
+sends. So **no child is handed the backend's environment**. Every ffmpeg, ffprobe and MediaMTX process is
+started through `spawnChild()`, which builds the environment from an allowlist; `JWT_SECRET`,
+`FIREBASE_CREDENTIALS`, `DATA_DIR`, `PUBLIC_HOST` and everything else the operator set are not passed to a
+child. This narrows what a child *inherits*; it does not stop a child reading the backend's own environment
+(see "What this does not do" below).
+
+| Variable | ffmpeg / ffprobe | MediaMTX | Why |
+|---|---|---|---|
+| `PATH` | yes | yes | finds the binary and what it execs |
+| `TZ` | yes | yes | segment and log times agree with the app |
+| `LANG`, `LC_ALL` | yes | yes | locale only |
+| `MTX_*` (operator's own) | **no** | yes | MediaMTX's documented override mechanism, e.g. `MTX_WEBRTCLOCALUDPADDRESS` |
+| `MTX_WEBRTCADDITIONALHOSTS` | no | yes | computed by `mediamtxProcess.js` at every launch from `PUBLIC_HOST` and the detected host IPs; it replaces an inherited value whenever that list is non-empty |
+| `MTX_WEBRTCLOCALUDPADDRESS` | no | yes | the operator's own value when they set one: it wins, and `WEBRTC_UDP_PORT` is then ignored with a warning; otherwise `:<port>` from a valid `WEBRTC_UDP_PORT`; otherwise unset, so MediaMTX keeps `:8189` from `mediamtx.yml` |
+| `HOME`, `LIBVA_*`, `NVIDIA_*`, `HTTP(S)_PROXY`, `LD_LIBRARY_PATH`, `RTSP_*` | no | no | nothing in the app documents or sets them (ffmpeg runs with software decoding; cameras are reached directly on the LAN; `RTSP_*` is MediaMTX's legacy override prefix, which it still reads: use the `MTX_*` spelling) |
+
+A name that is unset in the backend stays unset in the child. A caller-supplied `env` option is ignored.
+
+**To add a variable:** add the name to `ALLOWED_NAMES` in `childEnv.js` with a comment saying which setup
+needs it, add a row to the table above, and update `backend/test/child-env.test.js` (it pins the list on
+purpose). For a per-launch computed value (MediaMTX's) pass it as `extra` instead. **To add a new spawn
+site:** call `spawnChild()`, never `child_process` directly; the source test in `child-env.test.js` fails
+on any other import of it under `backend/src`.
+
+**What this does not do:**
+
+- **It is not a sandbox.** The children still run as the same operating-system user as the backend, so a
+  child that a camera managed to take over could still read the backend's own environment through the
+  process table (`/proc` on Linux), `JWT_SECRET` included. The allowlist narrows what a child *inherits*:
+  what a bug that discloses the child's own memory or environment (in a demuxer, a crash report or log
+  output) could expose, and what a command run by a MediaMTX hook inherits from MediaMTX.
+- **It does not protect the files.** For the same reason a child can read the database and `.jwt_secret`
+  from disk. A separate user was considered and not done (#553 (b)).
+
+Keep cameras on their own VLAN, as the README advises.
+
 ## ONVIF, PTZ, and camera credentials (`backend/src/lib/onvif.js`, `rtspProbe.js`)
 
 Cameras are added/edited by **components** (IP / port / path / username / password), not a
@@ -114,6 +153,27 @@ attach headers). Roles are `admin` / `caregiver`; `requireAdmin` gates account/s
 the routes registered *after* it: cameras.js's four media routes sit above that line on purpose, so
 moving a route across it changes who can reach it.
 
+**Password hashing runs off the main loop (#548).** Every bcrypt hash and compare on a request path goes
+through `lib/passwordHash.js`, which runs the same `bcryptjs` (cost 10, so existing hashes still verify)
+in one persistent worker thread. bcryptjs's own async API does not help: it yields only after 100 ms of
+work and a cost-10 compare takes about 82 ms, so `bcrypt.compare` blocked the event loop exactly as
+`compareSync` did. Because a handler now yields mid-request, each place that reads a row, awaits, then
+writes uses a compare-and-swap or re-checks after the await (login re-reads the whole row, so a reset
+password or a just-enabled second factor decides; password change, backup codes; `/setup`;
+`/me/mfa/enable`, whose write is bound to MFA still being off AND to the secret its code was checked
+against). Every signed-in route that awaits bcrypt and then writes re-checks its own session first
+(`signInEnded`: the middleware's `isLiveSessionId` rule) and answers 401 if it ended meanwhile; the two
+admin routes that hash (`POST /users`, `PUT /users/:id`) also re-read the caller's live role
+(`adminRightsEnded`) and answer 403 if they were demoted meanwhile, so an in-flight request cannot undo a
+demotion (#261).
+`/me/mfa/enable` also allows one request per user at a time, refused before any hashing, because each
+one costs ten hashes in the shared worker. The worker module keeps each worker's pending jobs separately,
+so a crashed worker rejects only its own jobs. The TOTP replay check (`users.mfa_last_step`, nullable) is
+a single `UPDATE ... WHERE mfa_last_step IS NULL OR mfa_last_step < ?` whose row count is the verdict. The
+per-user MFA limiter sits beside the per-source ones in `routes/auth.js` and is keyed on a *verified* MFA
+token; the admin MFA reset also empties it. User-facing rules:
+[mfa.md](mfa.md#replayed-codes-and-limits-on-guessing-550).
+
 **Every route's gate is pinned** by `backend/test/route-permissions.test.js` (issue #563). It enumerates
 the real route table (index.js's registrations read from its source, and every mounted router's actual
 `router.stack`), classifies each route as public / optional / media / signed-in / signed-in+admin, and
@@ -177,6 +237,24 @@ the bottom of `db.js` (`PRAGMA table_info` + conditional `ALTER TABLE`) — ther
 framework. Follow this same pattern for new columns: check `table_info`, `ALTER TABLE` if
 missing, keep it idempotent.
 
+**Deleting a child or a camera is `lib/entityPurge.js`** (#540, #554), and it deletes everything that belongs to
+it. Most of the history tables have **no foreign key** to `children` / `cameras` (deliberately: `bed_transitions`,
+`activity_samples`, `detection_events`, `camera_events`, `sensor_readings`, `sleep_nights`, `sleep_reviews`), so
+the database will not cascade for you. **A new table or column that names a child or camera (`child_id`,
+`camera_id`) must be added to `entityPurge.js`**, or `backend/test/entity-purge.test.js` fails: it finds every such
+column with `PRAGMA`, fills a row and real files in each, deletes over HTTP and checks nothing is left. The order is
+the contract: per file-bearing row, file first and then the row (autocommit, not one transaction, because a rollback
+would restore rows whose files were already unlinked); rows with no file go in one transaction, the entity's own row
+last, so a failed delete leaves the entity in place to retry. Every stored path is resolved against its real parent
+directory and skipped unless it is a regular file inside `CLIPS_DIR`. The whole-folder sweeps (`<cameraId>/`,
+`.ring/<cameraId>/`, `timelapse/<childId>/`, `.timelapse-frames/<childId>/`) run only for a UUID-shaped id (the
+only kind the app mints; an id like `timelapse` would otherwise name a shared folder), and refuse the whole delete,
+before anything is removed, if a parent folder resolves outside the real `CLIPS_DIR` (the camera route runs this
+check, `preflightCameraPurge`, before it stops the camera; a purge that still fails part-way restarts it at once). A failed delete answers
+**409** with the reason (never 5xx: Cloudflare strips 5xx bodies), and so does a delete while one of the cameras
+is recording on demand. A writer that finishes after the delete (a bed-transition frame, an alert photo or clip,
+a recording or wake clip) checks that its `UPDATE` still found the row, and deletes the file it wrote if not.
+
 ## API errors (`backend/src/lib/asyncHandler.js`, `backend/src/middleware/errorHandler.js`)
 
 Every API error is JSON in the same shape the routes already use, `{ "error": "<message>" }`, and a
@@ -201,9 +279,11 @@ page and only a 4xx message reaches the person:
   `http-errors` / body-parser / `send` convention), capped at 200 characters; otherwise a generic message
   for that status is used. Two exceptions: a **401** on a thrown error is never honoured (the web UI signs
   the user out on any 401, and a library error can carry its upstream's status), so 401 comes only from
-  `middleware/auth.js`; and a **403** is honoured only when the error is `expose: true`, which is what
-  `res.sendFile` throws for a denied dotfile or a `..` path (a bare `{ status: 403 }` from some other
-  library stays a 500).
+  `middleware/auth.js` and the pre-sign-in `/login` steps; and a **403** is honoured only when the error is
+  `expose: true`, which is what `res.sendFile` throws for a denied dotfile or a `..` path (a bare
+  `{ status: 403 }` from some other library stays a 500). For the reason behind the first exception, a wrong
+  *confirmation* password on a signed-in route (`PUT /auth/me/password`, `POST /auth/me/mfa/disable`) answers
+  **400**, never 401: the sign-in is still valid, only the typed password is wrong (#697).
 - **5xx: a server bug.** The response is `500` with a generic message. The real error (message and stack)
   is written to the log with the method and path (never the query string, which can hold a media token) and
   is never sent to the client, because a SQLite message names tables and columns and a stack names source

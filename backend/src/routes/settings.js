@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import db from '../db.js';
 import { requireAuth, requireAdmin, optionalAuth, isAdminRequest } from '../middleware/auth.js';
-import { refreshMqttConnection, mqttStatus, mqttBrokerUrl } from '../lib/mqttClient.js';
+import { refreshMqttConnection, mqttStatus, mqttBrokerUrl, parseMqttCa } from '../lib/mqttClient.js';
 import { applyRecordingSettingsChange } from '../lib/clipCapture.js';
 import { clipStorageStats, sweepClips } from '../lib/clipStorage.js';
 import { wakeClipStats } from '../lib/recordings.js';
+import { previewClipRetention } from '../lib/clipRetentionPreview.js';
 
 const router = Router();
 
@@ -99,6 +100,11 @@ router.get('/mqtt', requireAuth, requireAdmin, (req, res) => {
     mqtt_port: s.mqtt_port || '',
     mqtt_username: s.mqtt_username || '',
     mqtt_password_set: !!s.mqtt_password,
+    // TLS (#537), additive. The CA is a certificate, not a secret, so the form gets it back to show and edit; the
+    // password still never leaves the server, only whether one is set.
+    mqtt_tls: !!s.mqtt_tls,
+    mqtt_tls_ca: s.mqtt_tls_ca || '',
+    mqtt_tls_verify: s.mqtt_tls_verify !== 0,
   });
 });
 
@@ -115,6 +121,27 @@ router.get('/clip-storage', requireAuth, requireAdmin, (req, res) => {
   res.json({ ...clipStorageStats(), wakeClips: wakeClipStats() });
 });
 
+// Admin-only: what saving these two limits would delete RIGHT NOW (#395), so the Recording form can ask first.
+// A dry run of the same sweep PUT /api/settings runs when either limit changes (lib/clipRetentionPreview.js).
+// It changes no clips and no settings and answers with counts, bytes and one timestamp only. (Not "strictly
+// read-only": any authenticated request refreshes the session's last-seen time in requireAuth.)
+// A limit that is given is held to the same range as the save, so a value the save would refuse is refused here
+// too. A limit that is OMITTED means "keep what is stored", exactly as in PUT /api/settings, where an absent
+// field is left alone: the form sends only the limits the person changed (a page left open in an old tab would
+// otherwise re-send a stale limit and trigger a sweep nobody was asked about), so the preview must combine the
+// changed limit with the CURRENT stored one, as the save will. Strict whole numbers: parseInt would read "5abc"
+// as 5 and a preview of a limit that is not the one saved is worse than none.
+router.get('/clip-retention-preview', requireAuth, requireAdmin, (req, res) => {
+  const whole = (v, max) => (typeof v === 'string' && /^\d{1,6}$/.test(v) && Number(v) <= max ? Number(v) : null);
+  const stored = getSettings();
+  const days = req.query.days === undefined ? stored.clip_retention_days : whole(req.query.days, 365);
+  const maxGb = req.query.max_gb === undefined ? stored.clip_retention_max_gb : whole(req.query.max_gb, 2000);
+  if (days === null || maxGb === null) {
+    return res.status(400).json({ error: 'days must be a whole number from 0 to 365 and max_gb from 0 to 2000' });
+  }
+  res.json(previewClipRetention({ days, maxGb }));
+});
+
 function isValidTimezone(tz) {
   try {
     Intl.DateTimeFormat(undefined, { timeZone: tz });
@@ -129,6 +156,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
   const {
     app_name, accent_color, live_color, offline_color, timezone, font_choice,
     temp_unit, mqtt_enabled, mqtt_host, mqtt_port, mqtt_username, mqtt_password,
+    mqtt_tls, mqtt_tls_ca, mqtt_tls_verify,
     ptz_step, clip_pre_roll_s, clip_post_roll_s, clip_retention_days, clip_retention_max_gb,
     ondemand_enabled, ondemand_pre_roll_s, ondemand_max_duration_s,
     wake_clips_enabled, wake_clip_seconds, wake_clip_retention_days,
@@ -315,9 +343,26 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
       mqttPortVal = n;
     }
   }
+  // TLS (#537). The two switches are strict (true/false/1/0 only): `"false"` is truthy, and turning verification
+  // off by a mistyped value is a security downgrade nobody asked for. `field` names the control the message belongs
+  // to, so the form can show it next to that control instead of in a banner (additive; `error` is unchanged).
+  const tlsFlag = (v, current) => (v === undefined ? current : v ? 1 : 0);
+  for (const [name, v] of [['mqtt_tls', mqtt_tls], ['mqtt_tls_verify', mqtt_tls_verify]]) {
+    if (v !== undefined && ![true, false, 1, 0].includes(v)) {
+      return res.status(400).json({ error: 'This MQTT TLS setting must be on or off (true or false)', field: name });
+    }
+  }
+  const mqttTlsVal = tlsFlag(mqtt_tls, existing.mqtt_tls);
+  const mqttTlsVerifyVal = tlsFlag(mqtt_tls_verify, existing.mqtt_tls_verify);
+  let mqttTlsCaVal = existing.mqtt_tls_ca;
+  if (mqtt_tls_ca !== undefined) {
+    try { mqttTlsCaVal = parseMqttCa(mqtt_tls_ca); } catch (e) {
+      return res.status(400).json({ error: e.message, field: 'mqtt_tls_ca' });
+    }
+  }
   const mqttHostVal = mqtt_host !== undefined ? (mqtt_host || '').trim() || null : existing.mqtt_host;
-  if ((mqtt_host !== undefined || mqtt_port !== undefined) && mqttHostVal) {
-    try { mqttBrokerUrl(mqttHostVal, mqttPortVal); } catch (e) {
+  if ((mqtt_host !== undefined || mqtt_port !== undefined || mqtt_tls !== undefined) && mqttHostVal) {
+    try { mqttBrokerUrl(mqttHostVal, mqttPortVal, { tls: !!mqttTlsVal }); } catch (e) {
       return res.status(400).json({ error: `The MQTT broker is not usable: ${e.message}` });
     }
   }
@@ -326,6 +371,7 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     `UPDATE settings
      SET app_name = ?, accent_color = ?, live_color = ?, offline_color = ?, timezone = ?, font_choice = ?,
          temp_unit = ?, mqtt_enabled = ?, mqtt_host = ?, mqtt_port = ?, mqtt_username = ?, mqtt_password = ?,
+         mqtt_tls = ?, mqtt_tls_ca = ?, mqtt_tls_verify = ?,
          ptz_step = ?, clip_pre_roll_s = ?, clip_post_roll_s = ?, clip_retention_days = ?, clip_retention_max_gb = ?,
          camera_offline_alert_enabled = ?, camera_offline_alert_minutes = ?,
          snooze_alert_enabled = ?, snooze_alert_minutes = ?,
@@ -345,6 +391,9 @@ router.put('/', requireAuth, requireAdmin, (req, res) => {
     mqttPortVal,
     mqtt_username !== undefined ? (mqtt_username || '').trim() || null : existing.mqtt_username,
     mqtt_password ? mqtt_password : existing.mqtt_password, // blank submission keeps the existing one
+    mqttTlsVal,
+    mqttTlsCaVal,
+    mqttTlsVerifyVal,
     ptzStepVal,
     preRoll,
     postRoll,

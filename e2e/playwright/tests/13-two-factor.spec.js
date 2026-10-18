@@ -25,8 +25,10 @@ const { totp } = require('./totp');
 // rest, inside a single 15-minute window. Exceeding it produces a 429 in whichever test happens to
 // be last — which looks like a bug in that test and is not one. This file is deliberately economical
 // for that reason: assertions that would cost a login are made from `/auth/me/mfa` instead wherever
-// they can be. (`/me/mfa/disable` is on the limiter but no spec calls it; enrolment — `/me/mfa/setup`
-// and `/me/mfa/enable` — is NOT limited, so those are free.)
+// they can be. (`/me/mfa/disable` is on the limiter but no spec calls it; `/me/mfa/enable` is NOT
+// limited, so it is free. Since the review of #765 `/me/mfa/setup` checks the account password on every
+// call and is limited like `/me/password` and `/me/mfa/disable`: per source + account (this throwaway
+// account, not the shared admin) and against the per-source budget. This file calls it three times.)
 // **MEASURED after a full run: 17 of the 20 spent with #246's specs present, 16 without** — read it
 // yourself with `ratelimit-remaining` on a /login response made THROUGH the proxy; straight to the
 // app's published port is a different bucket and will tell you nothing.
@@ -102,6 +104,13 @@ test('enrolling through the Account screen turns two-factor on', async ({ browse
   await expect(view.getByText('Two-factor authentication')).toBeVisible();
   await view.getByRole('button', { name: 'Set up two-factor' }).click();
 
+  // Every set-up asks for the account password first (review of #765). Scoped to the dialog and EXACT: the
+  // Account page also has the change-password form, whose "Current password" / "New password" labels a
+  // substring match on "Password" would hit too.
+  const step = view.getByRole('dialog');
+  await step.getByLabel('Password', { exact: true }).fill(USER.password);
+  await step.getByRole('button', { name: 'Continue', exact: true }).click();
+
   // The setup dialog shows a QR and the same secret in typeable form. The manual key is what this
   // test reads, for the same reason a person would: it can't scan a QR code.
   await expect(view.getByRole('img', { name: 'Two-factor setup QR code' })).toBeVisible();
@@ -127,8 +136,9 @@ test('enrolling through the Account screen turns two-factor on', async ({ browse
 
 test('an enrolled account cannot start a second enrolment', async ({ page }) => {
   // Re-enrolling silently would replace a working secret with a pending one the user hasn't scanned
-  // yet, so the factor has to be turned off deliberately first.
-  const res = await page.request.post('/api/auth/me/mfa/setup', asUser());
+  // yet, so the factor has to be turned off deliberately first. With the right password, so the refusal
+  // is the "already on" rule and not the password check (review of #765).
+  const res = await page.request.post('/api/auth/me/mfa/setup', { ...asUser(), data: { password: USER.password } });
   expect(res.status(), 'starting a second enrolment on an enrolled account must be refused').toBe(400);
   expect((await res.json()).error).toMatch(/already on/i);
 });
@@ -231,9 +241,9 @@ test('★ enrolment refuses a code that does not match the pending secret', asyn
   // with any six digits, locking the real owner out of their own account.
   //
   // It runs last because it needs an UN-enrolled account, which is what the reset above just produced.
-  // Neither /me/mfa/setup nor /me/mfa/enable is rate limited, so this costs nothing from the login
-  // budget.
-  const setup = await page.request.post('/api/auth/me/mfa/setup', asUser());
+  // /me/mfa/enable is not rate limited; /me/mfa/setup is, per this throwaway account (see the budget note
+  // at the top), and needs the account password (review of #765).
+  const setup = await page.request.post('/api/auth/me/mfa/setup', { ...asUser(), data: { password: USER.password } });
   expect(setup.status()).toBe(200);
   const pending = (await setup.json()).secret;
   expect(pending, 'a fresh enrolment should hand back a new secret').toMatch(/^[A-Z2-7]{16,}$/);

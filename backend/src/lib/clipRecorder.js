@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawnChild } from './childEnv.js';
 import fs from 'fs';
 import path from 'path';
 import { logger, isNoisyMediaLine } from './logger.js';
@@ -217,7 +217,7 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
 
   function launch() {
     const launchedAt = Date.now();
-    const proc = spawn('ffmpeg', segmenterArgs(pathName, ringDir), {
+    const proc = spawnChild('ffmpeg', segmenterArgs(pathName, ringDir), {
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     entry.proc = proc;
@@ -395,7 +395,7 @@ export function ringHasFootageFor(cameraId, { at, preRollSec, postRollSec }) {
 
 function runFfmpeg(args, { tool = 'ffmpeg' } = {}) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(tool, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(tool, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     const out = [];
     const err = [];
     proc.stdout.on('data', (c) => out.push(c));

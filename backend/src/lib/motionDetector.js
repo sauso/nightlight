@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawnChild } from './childEnv.js';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { forwardProcessLines } from './processOutput.js';
@@ -536,7 +536,7 @@ export async function startMotionDetector(camera) {
       '-f', 'rawvideo',
       '-',
     ];
-    const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     entry.proc = proc;
     // #369: freshness stamps for the detector watchdog, all from performance.now() (monotonic: a wall-clock
     // step must never make a live leg look stale or a dead one fresh). Per ENTRY, i.e. per ffmpeg process, so a
