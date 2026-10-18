@@ -261,11 +261,11 @@ describe('★ the data arriving after the screen has rendered', () => {
 
     const { rerenderWith } = renderAsAdmin(
       <Routes><Route path="/cameras/:id" element={<CameraSettings />} /></Routes>,
-      { cameras: [], kids: [KID], route: `/cameras/${CAM.id}` },
+      { cameras: [], camerasLoaded: false, kids: [KID], route: `/cameras/${CAM.id}` },
     );
     expect(await screen.findByText('Loading…')).toBeInTheDocument();
     expect(Object.keys(sessionStorage)).toHaveLength(1);
-    rerenderWith({ cameras: [CAM] });
+    rerenderWith({ cameras: [CAM], camerasLoaded: true });
     expect((await screen.findByLabelText('Name')).value).toBe('Nursery 2');
   });
 
