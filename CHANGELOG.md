@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- **Lowering "Keep clips for" or "Storage cap" now asks first when it would delete saved clips (#395).** Until now pressing Save deleted every alert clip outside the new limit straight away, with nothing on screen saying so. The Recording settings now check what the new limits would delete, using the same queries the cleanup itself uses, and show a **Delete saved clips?** box with how many clips will go, about how much space they use and the date of the oldest; nothing is saved until you press **Save and delete clips**. Raising a limit or setting it to 0 (no limit) saves as before, and if the check fails you are still asked, without a number. Wake clips are not part of this: their retention is applied by its own schedule. New admin-only read `GET /api/settings/clip-retention-preview` (counts, bytes and one date; it changes nothing).
+
 ### Changed
 
 - **Routine dependency updates, no behaviour change intended.** Backend: `express-rate-limit` 8.7.0 → 8.7.1, `uuid` 14.0.2 → 14.0.3. Web app: `react-router-dom` 7.18.3 → 7.18.4, `lucide-react` 1.47.0 → 1.56.0. Test and CI tooling (not part of the image): `vitest` 5.0.2 → 5.0.4, `jsdom` 30.1.1 → 30.1.2, `@playwright/test` 1.63.0 → 1.64.0, and the mutation workflow's `actions/upload-artifact` v4 → v7 and `actions/download-artifact` v4 → v8. `express` 5 and `react-dom` 19 are deliberately not part of this.

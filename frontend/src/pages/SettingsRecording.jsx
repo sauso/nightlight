@@ -5,6 +5,8 @@ import { useSettingsDraft } from '../lib/useSettingsDraft.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
+import Modal from '../components/Modal.jsx';
+import { useHomeTime } from '../lib/useHomeTime.js';
 import { loadDraft } from '../lib/formDraft.js';
 import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
 
@@ -54,8 +56,17 @@ function valuesOf(src) {
   };
 }
 
+// Does moving a limit from `was` to `now` make it stricter? 0 means "no limit", so 0 -> 30 is stricter and
+// 30 -> 0 is not. Only a stricter limit can delete anything the old one kept, so only that asks first (#395).
+// Anything that is not a whole number is left to the server's own validation on Save.
+function tighter(now, was) {
+  const n = Number(now);
+  return Number.isInteger(n) && n > 0 && (was === 0 || n < was);
+}
+
 export default function SettingsRecording() {
   const { settings, refresh, commit, loaded } = useSettings();
+  const home = useHomeTime();
   // Server settings vs. this screen's own unsaved edits, kept separate (#449) — see
   // useSettingsDraft.js for why a derived `form` replaced the old setForm(settings) sync effect.
   const draftKey = useDraftKey('settings:recording');
@@ -67,6 +78,11 @@ export default function SettingsRecording() {
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  // The "this will delete clips" confirmation (#395): null when closed, else { preview } where preview is the
+  // server's dry run, or null when it could not be fetched. Its own error, not the page's: a failure of what the
+  // dialog's button did belongs inside the dialog (design-language.md, Modal).
+  const [deletePrompt, setDeletePrompt] = useState(null);
+  const [confirmError, setConfirmError] = useState('');
 
   const loadStorage = () => api.get('/settings/clip-storage').then(setStorage).catch(() => {});
   useEffect(() => { loadStorage(); }, []);
@@ -87,8 +103,34 @@ export default function SettingsRecording() {
     setRestored(false);
   }
 
+  // Save is a two-step when it would delete video. Lowering "Keep clips for" or "Storage cap" deletes the clips that
+  // fall outside the new limit the moment the save lands (routes/settings.js runs the retention sweep), and the form
+  // used to say nothing. The server's dry run (GET /settings/clip-retention-preview, the same queries the sweep
+  // uses) says how many; none means a plain save. If the dry run cannot be fetched we ask anyway rather than
+  // delete without a word.
   async function save(e) {
     e.preventDefault();
+    if (busy) return;
+    setError('');
+    if (tighter(shown.clip_retention_days, stored.clip_retention_days) || tighter(shown.clip_retention_max_gb, stored.clip_retention_max_gb)) {
+      setBusy(true);
+      let preview = null;
+      try {
+        const r = await api.get(`/settings/clip-retention-preview?days=${Number(shown.clip_retention_days)}&max_gb=${Number(shown.clip_retention_max_gb)}`);
+        preview = r && Number.isInteger(r.count) ? r : null;
+      } catch {
+        preview = null;
+      }
+      setBusy(false);
+      if (preview && preview.count === 0) return doSave();
+      setConfirmError('');
+      setDeletePrompt({ preview });
+      return undefined;
+    }
+    return doSave();
+  }
+
+  async function doSave() {
     setBusy(true);
     setError('');
     // The values as SHOWN, defaults included (valuesOf), so what is saved is what the person was looking at.
@@ -111,10 +153,13 @@ export default function SettingsRecording() {
         await refresh();
       }
       loadStorage();
+      setDeletePrompt(null);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
-      setError(err.message || 'Could not save');
+      // From the confirmation dialog the failure is shown inside it; otherwise on the page.
+      if (deletePrompt) setConfirmError(err.message || 'Could not save');
+      else setError(err.message || 'Could not save');
     } finally {
       setBusy(false);
     }
@@ -297,7 +342,49 @@ export default function SettingsRecording() {
             {busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save changes'}
           </button>
         </form>
+        {deletePrompt && (
+          <Modal title="Delete saved clips?" onClose={() => setDeletePrompt(null)} error={confirmError}>
+            <DeleteSummary preview={deletePrompt.preview} home={home} />
+            <div className="camera-tile__sub" style={{ margin: '8px 0 12px' }}>
+              The alerts and their pictures stay; only the video goes. Deleted clips can't be got back.
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setDeletePrompt(null)} disabled={busy}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-danger" style={{ flex: 1 }} onClick={doSave} disabled={busy}>
+                {busy ? 'Saving…' : 'Save and delete clips'}
+              </button>
+            </div>
+          </Modal>
+        )}
       </main>
+    </>
+  );
+}
+
+// What the dry run says will go. The clip count is as of now; the size is "about" because new clips can arrive
+// before Save and each size is the one recorded when the clip was cut. With no preview (the request failed) it says
+// so instead of guessing a number.
+function DeleteSummary({ preview, home }) {
+  if (!preview) {
+    return (
+      <p style={{ marginTop: 0 }}>
+        We couldn't check how many clips these limits would delete. Lowering a limit deletes the clips outside it
+        straight away.
+      </p>
+    );
+  }
+  const oldest = preview.oldestAt ? home.day(new Date(`${preview.oldestAt.replace(' ', 'T')}Z`)) : null;
+  return (
+    <>
+      <p style={{ marginTop: 0 }}>
+        Saving these limits deletes <strong>{preview.count} alert clip{preview.count === 1 ? '' : 's'}</strong>
+        {' '}(about <strong>{fmtBytes(preview.bytes)}</strong>) right away{oldest ? <>; the oldest is from {oldest}</> : ''}.
+      </p>
+      {!preview.storageReady && (
+        <p className="camera-tile__sub">Clip storage isn't available right now, so nothing is deleted until it is.</p>
+      )}
     </>
   );
 }

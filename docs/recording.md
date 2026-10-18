@@ -40,6 +40,22 @@ re-encode); only the clip's short audio track is re-encoded, once.
 | Keep clips for (days) | 14 | 0–365 | 0 = no day limit |
 | Storage cap (GB) | 5 | 0–2000 | 0 = no size limit; oldest deleted first |
 
+**Lowering a limit asks first.** Making **Keep clips for** or **Storage cap** stricter (a smaller number,
+or a number where there was 0, "no limit") deletes the clips outside the new limit as soon as you press
+**Save changes**. When that would delete anything, Nightlight first shows a **Delete saved clips?** box
+with how many alert clips will go, about how much space they use, and the date of the oldest, and saves
+only when you press **Save and delete clips**. The alerts and their pictures stay; only the video goes.
+Raising a limit, or setting it to 0, never asks, because it cannot delete anything. The count is as of the
+moment you pressed Save and the size is "about": a new clip can arrive before you confirm. If the check
+itself fails you are still asked, without a number. The numbers come from the same queries the real
+cleanup uses (an admin-only read, `GET /api/settings/clip-retention-preview`, which changes nothing and
+returns no file names).
+
+| | Asks before saving? | When it is applied |
+|---|---|---|
+| **Keep clips for** and **Storage cap** (alert clips) | Yes, when the new limit is stricter | Straight away on Save, then every 15 minutes |
+| **Keep wake clips for** | **No** | On the wake-clip cleanup's own schedule, not on Save |
+
 Alerts that have a clip show a **play button** on their thumbnail; tapping opens the clip in a player
 with a **Download** button. In the mobile app, Download saves the video into your phone's Downloads
 folder.
