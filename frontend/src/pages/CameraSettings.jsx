@@ -207,6 +207,12 @@ export default function CameraSettings() {
       // camera this same component stays mounted under /cameras/:newId, and without it the old form would be
       // re-stored there as an edit of the new camera.
       setBaseline({ ...form, rtsp_password: '', talk_password: '' });
+      // The save worked, so the "Couldn't reach the camera stream" question that Save anyway answered is over (#496).
+      // This is where that state lives, and it has to be cleared here because adding a camera does not remount the
+      // page: /cameras/new and /cameras/:id render this same component in the same place, so React keeps the instance
+      // (and its state) across the navigation below, and the new camera's page opened with the old warning on it and
+      // "Retry save" in place of "Save changes".
+      setConfirmMsg(''); setPageError('');
       await refresh();
       // New camera: drop into its own settings so motion/sound can be configured next.
       navigate(isNew ? `/cameras/${saved.id}` : back.to, isNew ? { state: { from: back } } : { state: { from: back } });
