@@ -278,7 +278,12 @@ describe('every API response, for every role', () => {
       assert.equal(res.body.mqtt_password_set, true);
       // The exact shape: a field added to this answer must be a decision, because the route it sits on
       // exists to serve a credential's neighbours.
-      assert.deepEqual(Object.keys(res.body).sort(), ['mqtt_enabled', 'mqtt_host', 'mqtt_password_set', 'mqtt_port', 'mqtt_username']);
+      // Extended on purpose for TLS (#537): mqtt_tls, mqtt_tls_ca and mqtt_tls_verify. The CA is a public
+      // certificate, not a credential (a private key is refused when it is saved), and none of the three columns
+      // has a secret-like name, so the derivation above still sees only the password as a secret here.
+      assert.deepEqual(Object.keys(res.body).sort(), [
+        'mqtt_enabled', 'mqtt_host', 'mqtt_password_set', 'mqtt_port', 'mqtt_tls', 'mqtt_tls_ca', 'mqtt_tls_verify', 'mqtt_username',
+      ]);
     });
 
     test('GET /mqtt says no password is set when none is (the flag is not a constant)', async () => {

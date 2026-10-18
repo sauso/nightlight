@@ -491,6 +491,27 @@ if (!settingsColumns.includes('mqtt_host')) {
   db.exec('ALTER TABLE settings ADD COLUMN mqtt_username TEXT');
   db.exec('ALTER TABLE settings ADD COLUMN mqtt_password TEXT');
 }
+// TLS to the MQTT broker (#537). All three are additive and default to what every install does today, so an upgrade
+// keeps connecting over plain mqtt:// until an admin changes it:
+//   mqtt_tls         0 = plain mqtt:// (today), 1 = mqtts://
+//   mqtt_tls_ca      optional PEM text of the CA (or, for a SELF-SIGNED broker, its own certificate) to trust INSTEAD of the system
+//                    list, for a broker with a private or self-signed certificate. A certificate is public
+//                    information, so this is not a secret and is returned to the admin form; NULL = use the
+//                    system's trusted authorities
+//   mqtt_tls_verify  1 = refuse a broker whose certificate does not check out (the default, and the only safe
+//                    setting), 0 = connect anyway (encryption without identity: it stops a passive eavesdropper,
+//                    not someone impersonating the broker)
+// The names deliberately avoid password/secret/token/key words: the secrets-never-returned test derives the secret
+// columns from the schema by name, and none of these is one.
+if (!settingsColumns.includes('mqtt_tls')) {
+  db.exec('ALTER TABLE settings ADD COLUMN mqtt_tls INTEGER NOT NULL DEFAULT 0');
+}
+if (!settingsColumns.includes('mqtt_tls_ca')) {
+  db.exec('ALTER TABLE settings ADD COLUMN mqtt_tls_ca TEXT');
+}
+if (!settingsColumns.includes('mqtt_tls_verify')) {
+  db.exec('ALTER TABLE settings ADD COLUMN mqtt_tls_verify INTEGER NOT NULL DEFAULT 1');
+}
 // Separate on/off switch rather than "blank host means off" - lets the broker
 // config stay saved while MQTT is temporarily disabled (e.g. broker down for
 // maintenance) instead of the client endlessly retrying a dead broker.
@@ -989,6 +1010,33 @@ db.exec(`
 // does not re-notify). See lib/sleepReportAlert.js.
 if (!settingsColumns.includes('sleep_report_alert_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN sleep_report_alert_enabled INTEGER NOT NULL DEFAULT 1');
+}
+
+// The nightly sleep report is now chosen PER CHILD (#397, #398), with two switches on the child:
+//   sleep_report_enabled    send this child's nightly report at all (default 1 = on, as it has always been)
+//   sleep_report_show_name  put the child's name in it (default 1 = shown, as it has always been) or say "a child"
+// Both default ON so an install that upgrades behaves exactly as before. The old global switch above
+// (settings.sleep_report_alert_enabled) had no control anywhere in the app, so the only way it could be 0 is a
+// hand edit of the database, or the demo seed: its value is carried into every EXISTING child once, when the
+// column is first added, so that choice survives and is now visible and changeable on the child. After that the
+// global column is no longer read (lib/sleepReportAlert.js); it stays in the table so a downgrade still finds it.
+// Runs only when the column is missing, so a later boot never overwrites a choice made on the child. A child
+// created later gets the column default (on), which is the same as a new install.
+// The ALTER and the copy are atomic WITHOUT a db.transaction of their own: like every group here they sit inside the
+// one schema transaction opened at the top of this file (#258), so a boot that dies between them leaves neither, and
+// the next boot, finding the column still absent, runs both (sleep-report-prefs-migration.test.js, "leaves NOTHING
+// behind"). A nested wrapper would only add a savepoint and suggest the rest of the file needed one.
+// Downgrade: an older build reads only the global switch and ignores these columns, so after a downgrade every
+// tracked child's report is sent again, with its name (docs/notifications.md says so).
+if (!childrenColumns.includes('sleep_report_enabled')) {
+  db.exec('ALTER TABLE children ADD COLUMN sleep_report_enabled INTEGER NOT NULL DEFAULT 1');
+  db.exec(
+    `UPDATE children SET sleep_report_enabled =
+       CASE WHEN (SELECT sleep_report_alert_enabled FROM settings WHERE id = 'app') = 0 THEN 0 ELSE 1 END`
+  );
+}
+if (!childrenColumns.includes('sleep_report_show_name')) {
+  db.exec('ALTER TABLE children ADD COLUMN sleep_report_show_name INTEGER NOT NULL DEFAULT 1');
 }
 
 // Ensure the single settings row always exists.

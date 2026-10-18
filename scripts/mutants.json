@@ -21637,5 +21637,157 @@
     "expect": "killed",
     "tests": ["mfa-setup-resume.test.js"],
     "namePattern": "two-factor switched on during a START"
+  },
+  {
+    "label": "#537 TLS on: the broker's certificate is no longer verified although verification is switched on",
+    "file": "backend/src/lib/mqttClient.js",
+    "find": "options.rejectUnauthorized = cfg.mqtt_tls_verify !== 0;",
+    "replace": "options.rejectUnauthorized = false;",
+    "expect": "killed",
+    "tests": ["mqtt-tls.test.js"],
+    "namePattern": "verification ON, no CA"
+  },
+  {
+    "label": "#537 TLS on: the CA the admin configured is not given to the TLS layer",
+    "file": "backend/src/lib/mqttClient.js",
+    "find": "if (ca) options.ca = ca;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["mqtt-tls.test.js"],
+    "namePattern": "TLS on with the broker"
+  },
+  {
+    "label": "#537 a pasted private key is accepted as the CA certificate",
+    "file": "backend/src/lib/mqttClient.js",
+    "find": "if (/PRIVATE KEY/i.test(text)) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["mqtt-tls.test.js"],
+    "namePattern": "private key is refused by name"
+  },
+  {
+    "label": "#537 TLS on still connects with plain mqtt://",
+    "file": "backend/src/lib/mqttClient.js",
+    "find": "const scheme = tls ? 'mqtts' : 'mqtt';",
+    "replace": "const scheme = 'mqtt';",
+    "expect": "killed",
+    "tests": ["mqtt-tls.test.js"],
+    "namePattern": "TLS on with the broker"
+  },
+  {
+    "label": "#537 a failed connection is not reported to the Settings screen",
+    "file": "backend/src/lib/mqttClient.js",
+    "find": "lastError = describeMqttError(err, { caAdded });",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["mqtt-tls.test.js"],
+    "namePattern": "verification ON, no CA"
+  },
+  {
+    "label": "#537 a settings save that does not mention verification turns it OFF",
+    "file": "backend/src/routes/settings.js",
+    "find": "tlsFlag(mqtt_tls_verify, existing.mqtt_tls_verify)",
+    "replace": "tlsFlag(mqtt_tls_verify, 0)",
+    "expect": "killed",
+    "tests": ["mqtt-tls.test.js"],
+    "namePattern": "a save that leaves the TLS switches out keeps both"
+  },
+  {
+    "label": "#537 a settings save that does not mention TLS turns it ON",
+    "file": "backend/src/routes/settings.js",
+    "find": "tlsFlag(mqtt_tls, existing.mqtt_tls)",
+    "replace": "tlsFlag(mqtt_tls, 1)",
+    "expect": "killed",
+    "tests": ["mqtt-tls.test.js"],
+    "namePattern": "a save that leaves the TLS switches out keeps both"
+  },
+  {
+    "label": "#537 a configured CA that did not sign the broker is reported as \"add the CA certificate\"",
+    "file": "backend/src/lib/mqttClient.js",
+    "find": "caAdded = !!options.ca;",
+    "replace": "caAdded = false;",
+    "expect": "killed",
+    "tests": ["mqtt-tls.test.js"],
+    "namePattern": "own certificate pasted as the CA"
+  },
+  {
+    "label": "#537 a stored CA that cannot be used leaves the Settings screen with no reason",
+    "file": "backend/src/lib/mqttClient.js",
+    "find": "{ code: 'CA_UNUSABLE', message: 'The stored CA certificate cannot be used; replace or clear it in the CA certificate box and save.' }",
+    "replace": "null",
+    "expect": "killed",
+    "tests": ["mqtt-tls.test.js"],
+    "namePattern": "CA already stored that is not usable"
+  },
+  {
+    "label": "#537 the MQTT host error repeats what was typed (a pasted password comes back in the 400)",
+    "file": "backend/src/lib/mqttClient.js",
+    "find": "the host is not a valid hostname or address: ${hostProblem(typed)}",
+    "replace": "the host ${JSON.stringify(typed)} is not a valid hostname or address: ${hostProblem(typed)}",
+    "expect": "killed",
+    "tests": ["mqtt-broker-validation.test.js"],
+    "namePattern": "never repeats the host"
+  },
+  {
+    "label": "#537 Settings → MQTT sends the hidden CA text while TLS is off (a refused CA blocks the save invisibly)",
+    "file": "frontend/src/pages/SettingsMqtt.jsx",
+    "find": "if (form.mqtt_tls) payload.mqtt_tls_ca = form.mqtt_tls_ca;",
+    "replace": "payload.mqtt_tls_ca = form.mqtt_tls_ca;",
+    "expect": "killed",
+    "tests": ["settingsMqttTls.test.jsx"]
+  },
+  {
+    "label": "#397 a child whose sleep report is switched off is still sent it",
+    "file": "backend/src/lib/sleepReportAlert.js",
+    "find": "if (enabled) out.push({ ...r, name: showName ? r.name : HIDDEN_NAME });",
+    "replace": "out.push({ ...r, name: showName ? r.name : HIDDEN_NAME });",
+    "expect": "killed",
+    "tests": ["sleep-report-prefs.test.js"],
+    "namePattern": "nothing at all reaches any provider"
+  },
+  {
+    "label": "#398 a child whose name is hidden is named in the sleep report anyway",
+    "file": "backend/src/lib/sleepReportAlert.js",
+    "find": "name: showName ? r.name : HIDDEN_NAME",
+    "replace": "name: r.name",
+    "expect": "killed",
+    "tests": ["sleep-report-prefs.test.js"],
+    "namePattern": "planted name is absent from push"
+  },
+  {
+    "label": "#397 the nightly job reads every child's report switch from the first child",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const canNotify = channelsConfigured && sleepReportPrefs(kid.id).enabled;",
+    "replace": "const canNotify = channelsConfigured && sleepReportPrefs(kids[0].id).enabled;",
+    "expect": "killed",
+    "tests": ["sleepReportNotify.test.js"],
+    "namePattern": "two children, the first child"
+  },
+  {
+    "label": "#397 the sleep report tray tag is worked out before a switched-off child is dropped",
+    "file": "backend/src/lib/sleepReportAlert.js",
+    "find": "fanOut(title, body, 'sleep_report', reportTag(reports));",
+    "replace": "fanOut(title, body, 'sleep_report', reportTag(all));",
+    "expect": "killed",
+    "tests": ["sleep-report-prefs.test.js"],
+    "namePattern": "ONE-child message"
+  },
+  {
+    "label": "#397 adding a child ignores the report switch it was sent",
+    "file": "backend/src/routes/children.js",
+    "find": "req.body?.sleep_report_enabled === undefined ? 1 : req.body.sleep_report_enabled ? 1 : 0,",
+    "replace": "1,",
+    "expect": "killed",
+    "tests": ["sleep-report-prefs.test.js"],
+    "namePattern": "adding a child with the report OFF"
+  },
+  {
+    "label": "#398 the sleep report switches accept strings and null and read them by truthiness",
+    "file": "backend/src/routes/children.js",
+    "find": "const flagInvalid = (v) => v !== undefined && ![true, false, 1, 0].includes(v);",
+    "replace": "const flagInvalid = (v) => typeof v === 'object' && v !== null;",
+    "expect": "killed",
+    "tests": ["sleep-report-prefs.test.js"],
+    "namePattern": "anything but true/false/1/0"
   }
 ]
