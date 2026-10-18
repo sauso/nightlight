@@ -29,11 +29,13 @@ const CAREGIVER_FIELDS = ['name', 'birthday', 'color', 'photo'];
 // moment it is picked on an existing child (persistPhoto), and as a data: URL it is too big to be worth
 // keeping in storage for the new-child case. A photo chosen for a not-yet-created child is lost on reload.
 // No secret fields exist on this form; the allow-list is still explicit so a future one is not stored by default.
-const DRAFT_FIELDS = ['name', 'birthday', 'color', 'track_sleep', 'sleep_window_start', 'sleep_window_end', 'primary_camera_id'];
+const DRAFT_FIELDS = ['name', 'birthday', 'color', 'track_sleep', 'sleep_window_start', 'sleep_window_end', 'primary_camera_id', 'sleep_report_enabled', 'sleep_report_show_name'];
 
 const NEW_CHILD = {
   name: '', birthday: '', color: COLORS[0], photo: null,
   track_sleep: true, sleep_window_start: '19:00', sleep_window_end: '07:00', primary_camera_id: '',
+  // Both on, as the server defaults them (#397, #398): the nightly report is sent, and it names the child.
+  sleep_report_enabled: true, sleep_report_show_name: true,
 };
 
 export default function ChildSettings() {
@@ -77,6 +79,9 @@ export default function ChildSettings() {
       sleep_window_start: kid.sleep_window_start || '19:00',
       sleep_window_end: kid.sleep_window_end || '07:00',
       primary_camera_id: kid.primary_camera_id || '',
+      // `!= 0`, not truthiness: a server older than these columns sends neither, and that means on.
+      sleep_report_enabled: kid.sleep_report_enabled !== 0 && kid.sleep_report_enabled !== false,
+      sleep_report_show_name: kid.sleep_report_show_name !== 0 && kid.sleep_report_show_name !== false,
     };
     const draft = loadDraft(draftKey, DRAFT_FIELDS);
     setBaseline(loaded);
@@ -323,6 +328,34 @@ export default function ChildSettings() {
                       </div>
                     </div>
                   )}
+                  {/* The nightly report (#397, #398). Both are admin-only like the rest of this block, and both are
+                      per child: what leaves the house is decided for each child on their own. The second switch is
+                      meaningless while the first is off, so it is disabled then rather than hidden. */}
+                  <div style={{ marginTop: 16 }}>
+                    <label className="child-sleep-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>Send this child's sleep report</span>
+                      <Switch checked={form.sleep_report_enabled} disabled={!isAdmin}
+                        onChange={(e) => setForm({ ...form, sleep_report_enabled: e.target.checked })} />
+                    </label>
+                    <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                      Each morning, a notification such as "asleep 8h12, 2 wakes, up 06:47" goes to every
+                      notification service that is turned on in Settings. On by default.
+                    </div>
+                    <label className="child-sleep-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+                      <span>Show this child's name in the report</span>
+                      <Switch checked={form.sleep_report_show_name} disabled={!isAdmin || !form.sleep_report_enabled}
+                        onChange={(e) => setForm({ ...form, sleep_report_show_name: e.target.checked })} />
+                    </label>
+                    <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                      Off says "a child" instead, in the title and in the text. The notification still passes
+                      through the service you use (Google, Pushover, ntfy or Gotify). On by default.
+                    </div>
+                    {!isAdmin && (
+                      <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                        Only an admin can change what the sleep report sends.
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
             </div>

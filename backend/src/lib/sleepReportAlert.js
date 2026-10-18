@@ -37,6 +37,35 @@ function fmtDur(min) {
   return `${h}h${String(m).padStart(2, '0')}`;
 }
 
+// What a report calls a child whose name is not to leave the house (#398). Capitalised for the start of a line;
+// the title lowercases it. Deliberately the same for every such child: two of them in one combined message read
+// as two identical labels, in the order the nightly job found them, which is the price of not naming either.
+const HIDDEN_NAME = 'A child';
+
+// The two per-child choices (#397, #398). A child that no longer exists has neither (nothing is sent for it).
+const prefsStmt = db.prepare('SELECT sleep_report_enabled, sleep_report_show_name FROM children WHERE id = ?');
+export function sleepReportPrefs(childId) {
+  const r = childId == null ? null : prefsStmt.get(childId);
+  // `!== 0`, not truthiness: only a stored 0 turns a switch off, so a NULL or an unexpected value keeps the
+  // behaviour every install had before these existed (report sent, name shown).
+  return r ? { enabled: r.sleep_report_enabled !== 0, showName: r.sleep_report_show_name !== 0 } : { enabled: false, showName: false };
+}
+
+// Drops the children whose report is off, and replaces the name of those whose name is hidden, BEFORE anything is
+// worded or sent. Every provider receives the title and text built from what this returns, so a name removed here
+// cannot reappear in any of them (push, Pushover, ntfy, Gotify). The log line is built from the same text.
+function applyPrefs(reports) {
+  const out = [];
+  for (const r of reports) {
+    const { enabled, showName } = sleepReportPrefs(r.childId);
+    if (enabled) out.push({ ...r, name: showName ? r.name : HIDDEN_NAME });
+  }
+  return out;
+}
+
+// "Sleep report — Name" for one child; a hidden name reads "a child" in the middle of the sentence.
+const titleName = (name) => (name === HIDDEN_NAME ? HIDDEN_NAME.toLowerCase() : name);
+
 // Build the one-line summary for a single child's night.
 function lineFor(name, summary, tz) {
   // An empty bed is a real observation, not missing data — say so, rather than lumping it in with
@@ -54,7 +83,7 @@ function link() {
   return server ? `nightlight://sleep?server=${encodeURIComponent(server)}` : 'nightlight://sleep';
 }
 
-// ROADMAP §1.6: `settings.sleep_report_alert_enabled` defaults ON even when nothing is actually
+// ROADMAP §1.6: the sleep report is ON by default (per child since #397; it was one global switch before) even when nothing is actually
 // configured to deliver it (push needs a mounted FCM credential; Pushover/ntfy/Gotify default off) — a
 // caller that only checks the toggle would treat "nothing was sent" the same as "a report went out",
 // which matters once a night's notify-history is tracked. Checked here, next to the *Enabled() checks
@@ -96,10 +125,11 @@ function fanOut(title, body, type, tag) {
 }
 
 // reports: [{ name, summary, childId, nightDate }] — one entry per freshly-computed child this run.
-export function notifySleepReports(reports) {
-  if (!reports || reports.length === 0) return;
+export function notifySleepReports(all) {
+  const reports = applyPrefs(all || []);
+  if (reports.length === 0) return;
   const tz = appTz();
-  const title = reports.length === 1 ? `Sleep report — ${reports[0].name}` : 'Sleep reports ready';
+  const title = reports.length === 1 ? `Sleep report — ${titleName(reports[0].name)}` : 'Sleep reports ready';
   const body = reports.map((r) => lineFor(r.name, r.summary, tz)).join('\n');
   logger.info(`[sleep-alert] ${title}: ${body.replace(/\n/g, ' | ')}`);
   fanOut(title, body, 'sleep_report', reportTag(reports));
@@ -112,10 +142,11 @@ export function notifySleepReports(reports) {
 // has corrected. This function fires unconditionally for whatever it's given, same fire-and-forget
 // contract as notifySleepReports. Reuses lineFor() as-is: the null->real transition already changes the
 // rendered string shape correctly (the "up HH:MM" clause appears), which is exactly what needs conveying.
-export function notifySleepReportUpdates(reports) {
-  if (!reports || reports.length === 0) return;
+export function notifySleepReportUpdates(all) {
+  const reports = applyPrefs(all || []);
+  if (reports.length === 0) return;
   const tz = appTz();
-  const title = reports.length === 1 ? `Sleep report updated — ${reports[0].name}` : 'Sleep reports updated';
+  const title = reports.length === 1 ? `Sleep report updated — ${titleName(reports[0].name)}` : 'Sleep reports updated';
   const body = reports.map((r) => lineFor(r.name, r.summary, tz)).join('\n');
   logger.info(`[sleep-alert] ${title}: ${body.replace(/\n/g, ' | ')}`);
   fanOut(title, body, 'sleep_report_update', reportTag(reports));

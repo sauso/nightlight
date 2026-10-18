@@ -1,6 +1,6 @@
 import db from '../db.js';
 import { logger } from './logger.js';
-import { notifySleepReports, notifySleepReportUpdates, sleepAlertChannelsConfigured } from './sleepReportAlert.js';
+import { notifySleepReports, notifySleepReportUpdates, sleepAlertChannelsConfigured, sleepReportPrefs } from './sleepReportAlert.js';
 import { getBedTransitions, TRANSITION } from './bedTransitions.js';
 import { listChildWakeClips } from './recordings.js';
 import { primaryCameraRowFor } from './primaryCamera.js';
@@ -2604,13 +2604,14 @@ export function runNightlySleepJob() {
     const toTimelapse = []; // freshly-closed nights to assemble a memories timelapse for
     const emptyNights = []; // ...and those with nobody in the bed, whose frames get thrown away
     const now = Date.now();
-    const notifyOn = db.prepare('SELECT sleep_report_alert_enabled FROM settings WHERE id = ?').get('app')?.sleep_report_alert_enabled;
-    // ROADMAP §1.6: `notifyOn` alone doesn't mean a notification can actually go out — it defaults ON
+    // ROADMAP §1.6: a report switched ON does not mean a notification can actually go out — it defaults ON
     // even on a fresh install with no push credential and every other provider off. Without this second
     // check, a night computed before push was ever configured would get stamped "notified" for nothing,
     // and the first real notification the owner ever saw once they DID configure push would be
-    // mislabelled "updated". Computed once (global settings, not per-child).
-    const canNotify = notifyOn && sleepAlertChannelsConfigured();
+    // mislabelled "updated". Whether a provider is configured is global; whether THIS child's report is on is
+    // per child (#397), so `canNotify` below is decided inside the loop from both. The old global
+    // `settings.sleep_report_alert_enabled` is no longer read: db.js carried its value into each existing child.
+    const channelsConfigured = sleepAlertChannelsConfigured();
     for (const kid of kids) {
       if (!childTracksSleep(kid.id)) continue; // sleep tracking off for this child
       // ROADMAP §1.6, found by adversarial review: this per-child body used to have no isolation of its
@@ -2624,6 +2625,9 @@ export function runNightlySleepJob() {
       // Isolating each child's failure here means the rest of the batch, and whatever was already
       // collected, still goes out.
       try {
+        // A child whose report is off is never stamped "notified" either (see channelsConfigured above): had it
+        // been, switching the report back on would mislabel its next message as an "update".
+        const canNotify = channelsConfigured && sleepReportPrefs(kid.id).enabled;
         const nightDate = lastCompletedNightDate(kid.id); // each child on their own window
         const existing = db
           .prepare(`SELECT status, window_end, computed_at, notified_at, notified_wake_at
@@ -2759,8 +2763,9 @@ export function runNightlySleepJob() {
       }
     }
     if (computed > 0) logger.info(`[sleep] Computed ${computed} sleep summary(ies).`);
-    if (notifyOn && fresh.length > 0) notifySleepReports(fresh);
-    if (notifyOn && followups.length > 0) notifySleepReportUpdates(followups);
+    // Which of these actually go out, and under what name, is decided per child inside the two functions (#397, #398).
+    if (fresh.length > 0) notifySleepReports(fresh);
+    if (followups.length > 0) notifySleepReportUpdates(followups);
     // Assemble each freshly-closed night's memories timelapse from the frames the sampler collected
     // overnight. Fire-and-forget (one FFmpeg pass each) and dynamically imported to avoid a static
     // import cycle (timelapse.js imports the window helpers from this module). Runs once per night —

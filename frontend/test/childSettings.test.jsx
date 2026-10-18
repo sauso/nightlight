@@ -71,7 +71,7 @@ describe('loading a child', () => {
     mount();
     expect((await screen.findByLabelText('Name')).value).toBe('Child B');
     expect(screen.getByLabelText(/Birthday/).value).toBe('2023-04-01');
-    expect(screen.getByRole('switch').checked).toBe(true);
+    expect(screen.getByRole('switch', { name: /Track sleep/ }).checked).toBe(true);
     expect(screen.getByLabelText('Bedtime').value).toBe('19:30');
     expect(screen.getByLabelText('Wake time').value).toBe('06:45');
   });
@@ -102,7 +102,7 @@ describe('loading a child', () => {
     // look like it had always been that way.
     mount({ kid: { id: 'kid-1', name: 'Child A', track_sleep: null } });
     await screen.findByLabelText('Name');
-    expect(screen.getByRole('switch').checked).toBe(true);
+    expect(screen.getByRole('switch', { name: /Track sleep/ }).checked).toBe(true);
   });
 
   test('a child still loading shows Loading…, not a blank form', async () => {
@@ -415,8 +415,8 @@ describe('★★ what a caregiver can change (#542)', () => {
   test('tracking and the window are shown but disabled, with the reason; an admin gets them enabled', async () => {
     const carer = mount({ who: CAREGIVER });
     await screen.findByLabelText('Name');
-    expect(screen.getByRole('switch')).toBeDisabled();
-    expect(screen.getByRole('switch').checked, 'still SHOWS the stored state').toBe(true);
+    expect(screen.getByRole('switch', { name: /Track sleep/ })).toBeDisabled();
+    expect(screen.getByRole('switch', { name: /Track sleep/ }).checked, 'still SHOWS the stored state').toBe(true);
     expect(screen.getByLabelText('Bedtime')).toBeDisabled();
     expect(screen.getByLabelText('Wake time')).toBeDisabled();
     expect(screen.getByText(NOTE)).toBeTruthy();
@@ -424,7 +424,7 @@ describe('★★ what a caregiver can change (#542)', () => {
 
     mount({ who: ADMIN });
     await screen.findByLabelText('Name');
-    expect(screen.getByRole('switch')).toBeEnabled();
+    expect(screen.getByRole('switch', { name: /Track sleep/ })).toBeEnabled();
     expect(screen.getByLabelText('Bedtime')).toBeEnabled();
     expect(screen.getByLabelText('Wake time')).toBeEnabled();
     expect(screen.queryByText(NOTE)).toBeNull();
@@ -589,5 +589,60 @@ describe('removing a child', () => {
     mount({ id: 'new' });
     await screen.findByLabelText('Name');
     expect(screen.queryByRole('button', { name: 'Remove child' })).toBeNull();
+  });
+});
+
+describe('★★ the nightly sleep report choices (#397, #398)', () => {
+  const SEND = /Send this child's sleep report/;
+  const NAME = /Show this child's name in the report/;
+
+  test('a child that predates the choices shows both ON, which is what they have always done', async () => {
+    mount({ kid: KID }); // KID carries neither field
+    await screen.findByLabelText('Name');
+    expect(screen.getByRole('switch', { name: SEND }).checked).toBe(true);
+    expect(screen.getByRole('switch', { name: NAME }).checked).toBe(true);
+  });
+
+  test('stored OFF values are shown OFF', async () => {
+    mount({ kid: { ...KID, sleep_report_enabled: 0, sleep_report_show_name: 0 } });
+    await screen.findByLabelText('Name');
+    expect(screen.getByRole('switch', { name: SEND }).checked).toBe(false);
+    expect(screen.getByRole('switch', { name: NAME }).checked).toBe(false);
+  });
+
+  test('an admin can turn each off, and the save carries both', async () => {
+    const { user } = mount({ kid: KID });
+    await screen.findByLabelText('Name');
+    await user.click(screen.getByRole('switch', { name: NAME }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1]).toMatchObject({ sleep_report_enabled: true, sleep_report_show_name: false });
+  });
+
+  test('the name choice means nothing while the report is off, so it cannot be changed then', async () => {
+    const { user } = mount({ kid: KID });
+    await screen.findByLabelText('Name');
+    await user.click(screen.getByRole('switch', { name: SEND }));
+    expect(screen.getByRole('switch', { name: NAME })).toBeDisabled();
+  });
+
+  test('a caregiver sees them disabled with the reason, and their save does not send them', async () => {
+    const { user } = mount({ kid: { ...KID, sleep_report_show_name: 0 }, who: CAREGIVER });
+    await screen.findByLabelText('Name');
+    expect(screen.getByRole('switch', { name: SEND })).toBeDisabled();
+    expect(screen.getByRole('switch', { name: NAME })).toBeDisabled();
+    expect(screen.getByText('Only an admin can change what the sleep report sends.')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1]).not.toHaveProperty('sleep_report_enabled');
+    expect(putSpy.mock.calls[0][1]).not.toHaveProperty('sleep_report_show_name');
+  });
+
+  test('a new child starts with both ON', async () => {
+    const { user } = mount({ kid: null, id: 'new' });
+    await user.type(await screen.findByLabelText('Name'), 'Someone');
+    await user.click(screen.getByRole('button', { name: 'Add child' }));
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    expect(postSpy.mock.calls[0][1]).toMatchObject({ sleep_report_enabled: true, sleep_report_show_name: true });
   });
 });
