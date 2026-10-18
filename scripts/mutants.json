@@ -21574,5 +21574,23 @@
     "expect": "killed",
     "tests": ["use-node-script.test.js"],
     "namePattern": "fails, says what to do, and leaves PATH exactly as it was"
+  },
+  {
+    "label": "#397 a child whose sleep report is switched off is still sent it",
+    "file": "backend/src/lib/sleepReportAlert.js",
+    "find": "if (enabled) out.push({ ...r, name: showName ? r.name : HIDDEN_NAME });",
+    "replace": "out.push({ ...r, name: showName ? r.name : HIDDEN_NAME });",
+    "expect": "killed",
+    "tests": ["sleep-report-prefs.test.js"],
+    "namePattern": "nothing at all reaches any provider"
+  },
+  {
+    "label": "#398 a child whose name is hidden is named in the sleep report anyway",
+    "file": "backend/src/lib/sleepReportAlert.js",
+    "find": "name: showName ? r.name : HIDDEN_NAME",
+    "replace": "name: r.name",
+    "expect": "killed",
+    "tests": ["sleep-report-prefs.test.js"],
+    "namePattern": "planted name is absent from push"
   }
 ]

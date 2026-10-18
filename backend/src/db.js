@@ -991,6 +991,27 @@ if (!settingsColumns.includes('sleep_report_alert_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN sleep_report_alert_enabled INTEGER NOT NULL DEFAULT 1');
 }
 
+// The nightly sleep report is now chosen PER CHILD (#397, #398), with two switches on the child:
+//   sleep_report_enabled    send this child's nightly report at all (default 1 = on, as it has always been)
+//   sleep_report_show_name  put the child's name in it (default 1 = shown, as it has always been) or say "a child"
+// Both default ON so an install that upgrades behaves exactly as before. The old global switch above
+// (settings.sleep_report_alert_enabled) had no control anywhere in the app, so the only way it could be 0 is a
+// hand edit of the database, or the demo seed: its value is carried into every EXISTING child once, when the
+// column is first added, so that choice survives and is now visible and changeable on the child. After that the
+// global column is no longer read (lib/sleepReportAlert.js); it stays in the table so a downgrade still finds it.
+// Runs only when the column is missing, so a later boot never overwrites a choice made on the child. A child
+// created later gets the column default (on), which is the same as a new install.
+if (!childrenColumns.includes('sleep_report_enabled')) {
+  db.exec('ALTER TABLE children ADD COLUMN sleep_report_enabled INTEGER NOT NULL DEFAULT 1');
+  db.exec(
+    `UPDATE children SET sleep_report_enabled =
+       CASE WHEN (SELECT sleep_report_alert_enabled FROM settings WHERE id = 'app') = 0 THEN 0 ELSE 1 END`
+  );
+}
+if (!childrenColumns.includes('sleep_report_show_name')) {
+  db.exec('ALTER TABLE children ADD COLUMN sleep_report_show_name INTEGER NOT NULL DEFAULT 1');
+}
+
 // Ensure the single settings row always exists.
 db.prepare(
   `INSERT OR IGNORE INTO settings (id, app_name, accent_color, live_color, offline_color, timezone, font_choice, temp_unit)

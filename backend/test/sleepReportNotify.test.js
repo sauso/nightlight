@@ -90,7 +90,8 @@ beforeEach(() => {
   db.prepare('UPDATE children SET track_sleep = 1 WHERE id = ?').run(KID);
   db.prepare('DELETE FROM activity_samples').run();
   db.prepare('DELETE FROM bed_transitions').run();
-  db.prepare("UPDATE settings SET sleep_report_alert_enabled = 1, push_enabled = 1 WHERE id = 'app'").run();
+  db.prepare("UPDATE settings SET push_enabled = 1 WHERE id = 'app'").run();
+  db.prepare('UPDATE children SET sleep_report_enabled = 1, sleep_report_show_name = 1').run();
   sendEach.mock.resetCalls();
 });
 
@@ -506,14 +507,24 @@ test('two children in the same tick get one combined, untagged notification', as
   assert.ok(!('tag' in msg.android.notification), 'a combined multi-child message must not carry a tag key at all, not even undefined');
 });
 
-test('reportTag guard: a report missing childId or nightDate never produces a tag', async () => {
+test('reportTag guard: a report missing its nightDate never produces a tag', async () => {
   sendEach.mock.resetCalls();
   const fakeSummary = { status: 'ok', wake_at: '2026-07-01 21:15:00', asleep_minutes: 600, wake_count: 1 };
-  notifySleepReportUpdates([{ name: 'Ghost Kid', summary: fakeSummary }]); // no childId, no nightDate
+  // A real child (the report choices are per child, #397) but no nightDate. Before those choices this fixture
+  // also had no childId; a report that names no child now sends nothing (below), so that half is asserted there.
+  notifySleepReportUpdates([{ name: 'Ghost Kid', summary: fakeSummary, childId: KID }]);
   await new Promise((r) => setImmediate(r)); // let the fire-and-forget send actually run
   assert.equal(sendEach.mock.callCount(), 1);
   const msg = sendEach.mock.calls[0].arguments[0][0];
   assert.ok(!('tag' in msg.android.notification), 'an incomplete entry must never produce a tag key at all, not even a broken one containing the literal word "undefined"');
+});
+
+test('a report that names no child at all is not sent: there is no choice of theirs to honour', async () => {
+  sendEach.mock.resetCalls();
+  const fakeSummary = { status: 'ok', wake_at: '2026-07-01 21:15:00', asleep_minutes: 600, wake_count: 1 };
+  notifySleepReportUpdates([{ name: 'Ghost Kid', summary: fakeSummary }]);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(sendEach.mock.callCount(), 0);
 });
 
 test('computeAndStoreNight refuses to blank an already-notified wake time (§1a)', () => {
@@ -540,4 +551,48 @@ test('computeAndStoreNight refuses to blank an already-notified wake time (§1a)
   assert.equal(row.status, 'ok', 'the row must be left completely untouched, not partially updated');
   assert.equal(row.wake_at, '2026-07-01 21:15:00', 'the already-notified wake time must survive the refused write');
   assert.equal(row.notified_wake_at, '2026-07-01 21:15:00');
+});
+
+// The per-child report choices (#397, #398), through the real nightly job. The provider-level checks (every provider,
+// the name searched for in whole payloads) are in sleep-report-prefs.test.js; what only the job can show is the
+// bookkeeping: a report that was not sent must not be recorded as sent.
+function nightWithLateWake() {
+  layNight(CAM, [[at(19, 0), at(19, 10)], [at(23, 0), at(23, 6)], [at(7, 10, 1), at(7, 20, 1)]], at(7, 45, 1));
+  insertTransition.run(CAM, 'out_of_bed', 0.4, sqlTime(at(7, 20, 1, 30)));
+}
+
+test('★ a child whose report is OFF is sent nothing, is not stamped "notified", and never gets an "updated"', async (t) => {
+  db.prepare('UPDATE children SET sleep_report_enabled = 0 WHERE id = ?').run(KID);
+  nightWithLateWake();
+  t.mock.timers.enable({ apis: ['Date'], now: at(7, 2, 1).getTime() });
+  runNightlySleepJob();
+  assert.equal(sendEach.mock.callCount(), 0, 'a report went out for a child whose report is off');
+  const nightDate = lastCompletedNightDate(KID);
+  const row = () => db.prepare('SELECT notified_at, notified_wake_at, wake_at FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(KID, nightDate);
+  assert.ok(row(), 'the night itself is still computed and stored');
+  assert.equal(row().notified_at, null, 'stamped notified although nothing was sent: a later message would be mislabelled "updated"');
+
+  t.mock.timers.tick(at(8, 0, 1).getTime() - at(7, 2, 1).getTime());
+  runNightlySleepJob();
+  assert.equal(sendEach.mock.callCount(), 0, 'a follow-up went out for a child whose report is off');
+  assert.ok(row().wake_at, 'the wake did resolve; only the notification is off');
+});
+
+test('★ a child whose NAME is hidden is reported as "a child" through the real job, with the numbers intact', async (t) => {
+  db.prepare('UPDATE children SET sleep_report_show_name = 0 WHERE id = ?').run(KID);
+  nightWithLateWake();
+  t.mock.timers.enable({ apis: ['Date'], now: at(7, 2, 1).getTime() });
+  runNightlySleepJob();
+  assert.equal(sendEach.mock.callCount(), 1);
+  const first = sendEach.mock.calls[0].arguments[0][0];
+  assert.equal(first.notification.title, 'Sleep report — a child');
+  assert.ok(first.notification.body.startsWith('A child: asleep '), first.notification.body);
+
+  sendEach.mock.resetCalls();
+  t.mock.timers.tick(at(8, 0, 1).getTime() - at(7, 2, 1).getTime());
+  runNightlySleepJob();
+  assert.equal(sendEach.mock.callCount(), 1, 'the follow-up still goes out');
+  const followup = sendEach.mock.calls[0].arguments[0][0];
+  assert.equal(followup.notification.title, 'Sleep report updated — a child');
+  assert.ok(!JSON.stringify(followup).includes('Notify Kid'), 'the name is in the follow-up');
 });

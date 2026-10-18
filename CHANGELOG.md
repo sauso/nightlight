@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- **Each child now has two sleep report switches: send the nightly report or not, and show the child's name or say "a child" (#397, #398).** Until now every tracked child's nightly sleep report went to every notification service that was turned on, with the child's name in the title and the text, and nothing in the app could change that. On the child's page, under **Track sleep**, an admin can now switch **Send this child's sleep report** off, or keep it and switch **Show this child's name in the report** off, in which case the title reads "Sleep report — a child" and the text starts "A child:" on Firebase push, Pushover, ntfy and Gotify alike. Both are on by default, so an upgrade changes nothing; caregivers see them greyed out. A child whose report is off is also no longer marked as already told, so switching it back on does not make its next message read "updated". `GET /api/children` and `PUT /api/children/:id` gain `sleep_report_enabled` and `sleep_report_show_name` (0/1); changing them is admin-only. The old global `sleep_report_alert_enabled` setting, which no screen ever showed, is no longer read; its value is copied into each existing child once.
+
 ### Changed
 
 - **Routine dependency updates, no behaviour change intended.** Backend: `express-rate-limit` 8.7.0 → 8.7.1, `uuid` 14.0.2 → 14.0.3. Web app: `react-router-dom` 7.18.3 → 7.18.4, `lucide-react` 1.47.0 → 1.56.0. Test and CI tooling (not part of the image): `vitest` 5.0.2 → 5.0.4, `jsdom` 30.1.1 → 30.1.2, `@playwright/test` 1.63.0 → 1.64.0, and the mutation workflow's `actions/upload-artifact` v4 → v7 and `actions/download-artifact` v4 → v8. `express` 5 and `react-dom` 19 are deliberately not part of this.
