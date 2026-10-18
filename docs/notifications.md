@@ -549,17 +549,34 @@ greyed out; the same switches apply to the "Sleep report updated" follow-up):
 | Switch | Default | When it is off |
 |---|---|---|
 | **Send this child's sleep report** | **On** | That child's report and follow-up are not sent at all. The night is still worked out and shown in the app |
-| **Show this child's name in the report** | **On** | The title says `Sleep report — a child` and the line starts `A child:`; the name is in no field of what leaves the server, on any provider. It can only be changed while the report is on |
+| **Show this child's name in the report** | **On** | The title says `Sleep report — a child` and the line starts `A child:`; the name is in no field of what leaves the server, on any provider. On the child's page this switch is greyed out while the report is off, because it changes nothing then; that is the page only: the API (`PUT /api/children/:id`) accepts either value in any combination, and the stored choice applies again once the report is back on |
 
 Both are decided for each child on their own: with several children in one combined message, the child
-whose report is off is left out, and each remaining line is named or not by its own child's choice. Two
-children who both hide their names appear as two lines that start `A child:`, in no particular order.
-Hiding the name only changes the words: the message still goes through the provider's service, and a
-tap link in it opens your Nightlight. **Upgrading changes nothing**: every existing child starts with
-both on (if the old, never-exposed global switch had been turned off in the database by hand, each
-existing child starts with the report off instead, and a child added later starts on). These switches
-cover the nightly sleep report only; motion, sound, offline and long-silence notifications are not
-affected, and nothing here is sent over MQTT (Nightlight does not publish to MQTT).
+whose report is off is left out, and each remaining line is named or not by its own child's choice. If
+that leaves one child, it is an ordinary one-child message (`Sleep report — <name>`), and its follow-up
+replaces it in the tray. Two children who both hide their names appear as two lines that start
+`A child:`, in no particular order. Hiding the name only changes the words: the message still goes
+through the provider's service, and a tap link in it opens your Nightlight. **Upgrading changes
+nothing**: every existing child starts with both on (if the old, never-exposed global switch had been
+turned off in the database by hand, each existing child starts with the report off instead, and a child
+added later starts on). These switches cover the nightly sleep report only; motion, sound, offline and
+long-silence notifications are not affected, and nothing here is sent over MQTT (Nightlight does not
+publish to MQTT).
+
+What these switches do **not** do, which is easy to get wrong:
+
+- **Switching a report back on does not send the night you missed.** A night's report goes out once,
+  when that night is first worked out, shortly after its window closes. If the report was off at that
+  moment, nothing is sent for that night, not even if you switch it on again later that morning; the
+  next night's report is the first you get. (A child whose report was off is not recorded as told, so
+  that next report is an ordinary one, not "updated".)
+- **A hidden name is hidden from notifications, not from the server's own log.** The report's log line
+  says "a child" too, but a few error lines (a night that failed to compute, a bookkeeping write that
+  failed) name the child. The log stays on your server unless you send it somewhere else yourself.
+- **A downgrade forgets them.** A version older than these switches reads only the old global switch
+  (on, unless it was turned off in the database by hand) and ignores the per-child ones, so after a
+  downgrade every tracked child's report is sent again, with the child's name. The per-child choices
+  stay in the database and apply again when you upgrade.
 
 **The report can arrive before the night's full story is known — and if the wake time was unknown at
 that point, you get one follow-up.** Working out exactly when a child got up can take up to a few hours
@@ -571,7 +588,7 @@ second, contradictory message. **Tracking more than one child, whose windows hap
 ~30-minute tick, is the one case this doesn't reach**: the original arrives as one combined "Sleep
 reports ready" message covering all of them, which has nothing for a later single-child follow-up to
 replace — so on a night that plays out that way, the correction lands as an additional message rather
-than a replacement. This only ever fills in a
+than a replacement. (A child whose report is switched off does not count: see the switches above.) This only ever fills in a
 wake time that was missing; it does not re-send if a wake time that was already reported later shifts by
 some amount — the original stands, since a later recompute is not always a more accurate one. **At most
 one follow-up per child per night** — if the wake time still hasn't settled after that, only the *stored*

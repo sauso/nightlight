@@ -1001,6 +1001,12 @@ if (!settingsColumns.includes('sleep_report_alert_enabled')) {
 // global column is no longer read (lib/sleepReportAlert.js); it stays in the table so a downgrade still finds it.
 // Runs only when the column is missing, so a later boot never overwrites a choice made on the child. A child
 // created later gets the column default (on), which is the same as a new install.
+// The ALTER and the copy are atomic WITHOUT a db.transaction of their own: like every group here they sit inside the
+// one schema transaction opened at the top of this file (#258), so a boot that dies between them leaves neither, and
+// the next boot, finding the column still absent, runs both (sleep-report-prefs-migration.test.js, "leaves NOTHING
+// behind"). A nested wrapper would only add a savepoint and suggest the rest of the file needed one.
+// Downgrade: an older build reads only the global switch and ignores these columns, so after a downgrade every
+// tracked child's report is sent again, with its name (docs/notifications.md says so).
 if (!childrenColumns.includes('sleep_report_enabled')) {
   db.exec('ALTER TABLE children ADD COLUMN sleep_report_enabled INTEGER NOT NULL DEFAULT 1');
   db.exec(

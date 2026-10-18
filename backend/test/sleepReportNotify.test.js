@@ -578,6 +578,36 @@ test('★ a child whose report is OFF is sent nothing, is not stamped "notified"
   assert.ok(row().wake_at, 'the wake did resolve; only the notification is off');
 });
 
+// Review A2: whether a child's report may be recorded as sent is decided PER CHILD inside the job's loop. Two children
+// in one tick, one report on and one off, both ways round, because the job walks the children in table order: a gate
+// read from the first child and applied to everyone is right for one of these two orders and wrong for the other.
+// What goes out must be the on-child's alone, with that child's one-child title and its tray tag (review S7, through
+// the job), and only that child may be stamped "notified".
+for (const [label, offId] of [['the first child ON and the second OFF', KID2], ['the first child OFF and the second ON', KID]]) {
+  test(`★ two children, ${label}: only the child whose report is on is sent it, tagged, and stamped "notified"`, async (t) => {
+    db.prepare(`INSERT INTO children (id, name, track_sleep, sleep_window_start, sleep_window_end)
+                VALUES (?, 'Second Kid', 1, '19:00', '07:00')`).run(KID2);
+    db.prepare('UPDATE children SET sleep_report_enabled = 0 WHERE id = ?').run(offId);
+    const onId = offId === KID ? KID2 : KID;
+    const onName = onId === KID ? 'Notify Kid' : 'Second Kid';
+    t.mock.timers.enable({ apis: ['Date'], now: at(7, 5, 1).getTime() });
+    runNightlySleepJob(); // both children compute (no_data: nothing laid), as in the combined-message test above
+
+    assert.equal(sendEach.mock.callCount(), 1, 'one message, for the child whose report is on');
+    const msg = sendEach.mock.calls[0].arguments[0][0];
+    assert.equal(msg.notification.title, `Sleep report — ${onName}`);
+    assert.ok(!msg.notification.body.includes(onId === KID ? 'Second Kid' : 'Notify Kid'), 'the child whose report is off is in it');
+    assert.equal(msg.android.notification.tag, `sleep_report_${onId}_${lastCompletedNightDate(onId)}`,
+      'the remaining one-child message must carry its tag, or its follow-up cannot replace it');
+
+    const row = (id) => db.prepare('SELECT notified_at FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(id, lastCompletedNightDate(id));
+    assert.ok(row(offId), 'precondition: the night of the child whose report is off was still computed');
+    assert.ok(row(onId)?.notified_at, 'the child whose report went out is not recorded as told');
+    assert.equal(row(offId).notified_at, null,
+      'the child whose report is off was stamped "notified": switching it back on would mislabel its next message "updated"');
+  });
+}
+
 test('★ a child whose NAME is hidden is reported as "a child" through the real job, with the numbers intact', async (t) => {
   db.prepare('UPDATE children SET sleep_report_show_name = 0 WHERE id = ?').run(KID);
   nightWithLateWake();

@@ -137,6 +137,25 @@ describe('★ "Send this child\'s sleep report" off', () => {
     }
   });
 
+  test('one child off, another on: what is left is a ONE-child message, titled and tagged for that child', async () => {
+    // Review S7. The tray-collapse tag and the one-child title are worked out from the children actually IN the
+    // message, after the filter. Worked out from the list the job handed over, two entries would read as a combined
+    // message: no tag, so the remaining child's "Sleep report updated" could not replace its first report.
+    setPrefs(KID, 0, 1);
+    for (const [send, title] of [
+      [notifySleepReports, `Sleep report — ${OTHER_NAME}`],
+      [notifySleepReportUpdates, `Sleep report updated — ${OTHER_NAME}`],
+    ]) {
+      sendEach.mock.resetCalls();
+      send([report(KID, SECRET_NAME), report(KID2, OTHER_NAME)]);
+      await settle();
+      assert.equal(sendEach.mock.callCount(), 1, title);
+      const msg = sendEach.mock.calls[0].arguments[0][0];
+      assert.equal(msg.notification.title, title);
+      assert.equal(msg.android.notification.tag, `sleep_report_${KID2}_2026-07-01`, `${title}: the remaining child's message lost its tag`);
+    }
+  });
+
   test('a child that no longer exists is not reported on', async () => {
     notifySleepReports([report('gone-kid', SECRET_NAME)]);
     await settle();
@@ -258,12 +277,79 @@ describe('the children API: additive, and an admin\'s decision', () => {
     assert.deepEqual(sleepReportPrefs(KID), { enabled: false, showName: false });
   });
 
-  test('values that are not on/off are refused, never read as the opposite', async () => {
-    for (const v of ['false', 'no', 2, null, [], {}]) {
-      const r = await put(KID, { sleep_report_show_name: v }, admin);
-      assert.equal(r.status, 400, JSON.stringify(v));
-    }
-    assert.deepEqual(sleepReportPrefs(KID), { enabled: true, showName: true });
+  // Strict parsing (review R6d/R10/R11), for both fields and both routes. Only true/false/1/0 are on/off. Each refused
+  // value is tried against BOTH stored states, so a handler that read it by truthiness (the string '0' is truthy, null
+  // is falsy) changes the stored value in one of the two and is caught; a rename rides along so a partial write shows.
+  // Each accepted value starts from the OPPOSITE stored value, so a value that is ignored fails too.
+  const ACCEPTED = [[true, 1], [1, 1], [false, 0], [0, 0]];
+  const REFUSED = ['0', '1', 'false', 'true', 'no', '', null, [], {}, 2, -1];
+  const stored = (id) => db.prepare('SELECT name, sleep_report_enabled, sleep_report_show_name FROM children WHERE id = ?').get(id);
+  const REPORT_FIELDS = ['sleep_report_enabled', 'sleep_report_show_name'];
+  const otherOf = (field) => REPORT_FIELDS.find((k) => k !== field);
+  const post = (body, token = admin) => call(`${server.url}/api/children`, { method: 'POST', token, body });
+
+  for (const field of REPORT_FIELDS) {
+    test(`PUT ${field}: true and 1 store 1, false and 0 store 0, and the response says the same`, async () => {
+      for (const [v, want] of ACCEPTED) {
+        const start = want ? 0 : 1;
+        setPrefs(KID, start, start);
+        const r = await put(KID, { [field]: v }, admin);
+        assert.equal(r.status, 200, `${JSON.stringify(v)}: ${JSON.stringify(r.body)}`);
+        assert.equal(r.body[field], want, `${JSON.stringify(v)} in the response`);
+        assert.equal(stored(KID)[field], want, `${JSON.stringify(v)} as stored`);
+        assert.equal(stored(KID)[otherOf(field)], start, `${JSON.stringify(v)} changed the OTHER switch`);
+      }
+    });
+
+    test(`PUT ${field}: anything but true/false/1/0 is a 400 and writes nothing, whatever was stored`, async () => {
+      for (const v of REFUSED) {
+        for (const start of [0, 1]) {
+          setPrefs(KID, start, start);
+          const r = await put(KID, { name: 'Renamed', [field]: v }, admin);
+          assert.equal(r.status, 400, `${JSON.stringify(v)} over a stored ${start}`);
+          assert.match(r.body.error, /Sleep report settings must be on or off/, JSON.stringify(v));
+          assert.deepEqual(stored(KID), { name: SECRET_NAME, sleep_report_enabled: start, sleep_report_show_name: start },
+            `${JSON.stringify(v)} over a stored ${start} wrote something`);
+        }
+      }
+    });
+
+    test(`POST ${field}: true and 1 store 1, false and 0 store 0; the other switch keeps its default (on)`, async () => {
+      for (const [v, want] of ACCEPTED) {
+        const r = await post({ name: `New ${field} ${JSON.stringify(v)}`, [field]: v });
+        assert.equal(r.status, 201, `${JSON.stringify(v)}: ${JSON.stringify(r.body)}`);
+        assert.equal(r.body[field], want, `${JSON.stringify(v)} in the response`);
+        assert.equal(stored(r.body.id)[field], want, `${JSON.stringify(v)} as stored`);
+        assert.equal(stored(r.body.id)[otherOf(field)], 1, `${JSON.stringify(v)} changed the OTHER switch`);
+      }
+    });
+
+    test(`POST ${field}: anything but true/false/1/0 is a 400 and no child is created`, async () => {
+      const count = () => db.prepare('SELECT COUNT(*) n FROM children').get().n;
+      const before = count();
+      for (const v of REFUSED) {
+        const r = await post({ name: 'Refused', [field]: v });
+        assert.equal(r.status, 400, JSON.stringify(v));
+        assert.match(r.body.error, /Sleep report settings must be on or off/, JSON.stringify(v));
+      }
+      assert.equal(count(), before, 'a refused add created a child');
+    });
+  }
+
+  test('★ adding a child with the report OFF: stored off, and nothing is sent for that child (review R7)', async () => {
+    const off = await post({ name: 'Quiet Newcomer', sleep_report_enabled: false });
+    assert.equal(off.status, 201);
+    assert.equal(off.body.sleep_report_enabled, 0);
+    assert.deepEqual(sleepReportPrefs(off.body.id), { enabled: false, showName: true });
+    notifySleepReports([report(off.body.id, 'Quiet Newcomer')]);
+    await settle();
+    assert.equal(sendEach.mock.callCount(), 0, 'push was sent for a child added with the report off');
+    assert.deepEqual(fetched, [], 'a provider was sent a report for a child added with the report off');
+    // The control: a child added the same way but with the report left on IS sent, so the silence above is the switch.
+    const on = await post({ name: 'Loud Newcomer' });
+    notifySleepReports([report(on.body.id, 'Loud Newcomer')]);
+    await settle();
+    assert.ok(fetched.some((f) => f.body.includes('Loud Newcomer')), 'control: the report of a child added with it on did not go out');
   });
 
   test('adding a child: both ON unless the admin says otherwise, and a caregiver cannot add one', async () => {

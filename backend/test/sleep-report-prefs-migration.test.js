@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import Database from 'better-sqlite3';
 
 const DB_JS_URL = pathToFileURL(path.join(import.meta.dirname, '..', 'src', 'db.js')).href;
 
@@ -50,6 +51,38 @@ test('★ a global switch that was OFF is carried into every existing child (not
   try {
     makeOldInstall(dir, 0);
     assert.deepEqual(readKids(dir), [{ id: 'kid-1', e: 0, n: 1 }, { id: 'kid-2', e: 0, n: 1 }]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('★ a boot that dies between adding the column and copying the old OFF leaves NOTHING behind; the next boot still copies it', () => {
+  // Review: the ALTER and the copy are two statements. Had the ALTER committed on its own, a crash before the copy
+  // would leave the column present with every child at its default (on), and the guard would never run the copy
+  // again: a report the database had switched off would start going out. They are atomic because both sit inside
+  // the one schema transaction db.js opens at the top (#258), not in a wrapper of their own. A trigger that aborts
+  // any UPDATE on children is the cheapest stand-in for the crash: the ALTER succeeds, then the copy throws (db.js
+  // has no other UPDATE on children, and the error text is checked below). Moving this migration after db.js's
+  // COMMIT makes this test fail.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-test-srmig3-'));
+  try {
+    makeOldInstall(dir, 0);
+    const raw = new Database(path.join(dir, 'babymonitor.db'));
+    raw.exec("CREATE TRIGGER interrupt_copy BEFORE UPDATE ON children BEGIN SELECT RAISE(ABORT, 'interrupted the sleep report copy'); END");
+    raw.close();
+
+    assert.throws(() => readKids(dir), /interrupted the sleep report copy/, 'precondition: the boot failed AT the copy');
+    const cols = () => {
+      const db = new Database(path.join(dir, 'babymonitor.db'));
+      try { return db.prepare('PRAGMA table_info(children)').all().map((c) => c.name); } finally { db.close(); }
+    };
+    assert.ok(!cols().includes('sleep_report_enabled'), 'the column survived a boot that died before the copy: the OFF is lost for good');
+    assert.ok(!cols().includes('sleep_report_show_name'));
+
+    const fix = new Database(path.join(dir, 'babymonitor.db'));
+    fix.exec('DROP TRIGGER interrupt_copy');
+    fix.close();
+    assert.deepEqual(readKids(dir), [{ id: 'kid-1', e: 0, n: 1 }, { id: 'kid-2', e: 0, n: 1 }], 'the retried boot carried the OFF');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
