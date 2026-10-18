@@ -5,6 +5,7 @@ import { refreshMqttConnection, mqttStatus, mqttBrokerUrl } from '../lib/mqttCli
 import { applyRecordingSettingsChange } from '../lib/clipCapture.js';
 import { clipStorageStats, sweepClips } from '../lib/clipStorage.js';
 import { wakeClipStats } from '../lib/recordings.js';
+import { previewClipRetention } from '../lib/clipRetentionPreview.js';
 
 const router = Router();
 
@@ -113,6 +114,27 @@ router.get('/clip-storage', requireAuth, requireAdmin, (req, res) => {
   // automatic consumer, and their length/retention settings only mean something if you can see what
   // they are actually costing.
   res.json({ ...clipStorageStats(), wakeClips: wakeClipStats() });
+});
+
+// Admin-only: what saving these two limits would delete RIGHT NOW (#395), so the Recording form can ask first.
+// A dry run of the same sweep PUT /api/settings runs when either limit changes (lib/clipRetentionPreview.js).
+// It changes no clips and no settings and answers with counts, bytes and one timestamp only. (Not "strictly
+// read-only": any authenticated request refreshes the session's last-seen time in requireAuth.)
+// A limit that is given is held to the same range as the save, so a value the save would refuse is refused here
+// too. A limit that is OMITTED means "keep what is stored", exactly as in PUT /api/settings, where an absent
+// field is left alone: the form sends only the limits the person changed (a page left open in an old tab would
+// otherwise re-send a stale limit and trigger a sweep nobody was asked about), so the preview must combine the
+// changed limit with the CURRENT stored one, as the save will. Strict whole numbers: parseInt would read "5abc"
+// as 5 and a preview of a limit that is not the one saved is worse than none.
+router.get('/clip-retention-preview', requireAuth, requireAdmin, (req, res) => {
+  const whole = (v, max) => (typeof v === 'string' && /^\d{1,6}$/.test(v) && Number(v) <= max ? Number(v) : null);
+  const stored = getSettings();
+  const days = req.query.days === undefined ? stored.clip_retention_days : whole(req.query.days, 365);
+  const maxGb = req.query.max_gb === undefined ? stored.clip_retention_max_gb : whole(req.query.max_gb, 2000);
+  if (days === null || maxGb === null) {
+    return res.status(400).json({ error: 'days must be a whole number from 0 to 365 and max_gb from 0 to 2000' });
+  }
+  res.json(previewClipRetention({ days, maxGb }));
 });
 
 function isValidTimezone(tz) {
