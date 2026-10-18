@@ -578,6 +578,23 @@ test('★ a child whose report is OFF is sent nothing, is not stamped "notified"
   assert.ok(row().wake_at, 'the wake did resolve; only the notification is off');
 });
 
+test('a report switched back ON later the same morning does not send the night it skipped (docs/notifications.md says so)', async (t) => {
+  // The report goes out once, on the pass that first works the night out. Off then, the night has no "notified"
+  // baseline, so a later pass cannot send it as a first report (the row exists) nor as a follow-up (nothing to follow).
+  db.prepare('UPDATE children SET sleep_report_enabled = 0 WHERE id = ?').run(KID);
+  nightWithLateWake();
+  t.mock.timers.enable({ apis: ['Date'], now: at(7, 2, 1).getTime() });
+  runNightlySleepJob();
+  assert.equal(sendEach.mock.callCount(), 0, 'precondition: off at the first pass, nothing sent');
+  db.prepare('UPDATE children SET sleep_report_enabled = 1 WHERE id = ?').run(KID);
+  t.mock.timers.tick(at(8, 0, 1).getTime() - at(7, 2, 1).getTime());
+  runNightlySleepJob();
+  const nightDate = lastCompletedNightDate(KID);
+  assert.ok(db.prepare('SELECT wake_at FROM sleep_nights WHERE child_id = ? AND night_date = ?').get(KID, nightDate).wake_at,
+    'precondition: the wake resolved on this pass, so a follow-up would have had news to send');
+  assert.equal(sendEach.mock.callCount(), 0, 'the skipped night was sent once the report was switched back on');
+});
+
 // Review A2: whether a child's report may be recorded as sent is decided PER CHILD inside the job's loop. Two children
 // in one tick, one report on and one off, both ways round, because the job walks the children in table order: a gate
 // read from the first child and applied to everyone is right for one of these two orders and wrong for the other.
