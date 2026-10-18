@@ -447,6 +447,42 @@ describe('two-factor authentication', () => {
     },
   );
 
+  // Review of #765: the pending set-up was discarded elsewhere (an admin reset, a password change on another
+  // device), so "Continue set-up" got a NEW key, without `resumed`. FAILS without the notice: the panel looked
+  // exactly like a continued set-up, and the code from the old entry could never match.
+  test('Continue set-up that gets a new key (no `resumed`) says so in the panel; a real continue and a first start do not', async () => {
+    const NOTICE = /There was no set-up to continue, so this is a new key/;
+    const cases = [
+      ['Continue set-up', true, SETUP, true],
+      ['Continue set-up', true, { ...SETUP, resumed: true }, false],
+      ['Set up two-factor', false, SETUP, false],
+    ];
+    for (const [button, pending, answer, shown] of cases) {
+      const { user, unmount } = mountMfa({ enabled: false, backup_codes_remaining: 0, setup_pending: pending });
+      postSpy.mockResolvedValue(answer);
+      await startThroughPassword(user, button);
+      await screen.findByLabelText(/Enter the 6-digit code/);
+      expect(!!screen.queryByText(NOTICE), `${button} with ${JSON.stringify(answer.resumed)}`).toBe(shown);
+      unmount();
+    }
+  });
+
+  // FAILS if opening the step does not clear the field: a password typed and abandoned would wait, filled in,
+  // for whoever opens the step next on a shared device.
+  test('a password typed into the step and abandoned is gone when the step is opened again', async () => {
+    const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0, setup_pending: true });
+    await user.click(await enabledButton('Continue set-up'));
+    const first = await screen.findByRole('dialog');
+    await user.type(within(first).getByLabelText('Password'), 'typed-then-abandoned');
+    await user.click(within(first).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    await user.click(await enabledButton('Start over'));
+    const again = await screen.findByRole('dialog');
+    expect(within(again).getByLabelText('Password').value).toBe('');
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
   describe('opening the key in an authenticator app (#765)', () => {
     const coarse = (matches) => { window.matchMedia = vi.fn().mockReturnValue({ matches }); };
     const open = async () => {

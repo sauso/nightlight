@@ -27,7 +27,7 @@ export default function TwoFactorSection() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const [setup, setSetup] = useState(null); // { secret, otpauth_uri, qr } while enrolling
+  const [setup, setSetup] = useState(null); // { secret, otpauth_uri, qr, resumed?, notContinued } while enrolling
   const [code, setCode] = useState('');
   const [backupCodes, setBackupCodes] = useState(null); // shown once after enabling
   const [copied, setCopied] = useState(false);
@@ -56,6 +56,8 @@ export default function TwoFactorSection() {
   const setupOpen = !!setup;
   useEffect(() => (setupOpen ? holdReload() : undefined), [setupOpen]);
 
+  // Always opens with an EMPTY field: a password typed and then abandoned (the dialog closed) must not be waiting
+  // pre-filled for whoever opens the step next, on a shared or borrowed device.
   function openPasswordStep(kind) {
     setPassword(''); setError(''); setPasswordStep(kind);
   }
@@ -67,7 +69,11 @@ export default function TwoFactorSection() {
     e.preventDefault(); setError(''); setBusy(true);
     try {
       const body = passwordStep === 'restart' ? { restart: true, password } : { password };
-      setSetup(await api.post('/auth/me/mfa/setup', body));
+      const res = await api.post('/auth/me/mfa/setup', body);
+      // "Continue set-up" chosen, but nothing was pending any more (an admin reset or a password change on
+      // another device discarded it), so the server made a NEW key: `resumed` is absent. Say so in the panel,
+      // or the person enters the code from the entry they already have, which can never match (review of #765).
+      setSetup({ ...res, notContinued: passwordStep === 'resume' && res.resumed !== true });
       setCode('');
       setPasswordStep(null); setPassword('');
       setStatus((st) => (st ? { ...st, setup_pending: true } : st));
@@ -170,6 +176,12 @@ export default function TwoFactorSection() {
       {setup && (
         <Modal title="Set up two-factor" onClose={() => (busy ? null : setSetup(null))}>
           {error && <div className="error-banner" style={{ marginBottom: 10 }}>{error}</div>}
+          {setup.notContinued && (
+            <div className="form-warning" role="status">
+              There was no set-up to continue, so this is a new key. Add it to your authenticator app (delete any
+              entry you added before).
+            </div>
+          )}
           <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
             Scan this with an authenticator app (Google Authenticator, Authy, 1Password…), or type the key in by hand.
           </div>

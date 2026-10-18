@@ -274,16 +274,40 @@ describe('every set-up call needs the account password', () => {
 // without its guard: the stale secret was handed out, or an active one replaced.
 describe('the row changes while set-up awaits', () => {
   // FAILS WITHOUT `AND mfa_enabled = 0` on the rotation (the status is 400 either way, from the re-read; the
-  // stored secret is what tells them apart): the start replaced the ACTIVE secret, a lockout at the code step.
-  test('★ two-factor switched on during a START\'s password check: 400 "already on", and the active secret is kept', async () => {
-    const ACTIVE = 'KRUGS4ZANFZSA2LOEBUGK4TFEBRGKY3BOVZWKIDJ';
+  // stored secret is what tells them apart): the restart replaced the ACTIVE secret, a lockout at the code step.
+  // A restart, not a start: /me/mfa/enable switches on the PENDING secret, so the secret the rotation compares
+  // is unchanged and only the mfa_enabled clause can refuse.
+  test('★ two-factor switched on during a RESTART\'s password check: 400 "already on", and the active secret is kept', async () => {
+    const pending = (await setup({})).body.secret;
     const res = await whileHandlerAwaitsBcrypt(
-      () => setup({}),
-      () => { db.prepare("UPDATE users SET mfa_enabled = 1, mfa_secret = ? WHERE id = 'u-pend'").run(ACTIVE); },
+      () => setup({ restart: true }),
+      // The write that completes /me/mfa/enable for the pending secret.
+      () => { db.prepare("UPDATE users SET mfa_enabled = 1 WHERE id = 'u-pend'").run(); },
     );
     assert.equal(res.status, 400);
     assert.deepEqual(res.body, { error: 'Two-factor is already on. Turn it off first to re-enrol.' });
-    assert.equal(row().mfa_secret, ACTIVE, 'the start replaced an active secret');
+    assert.equal(row().mfa_secret, pending, 'the restart replaced an active secret');
+  });
+
+  // FAILS WITHOUT `AND mfa_secret IS ?` on the rotation: the start overwrote the other set-up's secret and
+  // answered 200, so the device that stored it holds a key that can never confirm (review of #765).
+  test('★ another set-up stored its secret during a START\'s password check: 400 "changed meanwhile", that secret is kept', async () => {
+    const OTHER = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
+    const res = await whileHandlerAwaitsBcrypt(
+      () => setup({}),
+      () => { db.prepare("UPDATE users SET mfa_secret = ? WHERE id = 'u-pend'").run(OTHER); },
+    );
+    assert.equal(res.status, 400, JSON.stringify(res.body));
+    assert.deepEqual(res.body, { error: 'The set-up was changed meanwhile, on this or another device. Try again.' });
+    assert.equal(row().mfa_secret, OTHER, 'the start replaced the other set-up\'s secret');
+  });
+
+  test('two simultaneous starts: one 200, the other 400, and the stored key is the one the 200 handed out', async () => {
+    const results = await Promise.all([setup({}), setup({})]);
+    assert.deepEqual(results.map((r) => r.status).sort(), [200, 400], JSON.stringify(results.map((r) => r.body)));
+    const loser = results.find((r) => r.status === 400);
+    assert.deepEqual(loser.body, { error: 'The set-up was changed meanwhile, on this or another device. Try again.' });
+    assert.equal(row().mfa_secret, results.find((r) => r.status === 200).body.secret);
   });
 
   test('★ two-factor switched on meanwhile: 400 "already on", the now-ACTIVE secret is not handed out', async () => {

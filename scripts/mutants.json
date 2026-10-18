@@ -21632,11 +21632,20 @@
   {
     "label": "#765 mfa setup rotation replaces an ACTIVE secret switched on during the password check",
     "file": "backend/src/routes/auth.js",
-    "find": "mfa_secret = ?, mfa_last_step = NULL WHERE id = ? AND mfa_enabled = 0",
-    "replace": "mfa_secret = ?, mfa_last_step = NULL WHERE id = ?",
+    "find": "AND mfa_secret IS ? AND mfa_enabled = 0'",
+    "replace": "AND mfa_secret IS ?'",
     "expect": "killed",
     "tests": ["mfa-setup-resume.test.js"],
-    "namePattern": "two-factor switched on during a START"
+    "namePattern": "two-factor switched on during a RESTART"
+  },
+  {
+    "label": "#765 mfa setup rotation overwrites a secret another set-up stored during the password check",
+    "file": "backend/src/routes/auth.js",
+    "find": "WHERE id = ? AND mfa_secret IS ? AND mfa_enabled = 0",
+    "replace": "WHERE id = ? AND (mfa_secret IS ? OR 1) AND mfa_enabled = 0",
+    "expect": "killed",
+    "tests": ["mfa-setup-resume.test.js"],
+    "namePattern": "another set-up stored its secret during a START"
   },
   {
     "label": "#537 TLS on: the broker's certificate is no longer verified although verification is switched on",

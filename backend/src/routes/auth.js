@@ -869,13 +869,21 @@ router.post('/me/mfa/setup', requireAuth, sessionActionLimiter, asyncHandler(asy
     secret = user.mfa_secret;
   } else {
     secret = generateSecret();
-    // Compare-and-set on `mfa_enabled = 0`: the password check above yields, and two-factor may have been
-    // switched on meanwhile. An unconditional write would replace the ACTIVE secret, and the owner's
-    // authenticator would then fail every sign-in at the code step (a lockout); this refuses instead.
+    // Compare-and-set on BOTH things this rotation was decided from, because the password check above yields:
+    //   * `mfa_enabled = 0`: two-factor may have been switched on meanwhile. An unconditional write would
+    //     replace the ACTIVE secret, and the owner's authenticator would then fail every sign-in at the code
+    //     step (a lockout).
+    //   * `mfa_secret IS ?`, the secret read before the check (`IS`, so a NULL "nothing pending" compares
+    //     equal): another set-up may have stored its own secret meanwhile (review of #765, verified by
+    //     running: two simultaneous starts both answered 200, and the second overwrote the first's key, so
+    //     the first device held a key that could never confirm). The one that loses is told to try again.
     const stored = db
-      .prepare('UPDATE users SET mfa_secret = ?, mfa_last_step = NULL WHERE id = ? AND mfa_enabled = 0')
-      .run(secret, user.id);
-    if (stored.changes !== 1) return res.status(400).json({ error: SETUP_ALREADY_ON });
+      .prepare('UPDATE users SET mfa_secret = ?, mfa_last_step = NULL WHERE id = ? AND mfa_secret IS ? AND mfa_enabled = 0')
+      .run(secret, user.id, user.mfa_secret);
+    if (stored.changes !== 1) {
+      const current = db.prepare('SELECT mfa_enabled FROM users WHERE id = ?').get(user.id);
+      return res.status(400).json({ error: !current || current.mfa_enabled ? SETUP_ALREADY_ON : SETUP_CHANGED_MEANWHILE });
+    }
   }
   const uri = keyUri(user.username, secret, appName());
   const qr = await qrDataUrl(uri);

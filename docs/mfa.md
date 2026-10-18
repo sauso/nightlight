@@ -35,7 +35,7 @@ On a phone the authenticator is on the same device as the page, so you switch ap
 
 | Button | What it does |
 |---|---|
-| **Continue set-up** | Asks for your **account password**, then shows the **same** QR code and key again. The entry already in your authenticator keeps working; just enter its code. |
+| **Continue set-up** | Asks for your **account password**, then shows the **same** QR code and key again. The entry already in your authenticator keeps working; just enter its code. If the set-up was discarded meanwhile (an admin reset two-factor, or your password was changed on another device), the panel says "There was no set-up to continue, so this is a new key": add that one and delete the old entry. |
 | **Start over** | Asks for your **account password**, then makes a **new** key. The entry you already added stops matching, so delete it from your authenticator and add the new one. |
 
 **Why every set-up asks for your password.** **Set up two-factor**, **Continue set-up** and **Start over**
@@ -65,7 +65,7 @@ Two less common cases:
 - A set-up left pending by a version **before 0.26.0** holds an older, weaker (80-bit) key. It is not
   offered for continuing: the card shows **Set up two-factor**, which makes a new 160-bit key.
 - If the set-up changes on another device while yours is being prepared (two-factor switched on, a start
-  over, a reset), you get "Two-factor is already on…" or "The set-up was changed meanwhile, on this or
+  over, a reset, or another set-up started at the same moment), you get "Two-factor is already on…" or "The set-up was changed meanwhile, on this or
   another device. Try again." instead of a key that would no longer work, and a key that is already on is
   never replaced.
 
