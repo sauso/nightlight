@@ -176,10 +176,13 @@ token; the admin MFA reset also empties it. User-facing rules:
 `/me/mfa/enable` (confirming a set-up) has limits of its own, counting wrong codes only (the handler marks a
 wrong code in `res.locals.mfaWrongCode`, and the limiter's `requestWasSuccessful` reads it): an in-memory count
 per user and pending secret (keyed by a sha256 prefix of the secret, never the secret) cancels the pending set-up
-at the 10th wrong code, with no await between the count and the cancel; and `mfaEnableUserLimiter`, after
-`requireAuth` and keyed on the session's user, allows 30 wrong codes per 15 minutes. No per-source limiter is
-on that route. `resetMfaUserLimit` (the admin MFA reset) empties both. User-facing rules:
-[mfa.md](mfa.md#confirming-a-set-up-has-limits-of-its-own).
+at the 10th wrong code, with no await between the count and the cancel (the count is dropped only after the
+cancel's write succeeded); and `mfaEnableUserLimiter`, after `requireAuth` and keyed on the session's user,
+allows 30 wrong codes per 15 minutes. The 10 bounds guesses per key, the 30 across keys (a set-up started again
+gets a new key and a new 10). No per-source limiter is on that route. `resetMfaEnableLimit` empties both: both
+password-change paths, removing the account and the admin MFA reset (through `resetMfaUserLimit`) call it. It
+leaves the sign-in second step's per-user bucket alone, so a password change never gives out fresh second-step
+guesses. User-facing rules: [mfa.md](mfa.md#confirming-a-set-up-has-limits-of-its-own).
 
 **Every route's gate is pinned** by `backend/test/route-permissions.test.js` (issue #563). It enumerates
 the real route table (index.js's registrations read from its source, and every mounted router's actual

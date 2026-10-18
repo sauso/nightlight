@@ -3502,24 +3502,24 @@
   {
     "label": "#E2 M6: PUT /users/:id swallows a non-LastAdminError instead of rethrowing",
     "file": "backend/src/routes/auth.js",
-    "find": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n    throw e;\r\n  }\r\n  res.json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)));",
-    "replace": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n  }\r\n  res.json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)));",
+    "find": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n    throw e;\r\n  }\r\n  // After the transaction, so a refused (rolled-back) change leaves it alone",
+    "replace": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n  }\r\n  // After the transaction, so a refused (rolled-back) change leaves it alone",
     "expect": "killed",
     "tests": [
       "auth-routes-branches.test.js"
     ],
-    "note": "The temp-trigger test aborts the UPDATE and asserts a 500, not 200 — deleting `throw e` falls through to the 200 response below the catch block even though the write never happened."
+    "note": "The temp-trigger test aborts the UPDATE and asserts a 500, not 200 — deleting `throw e` falls through to the 200 response below the catch block even though the write never happened. Re-anchored on the comment that now follows the catch (mfa-enable-limit review fixes: the password-change reset of the confirmation budget sits between the catch and the response). Same mutant."
   },
   {
     "label": "#E2 M7: DELETE /users/:id swallows a non-LastAdminError instead of rethrowing",
     "file": "backend/src/routes/auth.js",
-    "find": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n    throw e;\r\n  }\r\n  res.status(204).end();",
-    "replace": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n  }\r\n  res.status(204).end();",
+    "find": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n    throw e;\r\n  }\r\n  // A removed account must not leave",
+    "replace": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n  }\r\n  // A removed account must not leave",
     "expect": "killed",
     "tests": [
       "auth-routes-branches.test.js"
     ],
-    "note": "The temp-trigger test aborts the DELETE and asserts a 500, not 204 — deleting `throw e` would falsely report the account removed while it still exists."
+    "note": "The temp-trigger test aborts the DELETE and asserts a 500, not 204 — deleting `throw e` would falsely report the account removed while it still exists. Re-anchored on the comment that now follows the catch (mfa-enable-limit review fixes: the account's confirmation state is cleared between the catch and the response). Same mutant."
   },
   {
     "label": "#E2 M9: demoMaxGuests() nullish-fallback changed from 25 to 30",
@@ -18284,6 +18284,18 @@
       "mfa-enable-limit.test.js"
     ],
     "namePattern": "a successful confirmation spends nothing"
+  },
+  {
+    "label": "mfa-enable-limit: changing your own password leaves the confirmation budget in place",
+    "file": "backend/src/routes/auth.js",
+    "find": "  resetMfaEnableLimit(req.user.id);",
+    "replace": "  void req.user.id;",
+    "expect": "killed",
+    "tests": [
+      "mfa-enable-limit.test.js"
+    ],
+    "namePattern": "changing your password empties the confirmation budget",
+    "note": "Review (Opus, verified by running): changing the password, the remedy for a device that used the budget up, left the owner's right code a 429 for the rest of the window."
   },
   {
     "label": "#355 corrected empty: any status is promoted, not only empty",

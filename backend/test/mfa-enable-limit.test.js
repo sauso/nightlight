@@ -5,8 +5,9 @@
 // 15 minutes from any number of addresses. Only WRONG codes count.
 //
 // Real database, real HTTP, real otplib, real bcrypt worker; nothing mocked. Each case was run against the
-// routes/auth.js from before this change (a scratch copy) and its comment says how it failed there. The one that
-// passes there (nine wrong codes, then the right one) is the lower edge of the cap and says so.
+// routes/auth.js from before this change (a scratch copy) and its comment says how it failed there; the review-fix
+// cases were run against the first version of this change. Two pass there by design and say so: nine wrong codes
+// then the right one (the lower edge of the cap), and the guard that a password change leaves the sign-in budget alone.
 //
 // ⚠️ The counter and the limiter are module-level and in memory: every case claims its OWN user, empties that
 // user's buckets (resetMfaUserLimit), and asserts the answer to its first request, so a budget spent earlier (in
@@ -195,6 +196,31 @@ describe('10 wrong codes cancel a pending set-up', () => {
     assert.equal(row('cap-burst').mfa_secret, null);
   });
 
+  // FAILS WITH THE COUNT DELETED BEFORE THE CANCEL'S WRITE (review, Opus; verified by running the previous order): a
+  // cancel whose UPDATE throws had already dropped the count, so the next wrong code counted from 1 and only answered
+  // "didn't match", and the key stayed pending past the cap. A trigger makes exactly that write fail: it refuses
+  // clearing THIS user's secret, which only the cancel does in this case (set-up stores a secret, it never clears one).
+  test('★ a cancel whose write fails keeps the count: the next wrong code cancels once the write works', async () => {
+    const token = account('cap-fail');
+    const first = await setup(token);
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    const { secret } = first.body;
+    for (let i = 1; i <= CAP - 1; i += 1) assert.deepEqual(await enable(token, wrongCode(secret)), wrongAnswer, `wrong code ${i}`);
+    db.exec(`CREATE TRIGGER cap_fail_cancel BEFORE UPDATE OF mfa_secret ON users
+      WHEN OLD.id = 'cap-fail' AND NEW.mfa_secret IS NULL
+      BEGIN SELECT RAISE(ABORT, 'test: the cancel write fails'); END`);
+    let failed;
+    try {
+      failed = await enable(token, wrongCode(secret));
+    } finally {
+      db.exec('DROP TRIGGER cap_fail_cancel');
+    }
+    assert.equal(failed.status, 500, `precondition: the cancel's write failed: ${JSON.stringify(failed.body)}`);
+    assert.equal(row('cap-fail').mfa_secret, secret, 'precondition: the key is still pending');
+    assert.deepEqual(await enable(token, wrongCode(secret)), { status: 400, body: { error: CANCELLED } }, 'the failed cancel lost the count');
+    assert.equal(row('cap-fail').mfa_secret, null);
+  });
+
   // FAILS ON THE OLD CODE: the 10th wrong code did not cancel anything, and the right code's write landed (200).
   // With the cap, the right code is being confirmed (parked on its backup-code hashing) when the 10th wrong code
   // cancels the key it was checked against; the confirmation's compare-and-set on that key then refuses the write.
@@ -298,5 +324,71 @@ describe('30 wrong codes per user per 15 minutes, from any address', () => {
     assert.equal(next.status, 200, JSON.stringify(next.body));
     const ok = await enable(token, rightCode(next.body.secret));
     assert.equal(ok.status, 200, `still ${ok.status} after the admin reset: the confirmation budget was not emptied`);
+  });
+});
+
+// Review, Opus (verified by running): a device signed in without the password can cancel the owner's set-up each
+// time they start over, and across those start-overs use up the 30, after which the owner's right code is a 429.
+// Changing the password is the remedy (it also discards the pending set-up and signs the other devices out), so it
+// empties the confirmation budget at once. It must NOT empty the sign-in second step's budget (#550).
+describe('a password change empties the confirmation budget, and only that one', () => {
+  const NEW_PASSWORD = 'a-new-long-password';
+  async function spendTheBudget(token) {
+    const { answers, secret } = await wrongCodesAcrossSecrets(token, PER_USER);
+    answers.forEach((a, i) => assert.deepEqual(a, wrongAnswer, `wrong code ${i + 1}`));
+    assert.equal((await enable(token, rightCode(secret))).status, 429, 'precondition: the budget is used up');
+  }
+
+  // FAILS WITHOUT resetMfaEnableLimit on PUT /me/password: the right code after the change was still a 429.
+  test('★ changing your password empties the confirmation budget: set up again and the right code is accepted', async () => {
+    const token = account('pw-own');
+    await spendTheBudget(token);
+    const changed = await call(`${server.url}/api/auth/me/password`, {
+      method: 'PUT', token, body: { current_password: PASSWORD, new_password: NEW_PASSWORD }, headers: { 'x-forwarded-for': freshIp() },
+    });
+    assert.equal(changed.status, 200, JSON.stringify(changed.body));
+    const next = await post('/me/mfa/setup', token, { password: NEW_PASSWORD });
+    assert.equal(next.status, 200, JSON.stringify(next.body));
+    const ok = await enable(token, rightCode(next.body.secret));
+    assert.equal(ok.status, 200, `still ${ok.status} after the password change: the confirmation budget was not emptied`);
+  });
+
+  // FAILS WITHOUT resetMfaEnableLimit on PUT /users/:id (the same 429 after an admin set a new password).
+  test('★ an admin setting a new password empties it too', async () => {
+    const token = account('pw-admin');
+    makeUser(db, { id: 'pw-admin-a', username: 'pw-admin-a', role: 'admin' });
+    const adminToken = signToken({ id: 'pw-admin-a', username: 'pw-admin-a', role: 'admin', sid: makeSession(db, 'pw-admin-a') });
+    await spendTheBudget(token);
+    const changed = await call(`${server.url}/api/auth/users/pw-admin`, {
+      method: 'PUT', token: adminToken, body: { password: NEW_PASSWORD }, headers: { 'x-forwarded-for': freshIp() },
+    });
+    assert.equal(changed.status, 200, JSON.stringify(changed.body));
+    // The admin's change signs every session of that account out, so the user signs in afresh.
+    const fresh = signToken({ id: 'pw-admin', username: 'pw-admin', role: 'caregiver', sid: makeSession(db, 'pw-admin') });
+    const next = await post('/me/mfa/setup', fresh, { password: NEW_PASSWORD });
+    assert.equal(next.status, 200, JSON.stringify(next.body));
+    const ok = await enable(fresh, rightCode(next.body.secret));
+    assert.equal(ok.status, 200, `still ${ok.status} after the admin set a new password: the confirmation budget was not emptied`);
+  });
+
+  // A guard, not a regression test: it PASSES on the code before the review fixes too (nothing was reset then). It
+  // fails if the password-change reset also empties the sign-in second step's per-user bucket, which would hand
+  // someone who holds the password a fresh 30 guesses at the second factor every time they change it.
+  test('a password change leaves the sign-in second step\'s per-user budget alone', async () => {
+    const token = account('pw-signin');
+    const secret = generateSecret();
+    db.prepare("UPDATE users SET mfa_enabled = 1, mfa_secret = ? WHERE id = 'pw-signin'").run(secret);
+    const mfaToken = () => signToken({ id: 'pw-signin', purpose: 'mfa' }, { expiresIn: '5m' });
+    for (let i = 1; i <= PER_USER; i += 1) {
+      const res = await post('/login/mfa', undefined, { mfaToken: mfaToken(), code: wrongCode(secret) });
+      assert.equal(res.status, 401, `second-step attempt ${i}: ${JSON.stringify(res.body)}`);
+    }
+    assert.equal((await post('/login/mfa', undefined, { mfaToken: mfaToken(), code: rightCode(secret) })).status, 429, 'precondition: the second-step budget is used up');
+    const changed = await call(`${server.url}/api/auth/me/password`, {
+      method: 'PUT', token, body: { current_password: PASSWORD, new_password: NEW_PASSWORD }, headers: { 'x-forwarded-for': freshIp() },
+    });
+    assert.equal(changed.status, 200, JSON.stringify(changed.body));
+    assert.equal((await post('/login/mfa', undefined, { mfaToken: mfaToken(), code: rightCode(secret) })).status, 429,
+      'the password change emptied the sign-in second step\'s budget (#550)');
   });
 });
