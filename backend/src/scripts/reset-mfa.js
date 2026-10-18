@@ -24,8 +24,10 @@ const arg = process.argv[2];
 // Two fully-literal statements rather than one with an interpolated WHERE clause — the query text is
 // static, and the only variable (a user id) is bound as a parameter. (The clause was always a
 // hardcoded literal, never user input, but keeping the SQL constant leaves no room for doubt.)
+// `OR mfa_secret IS NOT NULL`: a half-finished set-up now survives a reload (#765), so "everyone" must include
+// accounts whose two-factor is off but whose pending secret is still stored.
 const clearAllStmt = db.prepare(
-  'UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL, mfa_last_step = NULL WHERE mfa_enabled = 1'
+  'UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL, mfa_last_step = NULL WHERE mfa_enabled = 1 OR mfa_secret IS NOT NULL'
 );
 const clearOneStmt = db.prepare(
   'UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL, mfa_last_step = NULL WHERE id = ?'

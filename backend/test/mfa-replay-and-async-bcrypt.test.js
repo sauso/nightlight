@@ -195,7 +195,8 @@ describe('#550 a new secret never inherits an old secret\'s step', () => {
     makeUser(db, { id: 'setup-1', username: 'setup-1', role: 'caregiver' });
     db.prepare('UPDATE users SET mfa_last_step = 99999999999 WHERE id = ?').run('setup-1');
     const token = signToken({ id: 'setup-1', username: 'setup-1', role: 'caregiver', sid: makeSession(db, 'setup-1') });
-    const res = await post('/me/mfa/setup', {}, { token });
+    // The password: every set-up call needs it (review of #765). makeUser's default.
+    const res = await post('/me/mfa/setup', { password: 'hunter22' }, { token });
     assert.equal(res.status, 200);
     assert.equal(lastStep('setup-1'), null);
   });
@@ -442,7 +443,11 @@ describe('#548 bcrypt on a request path does not block the event loop', () => {
     let setup;
     const res = await whileHandlerAwaitsBcrypt(
       () => post('/me/mfa/enable', { code: codeAtOffset(secretA) }, { token }),
-      async () => { setup = await post('/me/mfa/setup', {}, { token }); },
+      // restart: true, the explicit start-over (#765): a plain set-up now resumes the pending secret instead.
+      // With the password every set-up needs (review of #765). Its compare joins the one worker's queue behind the
+      // enable's FIRST backup-code hash, ahead of the other nine (generateBackupCodes hashes one at a time), so
+      // this set-up still lands while the enable is hashing.
+      async () => { setup = await post('/me/mfa/setup', { restart: true, password: 'hunter22' }, { token }); },
     );
     assert.equal(setup.status, 200, 'precondition: the second set-up ran');
     assert.equal(res.status, 400);

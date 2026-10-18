@@ -22,6 +22,8 @@ import { renderAs, ADMIN, enabledButton } from './helpers/render.jsx';
 import Account from '../src/pages/Account.jsx';
 import TwoFactorSection from '../src/components/TwoFactorSection.jsx';
 import { api } from '../src/lib/api.js';
+import { isReloadHeld } from '../src/lib/reloadGuard.js';
+import * as nativeBridge from '../src/lib/nativeBridge.js';
 
 const USER = { ...ADMIN, first_name: 'Nacho', last_name: 'Leone', photo: null };
 
@@ -274,6 +276,16 @@ describe('two-factor authentication', () => {
   const SETUP = { secret: 'JBSWY3DPEHPK3PXP', otpauth_uri: 'otpauth://totp/x', qr: 'data:image/png;base64,iVBOR' };
   const CODES = ['1111-1111', '2222-2222', '3333-3333', '4444-4444'];
 
+  // Every set-up entry point asks for the account password first (review of #765). Opens the step from the
+  // card button, types the password and continues; the set-up panel is the result (wait for it, not for "a
+  // dialog": the password step is a dialog too).
+  const startThroughPassword = async (user, button = 'Set up two-factor', password = 'hunter22') => {
+    await user.click(await enabledButton(button));
+    const step = await screen.findByRole('dialog');
+    await user.type(within(step).getByLabelText('Password'), password);
+    await user.click(within(step).getByRole('button', { name: 'Continue' }));
+  };
+
   test('off, it offers to set two-factor up', async () => {
     mountMfa({ enabled: false, backup_codes_remaining: 0 });
     expect(await screen.findByRole('button', { name: 'Set up two-factor' })).toBeTruthy();
@@ -309,9 +321,10 @@ describe('two-factor authentication', () => {
     // browser, which is exactly the case on a phone.
     const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0 });
     postSpy.mockResolvedValue(SETUP);
-    await user.click(await enabledButton('Set up two-factor'));
+    await startThroughPassword(user);
 
-    const dialog = await screen.findByRole('dialog');
+    await screen.findByAltText('Two-factor setup QR code');
+    const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByAltText('Two-factor setup QR code').src).toBe(SETUP.qr);
     expect(within(dialog).getByText('JBSWY3DPEHPK3PXP')).toBeTruthy();
   });
@@ -321,7 +334,7 @@ describe('two-factor authentication', () => {
     // unmodified fails as "invalid", which reads as the app being wrong rather than the paste.
     const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0 });
     postSpy.mockResolvedValue(SETUP);
-    await user.click(await enabledButton('Set up two-factor'));
+    await startThroughPassword(user);
     // Let the set-up request settle (the dialog is its result) BEFORE swapping the mock for the next step;
     // re-mocking while it is in flight hands the NEXT step's answer to the first call on a slow run (#570).
     await screen.findByLabelText(/Enter the 6-digit code/);
@@ -338,7 +351,7 @@ describe('two-factor authentication', () => {
     // no way back into their own account after a lost phone.
     const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0 });
     postSpy.mockResolvedValue(SETUP);
-    await user.click(await enabledButton('Set up two-factor'));
+    await startThroughPassword(user);
     // Let the set-up request settle (the dialog is its result) BEFORE swapping the mock for the next step;
     // re-mocking while it is in flight hands the NEXT step's answer to the first call on a slow run (#570).
     await screen.findByLabelText(/Enter the 6-digit code/);
@@ -360,7 +373,7 @@ describe('two-factor authentication', () => {
     // the authenticator app — all because of one mistyped digit.
     const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0 });
     postSpy.mockResolvedValue(SETUP);
-    await user.click(await enabledButton('Set up two-factor'));
+    await startThroughPassword(user);
     // Let the set-up request settle (the dialog is its result) BEFORE swapping the mock for the next step;
     // re-mocking while it is in flight hands the NEXT step's answer to the first call on a slow run (#570).
     await screen.findByLabelText(/Enter the 6-digit code/);
@@ -371,6 +384,135 @@ describe('two-factor authentication', () => {
 
     expect(await screen.findByText('That code is not valid')).toBeTruthy();
     expect(screen.getByLabelText(/Enter the 6-digit code/), 'still enrolling').toBeTruthy();
+  });
+
+  test('★ the page may not reload itself while the set-up panel is open, and may again once it is closed (#765)', async () => {
+    const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0 });
+    postSpy.mockResolvedValue(SETUP);
+    expect(isReloadHeld()).toBe(false);
+    await startThroughPassword(user);
+    await screen.findByLabelText(/Enter the 6-digit code/);
+    expect(isReloadHeld()).toBe(true);
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByLabelText(/Enter the 6-digit code/)).toBeNull());
+    expect(isReloadHeld()).toBe(false);
+  });
+
+  test('a pending set-up offers Continue set-up and Start over instead of Set up two-factor (#765)', async () => {
+    mountMfa({ enabled: false, backup_codes_remaining: 0, setup_pending: true });
+    expect(await enabledButton('Continue set-up')).toBeTruthy();
+    expect(await enabledButton('Start over')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Set up two-factor' })).toBeNull();
+  });
+
+  // Review of #765 (owner's decision): the server answers every set-up call only with the account password, so
+  // each entry point asks for it BEFORE calling set-up, and sends it. FAILS on a passwordless entry point: it
+  // posted on the first tap, without the password.
+  test.each([
+    ['Set up two-factor', false, { password: 'hunter22' }],
+    ['Continue set-up', true, { password: 'hunter22' }],
+    ['Start over', true, { restart: true, password: 'hunter22' }],
+  ])('★ %s asks for the password first, then sends it', async (button, pending, body) => {
+    const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0, setup_pending: pending });
+    postSpy.mockResolvedValue(pending && button === 'Continue set-up' ? { ...SETUP, resumed: true } : SETUP);
+    await user.click(await enabledButton(button));
+    const step = await screen.findByRole('dialog');
+    const pw = within(step).getByLabelText('Password');
+    expect(pw.type).toBe('password');
+    expect(pw.required).toBe(true);
+    expect(postSpy, 'set-up was called before the password was asked for').not.toHaveBeenCalled();
+    await user.type(pw, 'hunter22');
+    await user.click(within(step).getByRole('button', { name: 'Continue' }));
+    await screen.findByLabelText(/Enter the 6-digit code/);
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(postSpy).toHaveBeenCalledWith('/auth/me/mfa/setup', body);
+    expect(screen.getByText(SETUP.secret)).toBeTruthy();
+    expect(screen.queryByLabelText('Password'), 'the password step stayed open over the set-up').toBeNull();
+  });
+
+  test.each([['Set up two-factor', false], ['Continue set-up', true], ['Start over', true]])(
+    'a wrong password on %s shows the message beside the field and keeps the step open (#765)',
+    async (button, pending) => {
+      const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0, setup_pending: pending });
+      postSpy.mockRejectedValue(new Error('Password is incorrect'));
+      await user.click(await enabledButton(button));
+      const step = await screen.findByRole('dialog');
+      await user.type(within(step).getByLabelText('Password'), 'wrong');
+      await user.click(within(step).getByRole('button', { name: 'Continue' }));
+
+      expect(await within(step).findByText('Password is incorrect')).toBeTruthy();
+      expect(within(step).getByLabelText('Password'), 'the step closed on a wrong password').toBeTruthy();
+      expect(screen.queryByLabelText(/Enter the 6-digit code/), 'the set-up opened without a key').toBeNull();
+    },
+  );
+
+  // Review of #765: the pending set-up was discarded elsewhere (an admin reset, a password change on another
+  // device), so "Continue set-up" got a NEW key, without `resumed`. FAILS without the notice: the panel looked
+  // exactly like a continued set-up, and the code from the old entry could never match.
+  test('Continue set-up that gets a new key (no `resumed`) says so in the panel; a real continue and a first start do not', async () => {
+    const NOTICE = /There was no set-up to continue, so this is a new key/;
+    const cases = [
+      ['Continue set-up', true, SETUP, true],
+      ['Continue set-up', true, { ...SETUP, resumed: true }, false],
+      ['Set up two-factor', false, SETUP, false],
+    ];
+    for (const [button, pending, answer, shown] of cases) {
+      const { user, unmount } = mountMfa({ enabled: false, backup_codes_remaining: 0, setup_pending: pending });
+      postSpy.mockResolvedValue(answer);
+      await startThroughPassword(user, button);
+      await screen.findByLabelText(/Enter the 6-digit code/);
+      expect(!!screen.queryByText(NOTICE), `${button} with ${JSON.stringify(answer.resumed)}`).toBe(shown);
+      unmount();
+    }
+  });
+
+  // FAILS if opening the step does not clear the field: a password typed and abandoned would wait, filled in,
+  // for whoever opens the step next on a shared device.
+  test('a password typed into the step and abandoned is gone when the step is opened again', async () => {
+    const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0, setup_pending: true });
+    await user.click(await enabledButton('Continue set-up'));
+    const first = await screen.findByRole('dialog');
+    await user.type(within(first).getByLabelText('Password'), 'typed-then-abandoned');
+    await user.click(within(first).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    await user.click(await enabledButton('Start over'));
+    const again = await screen.findByRole('dialog');
+    expect(within(again).getByLabelText('Password').value).toBe('');
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+
+  describe('opening the key in an authenticator app (#765)', () => {
+    const coarse = (matches) => { window.matchMedia = vi.fn().mockReturnValue({ matches }); };
+    const open = async () => {
+      const { user } = mountMfa({ enabled: false, backup_codes_remaining: 0 });
+      postSpy.mockResolvedValue(SETUP);
+      await startThroughPassword(user);
+      await screen.findByLabelText(/Enter the 6-digit code/);
+    };
+    afterEach(() => { delete window.matchMedia; });
+
+    test('shown on a touch device in the browser, linking to the otpauth uri', async () => {
+      coarse(true);
+      vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
+      await open();
+      expect(screen.getByRole('link', { name: /authenticator app/i }).getAttribute('href')).toBe(SETUP.otpauth_uri);
+    });
+
+    test('not shown inside the native app, nor on a mouse device', async () => {
+      coarse(true);
+      vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(true);
+      await open();
+      expect(screen.queryByRole('link', { name: /authenticator app/i })).toBeNull();
+    });
+
+    test('not shown without a coarse pointer', async () => {
+      coarse(false);
+      vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
+      await open();
+      expect(screen.queryByRole('link', { name: /authenticator app/i })).toBeNull();
+    });
   });
 
   test('★ turning it off requires the password, and sends it', async () => {

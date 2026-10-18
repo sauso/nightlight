@@ -239,7 +239,7 @@ describe('appName() falls back to "Nightlight" rather than embedding a blank TOT
     const admin = makeAdmin('u-mfa-app', 'mfa-app-admin');
     const token = tokenFor(admin);
     db.prepare("UPDATE settings SET app_name = '' WHERE id = 'app'").run();
-    const res = await post('/me/mfa/setup', {}, token);
+    const res = await post('/me/mfa/setup', { password: PASSWORD }, token); // every set-up needs it (review of #765)
     assert.equal(res.status, 200, JSON.stringify(res.body));
     // EXACT match on the issuer param, not a substring check: `?.app_name || 'Nightlight'` and a
     // mutated fallback like 'NightlightFallbackBroken' both contain "Nightlight" as a prefix, so an
