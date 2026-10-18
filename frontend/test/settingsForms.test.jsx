@@ -216,7 +216,7 @@ describe('Settings → MQTT', () => {
     await user.type(screen.getByLabelText('Broker port'), '8883');
     await user.clear(screen.getByLabelText('Username (optional)'));
     await user.type(screen.getByLabelText('Username (optional)'), 'ha');
-    await user.click(screen.getByRole('switch'));
+    await user.click(screen.getByRole('switch', { name: /Enable MQTT/ }));
     await user.click(screen.getByRole('button', { name: /Save/ }));
 
     await waitFor(() => expect(api.put).toHaveBeenCalled());
