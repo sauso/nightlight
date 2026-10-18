@@ -191,13 +191,99 @@ const mfaUserLimiter = rateLimit({
   keyGenerator: (req) => `mfa-user:${verifiedMfaUserId(req)}`,
 });
 
-// Empties one user's per-user bucket. The admin MFA reset (DELETE /users/:id/mfa) calls it: the store is in
+// Rate-limiting the two-factor CONFIRMATION route (POST /me/mfa/enable). The route takes a signed-in session
+// (requireAuth) but not the password, so it now limits wrong codes, like the other confirmation routes; a device
+// without the password gets at most 10 guesses at any one key. Since #765 set-up returns the same pending secret
+// when asked again, so the secret does not change between attempts: the bound follows the secret and the account,
+// not the request. Two bounds:
+//
+//   1. MFA_ENABLE_MAX_WRONG_CODES (10) wrong codes cancel the pending set-up (the counter below; the cancel is in
+//      the route). Set-up needs the PASSWORD on every call (#765), so a device without it cannot start another:
+//      its guesses against any one secret are capped at 10, however long it waits, however many addresses it uses
+//      and however many requests it sends at once. 10 guesses x 3 valid steps / 1,000,000 = 0.003%, once.
+//      10 is a judgement, not a measurement: a person mistyping a code, or held up by a phone clock that is off,
+//      starts over or asks for help long before 10, while 10 guesses at one key give the 0.003% above.
+//   2. mfaEnableUserLimiter: 30 WRONG codes per 15 minutes per user, whatever the source address. 30 mirrors
+//      PER_USER_MFA_LIMIT (#550), also a judgement. The cap above bounds guesses per KEY; this bounds them across
+//      keys: each time the owner starts over (with the password), a device without the password gets 10 more
+//      against the new key, so this is what caps such a device at 30 per window in all. It is also the per-account
+//      bound for someone who holds the password and mints a new secret every 9 wrong codes. A SEPARATE bucket from
+//      mfaUserLimiter (the sign-in second step): a pending set-up's failures must not carry over into the owner's
+//      first sign-in with the new authenticator.
+//
+// ⚠️ ONLY A WRONG CODE COUNTS, for both (the handler sets res.locals.mfaWrongCode; plan review, Codex and Opus).
+// Counting every 400 was the first design and had a hole: a password-less device cancels the set-up with 10 wrong
+// codes, then fills the per-user bucket with "Start setup first." refusals, which cost it no guess, and so stops
+// the owner's next set-up from confirming, again in every window. A refusal that needed no guess (nothing pending,
+// "already on") and a correct code spend nothing. The answer that cancels the set-up IS a wrong code and counts.
+// The 429 itself counts as nothing (the window is fixed, so hammering cannot extend it). The limiter counts a
+// request when it arrives and gives it back when it finishes, so 30 requests in flight AT ONCE (even refusals that
+// spend nothing) can make a right code that arrives among them a 429 until they finish (review, Codex; in the docs).
+//
+// NOT on this route, on purpose: the per-source + account limiter and perClientLimiter that set-up, turning
+// two-factor off and changing the password have. The cap of 10 always fires before a per-source 20 could, so that
+// limiter would add only lock-out surface; perClientLimiter counts successes too and would tie confirming two-factor
+// to the budget a household behind one proxy address shares (Opus). Nothing here is keyed on an address, so a
+// household behind one proxy IP shares no bucket on this route: each account has its own.
+//
+// Known limits (docs/mfa.md): the counter and the bucket are in memory, so a restart of the container resets both
+// (an operator-only event, as for every limiter here; the app is one process). A device signed in to the account
+// without the password can cancel the owner's pending set-up (10 wrong codes) each time the owner starts over, and
+// across those start-overs use up the 30, after which even the right code is refused (429) for the rest of the window
+// (review, Opus, verified by running: after three start-overs). It blocks nothing else. Signing that device out
+// does not empty the bucket (the window has to run out, up to 15 minutes); changing the password does, at once
+// (resetMfaEnableLimit below), in the same step that discards the pending set-up and signs the other devices out.
+const MFA_ENABLE_MAX_WRONG_CODES = 10;
+const PER_USER_MFA_ENABLE_LIMIT = 30;
+
+const mfaEnableUserLimiter = rateLimit({
+  windowMs: RATE_WINDOW_MS,
+  limit: PER_USER_MFA_ENABLE_LIMIT,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: limiterMessage,
+  // Mounted AFTER requireAuth, so this is the id of a VERIFIED session's user: a client can neither mint a fresh
+  // bucket for itself nor name someone else's.
+  keyGenerator: (req) => `mfa-enable-user:${req.user.id}`,
+  // "Successful" here means "not a wrong code" (see above): everything else is taken back off the count.
+  requestWasSuccessful: (req, res) => !res.locals.mfaWrongCode,
+  skipSuccessfulRequests: true,
+});
+
+// Wrong codes against the PENDING secret, per user: userId -> { secretKey, wrong }. secretKey is a short sha256
+// prefix of the secret being counted against, so the plaintext secret is not held in a second place. A different
+// secret (a start over, a new set-up after a cancel) starts again from 0; a resume (#765: the same secret returned)
+// does NOT, so reloading the set-up page part-way through does not start the count again. The entry is deleted on a
+// successful confirmation and AFTER a cancel's write has succeeded (the order matters: see the cancel in the route).
+// One whose secret went away some other way (turned off) is replaced by the next wrong code against the new secret;
+// a password change, an admin two-factor reset and removing the account delete it (resetMfaEnableLimit). At most
+// one small entry per account.
+const mfaEnableWrongCodes = new Map();
+const pendingSecretKey = (secret) => createHash('sha256').update(String(secret)).digest('hex').slice(0, 16);
+
+// Empties the confirmation route's state for one user: its per-user bucket and its wrong-code counter. Called by
+// both password-change paths (PUT /me/password, and PUT /users/:id with a password), by the admin two-factor reset
+// (through resetMfaUserLimit) and by removing the account. Why a password change may: only the password holder or
+// an admin can make one, and the same step discards the pending set-up and signs the other devices out, so the
+// device that used up the budget is gone with it (review, Opus: before this the owner stayed blocked for the rest of
+// the window). ⚠️ It does NOT touch mfaUserLimiter, the sign-in second step's bucket: emptying that on a password
+// change would hand someone who holds the password (the very person a password change is aimed at) a fresh 30
+// guesses at the second factor, weakening #550.
+function resetMfaEnableLimit(userId) {
+  mfaEnableUserLimiter.resetKey(`mfa-enable-user:${userId}`);
+  mfaEnableWrongCodes.delete(userId);
+}
+
+// Empties one user's per-user buckets: the sign-in second step's and the confirmation route's, and the confirmation
+// route's wrong-code counter. The admin MFA reset (DELETE /users/:id/mfa) calls it: the store is in
 // memory, so clearing the row alone left a locked-out user blocked for the rest of the window although the
 // docs said an admin reset clears it (review of #720, verified by running). The console script
 // (scripts/reset-mfa.js) runs in its own process and cannot reach this store. Tests also use it, because
 // the store is module-level and a test that exhausts one user's budget would otherwise 429 later tests.
 export function resetMfaUserLimit(userId) {
   mfaUserLimiter.resetKey(`mfa-user:${userId}`);
+  // The reset also clears any pending set-up (mfa_secret = NULL), so its budget goes with it.
+  resetMfaEnableLimit(userId);
 }
 
 const loginAccountLimiter = makeAccountLimiter(usernameKey);
@@ -726,6 +812,9 @@ router.put('/users/:id', requireAuth, requireAdmin, asyncHandler(async (req, res
     if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });
     throw e;
   }
+  // After the transaction, so a refused (rolled-back) change leaves it alone: a new password also empties the
+  // confirmation route's budget, as on PUT /me/password (see resetMfaEnableLimit).
+  if (password) resetMfaEnableLimit(req.params.id);
   res.json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)));
 }));
 
@@ -785,6 +874,8 @@ router.put('/me/password', requireAuth, sessionActionLimiter, asyncHandler(async
   db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.user.id, req.user.sid);
   // And a pending two-factor set-up, for the same reason (see discardPendingSetup above PUT /users/:id).
   discardPendingSetup.run(req.user.id);
+  // And the confirmation route's budget: a device that used it up is signed out just above (see resetMfaEnableLimit).
+  resetMfaEnableLimit(req.user.id);
   res.json({ ok: true });
 }));
 
@@ -901,21 +992,57 @@ router.post('/me/mfa/setup', requireAuth, sessionActionLimiter, asyncHandler(asy
 }));
 
 // Per-user single flight for /me/mfa/enable (review of #720, verified by running). generateBackupCodes() is
-// ten cost-10 hashes, about 0.8 s of the one worker's time, and this route has no attempt limiter, so every
+// ten cost-10 hashes, about 0.8 s of the one worker's time, and this route had no attempt limiter (its limits
+// count wrong codes only, so they still do not bound requests with the right code), so every
 // simultaneous enable for one account queued ten more hashes ahead of everyone's sign-ins, only for the
 // compare-and-set below to refuse all but one of them. A second enable for a user while one is in flight is
 // now refused BEFORE any hashing, with the same 400 the losing compare-and-set used to give. In memory, per
 // process: the app is one process, and the compare-and-set still guards the write if that ever changes.
 const mfaEnableInFlight = new Set();
 
+// The answer to the wrong code that cancels a pending set-up (see MFA_ENABLE_MAX_WRONG_CODES). 400 like every other
+// refusal here, never 401 (#697: that would sign the person out). The set-up card still offers Continue set-up and
+// Start over until the page reloads, and either one now makes a new key ("There was no set-up to continue" for the
+// first), so the text names both. The phone's clock is the usual reason a real person's codes keep failing.
+const MFA_ENABLE_CANCELLED =
+  "Too many wrong codes, so this set-up was cancelled. Choose Continue set-up or Start over to get a new key (also check your phone's clock).";
+// The cancel. A compare-and-set on the secret that was guessed against (`IS ?`), with two-factor still off, as on
+// the enable write below. Nothing awaits between the read of `user` and this statement today, so the compare
+// cannot lose: it is defence in depth for the day an await is added, so a cancel can never clear a newer set-up's
+// secret, nor an ACTIVE secret (that would leave two-factor on with no secret, a lockout at the code step).
+const cancelPendingSetup = db.prepare(
+  'UPDATE users SET mfa_secret = NULL, mfa_last_step = NULL WHERE id = ? AND mfa_enabled = 0 AND mfa_secret IS ?',
+);
+
 // Confirm a code against the pending secret; on success, enable MFA and return one-time backup
 // codes to show the user once (only their hashes are kept).
-router.post('/me/mfa/enable', requireAuth, asyncHandler(async (req, res) => {
+// mfaEnableUserLimiter after requireAuth: it is keyed on the session's user (see its comment).
+router.post('/me/mfa/enable', requireAuth, mfaEnableUserLimiter, asyncHandler(async (req, res) => {
   const { code } = req.body || {};
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (user.mfa_enabled) return res.status(400).json({ error: 'Two-factor is already on.' });
   if (!user.mfa_secret) return res.status(400).json({ error: 'Start setup first.' });
   if (!verifyToken(user.mfa_secret, code)) {
+    // A wrong code: the one kind of request either bound counts (see the comment above mfaEnableUserLimiter).
+    // Counted with NO await between the read of `user` above and the cancel below, so requests sent at once
+    // cannot all slip past the cap: each one runs this whole block before the next can start.
+    res.locals.mfaWrongCode = true;
+    const secretKey = pendingSecretKey(user.mfa_secret);
+    let entry = mfaEnableWrongCodes.get(user.id);
+    if (!entry || entry.secretKey !== secretKey) {
+      entry = { secretKey, wrong: 0 };
+      mfaEnableWrongCodes.set(user.id, entry);
+    }
+    entry.wrong += 1;
+    if (entry.wrong >= MFA_ENABLE_MAX_WRONG_CODES) {
+      // The write FIRST, the count's delete only after it succeeded (review, Opus, verified with a failing write).
+      // The other way round, a cancel whose UPDATE throws had already dropped the count while the key stayed
+      // pending, so the next wrong code counted from 1 again and the cap of 10 never held. Kept, the count stays
+      // at 10 or more and the next wrong code tries the cancel again.
+      cancelPendingSetup.run(user.id, user.mfa_secret);
+      mfaEnableWrongCodes.delete(user.id);
+      return res.status(400).json({ error: MFA_ENABLE_CANCELLED });
+    }
     return res.status(400).json({ error: "That code didn't match — check your authenticator app and try again." });
   }
   // Checked and taken with no await in between, released whatever happens (finally).
@@ -936,6 +1063,9 @@ router.post('/me/mfa/enable', requireAuth, asyncHandler(async (req, res) => {
       .prepare('UPDATE users SET mfa_enabled = 1, mfa_backup_codes = ? WHERE id = ? AND mfa_enabled = 0 AND mfa_secret IS ?')
       .run(hashesJson, user.id, user.mfa_secret);
     if (enabled.changes !== 1) return res.status(400).json({ error: 'Start setup first.' });
+    // Two-factor is on, so nothing is pending and its wrong-code count can go. Tidiness, not a rule anything
+    // depends on: a later set-up has a new secret, whose count starts at 0 anyway (so no test pins this line).
+    mfaEnableWrongCodes.delete(user.id);
     res.json({ backup_codes: codes });
   } finally {
     mfaEnableInFlight.delete(user.id);
@@ -994,6 +1124,8 @@ router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
     if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });
     throw e;
   }
+  // A removed account must not leave its confirmation-route state behind in memory (review, Codex).
+  resetMfaEnableLimit(req.params.id);
   res.status(204).end();
 });
 
