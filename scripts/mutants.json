@@ -21672,5 +21672,59 @@
     "replace": "payload.mqtt_tls_ca = form.mqtt_tls_ca;",
     "expect": "killed",
     "tests": ["settingsMqttTls.test.jsx"]
+  },
+  {
+    "label": "#397 a child whose sleep report is switched off is still sent it",
+    "file": "backend/src/lib/sleepReportAlert.js",
+    "find": "if (enabled) out.push({ ...r, name: showName ? r.name : HIDDEN_NAME });",
+    "replace": "out.push({ ...r, name: showName ? r.name : HIDDEN_NAME });",
+    "expect": "killed",
+    "tests": ["sleep-report-prefs.test.js"],
+    "namePattern": "nothing at all reaches any provider"
+  },
+  {
+    "label": "#398 a child whose name is hidden is named in the sleep report anyway",
+    "file": "backend/src/lib/sleepReportAlert.js",
+    "find": "name: showName ? r.name : HIDDEN_NAME",
+    "replace": "name: r.name",
+    "expect": "killed",
+    "tests": ["sleep-report-prefs.test.js"],
+    "namePattern": "planted name is absent from push"
+  },
+  {
+    "label": "#397 the nightly job reads every child's report switch from the first child",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const canNotify = channelsConfigured && sleepReportPrefs(kid.id).enabled;",
+    "replace": "const canNotify = channelsConfigured && sleepReportPrefs(kids[0].id).enabled;",
+    "expect": "killed",
+    "tests": ["sleepReportNotify.test.js"],
+    "namePattern": "two children, the first child"
+  },
+  {
+    "label": "#397 the sleep report tray tag is worked out before a switched-off child is dropped",
+    "file": "backend/src/lib/sleepReportAlert.js",
+    "find": "fanOut(title, body, 'sleep_report', reportTag(reports));",
+    "replace": "fanOut(title, body, 'sleep_report', reportTag(all));",
+    "expect": "killed",
+    "tests": ["sleep-report-prefs.test.js"],
+    "namePattern": "ONE-child message"
+  },
+  {
+    "label": "#397 adding a child ignores the report switch it was sent",
+    "file": "backend/src/routes/children.js",
+    "find": "req.body?.sleep_report_enabled === undefined ? 1 : req.body.sleep_report_enabled ? 1 : 0,",
+    "replace": "1,",
+    "expect": "killed",
+    "tests": ["sleep-report-prefs.test.js"],
+    "namePattern": "adding a child with the report OFF"
+  },
+  {
+    "label": "#398 the sleep report switches accept strings and null and read them by truthiness",
+    "file": "backend/src/routes/children.js",
+    "find": "const flagInvalid = (v) => v !== undefined && ![true, false, 1, 0].includes(v);",
+    "replace": "const flagInvalid = (v) => typeof v === 'object' && v !== null;",
+    "expect": "killed",
+    "tests": ["sleep-report-prefs.test.js"],
+    "namePattern": "anything but true/false/1/0"
   }
 ]
