@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Security
+
+- **Rate-limiting the two-factor confirmation route.** Confirming a new two-factor set-up (**Turn on**, `POST /api/auth/me/mfa/enable`) takes a signed-in session but not the password, so it now limits wrong codes, like the other confirmation routes; a device without the password gets at most 10 guesses at any one key. **10 wrong codes against one pending set-up cancel it** (HTTP 400 "Too many wrong codes, so this set-up was cancelled…"; **Continue set-up** or **Start over**, both of which ask for the password, then make a new key), and an account allows **30 wrong codes per 15 minutes** from any number of addresses (HTTP 429 after that, even for the right code). Only wrong codes count: a correct code, "Start setup first." and "Two-factor is already on." spend nothing, and continuing a set-up (the same key) does not start the count again. Unlike set-up, turning two-factor off and changing the password, this route has no per-address limit, and its per-account count is separate from the sign-in second step's. Both numbers are fixed (no settings) and are judgements, not measurements. Known limits: a device signed in to the account can still cancel a pending set-up again and again (sign it out, or change the password, then set up again); the counts are in memory, so a restart resets them, and an admin two-factor reset empties them. See `docs/mfa.md`.
+
 ## [0.41.0] - 2026-10-18
 
 ### Added

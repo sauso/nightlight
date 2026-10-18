@@ -25,8 +25,9 @@ const { totp } = require('./totp');
 // rest, inside a single 15-minute window. Exceeding it produces a 429 in whichever test happens to
 // be last — which looks like a bug in that test and is not one. This file is deliberately economical
 // for that reason: assertions that would cost a login are made from `/auth/me/mfa` instead wherever
-// they can be. (`/me/mfa/disable` is on the limiter but no spec calls it; `/me/mfa/enable` is NOT
-// limited, so it is free. Since the review of #765 `/me/mfa/setup` checks the account password on every
+// they can be. (`/me/mfa/disable` is on the limiter but no spec calls it; `/me/mfa/enable` is not on
+// it either and is free here: its own limits count only WRONG codes, per account (10 against one pending
+// set-up cancel it; 30 per 15 minutes), and this file sends one wrong code. Since the review of #765 `/me/mfa/setup` checks the account password on every
 // call and is limited like `/me/password` and `/me/mfa/disable`: per source + account (this throwaway
 // account, not the shared admin) and against the per-source budget. This file calls it three times.)
 // **MEASURED after a full run: 17 of the 20 spent with #246's specs present, 16 without** — read it
@@ -241,8 +242,9 @@ test('★ enrolment refuses a code that does not match the pending secret', asyn
   // with any six digits, locking the real owner out of their own account.
   //
   // It runs last because it needs an UN-enrolled account, which is what the reset above just produced.
-  // /me/mfa/enable is not rate limited; /me/mfa/setup is, per this throwaway account (see the budget note
-  // at the top), and needs the account password (review of #765).
+  // /me/mfa/enable counts only wrong codes (10 cancel the pending set-up, 30 per 15 minutes per account),
+  // so the one wrong code below costs nothing that matters; /me/mfa/setup is limited per this throwaway
+  // account (see the budget note at the top), and needs the account password (review of #765).
   const setup = await page.request.post('/api/auth/me/mfa/setup', { ...asUser(), data: { password: USER.password } });
   expect(setup.status()).toBe(200);
   const pending = (await setup.json()).secret;

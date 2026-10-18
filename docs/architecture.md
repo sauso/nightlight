@@ -173,6 +173,13 @@ a single `UPDATE ... WHERE mfa_last_step IS NULL OR mfa_last_step < ?` whose row
 per-user MFA limiter sits beside the per-source ones in `routes/auth.js` and is keyed on a *verified* MFA
 token; the admin MFA reset also empties it. User-facing rules:
 [mfa.md](mfa.md#replayed-codes-and-limits-on-guessing-550).
+`/me/mfa/enable` (confirming a set-up) has limits of its own, counting wrong codes only (the handler marks a
+wrong code in `res.locals.mfaWrongCode`, and the limiter's `requestWasSuccessful` reads it): an in-memory count
+per user and pending secret (keyed by a sha256 prefix of the secret, never the secret) cancels the pending set-up
+at the 10th wrong code, with no await between the count and the cancel; and `mfaEnableUserLimiter`, after
+`requireAuth` and keyed on the session's user, allows 30 wrong codes per 15 minutes. No per-source limiter is
+on that route. `resetMfaUserLimit` (the admin MFA reset) empties both. User-facing rules:
+[mfa.md](mfa.md#confirming-a-set-up-has-limits-of-its-own).
 
 **Every route's gate is pinned** by `backend/test/route-permissions.test.js` (issue #563). It enumerates
 the real route table (index.js's registrations read from its source, and every mounted router's actual
