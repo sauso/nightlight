@@ -141,11 +141,10 @@ describe('saving', () => {
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
     const [path, body] = putSpy.mock.calls[0];
     expect(path).toBe('/settings');
+    // The two alert-clip limits are absent on purpose when untouched (#395, next test).
     expect(Object.keys(body).sort()).toEqual([
       'clip_post_roll_s',
       'clip_pre_roll_s',
-      'clip_retention_days',
-      'clip_retention_max_gb',
       'ondemand_enabled',
       'ondemand_max_duration_s',
       'ondemand_pre_roll_s',
@@ -153,6 +152,38 @@ describe('saving', () => {
       'wake_clip_seconds',
       'wake_clips_enabled',
     ]);
+  });
+
+  test('★★ editing only another field sends NO retention keys, so a stale page cannot trigger a sweep (#395 review)', async () => {
+    // Tab A loaded a 5 GB cap, tab B set it to 0. If tab A re-sent its stale 5 here the server would see a change
+    // against its current 0, sweep, and nobody would have been asked. Omitted = keep on the server.
+    const { user } = renderWith({ ...FULL_SETTINGS, clip_retention_max_gb: 5 });
+    const pre = await screen.findByLabelText('Pre-roll (seconds)');
+    await user.clear(pre);
+    await user.type(pre, '9');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    const body = putSpy.mock.calls[0][1];
+    expect(body.clip_pre_roll_s).toBe('9');
+    expect(body).not.toHaveProperty('clip_retention_days');
+    expect(body).not.toHaveProperty('clip_retention_max_gb');
+    expect(api.get.mock.calls.filter(([p]) => String(p).includes('clip-retention-preview'))).toHaveLength(0);
+  });
+
+  test('changing one limit sends only that limit, to the save and to the dry run', async () => {
+    api.get.mockImplementation(async (path) => (String(path).includes('clip-retention-preview') ? PREVIEW_NONE : {}));
+    const { user } = renderWith(FULL_SETTINGS);
+    const field = await screen.findByLabelText('Storage cap (GB)');
+    await user.clear(field);
+    await user.type(field, '2');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    const body = putSpy.mock.calls[0][1];
+    expect(body.clip_retention_max_gb).toBe('2');
+    expect(body).not.toHaveProperty('clip_retention_days');
+    const asked = api.get.mock.calls.map(([p]) => String(p)).find((p) => p.includes('clip-retention-preview'));
+    expect(asked).toMatch(/max_gb=2/);
+    expect(asked).not.toMatch(/days=/);
   });
 
   test('★ the on/off switch rides in the same Save, as a real boolean (#391)', async () => {
@@ -440,11 +471,13 @@ describe('★ unsaved drafts survive a context refresh (#449)', () => {
     // Shows the server's normalised 7, not the 99 that was typed.
     expect(screen.getByLabelText('Keep clips for (days)').value).toBe('7');
 
-    // A second Save, nothing further edited, must send what was actually just committed (7) — not a
-    // stale pre-fix value that a dropped commit() would leave behind.
+    // A second Save, nothing further edited, must not send the stale 99 that a dropped commit() would leave
+    // behind. Since #395 a limit that did not change from the committed value (7) is not sent at all, so the
+    // proof is that the key is absent (a stale 99 differs from 7 and WOULD be sent) and the field still reads 7.
     await user.click(saveBtn);
     await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(2));
-    expect(putSpy.mock.calls[1][1].clip_retention_days).toBe(7);
+    expect(putSpy.mock.calls[1][1]).not.toHaveProperty('clip_retention_days');
+    expect(screen.getByLabelText('Keep clips for (days)').value).toBe('7');
     expect(failingRefresh).not.toHaveBeenCalled();
   });
 
@@ -666,7 +699,7 @@ describe('★ lowering a retention limit asks before it deletes video (#395)', (
     expect(putSpy.mock.calls[0][1].clip_pre_roll_s).toBe(5);
   });
 
-  test('the storage cap asks the same way, and sends both limits to the dry run', async () => {
+  test('the storage cap asks the same way, and names only the limit that changed', async () => {
     mockPreview(() => PREVIEW_SOME);
     const { user } = renderWith({ clip_retention_days: 14, clip_retention_max_gb: 5 });
     const field = await screen.findByLabelText('Storage cap (GB)');
@@ -674,7 +707,7 @@ describe('★ lowering a retention limit asks before it deletes video (#395)', (
     await user.type(field, '2');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(await screen.findByRole('dialog')).toBeTruthy();
-    expect(previewCalls()[0][0]).toMatch(/days=14/);
+    expect(previewCalls()[0][0]).not.toMatch(/days=/);
     expect(previewCalls()[0][0]).toMatch(/max_gb=2/);
   });
 

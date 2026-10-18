@@ -119,7 +119,7 @@ export default function SettingsRecording() {
     if (busy) return;
     setError('');
     // Snapshot once, now: the preview, the dialog and the PUT all use these values and no others.
-    const payload = shown;
+    const payload = { ...shown };
     const days = wholeLimit(payload.clip_retention_days, 365);
     const maxGb = wholeLimit(payload.clip_retention_max_gb, 2000);
     // Same wording as the server's own 400s. Refused here so a value the server would read differently from this
@@ -132,11 +132,22 @@ export default function SettingsRecording() {
       setError('Storage cap must be a whole number between 0 and 2000 GB (0 = no size limit)');
       return undefined;
     }
-    if (days !== stored.clip_retention_days || maxGb !== stored.clip_retention_max_gb) {
+    // Send a limit ONLY if the person changed it from the loaded value, and let the server keep the other one. The
+    // server decides whether to sweep by comparing the payload with its CURRENT values, but this screen compares
+    // with the values it LOADED: in a page left open while another tab changed the cap, re-sending the stale cap
+    // on an unrelated save (say pre-roll) would skip the question here and still sweep there (#395 review).
+    // Omitted means "keep" on the server (an absent field is left alone), so nothing else needs both.
+    const daysChanged = days !== stored.clip_retention_days;
+    const gbChanged = maxGb !== stored.clip_retention_max_gb;
+    if (!daysChanged) delete payload.clip_retention_days;
+    if (!gbChanged) delete payload.clip_retention_max_gb;
+    if (daysChanged || gbChanged) {
       setBusy(true);
       let preview = null;
       try {
-        const r = await api.get(`/settings/clip-retention-preview?days=${days}&max_gb=${maxGb}`);
+        // Same rule for the dry run: only the changed limits are named, the server combines them with its own.
+        const q = [daysChanged && `days=${days}`, gbChanged && `max_gb=${maxGb}`].filter(Boolean).join('&');
+        const r = await api.get(`/settings/clip-retention-preview?${q}`);
         preview = r && Number.isInteger(r.count) ? r : null;
       } catch {
         preview = null;

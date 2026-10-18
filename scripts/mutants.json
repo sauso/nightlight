@@ -20268,7 +20268,7 @@
   {
     "label": "#391 recording: Save leaves the on/off switch out of the payload",
     "file": "frontend/src/pages/SettingsRecording.jsx",
-    "find": "    const payload = shown;",
+    "find": "    const payload = { ...shown };",
     "replace": "    const { ondemand_enabled, ...payload } = shown;",
     "expect": "killed",
     "tests": [

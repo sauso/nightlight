@@ -120,13 +120,17 @@ router.get('/clip-storage', requireAuth, requireAdmin, (req, res) => {
 // A dry run of the same sweep PUT /api/settings runs when either limit changes (lib/clipRetentionPreview.js).
 // It changes no clips and no settings and answers with counts, bytes and one timestamp only. (Not "strictly
 // read-only": any authenticated request refreshes the session's last-seen time in requireAuth.)
-// Both limits are required and held to the same ranges as the save, so a value the save would refuse is
-// refused here too and the two cannot be asked different questions. Strict whole numbers: parseInt would
-// read "5abc" as 5 and a preview of a limit that is not the one saved is worse than none.
+// A limit that is given is held to the same range as the save, so a value the save would refuse is refused here
+// too. A limit that is OMITTED means "keep what is stored", exactly as in PUT /api/settings, where an absent
+// field is left alone: the form sends only the limits the person changed (a page left open in an old tab would
+// otherwise re-send a stale limit and trigger a sweep nobody was asked about), so the preview must combine the
+// changed limit with the CURRENT stored one, as the save will. Strict whole numbers: parseInt would read "5abc"
+// as 5 and a preview of a limit that is not the one saved is worse than none.
 router.get('/clip-retention-preview', requireAuth, requireAdmin, (req, res) => {
   const whole = (v, max) => (typeof v === 'string' && /^\d{1,6}$/.test(v) && Number(v) <= max ? Number(v) : null);
-  const days = whole(req.query.days, 365);
-  const maxGb = whole(req.query.max_gb, 2000);
+  const stored = getSettings();
+  const days = req.query.days === undefined ? stored.clip_retention_days : whole(req.query.days, 365);
+  const maxGb = req.query.max_gb === undefined ? stored.clip_retention_max_gb : whole(req.query.max_gb, 2000);
   if (days === null || maxGb === null) {
     return res.status(400).json({ error: 'days must be a whole number from 0 to 365 and max_gb from 0 to 2000' });
   }

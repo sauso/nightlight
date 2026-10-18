@@ -175,11 +175,30 @@ describe('GET /api/settings/clip-retention-preview', () => {
   test('a value the save would refuse is refused here too, and nothing is deleted', async () => {
     seed();
     const before = liveIds();
-    for (const q of ['days=-1&max_gb=1', 'days=366&max_gb=1', 'days=14&max_gb=2001', 'days=5abc&max_gb=1', 'days=14', 'max_gb=1', 'days=1.5&max_gb=1']) {
+    for (const q of ['days=-1&max_gb=1', 'days=366&max_gb=1', 'days=14&max_gb=2001', 'days=5abc&max_gb=1', 'days=1.5&max_gb=1', 'days=14&max_gb=', 'days=&max_gb=1']) {
       const r = await call(url(q), { token: adminToken });
       assert.equal(r.status, 400, q);
     }
     assert.deepEqual(liveIds(), before);
+  });
+
+  test('★ an omitted limit means the STORED one, as in PUT, so a form that sends only what changed is previewed correctly (#395 review)', async () => {
+    seed();
+    // Stored: 14 days, 1 GB. The form changed only the cap.
+    setRetention(14, 1);
+    const onlyCap = await call(url('max_gb=0'), { token: adminToken });
+    assert.equal(onlyCap.status, 200);
+    assert.deepEqual(onlyCap.body, previewClipRetention({ days: 14, maxGb: 0 }));
+    // ... and only the days.
+    const onlyDays = await call(url('days=60'), { token: adminToken });
+    assert.deepEqual(onlyDays.body, previewClipRetention({ days: 60, maxGb: 1 }));
+    // Different stored values give a different answer, so the stored value really is read (not a constant).
+    setRetention(0, 0);
+    const other = await call(url('max_gb=1'), { token: adminToken });
+    assert.deepEqual(other.body, previewClipRetention({ days: 0, maxGb: 1 }));
+    assert.notDeepEqual(other.body, onlyCap.body);
+    assert.equal((await call(url(''), { token: adminToken })).status, 200);
+    setRetention(14, 5); // the defaults, so later tests do not inherit this one's limits
   });
 
   test('the bounds themselves are accepted', async () => {

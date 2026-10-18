@@ -54,7 +54,9 @@ new clip can arrive before you confirm. If the check itself fails you are still 
 clip storage is not available at that moment (the unmapped-volume warning below) nothing can be deleted yet:
 the box says so, shows no count, and the limits take effect on the first cleanup after storage returns.
 Each field accepts whole numbers only (digits, no `1e2`, no decimals) within the range above; anything else
-is refused on the page and not sent. The numbers come from the same queries the real cleanup uses (an
+is refused on the page and not sent. Only a limit you actually changed is sent, so a settings page left open
+in an old tab cannot overwrite a limit changed elsewhere, or trigger a cleanup, by saving something unrelated.
+The numbers come from the same queries the real cleanup uses (an
 admin-only read, `GET /api/settings/clip-retention-preview`, which changes no clips or settings and returns
 no file names).
 
