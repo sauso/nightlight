@@ -131,6 +131,27 @@ describe('what the preview reports', () => {
     sweepClips();
     assert.deepEqual(liveIds(), before, 'the sweep ran although the preview said storage is not ready');
   });
+
+  test('★ with storage not ready the preview agrees with the sweep: zero clips, zero bytes, no oldest date (#395 review)', () => {
+    // Limits that WOULD delete clips if storage were up (the same call returns a positive count on the ready path
+    // below), so a preview that ignored the flag fails the first assertion.
+    seed();
+    const ifReady = previewClipRetention({ days: 14, maxGb: 1 });
+    assert.ok(ifReady.count > 0, 'fixture no longer has anything to delete');
+
+    checkClipStorage({ mounts: UNMAPPED });
+    const before = liveIds();
+    const p = previewClipRetention({ days: 14, maxGb: 1 });
+    setRetention(14, 1);
+    sweepClips();
+    const gone = before.filter((id) => !liveIds().includes(id));
+    assert.equal(gone.length, 0, 'the real sweep deleted something with storage down');
+    assert.equal(p.count, gone.length, 'preview named clips the sweep does not delete');
+    assert.equal(p.bytes, 0);
+    assert.equal(p.oldestAt, null);
+    assert.equal(p.storageReady, false);
+    assert.deepEqual([p.byAge.count, p.bySize.count], [0, 0]);
+  });
 });
 
 describe('GET /api/settings/clip-retention-preview', () => {

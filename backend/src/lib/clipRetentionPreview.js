@@ -28,6 +28,11 @@ export function previewClipRetention({ days, maxGb }) {
     byAge: { count: 0, bytes: 0 },
     bySize: { count: 0, bytes: 0 },
   };
+  // sweepClips() returns before it selects anything while clip storage is not ready (`if (!status.ok) return`), so
+  // right now a save deletes nothing. Report that as zero plus the flag, not as the clips that WOULD go once
+  // storage returns: a count here contradicted the dialog's own "nothing is deleted until it is" (#395 review).
+  // The first sweep after storage returns does apply the limits; the screen says so without inventing a number.
+  if (!out.storageReady) return out;
   const ready = getReadyClipsOldestFirst();
   const bytesOf = new Map(ready.map((c) => [c.id, c.clip_bytes || 0]));
   const doomed = new Set();

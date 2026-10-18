@@ -116,9 +116,10 @@ router.get('/clip-storage', requireAuth, requireAdmin, (req, res) => {
   res.json({ ...clipStorageStats(), wakeClips: wakeClipStats() });
 });
 
-// Admin-only, read-only: what saving these two limits would delete RIGHT NOW (#395), so the Recording form
-// can ask first. A dry run of the same sweep PUT /api/settings runs when either limit changes
-// (lib/clipRetentionPreview.js). It changes nothing and answers with counts, bytes and one timestamp only.
+// Admin-only: what saving these two limits would delete RIGHT NOW (#395), so the Recording form can ask first.
+// A dry run of the same sweep PUT /api/settings runs when either limit changes (lib/clipRetentionPreview.js).
+// It changes no clips and no settings and answers with counts, bytes and one timestamp only. (Not "strictly
+// read-only": any authenticated request refreshes the session's last-seen time in requireAuth.)
 // Both limits are required and held to the same ranges as the save, so a value the save would refuse is
 // refused here too and the two cannot be asked different questions. Strict whole numbers: parseInt would
 // read "5abc" as 5 and a preview of a limit that is not the one saved is worse than none.
