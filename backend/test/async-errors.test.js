@@ -209,7 +209,9 @@ describe('errorHandler over real HTTP', () => {
     const text = logText();
     assert.ok(text.includes(`${MARKER} detail`), 'the message must be in the log');
     assert.ok(text.includes('GET /reject'), 'the log names the request');
-    assert.ok(/at .*async-errors\.test\.js/.test(text), 'the stack must be in the log');
+    // A plain substring, not /at .*async-errors\.test\.js/: that regex backtracks on a long run of "at " and CodeQL
+    // flags it (js/polynomial-redos) on the release PR. This file's name appears in the log only as a stack frame.
+    assert.ok(text.includes('async-errors.test.js'), 'the stack must be in the log');
   });
 
   test('an exception thrown inside an async handler (not a thrown Error object we built) is a clean 500', async () => {
