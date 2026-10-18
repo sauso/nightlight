@@ -305,6 +305,35 @@ describe('★ an unreachable camera can still be saved', () => {
     expect(second).toEqual({ ...first, force: true });
   });
 
+  test('★★ after Save anyway ADDS a camera, its page shows Save changes and no stale warning (#496)', async () => {
+    // The page stays mounted from /cameras/new to /cameras/<new id> (same component, same position in the route
+    // table), so the state set by the failed first attempt used to survive onto the new camera's page.
+    const created = { ...CAM, id: 'cam-new', name: 'Playroom' };
+    postSpy = vi.spyOn(api, 'post')
+      .mockRejectedValueOnce(unreachable())
+      .mockResolvedValue({ id: 'cam-new' });
+    const { user } = renderAsAdmin(
+      <>
+        <Probe />
+        <Routes>
+          <Route path="/cameras/new" element={<CameraSettings />} />
+          <Route path="/cameras/:id" element={<CameraSettings />} />
+        </Routes>
+      </>,
+      { cameras: [CAM, created], kids: KIDS, route: '/cameras/new' }
+    );
+    await user.type(await screen.findByLabelText('Name'), 'Playroom');
+    await user.type(screen.getByLabelText('Camera IP address'), '10.0.0.9');
+    await user.click(screen.getByRole('button', { name: 'Add camera' }));
+    await user.click(await screen.findByRole('button', { name: 'Save anyway' }));
+
+    expect(await screen.findByText('at /cameras/cam-new')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Save changes' })).toBeTruthy();
+    expect(screen.queryByText(/Couldn't reach the camera stream/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save anyway' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry save' })).toBeNull();
+  });
+
   test('an ordinary failure is shown as an error, with no override offered', async () => {
     // Only `needsConfirm` earns the override. Offering "Save anyway" for, say, a duplicate name would
     // invite someone to force a save that cannot succeed.

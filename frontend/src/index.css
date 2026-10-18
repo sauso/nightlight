@@ -2722,6 +2722,11 @@ input[type='range'] {
 }
 .modal-overlay--top { align-items: flex-start; }
 
+/* The card is focusable by script only (tabIndex -1, Modal.jsx) as a last resort when it holds nothing tabbable (#376);
+   a ring on the whole card would be a visual change nobody asked for. */
+.modal-card:focus {
+  outline: none;
+}
 .modal-card {
   width: 100%;
   max-width: 440px;

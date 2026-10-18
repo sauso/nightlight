@@ -207,6 +207,18 @@ export default function LiveMonitor() {
     };
   }, []);
 
+  // The monitor stays mounted on every route so the streams keep running, which means its buttons stay in the DOM
+  // while another screen is showing. aria-hidden hides them from a screen reader but leaves them in the Tab order, so
+  // a keyboard user tabbed into controls they could not see (#376). `inert` takes them out of both, and of the
+  // accessibility tree, without unmounting anything, so playback and background audio carry on.
+  //
+  // Set through the DOM, not as a JSX prop, on purpose: React 18 does not know `inert` (it drops `inert={true}` and
+  // needs the string form), and React 19 treats the string form "" as false. A ref write is correct on both, so the
+  // React 19 migration (#634) cannot silently turn this off.
+  useEffect(() => {
+    containerRef.current?.toggleAttribute('inert', !isActive);
+  }, [isActive]);
+
   return (
     <div
       ref={containerRef}

@@ -409,7 +409,18 @@ add `wide` to a modal that is mostly text or a short form.
 
 **`dismissible={false}`** (default `true`) is for a dialog holding something that cannot be got back — today
 only the one-time two-factor backup codes (#557). It drops the overlay-click close and the `✕`, so the caller's
-own explicit button is the only way out. Any "close on Escape" behaviour added to `Modal` must honour it.
+own explicit button is the only way out. **Escape** honours it too: it closes an ordinary dialog and does nothing
+in a non-dismissible one.
+
+**Keyboard and screen reader (#376).** Every `Modal` does the same four things, so a caller does not have to:
+focus moves to the first field or action (a child with `autoFocus`, or an element marked `data-autofocus`, wins;
+the `✕` is chosen only if it is all there is); **Tab and Shift+Tab stay inside** the dialog; the rest of the page is
+made `inert` while it is open (`aria-modal` only describes a dialog, it does not block the page behind it), which
+leaves the page looking exactly as before; and on close **focus returns to the control that opened it**. With a
+dialog over a dialog, Escape and Tab belong to the top one. Not done: scroll lock on the page behind, and the
+tile's bottom-sheet menu, which is not a `Modal`. The inactive Live monitor is `inert` as well as `aria-hidden`,
+so its buttons are not in the Tab order while another screen shows; it stays mounted, so streams and background
+audio carry on.
 
 Layout lives in **CSS** (`.modal-overlay` / `.modal-card`), not inline styles. That is load-bearing: a
 media query cannot reach an inline style, and inline styles beat stylesheet rules, so the desktop rules
