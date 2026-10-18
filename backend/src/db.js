@@ -494,7 +494,7 @@ if (!settingsColumns.includes('mqtt_host')) {
 // TLS to the MQTT broker (#537). All three are additive and default to what every install does today, so an upgrade
 // keeps connecting over plain mqtt:// until an admin changes it:
 //   mqtt_tls         0 = plain mqtt:// (today), 1 = mqtts://
-//   mqtt_tls_ca      optional PEM text of the CA (or the broker's own certificate) to trust INSTEAD of the system
+//   mqtt_tls_ca      optional PEM text of the CA (or, for a SELF-SIGNED broker, its own certificate) to trust INSTEAD of the system
 //                    list, for a broker with a private or self-signed certificate. A certificate is public
 //                    information, so this is not a secret and is returned to the admin form; NULL = use the
 //                    system's trusted authorities

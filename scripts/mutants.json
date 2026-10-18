@@ -21614,10 +21614,63 @@
   {
     "label": "#537 a failed connection is not reported to the Settings screen",
     "file": "backend/src/lib/mqttClient.js",
-    "find": "lastError = describeMqttError(err);",
+    "find": "lastError = describeMqttError(err, { caAdded });",
     "replace": "",
     "expect": "killed",
     "tests": ["mqtt-tls.test.js"],
     "namePattern": "verification ON, no CA"
+  },
+  {
+    "label": "#537 a settings save that does not mention verification turns it OFF",
+    "file": "backend/src/routes/settings.js",
+    "find": "tlsFlag(mqtt_tls_verify, existing.mqtt_tls_verify)",
+    "replace": "tlsFlag(mqtt_tls_verify, 0)",
+    "expect": "killed",
+    "tests": ["mqtt-tls.test.js"],
+    "namePattern": "a save that leaves the TLS switches out keeps both"
+  },
+  {
+    "label": "#537 a settings save that does not mention TLS turns it ON",
+    "file": "backend/src/routes/settings.js",
+    "find": "tlsFlag(mqtt_tls, existing.mqtt_tls)",
+    "replace": "tlsFlag(mqtt_tls, 1)",
+    "expect": "killed",
+    "tests": ["mqtt-tls.test.js"],
+    "namePattern": "a save that leaves the TLS switches out keeps both"
+  },
+  {
+    "label": "#537 a configured CA that did not sign the broker is reported as \"add the CA certificate\"",
+    "file": "backend/src/lib/mqttClient.js",
+    "find": "caAdded = !!options.ca;",
+    "replace": "caAdded = false;",
+    "expect": "killed",
+    "tests": ["mqtt-tls.test.js"],
+    "namePattern": "own certificate pasted as the CA"
+  },
+  {
+    "label": "#537 a stored CA that cannot be used leaves the Settings screen with no reason",
+    "file": "backend/src/lib/mqttClient.js",
+    "find": "{ code: 'CA_UNUSABLE', message: 'The stored CA certificate cannot be used; replace or clear it in the CA certificate box and save.' }",
+    "replace": "null",
+    "expect": "killed",
+    "tests": ["mqtt-tls.test.js"],
+    "namePattern": "CA already stored that is not usable"
+  },
+  {
+    "label": "#537 the MQTT host error repeats what was typed (a pasted password comes back in the 400)",
+    "file": "backend/src/lib/mqttClient.js",
+    "find": "the host is not a valid hostname or address: ${hostProblem(typed)}",
+    "replace": "the host ${JSON.stringify(typed)} is not a valid hostname or address: ${hostProblem(typed)}",
+    "expect": "killed",
+    "tests": ["mqtt-broker-validation.test.js"],
+    "namePattern": "never repeats the host"
+  },
+  {
+    "label": "#537 Settings → MQTT sends the hidden CA text while TLS is off (a refused CA blocks the save invisibly)",
+    "file": "frontend/src/pages/SettingsMqtt.jsx",
+    "find": "if (form.mqtt_tls) payload.mqtt_tls_ca = form.mqtt_tls_ca;",
+    "replace": "payload.mqtt_tls_ca = form.mqtt_tls_ca;",
+    "expect": "killed",
+    "tests": ["settingsMqttTls.test.jsx"]
   }
 ]

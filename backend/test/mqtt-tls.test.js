@@ -20,7 +20,8 @@ useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const { default: settingsRouter } = await import('../src/routes/settings.js');
 const {
-  refreshMqttConnection, mqttStatus, mqttBrokerUrl, describeMqttError, parseMqttCa, MQTT_CA_MAX_CERTS, stopMqtt,
+  refreshMqttConnection, mqttStatus, mqttBrokerUrl, describeMqttError, parseMqttCa, MQTT_CA_MAX_CERTS, MQTT_CA_NOT_ISSUER,
+  stopMqtt,
 } = await import('../src/lib/mqttClient.js');
 const { logger } = await import('../src/lib/logger.js');
 
@@ -176,6 +177,29 @@ describe('describing a connection error', () => {
     assert.match(describeMqttError({ code: 'ECONNREFUSED' }).message, /refused/);
   });
 
+  test('★ with a CA configured, every "not trusted" failure says the added certificate did not sign the broker', () => {
+    // #537 review: "add the CA certificate" told an admin who HAD added one to add it. With a CA configured it is the
+    // only thing trusted, so all five codes mean the same: what was pasted is not what signed the broker's certificate.
+    const NOT_TRUSTED = ['DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+      'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_GET_ISSUER_CERT'];
+    for (const code of NOT_TRUSTED) {
+      const d = describeMqttError({ code, message: 'raw' }, { caAdded: true });
+      assert.equal(d.code, code);
+      assert.equal(d.message, MQTT_CA_NOT_ISSUER);
+      assert.notEqual(describeMqttError({ code }).message, MQTT_CA_NOT_ISSUER, `${code} without a CA must not blame one`);
+    }
+    assert.match(MQTT_CA_NOT_ISSUER, /the certificate you added is not a CA that signed the broker's certificate\. Paste the CA \(or, for a self-signed broker, the broker's own certificate\)/);
+    // Failures that are not about trust keep their own sentence when a CA is configured.
+    assert.match(describeMqttError({ code: 'CERT_HAS_EXPIRED' }, { caAdded: true }).message, /expired/);
+    assert.match(describeMqttError({ code: 'ECONNREFUSED' }, { caAdded: true }).message, /refused/);
+    // Without a CA, the broker's own certificate is offered only for a SELF-SIGNED broker (a CA-signed one pasted as
+    // the CA is refused: see the real connection below).
+    for (const code of ['DEPTH_ZERO_SELF_SIGNED_CERT', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY']) {
+      const { message } = describeMqttError({ code });
+      assert.ok(!/broker's own certificate/.test(message) || /self-signed broker, (that is )?the broker's own certificate/.test(message), message);
+    }
+  });
+
   test('an unknown error keeps its own words, cut short, with any certificate text removed', () => {
     const long = `boom ${'x'.repeat(500)}`;
     assert.ok(describeMqttError(new Error(long)).message.length <= 201);
@@ -225,6 +249,33 @@ describe('★ the real connection', () => {
     const st = await until(() => mqttStatus().error && mqttStatus());
     assert.ok(st && !st.connected, JSON.stringify(st));
     assert.match(st.error_code, /UNABLE_TO|SELF_SIGNED/);
+    assert.equal(st.error, MQTT_CA_NOT_ISSUER, 'a configured CA must not be answered with "add the CA certificate"');
+    await finish();
+  });
+
+  test('★ the broker\'s own certificate pasted as the CA, when an authority signed it, is refused with the reason', async () => {
+    // #537 review: the form and docs offered "(or the broker's own certificate)" as the CA. That works only for a
+    // SELF-SIGNED broker; a leaf signed by a CA is not a trust anchor. Measured here: the TLS layer refuses it.
+    const b = await broker({ kind: 'tls' });
+    configure({ mqtt_port: b.port, mqtt_tls: 1, mqtt_tls_ca: SERVER_CERT_PEM });
+    const st = await until(() => mqttStatus().error && mqttStatus());
+    assert.ok(st && !st.connected, JSON.stringify(st));
+    assert.ok(['UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_GET_ISSUER_CERT'].includes(st.error_code), st.error_code);
+    assert.equal(st.error, MQTT_CA_NOT_ISSUER);
+    assert.equal(b.seen.firstByte, null, 'MQTT bytes were sent to a broker that failed verification');
+    await finish();
+  });
+
+  test('one failed TLS attempt is logged once, not twice', async () => {
+    // mqtt.js emits the same Error twice for a TLS failure (its TLS stream builder and the client's stream handler).
+    // The reconnect is 5 s away, so everything logged in this window belongs to one attempt.
+    const b = await broker({ kind: 'tls' });
+    const count = () => logger.getRecent().filter((l) => l.includes('[mqtt] Connection error')).length;
+    const before = count();
+    configure({ mqtt_port: b.port, mqtt_tls: 1 });
+    assert.ok(await until(() => mqttStatus().error), 'no error was reported');
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(count() - before, 1);
     await finish();
   });
 
@@ -298,6 +349,24 @@ describe('★ the real connection', () => {
     assert.match(log, /Not connecting: the stored CA certificate is not usable/);
     assert.match(log, /MQTT stays off until the CA certificate is fixed/);
     assert.ok(!log.includes(junk), 'the stored CA text was logged');
+    // #537 review: the Settings screen is told why too. It used to get enabled, not connected and error null, so it
+    // showed neither "Connected" nor a reason.
+    assert.deepEqual(mqttStatus(), {
+      enabled: true, connected: false, tls: true, error_code: 'CA_UNUSABLE',
+      error: 'The stored CA certificate cannot be used; replace or clear it in the CA certificate box and save.',
+    });
+    await finish();
+  });
+
+  test('a broker host already stored that is not usable is reported to the Settings screen too, without the host', async () => {
+    configure({ mqtt_host: 'zq stored host', mqtt_port: 1883 });
+    const st = mqttStatus();
+    assert.equal(st.error_code, 'BROKER_UNUSABLE', JSON.stringify(st));
+    assert.equal(st.error, 'The stored broker host or port cannot be used; correct it and save.');
+    assert.ok(!JSON.stringify(st).includes('zq'));
+    // Fixed (here: switched off), the reason goes away.
+    configure({ mqtt_enabled: 0, mqtt_host: 'zq stored host' });
+    assert.equal(mqttStatus().error, null);
     await finish();
   });
 });
@@ -390,6 +459,18 @@ describe('the settings route', () => {
     assert.deepEqual([stored().mqtt_tls, !!stored().mqtt_tls_ca], [1, true]);
     await put({ mqtt_tls_ca: '' });
     assert.equal(stored().mqtt_tls_ca, null);
+  });
+
+  test('★ a save that leaves the TLS switches out keeps both as stored, whichever way they are set', async () => {
+    // #537 review (mutant M1): a fallback of 0 instead of the stored value for mqtt_tls_verify passed the whole suite,
+    // and it means any save from an older page or an API client that omits the field turns verification OFF. Every
+    // combination, so a fallback to a constant (0 or 1) fails for one of them.
+    for (const [tlsOn, verify] of [[1, 1], [1, 0], [0, 1], [0, 0]]) {
+      db.prepare('UPDATE settings SET mqtt_tls = ?, mqtt_tls_verify = ? WHERE id = ?').run(tlsOn, verify, 'app');
+      const r = await put({ mqtt_username: 'someone' });
+      assert.equal(r.status, 200, JSON.stringify(r.body));
+      assert.deepEqual([stored().mqtt_tls, stored().mqtt_tls_verify], [tlsOn, verify], `stored tls=${tlsOn} verify=${verify}`);
+    }
   });
 
   test('★ the switches take only on/off: "false" must not turn verification OFF by being truthy', async () => {

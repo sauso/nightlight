@@ -32,12 +32,14 @@ describe('the default is what every install has today', () => {
     expect(screen.queryByLabelText(/CA certificate/)).toBeNull();
   });
 
-  test('saving without touching TLS sends it off, with verification on', async () => {
+  test('saving without touching TLS sends it off, with verification on, and no CA text (the box is hidden)', async () => {
     const { user } = renderAsAdmin(<SettingsMqtt />);
     await screen.findByDisplayValue('broker.local');
     await user.click(screen.getByRole('button', { name: /Save/ }));
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
-    expect(putSpy.mock.calls[0][1]).toMatchObject({ mqtt_tls: false, mqtt_tls_verify: true, mqtt_tls_ca: '' });
+    expect(putSpy.mock.calls[0][1]).toMatchObject({ mqtt_tls: false, mqtt_tls_verify: true });
+    // Left out, the server keeps whatever CA is stored (routes/settings.js: an absent field keeps the stored value).
+    expect(putSpy.mock.calls[0][1]).not.toHaveProperty('mqtt_tls_ca');
   });
 
   test('a server that predates TLS (no such fields) leaves it off', async () => {
@@ -55,6 +57,8 @@ describe('turning TLS on', () => {
     await screen.findByDisplayValue('broker.local');
     await user.click(screen.getByRole('switch', TLS));
     expect(screen.getByRole('switch', VERIFY).checked, 'verification must default to ON').toBe(true);
+    // The broker's own certificate works as the CA only when it is self-signed (#537 review), and the help says so.
+    expect(screen.getByText(/or, for a self-signed broker, the broker's\s+own certificate/)).toBeTruthy();
     await user.click(screen.getByLabelText(/CA certificate/));
     await user.paste(PEM);
     await user.click(screen.getByRole('button', { name: /Save/ }));
@@ -104,6 +108,43 @@ describe('a CA the server refuses', () => {
     // Beside the field: the alert sits in the same block as the textarea.
     expect(alert.parentElement.contains(screen.getByLabelText(/CA certificate/))).toBe(true);
     expect(screen.getByLabelText(/CA certificate/).value).toBe('not a certificate');
+    expect(screen.queryByText('Saved ✓')).toBeNull();
+  });
+
+  // #537 review: the form used to send the CA text even with TLS off, and draw its refusal inside the hidden TLS
+  // block. TLS on, junk pasted, TLS off, Save: the save failed with no message on screen and no "Saved".
+  test('★ junk typed while TLS was on, then TLS switched off: the save goes through and says Saved', async () => {
+    // Refuses CA text the way the real route does (parseMqttCa), so the old behaviour fails this test.
+    const refuse = { error: 'No certificate found.', field: 'mqtt_tls_ca' };
+    mockApi({
+      putImpl: async (_path, body) => {
+        if (body.mqtt_tls_ca !== undefined && !String(body.mqtt_tls_ca).includes('BEGIN CERTIFICATE')) {
+          throw Object.assign(new Error(refuse.error), { status: 400, data: refuse });
+        }
+        return {};
+      },
+    });
+    const { user } = renderAsAdmin(<SettingsMqtt />);
+    await screen.findByDisplayValue('broker.local');
+    await user.click(screen.getByRole('switch', TLS));
+    await user.click(screen.getByLabelText(/CA certificate/));
+    await user.paste('junk');
+    await user.click(screen.getByRole('switch', TLS)); // off again: the CA box is hidden
+    expect(screen.queryByLabelText(/CA certificate/)).toBeNull();
+    await user.click(screen.getByRole('button', { name: /Save/ }));
+
+    expect(await screen.findByText('Saved ✓')).toBeTruthy();
+    expect(putSpy.mock.calls[0][1]).not.toHaveProperty('mqtt_tls_ca');
+    expect(putSpy.mock.calls[0][1].mqtt_tls).toBe(false);
+  });
+
+  test('a CA refusal that arrives while the CA box is hidden is shown in the banner, not dropped', async () => {
+    const msg = 'The stored CA certificate is not usable.';
+    mockApi({ putImpl: async () => { throw Object.assign(new Error(msg), { status: 400, data: { error: msg, field: 'mqtt_tls_ca' } }); } });
+    const { user } = renderAsAdmin(<SettingsMqtt />);
+    await screen.findByDisplayValue('broker.local');
+    await user.click(screen.getByRole('button', { name: /Save/ }));
+    expect(await screen.findByText(msg)).toBeTruthy();
     expect(screen.queryByText('Saved ✓')).toBeNull();
   });
 

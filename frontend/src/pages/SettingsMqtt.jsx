@@ -56,9 +56,13 @@ export default function SettingsMqtt() {
         mqtt_port: form.mqtt_port,
         mqtt_username: form.mqtt_username,
         mqtt_tls: !!form.mqtt_tls,
-        mqtt_tls_ca: form.mqtt_tls_ca,
         mqtt_tls_verify: !!form.mqtt_tls_verify,
       };
+      // The CA box is hidden while TLS is off, so its text is sent only while TLS is on. Sent always, a refused CA
+      // typed before switching TLS off made the whole save fail with the reason drawn inside the hidden block: no
+      // message, no "Saved" (#537 review). Left out, the server keeps the stored CA, so switching TLS back on later
+      // finds it where it was; and the person sees and fixes the text when the box is visible again.
+      if (form.mqtt_tls) payload.mqtt_tls_ca = form.mqtt_tls_ca;
       // Only send a new password if one was actually typed — blank means "keep current".
       if (form.mqtt_password) payload.mqtt_password = form.mqtt_password;
       await api.put('/settings', payload);
@@ -70,7 +74,8 @@ export default function SettingsMqtt() {
       loadStatus();
       setTimeout(loadStatus, 2500);
     } catch (err) {
-      if (err.data?.field === 'mqtt_tls_ca') setCaError(err.message);
+      // Beside the CA box only while that box is on screen; otherwise in the banner, so a refusal is never invisible.
+      if (err.data?.field === 'mqtt_tls_ca' && form.mqtt_tls) setCaError(err.message);
       else setError(err.message);
     } finally {
       setBusy(false);
@@ -182,7 +187,8 @@ export default function SettingsMqtt() {
                   {caError && <div className="error-banner" role="alert" style={{ marginTop: 8 }}>{caError}</div>}
                   <div id="mqtt-tls-ca-help" className="camera-tile__sub" style={{ marginTop: 6 }}>
                     Only needed when your broker uses a certificate from your own authority or a self-signed one.
-                    Paste the authority's certificate (or the broker's own certificate) in PEM form. Leave blank to
+                    Paste the certificate of the authority that signed it (or, for a self-signed broker, the broker's
+                    own certificate) in PEM form. Leave blank to
                     trust the usual public authorities. When filled in, only this certificate is trusted for this
                     connection. A certificate is not a secret; never paste a private key here.
                   </div>

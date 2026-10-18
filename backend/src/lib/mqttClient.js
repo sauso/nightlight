@@ -36,12 +36,17 @@ let lastError = null;
 // A short, safe description of a connection error. Never the raw TLS detail, never anything that could hold a
 // certificate: a recognised code gets a sentence written here, and an unrecognised one gets its message cut to 200
 // characters with any PEM block removed first.
+//
+// "The broker's own certificate" is only a usable CA when that certificate is SELF-SIGNED. A broker certificate signed
+// by an authority, pasted as the CA, is refused by the TLS layer (UNABLE_TO_VERIFY_LEAF_SIGNATURE, measured against the
+// test broker in mqtt-tls.test.js), so every sentence says "for a self-signed broker" next to it (#537 review).
+const ISSUER_NOT_TRUSTED = "The broker's certificate could not be verified: its issuer is not trusted. Add the CA certificate that signed it below (or, for a self-signed broker, the broker's own certificate), or turn off \"Verify the broker's certificate\".";
 const MQTT_ERRORS = {
-  DEPTH_ZERO_SELF_SIGNED_CERT: "The broker's certificate is self-signed and not trusted. Add the CA certificate (or the broker's own certificate) below, or turn off \"Verify the broker's certificate\".",
+  DEPTH_ZERO_SELF_SIGNED_CERT: "The broker's certificate is self-signed and not trusted. Add the CA certificate below (for a self-signed broker, that is the broker's own certificate), or turn off \"Verify the broker's certificate\".",
   SELF_SIGNED_CERT_IN_CHAIN: "The broker's certificate chain ends in an authority Nightlight does not trust. Add that CA certificate below, or turn off \"Verify the broker's certificate\".",
-  UNABLE_TO_VERIFY_LEAF_SIGNATURE: "The broker's certificate could not be verified: its issuer is not trusted. Add the CA certificate below, or turn off \"Verify the broker's certificate\".",
-  UNABLE_TO_GET_ISSUER_CERT_LOCALLY: "The broker's certificate could not be verified: its issuer is not trusted. Add the CA certificate below, or turn off \"Verify the broker's certificate\".",
-  UNABLE_TO_GET_ISSUER_CERT: "The broker's certificate could not be verified: its issuer is not trusted. Add the CA certificate below, or turn off \"Verify the broker's certificate\".",
+  UNABLE_TO_VERIFY_LEAF_SIGNATURE: ISSUER_NOT_TRUSTED,
+  UNABLE_TO_GET_ISSUER_CERT_LOCALLY: ISSUER_NOT_TRUSTED,
+  UNABLE_TO_GET_ISSUER_CERT: ISSUER_NOT_TRUSTED,
   CERT_HAS_EXPIRED: "The broker's certificate has expired. Renew it on the broker.",
   CERT_NOT_YET_VALID: "The broker's certificate is not valid yet. Check the date and time on the broker and on this server.",
   ERR_TLS_CERT_ALTNAME_INVALID: "The broker's certificate is not valid for the host name or address entered above. Use the name the certificate was issued for.",
@@ -51,7 +56,16 @@ const MQTT_ERRORS = {
   ETIMEDOUT: 'The broker did not answer in time.',
   EHOSTUNREACH: 'The broker could not be reached.',
 };
-export function describeMqttError(err) {
+// When a CA certificate IS configured it is the only thing trusted for the connection, so "add the CA certificate"
+// tells the admin to do what they think they already did. Every "not trusted" failure then means the same thing: what
+// they pasted is not what signed the broker's certificate (the usual cause is pasting the broker's own certificate
+// when an authority signed it). `caAdded` is passed by the connection, which knows whether it gave the TLS layer a CA.
+export const MQTT_CA_NOT_ISSUER = "The broker's certificate could not be verified: the certificate you added is not a CA that signed the broker's certificate. Paste the CA (or, for a self-signed broker, the broker's own certificate), or turn off \"Verify the broker's certificate\".";
+const NOT_TRUSTED_CODES = new Set([
+  'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_GET_ISSUER_CERT',
+]);
+export function describeMqttError(err, { caAdded = false } = {}) {
   const code = typeof err?.code === 'string' ? err.code : null;
   const raw = String(err?.message ?? 'Connection error')
     .replace(/-----BEGIN [A-Z ]+-----[\s\S]*?(-----END [A-Z ]+-----|$)/g, '[certificate removed]')
@@ -59,6 +73,7 @@ export function describeMqttError(err) {
     .trim();
   // `detail` is the underlying message, cleaned the same way, for the server log (which has always shown it).
   const detail = raw.length > 200 ? `${raw.slice(0, 200)}…` : raw || 'Connection error';
+  if (caAdded && NOT_TRUSTED_CODES.has(code)) return { code, message: MQTT_CA_NOT_ISSUER, detail };
   if (code && Object.hasOwn(MQTT_ERRORS, code)) return { code, message: MQTT_ERRORS[code], detail };
   // Node reports a TLS client talking to a plain-text server as EPROTO, with the OpenSSL reason only in the message
   // (measured against a plain socket on Node 24: code 'EPROTO', "...ssl3_get_record:wrong version number"). Matched
@@ -290,6 +305,27 @@ export function mqttStatus() {
 const BROKER_HOST_ALPHABET = /^(?:[\p{L}\p{N}_.-]+|\[[0-9A-Fa-f:.]+\])$/u;
 const BROKER_ASCII_HOST = /^[a-z0-9_.-]+$/;
 
+// What is wrong with a host that is not usable, in words that never repeat it (see mqttBrokerUrl). At most ONE
+// character of the input is named: the first one that is not allowed.
+function hostProblem(typed) {
+  if (!typed) return 'it is blank';
+  // The paste this guards against: a whole broker URL, or user:password@host. Said as such, so the admin knows where
+  // the parts go, and checked before any single character is named (the ":" of "user:password" would be next).
+  if (typed.includes('://') || typed.includes('@')) {
+    return 'it looks like a full address; enter only the host name or IP address (the port, user name and password have their own boxes)';
+  }
+  const bad = [...typed].find((ch) => !/^[\p{L}\p{N}_.-]$/u.test(ch));
+  // Every character is a letter, a digit or one of `_.-`: the name has a letter with no host-name (punycode) form.
+  if (bad === undefined) return 'it has a letter that cannot be used in a host name';
+  if (bad === '[' || bad === ']') return 'an IPv6 address must be the whole host, in [brackets], with only hex digits, ":" and "."';
+  if (bad === ' ') return 'it contains a space';
+  if (bad === ':') return 'it contains ":" (the port goes in its own box, and an IPv6 address goes in [brackets])';
+  const code = `U+${bad.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`;
+  // An invisible or control character is named by its code point only: printed, it would show nothing (#641).
+  if (/[\p{C}\p{Z}]/u.test(bad)) return `it contains an invisible or control character (${code})`;
+  return `it contains "${bad}" (${code})`;
+}
+
 export function mqttBrokerUrl(rawHost, port, { tls = false } = {}) {
   // The default the settings screen documents for a blank port: 1883, or 8883 (the port MQTT brokers conventionally
   // use for TLS) when TLS is on.
@@ -298,24 +334,27 @@ export function mqttBrokerUrl(rawHost, port, { tls = false } = {}) {
   if (!Number.isInteger(Number(p)) || Number(p) < 1 || Number(p) > 65535) {
     throw new Error(`the port ${JSON.stringify(p)} is not a whole number between 1 and 65535`);
   }
-  // JSON.stringify escapes \n, \t and the other C0 controls but leaves an invisible character (no-break or
-  // zero-width space, line separator) as it is, which is exactly the one the admin cannot see to fix.
-  const shown = typeof rawHost === 'string'
-    ? JSON.stringify(rawHost).replace(/(?! )[\p{C}\p{Z}]/gu, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
-    : JSON.stringify(rawHost) ?? String(rawHost);
-  const notAHost = () => new Error(`the host ${shown} is not a valid hostname or address (use letters, digits, ".", "-" and "_", or an IPv6 address in [brackets]; no spaces or other symbols)`);
   // Surrounding spaces are harmless typing noise (the settings route trims them before saving; a value already
   // stored that way is trimmed here too, so boot and save read the same host). Inner whitespace is not.
   const typed = typeof rawHost === 'string' ? rawHost.trim() : '';
+  // ⚠️ NO MESSAGE HERE REPEATS THE HOST (#537 review). These messages go back in the 400 from PUT /settings and into
+  // the "[mqtt] Not connecting" log line, and the host box is exactly where a pasted `mqtt://user:password@broker`
+  // lands: echoing it (as #641 did, to make an invisible character visible) sent the password back and logged it.
+  // So the message says what is wrong instead: the first character that is not allowed, named by its code point when
+  // it cannot be seen (that keeps the #641 point, an admin can still find a no-break space), and never a run of it.
+  const notAHost = () => new Error(`the host is not a valid hostname or address: ${hostProblem(typed)} (use letters, digits, ".", "-" and "_", or an IPv6 address in [brackets]; no spaces or other symbols)`);
   if (!BROKER_HOST_ALPHABET.test(typed)) throw notAHost();
   // Only a name with a non-ASCII letter is converted. An all-ASCII host goes through exactly as typed: domainToASCII
   // would also rewrite numeric forms (`1.2.3` becomes `1.2.0.3`) and refuse a name ending in a number.
   const host = [...typed].every((ch) => ch.charCodeAt(0) < 128) ? typed : domainToASCII(typed);
   if (!host.startsWith('[') && !BROKER_ASCII_HOST.test(host.toLowerCase())) throw notAHost();
   let u;
-  try { u = new URL(`${scheme}://${host}:${p}`); } catch { throw new Error(`the host ${shown} is not a valid hostname or address`); }
+  try { u = new URL(`${scheme}://${host}:${p}`); } catch {
+    // Reached by a bracketed literal that has the right characters but is not an address (`[1:2]`).
+    throw new Error(`the host is not a valid hostname or address: ${host.startsWith('[') ? 'the IPv6 address in [brackets] is not a valid address' : 'it cannot be read as a host name'}`);
+  }
   if (!u.hostname || u.username || u.password || u.pathname || u.search || u.hash || u.port !== String(Number(p))) {
-    throw new Error(`the host ${shown} must be just a hostname or address, with no user name, path or query`);
+    throw new Error('the host must be just a hostname or address, with no user name, path or query');
   }
   return `${scheme}://${host}:${Number(p)}`;
 }
@@ -354,6 +393,7 @@ export function refreshMqttConnection() {
   // save and camera edit. A bad value that is ALREADY stored (saved by an older version, or written by hand) has to
   // leave MQTT off and the app up, not take the process down on every start. The cache key is reset so that the
   // next call, after the admin fixes the value, tries again instead of treating the failed attempt as connected.
+  let caAdded = false;
   try {
     const tls = !!cfg.mqtt_tls;
     const options = {
@@ -372,6 +412,7 @@ export function refreshMqttConnection() {
         throw Object.assign(new Error(`the stored CA certificate is not usable (${e.message})`), { isCa: true });
       }
       if (ca) options.ca = ca;
+      caAdded = !!options.ca;
       if (!options.rejectUnauthorized) {
         logger.warn('[mqtt] Certificate verification is OFF: the connection is encrypted but the broker is not authenticated.');
       }
@@ -380,6 +421,12 @@ export function refreshMqttConnection() {
   } catch (e) {
     client = null;
     currentConfigKey = null;
+    // Also in the status, not only in the log (#537 review): with no client, mqttStatus() said enabled, not connected
+    // and no reason, so the Settings screen showed neither "Connected" nor why it was not. A fixed sentence: no part of
+    // the stored value (a certificate, or a host that may hold a pasted password) goes to the screen.
+    lastError = e.isCa
+      ? { code: 'CA_UNUSABLE', message: 'The stored CA certificate cannot be used; replace or clear it in the CA certificate box and save.' }
+      : { code: 'BROKER_UNUSABLE', message: 'The stored broker host or port cannot be used; correct it and save.' };
     logger.error(`[mqtt] Not connecting: ${e.message}. MQTT stays off until the ${e.isCa ? 'CA certificate' : 'broker host and port'} ${e.isCa ? 'is' : 'are'} fixed in Settings.`);
     return;
   }
@@ -394,8 +441,14 @@ export function refreshMqttConnection() {
     logger.info('[mqtt] Reconnecting to broker...');
   });
 
+  // mqtt.js 5 emits a TLS failure TWICE with the same Error object: once from its TLS stream builder
+  // (node_modules/mqtt/build/lib/connect/tls.js, handleTLSerrors) and once from the client's own stream error handler
+  // (client.js, streamErrorHandler), so every failed attempt logged two identical lines. The same object is handled once.
+  let lastErr = null;
   client.on('error', (err) => {
-    lastError = describeMqttError(err);
+    if (err === lastErr) return;
+    lastErr = err;
+    lastError = describeMqttError(err, { caAdded });
     logger.error('[mqtt] Connection error:', lastError.detail);
   });
 
