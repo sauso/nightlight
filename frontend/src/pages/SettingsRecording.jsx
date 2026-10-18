@@ -5,6 +5,8 @@ import { useSettingsDraft } from '../lib/useSettingsDraft.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
+import Modal from '../components/Modal.jsx';
+import { useHomeTime } from '../lib/useHomeTime.js';
 import { loadDraft } from '../lib/formDraft.js';
 import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
 
@@ -54,8 +56,19 @@ function valuesOf(src) {
   };
 }
 
+// A retention field as a whole number in 0..max, or null. Plain digits only, and the SAME ranges routes/settings.js
+// enforces (days 0-365, cap 0-2000 GB). WHY a strict test rather than Number(): the server stores these with
+// parseInt, which reads "1e2" as 1 where Number() reads it as 100. A screen that judged "1e2" as 100 days would
+// have skipped the question while the server kept 1 day and the sweep deleted nearly everything (#395 review).
+// Anything this refuses is not sent at all, so the client and the server can never read one field two ways.
+function wholeLimit(v, max) {
+  const s = String(v ?? '').trim();
+  return /^\d{1,6}$/.test(s) && Number(s) <= max ? Number(s) : null;
+}
+
 export default function SettingsRecording() {
   const { settings, refresh, commit, loaded } = useSettings();
+  const home = useHomeTime();
   // Server settings vs. this screen's own unsaved edits, kept separate (#449) — see
   // useSettingsDraft.js for why a derived `form` replaced the old setForm(settings) sync effect.
   const draftKey = useDraftKey('settings:recording');
@@ -67,6 +80,13 @@ export default function SettingsRecording() {
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
+  // The "this will delete clips" confirmation (#395): null when closed, else { preview, payload } where preview is
+  // the server's dry run (or null when it could not be fetched) and payload is the EXACT set of values that was
+  // previewed. Confirm saves that snapshot, never the live form, so the clips the person was told about are the
+  // clips the save acts on even if the form changed while the check or the dialog was open. Its own error, not
+  // the page's: a failure of what the dialog's button did belongs inside the dialog (design-language.md, Modal).
+  const [deletePrompt, setDeletePrompt] = useState(null);
+  const [confirmError, setConfirmError] = useState('');
 
   const loadStorage = () => api.get('/settings/clip-storage').then(setStorage).catch(() => {});
   useEffect(() => { loadStorage(); }, []);
@@ -87,14 +107,69 @@ export default function SettingsRecording() {
     setRestored(false);
   }
 
+  // Save is a two-step when it would delete video. Changing "Keep clips for" or "Storage cap" runs the retention
+  // sweep the moment the save lands (routes/settings.js, only when a limit changed), and the sweep enforces BOTH
+  // limits: even RAISING one limit deletes clips if storage is already over the other (#395 review). So the
+  // decision is not the direction of the change but the answer to "what would this save delete?": whenever a
+  // limit differs from what is stored we ask the server's dry run (GET /settings/clip-retention-preview, the same
+  // queries the sweep uses) and show the dialog if it reports anything. If the dry run cannot be fetched we ask
+  // anyway rather than delete without a word.
   async function save(e) {
     e.preventDefault();
+    if (busy) return;
+    setError('');
+    // Snapshot once, now: the preview, the dialog and the PUT all use these values and no others.
+    const payload = { ...shown };
+    const days = wholeLimit(payload.clip_retention_days, 365);
+    const maxGb = wholeLimit(payload.clip_retention_max_gb, 2000);
+    // Same wording as the server's own 400s. Refused here so a value the server would read differently from this
+    // screen (see wholeLimit) is never sent.
+    if (days === null) {
+      setError('Keep clips for must be a whole number between 0 and 365 days (0 = no day limit)');
+      return undefined;
+    }
+    if (maxGb === null) {
+      setError('Storage cap must be a whole number between 0 and 2000 GB (0 = no size limit)');
+      return undefined;
+    }
+    // Send a limit ONLY if the person changed it from the loaded value, and let the server keep the other one. The
+    // server decides whether to sweep by comparing the payload with its CURRENT values, but this screen compares
+    // with the values it LOADED: in a page left open while another tab changed the cap, re-sending the stale cap
+    // on an unrelated save (say pre-roll) would skip the question here and still sweep there (#395 review).
+    // Omitted means "keep" on the server (an absent field is left alone), so nothing else needs both.
+    const daysChanged = days !== stored.clip_retention_days;
+    const gbChanged = maxGb !== stored.clip_retention_max_gb;
+    if (!daysChanged) delete payload.clip_retention_days;
+    if (!gbChanged) delete payload.clip_retention_max_gb;
+    if (daysChanged || gbChanged) {
+      setBusy(true);
+      let preview = null;
+      try {
+        // Same rule for the dry run: only the changed limits are named, the server combines them with its own.
+        const q = [daysChanged && `days=${days}`, gbChanged && `max_gb=${maxGb}`].filter(Boolean).join('&');
+        const r = await api.get(`/settings/clip-retention-preview?${q}`);
+        preview = r && Number.isInteger(r.count) ? r : null;
+      } catch {
+        preview = null;
+      }
+      setBusy(false);
+      // Nothing to delete AND storage is up: a plain save. With storage down the sweep does nothing now but runs
+      // when it returns, and the preview cannot say what it will find, so that case is always explained.
+      if (preview && preview.count === 0 && preview.storageReady !== false) return doSave(payload);
+      setConfirmError('');
+      setDeletePrompt({ preview, payload });
+      return undefined;
+    }
+    return doSave(payload);
+  }
+
+  // `payload` is passed in rather than read from the form: from the dialog it is the snapshot that was previewed.
+  // The values as SHOWN, defaults included (valuesOf), so what is saved is what the person was looking at.
+  // This includes ondemand_enabled (#391): it used to commit on its own, by a separate PUT, the moment
+  // the switch moved. One request, one outcome, one error message for the whole page.
+  async function doSave(payload) {
     setBusy(true);
     setError('');
-    // The values as SHOWN, defaults included (valuesOf), so what is saved is what the person was looking at.
-    // This now includes ondemand_enabled (#391): it used to commit on its own, by a separate PUT, the moment
-    // the switch moved. One request, one outcome, one error message for the whole page.
-    const payload = shown;
     try {
       const response = await api.put('/settings', payload);
       if (response && typeof response === 'object') {
@@ -111,10 +186,13 @@ export default function SettingsRecording() {
         await refresh();
       }
       loadStorage();
+      setDeletePrompt(null);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
-      setError(err.message || 'Could not save');
+      // From the confirmation dialog the failure is shown inside it; otherwise on the page.
+      if (deletePrompt) setConfirmError(err.message || 'Could not save');
+      else setError(err.message || 'Could not save');
     } finally {
       setBusy(false);
     }
@@ -162,13 +240,15 @@ export default function SettingsRecording() {
             <div className="field-row" style={{ marginTop: 16 }}>
               <div className="field">
                 <label htmlFor="clip-days">Keep clips for (days)</label>
-                <input id="clip-days" type="number" min="0" max="365"
+                {/* Locked while the dry run is out or the confirmation is open: the values previewed are the values
+                    saved (#395 review), so they must not move underneath the dialog. */}
+                <input id="clip-days" type="number" min="0" max="365" disabled={busy || !!deletePrompt}
                   value={form.clip_retention_days ?? 14}
                   onChange={(e) => setField('clip_retention_days', e.target.value)} />
               </div>
               <div className="field">
                 <label htmlFor="clip-gb">Storage cap (GB)</label>
-                <input id="clip-gb" type="number" min="0" max="2000"
+                <input id="clip-gb" type="number" min="0" max="2000" disabled={busy || !!deletePrompt}
                   value={form.clip_retention_max_gb ?? 5}
                   onChange={(e) => setField('clip_retention_max_gb', e.target.value)} />
               </div>
@@ -297,7 +377,56 @@ export default function SettingsRecording() {
             {busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save changes'}
           </button>
         </form>
+        {deletePrompt && (
+          <Modal title="Delete saved clips?" onClose={() => setDeletePrompt(null)} error={confirmError}>
+            <DeleteSummary preview={deletePrompt.preview} home={home} />
+            <div className="camera-tile__sub" style={{ margin: '8px 0 12px' }}>
+              The alerts and their pictures stay; only the video goes. Deleted clips can't be got back.
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setDeletePrompt(null)} disabled={busy}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-danger" style={{ flex: 1 }} onClick={() => doSave(deletePrompt.payload)} disabled={busy}>
+                {busy ? 'Saving…' : 'Save and delete clips'}
+              </button>
+            </div>
+          </Modal>
+        )}
       </main>
+    </>
+  );
+}
+
+// What the dry run says will go. The clip count is as of now; the size is "about" because new clips can arrive
+// before Save and each size is the one recorded when the clip was cut. With no preview (the request failed) it says
+// so instead of guessing a number.
+function DeleteSummary({ preview, home }) {
+  if (!preview) {
+    return (
+      <p style={{ marginTop: 0 }}>
+        We couldn't check how many clips these limits would delete. Saving a changed limit deletes the clips outside
+        it straight away.
+      </p>
+    );
+  }
+  // Storage down: the real sweep returns before selecting anything, so there is no count to give, and giving one
+  // would contradict "nothing is deleted". The clips outside the limits go on the first sweep after it returns.
+  if (preview.storageReady === false) {
+    return (
+      <p style={{ marginTop: 0 }}>
+        Clip storage isn't available right now, so nothing is deleted until it is. Once it is back, clips outside
+        these limits are deleted.
+      </p>
+    );
+  }
+  const oldest = preview.oldestAt ? home.day(new Date(`${preview.oldestAt.replace(' ', 'T')}Z`)) : null;
+  return (
+    <>
+      <p style={{ marginTop: 0 }}>
+        Saving these limits deletes <strong>{preview.count} alert clip{preview.count === 1 ? '' : 's'}</strong>
+        {' '}(about <strong>{fmtBytes(preview.bytes)}</strong>) right away{oldest ? <>; the oldest is from {oldest}</> : ''}.
+      </p>
     </>
   );
 }

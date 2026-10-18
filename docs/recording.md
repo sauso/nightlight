@@ -40,6 +40,31 @@ re-encode); only the clip's short audio track is re-encoded, once.
 | Keep clips for (days) | 14 | 0–365 | 0 = no day limit |
 | Storage cap (GB) | 5 | 0–2000 | 0 = no size limit; oldest deleted first |
 
+**Changing a limit can ask first.** Saving a different **Keep clips for** or **Storage cap** runs the
+cleanup straight away, and the cleanup applies *both* limits, so the clips outside them are deleted as soon
+as you press **Save changes**. That includes raising one limit: if the stored clips already exceed the other
+limit (for example the storage cap), the cleanup deletes them at that moment. So Nightlight does not judge
+by whether the number went up or down. When a limit differs from what is stored, it asks the server what the
+save would delete, and when that is more than zero clips it shows a **Delete saved clips?** box with how many
+alert clips will go, about how much space they use, and the date of the oldest. It saves only when you press
+**Save and delete clips**; if nothing would be deleted it just saves. The values it checked are exactly the
+values it saves, and the two limit fields are locked while the check or the box is open. The alerts and their
+pictures stay; only the video goes. The count is as of the moment you pressed Save and the size is "about": a
+new clip can arrive before you confirm. If the check itself fails you are still asked, without a number. If
+clip storage is not available at that moment (the unmapped-volume warning below) nothing can be deleted yet:
+the box says so, shows no count, and the limits take effect on the first cleanup after storage returns.
+Each field accepts whole numbers only (digits, no `1e2`, no decimals) within the range above; anything else
+is refused on the page and not sent. Only a limit you actually changed is sent, so a settings page left open
+in an old tab cannot overwrite a limit changed elsewhere, or trigger a cleanup, by saving something unrelated.
+The numbers come from the same queries the real cleanup uses (an
+admin-only read, `GET /api/settings/clip-retention-preview`, which changes no clips or settings and returns
+no file names).
+
+| | Asks before saving? | When it is applied |
+|---|---|---|
+| **Keep clips for** and **Storage cap** (alert clips) | Yes, when the check says the save would delete clips | Straight away on Save, then every 15 minutes |
+| **Keep wake clips for** | **No** | On the wake-clip cleanup's own schedule, not on Save |
+
 Alerts that have a clip show a **play button** on their thumbnail; tapping opens the clip in a player
 with a **Download** button. In the mobile app, Download saves the video into your phone's Downloads
 folder.
