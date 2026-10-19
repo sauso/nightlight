@@ -3,7 +3,7 @@ import { logger } from './logger.js';
 import { onMinuteFlushed } from './activityTracker.js';
 import { SLEEP_THRESHOLDS, childTracksSleep, childWindowActiveNow } from './sleepAnalysis.js';
 import { holdRing, releaseRing, isSegmenterRunning, ringOldestStartMs, ringHasFootageFor, clipCoverStartMs } from './clipRecorder.js';
-import { RING_OWNER } from './ringHolds.js';
+import { RING_OWNER, wakeCaptureHoldOwner } from './ringHolds.js';
 import { captureWakeClip, pruneWakeClips, getWakeClipSettings, WAKE_CLIP_LEAD_SEC } from './recordings.js';
 
 // Live wake detection, for recording only — it never alerts.
@@ -73,9 +73,11 @@ const RESTART_LOG_MS = 15 * 60 * 1000;
 const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 // camera_id -> { asleep, quietRun, run, lastAt, restartLogAt, restartsUnlogged, restartsLongest }
-// run = { startMs, activeCount, lastActiveMs, captured, holding }
+// run = { startMs, activeCount, lastActiveMs, captured, holding, holdFromMs }
 //   startMs = the clip's anchor (#412: first active frame, clamped to the ring); lastActiveMs = the END label of
 //   the last active minute (the bridge arithmetic and the stale-run sweep read it, so it is NOT the anchor)
+//   holdFromMs (#471) = the point the run's WAKE hold reaches back to, null while it holds nothing; the capture's
+//   own lease reuses it rather than computing it a second time (see the capture in handleMinute)
 // lastAt (#448) = the end-of-minute ms of the last payload ACCEPTED for this camera, null = none yet. It is
 // what lets handleMinute measure TIME between payloads, because activityTracker sends no payload at all for a
 // minute with neither a motion frame nor a sound window (closeMinute: `hasSignal`), so an outage is visible
@@ -92,6 +94,10 @@ const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 // reads them; cleared by reset() like the rest, so a window that opens again starts a fresh limiter.
 const state = new Map();
 
+// #471: numbers each capture's ring lease (ringHolds.wakeCaptureHoldOwner). Per process, never reset, so two
+// captures in flight on one camera, or a late `.finally` from before a stopWakeWatcher(), can never share a key.
+let captureSeq = 0;
+
 function slot(cameraId) {
   let st = state.get(cameraId);
   if (!st) {
@@ -102,6 +108,11 @@ function slot(cameraId) {
 }
 
 // Drop any ring hold this camera is holding and forget the in-flight run. Safe to call repeatedly.
+// #471: this releases the RUN's WAKE hold only. A capture this run already started keeps the clip's footage through
+// its own lease (taken at the capture in handleMinute, released by the capture's `.finally`), so ending the run here,
+// for whatever reason, no longer leaves the janitor free to delete the segments the cut is still reading. Not
+// "skip the release when the run captured" (the issue's first idea): with nothing else to release it, that hold
+// would stay until the segmenter restarted.
 function endRun(cameraId, st, why) {
   if (st.run?.holding) {
     releaseRing(cameraId, RING_OWNER.WAKE);
@@ -287,12 +298,11 @@ export function handleMinute(payload) {
     if (at === st.lastAt) return null;
     if (at < st.lastAt) {
       // Same as the bridge case below: a run that already captured is not "nothing recorded", so it logs nothing.
-      // ⚠️ KNOWN LIMIT, not fixed here (#471): endRun releases the WAKE hold of a run whose capture may still be
-      // extracting its clip, and an ACTIVE label that jumps far forward replaces the captured run the same way
-      // (the new run's hold then takes the single WAKE slot). Both need a clock step of more than about 2 minutes
-      // (activityTracker absorbs smaller ones) within about a minute of the 5th active minute. Protecting a clip
-      // that is still being cut needs a per-capture lease, which is #471's job. This change adds one more trigger
-      // for that release; a hole is far past an extraction (wake clips are at most 120 s), a clock step is not.
+      // A clock step can end (here) or replace (an ACTIVE label far ahead: the new run takes the single WAKE slot)
+      // a run whose clip is still being cut. #448 found that this released the cut's footage, because the run's
+      // WAKE hold was the only thing protecting it; a hole is far past an extraction, a clock step of more than
+      // about 2 minutes (activityTracker absorbs smaller ones) within about a minute of the 5th active minute is
+      // not. Fixed by #471: the capture holds its own lease, so ending the run here is safe.
       endRun(cameraId, st, st.run?.captured ? null : 'the clock went back');
       st.quietRun = 0;
     }
@@ -418,7 +428,7 @@ export function handleMinute(payload) {
           anchor = at;
         }
       }
-      st.run = { startMs: anchor, activeCount: 0, lastActiveMs: at, captured: false, holding: false };
+      st.run = { startMs: anchor, activeCount: 0, lastActiveMs: at, captured: false, holding: false, holdFromMs: null };
       // Hold from the clip's cover start so the wake's opening survives the ~63s ring long enough to
       // find out whether this is a wake or just a stir. clipCoverStartMs is the SAME formula extractClip
       // reads back with (#446), so the hold can never be shallower than the cut. (Before #412 the hold was
@@ -434,7 +444,10 @@ export function handleMinute(payload) {
       // takes a hold does; `st.run.holding` stays false when it doesn't, and the existing
       // `if (st.run?.holding)` guards below already treat that as "nothing to release".
       if (isSegmenterRunning(cameraId) && getWakeClipSettings().enabled) {
-        holdRing(cameraId, RING_OWNER.WAKE, clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC));
+        // #471: the point is computed ONCE and kept on the run, so the capture's lease below reaches back exactly as
+        // far as this hold (and as the cut reads), with no second copy of the formula to drift.
+        st.run.holdFromMs = clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC);
+        holdRing(cameraId, RING_OWNER.WAKE, st.run.holdFromMs);
         st.run.holding = true;
         // The clamp cost the opening: the ring's oldest footage starts after the first frame's lead-in. This
         // line is the evidence for whether a deeper ring is worth building (#412 follow-up); nothing else
@@ -470,6 +483,26 @@ export function handleMinute(payload) {
       logger.info(
         `[wake] "${camera.name}" awake (${st.run.activeCount} active min) — recording the opening, no alert`
       );
+      // ★ #471: THE CUT HOLDS ITS OWN LEASE, separate from the run's WAKE hold. The run's hold goes when the run
+      // ends, and a run ends while its capture is still extracting in six ways: the window closing or the camera
+      // being disabled (reset), a quiet gap, the stale-run sweep, stopWakeWatcher, and the two #448 clock steps
+      // (an older label ends it; an active label far ahead ends it and the NEW run's holdRing takes over the one
+      // WAKE slot). Each left the janitor free to delete the segments the cut was about to read. Same shape as the
+      // on-demand and detection-clip leases (ringHolds.ondemandHoldOwner, clipHoldOwner; #445, #446): a clip in
+      // flight holds its footage itself instead of borrowing a hold that something else can release.
+      //   * Taken SYNCHRONOUSLY, before captureWakeClip is called: nothing can run in between, so there is no
+      //     moment when the capture exists and its footage is unheld.
+      //   * From run.holdFromMs, the run's own hold point, which is clipCoverStartMs: the formula extractClip
+      //     selects with, so the lease reaches exactly as far back as the cut reads. That is the 0.33.1 review's
+      //     finding F2 on #446 (a lease that exists but is too shallow still fails the case it exists for).
+      //   * Only if the run held the ring. A run that never held (wake clips were off, or no segmenter, when it
+      //     began) has nothing a lease could add: captureWakeClip returns null with clips off, and the footage
+      //     from before the ring existed is not there to protect. `run.holding` can be STALE (stopSegmenter clears
+      //     every hold without the watcher knowing); holdRing then returns false and records nothing, and the
+      //     watcher relies on nothing it did not get: the release below of a lease never recorded is a no-op
+      //     (ringHolds.removeHold: an unknown owner is never a clear-all).
+      const leaseOwner = wakeCaptureHoldOwner(++captureSeq);
+      if (run.holding) holdRing(cameraId, leaseOwner, run.holdFromMs);
       // Fire and forget: the capture awaits a segment settle, and the watcher must stay responsive to
       // the next minute. The ring hold is released once the cut is done, not before.
       captureWakeClip(camera, startMs)
@@ -480,6 +513,13 @@ export function handleMinute(payload) {
         // guard with an assumption about another module.
         .catch((err) => logger.error(`[wake] capture failed for "${camera.name}": ${err.message}`))
         .finally(() => {
+          // #471: the lease goes with the CAPTURE, unconditionally: whether the run is still st.run, ended, or was
+          // replaced, this cut is over and nothing else will ever release its key. Guarding it like the WAKE release
+          // below would leak it in exactly the cases it exists for (the run has ended, so st.run !== run), and the
+          // ring would then grow until the segmenter next restarts.
+          releaseRing(cameraId, leaseOwner);
+          // The run's WAKE hold keeps its guard: release it only while this run is still the current one. A NEW run
+          // (a clock step, #448) holds the same single WAKE key, and this capture must not take that away.
           if (st.run === run && run.holding) {
             releaseRing(cameraId, RING_OWNER.WAKE);
             run.holding = false;

@@ -11684,8 +11684,8 @@
   {
     "label": "#412 M-412-31: the hold goes back to `at - 15 s` (the #447 formula)",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "holdRing(cameraId, RING_OWNER.WAKE, clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC));",
-    "replace": "holdRing(cameraId, RING_OWNER.WAKE, at - 15000);",
+    "find": "st.run.holdFromMs = clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC);",
+    "replace": "st.run.holdFromMs = at - 15000;",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)|#447"
@@ -11693,8 +11693,8 @@
   {
     "label": "#412 M-412-32: the hold uses a different lead than the cut (clipCoverStartMs with 0)",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "holdRing(cameraId, RING_OWNER.WAKE, clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC));",
-    "replace": "holdRing(cameraId, RING_OWNER.WAKE, clipCoverStartMs(anchor, 0));",
+    "find": "st.run.holdFromMs = clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC);",
+    "replace": "st.run.holdFromMs = clipCoverStartMs(anchor, 0);",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)|#447"

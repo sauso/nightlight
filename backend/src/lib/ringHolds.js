@@ -4,7 +4,8 @@
 // `entry.holdFromMs`, written unconditionally by holdRing and cleared unconditionally by releaseRing.
 // THREE independent features share it:
 //   - on-demand Record (recordings.js) — holds on start, releases when the clip is cut
-//   - automatic wake clips (wakeWatcher.js) — holds when a run begins, releases on a stir or after cut
+//   - automatic wake clips (wakeWatcher.js) — holds when a run begins, releases on a stir or after cut; since #471
+//     the cut itself also holds its own lease (wakeCaptureHoldOwner below) until it is done
 //   - a detection clip mid-extraction (clipCapture.js's enqueueClip) — holds from just before it's
 //     queued, releases in the job's `finally` (#446: added once a settings save could resize the ring
 //     out from under a clip that was still relying on depth-based pruning alone to protect it)
@@ -55,6 +56,18 @@ export function ondemandHoldOwner(recordingId) {
 // that wipe with an actual guarantee for the in-flight clip).
 export function clipHoldOwner(eventId) {
   return `clip:${eventId}`;
+}
+
+// #471: a wake clip being CUT gets its own lease, separate from its run's RING_OWNER.WAKE hold. The run's hold
+// belongs to the run, and a run ends while its capture is still extracting in more ways than one (the sleep window
+// closing, a quiet gap, the stale-run sweep, the watcher stopping, and the #448 clock steps, one of which hands the
+// single WAKE slot straight to a NEW run): each of those released the only thing keeping the clip's segments from
+// the janitor. `captureId` is a per-process counter in wakeWatcher.js, unique for the life of the process, so two
+// captures in flight on one camera never share a slot, and the key can never equal RING_OWNER.WAKE (a lease under
+// that key would be released, or overwritten, with the run's hold: the bug again). No recordings id is used because
+// the capture takes the lease BEFORE captureWakeClip has inserted its row.
+export function wakeCaptureHoldOwner(captureId) {
+  return `wakecap:${captureId}`;
 }
 
 export function addHold(cameraId, owner, fromMs) {
