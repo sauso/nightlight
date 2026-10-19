@@ -22,6 +22,14 @@ Do not expose Nightlight directly to the public internet without understanding a
 
 For a reverse proxy such as SWAG, use HTTPS and set `TRUST_PROXY` to the address your proxy connects from, for proxies you control only. The default, `loopback`, trusts only a proxy on the same host, so a proxy that reaches Nightlight by its LAN IP is not trusted until you set it. Details: [`TRUST_PROXY`](readme-reference.md#trust_proxy--telling-nightlight-your-real-client-addresses). WebRTC media may require a reachable UDP port even when the website loads correctly through HTTPS. HLS travels over HTTP(S) but generally has higher latency.
 
+To watch low-latency video away from home:
+
+1. Put Nightlight behind HTTPS, for example with a reverse proxy such as SWAG.
+2. Set `PUBLIC_HOST` to your public IP or a DDNS name. It must **not** be a Cloudflare-proxied (orange cloud) name, because that proxy carries only HTTP(S), never the UDP video. Use a DNS-only record.
+3. Forward UDP port 8189 (or your `WEBRTC_UDP_PORT`: a bare port number from 1 to 65535, blank means 8189) on your router to the server.
+
+Compatibility (HLS) mode needs no extra forwarding. On iPhone and iPad, background audio works in low-latency mode only. More: [remote access in the full reference](readme-reference.md#remote--internet-access-watching-from-outside-your-home-network).
+
 A router that remaps the external WebRTC UDP port to a different internal port can break the advertised connection. Set `PUBLIC_HOST` and `WEBRTC_UDP_PORT` as appropriate for your deployment.
 
 ## Data security

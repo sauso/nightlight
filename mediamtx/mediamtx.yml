@@ -29,7 +29,7 @@ webrtcAddress: 127.0.0.1:8889
 
 # Static UDP port that carries the actual audio/video. For LAN-only use this needs no
 # extra setup. For internet access, forward THIS port (UDP) on your router to this
-# machine's LAN IP — see the README's "Remote / internet access" section.
+# machine's LAN IP — see "Remote / internet access" in docs/readme-reference.md.
 webrtcLocalUDPAddress: :8189
 
 # Your public IP or DDNS hostname, so remote viewers get a candidate address that
@@ -40,7 +40,7 @@ webrtcAdditionalHosts: []
 # STUN servers, so both sides of the connection can discover their public-facing address when
 # connecting over the internet. Not needed for LAN-only viewing.
 # ⚠️ EMPTY ON PURPOSE. The list comes from the STUN_SERVERS setting (a public server by default,
-# none when blank; see backend/src/lib/stunServers.js and the README). At start the backend copies this file to
+# none when blank; see backend/src/lib/stunServers.js and docs/readme-reference.md). At start the backend copies this file to
 # the temp directory with this exact line replaced by the configured list, and starts MediaMTX from the
 # copy. Do not put a server here: it would be replaced, and if the copy could not be written it would be the
 # one MediaMTX used, contacting a server the operator may have turned off (#558).

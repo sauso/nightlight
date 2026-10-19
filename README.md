@@ -20,7 +20,7 @@ Built for parents. Friendly to self-hosters. Open source.
 
 ## Why Nightlight?
 
-- **Use your existing cameras.** Connect compatible RTSP cameras, with ONVIF discovery on supported devices.
+- **Use your existing cameras.** Connect compatible RTSP cameras. On supported ONVIF cameras, Nightlight can fill in the stream details from the camera's IP address.
 - **Watch with less delay.** WebRTC provides low-latency live video, with an HLS compatibility option.
 - **Keep things in your hands.** Nightlight runs on your own Docker host and stores its settings and recordings locally.
 - **One place for the nursery.** Group cameras by child and manage access for caregivers.
@@ -69,7 +69,7 @@ In **Community Applications**, search for **Nightlight**, select **Install**, ch
 
 **Live monitoring.** Watch multiple cameras, use audio and picture-in-picture, and switch between low-latency WebRTC and compatibility playback.
 
-**Camera controls.** Discover supported cameras using ONVIF, configure RTSP streams, and use supported pan/tilt and two-way audio features.
+**Camera controls.** Add a camera by its IP address and let ONVIF fill in the stream details where it is supported, or set up the RTSP stream by hand. Use pan/tilt and two-way audio on cameras that support them.
 
 **Sleep and recordings.** Review sleep activity and, if enabled, save motion/sound clips, wake clips or recordings you start yourself. See [how sleep tracking works](docs/readme-reference.md#sleep-tracking) and [recording options](docs/recording.md).
 
@@ -77,7 +77,7 @@ In **Community Applications**, search for **Nightlight**, select **Install**, ch
 
 **Optional alerts.** Configure a supported notification provider to receive events when you're away from the app. [Learn how notifications work](docs/notifications.md).
 
-**Mobile access.** Use the installable web app or the [Android and iOS companion apps](https://github.com/sauso/nightlight-mobile), including supported background audio features.
+**Mobile access.** Use the installable web app or the [Android and iOS companion apps](https://github.com/sauso/nightlight-mobile), including supported background audio features. The apps are installed from GitHub rather than an app store (the iOS app is sideloaded).
 
 ## Privacy and safety
 
@@ -85,7 +85,7 @@ Nightlight doesn't require a Nightlight cloud account or send your video to a Ni
 
 - The default WebRTC setup uses a public Google STUN server, which can see connection metadata such as your public IP. You can disable it or use your own STUN server.
 - Push notifications use whichever external or self-hosted provider you configure.
-- Camera credentials and other secrets are stored in the local database. Protect your data directory and backups.
+- Camera credentials and other secrets are stored unencrypted in the local database. Protect your data directory and backups.
 
 Read [privacy, security and networking details](docs/networking.md) before exposing Nightlight outside your home network. For vulnerabilities, follow [SECURITY.md](SECURITY.md).
 

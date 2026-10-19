@@ -126,7 +126,7 @@ const BUFFER_TEXT = {
   storage_unavailable: {
     state: 'bad',
     text: 'Storage unavailable',
-    note: 'The clips folder is not usable (not writable, or not a mapped volume), so nothing can be recorded. See the README’s recording storage section.',
+    note: 'The clips folder is not usable (not writable, or not a mapped volume), so nothing can be recorded. See “Where recordings are stored” in docs/recording.md.',
   },
   camera_disabled: { state: 'off', text: 'Camera disabled', note: null },
 };

@@ -20,7 +20,7 @@ Instead of "Nightlight leverages WebRTC technology to facilitate low-latency vid
 
 | Level | What belongs there |
 | --- | --- |
-| **README** | The front door: what Nightlight is, a screenshot or two, what it can do, what you need, how to install it, where to read more. Roughly 150-250 lines. |
+| **README** | The front door: what Nightlight is, a screenshot or two, what it can do, what you need, how to install it, where to read more. Roughly 100-250 lines. |
 | **Guides** (`docs/*.md`) | How to set up and use a feature, in order of what the reader wants to do. |
 | **Reference** | Settings and environment variables, networking detail, architecture, known limits. Today most of this is in [readme-reference.md](readme-reference.md), which is being split into guides. |
 
@@ -37,7 +37,7 @@ Don't add feature descriptions, environment variables or troubleshooting to the 
 ## Rules that are enforced
 
 - Some README headings are pinned by tests (`Quick start` and `Running on Unraid`, in `backend/test/shutdown-grace-declared.test.js`), and `CHANGELOG.md`, `KNOWN-ISSUES.md`, `docs/recording.md` and `docs/notifications.md` are asserted on too. A change to them runs the whole test suite; it is not a docs-only change.
-- Every `docker run` example in the docs must carry `--stop-timeout 30`, and the documented values must match the code.
+- Every `docker run` example in the docs (the README and `docker-hub-overview.md` included) must carry `--stop-timeout 30`, and the documented values must match the code.
 - A user-visible change gets one `CHANGELOG.md` entry under `[Unreleased]`, under the existing heading for its type.
 - Never write a child's name, or any other detail that identifies a household, into the docs. Say "a child".
 - Don't hard-code one house's timezone, camera or setup into an example without saying it's an example.

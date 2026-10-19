@@ -68,7 +68,7 @@ on any other import of it under `backend/src`.
 - **It does not protect the files.** For the same reason a child can read the database and `.jwt_secret`
   from disk. A separate user was considered and not done (#553 (b)).
 
-Keep cameras on their own VLAN, as the README advises.
+Keep cameras on their own VLAN, as [docs/cameras.md](cameras.md) advises.
 
 ## ONVIF, PTZ, and camera credentials (`backend/src/lib/onvif.js`, `rtspProbe.js`)
 

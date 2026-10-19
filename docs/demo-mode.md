@@ -122,7 +122,7 @@ Notes for the camera source, which are the parts that are easy to get wrong:
   `DATA_DIR` before dropping privileges; skipping it leaves a fresh, root-owned volume unwritable.
 - **Get WebRTC reachable** the same way any remote install does — see
   [Remote / internet access](readme-reference.md#remote--internet-access-watching-from-outside-your-home-network)
-  in the README. Video is the only part that needs UDP; everything else is ordinary HTTPS.
+  in the full reference. Video is the only part that needs UDP; everything else is ordinary HTTPS.
 
 ## Capacity and abuse limits
 
