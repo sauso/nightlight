@@ -353,8 +353,11 @@ describe('a stored path cannot make a delete reach outside the clips directory',
   test('child delete: recordings, timelapses and wake clips with hostile paths are skipped, their rows still deleted', async (t) => {
     if (skipIfNoLink(t)) return;
     makeChild(db, { id: 'child-h' });
+    // started_at is datetime('now'), NOT the string 'now': scripts/clock-shift.mjs (the future-clock CI job, #570) rewrites
+    // every 'now' in an SQL string into two arguments, so a literal 'now' VALUE became "6 values for 5 columns" and the
+    // weekly job failed on main from 2026-10-19 (the suite itself was green).
     for (const p of hostilePaths()) {
-      db.prepare("INSERT INTO recordings (camera_id, child_id, started_at, path, thumb_path) VALUES ('c', 'child-h', 'now', ?, ?)").run(p, p);
+      db.prepare("INSERT INTO recordings (camera_id, child_id, started_at, path, thumb_path) VALUES ('c', 'child-h', datetime('now'), ?, ?)").run(p, p);
       db.prepare("INSERT INTO timelapses (child_id, night_date, path, thumb_path) VALUES ('child-h', ?, ?, ?)").run(uniq('n'), p, p);
     }
     assert.equal((await delChild('child-h')).status, 204);
@@ -369,7 +372,7 @@ describe('a stored path cannot make a delete reach outside the clips directory',
     makeCamera(db, { id: 'cam-h' });
     for (const p of hostilePaths()) {
       db.prepare("INSERT INTO detection_events (camera_id, camera_name, type, clip_path, clip_status) VALUES ('cam-h','n','motion',?, 'ready')").run(p);
-      db.prepare("INSERT INTO recordings (camera_id, started_at, path, thumb_path) VALUES ('cam-h', 'now', ?, ?)").run(p, p);
+      db.prepare("INSERT INTO recordings (camera_id, started_at, path, thumb_path) VALUES ('cam-h', datetime('now'), ?, ?)").run(p, p);
     }
     assert.equal((await delCamera('cam-h')).status, 204);
     for (const [name, f] of Object.entries(victims)) assert.ok(fs.existsSync(f), `${name} was deleted through a stored path: ${f}`);
@@ -423,7 +426,7 @@ describe('a failure part-way leaves nothing referencing a deleted file, and can 
     for (const tag of ['a', 'b', 'c']) {
       const rel = `${owner}/${tag}.mp4`;
       const abs = writeFile(path.join(CLIPS_DIR, rel));
-      const id = db.prepare("INSERT INTO recordings (camera_id, child_id, started_at, path) VALUES (?, ?, 'now', ?)")
+      const id = db.prepare("INSERT INTO recordings (camera_id, child_id, started_at, path) VALUES (?, ?, datetime('now'), ?)")
         .run(owner.startsWith('cam') ? owner : 'c', owner.startsWith('child') ? owner : null, rel).lastInsertRowid;
       out.push({ id, abs });
     }
@@ -506,7 +509,7 @@ describe('a failure part-way leaves nothing referencing a deleted file, and can 
     makeChild(db, { id: 'child-rp' });
     const rel = 'child-rp/a.mp4';
     const abs = writeFile(path.join(CLIPS_DIR, rel));
-    const recId = db.prepare("INSERT INTO recordings (camera_id, child_id, started_at, path) VALUES ('c', 'child-rp', 'now', ?)").run(rel).lastInsertRowid;
+    const recId = db.prepare("INSERT INTO recordings (camera_id, child_id, started_at, path) VALUES ('c', 'child-rp', datetime('now'), ?)").run(rel).lastInsertRowid;
     const realRealpath = fs.realpathSync;
     const unresolvable = path.join(CLIPS_DIR, 'child-rp');
     fs.realpathSync = (p, ...rest) => {
@@ -593,7 +596,7 @@ describe('a failure part-way leaves nothing referencing a deleted file, and can 
     makeCamera(db, { id });
     const rel = `fail-${id}/r.mp4`;
     const abs = writeFile(path.join(CLIPS_DIR, rel));
-    db.prepare("INSERT INTO recordings (camera_id, started_at, path) VALUES (?, 'now', ?)").run(id, rel);
+    db.prepare("INSERT INTO recordings (camera_id, started_at, path) VALUES (?, datetime('now'), ?)").run(id, rel);
     blocked = abs;
     const from = mtxLog.length;
     try {
@@ -649,7 +652,7 @@ describe('★ #719 a folder sweep never follows a link out of the clips folder',
         // A row with a file of its own: the refusal comes BEFORE anything is deleted, not halfway through.
         const recRel = `pre-${id}/r.mp4`;
         const recFile = writeFile(path.join(CLIPS_DIR, recRel));
-        db.prepare(`INSERT INTO recordings (camera_id, child_id, started_at, path) VALUES (?, ?, 'now', ?)`)
+        db.prepare(`INSERT INTO recordings (camera_id, child_id, started_at, path) VALUES (?, ?, datetime('now'), ?)`)
           .run(kind === 'camera' ? id : 'c', kind === 'child' ? id : null, recRel);
 
         const res = kind === 'child' ? await delChild(id) : await delCamera(id);

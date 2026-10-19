@@ -21,9 +21,10 @@ if (process.env.NIGHTLIGHT_CLOCK_SHIFT_DAYS) await import('../../scripts/clock-s
 // helpers/render.jsx) and this keeps the next one from growing back unnoticed.
 // Only `mockResolvedValue` on a spy is delayed: promises made some other way, fake-timer tests and
 // rejections are untouched, so a failure here is a test that depends on timing it did not state.
-// ⚠️ KNOWN LIMIT (#736, reviewer measurement): the rewritten test passes at 0, 10 and 25 ms and fails
-// at 40 ms when run in its full file. It uses mockResolvedValueOnce, which this wrapper does not delay,
-// so passing at 10 ms does not establish that the CI timing failure is fixed.
+// #736: 'reloads when the parent bumps the refresh nonce' failed in this mode more than once (a 1000 ms waitFor,
+// then a missing third row). It now answers by URL and by how many times the list was requested, so it no longer
+// depends on request order or latency; the wrapper does not delay that mock on purpose, because the test must not
+// care. (A first rewrite that kept queued mockResolvedValueOnce values still failed here in CI on 2026-10-19.)
 const LATENCY_MS = Number(process.env.NIGHTLIGHT_TEST_LATENCY_MS) || 0;
 if (LATENCY_MS > 0) {
   const realSpyOn = vi.spyOn.bind(vi);
