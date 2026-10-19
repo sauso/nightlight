@@ -10,6 +10,54 @@ const openModals = [];
 const TABBABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), summary';
 const tabbablesIn = (root) => [...root.querySelectorAll(TABBABLE)].filter((el) => !el.closest('[hidden], [inert]'));
 
+// Where focus goes when a dialog closes (#768), best first. Built when the dialog is first rendered, while whatever
+// opened it still exists.
+//   1. The control that had focus when the dialog was asked for, exactly as before.
+//   2. If that control is not on the page at close: whatever opened the dialog IT was opened from. The two-factor
+//      set-up is a chain (password -> QR code -> backup codes), each dialog replacing the last in the same step, so the
+//      control the last one saw focused was inside the dialog that had just disappeared. Inheriting the opener's
+//      targets from the open dialog that contains it hands the whole chain's origin down to the last link.
+//   3. If the origin is gone too (the card swapped its "Set up" button for "Turn off"), the nearest ancestor of the
+//      origin that is still on the page, which is the region that button lived in; `region: true` marks those, and the
+//      close focuses the first control in the region (here, the button that replaced it) rather than the region
+//      itself. Nearest first, so the fallback stays as close to where the person was as it can.
+// Never <body>, which is what the browser falls back to when focus is simply lost.
+function restoreTargetsFor(opener) {
+  if (!opener || opener === document.body) return [];
+  // Innermost first: a dialog rendered inside another's children is contained by both cards.
+  for (let i = openModals.length - 1; i >= 0; i--) {
+    const parent = openModals[i];
+    if (parent.card.contains(opener)) return [{ el: opener, region: false }, ...parent.targets];
+  }
+  const regions = [];
+  for (let n = opener.parentElement; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+    regions.push({ el: n, region: true });
+  }
+  return [{ el: opener, region: false }, ...regions];
+}
+
+// Focus the first target that can take it. A target inside an `inert` subtree is skipped: it is behind another open
+// dialog (a confirmation closing over a form whose opener has gone), where focus would be lost anyway, and handing
+// it there would also make the "restored" focus a lie. Returns nothing; with no usable target focus is left to the
+// browser, which is what happened before this fell back at all.
+function restoreFocus(targets) {
+  for (const { el, region } of targets) {
+    if (!el.isConnected || el.closest('[inert]')) continue;
+    if (!region) {
+      if (typeof el.focus !== 'function') continue;
+      el.focus({ preventScroll: true });
+      return;
+    }
+    const inside = tabbablesIn(el)[0];
+    if (inside) { inside.focus({ preventScroll: true }); return; }
+    // A region with nothing to press in it: make it focusable for this one moment, and leave the markup as it was.
+    el.setAttribute('tabindex', '-1');
+    el.addEventListener('blur', () => el.removeAttribute('tabindex'), { once: true });
+    el.focus({ preventScroll: true });
+    return;
+  }
+}
+
 // Makes everything outside the dialog inert while it is open (#376). `aria-modal` only DESCRIBES a dialog to
 // assistive technology; it does not stop Tab from walking into the page behind it, or a screen reader from reading
 // it. The dialog is rendered where it is used, not in a portal, so the way to isolate it is to walk up from it to
@@ -57,8 +105,9 @@ export default function Modal({ title, onClose, children, placement = 'bottom', 
   const cardRef = useRef(null);
   // Who had focus when this dialog was asked for, read during the FIRST render, before the commit moves focus (or a
   // child's autoFocus does). Closing hands focus back to it (#376).
-  const openerRef = useRef(undefined);
-  if (openerRef.current === undefined) openerRef.current = typeof document !== 'undefined' ? document.activeElement : null;
+  // Kept as the ordered list of places to try (see restoreTargetsFor), not just the opener (#768).
+  const targetsRef = useRef(undefined);
+  if (targetsRef.current === undefined) targetsRef.current = typeof document !== 'undefined' ? restoreTargetsFor(document.activeElement) : [];
   // Latest props for the listener below, which is attached once.
   const live = useRef({ onClose, dismissible });
   live.current = { onClose, dismissible };
@@ -70,7 +119,8 @@ export default function Modal({ title, onClose, children, placement = 'bottom', 
     const overlay = overlayRef.current;
     const card = cardRef.current;
     if (!overlay || !card) return undefined;
-    const me = {};
+    // `card` and `targets` let a dialog opened from inside this one find where this one came from (#768).
+    const me = { card, targets: targetsRef.current };
     openModals.push(me);
     const marked = makeRestInert(overlay);
 
@@ -108,12 +158,9 @@ export default function Modal({ title, onClose, children, placement = 'bottom', 
       const i = openModals.indexOf(me);
       if (i !== -1) openModals.splice(i, 1);
       for (const el of marked) el.removeAttribute('inert');
-      // Back to the opener, if it is still on the page (it is gone when the dialog's action removed it, and then the
-      // browser's own fallback is the right one). Never to <body>.
-      const opener = openerRef.current;
-      if (opener && opener !== document.body && opener.isConnected && typeof opener.focus === 'function') {
-        opener.focus({ preventScroll: true });
-      }
+      // Back to the opener if it is still on the page; if the dialog's action removed it, to the next best thing
+      // (#768). Never to <body>.
+      restoreFocus(targetsRef.current);
     };
   }, []);
 

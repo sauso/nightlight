@@ -13,6 +13,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 - **The two-factor confirmation counter no longer keys on a hash of the pending secret (#777).** Behaviour is unchanged (10 wrong codes against one set-up cancel it; a continued set-up keeps its count; a start over begins again at 0; see `docs/mfa.md`). The count is kept in memory next to the pending secret itself, which the account row and every request already held, instead of next to a short SHA-256 of it, which code scanning reported as password hashing. No setting.
 
+### Fixed
+
+- **After turning on two-factor, keyboard focus no longer drops to the top of the page (#768).** Closing the backup-codes dialog now puts focus back on the Two-factor card (on its **Turn off two-factor** button), instead of leaving it on nothing so the next Tab starts from the top of the page. The same goes for any dialog that is opened from inside another one that closes as it opens: focus goes back to whatever opened the first dialog, and if that button has since been replaced, to the first control in the place where it was. Nothing changes for a dialog opened and closed on its own, or one whose opener is still on the page. Known limit: if nothing from where the dialog was opened is left on the page, focus is still left to the browser. This is keyboard and screen-reader behaviour only; it has been checked in tests, not with a real screen reader.
+
 ## [0.41.1] - 2026-10-19
 
 ### Fixed
