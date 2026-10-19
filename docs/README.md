@@ -7,6 +7,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 - [Installation](installation.md) — Unraid, Docker, Compose, storage and first setup
 - [Cameras and caregivers](cameras.md) — add cameras and share access
 - [Networking and remote access](networking.md) — LAN options, WebRTC, STUN, HTTPS and privacy
+- [Reverse proxy and remote access](remote-access.md) — SWAG, `TRUST_PROXY`, `STUN_SERVERS`, `CLOUDFLARE_ANALYTICS`, watching away from home
 - [Troubleshooting](troubleshooting.md) — common problems and first checks
 - [Known issues](../KNOWN-ISSUES.md) — documented limitations and workarounds
 
@@ -32,7 +33,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 
 ## Full reference
 
-- [Full reference](readme-reference.md) — the previous README in full. It holds the reverse proxy and `TRUST_PROXY` settings, `SESSION_TTL_DAYS`, timezones, caregivers, logs and the longer troubleshooting notes. It is being split into separate guides; until then, settings and known limits that are not in a guide above live here.
+- [Full reference](readme-reference.md) — the previous README in full. It holds `SESSION_TTL_DAYS`, timezones, caregivers, logs and the longer troubleshooting notes. It is being split into separate guides; until then, settings and known limits that are not in a guide above live here.
 
 ## Visual walkthrough
 

@@ -103,7 +103,8 @@ Start with the [documentation hub](docs/README.md), or jump directly to:
 - [Architecture](docs/architecture.md)
 - [Building and testing](docs/development.md)
 - [Sleep tracking](docs/sleep-tracking.md)
-- [Full reference](docs/readme-reference.md) — reverse proxy and `TRUST_PROXY`, timezones, caregivers, logs (the old README, being split into guides)
+- [Reverse proxy and remote access](docs/remote-access.md)
+- [Full reference](docs/readme-reference.md) — timezones, caregivers, `SESSION_TTL_DAYS`, logs (the old README, being split into guides)
 
 ## Help make Nightlight better
 

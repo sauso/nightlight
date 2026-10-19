@@ -28,7 +28,7 @@ services:
       - PUID=${PUID:-99}
       # Which upstream addresses may set X-Forwarded-For. Blank = trust loopback only, which is
       # safe but means every visitor through a non-loopback reverse proxy looks like one client.
-      # Only ever list an address you control - see docs/readme-reference.md and .env.example.
+      # Only ever list an address you control - see docs/remote-access.md and .env.example.
       - TRUST_PROXY=${TRUST_PROXY:-}
       # How many days a sign-in lasts, counted from sign-in (no idle sign-out). Range 7-30, blank = 30;
       # an invalid value logs a warning and 30 is used. A phone is signed out at the same time of day it
