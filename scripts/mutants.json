@@ -22249,6 +22249,15 @@
     "namePattern": "#740 a CRLF template"
   },
   {
+    "label": "#740 MediaMTX renderer joins CRLF entries with LF",
+    "file": "backend/src/lib/stunServers.js",
+    "find": ".join(newline)",
+    "replace": ".join('\\n')",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "#740 a CRLF template"
+  },
+  {
     "label": "#753 default trusts every proxy",
     "file": "backend/src/lib/trustProxy.js",
     "find": "export const DEFAULT_TRUST_PROXY = 'loopback';",

@@ -148,8 +148,8 @@ describe('#558 MediaMTX config', () => {
 
   test('#740 a CRLF template keeps CRLF throughout the filled block', () => {
     const base = `rtsp: yes\r\n${MEDIAMTX_ICE_LINE}\r\nwebrtc: yes\r\n`;
-    const out = renderMediamtxConfig(base, [GOOGLE]);
-    assert.equal(out, `rtsp: yes\r\nwebrtcICEServers2:\r\n  - url: ${GOOGLE}\r\nwebrtc: yes\r\n`);
+    const out = renderMediamtxConfig(base, ['stun:a.example.org:3478', GOOGLE]);
+    assert.equal(out, `rtsp: yes\r\nwebrtcICEServers2:\r\n  - url: stun:a.example.org:3478\r\n  - url: ${GOOGLE}\r\nwebrtc: yes\r\n`);
     assert.equal(out.replace(/\r\n/g, '').includes('\n'), false, 'the rendered copy has no bare LF');
   });
 

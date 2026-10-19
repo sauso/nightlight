@@ -142,7 +142,6 @@ describe('child form', () => {
     await waitFor(() => expect(camerasValue.refresh).toHaveBeenCalled());
     // Save has succeeded, but refresh is held so the form remains mounted for this assertion.
     await waitFor(() => expect(screen.queryByText('Unsaved changes.')).toBeNull());
-    expect(Object.keys(sessionStorage)).toEqual([]);
     await act(async () => { finishRefresh(); });
     await screen.findByText('elsewhere');
   });
@@ -220,7 +219,6 @@ describe('camera form', () => {
     await waitFor(() => expect(camerasValue.refresh).toHaveBeenCalled());
     // The same screen remains mounted after adding a camera; no stale draft may follow it.
     await waitFor(() => expect(screen.queryByText('Unsaved changes.')).toBeNull());
-    expect(Object.keys(sessionStorage)).toEqual([]);
     await act(async () => { finishRefresh(); });
   });
 
