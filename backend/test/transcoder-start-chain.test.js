@@ -15,18 +15,22 @@
 // event-loop turns, and every wait is a bounded poll for a condition.
 //
 // Which cases FAIL on the code before #478 (run against it before the fix landed): a, b (both orders), e, f, f2,
-// g, h, i, j, k. Which PASS there by design, kept as guards against a broken chain: c (a rejection only ever
+// g, h, i, i2, s, j, k. Which PASS there by design, kept as guards against a broken chain: c (a rejection only ever
 // reached its own caller before, since there was no chain to poison) and d (cameras never waited for each other
-// before; a lock that is global instead of per camera fails it).
+// before; a lock that is global instead of per camera fails it). Two were added by the code review of the first
+// version of #478: s failed on that version (a start overtook a stop still in progress), and i2 passed on it but
+// kills a stopAllTranscoders that skips a camera with more than one start pending, which survived every other case.
 import { test, mock, describe, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { FakeFfmpeg } from './helpers/fakeFfmpeg.js';
+import { FakeFfmpeg, WedgedFfmpeg } from './helpers/fakeFfmpeg.js';
 
 const spawned = [];
+// Which fake the next spawn builds. WedgedFfmpeg ignores SIGTERM and dies only on SIGKILL (case s).
+let SpawnAs = FakeFfmpeg;
 mock.module('node:child_process', {
   exports: {
     spawn(command, args) {
-      const proc = new FakeFfmpeg(command, args);
+      const proc = new SpawnAs(command, args);
       spawned.push(proc);
       return proc;
     },
@@ -142,6 +146,7 @@ afterEach(async () => {
   await flush();
   probe.reset();
   configCheck.reset();
+  SpawnAs = FakeFfmpeg;
   spawned.length = 0;
   upserts.length = 0;
   unhandled.length = 0;
@@ -304,6 +309,51 @@ describe('#478: a stop reaches a start that is queued or in flight', () => {
     await releaseUntilSettled([a]);
 
     assert.equal(spawned.length, 0, 'a start launched ffmpeg after shutdown had stopped everything');
+  });
+
+  test('i2: stopAllTranscoders with one start in flight AND one queued behind it launches neither', async () => {
+    // Every camera with a chain record must be stopped, however many starts it holds (#478 code review: a union
+    // that took a camera only when ONE start was pending passed every other case here).
+    probe.hold();
+    const a = track(startTranscoder('cam-i2', URL1, 'path_i2', 'I2'));
+    await untilHeld(probe, 1, 'the first start never reached its probe');
+    const b = track(startTranscoder('cam-i2', URL2, 'path_i2', 'I2')); // queued behind a
+    await stopAllTranscoders();
+    await releaseUntilSettled([a, b]);
+
+    assert.ok(a.ok && b.ok, 'a stopped start rejected');
+    assert.equal(spawned.length, 0, `${spawned.length} ffmpeg launched after shutdown had stopped everything`);
+  });
+
+  test('s: a start waits for a stop still in progress, so two ffmpeg are never alive at once, even when the old one ignores SIGTERM', async (t) => {
+    // #478 code review (Codex): a stop deletes the camera from the map at once and then waits up to 3 s for the
+    // process to exit. A start in that window found nothing to stop and launched next to the dying process.
+    // The 3 s is the SIGKILL fallback (FORCE_KILL_TIMEOUT_MS); mocked, so it is ticked, not waited.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    SpawnAs = WedgedFfmpeg;
+    await startTranscoder('cam-s', URL1, 'path_s', 'S');
+    SpawnAs = FakeFfmpeg;
+    const old = spawned[0];
+    assert.equal(live().length, 1, 'precondition: the first ffmpeg is running');
+
+    const s = track(stopTranscoder('cam-s')); // e.g. a disable: SIGTERM, which this process ignores
+    const c = track(startTranscoder('cam-s', URL2, 'path_s', 'S')); // e.g. the enable, straight after
+    await flush(20);
+    try {
+      assert.deepEqual(old.signals, ['SIGTERM'], 'precondition: the old ffmpeg was sent SIGTERM and is still alive');
+      assert.equal(live().length, 1, `${live().length} ffmpeg alive: the start launched next to a process still being stopped`);
+      assert.equal(c.settled, false, 'the start finished while the stop was still in progress');
+    } finally {
+      // Even when an assertion above fails: the SIGKILL must still fire, or the wedged fake outlives this test
+      // with a stop that never settles, and afterEach's stopAllTranscoders would wait on it forever.
+      t.mock.timers.tick(3000);
+      await flush(20);
+    }
+    assert.deepEqual(old.signals, ['SIGTERM', 'SIGKILL'], 'the stop did not fall back to SIGKILL');
+    assert.ok(s.settled, 'the stop never settled');
+    assert.ok(c.settled && c.ok, 'the start never launched once the old process was gone');
+    assert.equal(live().length, 1);
+    assert.equal(urlOf(live()[0]), URL2);
   });
 });
 

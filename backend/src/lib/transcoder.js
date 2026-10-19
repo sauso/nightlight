@@ -19,6 +19,11 @@ const processes = new Map();
 // Keeping the timer handle here is what makes the relaunch cancellable. See issue #253.
 const pendingRestarts = new Map(); // cameraId -> timeout handle
 
+// Stops whose process has not exited yet (#478 code review): cameraId -> a promise that resolves once it has, or
+// once the SIGKILL fallback fired. A stop deletes the camera from `processes` before its process is gone, so this
+// is the only record that one is still dying; see stopProcess. Deleted as soon as the stop settles.
+const stopsInProgress = new Map();
+
 // Cancel a scheduled relaunch, if any. Safe to call for a camera that has none.
 function cancelPendingRestart(cameraId) {
   const t = pendingRestarts.get(cameraId);
@@ -126,7 +131,8 @@ function buildArgs(rtspUrl, mediamtxPath, aacSource) {
 // THE FIX. Each camera has a promise chain. A start waits until the previous start of the SAME camera has
 // finished, resolved or rejected, and then runs with ITS OWN arguments. Different cameras never wait for each
 // other. Requests with different arguments are never merged: an edit with a new RTSP address must end with
-// that address running, not with whichever start happened to be in flight.
+// that address running, not with whichever start happened to be in flight. (One way it still can end on the
+// old one lies outside this file: the edit route saves the new address only after its start, #780.)
 //
 // One record per camera, deleted when its chain drains, so nothing is left behind for a deleted camera:
 //   tail     what the next start waits on. Always `run.then(noop, noop)`, so a start that rejects rejects for
@@ -233,7 +239,9 @@ async function doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped) {
   // could leave MediaMTX's own state for the path confused well beyond just this one
   // restart, causing repeated "broken pipe" failures rather than a single clean blip.
   // The INTERNAL stop (#478): the exported stopTranscoder() bumps the stop generation, which would abort this
-  // very start.
+  // very start. It also waits for a stop of this camera that is still in progress (a disable, a delete or
+  // stopSubStream whose process has not exited yet), so nothing below can launch next to a process that is
+  // still alive.
   await stopProcess(cameraId);
   if (stopped()) return abandon(mediamtxPath, 'while the old ffmpeg stopped');
 
@@ -364,11 +372,32 @@ function stopProcess(cameraId) {
   cancelPendingRestart(cameraId);
 
   const entry = processes.get(cameraId);
-  if (!entry) return Promise.resolve();
+  // #478 code review (Codex, reproduced with a fake ffmpeg that ignores SIGTERM): "nothing tracked" does not mean
+  // "nothing running". A stop deletes the entry at once, then waits up to FORCE_KILL_TIMEOUT_MS for the process
+  // to exit. A start arriving in that window found no entry, its own stop returned at once, and it launched next
+  // to the old process, still alive until the SIGKILL: two publishers on one path. So a stop with nothing tracked
+  // waits for the stop still in progress. Bounded by that same timeout, and still outside the start chain, so
+  // shutdown's bound is unchanged (stopAllTranscoders runs these in parallel).
+  if (!entry) return stopsInProgress.get(cameraId) ?? Promise.resolve();
 
   entry.stopped = true;
   processes.delete(cameraId);
 
+  const stopping = killAndWait(entry);
+  // Joined with a stop already in progress, if any, so a later wait covers every process still dying. Defensive:
+  // now that a start waits here, a second process should not exist while one is still stopping.
+  const prior = stopsInProgress.get(cameraId);
+  const inProgress = prior ? Promise.all([prior, stopping]).then(noop) : stopping;
+  stopsInProgress.set(cameraId, inProgress);
+  inProgress.then(() => {
+    if (stopsInProgress.get(cameraId) === inProgress) stopsInProgress.delete(cameraId);
+  });
+  return inProgress;
+}
+
+// SIGTERM the entry's process and resolve once it is gone, or after FORCE_KILL_TIMEOUT_MS and a SIGKILL. Never
+// rejects.
+function killAndWait(entry) {
   return new Promise((resolve) => {
     let resolved = false;
     function done() {

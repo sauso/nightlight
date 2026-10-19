@@ -127,11 +127,14 @@ one path knock each other off it). Different cameras never wait for each other. 
 neighbouring mechanisms:
 - A request identical to one still **waiting** its turn (same address, path and name, no stop in between)
   shares it, so pressing **Restart stream** repeatedly queues one restart, not one per press. It never joins
-  the start already running, nor merges different addresses: an edit with a new address always ends with
-  that address running.
+  the start already running, nor merges different addresses: an edit with a new address gets a start of its
+  own with that address, so it ends with that address running, except in the known limit (#780) at the end of
+  this list.
 - A stop (switching the camera off, deleting it, shutting down) reaches a start that is queued or part-way
   through: it launches nothing and finishes quietly, logging `start abandoned …` at INFO. The stop itself
-  never waits in the queue, which keeps shutdown inside its 9 s bound.
+  never waits in the queue, which keeps shutdown inside its 9 s bound. The other way round, a start waits for
+  a stop of the same camera that is still in progress (its process not yet exited: up to 3 s, until the SIGKILL
+  fallback), so it never launches next to a process that ignored SIGTERM.
 - While a start is queued or running, the camera counts as running for the reconcile pass, which therefore
   does not queue another one behind it.
 - Known cost: a request now waits for every start ahead of it to finish. Each start is bounded (the old
@@ -140,10 +143,10 @@ neighbouring mechanisms:
   MediaMTX timing out throughout, can take about 70 s before it answers (its own checks included; worked out
   from those bounds, not measured), under Cloudflare's 100 s proxy limit. With more starts ahead of it (a
   watchdog's and the reconcile pass's at once) it can take longer than that.
-- Known limit: the transcoder never reads the database. An edit with a new address starts the new address
-  before it saves it, so a watchdog or reconcile start that read the old row in that window queues the old
-  address behind the edit's start, and it runs last. This window predates #478 and the queue does not widen
-  it.
+- Known limit (#780): the transcoder never reads the database. An edit with a new address starts the new
+  address before it saves it, so a watchdog or reconcile start that read the old row in that window queues
+  the old address behind the edit's start, and it runs last. This window predates #478 and the queue does not
+  widen it.
 
 When editing this area, preserve the "only write when actually broken" invariant — an
 unconditional reconcile-on-every-tick would cause constant disconnects.

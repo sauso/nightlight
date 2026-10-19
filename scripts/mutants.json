@@ -22071,7 +22071,16 @@
     "replace": "  const ids = new Set([...processes.keys(), ...pendingRestarts.keys()]);",
     "expect": "killed",
     "tests": ["transcoder-start-chain.test.js"],
-    "namePattern": "^i:"
+    "namePattern": "^i2?:"
+  },
+  {
+    "label": "#478 start does not wait for an in-progress stop (it launches next to a process that ignored SIGTERM)",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "  if (!entry) return stopsInProgress.get(cameraId) ?? Promise.resolve();",
+    "replace": "  if (!entry) return Promise.resolve();",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^s:"
   },
   {
     "label": "#478 isRunning misses a pending start (reconcile queues a second one behind it)",
