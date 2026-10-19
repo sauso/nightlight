@@ -1,0 +1,1348 @@
+# Nightlight — self-hosted baby monitor
+
+A mobile-friendly web app for watching multiple RTSP cameras, grouped by child, over your
+home network. Live video uses WebRTC (via [MediaMTX](https://github.com/bluenviron/mediamtx))
+for sub-second latency — much lower than a typical HLS-based viewer. Use it in any browser,
+install it to your home screen as a PWA, or run the companion **native apps for Android and
+iOS** ([nightlight-mobile](https://github.com/sauso/nightlight-mobile)) for reliable
+background audio and picture-in-picture (see [Mobile apps](#mobile-apps-android--ios)
+below). No cloud, no subscription, no account anywhere but your own network.
+
+> **One thing to know about "no cloud".** Nightlight has no cloud service of its own, but by default
+> the **Low latency (WebRTC)** live view uses Google's public STUN server
+> (`stun.l.google.com:19302`), both in the browser and in the bundled MediaMTX. STUN is how WebRTC
+> works out a public address: the browser asks that server, so Google can see the viewer's public IP
+> address and when each live view connected. **Watching on your home network needs no STUN**; a viewer
+> outside it, behind NAT, may. Set `STUN_SERVERS` to a blank value to use none (nothing then contacts
+> Google), or to your own server: see [`STUN_SERVERS`](#stun_servers--which-stun-servers-low-latency-webrtc-uses).
+> **Compatibility (HLS)** viewing does not use WebRTC and never contacts a STUN server. Push
+> notifications, if you enable a provider, also leave your network: see
+> [Push notifications](docs/notifications.md).
+
+> **⚠️ Not a safety device.** Nightlight is a convenience tool, not a safety device. It is
+> not a medical device, is not certified for safety monitoring of any kind, and must never
+> be used as a substitute for adult supervision. Streams can drop, apps can be killed by
+> the operating system, networks fail — never rely on this software to alert you to a
+> child in distress.
+
+## Screenshots
+
+See the [visual walkthrough](docs/README.md) for a tour of the main screens (the nursery
+dashboard, adding a camera, and settings). The images are captured by the end-to-end test
+suite but committed by hand, so they can lag behind the actual UI.
+
+## How it works
+
+- **FFmpeg** pulls each camera's RTSP stream, copies the video through untouched, and
+  transcodes just the audio to AAC (many IP cameras send audio as G711, a codec HLS can't
+  carry at all — WebRTC can, which is why this only matters for Compatibility/HLS mode).
+  The result is published into MediaMTX.
+- **MediaMTX** re-publishes that as WebRTC (WHEP) and HLS, which browsers can play
+  natively — RTSP itself cannot be played in a browser, so this bridge is required either way.
+- **Backend** (Node/Express + SQLite) stores children, cameras, and caregiver accounts,
+  and manages both MediaMTX and one FFmpeg process per camera as child processes —
+  starting them, restarting on crash, and stopping them when a camera's removed.
+- **Frontend** (React) is a mobile-first, installable app: a live dashboard grouped by
+  child, plus screens to manage children, cameras, and caregiver accounts. Cameras can be
+  added by IP over **ONVIF** (auto-filling the stream details), and PTZ (pan/tilt) cameras
+  get on-screen controls — see [Managing cameras](#managing-cameras).
+
+Everything above runs in a **single Docker container**, which needs its own routable IP on your LAN so
+WebRTC connects without NAT/ICE headaches (MediaMTX advertises that IP to browsers). The simple default
+is **host networking** — the container shares the host's IP — used by the quick start and the Unraid
+template. If host mode doesn't suit you (e.g. a port clash with another service), you can instead give
+the container its **own dedicated LAN IP**; see [Networking modes](#networking-modes) below.
+
+This is designed for **local network use by default** — see "Remote / internet access"
+below if you want it reachable from outside your home too.
+
+## Quick start
+
+Pull and run directly from Docker Hub:
+
+```bash
+docker run -d \
+  --name nightlight \
+  --network host \
+  --restart unless-stopped \
+  --log-opt max-size=10m \
+  --log-opt max-file=3 \
+  --stop-timeout 30 \
+  -e PUID=99 \
+  -e PGID=100 \
+  -e TZ=UTC \
+  -v /path/to/your/data:/app/data \
+  sauso/nightlight:latest
+```
+
+Nightlight records video three ways — **automatic clips** attached to motion/sound alerts (opt-in per
+camera), **wake clips** saved silently when your child wakes up, and **on-demand recordings** you
+capture with the Record button. They have different retention rules, so see
+[docs/recording.md](docs/recording.md) for all of it and for every setting under *Settings →
+Recording*. Video defaults to `<data dir>/clips`; you can point it at your array instead with a
+`/recordings` mount + `CLIPS_DIR`.
+
+PUID/PGID control which user/group owns files this container creates in your data
+directory - the defaults above (99/100) match Unraid's own "nobody"/"users" convention,
+so they're usually already correct there. On another system, find your own with
+`id your_username`. Do not set `PUID=0`: it runs the app as root, and the container logs a warning at start
+if you do. TZ (e.g. `Australia/Melbourne`) affects log timestamps only -
+[full list of values](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
+
+`UMASK` (optional, default `077`) decides who else can read what the container writes there. The
+database holds every stored secret (camera passwords, notification tokens) in plaintext, so by
+default everything is **owner-only** (files `600`, folders `700`), and each start takes group/other
+access off anything that still has it. Range: 3 or 4 octal digits with an owner digit of `0`
+(`000`-`077`, e.g. `022` for the old world-readable modes); anything else is ignored with a warning
+and `077` is used. **If another user or container reads your data directory, set `UMASK=022`
+*before* upgrading** - after one start at `077` the opt-out only affects new files. Known limits:
+a default ACL on the host folder overrides it, an external `CLIPS_DIR` mount's existing files are
+not tightened, and on a filesystem that ignores `chmod` (a Docker Desktop for Windows bind mount,
+a CIFS mount with a fixed `file_mode`) modes cannot change at all, so that filesystem's own access
+control is what protects the data. Details, including what this may mean for SMB shares (not
+verified) and backups:
+[Who can read the data directory](docs/operations.md#who-can-read-the-data-directory).
+
+The `--log-opt` flags cap Docker's own log storage at 10MB × 3 files - without them,
+logs default to growing unbounded, which can be a real problem on Unraid specifically
+since Docker's storage there is a fixed-size image that can break the whole Docker
+service if it fills up.
+
+`--stop-timeout 30` gives Nightlight enough time to stop cleanly. It needs a few seconds
+on the way down — an on-demand recording is assembled from the buffer at that point, and
+being killed part-way through loses it. Stopping normally takes **1-5 seconds**, so 30 is
+deliberately generous — and costs nothing, because the container exits as soon as it's
+finished rather than waiting out the timeout. Don't rely on Docker's own default here:
+recent versions don't document one, and it has been measured killing the container after
+about 4 seconds, which was enough to lose the recording. **If you deployed before this
+was added**, add `--stop-timeout 30` yourself (or `stop_grace_period: 30s` under the
+service in Compose, or the Unraid template's "Extra Parameters" field). Nothing else breaks
+without it — a recording lost this way is marked failed rather than disappearing silently.
+
+Or with Docker Compose:
+
+```bash
+cp .env.example .env
+# optionally edit .env - see comments in the file; the defaults are fine to start
+docker compose up -d
+```
+
+Then, from any phone/laptop on the same network, visit `http://<server-ip>:4000`. The
+first time you visit, you'll be asked to create the admin account — do this first, from a
+trusted device. Then add your children (Children tab), add your cameras (Cameras tab — by
+IP via ONVIF, or by RTSP details; see [Managing cameras](#managing-cameras)), and assign
+cameras to children.
+
+### Requirements
+
+- Any always-on Linux box on the same network as your cameras (a Raspberry Pi, an Unraid
+  server, anything running Docker). Both `amd64` and `arm64` are supported.
+- Cameras that expose an RTSP stream (almost all "dumb" IP cameras and most smart cameras
+  with a local RTSP option do — check the camera's manual for the RTSP path, usually
+  something like `/stream1`).
+- **ONVIF is optional but handy**: if a camera supports it, Nightlight can fetch the stream
+  details from just its IP, and enable pan/tilt controls on cameras that report PTZ.
+- **Capacity has not been measured.** There is no stated or tested limit on the number of
+  cameras or viewers, no minimum Raspberry Pi model, RAM or free disk, and no CPU-per-camera
+  figure: Nightlight enforces no limit, and none has been benchmarked. What a camera costs depends
+  on what you switch on: every camera has its own FFmpeg stream process, and motion analysis, sound
+  analysis (sleep tracking uses both) and the recording buffer each add another one. Add cameras
+  gradually and watch the host's CPU.
+- **Browsers: the automated tests cover desktop Chromium only.** The end-to-end suite runs in
+  Chromium (Playwright's "Desktop Chrome" profile) and nothing else. Safari, Firefox, Edge, Samsung
+  Internet and the native apps have no automated coverage, and no tested-version list is kept. The
+  table under [Installing to your home screen](#installing-to-your-home-screen) describes how each
+  platform treats installs; it is not a statement of tested versions.
+
+## Running on Unraid
+
+Nightlight is on the **Community Applications** store. Open the **Apps** tab, search
+"nightlight", and click **Install** — every field (network mode, data path, optional
+variables) comes pre-filled; double check the **Data Directory** path if you want something
+other than the default (`/mnt/user/appdata/nightlight`), then **Apply**.
+
+Prefer to install manually, or want the template before Community Applications' cache picks
+up a change? Add it straight from this repo instead:
+
+1. Open the Unraid **Terminal** (or SSH in), then run:
+   ```bash
+   mkdir -p /boot/config/plugins/dockerMan/templates-user
+   wget -O /boot/config/plugins/dockerMan/templates-user/my-nightlight.xml \
+     https://raw.githubusercontent.com/sauso/nightlight/main/unraid-template.xml
+   ```
+2. Docker tab → **Add Container** → **Template** dropdown → select **nightlight**. Every
+   field (network mode, data path, optional variables) is pre-filled from the template —
+   double check the **Data Directory** path if you want something other than the default
+   (`/mnt/user/appdata/nightlight`), then **Apply**.
+
+Either way, this is a single container — no extra plugins needed, Unraid's normal Docker UI
+handles it directly.
+
+**Already installed from an older copy of the template?** Check that **Extra Parameters**
+(Advanced view, on the container's edit page) contains `--stop-timeout 30`, and add it if
+not. Unraid builds the container from the saved template, so a template downloaded before
+this was added keeps the old value until you edit it — and without it a recording that was
+in progress when the container restarts can be cut short. See the note under
+[Quick start](#quick-start) for what it does.
+
+## Networking modes
+
+Nightlight needs its own routable IP on your LAN so WebRTC has no NAT/ICE trouble — MediaMTX advertises
+that IP to browsers. There are two supported ways to provide one:
+
+- **Host networking (default, simplest).** The container shares the host's IP (`--network host`, or
+  `<Network>host</Network>` in the Unraid template). Nothing to configure — it's what the quick start and
+  the template use. The trade-off is that it binds its ports (4000, plus MediaMTX's) directly on the host,
+  which clashes if something else there already uses them.
+- **A dedicated LAN IP (ipvlan / macvlan).** Put the container on a Docker `ipvlan`/`macvlan` network so it
+  gets its **own** address on your LAN, separate from the host. Nightlight auto-detects the container's IP
+  and has MediaMTX advertise it, so WebRTC works on the LAN with **no extra configuration** (no `PUBLIC_HOST`
+  needed for local viewing). Use this to avoid host-mode port conflicts, or just to keep the app on a tidy
+  fixed IP of its own.
+  - **On Unraid:** create a custom Docker network on your NIC (e.g. `br0`, or a VLAN like `br0.10`), then in
+    the container template set the **Network Type** to that network and give it a fixed IP.
+  - **macvlan caveat:** with plain `macvlan`, the **host itself usually can't reach the container** (a Linux
+    kernel limitation) — which matters if your reverse proxy (e.g. SWAG) runs on that same host. Use
+    **`ipvlan`** (or add a macvlan shim interface) so the host can reach it.
+
+| | Host networking | ipvlan | macvlan |
+|---|---|---|---|
+| Setup | None — the default | Custom Docker network + fixed IP | Custom Docker network + fixed IP |
+| Port collisions with other containers | Possible — shares the host's ports | None — has its own IP | None — has its own IP |
+| Host itself can reach the container | Yes (it *is* the host) | Yes | **No** (Linux kernel limitation) — use ipvlan instead if a reverse proxy runs on the host |
+| Multiple instances on one host | Awkward — only one can hold port 4000 | Easy — each gets its own IP | Easy — each gets its own IP |
+
+Either way, the app is still served on port **4000** (change it with the `PORT` env var if you need to).
+For **remote / internet** access, see "Remote / internet access" below — that part is the same in both
+modes.
+
+### Running more than one instance (e.g. staging + production)
+
+Running two copies on one host is easiest with the **dedicated LAN IP** mode above: give each its own IP
+and they can keep the same internal ports without clashing (host networking can't — two host-mode
+containers would both try to grab port 4000). Set a different `PORT` on an instance if you'd rather change
+its HTTP port instead.
+
+Watching **both remotely in Low latency (WebRTC)** takes one extra step, because each instance's WebRTC
+media needs its own UDP port forwarded **1:1** — the port a browser must reach has to match the port
+MediaMTX advertises, so a router that *remaps* the port breaks WebRTC:
+
+1. Give each instance a **distinct WebRTC UDP port**: leave one at the default `8189` and set the other
+   with the `WEBRTC_UDP_PORT` setting (a bare number between 1 and 65535, **no colon**; blank = `8189`),
+   e.g. `WEBRTC_UDP_PORT=8190`. On Unraid it is the **WebRTC UDP Port** field in the container's
+   advanced view. An invalid value is ignored with a warning in the log and `8189` is used. (The raw
+   MediaMTX override `MTX_WEBRTCLOCALUDPADDRESS` still works for a bind address a bare port cannot
+   express and wins if both are set, but you should not need it.)
+2. **Forward each 1:1** on your router — external UDP `8189` → instance A's `8189`, external UDP `8190` →
+   instance B's `8190` (same number in and out).
+3. Set `PUBLIC_HOST` (your public IP or DDNS) on **both**.
+4. Put each behind its **own subdomain** in SWAG (e.g. `nursery.example.com`, `nursery-dev.example.com`);
+   the HTTP and the WebRTC signalling both ride 443, so the only per-instance forwards are those two UDP
+   media ports.
+
+**Compatibility (HLS)** needs none of this — it's all HTTP over 443, so both instances work remotely with
+no extra port forwarding.
+
+## Managing cameras
+
+Cameras are added and edited from the **Cameras** tab (admin only). A camera's address is
+entered as separate fields — **IP address**, **RTSP port** (usually 554), **stream path**,
+and the camera's **username / password**. Nightlight assembles the `rtsp://` URL from those
+itself, so the password never appears in a URL on screen.
+
+**Supported cameras** — Nightlight works with **ONVIF / RTSP** cameras in general: video, audio, and —
+on ONVIF cameras — pan/tilt and two-way audio. The fully tested and **recommended** option is
+**open-firmware [Thingino](https://thingino.com/) cameras** (inexpensive, ONVIF, pan/tilt, two-way
+audio); on those, set the camera's audio codec to **G711 (a-law)** for reliable sound (some builds
+default to AAC, which not all of them stream well — see `KNOWN-ISSUES.md`). Most other ONVIF cameras
+work too, and Hikvision two-way audio (ISAPI) is supported. If a camera won't connect, the **Add
+camera** screen can generate a redacted **camera report** to help add support for it. The report is
+a JSON file that stays on your device — it holds the camera's address, username, ONVIF result and
+stream codecs, with any password replaced by `***`. It is meant to be attached to a GitHub issue, so
+it is worth opening and reading before you post it: the redaction covers passwords, not everything a
+particular camera's firmware might put in an error message. If you find something sensitive that
+shouldn't be there, see [SECURITY.md](SECURITY.md) for how to report it privately instead.
+
+**Cameras are trusted input.** Nightlight trusts everything a camera sends it: the video and audio
+stream, the ONVIF replies and the snapshot images. The stream is parsed by FFmpeg and ffprobe, and
+the rest by the server itself, all as the same user that owns the data directory (the database, the
+saved secrets and the recordings): nothing separates the media processes from the data on disk. They
+are not handed the server's environment: FFmpeg and ffprobe start with only `PATH`, `TZ`, `LANG` and
+`LC_ALL`, MediaMTX with the same plus your `MTX_*` overrides
+([details](docs/architecture.md#child-process-environment-backendsrclibchildenvjs-553)). That narrows what
+a bug in one of them could leak, but it is not a sandbox: running as the same user, a media process that a
+camera managed to take over could still read the server's own environment (`JWT_SECRET` included) through
+the process table, as well as the files. Cameras are often the least-updated devices on a network, so put them on
+**their own VLAN or network segment**, ideally with no route to the internet and no access to your
+other devices, and let only the Nightlight host reach them (RTSP, plus ONVIF and the snapshot URL if
+you use them). This is advice: Nightlight does not check or enforce it.
+
+**Adding a camera**
+
+- **Via ONVIF (easiest):** type the camera's IP and press **Fetch port & path from ONVIF**.
+  Nightlight queries the camera and fills in the port and stream path for you, and detects
+  whether it supports pan/tilt and two-way audio. Most cameras answer this without a login;
+  if yours needs one, fill in the username/password first. Then make sure the login is
+  entered and Save.
+- **Manually:** type the IP, port, path, and login yourself (see the camera's manual for its
+  RTSP path, e.g. `/stream1`).
+- On **Save**, Nightlight briefly tests the stream first and won't store a camera it can't
+  reach (wrong login, path, or IP) — it tells you why. If the camera just happens to be
+  offline right then, you can choose **Save anyway**.
+
+**Capability badges** — cameras added via ONVIF show badges in the list: **PTZ** and
+**Two-way Audio**, green when supported, red when not. (Manually-added cameras show neither,
+since their capabilities aren't probed.)
+
+**Pan/tilt (PTZ)** — on cameras that report PTZ, a move button appears on the camera tile
+(next to the stream-quality gear). Tap it for an on-screen D-pad: each press nudges the
+camera a fixed amount, and holding an arrow keeps it moving; it stops on release and can't
+run past the limit.
+
+**Two-way audio (talk-back)** — on cameras that support it, a talk button appears on the tile: hold it
+to speak through the camera's speaker. Works with **Hikvision** (over ISAPI — enter the camera's *web*
+login when adding) and with **any ONVIF camera that has an audio backchannel** (e.g. Thingino/Sonoff),
+which is set up automatically from the ONVIF probe using the camera's own stream login.
+
+**Editing** — Edit shows the same fields. Leave the **password blank to keep the existing
+one** — it's never sent back to your browser. Changing the address re-tests the stream, the
+same as adding.
+
+**Removing** — Remove asks for confirmation, then stops the stream and **permanently deletes everything for the camera**: its bed transitions and snapshot photos, activity history, alerts with their clips and snapshots, recordings, event log and sensor history. You can add the camera again, but none of that comes back. See [Removing a child or a camera](docs/recording.md#removing-a-child-or-a-camera).
+
+**Assigning to a child** — use the "Assigned to" dropdown on each camera (admin only; a caregiver
+sees the assignment as text). It is more than grouping: a camera's nights are tracked only while it is
+assigned to a child who has sleep tracking on, so unassigning a camera stops its tracking just as
+turning tracking off does.
+
+### Where to put the camera
+
+Nightlight works from **any** camera position: put the camera wherever it fits and you will still get
+sleep tracking and motion alerts. A good position makes them **more reliable**, and nothing more than that.
+These are suggestions from testing in one household, not guarantees, and not a measured result (a proper
+comparison of positions has not been done yet).
+
+- **The suggested view:** looking down at the bed from above, at about **45 degrees**, the way most baby
+  monitors are mounted. Have the **whole bed in frame**, and the **doorway or room entry in view as well**
+  if you can: seeing who comes in and goes out makes an entry or exit easier to tell from other movement.
+- **What to avoid:**
+  - **A light that flashes, flickers or changes brightness in view of the bed** (a blinking charger or
+    night light, a screen, a light that cycles). Every change lights up pixels in the bed, which can break
+    the empty-bed check into short pieces, and a correct morning wake can then read wrong or be missed.
+    Cover or move the light, or point the camera so it is out of frame.
+  - **A bed zone that overlaps where a parent stands or leans** (for example a camera so low or side-on
+    that a person at the bedside covers the bed in the picture). Their movement then counts as movement in
+    the bed.
+  - **The bed being a tiny part of the frame.** With few pixels on the bed, a real movement is a smaller
+    share of the zone and is easier to miss. Fill the frame with the bed, within reason.
+- **If you move a camera, paint the bed zone again.** The bed zone (the area the camera watches for
+  movement in the bed) is drawn on one particular picture, so after a move it no longer sits on the bed.
+  Nothing checks that the zone is on the bed, so look at it over a live picture after any move. Sleep
+  nights before and after a move are **not directly comparable**: the zone and the camera's idea of a quiet
+  room both change, so a difference in the figures may come from the move, not from the sleep.
+
+## Sleep tracking
+
+Nightlight can estimate each child's overnight sleep from what their cameras already see and
+hear — no wearables, no extra hardware. It's a **sleep-pattern guide, not a medical
+measurement**, and (like everything here) never a safety device — see the warning at the top.
+
+- **Turn it on per child.** Each child has a **Track sleep** toggle in their settings, with
+  their own **bedtime** and **wake time**. Turning tracking off stops it entirely. Only an
+  **admin** can turn tracking on or off, change those times or choose the camera the night is measured
+  from (a caregiver sees them, greyed out).
+  A child can have more than one camera; the night is measured from one of them (see "One camera
+  does the measuring" below).
+- **Bedtime is a guide, not a boundary.** Real bedtimes move night to night, and you shouldn't
+  have to edit the setting each evening. The bedtime that gets reported is the one the camera
+  actually saw — the **put-down**, and the child settling after it — whether that happens before
+  the window opens or an hour into it. If your child was already asleep **before** the window,
+  that sleep is counted and the night's timeline starts at the real bedtime rather than at the
+  setting. Either way it only happens when the camera saw the child actually **put into bed** —
+  a quiet room on its own is never read as a sleeping child, and neither is a *put-down* on its
+  own: the bed also has to go on showing signs of being occupied afterwards. A sleeping child is
+  never perfectly still for hours — they move a little, repeatedly — so a bed that stirs once and
+  then nothing is an empty one, and the bedtime it seemed to start is discarded. The same applies at the other end: a morning wake
+  is still found if it comes after the configured wake time.
+
+  Only movement **before the next put-down** counts towards that occupied-bed check: a later bedtime
+  never vouches for an earlier one. So a *put-down* the camera got wrong an hour or two before the
+  real one, with the bed empty in between, is discarded rather than reported as the bedtime (it used
+  to be accepted on the real bedtime's movement, and could even end the night in the evening when a
+  parent then left the room). A *got into bed* with recorded quiet in the minute either side of it (at
+  most a lone minute of movement, such as a parent reaching in) is not treated as a new put-down for
+  this. "Quiet" there means the same as everywhere else in the timeline: no movement in the bed, no
+  movement elsewhere in the picture, and no noise. There is no setting for any of it, and the numbers are
+  unchanged: at least 3 minutes with movement in the bed, however slight, in the 2½ hours after the
+  child settles.
+  **Known limits** (details, and the nights they come from, in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)):
+  - A very still child whose bedtime is followed by a second *got into bed* that is not quiet either
+    side (a parent at the bed for a couple of minutes, the same put-down logged twice, or a one-minute
+    check with a noise from elsewhere in the house beside it) before the bed has shown 3 such minutes
+    loses that bedtime: the in-bed and asleep times move later, to that second event or after it.
+    There is no grace period: this holds a few minutes after the child settles as much as an hour.
+  - The other way round: the **real** put-down, if it happens to be logged with quiet either side (a
+    quiet house, a put-down that pauses), is not treated as a new put-down either, so a false earlier
+    one is still believed, exactly as before this change.
+  - Where the false put-down is discarded but the real one settled after the window had already
+    opened on a quiet evening, the **In bed** time can now show nothing on a night where it used to
+    show the false put-down.
+  - The parent's approach in the minute or two before the real put-down still counts for a false
+    earlier one, so a false put-down with exactly that much movement before the real one is still
+    believed.
+  - The check needs the 2½ hours after a put-down to have been recorded. A put-down closer than that to
+    the end of what has been recorded is believed without it: while a night is still in progress, a false
+    put-down can show as tonight's bedtime for up to about 2½ hours after it, and the figures worked out
+    after that use the full rule. The same is true of a night that has ended, for a put-down within 2½
+    hours of the end of its window: a false one over an empty bed there is kept as the bedtime, and a real
+    one after it is not looked at.
+  - Not fixed by this: a nap the child was lifted out of without waking can still be taken as the
+    start of the night, and on a quiet evening (no household noise to break the stillness) an empty
+    bed can still be read as a child asleep from the moment the window opens, for example when a
+    discarded false put-down came first. That is still later, and closer to the truth, than the false
+    put-down it replaces.
+- **One camera does the measuring.** If a child has several cameras, sleep is worked out from their
+  **main camera**, and an admin can choose which one it is: **Camera used for this child's sleep** in
+  the child's settings (shown once a child has two or more cameras).
+  - **Default: Automatic** — the first camera in the order an admin has arranged them on the live grid,
+    skipping any that are turned off. This is how every child behaved before the setting existed, so
+    nothing changes until an admin picks a camera. With Automatic, dragging the tiles still changes the
+    main camera, which is why only an admin can rearrange them.
+  - **Range: any camera assigned to that child**, including one that is turned off. A chosen camera
+    that is turned off (or has been deleted) is skipped and Automatic is used until it is back on;
+    turning it back on makes it the main camera again. Moving the chosen camera to another child, or
+    unassigning it, resets the choice to Automatic.
+  - Only an **admin** can change it (a caregiver sees it, greyed out). The settings screen says which
+    camera the night is being measured from right now.
+  - **What a change affects.** The camera is looked up each time a night is worked out, so a change
+    applies to every night computed afterwards, not only future ones: tonight's figures, a night's
+    **detail page** and the **morning review** (always worked out fresh), last night's saved summary
+    while it can still be updated (up to about three hours after the wake time), a review correction
+    that saves the night first, and an admin's **Recompute**. Older saved summaries (the child's card)
+    are not recomputed and keep the numbers of the camera they were measured from, so after a change a
+    past night's detail page can show different figures from its card.
+
+  The others carry on streaming, alerting and recording as normal; they just don't affect the numbers.
+  The nightly timelapse is taken from the same main camera.
+  This is deliberate: if every camera were combined, the *noisiest* one would decide the night — a
+  camera facing the doorway would push bedtime later and add wake-ups that never happened, with nothing
+  saying which camera was responsible. The night's detail view names the camera it measured from. Room
+  temperature and humidity are the exception and still come from every sensor in the room, because
+  those are averaged rather than combined.
+- **How it estimates.** Across the night it builds a per-minute movement + sound timeline from
+  the child's main camera: falling still for a sustained stretch reads as falling asleep,
+  sustained movement or noise reads as an awakening (brief stirs don't count). On a completed
+  night, a short recorded exit-and-return can also count as an awakening even when it's too brief
+  to show up as sustained movement on its own — as long as the bed is confirmed quiet in between
+  and later bed movement supports the return. This only applies to trips of one to twenty minutes,
+  with at least a minute of quiet bed time in between; it updates wake-ups, awake time, and the
+  longest sleep stretch, but live figures and wake-clip recording still use the plain movement rule
+  above. If you've painted
+  a **bed zone** on the camera — the same area that scopes motion alerts — it also tracks
+  movement **outside** the bed and lists it separately, which catches a morning wake where the
+  child has already left the bed. Draw the zone so it comfortably contains the child **including
+  where their head ends up** — a zone that cuts through a sleeping child makes their own rolling
+  over register as movement outside the bed, and can stop a real climb-out being recognised.
+  Only clearly-outside-the-bed movement is listed; faint changes (a shadow, the camera's
+  night-vision adjusting) are ignored rather than reported as someone in the room.
+- **When the motion camera samples.** The movement timeline comes from a frame-by-frame motion leg that
+  reads the camera's low-resolution stream. When it runs depends on how the camera's motion is set up:
+
+  | Camera | When the leg runs |
+  |---|---|
+  | Frame-diff source with motion alerts on | around the clock (it is alerting anyway) |
+  | Motion alerts off, or motion from MQTT or ONVIF, on a camera assigned to a child who tracks sleep | only from **3 hours before the sleep window opens to 3 hours after it closes** |
+  | Not assigned to a child, or the child's sleep tracking is off | not at all (unless it alerts) |
+
+  The 3 + 3 hours are the same distance either side that the detector widens the window by (asleep times
+  are looked for from 3 hours before the window opens, wake-ups up to 3 hours after it closes). A camera
+  that stopped sampling sooner would never see a morning departure that comes after the window, and a
+  window that opens shortly after midnight (00:00 to 02:59) is sampled from the previous evening. The leg
+  starts and stops on the server's 5-minute check, so it begins up to 5 minutes after the 3-hour mark and
+  lingers 5 to 10 minutes after the closing one.
+  - **The cost:** about 3 hours more a day of one low-resolution video decode per such camera (15 hours a
+    day becomes 18 for a 19:00-07:00 window). That is a relative figure; the extra CPU was not measured.
+    A frame-diff camera with motion alerts on already runs all day and costs nothing extra.
+  - **What is not widened:** none of these is widened to 3 hours. The timelapse records only inside the
+    sleep window itself. The live wake watcher (which also decides wake clips) uses the window plus 5
+    minutes either side.
+  - **Known limits:** a departure later than 3 hours after the window closes is not seen by any camera, and
+    for a camera of this kind the morning review has no recorded *got out / into bed* events after about
+    3 hours past the window's end, because nothing past that point feeds the night's numbers.
+- **Getting up for the day.** The morning wake is the point the bed empties and stays empty, rather
+  than the last movement seen in it — otherwise a parent stripping the bed an hour later would be
+  reported as the child waking. A single stray minute of movement in an otherwise still bed (an adult
+  reaching in for a toy or a blanket) does not restart that count; several minutes together do, because
+  that is a person at the bed rather than a passing arm. The wake is only accepted where a recorded
+  **got out of bed** backs it up, so a quiet spell alone can never end the night early.
+- **A child who gets out and climbs straight back in has not got up.** If a *got into bed* follows a
+  *got out of bed* shortly after, the night carries on rather than ending there — and so does a second
+  *got out of bed* logged within a minute of that return, because climbing back into a bed and leaving
+  it again inside a minute is one movement being read twice, not two trips. This matters most for a
+  very still sleeper: once they settle, their bed can look identical to an empty one for hours, so a
+  false exit shortly after bedtime would otherwise be reported as the end of the night.
+  That second *got out of bed* is only set aside when the bed then shows a **still sleeper**: at least 6
+  minutes of the slight movement a sleeping child makes (too small to count as the child moving) in the
+  2½ hours after the return. Bigger movement at the bed does not count, because after a child has
+  really got up that is a parent stripping the bed, tidying or reaching in: counting it once turned a
+  real early-morning wake into one more than two hours later.
+  A qualifying short trip can still be counted as a wake-up within that same continuing night — see
+  "How it estimates" above. It can miss a trip that's interrupted by a data gap or a stray reading,
+  and it cannot tell an adult's visit to the bed from the child's own trip out of it.
+  **Known limit:** a genuine departure less than a minute after a *got into bed* is read the same way
+  when the bed then shows a still sleeper (6 or more of those minutes), because the two are not
+  distinguishable from what the cameras record. Where that is the only *got out of bed* of the night it
+  is still used, so the night is never left with no wake time at all; where a later one exists, the
+  later one is reported instead. A genuine departure followed only by a parent at the bed (bigger
+  movement) is no longer set aside: it is found.
+  **Known limit:** a child who climbs back in and then lies stiller than that (fewer than 6 minutes of
+  slight movement in those 2½ hours), or a camera whose detection zone only ever registers bigger
+  movement, is treated as having left at that second *got out of bed*: the wake is reported too
+  **early**, never left blank. The 6 was measured on two cameras in one house, where the second exits
+  that were the real wake showed 0-3 such minutes and the ones a review confirmed were not showed 10 or
+  more; see KNOWN-ISSUES.
+- **Tell it when it got a night wrong.** The morning after, the child's page offers **Was last night
+  right?** — confirm the times or correct them, and mark any recorded *got into / out of bed* event as
+  right, wrong, or "can't tell" against the still frame it was decided from. It appears once per night
+  and goes for good once answered **or dismissed**; nothing is asked about nights with no times to
+  confirm. Either an admin or a caregiver can answer, deliberately — the person who was in the room at
+  5am is the one who knows. The review then shows who last answered it (**Answered by** and their
+  username): a save with a time, "no one was in the bed", a note or an event answer counts, and so does
+  saving someone else's answers again unchanged; dismissing the prompt does not, nor does a save that
+  only empties fields, and both leave the name as it was. Reviews saved before this was recorded show no
+  name. Type times on your own clock; they are
+  recorded against the timezone in Settings, the same one the sleep card displays.
+  - **Confirming that a night was right is worth as much as correcting one** — it is what makes a
+    future change to sleep detection provable rather than arguable. Confirming and correcting are
+    separate buttons on purpose: the times we guessed are never one stray tap from being recorded as
+    fact.
+  - **In bed and asleep are two different answers.** The form has three times: **In bed** (when they
+    were put down), **Fell asleep** and **Got up for the day**. On a night with a bedtime story they can
+    be half an hour apart, and you can give both. "In bed" is optional: leave it empty and nothing about
+    the put-down is recorded. It can't be later than "Fell asleep" (a picked frame may be up to a minute
+    after a typed asleep time, since a frame keeps its seconds and a typed time doesn't); the save is
+    refused with a message if it is. If your review is left with an in-bed time but no asleep time
+    (you gave "In bed" on its own, or emptied "Fell asleep"), the in-bed time is checked against the
+    asleep time the app already has for the night instead, since that is the one it will be shown next
+    to. In the same way "Fell asleep" can't be later than "Got up for the day" (again with a minute of
+    slack for a picked frame), and an asleep time saved with no wake-up time is checked against the
+    wake-up time the app already has. All of these are checked against what you saved before as well as
+    what you are saving now, and a refused save stores nothing, event answers included. They are checked
+    only when a save gives or empties one of those times: a note, an event answer or a dismissal is
+    never refused because the app's own night changed after you answered.
+  - **The times wait for your timezone setting.** Right after the page opens, the app may not have
+    loaded the timezone set in Settings yet, and until it has, the times on the page can be shown in the
+    wrong zone (and saved that way). So **That's right**, **Not quite…**, the time fields and the frame
+    buttons stay greyed out, with a line saying why, until it has loaded (usually a moment). Event
+    answers, **Save just the event answers** and **No one was in the bed** don't involve a time and work
+    straight away. If the setting can't be loaded at all, the line becomes an error saying so and the
+    times stay greyed out for that visit: reload the page. Every time on this page, shown or typed, is
+    in your **home** time (the timezone set in Settings), never the time zone of the phone or browser
+    you are using.
+  - **Point at the picture instead of typing.** Tap the frame that shows the real moment and the time is
+    taken from it, exact to the second rather than rounded from memory. Typing a time by hand instead
+    clears the picked frame, so only one of them is ever the answer.
+
+    | On a recorded… | Button | Fills |
+    |---|---|---|
+    | *got into bed* | **Put down here** | **In bed** only. It never changes "Fell asleep". |
+    | *got into bed* | **Asleep here** | **Fell asleep** |
+    | *got out of bed* | **Up for the day here** | **Got up for the day** |
+
+    Reading a story first? Mark both: **Put down here** on the put-down, **Asleep here** on the event
+    closest to when they settled (or type the asleep time).
+    - This is **not** the same as marking an event *correct*. An exit can be perfectly real and
+      still not be the end of the night — a child who gets out at 5:45, goes back, and gets up
+      again at 6:00 had two genuine exits and only one of them ended the night.
+    - **Before this version** there was only one button on a *got into bed* event, **Put down here**,
+      and it set the *asleep* time. Reviews saved that way are kept exactly as they are: there is no way
+      to tell which stored asleep times came from that button, so none is reinterpreted as "in bed". If
+      one of yours is wrong, open the night and correct it. A page that was already open when the app
+      updated keeps the old button until it is reloaded, and saves the old way until then.
+  - **Saying "No" can say what it really was.** In the full event list, answering **No** offers an
+    optional follow-up: **Me or another adult**, **They moved in bed**, or **Someone walking by /
+    nothing**. A plain "No" can't tell a parent leaving after a story from a child rolling over, and
+    telling those apart is what future detection work needs. Skipping the follow-up is fine: a "No"
+    with nothing else is still a complete answer. Changing the answer away from "No" removes the
+    follow-up too. The **Quick check-in?** and **Still moving?** cards don't ask it, because their own
+    buttons ("That was me", "No, still in bed") already say what happened. Those events also appear
+    in the full list with your answer shown, but without the follow-up. **That was me** is saved as
+    **Me or another adult** without asking; **No, still in bed** is saved with no follow-up.
+  - **Afternoon events are grouped out of the way.** Events recorded before **16:00** on the night's
+    date, in the timezone set in Settings, are collected at the top of the full list as **Before
+    bedtime (N)**, collapsed. They are usually someone walking across the bed zone. **None of these
+    were a bedtime event** marks them all **No** in one tap. The button stays greyed out until you
+    have opened the group at least once, so a real nap can't be marked "No" before anyone has looked
+    at it. Closing the group again doesn't lock it. It never overwrites an answer you've
+    already given, and it leaves out any event that has its own Quick check-in or Still moving card.
+    Open the group to change any single one before you save, for example to mark a real afternoon
+    nap as **Yes**. 16:00 is a first guess, not a measured value, and it's the same for every house.
+    If your child's night really starts before 16:00, don't use the button: it would mark their
+    real bedtime "No". A night with no bedtime information at all (no put-down, no sleep time, no
+    frame picked, no bedtime you typed in) shows the list ungrouped. The list is also ungrouped until
+    the app has loaded your timezone setting. That is usually a moment after the page opens, but it
+    lasts the whole visit if the settings can't be loaded. Grouping by a guessed timezone could put
+    a real evening bedtime in the afternoon group, where the button would mark it "No".
+  - **Your times become the ones shown.** Once you correct a night, the child's card, the history list
+    and the sleep detail page all show *your* times, marked **You corrected this**, with the total
+    sleep recalculated to match wherever an asleep or wake-up time you saved differs from the one that
+    screen had (a time that is the same keeps that screen's own total). This is different from
+    **Recompute this night**, which re-runs the detector: correcting records what *you* know,
+    recomputing re-asks the *app*.
+    - A corrected **In bed** only moves the "in bed" time. Saving the form also records the asleep and
+      wake-up times it shows, as your confirmation. Where those are the times a screen was already
+      showing, nothing about the sleep changes there: the total asleep, the wake-ups and the longest
+      stretch stay what that screen had. The total is recalculated only where a time you saved differs
+      from that screen's own, which is normally only when you changed it (but not always: see the known
+      limit below about the review page and the card starting from different versions of the night).
+      Tapping a picked frame's button a second time undoes the pick and puts the field back
+      the way it was (un-pressing a put-down that was already saved removes it). When you give an in-bed
+      time, the card and the detail page show it next to the asleep time even if you corrected that too
+      (they hide the *detector's* put-down beside a corrected asleep time, because it may belong to the
+      bedtime you overruled). Either way it only shows when it is at least a minute before "asleep".
+  - **A night you have corrected is locked.** Once any correction is saved (an in-bed, asleep or wake
+    time, "No one was in the bed", or a plain **That's right**), the night's saved summary is complete:
+    the nightly update stops refining it and **Recompute this night** refuses it (the dialog says the
+    night is locked). Answering only the per-event questions (**Save just the event answers**) or
+    dismissing the card is not a correction and locks nothing. A note isn't a correction either, but the
+    review form always saves the asleep and wake-up times it shows along with it (as your confirmation,
+    see above), so **a note saved from the form does lock the night**. Only a note sent on its own through
+    the API locks nothing. This is the same for every child and every install.
+
+    | | Before you correct a night | After |
+    |---|---|---|
+    | Nightly update (the ~3 hours after the window closes) | keeps refining the saved summary | leaves it alone |
+    | **Recompute this night** (admins) | can re-save it | refused: "locked because you corrected it" |
+    | Follow-up "Sleep report updated" push | can be sent once, within about 3 hours of the window closing | not sent |
+    | Sleep detail page | worked out fresh each time | still worked out fresh each time, with your times laid over it |
+    | Editing or removing your correction | — | always allowed |
+
+    **Recompute this night** (admins only) is on every night that was scored, including one that shows
+    **No one in the bed**, whether the detector scored it empty or you flagged it. It works the same way
+    there: the first press compares the saved summary with the current one and saves nothing, the second
+    saves. A flagged night is a corrected night, so it normally opens on "locked" until you remove the correction (once its saved summary is final, see above). It is
+    not offered on nights with no data, no clear sleep, or with sleep tracking off.
+
+    - **What gets locked is the night as it is when you save.** If last night's saved summary was still
+      being refined (the first ~3 hours after the window closes), saving your correction first stores the
+      night freshly worked out at that moment, then locks it, so an early rough pass isn't what gets kept.
+      Any other night — an older one, or one whose summary had already settled — is locked as it is:
+      correcting it never re-scores it (only an admin's Recompute does that, and only on an unlocked
+      night). Later saves on a night that is already locked (changing your times, a note, an event
+      answer) never re-work it either.
+    - **Removing your last correction unlocks the night.** While it is still "last night", the nightly
+      update then refines it once more if it had not finished doing so before you corrected it. Past the
+      ~3 hours that pass only updates the saved summary: no "Sleep report updated" push goes out that late.
+    - **How to remove a correction (unlock a night).** Either:
+      - an admin opens **Recompute this night** on the sleep detail page, which says the night is locked,
+        and presses **Remove my correction** (it asks you to confirm first); or
+      - anyone edits the review (**Change what you told us about this night**) and empties **all three**
+        times, **In bed**, **Fell asleep** and **Got up for the day** (or, for a night you marked "No one was
+        in the bed", presses **Someone was in the bed**). Emptying only some of them leaves the night
+        locked: the review form starts with the app's own asleep and wake-up times filled in, so clearing
+        just **In bed** still counts as a correction.
+
+      The button **removes** the times you entered (or your "No one was in the bed" answer); it does not
+      hide them, and nothing brings them back. Your answers to the individual events (and their reasons)
+      and your note are kept, and so is the night's saved summary: the button only unlocks the night, it
+      does not recompute it. Press **Recompute this night** afterwards to see the app's own figures beside
+      the saved ones, which may be wrong (that is why you corrected the night). To keep a correction after
+      that, enter your times again, and the night locks again when you save them. Removing a correction is
+      allowed for any signed-in user through the review itself, but the button is in the admin-only
+      Recompute dialog. The one side effect: removing a "No one was in the bed" answer counts as answering
+      the review, so a dismissed prompt returns and the review names the person who removed it.
+    - **Known limits, all documented rather than fixed:**
+      - A night corrected early (say 07:15, when the window closed at 07:00) keeps any time you did
+        *not* correct at the value it had then. A detected wake-up that would have settled from 06:50
+        to 07:15 an hour later stays at 06:50. Correct the wake too if it matters.
+      - "Freshly worked out at that moment" is the moment you press save, not the moment you opened the
+        page. A detected wake-up keeps moving until about 10:00 as the morning's activity is taken into
+        account, so on a page left open for a while the saved night can differ a little from what the
+        page showed you. That saved version is the one that locks. (What the page showed is still
+        recorded with your answer.)
+      - A night corrected before its first summary was saved (possible from the sleep detail page in
+        the first half hour after the window closes), or while that summary was still "no data", locks
+        at the first real summary the nightly update saves after your correction. That update still
+        sends the usual first sleep report and makes the night's timelapse. (Saving the correction does
+        not save that summary itself, on purpose: the nightly update's first pass is the one that sends
+        the report and makes the timelapse.) If that first summary says "no one in the bed" where a later
+        one would have found your child, the night is still not looked at again (it is locked). If your
+        correction has both an asleep and a wake-up time, the card and the detail page show it as a slept
+        night anyway (see the #355 point on correcting such a night, below); with only one of
+        them it stays "no one in the bed". Remove your correction (while it is still last night) to let the
+        nightly update look again. In the same way, if that
+        first summary has no wake-up time yet (the morning's departure was still being confirmed when it
+        was saved), the night keeps showing no wake-up time until you add one to your review.
+      - The sleep detail page always works the night out fresh and lays your times over it, so its
+        total asleep and wake-ups can differ a little from the locked summary on the child's card.
+      - The review page starts from the night worked out fresh when you open it, while the child's card
+        and history show the night as it was saved. When those differ (a page left open while the
+        detected wake-up moved on, or an older night saved by an earlier version of the detector), the
+        asleep and wake-up times you save unchanged are the review page's, so the card shows those and
+        recalculates its total to fit them, even if you only marked **In bed**. The sleep detail page,
+        which works the night out fresh, may keep its own total instead. Each screen's total always fits
+        the times it shows; they just aren't always the same total.
+      - **Correcting a night the app called "no one in the bed" makes it a slept night (#355).** Open the
+        night on the sleep detail page and press **Was this night right?** (the morning card on the child's
+        page never asks about such a night). Give both an asleep and a wake-up time and the night is shown
+        as a normal night on the child's card, marked **You corrected this**, and on the sleep detail page,
+        where the button then reads **Change what you told us about this night**. Your two times are taken
+        as given: asleep = your wake-up minus your asleep time; wake-ups 0; awake 0; longest stretch =
+        asleep. The app had measured no movement in the bed, which is what "no one in the bed" means, so 0
+        wake-ups is what it saw, not a count of what happened. **Known limit:** minutes with no video are
+        not subtracted on such a night, unlike on a night the app scored itself (next point), because the
+        app found no sleep of its own to count them against, so it cannot tell whether a gap fell inside
+        your times. If the cameras missed minutes inside the span you entered, they are counted as slept.
+        The detail page has no minute-by-minute timeline or wake list for such a night (none was recorded).
+        The saved summary is not rewritten: removing your correction brings back "no one in the bed"
+        exactly. Compared with the other corrections:
+
+        | | Night the app scored (slept) | Night the app called "no one in the bed" |
+        |---|---|---|
+        | Both times given | your times, total recalculated | becomes a slept night, figures as above |
+        | Only an asleep **or** only a wake-up time, or only **In bed** | your time laid over | stays "no one in the bed" (and locked); the night itself shows no times on the card or the detail page, and your time appears only in the "that's recorded" receipt and in the review |
+        | Wake-up not after asleep | total floored at 0 | stays "no one in the bed" |
+        | Night still in progress | your times laid over | stays as the cameras see it now |
+        | **No one was in the bed** (your answer) | "no one in the bed" | "no one in the bed" (your answer always wins) |
+
+        Only the child's card and the sleep detail page show such a night as slept: they lay your review over
+        the night. Everything that reads the saved summary instead still sees "no one in the bed", because a
+        correction never rewrites that summary (that is what lets removing it bring the night back, and why
+        the lock works as before). So the morning report and push, which are built from the app's own
+        summary, say "no one in the bed" for that night, even when you corrected it before they were sent;
+        and the sleep ↔ temperature averages, which read only nights the app saved as slept, leave it out.
+        Only a "no one in the bed" night is promoted; "no data" and "no sleep" nights are not.
+      - A corrected total still subtracts every unwatched minute the detector counted for the night,
+        even ones outside your corrected times (the camera-outage limit under "Minutes with no video are
+        unknown" in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)). Locking makes that figure stop changing; it
+        does not make it exact.
+      - Nights corrected **before this version** are locked from the moment you update, as they were
+        last saved.
+      - The sleep ↔ temperature averages read the detector's saved figures and never apply time
+        corrections, locked or not (a night marked "No one was in the bed" is left out of them).
+      - The app's own asleep and wake-up times, saved unchanged (**That's right**, or the form with those
+        fields left as the app had them), are saved as exactly the time the page showed, as long as it is
+        a time the app could have worked out for that night. That means inside the child's sleep window
+        widened the way the detector widens it: asleep times are looked for from 3 hours before the
+        window opens, wake-ups up to 3 hours after it closes. The app's own times always are, unless the
+        window was changed in Settings, or the app's timezone was, while the page was open. Any other time, including every **In
+        bed** time, is dated by the clock alone: before 12:00 is the morning after the night's date, 12:00
+        or later is the night's own evening. That is right for most nights, but not for a time that really
+        belongs on the other side of that line: a wake-up you correct to after midday (a detected one can
+        be, when the sleep window ends after 09:00), an asleep time you correct to before midnight on a
+        window that opens just after midnight, or any time on a sleep window that crosses local midday
+        (for example a night-shift family's 10:00 to 18:00). Typed, such a time lands on the wrong day,
+        which shows up as "In bed can't be after Fell asleep" or "Fell asleep can't be after Got up for
+        the day". That includes a time from an earlier save that the form shows again, because only the
+        app's own times are matched. So once the app no longer has a night's after-midday wake-up itself,
+        re-saving the form for that night is refused if your review also has an asleep time (and without
+        one, the wake-up is saved again a day early: see the unchecked wake-up time below). That is always
+        the case on a night older than 30 days, whose minute-by-minute data is gone so the app has no times
+        of its own for it, and on a newer night if the app's own wake-up has moved since you saved yours.
+      - On the night the clocks go back, the hour that happens twice can't be told apart as an HH:MM. The
+        app's own time in it, saved unchanged, keeps the occurrence the page showed. A time you type in
+        that hour is read as whichever occurrence the timezone arithmetic lands on, which depends on the
+        timezone: the second one at or east of UTC (Europe, Australia, New Zealand), the first one west of
+        it (the Americas). Only a time inside that one hour, one night a year.
+      - The checks against the times the app already has for the night (see "In bed and asleep are two
+        different answers") use the night as it was saved when you press save. If last night's summary
+        was still being refined, saving then stores it freshly worked out (see above), and in the rare
+        case that moves the app's asleep time earlier than an in-bed time you gave without an asleep
+        time (or its wake-up time earlier than an asleep time you gave without a wake-up time), the save
+        still goes through, and the card then hides your in-bed time (or shows asleep after up). Giving
+        both times avoids it.
+      - A wake-up time saved while your review has no asleep time is not checked against the app's
+        asleep time. A wake-up typed earlier than that (with "Fell asleep" left empty) is saved, and the
+        screens then show a night that ends before it starts. Give the asleep time too.
+      - Through the API only: a save that empties just the wake-up time, beside an asleep time already in
+        your review, is not checked against the app's wake-up time, so an asleep time after it can be left
+        standing. The review form always sends its asleep time along with the wake-up time, and that save
+        is checked.
+      - Only just after updating: a review page that was already open before the update has no **In
+        bed** field. If it saves an asleep time earlier than an in-bed time someone else has since saved
+        from an updated page, the save is refused ("In bed can't be after Fell asleep") and that old page
+        has no way to show or change the in-bed time. Reload the page.
+  - **The detector's own answer is kept underneath, not overwritten.** That is deliberate — it is what
+    a future improvement gets scored against. Nothing you enter here changes how sleep is detected.
+  - **"No one was in the bed" says the whole night was wrong, not just a time.** Next to the usual times
+    is a button for the case those don't fit at all — a night the detector scored as sleep, or as a wake
+    or two, when nobody was actually there. It changes the child's card and the sleep detail page to say
+    "You said no one was in the bed", the same way a time correction already shows your own times
+    instead of the detector's, and it is per night and per child — there's no house- or timezone-specific
+    assumption in it. **Someone was in the bed** undoes it and brings the detector's own night back.
+    - **What does and doesn't come back.** Undoing restores the detector's answer, but **not** any time
+      you had typed before you flagged the night — flagging clears those, and they are gone for good.
+      If you undo without typing anything new, the morning card then shows neither "ask" nor "done" for
+      that night: this is a known limit of the undo, not a bug, and the way past it is to type the real
+      times in again.
+    - **Unlike a night the detector itself scores empty, nothing is deleted.** That night's timelapse and
+      any recorded transition frames are kept exactly as they would be for any other night. The flag is
+      reversible, and a tap on this screen should never destroy video that undoing the tap could not
+      bring back.
+    - **Excluded from the sleep ↔ temperature averages** on the sleep detail page, so a night that never
+      happened can't drag those numbers around. A push notification already sent before you flag the
+      night cannot be recalled, but the automatic follow-up telling you when they got up is skipped once
+      you have.
+  - **The card confirms it.** After you answer, the prompt becomes a short receipt showing what you
+    recorded, and tapping it lets you change your mind.
+  - **Any night can be reviewed, not just last night.** The sleep detail page has **Was this night
+    right?** for whichever night you are looking at — that is how you correct a night you already
+    answered, since the card only ever offers nights you haven't. It is on every finished night shown as
+    slept or as "no one in the bed" (the card never asks about a "no one in the bed" night, so this is the
+    way to correct one, #355); a night still in progress, and a "no data" or "no sleep" night, have no
+    such button. Saving from there keeps you on that
+    night and shows the receipt in place, so working back through a run of nights doesn't send you to
+    re-pick the date each time.
+  - **Reviews are kept forever** — unlike the sleep minute-data behind them (30 days) or the recorded
+    events (45 days). They are a few hundred bytes a night, and their whole value is being comparable
+    years later. A recorded event you have **judged** is also kept past the usual 45 days, along with
+    its frame, so a labelled picture is never deleted on a timer.
+- **Noise on its own doesn't delay bedtime.** A bedroom microphone hears the whole house, and
+  bedtime is usually its loudest hour — a sibling being settled, a TV, adults talking. So when
+  working out **when your child fell asleep**, a noisy minute counts as awake only if that room
+  also *moved* at around the same time. The same holds for the **first half hour** after they
+  fall asleep, so the tail of the household's evening isn't reported as their first wake-up.
+  After that the rule stops: mid-night the house is quiet, so a cry with no movement counts as a
+  wake-up as you'd expect.
+- **Re-working out a night (admins).** A night's summary is worked out once, the morning after, and
+  then kept as it is — so if sleep detection is improved later, an already-recorded night keeps showing
+  the old answer while the detail view, which works the night out fresh each time you open it, shows the
+  new one. **Recompute this night** on the sleep detail page reconciles them. It compares what is
+  *saved* — the summary on the child's page — against what the recorded movement now says, and shows
+  you exactly what would change (bedtime, wake time, how long they slept, how many wake-ups) *before*
+  anything is saved. You can cancel. Admins only. **A night someone has corrected in the morning review
+  is locked and is not recomputed** — the dialog says so, and the API answers `409` with
+  `reason: "reviewed"`. Remove the correction first if the night really should be re-scored: the dialog
+  has a **Remove my correction** button for it (see "How to remove a correction", above).
+  **It can never make a night worse:** the minute-by-minute data behind a night is only kept for 30
+  days — the same span the date picker offers — so the oldest night you can browse sits right on that
+  edge. If its data has aged out, the recompute is refused and the saved summary is left alone, rather
+  than being replaced with "no data". The same refusal protects a night saved before a detection change
+  that would now come out "no data" for another reason — for example most of it had sound but no video.
+  (The page only offers Recompute on a night that still scores, so in practice that refusal is only seen
+  through the API; its 409 says which reason applied — `reason`, `status`, `coverage_minutes` — see
+  [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "Minutes with no video are unknown in the sleep numbers".)
+- **In bed, then asleep.** On a night where your child was put down a while before they fell asleep
+  (a bedtime story, a slow settle), the card and the detail page show both: **In bed** is the
+  put-down the camera recorded, and **Asleep** is when the room went quiet. That's the same time the
+  app has always reported as bedtime. The extra time appears only when "in bed" is at least a minute
+  before "asleep", so most nights still show one time. If you corrected a night's asleep time, the
+  camera's "In bed" is hidden and only your time is shown: the recorded put-down belongs to the bedtime
+  you corrected, so it may not match yours. Correcting only the wake-up time keeps it. If you gave the
+  **In bed** time yourself in the morning review, yours is shown, beside your asleep time too. A night
+  saved before this update has no "in bed" time on the child's card until it's recomputed, and a night
+  you corrected in the morning review is locked against that until the correction is removed (or give
+  its **In bed** time yourself in the review). The detail page works the night out fresh each time, so
+  it shows the time straight away.
+- **At a glance, and live.** Each child's page summarises last night — total sleep, wake-ups,
+  longest stretch — and while a night is in progress it updates as **"Tonight · so far"**, so an
+  early-morning wake appears within a minute or two rather than only after the window closes.
+  Treat those live figures as provisional: a night in progress is judged only on what has
+  happened so far, so a bedtime can be revised later in the evening and the morning wake isn't
+  looked for at all until the night is complete. The settled numbers are the ones on the card the
+  following day.
+  - **"Last night" is always the last night that has finished.** The saved summary for a night is
+    written by the nightly update, which runs every 30 minutes, so for up to half an hour after the
+    window closes (and for as long as that update is refused or skipped, for example for a night you
+    corrected in the morning review) there is no saved summary for it yet. The card, and the detail
+    page it opens, then show last night **worked out fresh** instead of the night before; once the
+    saved summary exists they show that, so the card keeps agreeing with the morning notification.
+    Reading the card never saves anything. If the night was not watched enough to score it reads "no
+    data" rather than falling back to an older night.
+- **The detail view.** Tap the sleep summary for the full **night timeline**: a to-scale bar of
+  asleep / stirring / awake stretches on a real time axis, every wake-up listed with its time
+  and length, a **movement outside the bed** list, and a date picker to step back through
+  roughly the last month of nights. Two moment markers sit on the bar — **got into bed** and
+  **got out of bed** — and they are deliberately the only two shown: they're the put-down and
+  the morning departure the night's times were actually derived from. A single camera can see
+  that something crossed the edge of the bed, but not *who*, so movement in between is reported
+  as exactly that and never attributed to a person. A stretch the camera has no data for at
+  all — a detector restart, a dead connection — shows as its own striped **"No data"** segment
+  rather than being folded into asleep or awake; it isn't counted toward the reported sleep
+  duration either, and a night with a long enough gap can come back with less sleep counted, or
+  occasionally no clear sleep detected, than the raw hours between bedtime and waking would
+  suggest. **A stretch with sound but no video counts as "No data" too:** a minute is only
+  counted as watched if the camera's video actually delivered a picture in it (at least one real
+  frame — any frame rate), and the sound of an unwatched minute is not used, because a bedroom
+  microphone hears the whole house. So if the video stalls over bedtime, the reported bedtime is
+  the first quiet minute after the video came back, and a cry during a stall is not shown as a
+  wake-up from the noise alone. A night more than half unwatched is "no data", and a night is only
+  ever reported as **"no one was in the bed"** when at least **90%** of it was watched (a fixed
+  first estimate, not a setting; on a night still in progress, 90% of the part so far), because
+  that answer also discards the night's timelapse. A
+  frozen picture still counts as watched — see
+  [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "Minutes with no video are unknown in the sleep numbers".
+- **Room temperature (optional).** If a camera reports temperature/humidity over **MQTT** (set
+  up under **Settings → MQTT**, e.g. via Zigbee2MQTT — the readings also show on the camera
+  tile), the sleep detail overlays the night's room temperature beneath the timeline, aligned to
+  the same time axis. A **"Sleep & room temperature"** card compares wake-ups on the child's warmer
+  vs cooler nights, so you can spot whether a warm room tends to mean more waking — a pattern, not
+  a cause. It reads the child's 30 most recent tracked nights with a temperature (fixed, not a
+  setting). From the first such night until there are 5 it reads "Collecting nights" with the count
+  so far. From 5, a room whose temperature varied by less than 1°C across those nights is reported
+  as "barely changed": that says nothing about sleep, only that the room did not change enough to
+  compare. Otherwise the nights are split at the median temperature, and the card needs **at least
+  10 nights in each of the cooler group and the warmer group before it says anything about sleep**
+  (fixed, not a setting; the figure is a judgement, not a measurement, and counts nights only, so it
+  is the same in any home or climate). Nights at exactly the median temperature belong to neither
+  group, so the first comparison needs at least 21 nights (10 cooler, 10 warmer and one at the
+  median). Until both groups reach 10 the card reads "Not enough nights yet" with how many it has
+  of each, and shows no verdict and no averages. Once both groups have 10, the wording and numbers
+  are exactly what they were before. Known limit: each night's average temperature is rounded to
+  0.1°C, so in a very steady room where many nights share the median value (all of which join
+  neither group) one group can stay under 10, and the card keeps saying "Not enough nights yet",
+  for as long as the room stays that steady.
+
+## Adding caregivers
+
+Once signed in as admin, go to **Settings → Caregivers** to create additional logins (e.g. for a
+partner or babysitter).
+
+The rule (owner decision, 2026-10-10): **a caregiver can watch and act in the moment, but cannot
+destroy or reconfigure.**
+
+| Capability | Caregiver | Admin |
+|---|:---:|:---:|
+| View live cameras; watch and download alert clips, recordings, wake clips and timelapses | Yes | Yes |
+| Record, move a PTZ camera, talk through a camera | Yes | Yes |
+| Restart, reboot, or snooze camera alerts (recorded with your username; see below) | Yes | Yes |
+| Reorder cameras on the live grid (the order also picks the measuring camera of a child whose sleep camera is on Automatic) | No | Yes |
+| Assign a camera to a child | No | Yes |
+| Add / edit / enable / delete a camera | No | Yes |
+| Change a child's name, birthday, colour and photo | Yes | Yes |
+| Add a child; turn a child's sleep tracking on or off; change their bedtime and wake time; choose the camera their sleep is measured from | No | Yes |
+| Answer the morning sleep review (the review shows who last answered it) | Yes | Yes |
+| Delete an alert clip, a recording or a wake clip | No | Yes |
+| Delete a timelapse | No | Yes |
+| Delete a child and everything recorded for them (nights, reviews, bed transitions, recordings, timelapses) | No | Yes |
+| Change global settings (detection, notifications, providers, recording retention) | No | Yes |
+| Manage caregiver/admin accounts and sessions | No | Yes |
+
+Deleting by hand is not the same as **retention**: the automatic sweep of old alert clips and wake clips
+(Settings → Recording, admin only to configure) runs on a timer on every install, whoever is signed in.
+
+**Who did it is recorded.** Silencing a camera's alerts, un-silencing them, restarting its stream and
+rebooting it each add a row to **Camera history** naming the account by its **username** (the login name
+an admin sets, never the first name, which anyone can change on their own account); a restart or reboot
+that failed is recorded too. While a camera is silenced, its tile shows who silenced it, to everyone. The
+morning review shows who last answered it (above). Details, including what happens when the history
+cannot be written, are in [docs/camera-controls.md](docs/camera-controls.md#silencing-a-cameras-alerts-and-who-did-what).
+If a camera's alerts are kept silenced, on and off, for a long time (more than an hour by default, short gaps
+between renewals included), the admins are sent one notification for it, which names no one; on Pushover, ntfy
+and Gotify everyone on them gets it too. See [Long-silence alerts](docs/camera-controls.md#long-silence-alerts).
+
+On a caregiver's screen the admin-only controls are not shown (sleep tracking, the window and the sleep
+camera are shown, greyed out, with a note); the server refuses them too, so a page opened before an update that changed a
+permission gets a refusal rather than a change.
+
+The **Settings** hub itself is visible to caregivers too — its admin-only pages (general,
+camera controls, recording, MQTT, push providers, users, logs, clip storage) are simply hidden
+for them rather than the whole screen being off-limits.
+
+**Changing someone’s role takes effect immediately** — on their very next action, on every device
+they’re signed in on. Demoting an admin to caregiver does *not* sign them out: they keep browsing as
+a caregiver and simply lose the admin-only screens. Deleting an account, by contrast, ends its
+sessions at once and signs that person out everywhere.
+
+**There must always be at least one admin.** The only admin on an install can't be changed to
+caregiver until another account is made an admin first, and no account can ever delete itself —
+another admin has to remove it. Both are enforced by the server, not just hidden in the UI: the Role
+field explains it up front when it applies, and a request that tries anyway gets a clear error rather
+than a partial change. If an install somehow already has no admin (a database edited by hand, or
+from before this was enforced), see **[docs/mfa.md](docs/mfa.md)**'s recovery section for the console
+command that fixes it — it's documented there alongside the equivalent two-factor recovery, not
+because it's about two-factor, but because it's the same kind of last-resort console fix.
+
+Any account can also turn on **two-factor authentication** for its own login — see
+**[docs/mfa.md](docs/mfa.md)** for enrolling, one-time backup codes, and how to recover if an
+admin loses their authenticator.
+
+### `SESSION_TTL_DAYS` — how long a sign-in lasts
+
+> **⚠️ A sign-in ends at the same time of day it began, and the app's push alerts stop with it, without
+> warning.** The lifetime is counted from sign-in, not from the last use: a phone that signed in at 02:00
+> is signed out at 02:00, `SESSION_TTL_DAYS` days later. From then until someone opens the app (which
+> shows the sign-in screen), that phone gets no Nightlight push alerts, and a live view or background
+> audio playing on it stops. Pushover, ntfy and Gotify are not affected. The session lists show when each
+> device was last active, not when it will be signed out: if you rely on a phone's alerts, sign in on it
+> again at a time that suits you before its lifetime runs out.
+
+| Variable | Default | Range | What it does |
+|---|---|---|---|
+| `SESSION_TTL_DAYS` | `30` (blank = 30) | `7`-`30` whole days | How many days a sign-in lasts, counted from sign-in. Anything else is ignored with a warning in the log and 30 is used. |
+
+- **It can only shorten.** 30 is the most, as before this setting existed; 7 is the least, because a shorter,
+  silent end would stop alerts at the same hour every few nights.
+- **Lowering it signs out every sign-in older than the new value at that device's next request**, push and
+  live views included (they check the same rule). **Raising it does not lengthen sign-ins already made**: a
+  sign-in's token carries the lifetime in force when it was issued, so one made at 7 still ends on its 7th
+  day after you raise it to 30. A changed value needs a restart, and one other than 30 is logged at start.
+- **There is no idle sign-out**: an unused device stays signed in until its lifetime ends.
+- The sign-in token is kept in the browser's (or the Android app's) `localStorage`, and every sign-in can be
+  ended from the server at once (sign out a device, remove an account, change a password). Since this
+  setting, the 12-hour token in video and snapshot URLs also stops when its sign-in ends. What this means
+  for security: [SECURITY.md](SECURITY.md#how-long-a-sign-in-lasts-and-where-it-is-kept).
+
+## Running behind a reverse proxy (e.g. SWAG on Unraid)
+
+A ready-to-use config is in `reverse-proxy/nightlight.subdomain.conf`. Copy it to
+`swag/config/nginx/proxy-confs/nightlight.subdomain.conf` and replace `UNRAID_LAN_IP`
+with the container's LAN IP — the **host's IP** in host mode, or the container's **own
+dedicated IP** if you gave it one (see [Networking modes](#networking-modes)). Either way SWAG
+reaches it by that IP, not by container name.
+
+> **macvlan note:** if you put Nightlight on its own IP with plain `macvlan`, SWAG running on the
+> *same host* won't be able to reach it (the host↔macvlan-container limitation noted above) — use
+> `ipvlan`, or run SWAG on a different host.
+
+Everything is proxied through a single port (4000): the app, login, all pages, and the
+video signaling handshake — no extra ports to open on your router for this part.
+
+### `TRUST_PROXY` — telling Nightlight your real client addresses
+
+| Variable | Default | What it does |
+|---|---|---|
+| `TRUST_PROXY` | `loopback` | Which upstream addresses may set `X-Forwarded-For`. Accepts an IP or CIDR (`10.0.0.20`, `172.18.0.0/16`), a comma-separated list, a hop count (`1`), or a named range. |
+
+Behind a proxy, every request arrives from the **proxy's** address unless you tell Nightlight to trust
+it. The default (`loopback`) only trusts a proxy on `127.0.0.1` — and SWAG reaches Nightlight by its
+LAN IP, so with the setup above **it is not trusted and every remote visitor looks like one client**.
+
+Set it to the address your proxy connects *from*:
+
+```bash
+-e TRUST_PROXY=10.0.0.20        # SWAG's own LAN IP
+```
+
+> **⚠️ Only set this to an address you control.** Whatever you trust here is allowed to declare a
+> client's IP. Too broad a value — or `true`, which trusts *every* upstream — lets anyone forge
+> `X-Forwarded-For` and slip the login rate limit entirely, which is worse than leaving it unset. If
+> you are not sure, leave it alone.
+
+**IPv6 ranges and IPv4 clients (changed with the `proxy-addr` 2.0.8 update).** An IPv6 range is now
+compared with IPv4 peers only if it is an IPv4-mapped range of /96 or longer, such as `::ffff:a00:0/104`,
+and that behaves exactly like the IPv4 range it maps (`10.0.0.0/8`). Any other IPv6 range, such as `::/1`,
+no longer matches IPv4 peers, and a range written in mapped form but shorter than /96, such as
+`::ffff:0:0/80`, now matches no peer at all. IPv4 addresses and ranges, the named ranges, hop counts and
+`true`/`false` behave as before. If you relied on an IPv6 range to cover IPv4 peers, list the IPv4 address
+or range instead.
+
+A value Nightlight can't make sense of is **ignored, with a warning in the log**, and the safe default
+is used instead — a typo here will never stop the app starting.
+
+**You do not have to set it.** Login attempts are limited per account *and* per source, so even with
+every remote user sharing the proxy's address, one person mistyping their password cannot lock anyone
+else out. Setting `TRUST_PROXY` makes the per-source half meaningful as well.
+
+### `STUN_SERVERS` — which STUN servers Low latency (WebRTC) uses
+
+| Variable | Default | What it does |
+|---|---|---|
+| `STUN_SERVERS` | `stun:stun.l.google.com:19302` (Google's public server) | Comma-separated list of `stun:host` or `stun:host:port` URLs, used by the browser **and** by the bundled MediaMTX, and the only STUN hosts the browser is allowed to contact. |
+
+| You set | Result |
+|---|---|
+| nothing (variable unset) | Google's public STUN server, as in earlier versions |
+| blank (`STUN_SERVERS=`, or the field cleared on Unraid) | **No STUN server.** Nothing contacts Google or anyone else |
+| `stun:stun.example.org:3478` or a comma-separated list | exactly those servers (port defaults to 3478) |
+| anything that is not a `stun:` URL (`turn:`, `stuns:`, a typo) | that entry is ignored, with **one** warning in the log; if no entry is valid, STUN is **off** (never silently back to Google) |
+
+STUN is only how a WebRTC peer learns its public address. **Watching on your home network never needs it.** A viewer
+outside your network who is behind NAT may fail to connect without it (Compatibility (HLS) mode still works). With the
+default, Google sees the viewer's public IP address and when each live view connected. `turn:` relay servers are not
+supported. Change takes effect on restart. The log shows `[stun] ...` at start-up.
+
+The browser starts reading this list when you sign in, before the first camera tile connects (#739).
+On a very slow link, if the first tile appears before that answer arrives (for example, from a direct link),
+its 1-second lookup budget can still expire. That connection then uses host candidates only, with no STUN;
+later attempts use the list once it arrives. It never substitutes Google's server for a missing answer.
+
+On Unraid it is the **STUN Servers** field: it ships with the Google URL, so clear the field to turn STUN off.
+
+### `CLOUDFLARE_ANALYTICS` — Cloudflare Web Analytics through Cloudflare's proxy
+
+| Variable | Default | What it does |
+|---|---|---|
+| `CLOUDFLARE_ANALYTICS` | blank (off) | Allows Cloudflare's Web Analytics beacon in Nightlight's Content-Security-Policy. `1`, `true`, `yes` or `on` (any case, spaces ignored) turn it on; blank, `0`, `false`, `no` or `off` keep it off. Any other value also keeps it off and logs one warning at start. |
+
+**If you do not use Cloudflare Web Analytics, leave it blank: nothing changes.**
+
+It matters only if you serve Nightlight through Cloudflare's proxy **and** have Cloudflare Web Analytics
+turned on for that site. Cloudflare then injects its beacon script into every page, and Nightlight's
+security policy **blocks it unless this is on**. You can tell it is being blocked: the browser console
+shows a Content-Security-Policy violation, and the container log shows `[csp-report]` lines (at most 10
+a minute). Two ways to stop that: set `CLOUDFLARE_ANALYTICS=1` to allow the beacon, or, if you do not
+want the analytics, turn off Web Analytics' automatic setup (the beacon injection) for that site in the
+Cloudflare dashboard.
+
+> **Upgrading from a version before this setting existed:** the beacon used to be allowed on every
+> install. If you rely on Cloudflare Web Analytics, set the variable, or your analytics stop. A container
+> made from the Unraid template before this change does not gain the new field by itself: add it as a
+> variable ("Add another Path, Port, Variable, Label or Device") with the key `CLOUDFLARE_ANALYTICS`.
+
+With it off (the default), the page can only run scripts from your own server. The rest of the policy
+is the same either way; see "CSP is enforced" in [docs/architecture.md](docs/architecture.md#csp-is-enforced--keep-it-that-way).
+
+## Remote / internet access (watching from outside your home network)
+
+By default this is LAN-only. There are two ways to watch remotely, and each camera tile
+has a toggle to switch between them ("Low latency" / "Compatibility"):
+
+**Low latency (WebRTC)** — near-instant video, same as at home. This requires:
+1. Set up SWAG as described above (HTTPS for the app itself).
+2. Set `PUBLIC_HOST` to your public IP or a DDNS hostname. ⚠️ It must **not** be a
+   Cloudflare-proxied (orange cloud) name: Cloudflare's proxy carries only HTTP(S), never the UDP
+   media, so remote Low latency would never connect while the page itself loads fine. Use a
+   separate DNS-only (grey cloud) record, e.g. `rtc.example.com`, for `PUBLIC_HOST` and keep the
+   proxied name for the web page.
+3. Forward **UDP port 8189** (or your `WEBRTC_UDP_PORT`, see "Running more than one instance" above) on your router to your server's
+   LAN IP.
+
+This is a hard requirement of WebRTC, not a workaround — the actual audio/video always
+travels over UDP between your browser and MediaMTX, no matter what. A TURN relay server
+doesn't change this (it only changes how the *signaling* connects, not the media itself),
+so there's no way to get the low-latency mode down to zero UDP ports. This single UDP
+port forward is all you need, unless you're behind CGNAT.
+
+**Compatibility (HLS)** — a few seconds of delay, but pure HTTP/TCP, so it rides through
+the same port 443 as everything else with **no extra port forwarding at all**. Use this if
+you'd rather not forward a UDP port, or if you're ever watching from a network that blocks
+outbound UDP (some corporate/public Wi-Fi).
+
+> **iOS background audio:** On iPhone/iPad, background listening (screen off / app minimised) works
+> in **Low latency** mode only — its WebRTC audio lets Nightlight fully own the lock screen (camera
+> name, artwork, Pause/Play). **Compatibility** is HLS, which iOS runs its own native lock-screen
+> session for that we can't reliably control, so Background isn't offered for a Compatibility camera
+> on iOS (it was tried and removed for being inconsistent — see [KNOWN-ISSUES.md](KNOWN-ISSUES.md)).
+> Compatibility still works for live viewing. Android is unaffected — its background-listening
+> service keeps both modes alive.
+
+Both modes work automatically once SWAG + `PUBLIC_HOST` are set up — Compatibility mode
+needs nothing further, since it's already proxied through the app's normal port.
+
+## Installing to your home screen
+
+The app has a web app manifest and icons for a full-screen, native-app-like home-screen
+experience — no browser address bar. **It has no service worker**, so this is an install
+shortcut, not an offline mode: the app still needs to reach your server over the network every
+time, same as opening it in a tab.
+
+What you actually get depends on the platform and whether the site is served over **HTTPS**
+(via the reverse-proxy setup above) or plain `http://` on your LAN:
+
+| Platform | Over HTTPS | Over plain `http://` |
+|---|---|---|
+| Android — Chrome / Samsung Internet | Installable PWA (full-screen, own icon, install prompt) | Usually a browser-badged **shortcut** that still opens inside the browser, not a true standalone install — Chromium's installability criteria require HTTPS (or `localhost`) |
+| iOS — Safari | Add to Home Screen (full-screen, own icon) | Add to Home Screen works the same over plain HTTP — iOS doesn't gate it on HTTPS the way Chromium does |
+| Desktop browser | Installable as a windowed app (Chrome/Edge) | Same shortcut limitation as Android Chrome |
+
+- **Android, HTTPS**: browser menu → "Add to Home screen" / "Install app" (or the automatic
+  install banner).
+- **Android, plain HTTP**: same menu item still adds something to your home screen, but expect
+  a shortcut that opens in the browser rather than a standalone window.
+- **iOS**: Share button → "Add to Home Screen" — works the same either way.
+
+If you want the full installed experience on Android specifically, the reverse-proxy/HTTPS
+setup above is worth doing; otherwise the **native Android app** (below) gives you a true
+standalone app without needing HTTPS at all.
+
+**Zooming the page.** In a browser, including a home-screen install, you can pinch-zoom the page as on
+any other site. In the native apps (below) page zoom stays **locked**, because in the Android app
+double-tapping the picture-in-picture window used to zoom the whole app and leave it stuck until a
+restart. Double-tap zoom on a camera's video is the app's own and works everywhere.
+
+- **Android and desktop browsers:** pinch-zoom works again (it used to be blocked).
+- **iPhone and iPad (Safari, or any other iOS browser):** unchanged. Pinch-zoom already worked there,
+  because Safari ignores the zoom lock for pinching, and the page still does not jump in when you tap
+  into a text field, because Nightlight keeps the one setting that stops Safari doing that. Expected
+  from Safari's behaviour; not checked on a device.
+
+While the page is zoomed in, dragging down on the live screen pans the page; the live screen's
+pull-to-refresh works again once you zoom back out.
+
+## Mobile apps (Android & iOS)
+
+Beyond the PWA, there are companion **native apps** in a separate repo,
+[nightlight-mobile](https://github.com/sauso/nightlight-mobile). They're thin native
+shells around this same web UI — the app loads the interface **live from your own server**
+rather than bundling it, so any server update applies to the apps automatically with no
+reinstall. On first launch you just enter your server's address (like the Home Assistant
+app); a "Change server" menu item switches later.
+
+What the native apps add over the browser/PWA:
+
+- **Reliable background listening** — keep hearing a camera with the screen off or the app
+  minimised. Android uses a foreground service (with a wake/wifi lock and a battery-
+  optimisation exemption); iOS uses a background audio session. Plain in-browser background
+  audio is unreliable by comparison. **On iOS this requires a camera in Low latency mode** —
+  Compatibility (HLS) can't do reliable background audio on iOS (iOS runs its own native
+  lock-screen session for it), so Background is only offered for Low-latency cameras there; see the
+  Low latency / Compatibility notes above and [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
+- **Pause/Resume from the system controls** — Android's notification and iOS's Now Playing
+  (Control Center / lock screen), plus a Stop on Android.
+- **Picture-in-Picture** — float a camera in a small always-on-top window while you use
+  other apps (Android; the browser has its own PiP too).
+- **Battery-friendly** — minimising the app disconnects streams unless a camera is in
+  Background mode, so nothing keeps pulling video in the background.
+- **Push notifications** — a phone alert when a camera sees motion, even with the app closed
+  (Android only for now). See below.
+
+### Push notifications (motion alerts)
+
+Get a **phone notification** when a camera with motion detection sees movement — even when the app is
+closed. It's off by default, and the in-app **Recent alerts** list — on each child's page, or the
+combined view under **Settings → Logs** (admin only) — works with or without it. There are two
+ways to set it up (pick one), both configured under **Settings → Push notifications**:
+
+**Pushover (recommended — simplest, and works on iOS).** A small notification service (the same one
+Sonarr/Radarr use). No Firebase project, no Apple Developer account.
+
+1. Install the **Pushover** app on your phone and note your **User Key** (or make a Delivery Group to
+   alert several caregivers).
+2. Create a Pushover application at [pushover.net/apps/build](https://pushover.net/apps/build) and copy
+   its **API Token**.
+3. In **Settings → Push notifications → Pushover**, paste the token + your user/group key, **Enable**,
+   **Save** (it verifies with Pushover), and **Send test**. Then enable **Motion detection** on a
+   camera. Alerts arrive with a **snapshot** of what triggered them.
+
+**Firebase / FCM (Android app only).** Delivers straight to the Nightlight Android app via your own
+Firebase project: drop `google-services.json` + a `firebase-service-account.json` service-account key
+into your data dir (e.g. `/mnt/user/appdata/nightlight`, keep the key `chmod 600`), then enable it
+under **Settings → Push notifications**. Each phone opts in under **Account → Notifications**.
+
+Full walkthrough for both, with troubleshooting: **[docs/notifications.md](docs/notifications.md)**.
+
+**Getting them:**
+- **Android** — download the signed APK from the
+  [nightlight-mobile Releases](https://github.com/sauso/nightlight-mobile/releases) page and
+  sideload it (built and signed automatically in CI on each release).
+- **iOS** — no App Store build yet; it's installed by sideloading (e.g. AltStore/Sideloadly
+  with a free Apple ID). See the nightlight-mobile repo for the current status and steps.
+
+Both apps are built entirely in GitHub Actions — see the nightlight-mobile repo for how,
+and its own `CHANGELOG.md` for per-release notes.
+
+## Logs
+
+Both the app and MediaMTX log to stdout, captured by Docker in the normal way:
+
+```bash
+docker logs -f nightlight
+```
+
+Docker's own log rotation (already configured in the `docker run`/Compose examples
+above, and in the Unraid template's extra parameters) caps total log storage at 10MB × 3
+files, so this doesn't grow unbounded - this matters particularly on Unraid, where
+Docker's storage is a fixed-size image that can break the whole Docker service if it
+fills up. If you deployed before this was added, add `--log-opt max-size=10m --log-opt
+max-file=3` yourself (or the Unraid template's "Extra Parameters" field) to get the
+same protection.
+
+Timestamps use your container's local time (see the `TZ` variable above) rather than
+UTC, so they line up with when you actually remember something happening.
+
+## Times and your timezone
+
+Every time the app shows is in your **home** time: the timezone set in **Settings → General** (an IANA
+name such as `Europe/London`; **default `UTC`** until you set it, so set it first). It is the same zone
+the sleep reports, the morning review and the alert schedule already use, so an alert at "7:00 pm" is
+the same moment on every phone, and it agrees with the sleep card. It is **not** the zone of the phone or
+browser you happen to be using.
+
+- **When your device is in a different zone** (travelling, or someone watching from abroad), a time
+  carries a short zone label after it, such as **7:00 pm GMT-7**, so it cannot be mistaken for the
+  device's own clock. **When the device is in your home zone nothing is added**, so a household that
+  stays put sees no change. Clock format (12 or 24 hour) and date order follow the device's own language
+  settings, not the timezone.
+- **Where it applies:** the alert and camera-history lists (the exact time is in the tooltip on each row
+  and in the clip player), **Clip Management** (clips are grouped under their home-time **day**, and the
+  date filter and its "today" use home days, so two people never see the same clip on different days),
+  the **Recordings** card, a camera tile's **silenced until** time, and the nightly timelapse dates (a
+  night is a calendar date worked out in home time, so it never shifts).
+- **Not affected:** ages such as "3h ago" (elapsed time is the same everywhere), the sleep screens (they
+  were already in home time), and the build date under **About**.
+- **Known limits.** The label appears whenever the device's zone *name* differs from home, even if the two
+  happen to share an offset today (Paris and Berlin, say); it never hides a real difference. A time from
+  before a daylight-saving change shows the offset that applied then. Right after the page opens, before the setting has
+  loaded, times show in `UTC` for a moment and then switch to your home zone.
+
+## Troubleshooting
+
+- **Camera shows "No signal"**: double check the RTSP URL works with a tool like VLC
+  (Media → Open Network Stream) first — if VLC can't play it, the app won't either.
+- **The app shows "Can't reach Nightlight" instead of the sign-in screen**: the app could not get an answer
+  from the server (it is restarting, off, or this device is not on the home network), so it does not know
+  whether you are signed in and does not ask for a password that could not be checked anyway. It retries
+  by itself (after 5 seconds, then 10, 20, and every 30 seconds from then on) and you can press **Try again**
+  at any time; once the server answers you land in the app, or on the sign-in screen if you really were signed
+  out. Your sign-in is kept while it retries. Only a server that answers "not signed in" shows the sign-in screen,
+  and so does **Sign out**, at once.
+- **Video won't connect from a phone but the pages load fine**: confirm the device is on
+  the same LAN (for Low latency mode) — see "Remote / internet access" above if it's
+  actually a different network.
+- **A camera shows disconnected for a few seconds after opening the app and doesn't come
+  back**: this is usually a stale WebRTC connection on the phone itself, not the camera or
+  server — the video connection can get "wedged" after the phone sleeps, switches networks,
+  or hands off Wi-Fi/cellular, and won't always re-establish on its own. **Pull down on the
+  camera dashboard to reconnect** — this works in the browser and in the mobile apps, and
+  rebuilds the connection without a full restart. If a camera is *actually* down, every
+  device sees it, not just one — check the Camera history panel (Settings) or the logs
+  (below) to tell the two apart.
+- **Background listening stops after a while (Android app)**: Android's battery optimisation
+  (Doze) will eventually freeze the app and cut its network unless it's exempt. The app asks
+  for the exemption the first time you enable Background mode — if you declined, grant it
+  manually under Settings → Apps → Nightlight → Battery → Unrestricted. (Background audio is
+  a feature of the native apps, not the browser/PWA — see [Mobile apps](#mobile-apps-android--ios).)
+- **A camera says "No signal" only in Compatibility mode**: usually the camera sending bad
+  audio timestamps, which can stall the HLS pipeline. Nightlight resamples/rewrites camera
+  timestamps to ride through this, but if it persists, power-cycle or update that camera's
+  firmware. See [`KNOWN-ISSUES.md`](KNOWN-ISSUES.md).
+- **Checking whether MediaMTX has registered your cameras**: its API is loopback-only (not
+  reachable directly from a browser), so check it from inside the container:
+  ```bash
+  docker exec nightlight wget -qO- http://127.0.0.1:9997/v3/paths/list
+  ```
+  An empty `"items":[]` with cameras added in the app means MediaMTX and the app's database
+  have drifted apart — restarting the container re-syncs them automatically (see the
+  startup log line "Reconciled N camera path(s)...").
+- **Checking logs**: see the "Logs" section above — `docker logs -f nightlight`.
+
+For a catalogue of understood quirks (camera glitches, WebRTC reconnects, the watchdog's
+recovery window) with what each one means and whether it needs any action, see
+[`KNOWN-ISSUES.md`](KNOWN-ISSUES.md).
+
+## Building from source
+
+```bash
+git clone https://github.com/sauso/nightlight.git
+cd nightlight
+docker build -t nightlight .
+docker run -d --name nightlight --network host --stop-timeout 30 \
+  -e PUID=99 -e PGID=100 -v ./data:/app/data nightlight
+```
+
+### Running the tests
+
+The tests need **Node 24** (the version in `.nvmrc`; `engines` in both `package.json` files says `>=24`, and the Docker image and CI use the same). On an older Node the backend suite does not fail in one place with one reason: 16 test files fail in ways that look unrelated (`The requested module 'child_process' does not provide an export named 'spawn'`, `mock.module is not a function`). The cause is that the tests replace modules with `mock.module(name, { exports })`, and Node 22 ignores `exports`, so the mocked module has no named exports to import. `backend/test/node-version-pin.test.js` fails first, with that explanation, when the suite runs on a Node that cannot do it.
+
+```bash
+nvm use                      # reads .nvmrc
+cd backend && npm ci && npm test
+cd ../frontend && npm ci && npm test
+```
+
+## Project layout
+
+```
+backend/          Express API + SQLite storage + process supervision for MediaMTX/FFmpeg
+frontend/          React mobile-first UI (built into the image at build time)
+mediamtx/          Default MediaMTX config (baked into the image - see src/index.js for why)
+reverse-proxy/     Example SWAG config for running behind HTTPS
+Dockerfile         Single combined image (app + MediaMTX + FFmpeg)
+unraid-template.xml   Unraid Community Applications template
+docker-compose.yml
+```
+
+## License
+
+MIT — see `LICENSE`.
