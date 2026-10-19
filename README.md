@@ -104,7 +104,9 @@ Start with the [documentation hub](docs/README.md), or jump directly to:
 - [Building and testing](docs/development.md)
 - [Sleep tracking](docs/sleep-tracking.md)
 - [Reverse proxy and remote access](docs/remote-access.md)
-- [Full reference](docs/readme-reference.md) — timezones, caregivers, `SESSION_TTL_DAYS`, logs (the old README, being split into guides)
+- [Adding caregivers](docs/caregivers.md)
+- [Your home screen and the mobile apps](docs/mobile.md)
+- [Full reference](docs/readme-reference.md) — the rest of the old README (installation detail, networking modes, managing cameras, building), being split into guides
 
 ## Help make Nightlight better
 

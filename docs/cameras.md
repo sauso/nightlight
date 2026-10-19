@@ -18,4 +18,4 @@ Removing a camera asks for confirmation, then permanently deletes everything sto
 
 ## Caregivers
 
-Create caregiver accounts in the app to give other trusted people access. For sign-in and multi-factor authentication, see [MFA](mfa.md). Only share access with people you trust.
+Create caregiver accounts in the app to give other trusted people access. For sign-in and multi-factor authentication, see [MFA](mfa.md). Only share access with people you trust. What caregivers and admins can each do, and how long a sign-in lasts, are in [Adding caregivers](caregivers.md).

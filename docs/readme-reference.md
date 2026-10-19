@@ -349,93 +349,7 @@ Moved to its own page: [Sleep tracking](sleep-tracking.md).
 
 ## Adding caregivers
 
-Once signed in as admin, go to **Settings → Caregivers** to create additional logins (e.g. for a
-partner or babysitter).
-
-The rule (owner decision, 2026-10-10): **a caregiver can watch and act in the moment, but cannot
-destroy or reconfigure.**
-
-| Capability | Caregiver | Admin |
-|---|:---:|:---:|
-| View live cameras; watch and download alert clips, recordings, wake clips and timelapses | Yes | Yes |
-| Record, move a PTZ camera, talk through a camera | Yes | Yes |
-| Restart, reboot, or snooze camera alerts (recorded with your username; see below) | Yes | Yes |
-| Reorder cameras on the live grid (the order also picks the measuring camera of a child whose sleep camera is on Automatic) | No | Yes |
-| Assign a camera to a child | No | Yes |
-| Add / edit / enable / delete a camera | No | Yes |
-| Change a child's name, birthday, colour and photo | Yes | Yes |
-| Add a child; turn a child's sleep tracking on or off; change their bedtime and wake time; choose the camera their sleep is measured from | No | Yes |
-| Answer the morning sleep review (the review shows who last answered it) | Yes | Yes |
-| Delete an alert clip, a recording or a wake clip | No | Yes |
-| Delete a timelapse | No | Yes |
-| Delete a child and everything recorded for them (nights, reviews, bed transitions, recordings, timelapses) | No | Yes |
-| Change global settings (detection, notifications, providers, recording retention) | No | Yes |
-| Manage caregiver/admin accounts and sessions | No | Yes |
-
-Deleting by hand is not the same as **retention**: the automatic sweep of old alert clips and wake clips
-(Settings → Recording, admin only to configure) runs on a timer on every install, whoever is signed in.
-
-**Who did it is recorded.** Silencing a camera's alerts, un-silencing them, restarting its stream and
-rebooting it each add a row to **Camera history** naming the account by its **username** (the login name
-an admin sets, never the first name, which anyone can change on their own account); a restart or reboot
-that failed is recorded too. While a camera is silenced, its tile shows who silenced it, to everyone. The
-morning review shows who last answered it (above). Details, including what happens when the history
-cannot be written, are in [docs/camera-controls.md](camera-controls.md#silencing-a-cameras-alerts-and-who-did-what).
-If a camera's alerts are kept silenced, on and off, for a long time (more than an hour by default, short gaps
-between renewals included), the admins are sent one notification for it, which names no one; on Pushover, ntfy
-and Gotify everyone on them gets it too. See [Long-silence alerts](camera-controls.md#long-silence-alerts).
-
-On a caregiver's screen the admin-only controls are not shown (sleep tracking, the window and the sleep
-camera are shown, greyed out, with a note); the server refuses them too, so a page opened before an update that changed a
-permission gets a refusal rather than a change.
-
-The **Settings** hub itself is visible to caregivers too — its admin-only pages (general,
-camera controls, recording, MQTT, push providers, users, logs, clip storage) are simply hidden
-for them rather than the whole screen being off-limits.
-
-**Changing someone’s role takes effect immediately** — on their very next action, on every device
-they’re signed in on. Demoting an admin to caregiver does *not* sign them out: they keep browsing as
-a caregiver and simply lose the admin-only screens. Deleting an account, by contrast, ends its
-sessions at once and signs that person out everywhere.
-
-**There must always be at least one admin.** The only admin on an install can't be changed to
-caregiver until another account is made an admin first, and no account can ever delete itself —
-another admin has to remove it. Both are enforced by the server, not just hidden in the UI: the Role
-field explains it up front when it applies, and a request that tries anyway gets a clear error rather
-than a partial change. If an install somehow already has no admin (a database edited by hand, or
-from before this was enforced), see **[docs/mfa.md](mfa.md)**'s recovery section for the console
-command that fixes it — it's documented there alongside the equivalent two-factor recovery, not
-because it's about two-factor, but because it's the same kind of last-resort console fix.
-
-Any account can also turn on **two-factor authentication** for its own login — see
-**[docs/mfa.md](mfa.md)** for enrolling, one-time backup codes, and how to recover if an
-admin loses their authenticator.
-
-### `SESSION_TTL_DAYS` — how long a sign-in lasts
-
-> **⚠️ A sign-in ends at the same time of day it began, and the app's push alerts stop with it, without
-> warning.** The lifetime is counted from sign-in, not from the last use: a phone that signed in at 02:00
-> is signed out at 02:00, `SESSION_TTL_DAYS` days later. From then until someone opens the app (which
-> shows the sign-in screen), that phone gets no Nightlight push alerts, and a live view or background
-> audio playing on it stops. Pushover, ntfy and Gotify are not affected. The session lists show when each
-> device was last active, not when it will be signed out: if you rely on a phone's alerts, sign in on it
-> again at a time that suits you before its lifetime runs out.
-
-| Variable | Default | Range | What it does |
-|---|---|---|---|
-| `SESSION_TTL_DAYS` | `30` (blank = 30) | `7`-`30` whole days | How many days a sign-in lasts, counted from sign-in. Anything else is ignored with a warning in the log and 30 is used. |
-
-- **It can only shorten.** 30 is the most, as before this setting existed; 7 is the least, because a shorter,
-  silent end would stop alerts at the same hour every few nights.
-- **Lowering it signs out every sign-in older than the new value at that device's next request**, push and
-  live views included (they check the same rule). **Raising it does not lengthen sign-ins already made**: a
-  sign-in's token carries the lifetime in force when it was issued, so one made at 7 still ends on its 7th
-  day after you raise it to 30. A changed value needs a restart, and one other than 30 is logged at start.
-- **There is no idle sign-out**: an unused device stays signed in until its lifetime ends.
-- The sign-in token is kept in the browser's (or the Android app's) `localStorage`, and every sign-in can be
-  ended from the server at once (sign out a device, remove an account, change a password). Since this
-  setting, the 12-hour token in video and snapshot URLs also stops when its sign-in ends. What this means
-  for security: [SECURITY.md](../SECURITY.md#how-long-a-sign-in-lasts-and-where-it-is-kept).
+Moved to its own page: [Adding caregivers](caregivers.md).
 
 ## Running behind a reverse proxy (e.g. SWAG on Unraid)
 
@@ -447,194 +361,23 @@ Moved to the same page: [Remote / internet access](remote-access.md#remote--inte
 
 ## Installing to your home screen
 
-The app has a web app manifest and icons for a full-screen, native-app-like home-screen
-experience — no browser address bar. **It has no service worker**, so this is an install
-shortcut, not an offline mode: the app still needs to reach your server over the network every
-time, same as opening it in a tab.
-
-What you actually get depends on the platform and whether the site is served over **HTTPS**
-(via the reverse-proxy setup above) or plain `http://` on your LAN:
-
-| Platform | Over HTTPS | Over plain `http://` |
-|---|---|---|
-| Android — Chrome / Samsung Internet | Installable PWA (full-screen, own icon, install prompt) | Usually a browser-badged **shortcut** that still opens inside the browser, not a true standalone install — Chromium's installability criteria require HTTPS (or `localhost`) |
-| iOS — Safari | Add to Home Screen (full-screen, own icon) | Add to Home Screen works the same over plain HTTP — iOS doesn't gate it on HTTPS the way Chromium does |
-| Desktop browser | Installable as a windowed app (Chrome/Edge) | Same shortcut limitation as Android Chrome |
-
-- **Android, HTTPS**: browser menu → "Add to Home screen" / "Install app" (or the automatic
-  install banner).
-- **Android, plain HTTP**: same menu item still adds something to your home screen, but expect
-  a shortcut that opens in the browser rather than a standalone window.
-- **iOS**: Share button → "Add to Home Screen" — works the same either way.
-
-If you want the full installed experience on Android specifically, the reverse-proxy/HTTPS
-setup above is worth doing; otherwise the **native Android app** (below) gives you a true
-standalone app without needing HTTPS at all.
-
-**Zooming the page.** In a browser, including a home-screen install, you can pinch-zoom the page as on
-any other site. In the native apps (below) page zoom stays **locked**, because in the Android app
-double-tapping the picture-in-picture window used to zoom the whole app and leave it stuck until a
-restart. Double-tap zoom on a camera's video is the app's own and works everywhere.
-
-- **Android and desktop browsers:** pinch-zoom works again (it used to be blocked).
-- **iPhone and iPad (Safari, or any other iOS browser):** unchanged. Pinch-zoom already worked there,
-  because Safari ignores the zoom lock for pinching, and the page still does not jump in when you tap
-  into a text field, because Nightlight keeps the one setting that stops Safari doing that. Expected
-  from Safari's behaviour; not checked on a device.
-
-While the page is zoomed in, dragging down on the live screen pans the page; the live screen's
-pull-to-refresh works again once you zoom back out.
+Moved: [Installing to your home screen](mobile.md#installing-to-your-home-screen).
 
 ## Mobile apps (Android & iOS)
 
-Beyond the PWA, there are companion **native apps** in a separate repo,
-[nightlight-mobile](https://github.com/sauso/nightlight-mobile). They're thin native
-shells around this same web UI — the app loads the interface **live from your own server**
-rather than bundling it, so any server update applies to the apps automatically with no
-reinstall. On first launch you just enter your server's address (like the Home Assistant
-app); a "Change server" menu item switches later.
-
-What the native apps add over the browser/PWA:
-
-- **Reliable background listening** — keep hearing a camera with the screen off or the app
-  minimised. Android uses a foreground service (with a wake/wifi lock and a battery-
-  optimisation exemption); iOS uses a background audio session. Plain in-browser background
-  audio is unreliable by comparison. **On iOS this requires a camera in Low latency mode** —
-  Compatibility (HLS) can't do reliable background audio on iOS (iOS runs its own native
-  lock-screen session for it), so Background is only offered for Low-latency cameras there; see the
-  Low latency / Compatibility notes above and [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
-- **Pause/Resume from the system controls** — Android's notification and iOS's Now Playing
-  (Control Center / lock screen), plus a Stop on Android.
-- **Picture-in-Picture** — float a camera in a small always-on-top window while you use
-  other apps (Android; the browser has its own PiP too).
-- **Battery-friendly** — minimising the app disconnects streams unless a camera is in
-  Background mode, so nothing keeps pulling video in the background.
-- **Push notifications** — a phone alert when a camera sees motion, even with the app closed
-  (Android only for now). See below.
-
-### Push notifications (motion alerts)
-
-Get a **phone notification** when a camera with motion detection sees movement — even when the app is
-closed. It's off by default, and the in-app **Recent alerts** list — on each child's page, or the
-combined view under **Settings → Logs** (admin only) — works with or without it. There are two
-ways to set it up (pick one), both configured under **Settings → Push notifications**:
-
-**Pushover (recommended — simplest, and works on iOS).** A small notification service (the same one
-Sonarr/Radarr use). No Firebase project, no Apple Developer account.
-
-1. Install the **Pushover** app on your phone and note your **User Key** (or make a Delivery Group to
-   alert several caregivers).
-2. Create a Pushover application at [pushover.net/apps/build](https://pushover.net/apps/build) and copy
-   its **API Token**.
-3. In **Settings → Push notifications → Pushover**, paste the token + your user/group key, **Enable**,
-   **Save** (it verifies with Pushover), and **Send test**. Then enable **Motion detection** on a
-   camera. Alerts arrive with a **snapshot** of what triggered them.
-
-**Firebase / FCM (Android app only).** Delivers straight to the Nightlight Android app via your own
-Firebase project: drop `google-services.json` + a `firebase-service-account.json` service-account key
-into your data dir (e.g. `/mnt/user/appdata/nightlight`, keep the key `chmod 600`), then enable it
-under **Settings → Push notifications**. Each phone opts in under **Account → Notifications**.
-
-Full walkthrough for both, with troubleshooting: **[docs/notifications.md](notifications.md)**.
-
-**Getting them:**
-- **Android** — download the signed APK from the
-  [nightlight-mobile Releases](https://github.com/sauso/nightlight-mobile/releases) page and
-  sideload it (built and signed automatically in CI on each release).
-- **iOS** — no App Store build yet; it's installed by sideloading (e.g. AltStore/Sideloadly
-  with a free Apple ID). See the nightlight-mobile repo for the current status and steps.
-
-Both apps are built entirely in GitHub Actions — see the nightlight-mobile repo for how,
-and its own `CHANGELOG.md` for per-release notes.
+Moved: [Mobile apps](mobile.md#mobile-apps-android--ios).
 
 ## Logs
 
-Both the app and MediaMTX log to stdout, captured by Docker in the normal way:
-
-```bash
-docker logs -f nightlight
-```
-
-Docker's own log rotation (already configured in the `docker run`/Compose examples
-above, and in the Unraid template's extra parameters) caps total log storage at 10MB × 3
-files, so this doesn't grow unbounded - this matters particularly on Unraid, where
-Docker's storage is a fixed-size image that can break the whole Docker service if it
-fills up. If you deployed before this was added, add `--log-opt max-size=10m --log-opt
-max-file=3` yourself (or the Unraid template's "Extra Parameters" field) to get the
-same protection.
-
-Timestamps use your container's local time (see the `TZ` variable above) rather than
-UTC, so they line up with when you actually remember something happening.
+Moved: [Logs](operations.md#logs).
 
 ## Times and your timezone
 
-Every time the app shows is in your **home** time: the timezone set in **Settings → General** (an IANA
-name such as `Europe/London`; **default `UTC`** until you set it, so set it first). It is the same zone
-the sleep reports, the morning review and the alert schedule already use, so an alert at "7:00 pm" is
-the same moment on every phone, and it agrees with the sleep card. It is **not** the zone of the phone or
-browser you happen to be using.
-
-- **When your device is in a different zone** (travelling, or someone watching from abroad), a time
-  carries a short zone label after it, such as **7:00 pm GMT-7**, so it cannot be mistaken for the
-  device's own clock. **When the device is in your home zone nothing is added**, so a household that
-  stays put sees no change. Clock format (12 or 24 hour) and date order follow the device's own language
-  settings, not the timezone.
-- **Where it applies:** the alert and camera-history lists (the exact time is in the tooltip on each row
-  and in the clip player), **Clip Management** (clips are grouped under their home-time **day**, and the
-  date filter and its "today" use home days, so two people never see the same clip on different days),
-  the **Recordings** card, a camera tile's **silenced until** time, and the nightly timelapse dates (a
-  night is a calendar date worked out in home time, so it never shifts).
-- **Not affected:** ages such as "3h ago" (elapsed time is the same everywhere), the sleep screens (they
-  were already in home time), and the build date under **About**.
-- **Known limits.** The label appears whenever the device's zone *name* differs from home, even if the two
-  happen to share an offset today (Paris and Berlin, say); it never hides a real difference. A time from
-  before a daylight-saving change shows the offset that applied then. Right after the page opens, before the setting has
-  loaded, times show in `UTC` for a moment and then switch to your home zone.
+Moved: [Times and your timezone](operations.md#times-and-your-timezone).
 
 ## Troubleshooting
 
-- **Camera shows "No signal"**: double check the RTSP URL works with a tool like VLC
-  (Media → Open Network Stream) first — if VLC can't play it, the app won't either.
-- **The app shows "Can't reach Nightlight" instead of the sign-in screen**: the app could not get an answer
-  from the server (it is restarting, off, or this device is not on the home network), so it does not know
-  whether you are signed in and does not ask for a password that could not be checked anyway. It retries
-  by itself (after 5 seconds, then 10, 20, and every 30 seconds from then on) and you can press **Try again**
-  at any time; once the server answers you land in the app, or on the sign-in screen if you really were signed
-  out. Your sign-in is kept while it retries. Only a server that answers "not signed in" shows the sign-in screen,
-  and so does **Sign out**, at once.
-- **Video won't connect from a phone but the pages load fine**: confirm the device is on
-  the same LAN (for Low latency mode) — see [Remote / internet access](remote-access.md#remote--internet-access-watching-from-outside-your-home-network) above if it's
-  actually a different network.
-- **A camera shows disconnected for a few seconds after opening the app and doesn't come
-  back**: this is usually a stale WebRTC connection on the phone itself, not the camera or
-  server — the video connection can get "wedged" after the phone sleeps, switches networks,
-  or hands off Wi-Fi/cellular, and won't always re-establish on its own. **Pull down on the
-  camera dashboard to reconnect** — this works in the browser and in the mobile apps, and
-  rebuilds the connection without a full restart. If a camera is *actually* down, every
-  device sees it, not just one — check the Camera history panel (Settings) or the logs
-  (below) to tell the two apart.
-- **Background listening stops after a while (Android app)**: Android's battery optimisation
-  (Doze) will eventually freeze the app and cut its network unless it's exempt. The app asks
-  for the exemption the first time you enable Background mode — if you declined, grant it
-  manually under Settings → Apps → Nightlight → Battery → Unrestricted. (Background audio is
-  a feature of the native apps, not the browser/PWA — see [Mobile apps](#mobile-apps-android--ios).)
-- **A camera says "No signal" only in Compatibility mode**: usually the camera sending bad
-  audio timestamps, which can stall the HLS pipeline. Nightlight resamples/rewrites camera
-  timestamps to ride through this, but if it persists, power-cycle or update that camera's
-  firmware. See [`KNOWN-ISSUES.md`](../KNOWN-ISSUES.md).
-- **Checking whether MediaMTX has registered your cameras**: its API is loopback-only (not
-  reachable directly from a browser), so check it from inside the container:
-  ```bash
-  docker exec nightlight wget -qO- http://127.0.0.1:9997/v3/paths/list
-  ```
-  An empty `"items":[]` with cameras added in the app means MediaMTX and the app's database
-  have drifted apart — restarting the container re-syncs them automatically (see the
-  startup log line "Reconciled N camera path(s)...").
-- **Checking logs**: see the "Logs" section above — `docker logs -f nightlight`.
-
-For a catalogue of understood quirks (camera glitches, WebRTC reconnects, the watchdog's
-recovery window) with what each one means and whether it needs any action, see
-[`KNOWN-ISSUES.md`](../KNOWN-ISSUES.md).
+Moved: [More troubleshooting](troubleshooting.md#more-troubleshooting).
 
 ## Building from source
 
