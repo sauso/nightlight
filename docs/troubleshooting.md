@@ -23,9 +23,9 @@ but if it persists, power-cycle or update that camera's firmware. See
 ### The app shows "Can't reach Nightlight" instead of the sign-in screen
 
 The app could not get an answer from the server (it is restarting, off, or this device is not on
-the home network). Confirm the server is running and the phone is on a network that can reach it.
-The app does not know whether you are signed in, so it does not ask for a password that could not
-be checked anyway.
+the home network), so it does not know whether you are signed in and does not ask for a password
+that could not be checked anyway. Confirm the server is running and the phone is on a network that
+can reach it.
 
 It retries by itself (after 5 seconds, then 10, 20, and every 30 seconds from then on), and you
 can press **Try again** at any time. Once the server answers, you land in the app or on the sign-in
@@ -57,8 +57,7 @@ If a camera is actually down, every device sees it, not just one. Check the Came
 
 Android's battery optimisation (Doze) will eventually freeze the app and cut its network unless
 it's exempt. The app asks for the exemption the first time you enable Background mode. If you
-declined, grant it manually under Settings → Apps → Nightlight → Battery → Unrestricted, allowing
-Nightlight unrestricted battery use in Android app settings. Background audio is a feature of the
+declined, grant it manually under Settings → Apps → Nightlight → Battery → Unrestricted. Background audio is a feature of the
 native apps, not the browser/PWA; see [Mobile apps](mobile.md#mobile-apps-android--ios).
 
 ## MediaMTX and the server

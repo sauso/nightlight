@@ -629,7 +629,7 @@ summary still catches up on its next check, but no "Sleep report updated" goes o
 | Night corrected before the first report | still sent, with the cameras' figures | not sent |
 | Correction removed after those ~3 hours | already sent | not sent (the saved summary still updates) |
 
-A corrected night is also **locked** (README, "A night you have corrected is locked"): its saved summary
+A corrected night is also **locked** ([sleep tracking](sleep-tracking.md#a-night-you-have-corrected-is-locked)): its saved summary
 stops being refined, which is the other half of why no later wake time is pushed.
 
 ## Long-silence notifications (admins)

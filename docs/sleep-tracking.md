@@ -4,7 +4,7 @@ Nightlight can estimate each child's overnight sleep from what their cameras alr
 hear — no wearables, no extra hardware. It's a **sleep-pattern guide, not a medical
 measurement**, and (like everything here) never a safety device — see the [safety note in the README](../README.md).
 
-This guide covers setup, the child card and night page, how a night is estimated, how to correct it, and the known limits.
+This guide covers setup, the child card and the sleep detail page, how a night is estimated, how to correct it, and the known limits.
 
 ## Turn it on per child
 
@@ -142,7 +142,7 @@ to show up as sustained movement on its own — as long as the bed is confirmed 
 and later bed movement supports the return. This only applies to trips of one to twenty minutes,
 with at least a minute of quiet bed time in between; it updates wake-ups, awake time, and the
 longest sleep stretch, but live figures and wake-clip recording still use the plain movement rule
-described in [How it estimates](#how-it-estimates). If you've painted
+described earlier in this section. If you've painted
 a **bed zone** on the camera — the same area that scopes motion alerts — it also tracks
 movement **outside** the bed and lists it separately, which catches a morning wake where the
 child has already left the bed. Draw the zone so it comfortably contains the child **including
@@ -392,7 +392,7 @@ recomputing re-asks the *app*.
   showing, nothing about the sleep changes there: the total asleep, the wake-ups and the longest
   stretch stay what that screen had. The total is recalculated only where a time you saved differs
   from that screen's own, which is normally only when you changed it (but not always: see the
-  [known limits](#known-limits-all-documented-rather-than-fixed) about the review page and the card starting from different versions of the night).
+  [Known limits, all documented rather than fixed](#known-limits-all-documented-rather-than-fixed) about the review page and the card starting from different versions of the night).
   Tapping a picked frame's button a second time undoes the pick and puts the field back
   the way it was (un-pressing a put-down that was already saved removes it). When you give an in-bed
   time, the card and the detail page show it next to the asleep time even if you corrected that too
@@ -479,7 +479,7 @@ Either:
     the report and makes the timelapse.) If that first summary says "no one in the bed" where a later
     one would have found your child, the night is still not looked at again (it is locked). If your
     correction has both an asleep and a wake-up time, the card and the detail page show it as a slept
-    night anyway (see the #355 point on correcting such a night in [Known limits](#known-limits-all-documented-rather-than-fixed)); with only one of
+    night anyway (see the #355 point on correcting such a night in [Known limits, all documented rather than fixed](#known-limits-all-documented-rather-than-fixed)); with only one of
     them it stays "no one in the bed". Remove your correction (while it is still last night) to let the
     nightly update look again. In the same way, if that
     first summary has no wake-up time yet (the morning's departure was still being confirmed when it
@@ -510,7 +510,7 @@ Either:
 
     | | Night the app scored (slept) | Night the app called "no one in the bed" |
     |---|---|---|
-    | Both times given | your times, total recalculated | becomes a slept night, with the figures described in this limit |
+    | Both times given | your times, total recalculated | becomes a slept night, with the figures described in the bullet above this table |
     | Only an asleep **or** only a wake-up time, or only **In bed** | your time laid over | stays "no one in the bed" (and locked); the night itself shows no times on the card or the detail page, and your time appears only in the "that's recorded" receipt and in the review |
     | Wake-up not after asleep | total floored at 0 | stays "no one in the bed" |
     | Night still in progress | your times laid over | stays as the cameras see it now |

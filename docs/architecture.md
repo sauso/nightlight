@@ -43,7 +43,7 @@ child. This narrows what a child *inherits*; it does not stop a child reading th
 | Variable | ffmpeg / ffprobe | MediaMTX | Why |
 |---|---|---|---|
 | `PATH` | yes | yes | finds the binary and what it execs |
-| `TZ` | yes | yes | segment and log times agree with the app |
+| `TZ` | yes | yes | segment file names and log times use the container's zone (the app's own times follow Settings → General) |
 | `LANG`, `LC_ALL` | yes | yes | locale only |
 | `MTX_*` (operator's own) | **no** | yes | MediaMTX's documented override mechanism, e.g. `MTX_WEBRTCLOCALUDPADDRESS` |
 | `MTX_WEBRTCADDITIONALHOSTS` | no | yes | computed by `mediamtxProcess.js` at every launch from `PUBLIC_HOST` and the detected host IPs; it replaces an inherited value whenever that list is non-empty |

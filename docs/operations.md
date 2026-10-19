@@ -262,12 +262,12 @@ Use Docker's logs to check what the app and MediaMTX are doing. Both log to stdo
 docker logs -f nightlight
 ```
 
-Docker's own log rotation caps total log storage at 10MB × 3 files. This matters particularly on Unraid, where Docker's storage is a fixed-size image that can break the whole Docker service if it fills up.
+Docker's own log rotation caps total log storage at 10MB × 3 files, so the logs don't grow without limit. This matters particularly on Unraid, where Docker's storage is a fixed-size image that can break the whole Docker service if it fills up.
 
 - The `docker run`/Compose examples in the [installation guide](installation.md) and the Unraid template's extra parameters already configure this rotation.
 - If you deployed before this was added, add `--log-opt max-size=10m --log-opt max-file=3` yourself (or use the Unraid template's "Extra Parameters" field) to get the same protection.
 
-Log timestamps use the container's local time rather than UTC. Set it with the `TZ` variable in the [installation guide](installation.md); `TZ` also names the video buffer's segment files. The times shown in the app follow [Settings → General](#times-and-your-timezone).
+Log timestamps use the container's local time rather than UTC, so they line up with when you actually remember something happening. Set it with the `TZ` variable in the [installation guide](installation.md); `TZ` also names the video buffer's segment files. The times shown in the app follow [Settings → General](#times-and-your-timezone).
 
 ## Times and your timezone
 

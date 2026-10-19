@@ -1,6 +1,6 @@
 # Reverse proxy and remote access
 
-Watch from outside your home network through a VPN into your home network, or set up a reverse proxy with HTTPS. If you use a reverse proxy, choose Low latency for near-instant video or Compatibility when you cannot forward UDP. The setup steps come first; the proxy settings follow.
+To watch from outside your home network, set up a reverse proxy with HTTPS (a VPN into your home network is the other common option; see [networking](networking.md#watching-away-from-home)). If you use a reverse proxy, choose Low latency for near-instant video or Compatibility when you cannot forward UDP. The setup steps come first; the proxy settings follow.
 
 ## Remote / internet access (watching from outside your home network)
 

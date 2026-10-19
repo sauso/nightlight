@@ -52,6 +52,9 @@ pull-to-refresh works again once you zoom back out.
 - **iOS** — no App Store build yet; it's installed by sideloading (e.g. AltStore/Sideloadly
   with a free Apple ID). See the nightlight-mobile repo for the current status and steps.
 
+Both apps are built entirely in GitHub Actions — see the nightlight-mobile repo for how,
+and its own `CHANGELOG.md` for per-release notes.
+
 Beyond the PWA, there are companion **native apps** in a separate repo,
 [nightlight-mobile](https://github.com/sauso/nightlight-mobile). They're thin native
 shells around this same web UI — the app loads the interface **live from your own server**
@@ -101,6 +104,3 @@ into your data dir (e.g. `/mnt/user/appdata/nightlight`, keep the key `chmod 600
 under **Settings → Push notifications**. Each phone opts in under **Account → Notifications**.
 
 Full walkthrough for both, with troubleshooting: **[docs/notifications.md](notifications.md)**.
-
-Both apps are built entirely in GitHub Actions — see the nightlight-mobile repo for how,
-and its own `CHANGELOG.md` for per-release notes.
