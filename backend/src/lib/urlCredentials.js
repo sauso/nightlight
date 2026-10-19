@@ -27,6 +27,16 @@ function parse(raw) {
   }
 }
 
+/** #743: WHATWG URLs accept stray '%' in userinfo; keep it as typed if decoding fails. */
+export function decodeUrlCredential(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch (error) {
+    if (error instanceof URIError) return value;
+    throw error;
+  }
+}
+
 /** True if the URL carries a Basic-auth password. */
 export function urlHasPassword(raw) {
   const u = parse(raw);
@@ -36,7 +46,7 @@ export function urlHasPassword(raw) {
 /** The username in the URL, or '' — safe to show, like `rtsp_username`. */
 export function urlUsername(raw) {
   const u = parse(raw);
-  return u ? decodeURIComponent(u.username || '') : '';
+  return u ? decodeUrlCredential(u.username || '') : '';
 }
 
 /**
