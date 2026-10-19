@@ -71,7 +71,7 @@ In **Community Applications**, search for **Nightlight**, select **Install**, ch
 
 **Camera controls.** Add a camera by its IP address and let ONVIF fill in the stream details where it is supported, or set up the RTSP stream by hand. Use pan/tilt and two-way audio on cameras that support them.
 
-**Sleep and recordings.** Review sleep activity and, if enabled, save motion/sound clips, wake clips or recordings you start yourself. See [how sleep tracking works](docs/readme-reference.md#sleep-tracking) and [recording options](docs/recording.md).
+**Sleep and recordings.** Review sleep activity and, if enabled, save motion/sound clips, wake clips or recordings you start yourself. See [how sleep tracking works](docs/sleep-tracking.md) and [recording options](docs/recording.md).
 
 **Caregiver access.** Create accounts for people who need access to your nursery.
 
@@ -102,7 +102,8 @@ Start with the [documentation hub](docs/README.md), or jump directly to:
 - [Troubleshooting and known issues](docs/troubleshooting.md)
 - [Architecture](docs/architecture.md)
 - [Building and testing](docs/development.md)
-- [Full reference](docs/readme-reference.md) — sleep tracking, reverse proxy and `TRUST_PROXY`, timezones, caregivers, logs (the old README, being split into guides)
+- [Sleep tracking](docs/sleep-tracking.md)
+- [Full reference](docs/readme-reference.md) — reverse proxy and `TRUST_PROXY`, timezones, caregivers, logs (the old README, being split into guides)
 
 ## Help make Nightlight better
 
