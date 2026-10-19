@@ -1052,6 +1052,11 @@ outside your network who is behind NAT may fail to connect without it (Compatibi
 default, Google sees the viewer's public IP address and when each live view connected. `turn:` relay servers are not
 supported. Change takes effect on restart. The log shows `[stun] ...` at start-up.
 
+The browser starts reading this list when you sign in, before the first camera tile connects (#739).
+On a very slow link, if the first tile appears before that answer arrives (for example, from a direct link),
+its 1-second lookup budget can still expire. That connection then uses host candidates only, with no STUN;
+later attempts use the list once it arrives. It never substitutes Google's server for a missing answer.
+
 On Unraid it is the **STUN Servers** field: it ships with the Google URL, so clear the field to turn STUN off.
 
 ### `CLOUDFLARE_ANALYTICS` — Cloudflare Web Analytics through Cloudflare's proxy
