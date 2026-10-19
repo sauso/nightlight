@@ -45,7 +45,7 @@ before "asleep", so most nights still show one time. If you corrected a night's 
 camera's "In bed" is hidden and only your time is shown: the recorded put-down belongs to the bedtime
 you corrected, so it may not match yours. Correcting only the wake-up time keeps it. If you gave the
 **In bed** time yourself in the morning review, yours is shown, beside your asleep time too. A night
-saved before this update has no "in bed" time on the child's card until it's recomputed, and a night
+saved before 0.35.0 has no "in bed" time on the child's card until it's recomputed, and a night
 you corrected in the morning review is locked against that until the correction is removed (or give
 its **In bed** time yourself in the review). The detail page works the night out fresh each time, so
 it shows the time straight away.
@@ -343,7 +343,7 @@ closest to when they settled (or type the asleep time).
 - This is **not** the same as marking an event *correct*. An exit can be perfectly real and
   still not be the end of the night — a child who gets out at 5:45, goes back, and gets up
   again at 6:00 had two genuine exits and only one of them ended the night.
-- **Before this version** there was only one button on a *got into bed* event, **Put down here**,
+- **Before 0.35.0** there was only one button on a *got into bed* event, **Put down here**,
   and it set the *asleep* time. Reviews saved that way are kept exactly as they are: there is no way
   to tell which stored asleep times came from that button, so none is reinterpreted as "in bed". If
   one of yours is wrong, open the night and correct it. A page that was already open when the app
@@ -527,8 +527,8 @@ Either:
     even ones outside your corrected times (the camera-outage limit under "Minutes with no video are
     unknown" in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md)). Locking makes that figure stop changing; it
     does not make it exact.
-  - Nights corrected **before this version** are locked from the moment you update, as they were
-    last saved.
+  - Nights corrected **before 0.35.0** were locked, as they were last saved, from the moment that
+    version was installed.
   - The sleep ↔ temperature averages read the detector's saved figures and never apply time
     corrections, locked or not (a night marked "No one was in the bed" is left out of them).
   - The app's own asleep and wake-up times, saved unchanged (**That's right**, or the form with those
@@ -572,7 +572,7 @@ Either:
     your review, is not checked against the app's wake-up time, so an asleep time after it can be left
     standing. The review form always sends its asleep time along with the wake-up time, and that save
     is checked.
-  - Only just after updating: a review page that was already open before the update has no **In
+  - Only just after updating to 0.35.0: a review page that was already open before the update has no **In
     bed** field. If it saves an asleep time earlier than an in-bed time someone else has since saved
     from an updated page, the save is refused ("In bed can't be after Fell asleep") and that old page
     has no way to show or change the in-bed time. Reload the page.

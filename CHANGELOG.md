@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **Four statements in the documentation were checked against the code and corrected.** The remote-access page said a TURN relay would not change the media path and that both viewing modes work once the proxy and `PUBLIC_HOST` are set up; it now says Nightlight does not support TURN, that the one UDP port forward is required for Low latency in this setup, and that Compatibility needs only the proxy. The mobile page now says only delivery through the Nightlight app (Firebase) is Android-only, while Pushover and ntfy alerts also reach an iPhone. The sleep-tracking page now names the release (0.35.0) behind its "before this version" notes. Documentation only.
+
 ## [0.41.3] - 2026-10-20
 
 ### Changed
