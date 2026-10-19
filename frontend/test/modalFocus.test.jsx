@@ -276,6 +276,96 @@ describe('★ a dialog that replaces another hands focus back to where the chain
     expect(region.hasAttribute('tabindex')).toBe(false);
   });
 
+  // Fallback regions that LOOK usable but are not (review of #779). `build({ opener, gone })` lays out the page around
+  // the opener, which the dialog's action then removes.
+  async function removeOpenerThenClose(build) {
+    function Scene() {
+      const [open, setOpen] = useState(false);
+      const [gone, setGone] = useState(false);
+      const opener = !gone && <button onClick={() => setOpen(true)}>Lonely opener</button>;
+      return (
+        <main>
+          {build({ opener, gone })}
+          {open && (
+            <Modal title="Lonely" onClose={() => setOpen(false)}>
+              <button onClick={() => setGone(true)}>Remove opener</button>
+              <button onClick={() => setOpen(false)}>Done</button>
+            </Modal>
+          )}
+        </main>
+      );
+    }
+    const user = userEvent.setup();
+    const view = render(<Scene />);
+    await user.click(screen.getByRole('button', { name: 'Lonely opener' }));
+    await user.click(screen.getByRole('button', { name: 'Remove opener' }));
+    return { user, ...view };
+  }
+
+  test('a nearer region that is hidden is skipped; focus goes to the next one up, with no tabindex left on the hidden one', async () => {
+    const { user, container } = await removeOpenerThenClose(({ opener, gone }) => (
+      <div data-testid="outer">
+        <div data-testid="inner" hidden={gone}>{opener}</div>
+        <button>Fallback sibling</button>
+      </div>
+    ));
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(container.querySelector('[data-testid="inner"]').hasAttribute('tabindex')).toBe(false);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Fallback sibling' }));
+  });
+
+  test('a region that refuses focus is cleaned up and the search goes on (it never ends on <body>)', async () => {
+    const { user, container } = await removeOpenerThenClose(({ opener }) => (
+      <div data-testid="outer">
+        <div data-testid="inner">{opener}</div>
+        <button>Fallback sibling</button>
+      </div>
+    ));
+    // What a real browser does for a region that is not rendered: focus() returns and nothing moves.
+    container.querySelector('[data-testid="inner"]').focus = () => {};
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(container.querySelector('[data-testid="inner"]').hasAttribute('tabindex')).toBe(false);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Fallback sibling' }));
+  });
+
+  test('a control that is aria-hidden, or inside something that is, is not chosen', async () => {
+    const { user } = await removeOpenerThenClose(({ opener }) => (
+      <div data-testid="region">
+        {opener}
+        <div aria-hidden="true"><button>Buried</button></div>
+        <button aria-hidden="true">Hidden twin</button>
+        <button>Visible one</button>
+      </div>
+    ));
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Visible one' }));
+  });
+
+  test('a region that already had a tabindex gets exactly that value back, not none', async () => {
+    const { user, container } = await removeOpenerThenClose(({ opener }) => (
+      <div data-testid="region" tabIndex={0}>{opener}</div>
+    ));
+    const region = container.querySelector('[data-testid="region"]');
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(document.activeElement).toBe(region);
+    region.blur();
+    expect(region.getAttribute('tabindex')).toBe('0');
+  });
+
+  test('a dialog opened while nothing had focus (<body>) does not focus <body> on close', async () => {
+    document.activeElement?.blur();
+    expect(document.activeElement).toBe(document.body);
+    const bodyFocus = vi.spyOn(document.body, 'focus');
+    try {
+      const { unmount } = render(<Modal title="T" onClose={() => {}}><button>Go</button></Modal>);
+      unmount();
+      expect(bodyFocus).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(document.body);
+    } finally {
+      bodyFocus.mockRestore();
+    }
+  });
+
   test('with the whole chain gone from the page, closing does not throw and does not invent a focus', async () => {
     const opener = document.createElement('button');
     document.body.appendChild(opener);

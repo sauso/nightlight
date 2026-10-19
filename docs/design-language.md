@@ -420,7 +420,8 @@ leaves the page looking exactly as before; and on close **focus returns to the c
 control is gone (a dialog that replaces another in the same step, like the two-factor set-up handing over to the
 backup codes, or a button the dialog's action swapped for another), focus goes to the control that opened the
 first dialog of the chain, then to the first control in the place where it was (#768); never to `<body>`, and never
-to something behind a dialog that is still open. With a dialog over a dialog, Escape and Tab belong to the top one. Not done: scroll lock on the page behind, and the
+to something behind a dialog that is still open, `hidden`, or `aria-hidden` (those are skipped, and the next place
+up is tried). With a dialog over a dialog, Escape and Tab belong to the top one. Not done: scroll lock on the page behind, and the
 tile's bottom-sheet menu, which is not a `Modal`. The inactive Live monitor is `inert` as well as `aria-hidden`,
 so its buttons are not in the Tab order while another screen shows; it stays mounted, so streams and background
 audio carry on.

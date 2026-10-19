@@ -36,25 +36,44 @@ function restoreTargetsFor(opener) {
   return [{ el: opener, region: false }, ...regions];
 }
 
-// Focus the first target that can take it. A target inside an `inert` subtree is skipped: it is behind another open
-// dialog (a confirmation closing over a form whose opener has gone), where focus would be lost anyway, and handing
-// it there would also make the "restored" focus a lie. Returns nothing; with no usable target focus is left to the
-// browser, which is what happened before this fell back at all.
+// Can a person (and a screen reader) actually get to this? `inert` is a subtree behind another open dialog (a
+// confirmation closing over a form whose opener has gone), where focus would be lost anyway; `hidden` is not
+// rendered, so a browser ignores focus() on it; `aria-hidden` can take focus but is invisible to a screen reader,
+// which would announce nothing where focus landed. tabbablesIn already drops the first two for what is INSIDE a
+// region; this also looks at the target and every ancestor, for the aria-hidden case it does not know about.
+const reachable = (el) => el.isConnected && !el.closest('[inert], [hidden], [aria-hidden="true"]');
+
+// Moves focus to `el` and says whether it ACTUALLY went there. focus() returns nothing and silently does nothing on an
+// element a browser will not focus (not rendered, disabled by an ancestor), so success is read back from the page.
+function tryFocus(el) {
+  if (typeof el.focus !== 'function') return false;
+  el.focus({ preventScroll: true });
+  return document.activeElement === el;
+}
+
+// A region with nothing to press in it: make it focusable for one stop, then put its markup back exactly as it was.
+// A region that already has a tabindex (0 or -1) is focusable as it is and is left alone: overwriting it and then
+// removing it on blur would turn a real tab stop into none. If focus does not land, nothing is left behind.
+function tryFocusRegion(el) {
+  if (el.hasAttribute('tabindex')) return tryFocus(el);
+  el.setAttribute('tabindex', '-1');
+  if (!tryFocus(el)) { el.removeAttribute('tabindex'); return false; }
+  el.addEventListener('blur', () => el.removeAttribute('tabindex'), { once: true });
+  return true;
+}
+
+// Focus the first target that can take it, trying the next when one refuses, so the search never ends on <body> while
+// something better is left. With no usable target focus is left to the browser, which is what happened before this
+// fell back at all.
 function restoreFocus(targets) {
   for (const { el, region } of targets) {
-    if (!el.isConnected || el.closest('[inert]')) continue;
+    if (!reachable(el)) continue;
     if (!region) {
-      if (typeof el.focus !== 'function') continue;
-      el.focus({ preventScroll: true });
-      return;
+      if (tryFocus(el)) return;
+      continue;
     }
-    const inside = tabbablesIn(el)[0];
-    if (inside) { inside.focus({ preventScroll: true }); return; }
-    // A region with nothing to press in it: make it focusable for this one moment, and leave the markup as it was.
-    el.setAttribute('tabindex', '-1');
-    el.addEventListener('blur', () => el.removeAttribute('tabindex'), { once: true });
-    el.focus({ preventScroll: true });
-    return;
+    if (tabbablesIn(el).some((inside) => reachable(inside) && tryFocus(inside))) return;
+    if (tryFocusRegion(el)) return;
   }
 }
 
