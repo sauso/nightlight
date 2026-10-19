@@ -2,8 +2,8 @@
   {
     "label": "#780 camera save starts the transcoder before saving the new address",
     "file": "backend/src/routes/cameras.js",
-    "find": "  const updatedRows = db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,\r\n      talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,\r\n      discovery_source = ?, onvif_capable = ?, onvif_motion_capable = ?, onvif_device_url = ?, backchannel_supported = ?,\r\n      ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?\r\n    WHERE id = ?`).run(\r\n    name?.trim() || existing.name,\r\n    newRtsp,\r\n    child_id !== undefined ? child_id || null : existing.child_id,\r\n    mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic,\r\n    talkBackend,\r\n    talkUser,\r\n    talkPass,\r\n    subUrl,\r\n    discSource,\r\n    onvifCapable,\r\n    onvifMotionCapable,\r\n    onvifUrl,\r\n    backchannel,\r\n    ptz,\r\n    profileToken,\r\n    onvifUser,\r\n    onvifPass,\r\n    req.params.id\r\n  ).changes;\r\n  // The child may have changed (#655): see clearStalePrimaryPointers (lib/primaryCamera.js). Synchronous, straight after the\r\n  // UPDATE, so no other request can run between the two.\r\n  clearStalePrimaryPointers(req.params.id);\r\n  // #780: queue the changed-address start only after the row is saved. Watchdogs and manual restarts\r\n  // read this row; a start they queue after this point must get the new address. `existing` can be\r\n  // stale across the ONVIF probe: a disable or delete may finish while it awaits. Check the saved\r\n  // row, then enqueue without another await so #478's stop generation covers any later disable.\r\n  // A failed UPDATE (including a child deleted during the probe) cannot queue a start. A failed\r\n  // start still errors as before, but leaves the saved row for the next retry.\r\n  const saved = updatedRows ? db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id) : undefined;\r\n  if (saved && !saved.disabled && newRtsp !== existing.rtsp_url) {\r\n    await startTranscoder(saved.id, saved.rtsp_url, saved.mediamtx_path, saved.name);\r\n  }\r\n",
-    "replace": "  if (newRtsp !== existing.rtsp_url && !existing.disabled) {\r\n    await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);\r\n  }\r\n  const updatedRows = db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,\r\n      talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,\r\n      discovery_source = ?, onvif_capable = ?, onvif_motion_capable = ?, onvif_device_url = ?, backchannel_supported = ?,\r\n      ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?\r\n    WHERE id = ?`).run(\r\n    name?.trim() || existing.name,\r\n    newRtsp,\r\n    child_id !== undefined ? child_id || null : existing.child_id,\r\n    mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic,\r\n    talkBackend,\r\n    talkUser,\r\n    talkPass,\r\n    subUrl,\r\n    discSource,\r\n    onvifCapable,\r\n    onvifMotionCapable,\r\n    onvifUrl,\r\n    backchannel,\r\n    ptz,\r\n    profileToken,\r\n    onvifUser,\r\n    onvifPass,\r\n    req.params.id\r\n  ).changes;\r\n  // The child may have changed (#655): see clearStalePrimaryPointers (lib/primaryCamera.js). Synchronous, straight after the\r\n  // UPDATE, so no other request can run between the two.\r\n  clearStalePrimaryPointers(req.params.id);\r\n",
+    "find": "  const updatedRows = db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,\r\n      talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,\r\n      discovery_source = ?, onvif_capable = ?, onvif_motion_capable = ?, onvif_device_url = ?, backchannel_supported = ?,\r\n      ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?\r\n    WHERE id = ?`).run(\r\n    keepFresh('name', name?.trim() || existing.name),\r\n    keepFresh('rtsp_url', newRtsp),\r\n    keepFresh('child_id', child_id !== undefined ? child_id || null : existing.child_id),\r\n    keepFresh('mqtt_topic', mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic),\r\n    keepFresh('talk_backend', talkBackend),\r\n    keepFresh('talk_username', talkUser),\r\n    keepFresh('talk_password', talkPass),\r\n    keepFresh('sub_rtsp_url', subUrl),\r\n    keepFresh('discovery_source', discSource),\r\n    keepFresh('onvif_capable', onvifCapable),\r\n    keepFresh('onvif_motion_capable', onvifMotionCapable),\r\n    keepFresh('onvif_device_url', onvifUrl),\r\n    keepFresh('backchannel_supported', backchannel),\r\n    keepFresh('ptz_supported', ptz),\r\n    keepFresh('onvif_profile_token', profileToken),\r\n    keepFresh('onvif_username', onvifUser),\r\n    keepFresh('onvif_password', onvifPass),\r\n    req.params.id\r\n  ).changes;\r\n",
+    "replace": "  await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);\r\n  const updatedRows = db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,\r\n      talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,\r\n      discovery_source = ?, onvif_capable = ?, onvif_motion_capable = ?, onvif_device_url = ?, backchannel_supported = ?,\r\n      ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?\r\n    WHERE id = ?`).run(\r\n    keepFresh('name', name?.trim() || existing.name),\r\n    keepFresh('rtsp_url', newRtsp),\r\n    keepFresh('child_id', child_id !== undefined ? child_id || null : existing.child_id),\r\n    keepFresh('mqtt_topic', mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic),\r\n    keepFresh('talk_backend', talkBackend),\r\n    keepFresh('talk_username', talkUser),\r\n    keepFresh('talk_password', talkPass),\r\n    keepFresh('sub_rtsp_url', subUrl),\r\n    keepFresh('discovery_source', discSource),\r\n    keepFresh('onvif_capable', onvifCapable),\r\n    keepFresh('onvif_motion_capable', onvifMotionCapable),\r\n    keepFresh('onvif_device_url', onvifUrl),\r\n    keepFresh('backchannel_supported', backchannel),\r\n    keepFresh('ptz_supported', ptz),\r\n    keepFresh('onvif_profile_token', profileToken),\r\n    keepFresh('onvif_username', onvifUser),\r\n    keepFresh('onvif_password', onvifPass),\r\n    req.params.id\r\n  ).changes;\r\n",
     "expect": "killed",
     "tests": [
       "camera-edit-save-before-restart.test.js"
@@ -13,13 +13,55 @@
   {
     "label": "#780 start decided from the stale row read before the probe",
     "file": "backend/src/routes/cameras.js",
-    "find": "  const saved = updatedRows ? db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id) : undefined;\r\n  if (saved && !saved.disabled && newRtsp !== existing.rtsp_url) {\r\n    await startTranscoder(saved.id, saved.rtsp_url, saved.mediamtx_path, saved.name);\r\n  }",
-    "replace": "  if (newRtsp !== existing.rtsp_url && !existing.disabled) {\r\n    await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);\r\n  }",
+    "find": "  if (saved && !saved.disabled && newRtsp !== existing.rtsp_url) {",
+    "replace": "  if (newRtsp !== existing.rtsp_url && !existing.disabled) {",
     "expect": "killed",
     "tests": [
       "camera-edit-save-before-restart.test.js"
     ],
     "namePattern": "disable during ONVIF probe leaves no live transcoder start"
+  },
+  {
+    "label": "#787 stale main address overwrites concurrent edit",
+    "file": "backend/src/routes/cameras.js",
+    "find": "keepFresh('rtsp_url', newRtsp)",
+    "replace": "newRtsp",
+    "expect": "killed",
+    "tests": [
+      "camera-edit-keep-fresh.test.js"
+    ],
+    "namePattern": "concurrent address survives a no-address ONVIF save"
+  },
+  {
+    "label": "#787 delete during probe misses 404",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  if (!fresh) return res.status(404).json({ error: 'Camera not found' });\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "camera-edit-keep-fresh.test.js"
+    ],
+    "namePattern": "delete of a disabled camera during ONVIF probe returns the early 404"
+  },
+  {
+    "label": "#787 delete during transcoder start misses 404",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    if (!updated) return res.status(404).json({ error: 'Camera not found' });\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "camera-edit-keep-fresh.test.js"
+    ],
+    "namePattern": "delete while transcoder start is awaited returns 404"
+  },
+  {
+    "label": "#787 re-sent old sub path overwrites concurrent sub-stream change",
+    "file": "backend/src/routes/cameras.js",
+    "find": "subUrl !== existing.sub_rtsp_url && sub_rtsp_path !== undefined",
+    "replace": "sub_rtsp_path !== undefined",
+    "expect": "killed",
+    "tests": ["camera-edit-keep-fresh.test.js"],
+    "namePattern": "re-sent old sub path keeps a concurrent sub-path change"
   },
   {
     "label": "sound percentile: nearest-rank index off by one",
@@ -22139,5 +22181,158 @@
     "expect": "killed",
     "tests": ["rtsp-probe-codec-deadline.test.js"],
     "namePattern": "never exits after SIGKILL"
+  },
+  {
+    "label": "#737 unknown status retains a prior failed-poll count",
+    "file": "frontend/src/lib/CamerasContext.jsx",
+    "find": "          counts.delete(cam.id);\r\n          return { ...cam, statusLevel: 'connecting', statusUnknown: true };",
+    "replace": "          return { ...cam, statusLevel: 'connecting', statusUnknown: true };",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"],
+    "namePattern": "#737 an unknown poll"
+  },
+  {
+    "label": "#737 WebRTC notice covers a live stream",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "{state !== 'live' && (",
+    "replace": "{true && (",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"],
+    "namePattern": "#737 player notice boundaries.*live WebRTC"
+  },
+  {
+    "label": "#737 HLS notice covers a live stream",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": "{state !== 'live' && (",
+    "replace": "{true && (",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"],
+    "namePattern": "#737 live HLS"
+  },
+  {
+    "label": "#737 HLS Retry does not start another connection",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": "onRetry={() => setReconnectKey((k) => k + 1)}",
+    "replace": "onRetry={() => {}}",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"],
+    "namePattern": "#737 Retry starts"
+  },
+  {
+    "label": "#737 tile loses unknown status in Compatibility mode",
+    "file": "frontend/src/components/CameraTile.jsx",
+    "find": "muted={effectiveMuted}\r\n              statusUnknown={!!camera.statusUnknown}",
+    "replace": "muted={effectiveMuted}",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"],
+    "namePattern": "#737 the tile passes"
+  },
+  {
+    "label": "#737 stopped WebRTC player shows an unavailable notice",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "{statusUnknown && state !== 'idle' ? (",
+    "replace": "{statusUnknown ? (",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"],
+    "namePattern": "#737 player notice boundaries.*stopped"
+  },
+  {
+    "label": "#737 unavailable notice loses its accessible status role",
+    "file": "frontend/src/components/StreamUnavailableNotice.jsx",
+    "find": "className=\"stream-unavailable\" role=\"status\"",
+    "replace": "className=\"stream-unavailable\"",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"],
+    "namePattern": "unknown shows the service wording"
+  },
+  {
+    "label": "#738 draft lifetime is shortened to five hours",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "6 * 60 * 60 * 1000",
+    "replace": "5 * 60 * 60 * 1000",
+    "expect": "killed",
+    "tests": ["lib/formDraft.test.js"],
+    "namePattern": "older than the time limit"
+  },
+  {
+    "label": "#738 saving a new child keeps its old baseline",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "      setBaseline(form);",
+    "replace": "      if (!isNew) setBaseline(form);",
+    "expect": "killed",
+    "tests": ["formDrafts.test.jsx"],
+    "namePattern": "#738 saving a new child"
+  },
+  {
+    "label": "#738 saving a new camera keeps its old baseline",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "      setBaseline({ ...form, rtsp_password: '', talk_password: '' });",
+    "replace": "      if (!isNew) setBaseline({ ...form, rtsp_password: '', talk_password: '' });",
+    "expect": "killed",
+    "tests": ["formDrafts.test.jsx"],
+    "namePattern": "#738 saving a new camera"
+  },
+  {
+    "label": "#738 RTSP host is omitted from camera drafts",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "'name', 'rtsp_host', 'rtsp_port'",
+    "replace": "'name', 'rtsp_port'",
+    "expect": "killed",
+    "tests": ["formDrafts.test.jsx"],
+    "namePattern": "#738 a camera draft"
+  },
+  {
+    "label": "#740 MediaMTX renderer inserts LF into a CRLF template",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "const newline = baseText.includes('\\r\\n') ? '\\r\\n' : '\\n';",
+    "replace": "const newline = '\\n';",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "#740 a CRLF template"
+  },
+  {
+    "label": "#740 MediaMTX renderer joins CRLF entries with LF",
+    "file": "backend/src/lib/stunServers.js",
+    "find": ".join(newline)",
+    "replace": ".join('\\n')",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "#740 a CRLF template"
+  },
+  {
+    "label": "#753 default trusts every proxy",
+    "file": "backend/src/lib/trustProxy.js",
+    "find": "export const DEFAULT_TRUST_PROXY = 'loopback';",
+    "replace": "export const DEFAULT_TRUST_PROXY = true;",
+    "expect": "killed",
+    "tests": ["trust-proxy.test.js"],
+    "namePattern": "#753 the unset default"
+  },
+  {
+    "label": "#753 default also trusts unique local peers",
+    "file": "backend/src/lib/trustProxy.js",
+    "find": "export const DEFAULT_TRUST_PROXY = 'loopback';",
+    "replace": "export const DEFAULT_TRUST_PROXY = 'loopback, uniquelocal';",
+    "expect": "killed",
+    "tests": ["trust-proxy.test.js"],
+    "namePattern": "#753 the unset default"
+  },
+  {
+    "label": "#781 assembly has no stall deadline and leaves the night pending",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "], { stallLabel: `${childId} ${nightDate}`, progressKind: 'timelapse' });",
+    "replace": "]);",
+    "expect": "killed",
+    "tests": ["timelapse-deadline.test.js"],
+    "namePattern": "^#781 assembly with no progress"
+  },
+  {
+    "label": "#781 thumbnail has no deadline and holds the ready row pending",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "], { deadlineMs: PROBE_DEADLINE_MS }).catch(() => {",
+    "replace": "]).catch(() => {",
+    "expect": "killed",
+    "tests": ["timelapse-deadline.test.js"],
+    "namePattern": "^#781 hung thumbnail"
   }
 ]

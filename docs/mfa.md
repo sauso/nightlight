@@ -108,7 +108,7 @@ Lost your authenticator? Use a **backup code** at login. If you're also out of b
 ## Related: no admin account left at all
 
 A different, rarer failsafe for a different problem — there must always be at least one admin (see
-"Adding caregivers" in the README), and the app itself refuses any change that would leave zero. But
+"Adding caregivers" in the [full reference](caregivers.md)), and the app itself refuses any change that would leave zero. But
 an install that got into that state before that protection existed, or one whose database was edited
 by hand, has no admin to sign in as and no admin route it can reach to fix itself — and first-run
 setup (`/setup`) refuses to run again once any user exists.

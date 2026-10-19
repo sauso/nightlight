@@ -43,7 +43,7 @@ child. This narrows what a child *inherits*; it does not stop a child reading th
 | Variable | ffmpeg / ffprobe | MediaMTX | Why |
 |---|---|---|---|
 | `PATH` | yes | yes | finds the binary and what it execs |
-| `TZ` | yes | yes | segment and log times agree with the app |
+| `TZ` | yes | yes | segment file names and log times use the container's zone (the app's own times follow Settings → General) |
 | `LANG`, `LC_ALL` | yes | yes | locale only |
 | `MTX_*` (operator's own) | **no** | yes | MediaMTX's documented override mechanism, e.g. `MTX_WEBRTCLOCALUDPADDRESS` |
 | `MTX_WEBRTCADDITIONALHOSTS` | no | yes | computed by `mediamtxProcess.js` at every launch from `PUBLIC_HOST` and the detected host IPs; it replaces an inherited value whenever that list is non-empty |
@@ -68,7 +68,7 @@ on any other import of it under `backend/src`.
 - **It does not protect the files.** For the same reason a child can read the database and `.jwt_secret`
   from disk. A separate user was considered and not done (#553 (b)).
 
-Keep cameras on their own VLAN, as the README advises.
+Keep cameras on their own VLAN, as [docs/cameras.md](cameras.md) advises.
 
 ## ONVIF, PTZ, and camera credentials (`backend/src/lib/onvif.js`, `rtspProbe.js`)
 
@@ -156,6 +156,13 @@ neighbouring mechanisms:
   clip-ring steps and `subscribeAllCameraTopics`; a changed MQTT topic is not subscribed until the MQTT
   client reconnects. Reconcile and the watchdogs can restart the camera from the saved row because
   `isRunning` is false after a rejected start.
+- During that probe, a second camera save can finish first (#787). The waiting save now preserves each
+  column it did not change from the latest row; its own changed columns win, including a changed address
+  or talk/ONVIF credentials. A sub-stream path entered against an unchanged main address follows a newer
+  main address. Deletion during the probe or transcoder start answers 404. A request re-sending a column's
+  old value cannot be distinguished from leaving it untouched, so it preserves a newer value in that column.
+  Credential pairs can still be mixed across overlapping saves: when one save leaves a password blank,
+  its talk or ONVIF username can come from one save and the password from the other because the merge is per column.
 - Known limit (#780): the transcoder never reads the database. A watchdog or reconcile pass that fetched
   the old camera row before the edit's write can queue its stale-address start after the edit's start;
   it then runs last. The window is the other reader's own wait after fetching the row, not just the time

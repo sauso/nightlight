@@ -5,7 +5,7 @@
 // real sessionStorage that jsdom provides: nothing is mocked except the one case that needs storage to fail.
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import {
-  DRAFT_PREFIX, DRAFT_TTL_MS, draftKey, pickDraftFields, saveDraft, loadDraft, clearDraft, clearAllDrafts,
+  DRAFT_PREFIX, draftKey, pickDraftFields, saveDraft, loadDraft, clearDraft, clearAllDrafts,
 } from '../../src/lib/formDraft.js';
 
 afterEach(() => {
@@ -58,13 +58,13 @@ describe('storing and restoring', () => {
   });
 
   test('★ an entry older than the time limit is ignored and removed', () => {
-    // Fixed by Date.now so the boundary is exact: just inside is kept, just past is gone.
+    // docs/architecture.md promises a 6-hour lifetime (#738). Keep the literal independent of the implementation.
     const now = 1_800_000_000_000;
     const spy = vi.spyOn(Date, 'now').mockReturnValue(now);
     saveDraft('k', { a: 'x' }, ['a']);
-    spy.mockReturnValue(now + DRAFT_TTL_MS);
+    spy.mockReturnValue(now + 6 * 60 * 60 * 1000 - 60 * 1000);
     expect(loadDraft('k', ['a'])).toEqual({ a: 'x' });
-    spy.mockReturnValue(now + DRAFT_TTL_MS + 1);
+    spy.mockReturnValue(now + 6 * 60 * 60 * 1000 + 60 * 1000);
     expect(loadDraft('k', ['a'])).toBeNull();
     expect(sessionStorage.getItem('k')).toBeNull();
   });

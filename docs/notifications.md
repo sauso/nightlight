@@ -411,7 +411,7 @@ Turn on **Only alert during set hours** and set a **From** and **To** time.
   fresh install that timezone is **UTC** until you set it, so set it before relying on a schedule. The
   times the app *shows* (alert and history lists, clips, recordings, the time a camera's alerts are
   silenced until) are in that same zone, with a zone label added only when the device you are looking
-  at is in a different one; see [Times and your timezone](../README.md#times-and-your-timezone).
+  at is in a different one; see [Times and your timezone](operations.md#times-and-your-timezone).
 - ⚠️ **It suppresses alerts, not detection.** Outside the window there is no push *and* no in-app
   alert, but the camera is still watched: **sleep tracking keeps recording normally**, so a night is
   unaffected by the schedule. This is the opposite of turning motion or sound detection off, which
@@ -629,7 +629,7 @@ summary still catches up on its next check, but no "Sleep report updated" goes o
 | Night corrected before the first report | still sent, with the cameras' figures | not sent |
 | Correction removed after those ~3 hours | already sent | not sent (the saved summary still updates) |
 
-A corrected night is also **locked** (README, "A night you have corrected is locked"): its saved summary
+A corrected night is also **locked** ([sleep tracking](sleep-tracking.md#a-night-you-have-corrected-is-locked)): its saved summary
 stops being refined, which is the other half of why no later wake time is pushed.
 
 ## Long-silence notifications (admins)

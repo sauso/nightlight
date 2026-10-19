@@ -28,7 +28,7 @@ services:
       - PUID=${PUID:-99}
       # Which upstream addresses may set X-Forwarded-For. Blank = trust loopback only, which is
       # safe but means every visitor through a non-loopback reverse proxy looks like one client.
-      # Only ever list an address you control - see the README and .env.example.
+      # Only ever list an address you control - see docs/remote-access.md and .env.example.
       - TRUST_PROXY=${TRUST_PROXY:-}
       # How many days a sign-in lasts, counted from sign-in (no idle sign-out). Range 7-30, blank = 30;
       # an invalid value logs a warning and 30 is used. A phone is signed out at the same time of day it
@@ -47,7 +47,8 @@ services:
       # volume: set it BEFORE upgrading, it only affects new files after one start at 077.
       # See docs/operations.md, "Who can read the data directory".
       - UMASK=${UMASK:-077}
-      # Your local timezone (e.g. Australia/Melbourne) - affects log timestamps only.
+      # Your local timezone (e.g. Australia/Melbourne) - affects log timestamps and the names of the video
+      # buffer files only; the times the app shows follow Settings -> General.
       # Defaults to UTC if unset. Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
       - TZ=${TZ:-UTC}
       # Optional. A random, persistent secret is auto-generated and stored in the

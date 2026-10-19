@@ -136,8 +136,21 @@ describe('#558 MediaMTX config', () => {
   test('#558 a list is written as `- url:` entries; the rest of the file is untouched', () => {
     const base = fs.readFileSync(BASE_YML, 'utf8');
     const out = renderMediamtxConfig(base, ['stun:a.example.org:3478', GOOGLE]);
-    assert.ok(out.includes('webrtcICEServers2:\n  - url: stun:a.example.org:3478\n  - url: stun:stun.l.google.com:19302\n'));
-    assert.equal(out.replace(/webrtcICEServers2:\n {2}- url: .*\n {2}- url: .*\n/, `${MEDIAMTX_ICE_LINE}\n`), base);
+    const nl = base.includes('\r\n') ? '\r\n' : '\n';
+    assert.ok(out.includes(`webrtcICEServers2:${nl}  - url: stun:a.example.org:3478${nl}  - url: stun:stun.l.google.com:19302${nl}`));
+    assert.equal(out.replace(/webrtcICEServers2:\r?\n {2}- url: .*\r?\n {2}- url: .*\r?\n/, `${MEDIAMTX_ICE_LINE}${nl}`), base);
+  });
+
+  test('#740 an LF template renders byte-for-byte as before', () => {
+    const base = `rtsp: yes\n${MEDIAMTX_ICE_LINE}\nwebrtc: yes\n`;
+    assert.equal(renderMediamtxConfig(base, [GOOGLE]), `rtsp: yes\nwebrtcICEServers2:\n  - url: ${GOOGLE}\nwebrtc: yes\n`);
+  });
+
+  test('#740 a CRLF template keeps CRLF throughout the filled block', () => {
+    const base = `rtsp: yes\r\n${MEDIAMTX_ICE_LINE}\r\nwebrtc: yes\r\n`;
+    const out = renderMediamtxConfig(base, ['stun:a.example.org:3478', GOOGLE]);
+    assert.equal(out, `rtsp: yes\r\nwebrtcICEServers2:\r\n  - url: stun:a.example.org:3478\r\n  - url: ${GOOGLE}\r\nwebrtc: yes\r\n`);
+    assert.equal(out.replace(/\r\n/g, '').includes('\n'), false, 'the rendered copy has no bare LF');
   });
 
   test('#558 an empty list leaves the empty list, so MediaMTX is given no STUN server', () => {
@@ -155,7 +168,8 @@ describe('#558 MediaMTX config', () => {
       const before = fs.readFileSync(BASE_YML, 'utf8');
       const out = writeMediamtxConfig(BASE_YML, [GOOGLE], { tmpDir: tmp });
       assert.equal(path.dirname(out), tmp);
-      assert.match(fs.readFileSync(out, 'utf8'), /webrtcICEServers2:\n {2}- url: stun:stun\.l\.google\.com:19302\n/);
+      const nl = before.includes('\r\n') ? '\r\n' : '\n';
+      assert.ok(fs.readFileSync(out, 'utf8').includes(`webrtcICEServers2:${nl}  - url: ${GOOGLE}${nl}`));
       assert.equal(fs.readFileSync(BASE_YML, 'utf8'), before);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });

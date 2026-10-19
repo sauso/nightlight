@@ -169,7 +169,7 @@ while the API isn't answering Nightlight **won't rewrite MediaMTX's path configu
 could disconnect a stream that was still working.
 
 **What to do:** check the streaming server from inside the container (the same check as in the
-README's troubleshooting section):
+the [troubleshooting guide](docs/troubleshooting.md)):
 ```bash
 docker exec nightlight wget -qO- http://127.0.0.1:9997/v3/paths/list
 ```
@@ -703,7 +703,7 @@ closing sentence.
 - **A parent's corrected night** subtracts the night's stored unknown minutes from the corrected span as
   one total (an existing limit of corrections). A recompute that adds many unknown minutes to a corrected
   night can therefore shrink its displayed sleep more than the stall alone explains. Since a corrected
-  night's saved summary is locked (README, "A night you have corrected is locked"), that no longer happens
+  night's saved summary is locked (docs/sleep-tracking.md, "A night you have corrected is locked"), that no longer happens
   to the child's card after the correction is saved; the figure stops changing but is not made exact. The
   sleep detail page works the night out fresh each time, so it can still show it.
 
@@ -712,7 +712,7 @@ the Camera history for a `[detector-watchdog]` restart (next section) around tha
 
 ## A wake recording does not bridge a gap in the readings, and settling needs 15 unbroken minutes
 
-**What you see:** wake clips (README, "Wake clips") are recorded by the live wake watcher, which only
+**What you see:** wake clips (docs/recording.md, "Wake clips") are recorded by the live wake watcher, which only
 records and never alerts. Three things about when it decides:
 
 - **Two qualifying bursts of activity (each at least 5 active minutes once short gaps are bridged) with a
@@ -1337,7 +1337,7 @@ real 07:12 exit set that exit aside, so the night reported 09:27 instead.
   after a *got out of bed* still cancels that exit on any 3 minutes of movement, because "came back and
   stayed" is a different question and #598 did not measure it.
 - **Saved nights keep their old answer** on the child's page; the detail view works a night out afresh, so
-  for the nights this changes the two can differ until an admin uses **Recompute this night** (README,
+  for the nights this changes the two can differ until an admin uses **Recompute this night** (docs/sleep-tracking.md,
   "Re-working out a night").
 
 **What to do:** nothing, there is no setting for this. If a reported wake looks too early on a night like
@@ -1498,7 +1498,7 @@ changed (3 minutes, 2½ hours, 0.0005), and there is no setting.
   read as a child asleep from the window's opening. A camera outage between a false put-down and the next
   put-down still makes the false one believed: an unrecorded stretch is not proof of an empty bed.
 - **Saved nights keep their old answer** on the child's page; the detail view works a night out afresh, so
-  the two can differ until an admin uses **Recompute this night** (README, "Re-working out a night").
+  the two can differ until an admin uses **Recompute this night** (docs/sleep-tracking.md, "Re-working out a night").
 
 **What to do:** nothing, there is no setting for this. If a bedtime looks wrong, correct it in the morning
 review ("Was last night right?"): the reviewed nights are what this change was checked against.
@@ -1574,6 +1574,6 @@ that cookie, so Low latency is unaffected. This surfaced while building the end-
 where the same thing broke in-browser HLS until the test stack was served over TLS.
 
 **What to do:** Use **Low latency** on a plain-HTTP LAN setup, or put the app behind HTTPS (a
-reverse proxy such as SWAG — see the README's "Running behind a reverse proxy" section), after
+reverse proxy such as SWAG — see "Running behind a reverse proxy" in [docs/remote-access.md](docs/remote-access.md)), after
 which Compatibility works. A proper fix (e.g. having the app strip `Secure` from that cookie when
 it's serving over HTTP) is not yet implemented.
