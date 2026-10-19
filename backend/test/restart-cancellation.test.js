@@ -216,7 +216,7 @@ describe('the same window in the two detectors', { concurrency: true }, () => {
 });
 
 // Shutdown and restart-into-the-gap. Both were claims in the PR that no test covered: stopAll* iterates
-// the union of the process map and pendingRestarts, and startTranscoder awaits stopTranscoder first,
+// the union of the process map and pendingRestarts, and startTranscoder awaits its own stop first,
 // so a re-start inside the gap should adopt the pending relaunch rather than race it. Asserting that
 // without driving it is the habit these tests exist to break.
 // ⚠️ SERIAL, and this one MUST NOT be made concurrent again (issue #278). `stopAllTranscoders()` in
@@ -251,8 +251,9 @@ describe('shutdown and restart while a relaunch is pending', { concurrency: fals
 
   test('re-starting inside the gap does not leave a second lineage running', async () => {
     // The original comment warns that two lineages publishing to one MediaMTX path kick each other off
-    // forever — a real incident, 901 restarts in 2.5 hours. startTranscoder awaits stopTranscoder, which
-    // now cancels the pending timer, so the old relaunch must not survive the new start.
+    // forever — a real incident, 901 restarts in 2.5 hours. startTranscoder awaits its own stop first (the
+    // same code as stopTranscoder, minus the #478 stop generation), which now cancels the pending timer, so the
+    // old relaunch must not survive the new start.
     const CAM = 'cam-relaunch-1';
     const PATH = 'path_relaunch_1';
     await startTranscoder(CAM, 'rtsp://192.0.2.10:554/ch0', PATH, 'Relaunch Cam');

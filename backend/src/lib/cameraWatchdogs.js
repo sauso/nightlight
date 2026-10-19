@@ -122,7 +122,8 @@ const byName = (cam) => cam.name;
 // putting the main leg first only moves the starvation onto the sub leg (W17), so they are split.
 // A main and a sub restart for one camera can now run at the same time. That is safe: they use different
 // transcoder keys (the sub runs as `subCameraId(id)`, see subStream.js) and different MediaMTX paths, so
-// neither can orphan the other's FFmpeg the way two restarts of the SAME key can.
+// neither touches the other's FFmpeg. Two restarts of the SAME key could orphan one until #478; they now
+// queue one behind the other (transcoder.js), and different keys still never wait for each other.
 export function createCameraWatchdog(overrides = {}) {
   const deps = { ...DEFAULT_CAMERA_WATCHDOG_DEPS, ...DEFAULT_RESTART_REQUEST_CONSUMER_DEPS, restartRequests: null, ...overrides };
   // One pending check per camera PER LEG. The clock is the injected one, so a test's fake clock also
@@ -164,9 +165,13 @@ export function createCameraWatchdog(overrides = {}) {
   }
 
   // #369: a restart REQUEST from the detector watchdog (plan v5 §D). That watchdog never starts a publisher
-  // itself: startTranscoder is not safe under two concurrent calls for one camera, and this watchdog's
-  // per-leg runner is what already serialises this leg's restarts. So it posts a request, and the check of
-  // the leg that owns the publisher consumes it. Each check TAKES its request at its very start, which
+  // itself. Two concurrent startTranscoder calls for one camera no longer orphan an FFmpeg (they queue, #478),
+  // but each queued call is still a full restart that kills the FFmpeg the previous one just launched, so two
+  // restarters acting on one stall would cost the live view two outages. This leg's check is the one place
+  // that judges this leg's publisher, and its per-leg runner allows one check per camera at a time, so a
+  // request handled here gives at most one restart per check, judged against that check's own fresh reading.
+  // So the detector watchdog posts a request, and the check of the leg that owns the publisher consumes it.
+  // Each check TAKES its request at its very start, which
   // deletes it from the mailbox whatever happens next: a request is acted on at most once, and never after
   // an awaited restart, however slow or throwing (a startSubStream can take 16s).
   const takeRequest = (cam, kind) => (deps.restartRequests ? deps.restartRequests.take(cam.id, kind) : null);
@@ -439,8 +444,9 @@ export function createAudioWatchdog(overrides = {}) {
 //   attempt 1   L1: restart the DETECTOR (its own exit handler relaunches it after 5s: one lineage).
 //   attempt 2+  L2 (motion only): also ask for the PUBLISHER of the path it reads to be restarted, through a
 //               request the camera watchdog consumes. THIS WATCHDOG NEVER STARTS OR STOPS A PUBLISHER
-//               ITSELF: startTranscoder is not safe under two concurrent calls for one camera (processGuards.js),
-//               and the camera watchdog's per-leg runner is what already serialises that leg's restarts.
+//               ITSELF: concurrent startTranscoder calls for one camera queue (#478) rather than orphan an
+//               FFmpeg, but each is still a full restart, and the camera watchdog's leg check is the one place
+//               that judges a leg's publisher, one check per camera at a time (see createCameraWatchdog).
 // Every action that actually DID something records one camera_events RESTART naming what acted (the detector
 // only if its kill really signalled a process, #578), and ONE diagnosis line (path status, a video/audio probe,
 // the ffmpeg input tap's age) - that line is how the unknown root cause gets learned. An attempt whose kill was

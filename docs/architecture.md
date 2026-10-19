@@ -118,6 +118,40 @@ reconciliation. Three independent mechanisms keep the pipeline alive without man
   `mediamtxProcess.js`), and `transcoder.js` also watches for a specific known bad-camera
   symptom ("DTS discontinuity") and proactively restarts rather than let a session run poisoned.
 
+**One start at a time per camera (#478).** The reconcile pass, the camera watchdog, the audio watchdog
+and the camera routes (add, an edit with a new address, enable, **Restart stream**, a failed delete putting
+the camera back) all start a camera's transcoder through `startTranscoder` (`lib/transcoder.js`), and so
+does the optional sub-stream, under its own key. Starts for one camera run one after another, each with its
+own arguments: two that overlapped used to both launch FFmpeg and leave one running unseen (two publishers on
+one path knock each other off it). Different cameras never wait for each other. What differs from the
+neighbouring mechanisms:
+- A request identical to one still **waiting** its turn (same address, path and name, no stop in between)
+  shares it, so pressing **Restart stream** repeatedly queues one restart, not one per press. It never joins
+  the start already running, nor merges different addresses: an edit with a new address gets a start of its
+  own with that address, so it ends with that address running, except in the known limit (#780) at the end of
+  this list.
+- A stop (switching the camera off, deleting it, shutting down) reaches a start that is queued or part-way
+  through: it launches nothing and finishes quietly, logging `start abandoned …` at INFO. The stop itself
+  never waits in the queue, which keeps shutdown inside its 9 s bound; shutdown does wait for a stop that is
+  already in progress, in parallel with the others. The other way round, a start waits for a stop of the same
+  camera that is still in progress, for at most that stop's 3 s fallback: until the old process exits, or until
+  SIGKILL is sent to one that ignored SIGTERM. After the SIGKILL the old process is gone within a moment, not
+  instantly, so the new FFmpeg can start while it is still exiting; a process that survives SIGKILL (stuck in
+  the kernel) is not waited for at all. Deliberately: waiting on, or giving up the start for, a process that
+  cannot be killed would leave the camera down for good.
+- While a start is queued or running, the camera counts as running for the reconcile pass, which therefore
+  does not queue another one behind it.
+- Known cost: a request now waits for every start ahead of it to finish. Each start is bounded (the old
+  process's stop 3 s, the audio probe 9 s, the MediaMTX checks 5 s and 10 s: about 27 s at the very worst),
+  so an edit with a new address that arrives while one other start of the same camera is running, with
+  MediaMTX timing out throughout, can take about 70 s before it answers (its own checks included; worked out
+  from those bounds, not measured), under Cloudflare's 100 s proxy limit. With more starts ahead of it (a
+  watchdog's and the reconcile pass's at once) it can take longer than that.
+- Known limit (#780): the transcoder never reads the database. An edit with a new address starts the new
+  address before it saves it, so a watchdog or reconcile start that read the old row in that window queues
+  the old address behind the edit's start, and it runs last. This window predates #478 and the queue does not
+  widen it.
+
 When editing this area, preserve the "only write when actually broken" invariant — an
 unconditional reconcile-on-every-tick would cause constant disconnects.
 
