@@ -1,6 +1,6 @@
 # Networking, privacy and remote access
 
-Nightlight is made for your home network first. Live video goes through MediaMTX, which turns each camera's RTSP stream into WebRTC (low delay) and HLS (compatibility) so browsers can play it. The Node/Express backend manages the camera streams and keeps your data locally. This page covers how to put the container on your network, what connects to the outside world, and what to think about before watching from away from home.
+Nightlight is made for your home network first: add your cameras, watch them from any device at home, and keep everything on your own hardware. This page covers how to put the container on your network, how to watch from away from home, and what connects to the outside world. (Under the hood, MediaMTX turns each camera's RTSP stream into WebRTC for low delay and HLS for compatibility, and the Node/Express backend manages the streams and keeps your data locally.)
 
 ## Networking modes
 
@@ -33,12 +33,6 @@ Watching **both remotely in Low latency (WebRTC)** takes one extra step, because
 
 **Compatibility (HLS)** needs none of this. It's all HTTP over 443, so both instances work remotely with no extra port forwarding.
 
-## What connects to the outside
-
-**STUN.** By default the browser and MediaMTX use Google's `stun.l.google.com:19302` to work out a public address for WebRTC. Google can see public IP and connection-timing metadata; it does **not** relay your video (it isn't a TURN server). On your own network STUN isn't needed. Set `STUN_SERVERS` to an empty value to switch it off, or point it at a server you control. HLS compatibility playback never uses STUN.
-
-**Push notifications.** If you enable a notification provider, those messages go through that provider's service. See [notifications](notifications.md).
-
 ## Watching away from home
 
 Don't expose Nightlight directly to the public internet without understanding authentication, HTTPS and network restrictions. A VPN is often the simplest way to reach your home network securely.
@@ -51,7 +45,15 @@ To watch **low-latency** video away from home:
 2. Set `PUBLIC_HOST` to your public IP or a DDNS name. It must **not** be a Cloudflare-proxied (orange cloud) name, because that proxy carries only HTTP(S), never the UDP video. Use a DNS-only record.
 3. Forward UDP port 8189 (or your `WEBRTC_UDP_PORT`: a bare port number from 1 to 65535, blank means 8189) on your router to the server, with the same number in and out. A router that remaps the external port to a different internal one breaks the advertised connection.
 
-**Compatibility (HLS)** mode needs no extra forwarding; it travels over HTTP(S) but generally has higher latency. WebRTC media may need a reachable UDP port even when the website itself loads fine through HTTPS. On iPhone and iPad, background audio works in low-latency mode only. More: [remote access](remote-access.md#remote--internet-access-watching-from-outside-your-home-network).
+**Compatibility (HLS)** mode needs no extra forwarding; it travels over HTTP(S) but generally has higher latency.
+
+Low-latency video can still need a reachable UDP port even when the website itself loads fine through HTTPS. On iPhone and iPad, background audio works in low-latency mode only. More: [remote access](remote-access.md#remote--internet-access-watching-from-outside-your-home-network).
+
+## What connects to the outside
+
+**STUN.** By default the browser and MediaMTX use Google's `stun.l.google.com:19302` to work out a public address for WebRTC. Google can see public IP and connection-timing metadata; it does **not** relay your video (it isn't a TURN server). On your own network STUN isn't needed. Set `STUN_SERVERS` to an empty value to switch it off, or point it at a server you control. HLS compatibility playback never uses STUN.
+
+**Push notifications.** If you enable a notification provider, those messages go through that provider's service. See [notifications](notifications.md).
 
 ## Data security
 
