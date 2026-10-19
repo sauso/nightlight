@@ -128,8 +128,7 @@ neighbouring mechanisms:
 - A request identical to one still **waiting** its turn (same address, path and name, no stop in between)
   shares it, so pressing **Restart stream** repeatedly queues one restart, not one per press. It never joins
   the start already running, nor merges different addresses: an edit with a new address gets a start of its
-  own with that address, so it ends with that address running, except in the known limit (#780) at the end of
-  this list.
+  own with that address. The narrow stale-row limit (#780) is at the end of this list.
 - A stop (switching the camera off, deleting it, shutting down) reaches a start that is queued or part-way
   through: it launches nothing and finishes quietly, logging `start abandoned …` at INFO. The stop itself
   never waits in the queue, which keeps shutdown inside its 9 s bound; shutdown does wait for a stop that is
@@ -147,10 +146,17 @@ neighbouring mechanisms:
   MediaMTX timing out throughout, can take about 70 s before it answers (its own checks included; worked out
   from those bounds, not measured), under Cloudflare's 100 s proxy limit. With more starts ahead of it (a
   watchdog's and the reconcile pass's at once) it can take longer than that.
-- Known limit (#780): the transcoder never reads the database. An edit with a new address starts the new
-  address before it saves it, so a watchdog or reconcile start that read the old row in that window queues
-  the old address behind the edit's start, and it runs last. This window predates #478 and the queue does not
-  widen it.
+- An edit with a new address first registers the MediaMTX path, then saves the camera row, then queues
+  the transcoder start (#780). A failed path registration still answers 502 without saving, and a failed
+  save, including a stale child assignment that answers 409, does not start the transcoder with the new
+  address. Registering the MediaMTX path can still briefly interrupt its publisher. If the transcoder
+  start itself fails, the route still answers 500, but the new address remains saved.
+  The sub-stream and detector restarts and clip-ring reconciliation follow the main start and read the saved row.
+- Known limit (#780): the transcoder never reads the database. A watchdog or reconcile pass that fetched
+  the old camera row before the edit's write can queue its stale-address start after the edit's start;
+  it then runs last. Moving the write before the start narrows this window from the ONVIF probe's possible
+  seconds to a millisecond-scale interval around the write and queue (not measured). Fully closing it would require
+  the transcoder to re-read the address when its queued start runs; that is outside this fix.
 
 When editing this area, preserve the "only write when actually broken" invariant — an
 unconditional reconcile-on-every-tick would cause constant disconnects.

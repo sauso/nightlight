@@ -924,8 +924,6 @@ router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
     } catch (e) {
       return res.status(502).json({ error: `Could not update stream: ${e.message}` });
     }
-    // Address changed - restart the transcoder pointed at the new one.
-    await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);
   }
   // Two-way audio credentials. talk_username not sent => leave unchanged; sent empty => disable
   // talk-back (clear backend + creds); a value => enable the Hikvision ISAPI sink. A blank password
@@ -1028,6 +1026,13 @@ router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
   // The child may have changed (#655): see clearStalePrimaryPointers (lib/primaryCamera.js). Synchronous, straight after the
   // UPDATE, so no other request can run between the two.
   clearStalePrimaryPointers(req.params.id);
+  // #780: queue the changed-address start only after the row is saved. Watchdogs and manual restarts
+  // read this row; a start they queue after this point must get the new address. A failed UPDATE
+  // (including a child deleted during the ONVIF probe above) must not queue a new transcoder start.
+  // A failed start still errors as before, but leaves the saved address for the next retry.
+  if (newRtsp !== existing.rtsp_url && !existing.disabled) {
+    await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);
+  }
   // Apply the sub-stream change to the running pipeline (unless the camera is disabled): start/
   // restart its transcoder if a sub-stream is configured, or tear it down if it was cleared.
   if (!existing.disabled) {
@@ -1053,7 +1058,7 @@ router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
     // deletes every segment, so ANY save (a rename too) lost an on-demand recording in progress, a detection clip's
     // post-roll, a wake clip being cut and the pre-roll of every later clip. The reason never applied: the
     // segmenter reads only `mediamtx_path`, which this UPDATE does not change (it is set once, from the id, when
-    // the camera is added); an address change restarts the TRANSCODER above, and the segmenter rides out the path's
+    // the camera is added); an address change restarts the TRANSCODER after the write, and the segmenter rides out the path's
     // brief absence through its own exit handler (relaunch every 5 s, old segments kept: clipRecorder.js).
     // What a save CAN change is whether the ring is wanted (child_id, so clipRingWanted), and reconcileClipRing
     // already decides every case, as the assign route and index.js's 5-minute reconcile use it: wanted and running

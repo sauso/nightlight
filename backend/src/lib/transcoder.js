@@ -132,8 +132,10 @@ function buildArgs(rtspUrl, mediamtxPath, aacSource) {
 // THE FIX. Each camera has a promise chain. A start waits until the previous start of the SAME camera has
 // finished, resolved or rejected, and then runs with ITS OWN arguments. Different cameras never wait for each
 // other. Requests with different arguments are never merged: an edit with a new RTSP address must end with
-// that address running, not with whichever start happened to be in flight. (One way it still can end on the
-// old one lies outside this file: the edit route saves the new address only after its start, #780.)
+// that address running, not with whichever start happened to be in flight. #780 saves the new address
+// before queuing its start. A reader that fetched the old row before that write can still queue its
+// stale-address start after the edit's start; this queue then runs it last. Closing that narrow window
+// requires re-reading the address when a queued start runs, outside this module's current contract.
 //
 // One record per camera, deleted when its chain drains, so nothing is left behind for a deleted camera:
 //   tail     what the next start waits on. Always `run.then(noop, noop)`, so a start that rejects rejects for
