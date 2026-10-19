@@ -5,6 +5,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 ## Get Nightlight running
 
 - [Installation](installation.md) — Unraid, Docker, Compose, storage and first setup
+- [How it works](how-it-works.md) — FFmpeg, MediaMTX, the backend and the app, and how video reaches your browser
 - [Cameras and caregivers](cameras.md) — add cameras and share access
 - [Adding caregivers](caregivers.md) — what caregivers and admins can each do, and how long a sign-in lasts (`SESSION_TTL_DAYS`)
 - [Networking and remote access](networking.md) — LAN options, WebRTC, STUN, HTTPS and privacy
@@ -32,10 +33,6 @@ New here? Start with the [main README](../README.md), then choose the guide that
 - [Mutation testing](mutation-testing.md) — contributor test reference
 - [Demo mode](demo-mode.md) — public read-only demo deployments
 - [Security reporting](../SECURITY.md) — report vulnerabilities privately
-
-## Full reference
-
-- [Full reference](readme-reference.md) — the previous README in full. It still holds the longer installation notes, networking modes, managing cameras and building from source. It is being split into separate guides; until then, settings and known limits that are not in a guide above live here.
 
 ## Visual walkthrough
 

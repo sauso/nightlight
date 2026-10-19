@@ -22,7 +22,7 @@ Instead of "Nightlight leverages WebRTC technology to facilitate low-latency vid
 | --- | --- |
 | **README** | The front door: what Nightlight is, a screenshot or two, what it can do, what you need, how to install it, where to read more. Roughly 100-250 lines. |
 | **Guides** (`docs/*.md`) | How to set up and use a feature, in order of what the reader wants to do. |
-| **Reference** | Settings and environment variables, networking detail, architecture, known limits. Today most of this is in [readme-reference.md](readme-reference.md), which is being split into guides. |
+| **Reference** | Settings and environment variables, networking detail, architecture, known limits. See [docs/README.md](README.md) for where each guide lives. |
 
 Don't add feature descriptions, environment variables or troubleshooting to the README. When a feature ships, decide: a one-line README mention, an update to an existing guide, a new guide, or nothing. Check for an existing guide before creating one, and link to the authoritative page instead of repeating it.
 
