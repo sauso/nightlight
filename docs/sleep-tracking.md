@@ -1,6 +1,6 @@
 # Sleep tracking
 
-> This page was moved, word for word, from the [full reference](readme-reference.md) (the old README). The wording has not been edited yet; the first paragraph's pointer to the safety note is the only change.
+> This page was moved, word for word, from the old README. The wording has not been edited yet; the first paragraph's pointer to the safety note is the only change.
 
 Nightlight can estimate each child's overnight sleep from what their cameras already see and
 hear — no wearables, no extra hardware. It's a **sleep-pattern guide, not a medical

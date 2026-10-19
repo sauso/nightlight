@@ -1,6 +1,6 @@
 # Your home screen and the mobile apps
 
-> This page was moved, word for word, from the [full reference](readme-reference.md) (the old README). The wording has not been edited yet, and the cross-references to the reverse-proxy and remote-access sections now link to them.
+> This page was moved, word for word, from the old README. The wording has not been edited yet, and the cross-references to the reverse-proxy and remote-access sections now link to them.
 
 ## Installing to your home screen
 

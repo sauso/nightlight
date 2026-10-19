@@ -1,17 +1,17 @@
 # Reverse proxy and remote access
 
-> This page was moved, word for word, from the [full reference](readme-reference.md) (the old README). The wording has not been edited yet; the only changes are three cross-references to sections that stayed in the reference.
+> This page was moved, word for word, from the old README. The wording has not been edited yet; the only changes are three cross-references to sections that were not moved with it.
 
 ## Running behind a reverse proxy (e.g. SWAG on Unraid)
 
 A ready-to-use config is in `reverse-proxy/nightlight.subdomain.conf`. Copy it to
 `swag/config/nginx/proxy-confs/nightlight.subdomain.conf` and replace `UNRAID_LAN_IP`
 with the container's LAN IP — the **host's IP** in host mode, or the container's **own
-dedicated IP** if you gave it one (see [Networking modes](readme-reference.md#networking-modes)). Either way SWAG
+dedicated IP** if you gave it one (see [Networking modes](networking.md#networking-modes)). Either way SWAG
 reaches it by that IP, not by container name.
 
 > **macvlan note:** if you put Nightlight on its own IP with plain `macvlan`, SWAG running on the
-> *same host* won't be able to reach it (the host↔macvlan-container limitation noted in [Networking modes](readme-reference.md#networking-modes)) — use
+> *same host* won't be able to reach it (the host↔macvlan-container limitation noted in [Networking modes](networking.md#networking-modes)) — use
 > `ipvlan`, or run SWAG on a different host.
 
 Everything is proxied through a single port (4000): the app, login, all pages, and the
@@ -114,7 +114,7 @@ has a toggle to switch between them ("Low latency" / "Compatibility"):
    media, so remote Low latency would never connect while the page itself loads fine. Use a
    separate DNS-only (grey cloud) record, e.g. `rtc.example.com`, for `PUBLIC_HOST` and keep the
    proxied name for the web page.
-3. Forward **UDP port 8189** (or your `WEBRTC_UDP_PORT`, see "Running more than one instance" in [Networking modes](readme-reference.md#running-more-than-one-instance-eg-staging--production)) on your router to your server's
+3. Forward **UDP port 8189** (or your `WEBRTC_UDP_PORT`, see "Running more than one instance" in [Networking modes](networking.md#running-more-than-one-instance-eg-staging--production)) on your router to your server's
    LAN IP.
 
 This is a hard requirement of WebRTC, not a workaround — the actual audio/video always

@@ -24,8 +24,8 @@ docker run -d \
 Nightlight needs a routable LAN address so WebRTC (the low-latency viewing mode) works
 correctly. **Host networking (shown above) is the simplest default** and needs no extra setup; a
 dedicated `ipvlan`/`macvlan` address is also supported if you'd rather avoid host-mode port
-conflicts — see [Networking modes](https://github.com/sauso/nightlight/blob/main/docs/readme-reference.md#networking-modes) in the
-full reference for both options and their trade-offs.
+conflicts — see [Networking modes](https://github.com/sauso/nightlight/blob/main/docs/networking.md#networking-modes) in the
+networking guide for both options and their trade-offs.
 
 ### Example
 

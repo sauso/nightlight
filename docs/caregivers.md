@@ -1,6 +1,6 @@
 # Adding caregivers
 
-> This page was moved, word for word, from the [full reference](readme-reference.md) (the old README). The wording has not been edited yet.
+> This page was moved, word for word, from the old README. The wording has not been edited yet.
 
 Once signed in as admin, go to **Settings → Caregivers** to create additional logins (e.g. for a
 partner or babysitter).

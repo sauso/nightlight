@@ -106,7 +106,7 @@ Start with the [documentation hub](docs/README.md), or jump directly to:
 - [Reverse proxy and remote access](docs/remote-access.md)
 - [Adding caregivers](docs/caregivers.md)
 - [Your home screen and the mobile apps](docs/mobile.md)
-- [Full reference](docs/readme-reference.md) — the rest of the old README (installation detail, networking modes, managing cameras, building), being split into guides
+- [How it works](docs/how-it-works.md)
 
 ## Help make Nightlight better
 
