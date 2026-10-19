@@ -18,12 +18,24 @@ const WORDING = {
   [ALERT.SOUND]: { body: 'Sound detected', suffix: 'sound' },
 };
 
+const warnedSnapshotFailures = new Set();
+
 // Resolve the alert image: prefer the camera's own HTTP snapshot endpoint when set (instant, no
 // keyframe wait), falling back to a one-shot grab off the local MediaMTX stream. Best-effort —
 // returns a Buffer or null, and the alert still sends text-only on null.
 async function resolveSnapshot(camera, snapshotPath) {
   if (camera.snapshot_url && String(camera.snapshot_url).trim()) {
-    const img = await fetchHttpSnapshot(camera.snapshot_url);
+    let img;
+    try {
+      img = await fetchHttpSnapshot(camera.snapshot_url);
+    } catch {
+      // #743: a snapshot failure must not drop the event's push. Log once per camera without
+      // including the URL or the error message, either of which may contain credentials.
+      if (!warnedSnapshotFailures.has(camera.id)) {
+        warnedSnapshotFailures.add(camera.id);
+        logger.warn(`[detect] camera snapshot fetch threw for camera ${camera.id}; falling back to stream grab`);
+      }
+    }
     if (img) return img;
     logger.info(`[detect] camera snapshot URL failed for "${camera.name}" — falling back to stream grab`);
   }

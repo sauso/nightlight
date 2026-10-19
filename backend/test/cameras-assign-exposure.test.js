@@ -164,6 +164,13 @@ describe('the credential list itself stays honest', () => {
 });
 
 describe('PUT /cameras/:id/assign as an admin', () => {
+  test('#743: a malformed RTSP escape still gives the admin editable login fields', async () => {
+    db.prepare('UPDATE cameras SET rtsp_url = ? WHERE id = ?').run('rtsp://us%zz:pa%zz@192.0.2.10:554/ch0', 'cam-1');
+    const r = await unassign(adminToken);
+    assert.equal(r.status, 200);
+    assert.equal(r.body.rtsp_username, 'us%zz');
+    assert.equal(r.body.rtsp_has_password, true);
+  });
   test('gets the edit-form fields, but never a raw credential', async () => {
     const r = await unassign(adminToken);
     assert.equal(r.status, 200);

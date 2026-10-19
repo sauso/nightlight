@@ -57,6 +57,14 @@ test('★ credentials in the URL become a Basic header (decoded first) and never
   assert.equal(seen[0].url, '/snap.jpg?channel=1', 'the path and query must survive the credential move');
 });
 
+test('#743: malformed escapes in either credential are sent as typed without rejecting', async () => {
+  for (const [username, password] of [['us%zz', 'pass'], ['user', 'pa%zz']]) {
+    const img = await fetchHttpSnapshot(`http://${username}:${password}@${base}/snap.jpg`);
+    assert.ok(img?.equals(JPEG), 'a malformed escape prevented the camera snapshot');
+    assert.equal(seen.at(-1).auth, `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`);
+  }
+});
+
 test('a non-2xx answer is null, not an error page treated as a picture', async () => {
   route = (req, res) => res.writeHead(401).end('<html>login</html>');
   assert.equal(await fetchHttpSnapshot(`http://${base}/snap.jpg`), null);

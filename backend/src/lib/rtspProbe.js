@@ -45,7 +45,11 @@ export function ffprobeAudioCodec(rtspUrl) {
     }
     let out = '';
     proc.stdout.on('data', (d) => (out += d.toString()));
-    const killer = setTimeout(() => proc.kill('SIGKILL'), 9000);
+    // resolve(null) HERE as well as on 'exit' (#478): this probe runs inside the transcoder's per-camera start
+    // chain, so a child that never reports 'exit' after its SIGKILL (a process stuck in an uninterruptible wait
+    // can) would otherwise hold that camera's every later start forever. Resolving first is safe: a promise
+    // settles once, so the 'exit' that normally follows changes nothing, and a kill() that throws cannot skip it.
+    const killer = setTimeout(() => { resolve(null); proc.kill('SIGKILL'); }, 9000);
     proc.on('error', () => { clearTimeout(killer); resolve(null); });
     proc.on('exit', () => { clearTimeout(killer); resolve((out.trim().split('\n')[0] || '').trim() || null); });
   });

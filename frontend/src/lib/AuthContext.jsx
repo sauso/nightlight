@@ -3,6 +3,15 @@ import { api, getToken, setToken, refreshMediaToken, clearMediaToken, onUnauthor
 import { unregisterPushNotifications, resetPushRegistration } from './pushNotifications.js';
 import { useAutoRetry } from './useAutoRetry.js';
 import { clearAllDrafts } from './formDraft.js';
+import { getIceServers } from './iceServers.js';
+
+function warmIceServersForSignedInUser() {
+  // #739: /api/about requires a session. Start this before showing the first tile, so its 1s ICE
+  // lookup budget usually finds a cached answer. Do not wait for it: a slow /about must not hold sign-in,
+  // and it can run alongside the media-token fetch. getIceServers() shares an in-flight request and never
+  // rejects. Keep that cache across sign-out: STUN_SERVERS is server-wide, not tied to a user.
+  void getIceServers();
+}
 
 // Exported so tests can inject a value directly — chiefly to render a screen as an admin and
 // again as a caregiver, since role gating is real in this UI and is where bugs hide.
@@ -28,6 +37,7 @@ export function AuthProvider({ children }) {
     setRetrying(true);
     try {
       const me = await api.get('/auth/me');
+      warmIceServersForSignedInUser();
       // Fetch the media token before rendering the authed app, so the first <img>/HLS load already
       // has one (never blocks sign-in on failure — getMediaToken() retries lazily).
       await refreshMediaToken().catch(() => {});
@@ -98,6 +108,7 @@ export function AuthProvider({ children }) {
 
   async function login(token, userObj) {
     setToken(token);
+    warmIceServersForSignedInUser();
     await refreshMediaToken().catch(() => {});
     setUser(userObj);
   }

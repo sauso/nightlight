@@ -30,7 +30,7 @@ import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rt
 import { grabLiveFrame } from '../lib/snapshot.js';
 import { logger } from '../lib/logger.js';
 import { startRecording, stopRecording, recordingState, getOndemandSettings, isRecording } from '../lib/recordings.js';
-import { stripUrlPassword, urlHasPassword, resolveUrlPassword, scrubSecrets, findCredentialLeak } from '../lib/urlCredentials.js';
+import { stripUrlPassword, urlHasPassword, resolveUrlPassword, scrubSecrets, findCredentialLeak, decodeUrlCredential } from '../lib/urlCredentials.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { clearStalePrimaryPointers } from '../lib/primaryCamera.js';
 import { purgeCamera, preflightCameraPurge, purgeFailureReason } from '../lib/entityPurge.js';
@@ -139,8 +139,8 @@ function parseRtspComponents(url) {
       host: u.hostname,
       port: u.port || '554',
       path: (u.pathname || '') + (u.search || ''),
-      username: u.username ? decodeURIComponent(u.username) : '',
-      password: u.password ? decodeURIComponent(u.password) : '',
+      username: u.username ? decodeUrlCredential(u.username) : '',
+      password: u.password ? decodeUrlCredential(u.password) : '',
     };
   } catch {
     return null;
@@ -924,8 +924,6 @@ router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
     } catch (e) {
       return res.status(502).json({ error: `Could not update stream: ${e.message}` });
     }
-    // Address changed - restart the transcoder pointed at the new one.
-    await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);
   }
   // Two-way audio credentials. talk_username not sent => leave unchanged; sent empty => disable
   // talk-back (clear backend + creds); a value => enable the Hikvision ISAPI sink. A blank password
@@ -1001,7 +999,7 @@ router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
       talkBackend = 'onvif-backchannel';
     }
   }
-  db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,
+  const updatedRows = db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,
       talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,
       discovery_source = ?, onvif_capable = ?, onvif_motion_capable = ?, onvif_device_url = ?, backchannel_supported = ?,
       ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?
@@ -1024,10 +1022,20 @@ router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
     onvifUser,
     onvifPass,
     req.params.id
-  );
+  ).changes;
   // The child may have changed (#655): see clearStalePrimaryPointers (lib/primaryCamera.js). Synchronous, straight after the
   // UPDATE, so no other request can run between the two.
   clearStalePrimaryPointers(req.params.id);
+  // #780: queue the changed-address start only after the row is saved. Watchdogs and manual restarts
+  // read this row; a start they queue after this point must get the new address. `existing` can be
+  // stale across the ONVIF probe: a disable or delete may finish while it awaits. Check the saved
+  // row, then enqueue without another await so #478's stop generation covers any later disable.
+  // A failed UPDATE (including a child deleted during the probe) cannot queue a start. A failed
+  // start still errors as before, but leaves the saved row for the next retry.
+  const saved = updatedRows ? db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id) : undefined;
+  if (saved && !saved.disabled && newRtsp !== existing.rtsp_url) {
+    await startTranscoder(saved.id, saved.rtsp_url, saved.mediamtx_path, saved.name);
+  }
   // Apply the sub-stream change to the running pipeline (unless the camera is disabled): start/
   // restart its transcoder if a sub-stream is configured, or tear it down if it was cleared.
   if (!existing.disabled) {
@@ -1053,7 +1061,7 @@ router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
     // deletes every segment, so ANY save (a rename too) lost an on-demand recording in progress, a detection clip's
     // post-roll, a wake clip being cut and the pre-roll of every later clip. The reason never applied: the
     // segmenter reads only `mediamtx_path`, which this UPDATE does not change (it is set once, from the id, when
-    // the camera is added); an address change restarts the TRANSCODER above, and the segmenter rides out the path's
+    // the camera is added); an address change restarts the TRANSCODER after the write, and the segmenter rides out the path's
     // brief absence through its own exit handler (relaunch every 5 s, old segments kept: clipRecorder.js).
     // What a save CAN change is whether the ring is wanted (child_id, so clipRingWanted), and reconcileClipRing
     // already decides every case, as the assign route and index.js's 5-minute reconcile use it: wanted and running

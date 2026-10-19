@@ -177,6 +177,14 @@ describe('with every channel switched on', () => {
     assert.equal(getEventSnapshotFile(getRecentDetectionEvents()[0].id), null, 'a snapshot was recorded that never existed');
   });
 
+  test('#743: malformed snapshot login still delivers the alert with its image', async () => {
+    cam.snapshot_url = `http://user:pa%zz@127.0.0.1:${hub.address().port}/snap.jpg`;
+    await fireDetectionAlert(cam, ALERT.MOTION, 'd');
+    await arrived();
+    assert.ok(ntfy[0].body.equals(JPEG));
+    assert.ok(getEventSnapshotFile(getRecentDetectionEvents()[0].id));
+  });
+
   test('a channel that fails does not stop the others and does not make the alert throw', async () => {
     gotifyStatus = 500;
     await assert.doesNotReject(fireDetectionAlert(cam, ALERT.MOTION, 'd'));

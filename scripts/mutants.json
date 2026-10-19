@@ -1,5 +1,27 @@
 [
   {
+    "label": "#780 camera save starts the transcoder before saving the new address",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  const updatedRows = db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,\r\n      talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,\r\n      discovery_source = ?, onvif_capable = ?, onvif_motion_capable = ?, onvif_device_url = ?, backchannel_supported = ?,\r\n      ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?\r\n    WHERE id = ?`).run(\r\n    name?.trim() || existing.name,\r\n    newRtsp,\r\n    child_id !== undefined ? child_id || null : existing.child_id,\r\n    mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic,\r\n    talkBackend,\r\n    talkUser,\r\n    talkPass,\r\n    subUrl,\r\n    discSource,\r\n    onvifCapable,\r\n    onvifMotionCapable,\r\n    onvifUrl,\r\n    backchannel,\r\n    ptz,\r\n    profileToken,\r\n    onvifUser,\r\n    onvifPass,\r\n    req.params.id\r\n  ).changes;\r\n  // The child may have changed (#655): see clearStalePrimaryPointers (lib/primaryCamera.js). Synchronous, straight after the\r\n  // UPDATE, so no other request can run between the two.\r\n  clearStalePrimaryPointers(req.params.id);\r\n  // #780: queue the changed-address start only after the row is saved. Watchdogs and manual restarts\r\n  // read this row; a start they queue after this point must get the new address. `existing` can be\r\n  // stale across the ONVIF probe: a disable or delete may finish while it awaits. Check the saved\r\n  // row, then enqueue without another await so #478's stop generation covers any later disable.\r\n  // A failed UPDATE (including a child deleted during the probe) cannot queue a start. A failed\r\n  // start still errors as before, but leaves the saved row for the next retry.\r\n  const saved = updatedRows ? db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id) : undefined;\r\n  if (saved && !saved.disabled && newRtsp !== existing.rtsp_url) {\r\n    await startTranscoder(saved.id, saved.rtsp_url, saved.mediamtx_path, saved.name);\r\n  }\r\n",
+    "replace": "  if (newRtsp !== existing.rtsp_url && !existing.disabled) {\r\n    await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);\r\n  }\r\n  const updatedRows = db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,\r\n      talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,\r\n      discovery_source = ?, onvif_capable = ?, onvif_motion_capable = ?, onvif_device_url = ?, backchannel_supported = ?,\r\n      ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?\r\n    WHERE id = ?`).run(\r\n    name?.trim() || existing.name,\r\n    newRtsp,\r\n    child_id !== undefined ? child_id || null : existing.child_id,\r\n    mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic,\r\n    talkBackend,\r\n    talkUser,\r\n    talkPass,\r\n    subUrl,\r\n    discSource,\r\n    onvifCapable,\r\n    onvifMotionCapable,\r\n    onvifUrl,\r\n    backchannel,\r\n    ptz,\r\n    profileToken,\r\n    onvifUser,\r\n    onvifPass,\r\n    req.params.id\r\n  ).changes;\r\n  // The child may have changed (#655): see clearStalePrimaryPointers (lib/primaryCamera.js). Synchronous, straight after the\r\n  // UPDATE, so no other request can run between the two.\r\n  clearStalePrimaryPointers(req.params.id);\r\n",
+    "expect": "killed",
+    "tests": [
+      "camera-edit-save-before-restart.test.js"
+    ],
+    "namePattern": "changed address is saved when startTranscoder is called"
+  },
+  {
+    "label": "#780 start decided from the stale row read before the probe",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  const saved = updatedRows ? db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id) : undefined;\r\n  if (saved && !saved.disabled && newRtsp !== existing.rtsp_url) {\r\n    await startTranscoder(saved.id, saved.rtsp_url, saved.mediamtx_path, saved.name);\r\n  }",
+    "replace": "  if (newRtsp !== existing.rtsp_url && !existing.disabled) {\r\n    await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);\r\n  }",
+    "expect": "killed",
+    "tests": [
+      "camera-edit-save-before-restart.test.js"
+    ],
+    "namePattern": "disable during ONVIF probe leaves no live transcoder start"
+  },
+  {
     "label": "sound percentile: nearest-rank index off by one",
     "file": "backend/src/lib/activityTracker.js",
     "find": "Math.ceil(p * n) - 1",
@@ -21901,5 +21923,221 @@
     "expect": "killed",
     "tests": ["wake-capture-lease.test.js"],
     "namePattern": "the capture's lease holds the footage until the cut settles"
+  },
+  {
+    "label": "#773 reset-on-any-line: every counter line re-arms the stall timer, rising or not (a hung ffmpeg 7 encode printing frozen blocks is never cut)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "if (v > run.seen[m[1]]) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "frozen counters"
+  },
+  {
+    "label": "#773 kill without settle: the deadline kills the child but leaves the promise to its exit (an unkillable child hangs the capture again)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "settle(false, new Error(`${tool} ${why(ms)}; killed it`), 'given up on (killed)');",
+    "replace": "void why;",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "an UNKILLABLE child"
+  },
+  {
+    "label": "#773 the stall window ignores total_size (a long recording's silent faststart rewrite is cut at the base window)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "return STALL_WINDOW_BASE_MS + Math.ceil((bytes / STALL_ASSUMED_BYTES_PER_SEC) * 1000);",
+    "replace": "return STALL_WINDOW_BASE_MS;",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "the stall window grows"
+  },
+  {
+    "label": "#773 cleanup deletes more than this clip's own files (the camera's whole clip folder goes on a failed encode)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "    removeOwnFile(outFile);\r\n    removeOwnFile(thumbFile);\r\n    throw err;",
+    "replace": "    fs.rmSync(outDir, { recursive: true, force: true });\r\n    throw err;",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "a failed encode removes its own partial MP4"
+  },
+  {
+    "label": "#773 a failed extraction leaves its own files behind (a partial or orphaned MP4 and JPG no row points at)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "    removeOwnFile(outFile);\r\n    removeOwnFile(thumbFile);\r\n    throw err;",
+    "replace": "    throw err;",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "a probe that fails after a good encode"
+  },
+  {
+    "label": "#773 hold not released on stall: no deadline is armed at spawn, so a silent encode pins the detection clip's ring hold forever",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "      proc.stdout.on('data', (c) => lines.write(c));\r\n      arm(run.windowMs, stalledFor);",
+    "replace": "      proc.stdout.on('data', (c) => lines.write(c));",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "acceptance: a detection clip"
+  },
+  {
+    "label": "#773 the 'error' listener is removed once settled, so a late 'error' throws (the #257 crash class)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "      settled = true;\r\n      clearTimeout(timer);",
+    "replace": "      settled = true;\r\n      clearTimeout(timer);\r\n      proc.removeAllListeners('error');",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "an UNKILLABLE child"
+  },
+  {
+    "label": "#773 a child already given up on can re-arm its deadline and be signalled again",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "if (settled) return; // a child that keeps talking after it was given up on must not re-arm anything",
+    "replace": "// (the re-arm guard is gone)",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "an UNKILLABLE child"
+  },
+  {
+    "label": "#773 ffprobe has no deadline (a hung probe after a good encode pins the clip's hold again)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "{ tool: 'ffprobe', deadlineMs: PROBE_DEADLINE_MS }",
+    "replace": "{ tool: 'ffprobe' }",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "ffprobe has a fixed 120 s deadline"
+  },
+  {
+    "label": "#773 a failed thumbnail keeps its truncated JPG (stored as the clip's thumb_path)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": ".catch(() => removeOwnFile(thumbFile));",
+    "replace": ".catch(() => {});",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "a thumbnail that hangs"
+  },
+  {
+    "label": "#773 (Codex P1 on #783) a child settles on 'exit' again: stdout that arrives after it is lost, the probe parses half its JSON, and a good clip is deleted",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "    proc.on('close', (code) => settleOnCode(exited ? exitCode : code));",
+    "replace": "    proc.on('exit', (code) => settleOnCode(code));",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "is still read: the probe parses all of it"
+  },
+  {
+    "label": "#773 a child that has exited but whose stdio never closes is treated as stuck at its deadline (rejected, so a good clip is deleted)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "        if (exited) return settleOnCode(exitCode);",
+    "replace": "        // (the exited branch is gone)",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "a child that exits but whose output never closes"
+  },
+  {
+    "label": "#478 no chain: a start does not wait for the previous start of its camera (two launch, one is orphaned)",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "      await previous; // never rejects: see `tail` above",
+    "replace": "      void previous;",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^a:"
+  },
+  {
+    "label": "#478 one chain for every camera: a start of one camera waits behind another camera's",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "  let chain = startChains.get(cameraId);",
+    "replace": "  let chain = [...startChains.values()][0];",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^d:"
+  },
+  {
+    "label": "#478 a rejected start poisons the chain: the start queued behind it rejects too",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "  chain.tail = request.run.then(noop, noop);",
+    "replace": "  chain.tail = request.run;",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^c:"
+  },
+  {
+    "label": "#478 no stop-generation check right before launch(): a stop during the last MediaMTX check still launches",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "  if (stopped()) return abandon(mediamtxPath, 'before ffmpeg was launched');",
+    "replace": "  ;",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^f, l:"
+  },
+  {
+    "label": "#478 no stop-generation check before the -hls write: a stopped (deleted) camera's -hls path is re-created",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "    if (stopped()) return abandon(mediamtxPath, 'before the -hls path was written');",
+    "replace": "    ;",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^f2:"
+  },
+  {
+    "label": "#478 the stop generation is read when the start BEGINS, not when it was queued (a disabled camera launches)",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "  const stopped = () => chain.epoch !== epoch;",
+    "replace": "  let begunAt; const stopped = () => chain.epoch !== (begunAt ??= chain.epoch);",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^g:"
+  },
+  {
+    "label": "#478 stopAllTranscoders misses a camera whose start is queued or in flight",
+    "file": "backend/src/lib/transcoder.js",
+    "find": ", ...startChains.keys(), ",
+    "replace": ", ",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^i2?:"
+  },
+  {
+    "label": "#478 start does not wait for an in-progress stop (it launches next to a process that ignored SIGTERM)",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "  if (!entry) return stopsInProgress.get(cameraId) ?? Promise.resolve();",
+    "replace": "  if (!entry) return Promise.resolve();",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^s:"
+  },
+  {
+    "label": "#478 shutdown skips a stop in progress (stopAllTranscoders settles while an earlier stop's ffmpeg is alive)",
+    "file": "backend/src/lib/transcoder.js",
+    "find": ", ...stopsInProgress.keys()]",
+    "replace": "]",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^s2:"
+  },
+  {
+    "label": "#478 isRunning misses a pending start (reconcile queues a second one behind it)",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "  return processes.has(cameraId) || (startChains.get(cameraId)?.pending ?? 0) > 0;",
+    "replace": "  return processes.has(cameraId);",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^j:"
+  },
+  {
+    "label": "#478 the dedupe joins a queued start across a stop (disable then enable leaves no transcoder)",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "  if (last && !last.started && last.epoch === epoch && last.rtspUrl === rtspUrl",
+    "replace": "  if (last && !last.started && last.rtspUrl === rtspUrl",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^k3:"
+  },
+  {
+    "label": "#478 ffprobeAudioCodec settles only on exit: a killed probe that never exits holds its camera's start chain",
+    "file": "backend/src/lib/rtspProbe.js",
+    "find": "    const killer = setTimeout(() => { resolve(null); proc.kill('SIGKILL'); }, 9000);",
+    "replace": "    const killer = setTimeout(() => proc.kill('SIGKILL'), 9000);",
+    "expect": "killed",
+    "tests": ["rtsp-probe-codec-deadline.test.js"],
+    "namePattern": "never exits after SIGKILL"
   }
 ]

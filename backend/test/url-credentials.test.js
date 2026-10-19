@@ -66,6 +66,11 @@ describe('what leaves the server', () => {
     assert.equal(urlUsername(`http://admin:${SECRET}@cam.local/x`), 'admin');
     assert.equal(urlUsername('http://cam.local/x'), '');
   });
+
+  test('#743: a malformed escape in a parseable URL still shows the username', () => {
+    assert.equal(urlUsername('http://us%zz:pass@cam.local/snap.jpg'), 'us%zz');
+    assert.equal(urlUsername('http://us%40er:pass@cam.local/snap.jpg'), 'us@er');
+  });
 });
 
 describe('what happens on save', () => {
