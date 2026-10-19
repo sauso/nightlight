@@ -6,6 +6,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 
 - [Installation](installation.md) — Unraid, Docker, Compose, storage and first setup
 - [Cameras and caregivers](cameras.md) — add cameras and share access
+- [Adding caregivers](caregivers.md) — what caregivers and admins can each do, and how long a sign-in lasts (`SESSION_TTL_DAYS`)
 - [Networking and remote access](networking.md) — LAN options, WebRTC, STUN, HTTPS and privacy
 - [Reverse proxy and remote access](remote-access.md) — SWAG, `TRUST_PROXY`, `STUN_SERVERS`, `CLOUDFLARE_ANALYTICS`, watching away from home
 - [Troubleshooting](troubleshooting.md) — common problems and first checks
@@ -17,6 +18,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 - [Camera controls](camera-controls.md) — PTZ and offline alerts
 - [Sleep tracking](sleep-tracking.md) — how nights are estimated, corrected and reviewed, and its known limits
 - [Recording](recording.md) — clips, wake events, manual recordings and retention
+- [Your home screen and the mobile apps](mobile.md) — install as an app, Android and iOS, push on the apps
 - [Push notifications](notifications.md) — supported providers and event delivery
 - [MQTT](mqtt.md) — broker setup and sensor data
 - [Multi-factor authentication](mfa.md) — enrollment and recovery
@@ -33,7 +35,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 
 ## Full reference
 
-- [Full reference](readme-reference.md) — the previous README in full. It holds `SESSION_TTL_DAYS`, timezones, caregivers, logs and the longer troubleshooting notes. It is being split into separate guides; until then, settings and known limits that are not in a guide above live here.
+- [Full reference](readme-reference.md) — the previous README in full. It still holds the longer installation notes, networking modes, managing cameras and building from source. It is being split into separate guides; until then, settings and known limits that are not in a guide above live here.
 
 ## Visual walkthrough
 
