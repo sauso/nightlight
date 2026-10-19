@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.41.1] - 2026-10-19
+
 ### Fixed
 
 - **Saving a camera, a rename included, no longer empties its recording buffer (#490).** Every camera save stopped and restarted the camera's rolling buffer, which deleted the footage in it and dropped what was holding it: an on-demand recording in progress lost its clip, a detection clip or a wake clip being cut could fail, and the next clip had no pre-roll. A save now leaves a running buffer as it is (resized to the current settings), starts it if the camera should be buffering and is not, and, when the save makes it unneeded (for example the camera is unassigned from its child), stops it only once nothing on that camera is still using it, the same rule a Recording-settings save already follows. An address change still restarts the camera's stream, which can leave a short gap in the buffer, but no longer empties it. No setting. Given up: any camera save also restarted a buffer that had stalled; switching the camera off and on, or restarting Nightlight, still does. See `docs/recording.md`, "Changing these settings does not restart buffering".
