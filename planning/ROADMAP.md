@@ -1133,7 +1133,7 @@ be built.** Full plan: [`reviews/sleep-data-sharing-plan-2026-09-16.md`](reviews
 
 The central tension: every existing outbound call (ntfy/Pushover/Gotify/Firebase) goes to a service the
 household configures and owns, and the docs say so explicitly in three places ("no cloud... nothing is
-shared through a Nightlight cloud" — `README.md:9`, `docker-hub-overview.md:3-5`, `docs/README.md:77-78`).
+shared through a Nightlight cloud" — the README's "Privacy and safety" section, `docker-hub-overview.md:3-5` and `docs/networking.md`).
 A feature sending data to a maintainer-run server is categorically new and would make those claims false
 if shipped without qualifying them — the plan treats that as the central constraint, not an afterthought.
 
