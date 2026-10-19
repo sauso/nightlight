@@ -257,6 +257,29 @@ describe('#471: a wake clip being cut keeps its ring footage when its run ends',
     }
   }
 
+  // #773: before runFfmpeg had a deadline, a cut whose ffmpeg never exited kept its capture pending, and so this
+  // lease, forever (the ring then grows until a restart). The lease is released by the capture's own `.finally`
+  // (wakeWatcher.js), so it is enough that the capture now SETTLES. 120 s is the stall window for a child that has
+  // reported nothing (clipRecorder.STALL_WINDOW_BASE_MS); written out so a change to it has to be made here too.
+  test('#773: a cut whose ffmpeg never exits nor reports progress is given up on after the stall window; the row fails and the lease goes', async () => {
+    armSegmenter();
+    const ctx = wakeThatCaptures();
+    mock.timers.tick(5000); // the capture's 5 s segment settle
+    await until(() => concatProc(ctx.id), 'the extraction ffmpeg');
+    assert.equal(leases().length, 1, 'precondition: the capture holds its lease');
+    mock.timers.tick(119_000);
+    await flush();
+    assert.equal(rowStatus(ctx.id), 'pending', 'given up on before the stall window ran out');
+    assert.equal(leases().length, 1);
+    mock.timers.tick(1_000);
+    await until(() => rowStatus(ctx.id) !== 'pending', 'the stalled cut to be given up on');
+    await flush();
+    assert.equal(rowStatus(ctx.id), 'failed');
+    assert.deepEqual(concatProc(ctx.id).signals, ['SIGKILL']);
+    assert.deepEqual(leases(), [], 'the given-up cut still holds its lease');
+    assert.deepEqual(holdOwners(CAM).filter((o) => HOSTILE.includes(o)), HOSTILE, 'another owner\'s hold was released with the lease');
+  });
+
   test('two captures in flight on one camera keep two independent leases; each release frees only its own', async () => {
     armSegmenter();
     const first = wakeThatCaptures('seg-1.mkv');

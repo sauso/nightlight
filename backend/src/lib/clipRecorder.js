@@ -2,7 +2,7 @@ import { spawnChild } from './childEnv.js';
 import fs from 'fs';
 import path from 'path';
 import { logger, isNoisyMediaLine } from './logger.js';
-import { forwardProcessLines } from './processOutput.js';
+import { forwardProcessLines, createLineBuffer } from './processOutput.js';
 import { addHold, removeHold, effectiveHold, clearHolds } from './ringHolds.js';
 import { killIfSpawned } from './processGuards.js';
 
@@ -393,19 +393,182 @@ export function ringHasFootageFor(cameraId, { at, preRollSec, postRollSec }) {
   return selectRingSegments(entry.ringDir, at, preRollSec, postRollSec, Date.now()).length > 0;
 }
 
-function runFfmpeg(args, { tool = 'ffmpeg' } = {}) {
+// --- Deadlines for the extraction children (#773) ---------------------------------------------------
+// WHY THERE IS ONE. runFfmpeg used to settle only on the child's 'exit' or 'error'. A child that never exits
+// (a stuck read, a wedged encoder) kept its capture's promise pending forever, and every capture holds the ring
+// for as long as it runs (a detection clip's clipHoldOwner, an on-demand recording's ondemandHoldOwner, a wake
+// clip's wakeCaptureHoldOwner). So one hung child kept the janitor from pruning past that clip's start (the ring
+// grows by the camera's bitrate, ~172 KiB/s, about 10 MB a minute, at the rate recordings.js quotes), kept a ring
+// nobody wants running (reconcileClipRing defers its stop while any hold exists), left the camera in clipCapture's
+// busyCameras (so every later detection on it was folded into a clip that never came), held one of the queue's two
+// slots, and left the Stop request (routes/cameras.js) waiting. Not reproduced: found by the plan review of #471/#490.
+//
+// The costs are LOPSIDED, and every number below leans the same way because of it: a deadline that fires late
+// costs a few more MB of ring for a few more minutes; a deadline that fires early DESTROYS a recording someone
+// pressed Record for. So the windows are minutes, not seconds.
+//
+// The clips these cover (the bounds are routes/settings.js's): a detection clip is at most 30 + 120 = 150 s, a
+// wake clip at most 3 + 120 = 123 s (WAKE_CLIP_LEAD_SEC + wake_clip_seconds), an on-demand recording at most
+// 60 + 600 + 2 = 662 s (pre-roll + the max-duration cap + recordings.js's TAIL_SEC; its MAX_ACTIVE_MS backstop is
+// longer, but the cap of 600 s always fires first, so it is unreachable from the UI).
+
+// THE RE-ENCODE (extractClip's libx264 pass) gets a STALL deadline, not a wall-clock one: it is cut only when
+// ffmpeg's own progress counters stop moving, never for being slow. A clip's encode time depends on its length,
+// the camera's resolution and the server's CPU, none of which this code knows, so any wall-clock number would be
+// a guess about someone else's machine; "nothing has moved for N minutes" is not.
+//
+// The window has two parts, and a reason for each:
+//   * STALL_WINDOW_BASE_MS covers the stretches where nothing moves although nothing is wrong: opening the inputs
+//     and starting the encoders (before the first progress block), the output-side `-ss` decode-and-discard at
+//     the start (a few seconds of footage: the selection margin is two segments), and the encoder flush at the end.
+//   * One second per STALL_ASSUMED_BYTES_PER_SEC already written covers the END of the encode, which reports no
+//     progress at all and grows with the file: `-movflags +faststart` rewrites the whole MP4 to move its index to
+//     the front, a read and a write of every byte, after the last progress block. A 662 s recording from a 4K camera
+//     is ~0.8 GB; on a parity-protected array at 30-40 MB/s that pass alone can pass 60 s. 2 MB/s is deliberately
+//     pessimistic (roughly ten times slower than that), so the window at that size is 120 + 400 = 520 s.
+// ⚠️ A HYPOTHESIS, NOT A MEASUREMENT. Neither number was timed on the owner's server or any other machine (no
+// ffmpeg was available where this was written). Someone on a slower disk or a higher-bitrate camera gets a larger
+// file and so a larger window, still generous: the allowance scales with exactly the thing that makes the tail
+// slow. The `[clip] cut ...` line runFfmpeg logs for every extraction (see logProgressRun below) records the
+// longest stretch without progress and the length of the silent tail, which is what to calibrate both from.
+// ⚠️ NO WALL-CLOCK BACKSTOP ON TOP, deliberately: the input is a finite list of local files and the output is
+// limited by `-t`, so a child whose counters keep advancing is getting closer to the end and must finish; cutting
+// it would only ever destroy a slow-but-working recording. Known limit, stated: a child that keeps advancing its
+// counters and never finishes is never cut. The calibration line is how a backstop could later be sized from data.
+export const STALL_WINDOW_BASE_MS = 120_000;
+export const STALL_ASSUMED_BYTES_PER_SEC = 2_000_000;
+
+// The stall window after a child has reported `totalSizeBytes` written (0 before it has reported anything).
+export function stallWindowMs(totalSizeBytes) {
+  const bytes = Number.isFinite(totalSizeBytes) && totalSizeBytes > 0 ? totalSizeBytes : 0;
+  return STALL_WINDOW_BASE_MS + Math.ceil((bytes / STALL_ASSUMED_BYTES_PER_SEC) * 1000);
+}
+
+// ffprobe and the one-frame thumbnail read a FINISHED local file: the headers, or a single frame. That takes
+// milliseconds, so they get a plain wall-clock deadline, and a generous one: 120 s is a judgement, not a
+// measurement (unmeasured, like the stall window above), chosen so that only a child that is really stuck reaches it.
+export const PROBE_DEADLINE_MS = 120_000;
+
+// Remove one file this extraction itself named (the clip or its thumbnail, from safePathSegment). Never anything
+// else, and never a directory: rmSync without `recursive` throws on a directory, and the catch swallows that.
+function removeOwnFile(file) {
+  try { fs.rmSync(file, { force: true }); } catch { /* not there, or not a plain file: leave it */ }
+}
+
+const secs = (ms) => (ms == null ? '?' : (ms / 1000).toFixed(1));
+const stalledFor = (ms) => `made no progress for ${secs(ms)} s`;
+
+// One child of extractClip/probeClip, settled exactly once: on 'exit', on 'error', or when its deadline fires.
+//   deadlineMs      a wall-clock deadline from spawn (probe, thumbnail).
+//   stallLabel      instead: read ffmpeg's `-progress pipe:1` output and apply the stall window above. The label
+//                   names the clip in the one log line per run. Progress output is NOT kept (it would be most of
+//                   the process's output and nothing reads it); the resolved value is then ''.
+// On a deadline the child is SIGKILLed and the promise REJECTS AT ONCE, without waiting for its 'exit': a process
+// stuck in the kernel (uninterruptible I/O) may not exit even on SIGKILL, and waiting for it would rebuild the very
+// hang this exists to end. `settled` makes a later 'exit' or 'error' a no-op.
+function runFfmpeg(args, { tool = 'ffmpeg', deadlineMs = null, stallLabel = null } = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawnChild(tool, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     const out = [];
     const err = [];
-    proc.stdout.on('data', (c) => out.push(c));
+    let settled = false;
+    let timer = null;
+    // Monotonic, for the calibration line only: a wall-clock step must not read as a 10-minute gap. Nothing
+    // DECIDES on it (the deadline is a timer), so it plays no part in when a child is cut.
+    const t0 = performance.now();
+    const run = stallLabel == null ? null : {
+      // The largest value seen so far for each counter, from 0: only a value ABOVE it is progress.
+      seen: { frame: 0, total_size: 0, out_time_us: 0 },
+      lastAdvanceAt: t0,
+      maxGapMs: 0,
+      lastContinueAt: null,
+      windowMs: stallWindowMs(0),
+    };
+
+    const settle = (ok, value, outcome) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (run) logProgressRun(stallLabel, run, t0, outcome);
+      if (ok) resolve(value);
+      else reject(value);
+    };
+
+    // clearTimeout + a NEW setTimeout, never `timer.refresh()` and never setInterval: under node:test's mock timers
+    // refresh() does not move the deadline (verified on Node 24.18 while writing #773: a 1 s timer refreshed at
+    // 0.8 s still fired at 1.1 s), so the tests could not see the reset at all; and test/helpers/sourceScan.js
+    // sweeps src/ for intervals. unref'd: four suites spawn with an empty PATH (clip-recorder, clip-capture,
+    // recordings-lifecycle, wake-watcher), and a pending timer that is not unref'd would hold a test process open,
+    // the #278 failure.
+    const arm = (ms, why) => {
+      if (settled) return; // a child that keeps talking after it was given up on must not re-arm anything
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        // killIfSpawned, never proc.kill: on Linux, killing a child whose spawn failed signals our whole process
+        // group (processGuards.js, #263/#297).
+        killIfSpawned(proc, 'SIGKILL');
+        settle(false, new Error(`${tool} ${why(ms)}; killed it`), 'given up on (killed)');
+      }, ms);
+      timer.unref?.();
+    };
+
+    if (run) {
+      // A reader for the WHOLE run, not only while we care: unread progress output fills the 64 KiB pipe, the
+      // child then blocks on its next write, and that blocked child would look exactly like a stall.
+      const lines = createLineBuffer((line) => {
+        const m = /^(frame|total_size|out_time_us)=(\d+)\s*$/.exec(line);
+        if (m) {
+          const v = Number(m[2]);
+          // ONLY an increase is progress. ffmpeg 7+ prints a `progress=continue` block every 0.5 s from its main
+          // thread even while a worker thread is hung, with the counters frozen (read in ffmpeg 7.x's source by the
+          // plan review, not run here), so "any output resets the timer" would never cut a hung encode. The
+          // Dockerfile installs whatever ffmpeg node:24-alpine's `apk add ffmpeg` resolves to, so the major version
+          // can change with no diff here: this rule has to hold for either behaviour, and "a counter went up" does.
+          if (v > run.seen[m[1]]) {
+            run.seen[m[1]] = v;
+            const now = performance.now();
+            run.maxGapMs = Math.max(run.maxGapMs, now - run.lastAdvanceAt);
+            run.lastAdvanceAt = now;
+            run.windowMs = stallWindowMs(run.seen.total_size);
+            arm(run.windowMs, stalledFor);
+          }
+        } else if (line === 'progress=continue') {
+          run.lastContinueAt = performance.now();
+        }
+      });
+      proc.stdout.on('data', (c) => lines.write(c));
+      arm(run.windowMs, stalledFor);
+    } else {
+      proc.stdout.on('data', (c) => out.push(c));
+      if (deadlineMs != null) arm(deadlineMs, (ms) => `did not finish within ${secs(ms)} s`);
+    }
     proc.stderr.on('data', (c) => err.push(c));
-    proc.on('error', reject);
+    // Stays attached for the child's whole life, settled or not: an 'error' emitted with no listener THROWS and
+    // takes the backend down (the #257 class). So nothing here ever removes a listener.
+    proc.on('error', (e) => settle(false, e, `could not run (${e.code || e.message})`));
     proc.on('exit', (code) => {
-      if (code === 0) resolve(Buffer.concat(out).toString());
-      else reject(new Error(`${tool} exited ${code}: ${Buffer.concat(err).toString().slice(-500)}`));
+      if (code === 0) settle(true, Buffer.concat(out).toString(), 'finished');
+      else settle(false, new Error(`${tool} exited ${code}: ${Buffer.concat(err).toString().slice(-500)}`), `failed (exit ${code})`);
     });
   });
+}
+
+// The calibration line (#773): one per extraction, whatever the outcome, so the stall window (and any future
+// wall-clock backstop) can be sized from real runs instead of from the guesses above.
+//   longest wait   the longest the stall timer ran without being reset (between two counter increases, or from
+//                  the last one to the end): how close this run came to being cut.
+//   tail           from the last `progress=continue` block to the end: the encoder flush plus the faststart rewrite.
+//                  Measured to the last CONTINUE block, not the last block, because ffmpeg prints its final
+//                  `progress=end` block only after writing the trailer (our reading of fftools/ffmpeg.c, not
+//                  verified by running ffmpeg), so counting that block would hide the very tail this is for.
+function logProgressRun(label, run, t0, outcome) {
+  const now = performance.now();
+  const maxGapMs = Math.max(run.maxGapMs, now - run.lastAdvanceAt);
+  const tailMs = run.lastContinueAt == null ? null : now - run.lastContinueAt;
+  logger.info(
+    `[clip] cut ${label}: ${outcome} after ${secs(now - t0)} s; longest wait for progress ${secs(maxGapMs)} s, ` +
+      `${secs(tailMs)} s after the last progress report; stall window at the end ${secs(run.windowMs)} s`
+  );
 }
 
 // ffprobe the finished clip so the spike can assert what actually came out: container, video/audio
@@ -414,7 +577,7 @@ function runFfmpeg(args, { tool = 'ffmpeg' } = {}) {
 export async function probeClip(file) {
   const json = await runFfmpeg(
     ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', file],
-    { tool: 'ffprobe' }
+    { tool: 'ffprobe', deadlineMs: PROBE_DEADLINE_MS }
   );
   const data = JSON.parse(json);
   const v = (data.streams || []).find((s) => s.codec_type === 'video');
@@ -479,36 +642,50 @@ export async function extractClip(
   const durSec = preRollSec + postRollSec;
 
   const outFile = path.join(outDir, `${safeBase}.mp4`);
-  try {
-    // Concatenate the ring segments, then trim to EXACTLY [pre+post] seconds. Because a `-c copy` cut
-    // can only land on a keyframe (~2s GOP here), an exact, admin-set duration requires re-encoding
-    // this one short clip: the frame-accurate `-ss`/`-t` (output-side) guarantees the clip is exactly
-    // as long as the pre-roll + post-roll settings say — otherwise people rightly ask why a "5s + 15s"
-    // clip is 27s. Only this ~20s clip is re-encoded (veryfast), once per event; the continuous ring
-    // segmenter stays a cheap copy. AUDIO is re-encoded to AAC in the same pass (the ring holds the
-    // clean ORIGINAL track — often G711 — which <video> can't play); no aresample=async (it dropped
-    // samples and made this camera choppier — see the header note). yuv420p + faststart for browsers.
-    await runFfmpeg([
-      '-nostdin', '-loglevel', 'error',
-      '-f', 'concat', '-safe', '0', '-i', listFile,
-      '-ss', offsetSec.toFixed(3),
-      '-t', String(durSec),
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac', '-b:a', '128k',
-      '-movflags', '+faststart',
-      '-y', outFile,
-    ]);
-  } finally {
-    try { fs.rmSync(listFile, { force: true }); } catch { /* ignore */ }
-  }
-
-  // Thumbnail — one frame from the finished clip. Best-effort (Phase 2 reuses the event snapshot).
   const thumbFile = path.join(outDir, `${safeBase}.jpg`);
-  await runFfmpeg([
-    '-nostdin', '-loglevel', 'error', '-i', outFile,
-    '-frames:v', '1', '-q:v', '4', '-y', thumbFile,
-  ]).catch(() => {});
+  try {
+    try {
+      // Concatenate the ring segments, then trim to EXACTLY [pre+post] seconds. Because a `-c copy` cut
+      // can only land on a keyframe (~2s GOP here), an exact, admin-set duration requires re-encoding
+      // this one short clip: the frame-accurate `-ss`/`-t` (output-side) guarantees the clip is exactly
+      // as long as the pre-roll + post-roll settings say — otherwise people rightly ask why a "5s + 15s"
+      // clip is 27s. Only this ~20s clip is re-encoded (veryfast), once per event; the continuous ring
+      // segmenter stays a cheap copy. AUDIO is re-encoded to AAC in the same pass (the ring holds the
+      // clean ORIGINAL track — often G711 — which <video> can't play); no aresample=async (it dropped
+      // samples and made this camera choppier — see the header note). yuv420p + faststart for browsers.
+      // `-progress pipe:1 -nostats` (#773): machine-readable progress on stdout for the stall deadline (see
+      // runFfmpeg), and no human-readable stats line on stderr, whose tail is what a failure reports.
+      await runFfmpeg([
+        '-nostdin', '-loglevel', 'error', '-nostats', '-progress', 'pipe:1',
+        '-f', 'concat', '-safe', '0', '-i', listFile,
+        '-ss', offsetSec.toFixed(3),
+        '-t', String(durSec),
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', '+faststart',
+        '-y', outFile,
+      ], { stallLabel: `${safeId}/${safeBase} (${durSec} s clip)` });
+    } finally {
+      try { fs.rmSync(listFile, { force: true }); } catch { /* ignore */ }
+    }
 
-  const probe = await probeClip(outFile);
-  return { file: outFile, thumb: fs.existsSync(thumbFile) ? thumbFile : null, segments: segs.length, probe };
+    // Thumbnail — one frame from the finished clip. Best-effort (Phase 2 reuses the event snapshot). A failure is
+    // swallowed, so it must not leave a half-written JPG behind for the caller to store as thumb_path (#773).
+    await runFfmpeg([
+      '-nostdin', '-loglevel', 'error', '-i', outFile,
+      '-frames:v', '1', '-q:v', '4', '-y', thumbFile,
+    ], { deadlineMs: PROBE_DEADLINE_MS }).catch(() => removeOwnFile(thumbFile));
+
+    const probe = await probeClip(outFile);
+    return { file: outFile, thumb: fs.existsSync(thumbFile) ? thumbFile : null, segments: segs.length, probe };
+  } catch (err) {
+    // #773: a failed extraction leaves nothing of its own behind. Before this only the concat list was removed, so a
+    // failed or killed encode orphaned its partial MP4, and a probe failing after a good encode orphaned a complete
+    // MP4 + JPG: no row points at either (the caller marks it failed), and on-demand recordings have no retention
+    // sweep, so they stayed on disk for good. ONLY this call's two files, by the names built above from
+    // safePathSegment: never the directory, never a sibling (another clip may be being written beside them).
+    removeOwnFile(outFile);
+    removeOwnFile(thumbFile);
+    throw err;
+  }
 }
