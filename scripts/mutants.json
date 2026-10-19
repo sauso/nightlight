@@ -22316,5 +22316,23 @@
     "expect": "killed",
     "tests": ["trust-proxy.test.js"],
     "namePattern": "#753 the unset default"
+  },
+  {
+    "label": "#781 assembly has no stall deadline and leaves the night pending",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "], { stallLabel: `${childId} ${nightDate}`, progressKind: 'timelapse' });",
+    "replace": "]);",
+    "expect": "killed",
+    "tests": ["timelapse-deadline.test.js"],
+    "namePattern": "^#781 assembly with no progress"
+  },
+  {
+    "label": "#781 thumbnail has no deadline and holds the ready row pending",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "], { deadlineMs: PROBE_DEADLINE_MS }).catch(() => {",
+    "replace": "]).catch(() => {",
+    "expect": "killed",
+    "tests": ["timelapse-deadline.test.js"],
+    "namePattern": "^#781 hung thumbnail"
   }
 ]
