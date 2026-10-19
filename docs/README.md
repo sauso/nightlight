@@ -14,6 +14,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 
 - [Visual walkthrough](#visual-walkthrough) — dashboard, camera setup and settings
 - [Camera controls](camera-controls.md) — PTZ and offline alerts
+- [Sleep tracking](sleep-tracking.md) — how nights are estimated, corrected and reviewed, and its known limits
 - [Recording](recording.md) — clips, wake events, manual recordings and retention
 - [Push notifications](notifications.md) — supported providers and event delivery
 - [MQTT](mqtt.md) — broker setup and sensor data
@@ -31,7 +32,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 
 ## Full reference
 
-- [Full reference](readme-reference.md) — the previous README in full. It holds sleep tracking and its known limits, the reverse proxy and `TRUST_PROXY` settings, `SESSION_TTL_DAYS`, timezones, caregivers, logs and the longer troubleshooting notes. It is being split into separate guides; until then, settings and known limits that are not in a guide above live here.
+- [Full reference](readme-reference.md) — the previous README in full. It holds the reverse proxy and `TRUST_PROXY` settings, `SESSION_TTL_DAYS`, timezones, caregivers, logs and the longer troubleshooting notes. It is being split into separate guides; until then, settings and known limits that are not in a guide above live here.
 
 ## Visual walkthrough
 

@@ -11,7 +11,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
-- **The README is now a short introduction, and the documentation is easier to find.** Installation, cameras, networking, troubleshooting and development each have their own short guide under `docs/`, there is a documentation hub (`docs/README.md`) and a page on how we write docs (`docs/writing-guidelines.md`). The previous README is kept in full as `docs/readme-reference.md` (sleep tracking and its known limits, `TRUST_PROXY`, `SESSION_TTL_DAYS`, timezones, caregivers, logs) while it is split into guides; links elsewhere now point there. No setting or behaviour changed.
+- **The README is now a short introduction, and the documentation is easier to find.** Installation, cameras, networking, troubleshooting and development each have their own short guide under `docs/`, there is a documentation hub (`docs/README.md`) and a page on how we write docs (`docs/writing-guidelines.md`). The previous README is kept in full as `docs/readme-reference.md` (`TRUST_PROXY`, `SESSION_TTL_DAYS`, timezones, caregivers, logs) while it is split into guides. Sleep tracking and its known limits already have their own page, `docs/sleep-tracking.md`. Links elsewhere now point at the new homes. No setting or behaviour changed.
 
 ### Fixed
 
