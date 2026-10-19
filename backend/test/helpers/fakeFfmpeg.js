@@ -55,6 +55,16 @@ export class WedgedFfmpeg extends FakeFfmpeg {
   }
 }
 
+// #773: an ffmpeg that does not end even on SIGKILL (a process stuck in uninterruptible I/O is not reaped until that
+// I/O returns). It records every signal and ends only when the test calls finish(). FakeFfmpeg and WedgedFfmpeg both
+// exit on SIGKILL, so neither can tell "killed it and gave up" from "killed it and waited for it to exit".
+export class UnkillableFfmpeg extends FakeFfmpeg {
+  kill(signal) {
+    this.signals.push(signal);
+    return true;
+  }
+}
+
 // A fake MediaMTX API on a random local port. ⚠️ ORDER MATTERS: lib/mediamtx.js reads MEDIAMTX_API at MODULE
 // LOAD, so a suite must `await startFakeMediamtx()` BEFORE its dynamic imports of anything that loads it. Doing
 // it later left the detectors polling the default port forever: they never spawned, and their cases passed

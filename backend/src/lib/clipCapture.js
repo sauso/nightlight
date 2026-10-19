@@ -142,8 +142,8 @@ export function stopAllClipCapture() {
 // Cameras whose stop is currently deferred because something still holds the ring (see reconcileClipRing
 // below). Logged once, on the tick that ADDS a camera here, not on every later tick that still finds it
 // held — #446, Codex F5: an on-demand recording can hold for up to its ≤600s cap, a wake run for up to
-// its 20-min stale-run window (wakeWatcher.js), and a clip being cut until its extraction ends (see the
-// deferral in reconcileClipRing for why that has no upper bound), so without this the same line would
+// its 20-min stale-run window (wakeWatcher.js), and a clip being cut until its extraction ends (bounded since
+// #773 only by a stall deadline that grows with the clip: see the deferral in reconcileClipRing), so without this the same line would
 // repeat every 5 minutes (index.js's reconcile interval) for a good while. Cleared once the ring actually
 // stops, or if the camera starts wanting the ring again before that happens.
 const deferredStops = new Set();
@@ -182,12 +182,14 @@ export function reconcileClipRing(camera) {
     // do the stop once the last hold clears. How long that takes is set by the holders: an on-demand
     // recording holds for at most its ≤600s cap and then its cut, a wake run for at most its 20-minute
     // stale-run window, and a clip being cut (a detection clip, an on-demand recording's, or since #471 a
-    // wake clip's own lease) until its extraction settles. ⚠️ NOT BOUNDED BY ANY TIMER: extractClip's ffmpeg
-    // and ffprobe children (clipRecorder.runFfmpeg) have no deadline, so a child that never exits keeps its
-    // lease, this deferral, and the janitor's cutoff where they are until it does exit or the ring is
-    // stopped another way (disable, delete, shutdown: stopSegmenter clears every hold). All three lease
-    // types share that exposure; the wake lease (#471) adds the same, not a new kind. A deadline is a
-    // separate change (a new number with no measurement behind it, on every clip extraction).
+    // wake clip's own lease) until its extraction settles. Since #773 that settles even when an extraction child
+    // never exits: clipRecorder.runFfmpeg gives the re-encode a STALL deadline (cut when its progress counters have
+    // not moved for 120 s plus 1 s per 2 MB already written) and the thumbnail and ffprobe 120 s each, and rejects
+    // on the deadline without waiting for the child to exit, so every caller's `finally` releases its lease. That
+    // bounds a hung child, not a slow one: an encode whose counters keep advancing is never cut (no wall-clock
+    // backstop, deliberately; see clipRecorder.js), so a stop deferred behind a long, slow cut waits for it.
+    // The numbers are unmeasured hypotheses (clipRecorder.js says what calibrates them). stopSegmenter (disable,
+    // delete, shutdown) still clears every hold at once, as before.
     // Since #490 a camera save (PUT /api/cameras/:id) comes through here too, instead of restarting the ring.
     if (effectiveHold(camera.id) != null) {
       if (!deferredStops.has(camera.id)) {

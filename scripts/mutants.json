@@ -21901,5 +21901,113 @@
     "expect": "killed",
     "tests": ["wake-capture-lease.test.js"],
     "namePattern": "the capture's lease holds the footage until the cut settles"
+  },
+  {
+    "label": "#773 reset-on-any-line: every counter line re-arms the stall timer, rising or not (a hung ffmpeg 7 encode printing frozen blocks is never cut)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "if (v > run.seen[m[1]]) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "frozen counters"
+  },
+  {
+    "label": "#773 kill without settle: the deadline kills the child but leaves the promise to its exit (an unkillable child hangs the capture again)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "settle(false, new Error(`${tool} ${why(ms)}; killed it`), 'given up on (killed)');",
+    "replace": "void why;",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "an UNKILLABLE child"
+  },
+  {
+    "label": "#773 the stall window ignores total_size (a long recording's silent faststart rewrite is cut at the base window)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "return STALL_WINDOW_BASE_MS + Math.ceil((bytes / STALL_ASSUMED_BYTES_PER_SEC) * 1000);",
+    "replace": "return STALL_WINDOW_BASE_MS;",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "the stall window grows"
+  },
+  {
+    "label": "#773 cleanup deletes more than this clip's own files (the camera's whole clip folder goes on a failed encode)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "    removeOwnFile(outFile);\r\n    removeOwnFile(thumbFile);\r\n    throw err;",
+    "replace": "    fs.rmSync(outDir, { recursive: true, force: true });\r\n    throw err;",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "a failed encode removes its own partial MP4"
+  },
+  {
+    "label": "#773 a failed extraction leaves its own files behind (a partial or orphaned MP4 and JPG no row points at)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "    removeOwnFile(outFile);\r\n    removeOwnFile(thumbFile);\r\n    throw err;",
+    "replace": "    throw err;",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "a probe that fails after a good encode"
+  },
+  {
+    "label": "#773 hold not released on stall: no deadline is armed at spawn, so a silent encode pins the detection clip's ring hold forever",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "      proc.stdout.on('data', (c) => lines.write(c));\r\n      arm(run.windowMs, stalledFor);",
+    "replace": "      proc.stdout.on('data', (c) => lines.write(c));",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "acceptance: a detection clip"
+  },
+  {
+    "label": "#773 the 'error' listener is removed once settled, so a late 'error' throws (the #257 crash class)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "      settled = true;\r\n      clearTimeout(timer);",
+    "replace": "      settled = true;\r\n      clearTimeout(timer);\r\n      proc.removeAllListeners('error');",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "an UNKILLABLE child"
+  },
+  {
+    "label": "#773 a child already given up on can re-arm its deadline and be signalled again",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "if (settled) return; // a child that keeps talking after it was given up on must not re-arm anything",
+    "replace": "// (the re-arm guard is gone)",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "an UNKILLABLE child"
+  },
+  {
+    "label": "#773 ffprobe has no deadline (a hung probe after a good encode pins the clip's hold again)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "{ tool: 'ffprobe', deadlineMs: PROBE_DEADLINE_MS }",
+    "replace": "{ tool: 'ffprobe' }",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "ffprobe has a fixed 120 s deadline"
+  },
+  {
+    "label": "#773 a failed thumbnail keeps its truncated JPG (stored as the clip's thumb_path)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": ".catch(() => removeOwnFile(thumbFile));",
+    "replace": ".catch(() => {});",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "a thumbnail that hangs"
+  },
+  {
+    "label": "#773 (Codex P1 on #783) a child settles on 'exit' again: stdout that arrives after it is lost, the probe parses half its JSON, and a good clip is deleted",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "    proc.on('close', (code) => settleOnCode(exited ? exitCode : code));",
+    "replace": "    proc.on('exit', (code) => settleOnCode(code));",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "is still read: the probe parses all of it"
+  },
+  {
+    "label": "#773 a child that has exited but whose stdio never closes is treated as stuck at its deadline (rejected, so a good clip is deleted)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "        if (exited) return settleOnCode(exitCode);",
+    "replace": "        // (the exited branch is gone)",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "a child that exits but whose output never closes"
   }
 ]

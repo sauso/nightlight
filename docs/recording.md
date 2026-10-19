@@ -312,11 +312,29 @@ simply "5 minutes." The same applies to turning **Record wake-ups without alerti
 difference: that switch also stops any *new* wake-up from starting a fresh capture, so only a wake-up
 already under way at the moment you flip it can still hold that camera's buffering open. This is
 deliberate: stopping immediately would have deleted the very footage that capture was still reading.
-**Known limit: cutting a clip has no time limit.** Every clip (on-demand, detection or wake) is cut by
-an FFmpeg process that Nightlight waits for without a deadline. If one never finishes, that camera's
-buffer stops discarding anything recorded since that clip's start (so it grows), and a buffer that is no
-longer wanted keeps running, until the process ends, the camera is switched off or removed, or
-Nightlight restarts.
+**A clip whose cutting gets stuck is given up on.** Every clip (on-demand, detection or wake) is cut by
+an FFmpeg process, and while one runs, that camera's buffer keeps everything recorded since that clip's
+start (#773; until then a process that never finished held it for good). Nightlight watches the cut's own
+progress (frames, time and bytes written so far) and gives up once **none of them has moved for 2 minutes,
+plus 1 second for every 2 MB the cut has already written**. It is measured from the last time anything
+moved, not from the start, so a long recording on a slow server is never cut off while it is still
+making progress; the extra time per 2 MB is for the very end of the cut, which reports no progress at all
+and takes longer the bigger the file (the video is rewritten so it can start playing in a browser before
+it has fully downloaded). In practice, for a camera streaming at 1.4 Mbit/s: a little over 2 minutes
+for the longest detection or wake clip (150 s and 123 s, about 26 MB), and just under 3 minutes for the
+longest recording (662 s with its pre-roll, about 115 MB); the same recording from a 4K camera (about
+0.8 GB) gets about 8 minutes 40 seconds. The two quick steps after it (reading the finished clip's
+length and size, and taking its thumbnail) get **2 minutes** each. A cut that is given up on is stopped,
+marked **failed** like any other failed clip, and its half-written video and thumbnail are deleted (they
+used to stay on disk); the buffer then goes back to discarding old footage, and a buffer that is no
+longer wanted stops at the next periodic check. Pressing **Stop** waits for the cut, so a stuck cut now
+holds it up for at most that window plus the two 2-minute steps. None of these are settings.
+**Known limits.** The numbers are generous guesses, not measurements: they were not timed on any server.
+The log shows one line per cut, beginning `[clip] cut`, with how long it took and the longest it went
+without progress; if a clip that should have worked is ever given up on, that line is what to report. A
+cut that keeps making progress but never finishes is never stopped (with a clip of fixed length this is
+not expected to happen). The progress FFmpeg reports has changed between FFmpeg versions, and the image
+installs whichever version its base image ships, so a future FFmpeg could report it differently.
 
 **No Record button on a camera?** The button hides itself when that camera isn't buffering, because
 reaching backward is the whole point and there'd be nothing to reach into. Check that on-demand
