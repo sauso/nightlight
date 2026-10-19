@@ -250,16 +250,18 @@ const mfaEnableUserLimiter = rateLimit({
   skipSuccessfulRequests: true,
 });
 
-// Wrong codes against the PENDING secret, per user: userId -> { secretKey, wrong }. secretKey is a short sha256
-// prefix of the secret being counted against, so the plaintext secret is not held in a second place. A different
-// secret (a start over, a new set-up after a cancel) starts again from 0; a resume (#765: the same secret returned)
+// Wrong codes against the PENDING secret, per user: userId -> { secret, wrong }. `secret` is the pending secret the
+// count belongs to, compared as-is. It used to be a sha256 prefix, "so the plaintext is not held twice" (#772), but
+// that bought nothing: the plaintext is in the users row (mfa_secret) and in every request's `user` object already,
+// and CodeQL (js/insufficient-password-hash, alert #27) read the hash of a secret as password hashing (#777). What is
+// held here is a pending, not yet confirmed seed (deleted on a successful confirmation), one per account at most.
+// A different secret (a start over, a new set-up after a cancel) starts again from 0; a resume (#765: the same secret returned)
 // does NOT, so reloading the set-up page part-way through does not start the count again. The entry is deleted on a
 // successful confirmation and AFTER a cancel's write has succeeded (the order matters: see the cancel in the route).
 // One whose secret went away some other way (turned off) is replaced by the next wrong code against the new secret;
 // a password change, an admin two-factor reset and removing the account delete it (resetMfaEnableLimit). At most
 // one small entry per account.
 const mfaEnableWrongCodes = new Map();
-const pendingSecretKey = (secret) => createHash('sha256').update(String(secret)).digest('hex').slice(0, 16);
 
 // Empties the confirmation route's state for one user: its per-user bucket and its wrong-code counter. Called by
 // both password-change paths (PUT /me/password, and PUT /users/:id with a password), by the admin two-factor reset
@@ -1027,10 +1029,9 @@ router.post('/me/mfa/enable', requireAuth, mfaEnableUserLimiter, asyncHandler(as
     // Counted with NO await between the read of `user` above and the cancel below, so requests sent at once
     // cannot all slip past the cap: each one runs this whole block before the next can start.
     res.locals.mfaWrongCode = true;
-    const secretKey = pendingSecretKey(user.mfa_secret);
     let entry = mfaEnableWrongCodes.get(user.id);
-    if (!entry || entry.secretKey !== secretKey) {
-      entry = { secretKey, wrong: 0 };
+    if (!entry || entry.secret !== user.mfa_secret) {
+      entry = { secret: user.mfa_secret, wrong: 0 };
       mfaEnableWrongCodes.set(user.id, entry);
     }
     entry.wrong += 1;

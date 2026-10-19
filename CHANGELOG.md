@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Security
+
+- **The two-factor confirmation counter no longer keys on a hash of the pending secret (#777).** Behaviour is unchanged (10 wrong codes against one set-up cancel it; a continued set-up keeps its count; a start over begins again at 0; see `docs/mfa.md`). The count is kept in memory next to the pending secret itself, which the account row and every request already held, instead of next to a short SHA-256 of it, which code scanning reported as password hashing. No setting.
+
 ## [0.41.1] - 2026-10-19
 
 ### Fixed
