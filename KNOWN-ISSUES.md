@@ -1574,6 +1574,6 @@ that cookie, so Low latency is unaffected. This surfaced while building the end-
 where the same thing broke in-browser HLS until the test stack was served over TLS.
 
 **What to do:** Use **Low latency** on a plain-HTTP LAN setup, or put the app behind HTTPS (a
-reverse proxy such as SWAG — see "Running behind a reverse proxy" in [docs/readme-reference.md](docs/readme-reference.md)), after
+reverse proxy such as SWAG — see "Running behind a reverse proxy" in [docs/remote-access.md](docs/remote-access.md)), after
 which Compatibility works. A proper fix (e.g. having the app strip `Secure` from that cookie when
 it's serving over HTTP) is not yet implemented.
