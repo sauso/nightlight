@@ -22139,5 +22139,140 @@
     "expect": "killed",
     "tests": ["rtsp-probe-codec-deadline.test.js"],
     "namePattern": "never exits after SIGKILL"
+  },
+  {
+    "label": "#737 unknown status retains a prior failed-poll count",
+    "file": "frontend/src/lib/CamerasContext.jsx",
+    "find": "          counts.delete(cam.id);\r\n          return { ...cam, statusLevel: 'connecting', statusUnknown: true };",
+    "replace": "          return { ...cam, statusLevel: 'connecting', statusUnknown: true };",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"],
+    "namePattern": "#737 an unknown poll"
+  },
+  {
+    "label": "#737 WebRTC notice covers a live stream",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "{state !== 'live' && (",
+    "replace": "{true && (",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"],
+    "namePattern": "#737 player notice boundaries.*live WebRTC"
+  },
+  {
+    "label": "#737 HLS notice covers a live stream",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": "{state !== 'live' && (",
+    "replace": "{true && (",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"],
+    "namePattern": "#737 live HLS"
+  },
+  {
+    "label": "#737 HLS Retry does not start another connection",
+    "file": "frontend/src/components/HlsPlayer.jsx",
+    "find": "onRetry={() => setReconnectKey((k) => k + 1)}",
+    "replace": "onRetry={() => {}}",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"],
+    "namePattern": "#737 Retry starts"
+  },
+  {
+    "label": "#737 tile loses unknown status in Compatibility mode",
+    "file": "frontend/src/components/CameraTile.jsx",
+    "find": "muted={effectiveMuted}\r\n              statusUnknown={!!camera.statusUnknown}",
+    "replace": "muted={effectiveMuted}",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"],
+    "namePattern": "#737 the tile passes"
+  },
+  {
+    "label": "#737 stopped WebRTC player shows an unavailable notice",
+    "file": "frontend/src/components/WhepPlayer.jsx",
+    "find": "{statusUnknown && state !== 'idle' ? (",
+    "replace": "{statusUnknown ? (",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"],
+    "namePattern": "#737 player notice boundaries.*stopped"
+  },
+  {
+    "label": "#737 unavailable notice loses its accessible status role",
+    "file": "frontend/src/components/StreamUnavailableNotice.jsx",
+    "find": "className=\"stream-unavailable\" role=\"status\"",
+    "replace": "className=\"stream-unavailable\"",
+    "expect": "killed",
+    "tests": ["streamUnavailable.test.jsx"],
+    "namePattern": "unknown shows the service wording"
+  },
+  {
+    "label": "#738 draft lifetime is shortened to five hours",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "6 * 60 * 60 * 1000",
+    "replace": "5 * 60 * 60 * 1000",
+    "expect": "killed",
+    "tests": ["lib/formDraft.test.js"],
+    "namePattern": "older than the time limit"
+  },
+  {
+    "label": "#738 saving a new child keeps its old baseline",
+    "file": "frontend/src/pages/ChildSettings.jsx",
+    "find": "      setBaseline(form);",
+    "replace": "      if (!isNew) setBaseline(form);",
+    "expect": "killed",
+    "tests": ["formDrafts.test.jsx"],
+    "namePattern": "#738 saving a new child"
+  },
+  {
+    "label": "#738 saving a new camera keeps its old baseline",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "      setBaseline({ ...form, rtsp_password: '', talk_password: '' });",
+    "replace": "      if (!isNew) setBaseline({ ...form, rtsp_password: '', talk_password: '' });",
+    "expect": "killed",
+    "tests": ["formDrafts.test.jsx"],
+    "namePattern": "#738 saving a new camera"
+  },
+  {
+    "label": "#738 RTSP host is omitted from camera drafts",
+    "file": "frontend/src/pages/CameraSettings.jsx",
+    "find": "'name', 'rtsp_host', 'rtsp_port'",
+    "replace": "'name', 'rtsp_port'",
+    "expect": "killed",
+    "tests": ["formDrafts.test.jsx"],
+    "namePattern": "#738 a camera draft"
+  },
+  {
+    "label": "#740 MediaMTX renderer inserts LF into a CRLF template",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "const newline = baseText.includes('\\r\\n') ? '\\r\\n' : '\\n';",
+    "replace": "const newline = '\\n';",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "#740 a CRLF template"
+  },
+  {
+    "label": "#740 MediaMTX renderer joins CRLF entries with LF",
+    "file": "backend/src/lib/stunServers.js",
+    "find": ".join(newline)",
+    "replace": ".join('\\n')",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "#740 a CRLF template"
+  },
+  {
+    "label": "#753 default trusts every proxy",
+    "file": "backend/src/lib/trustProxy.js",
+    "find": "export const DEFAULT_TRUST_PROXY = 'loopback';",
+    "replace": "export const DEFAULT_TRUST_PROXY = true;",
+    "expect": "killed",
+    "tests": ["trust-proxy.test.js"],
+    "namePattern": "#753 the unset default"
+  },
+  {
+    "label": "#753 default also trusts unique local peers",
+    "file": "backend/src/lib/trustProxy.js",
+    "find": "export const DEFAULT_TRUST_PROXY = 'loopback';",
+    "replace": "export const DEFAULT_TRUST_PROXY = 'loopback, uniquelocal';",
+    "expect": "killed",
+    "tests": ["trust-proxy.test.js"],
+    "namePattern": "#753 the unset default"
   }
 ]

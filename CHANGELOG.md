@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **More reliable tests for recording refreshes, unavailable streams, unsaved drafts and the trusted-proxy default (#736 #737 #738 #753).** The MediaMTX config renderer now keeps the input file's line ending, which matters when running from a Windows checkout (#740); the Docker image is unchanged. Known limit: the slow-request recording test was intermittent in CI and did not fail in five local runs before this change.
+
 ## [0.41.2] - 2026-10-19
 
 ### Fixed
