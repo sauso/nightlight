@@ -463,8 +463,10 @@ Each kind ages out differently — this is the part most worth reading twice:
 
 **A stuck timelapse is given up on.** If the assembly's frames, time and bytes written stop moving for
 **2 minutes plus 1 second per 2 MB already written**, Nightlight stops it and marks that night failed.
-The sampled frames are kept, while the temporary numbered sequence is removed. A slow server can keep
-assembling for longer while progress continues. The thumbnail step has its own **2-minute** limit;
+The sampled frames and any partial video file stay on disk, while the temporary numbered sequence is
+removed. Nothing sweeps these files or retries assembly, so repeated failures use disk space until the
+child is removed. A slow server can keep assembling for longer while progress continues. The thumbnail
+step has its own **2-minute** limit;
 if it fails, the video is still ready without a thumbnail. These numbers are unmeasured guesses shared
 with clip cutting (#773), and the `[timelapse] assemble` log line records the longest wait to help
 calibrate them. There is no automatic retry or retry button after a failed assembly: the nightly job

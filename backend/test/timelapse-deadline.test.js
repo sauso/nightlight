@@ -104,9 +104,12 @@ test('#781 increasing progress beyond the base window finishes ready', async () 
   fs.writeFileSync(outFile, 'video');
   proc.finish(0);
   await until(thumbProc);
+  fs.writeFileSync(thumbFile, 'thumbnail');
   thumbProc().finish(0);
   await until(() => state.value !== 'pending');
   assert.equal(row().status, 'ready');
+  assert.equal(row().thumb_path, path.relative(CLIPS_DIR, thumbFile));
+  assert.equal(fs.existsSync(thumbFile), true);
 });
 
 test('#781 frozen progress=continue blocks do not extend the stall window', async () => {
