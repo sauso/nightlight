@@ -161,6 +161,8 @@ neighbouring mechanisms:
   or talk/ONVIF credentials. A sub-stream path entered against an unchanged main address follows a newer
   main address. Deletion during the probe or transcoder start answers 404. A request re-sending a column's
   old value cannot be distinguished from leaving it untouched, so it preserves a newer value in that column.
+  Credential pairs can still be mixed across overlapping saves: when one save leaves a password blank,
+  its talk or ONVIF username can come from one save and the password from the other because the merge is per column.
 - Known limit (#780): the transcoder never reads the database. A watchdog or reconcile pass that fetched
   the old camera row before the edit's write can queue its stale-address start after the edit's start;
   it then runs last. The window is the other reader's own wait after fetching the row, not just the time

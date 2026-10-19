@@ -1005,8 +1005,9 @@ router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
   const fresh = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!fresh) return res.status(404).json({ error: 'Camera not found' });
   const keepFresh = (col, mine) => mine !== existing[col] ? mine : fresh[col];
-  // A sub path supplied with an unchanged main address must follow a concurrently edited address.
-  if (sub_rtsp_path !== undefined && newRtsp === existing.rtsp_url && fresh.rtsp_url !== existing.rtsp_url) {
+  // #787: only a changed sub path follows a concurrently edited main address. The edit form also
+  // re-sends old paths; rebuilding one would overwrite a newer sub path or a removal from another save.
+  if (subUrl !== existing.sub_rtsp_url && sub_rtsp_path !== undefined && newRtsp === existing.rtsp_url && fresh.rtsp_url !== existing.rtsp_url) {
     const sp = String(sub_rtsp_path).trim();
     if (sp) {
       const cur = parseRtspComponents(fresh.rtsp_url) || {};

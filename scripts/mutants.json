@@ -41,7 +41,7 @@
     "tests": [
       "camera-edit-keep-fresh.test.js"
     ],
-    "namePattern": "delete during ONVIF probe returns 404 without starting a leg"
+    "namePattern": "delete of a disabled camera during ONVIF probe returns the early 404"
   },
   {
     "label": "#787 delete during transcoder start misses 404",
@@ -53,6 +53,15 @@
       "camera-edit-keep-fresh.test.js"
     ],
     "namePattern": "delete while transcoder start is awaited returns 404"
+  },
+  {
+    "label": "#787 re-sent old sub path overwrites concurrent sub-stream change",
+    "file": "backend/src/routes/cameras.js",
+    "find": "subUrl !== existing.sub_rtsp_url && sub_rtsp_path !== undefined",
+    "replace": "sub_rtsp_path !== undefined",
+    "expect": "killed",
+    "tests": ["camera-edit-keep-fresh.test.js"],
+    "namePattern": "re-sent old sub path keeps a concurrent sub-path change"
   },
   {
     "label": "sound percentile: nearest-rank index off by one",
