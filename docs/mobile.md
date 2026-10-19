@@ -1,6 +1,6 @@
 # Your home screen and the mobile apps
 
-> This page was moved, word for word, from the old README. The wording has not been edited yet, and the cross-references to the reverse-proxy and remote-access sections now link to them.
+To put Nightlight on your phone, add the web app to your home screen or install a native app. The web app needs your server every time you open it; the native apps add background listening and system controls.
 
 ## Installing to your home screen
 
@@ -25,11 +25,11 @@ What you actually get depends on the platform and whether the site is served ove
 - **iOS**: Share button → "Add to Home Screen" — works the same either way.
 
 If you want the full installed experience on Android specifically, the reverse-proxy/HTTPS
-setup ([Running behind a reverse proxy](remote-access.md#running-behind-a-reverse-proxy-eg-swag-on-unraid)) is worth doing; otherwise the **native Android app** (below) gives you a true
+setup ([Running behind a reverse proxy](remote-access.md#running-behind-a-reverse-proxy-eg-swag-on-unraid)) is worth doing; otherwise the **native Android app** ([Mobile apps](#mobile-apps-android--ios)) gives you a true
 standalone app without needing HTTPS at all.
 
 **Zooming the page.** In a browser, including a home-screen install, you can pinch-zoom the page as on
-any other site. In the native apps (below) page zoom stays **locked**, because in the Android app
+any other site. In the [native apps](#mobile-apps-android--ios) page zoom stays **locked**, because in the Android app
 double-tapping the picture-in-picture window used to zoom the whole app and leave it stuck until a
 restart. Double-tap zoom on a camera's video is the app's own and works everywhere.
 
@@ -43,6 +43,14 @@ While the page is zoomed in, dragging down on the live screen pans the page; the
 pull-to-refresh works again once you zoom back out.
 
 ## Mobile apps (Android & iOS)
+
+**Getting them:**
+
+- **Android** — download the signed APK from the
+  [nightlight-mobile Releases](https://github.com/sauso/nightlight-mobile/releases) page and
+  sideload it (built and signed automatically in CI on each release).
+- **iOS** — no App Store build yet; it's installed by sideloading (e.g. AltStore/Sideloadly
+  with a free Apple ID). See the nightlight-mobile repo for the current status and steps.
 
 Beyond the PWA, there are companion **native apps** in a separate repo,
 [nightlight-mobile](https://github.com/sauso/nightlight-mobile). They're thin native
@@ -67,7 +75,7 @@ What the native apps add over the browser/PWA:
 - **Battery-friendly** — minimising the app disconnects streams unless a camera is in
   Background mode, so nothing keeps pulling video in the background.
 - **Push notifications** — a phone alert when a camera sees motion, even with the app closed
-  (Android only for now). See below.
+  (Android only for now). See [Push notifications (motion alerts)](#push-notifications-motion-alerts).
 
 ### Push notifications (motion alerts)
 
@@ -93,13 +101,6 @@ into your data dir (e.g. `/mnt/user/appdata/nightlight`, keep the key `chmod 600
 under **Settings → Push notifications**. Each phone opts in under **Account → Notifications**.
 
 Full walkthrough for both, with troubleshooting: **[docs/notifications.md](notifications.md)**.
-
-**Getting them:**
-- **Android** — download the signed APK from the
-  [nightlight-mobile Releases](https://github.com/sauso/nightlight-mobile/releases) page and
-  sideload it (built and signed automatically in CI on each release).
-- **iOS** — no App Store build yet; it's installed by sideloading (e.g. AltStore/Sideloadly
-  with a free Apple ID). See the nightlight-mobile repo for the current status and steps.
 
 Both apps are built entirely in GitHub Actions — see the nightlight-mobile repo for how,
 and its own `CHANGELOG.md` for per-release notes.

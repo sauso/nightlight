@@ -1,6 +1,44 @@
 # Reverse proxy and remote access
 
-> This page was moved, word for word, from the old README. The wording has not been edited yet; the only changes are three cross-references to sections that were not moved with it.
+Watch from outside your home network through a VPN into your home network, or set up a reverse proxy with HTTPS. If you use a reverse proxy, choose Low latency for near-instant video or Compatibility when you cannot forward UDP. The setup steps come first; the proxy settings follow.
+
+## Remote / internet access (watching from outside your home network)
+
+By default this is LAN-only. There are two ways to watch remotely, and each camera tile
+has a toggle to switch between them ("Low latency" / "Compatibility"):
+
+**Low latency (WebRTC)** — near-instant video, same as at home. This requires:
+
+1. Set up SWAG as described in [Running behind a reverse proxy](#running-behind-a-reverse-proxy-eg-swag-on-unraid) (HTTPS for the app itself).
+2. Set `PUBLIC_HOST` to your public IP or a DDNS hostname. ⚠️ It must **not** be a
+   Cloudflare-proxied (orange cloud) name: Cloudflare's proxy carries only HTTP(S), never the UDP
+   media, so remote Low latency would never connect while the page itself loads fine. Use a
+   separate DNS-only (grey cloud) record, e.g. `rtc.example.com`, for `PUBLIC_HOST` and keep the
+   proxied name for the web page.
+3. Forward **UDP port 8189** (or your `WEBRTC_UDP_PORT`, see "Running more than one instance" in [Networking modes](networking.md#running-more-than-one-instance-eg-staging--production)) on your router to your server's
+   LAN IP.
+
+This is a hard requirement of WebRTC, not a workaround — the actual audio/video always
+travels over UDP between your browser and MediaMTX, no matter what. A TURN relay server
+doesn't change this (it only changes how the *signaling* connects, not the media itself),
+so there's no way to get the low-latency mode down to zero UDP ports. This single UDP
+port forward is all you need, unless you're behind CGNAT.
+
+**Compatibility (HLS)** — a few seconds of delay, but pure HTTP/TCP, so it rides through
+the same port 443 as everything else with **no extra port forwarding at all**. Use this if
+you'd rather not forward a UDP port, or if you're ever watching from a network that blocks
+outbound UDP (some corporate/public Wi-Fi).
+
+Both modes work automatically once SWAG + `PUBLIC_HOST` are set up — Compatibility mode
+needs nothing further, since it's already proxied through the app's normal port.
+
+> **iOS background audio:** On iPhone/iPad, background listening (screen off / app minimised) works
+> in **Low latency** mode only — its WebRTC audio lets Nightlight fully own the lock screen (camera
+> name, artwork, Pause/Play). **Compatibility** is HLS, which iOS runs its own native lock-screen
+> session for that we can't reliably control, so Background isn't offered for a Compatibility camera
+> on iOS (it was tried and removed for being inconsistent — see [KNOWN-ISSUES.md](../KNOWN-ISSUES.md)).
+> Compatibility still works for live viewing. Android is unaffected — its background-listening
+> service keeps both modes alive.
 
 ## Running behind a reverse proxy (e.g. SWAG on Unraid)
 
@@ -25,7 +63,7 @@ video signaling handshake — no extra ports to open on your router for this par
 
 Behind a proxy, every request arrives from the **proxy's** address unless you tell Nightlight to trust
 it. The default (`loopback`) only trusts a proxy on `127.0.0.1` — and SWAG reaches Nightlight by its
-LAN IP, so with the setup above **it is not trusted and every remote visitor looks like one client**.
+LAN IP, so with the [SWAG setup](#running-behind-a-reverse-proxy-eg-swag-on-unraid) **it is not trusted and every remote visitor looks like one client**.
 
 Set it to the address your proxy connects *from*:
 
@@ -101,40 +139,3 @@ Cloudflare dashboard.
 
 With it off (the default), the page can only run scripts from your own server. The rest of the policy
 is the same either way; see "CSP is enforced" in [docs/architecture.md](architecture.md#csp-is-enforced--keep-it-that-way).
-
-## Remote / internet access (watching from outside your home network)
-
-By default this is LAN-only. There are two ways to watch remotely, and each camera tile
-has a toggle to switch between them ("Low latency" / "Compatibility"):
-
-**Low latency (WebRTC)** — near-instant video, same as at home. This requires:
-1. Set up SWAG as described above (HTTPS for the app itself).
-2. Set `PUBLIC_HOST` to your public IP or a DDNS hostname. ⚠️ It must **not** be a
-   Cloudflare-proxied (orange cloud) name: Cloudflare's proxy carries only HTTP(S), never the UDP
-   media, so remote Low latency would never connect while the page itself loads fine. Use a
-   separate DNS-only (grey cloud) record, e.g. `rtc.example.com`, for `PUBLIC_HOST` and keep the
-   proxied name for the web page.
-3. Forward **UDP port 8189** (or your `WEBRTC_UDP_PORT`, see "Running more than one instance" in [Networking modes](networking.md#running-more-than-one-instance-eg-staging--production)) on your router to your server's
-   LAN IP.
-
-This is a hard requirement of WebRTC, not a workaround — the actual audio/video always
-travels over UDP between your browser and MediaMTX, no matter what. A TURN relay server
-doesn't change this (it only changes how the *signaling* connects, not the media itself),
-so there's no way to get the low-latency mode down to zero UDP ports. This single UDP
-port forward is all you need, unless you're behind CGNAT.
-
-**Compatibility (HLS)** — a few seconds of delay, but pure HTTP/TCP, so it rides through
-the same port 443 as everything else with **no extra port forwarding at all**. Use this if
-you'd rather not forward a UDP port, or if you're ever watching from a network that blocks
-outbound UDP (some corporate/public Wi-Fi).
-
-> **iOS background audio:** On iPhone/iPad, background listening (screen off / app minimised) works
-> in **Low latency** mode only — its WebRTC audio lets Nightlight fully own the lock screen (camera
-> name, artwork, Pause/Play). **Compatibility** is HLS, which iOS runs its own native lock-screen
-> session for that we can't reliably control, so Background isn't offered for a Compatibility camera
-> on iOS (it was tried and removed for being inconsistent — see [KNOWN-ISSUES.md](../KNOWN-ISSUES.md)).
-> Compatibility still works for live viewing. Android is unaffected — its background-listening
-> service keeps both modes alive.
-
-Both modes work automatically once SWAG + `PUBLIC_HOST` are set up — Compatibility mode
-needs nothing further, since it's already proxied through the app's normal port.
