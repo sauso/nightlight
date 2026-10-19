@@ -53,7 +53,7 @@ Replace `/path/to/your/data` with a persistent folder on your host.
 
 **`PUID` and `PGID`** set which user and group own the files the container creates in your data directory. The defaults (99 and 100) match Unraid's own "nobody" and "users", so they are usually already right there. On another system, find your own with `id your_username`. Don't set `PUID=0`: it runs the app as root, and the container logs a warning at start if you do.
 
-**`TZ`** (for example `Australia/Melbourne`) affects log timestamps only. [Full list of values](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
+**`TZ`** (for example `Australia/Melbourne`) sets the container's own clock zone. It affects log timestamps and the names of the video buffer's segment files, so those agree with the app's logs. It does **not** change the times the app shows: those follow the timezone in **Settings → General** (see [times and your timezone](operations.md#times-and-your-timezone)). [Full list of values](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
 
 **`UMASK`** (optional, default `077`) decides who else can read what the container writes to your data directory. The database holds every stored secret (camera passwords, notification tokens) in plaintext, so by default everything is **owner-only** (files `600`, folders `700`), and each start takes group and other access off anything that still has it.
 - Range: 3 or 4 octal digits with an owner digit of `0` (`000`-`077`, for example `022` for the old world-readable modes). Anything else is ignored with a warning, and `077` is used.

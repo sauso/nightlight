@@ -1,18 +1,18 @@
 # Adding caregivers
 
-> This page was moved, word for word, from the old README. The wording has not been edited yet.
-
-Once signed in as admin, go to **Settings → Caregivers** to create additional logins (e.g. for a
-partner or babysitter).
+Add a login for someone you trust without giving them control over every setting. Once signed in
+as admin, go to **Settings → Caregivers** to create additional logins (e.g. for a partner or babysitter).
 
 The rule (owner decision, 2026-10-10): **a caregiver can watch and act in the moment, but cannot
 destroy or reconfigure.**
+
+## What caregivers and admins can do
 
 | Capability | Caregiver | Admin |
 |---|:---:|:---:|
 | View live cameras; watch and download alert clips, recordings, wake clips and timelapses | Yes | Yes |
 | Record, move a PTZ camera, talk through a camera | Yes | Yes |
-| Restart, reboot, or snooze camera alerts (recorded with your username; see below) | Yes | Yes |
+| Restart, reboot, or snooze camera alerts (recorded with your username; see [Camera history](#camera-history-and-permissions)) | Yes | Yes |
 | Reorder cameras on the live grid (the order also picks the measuring camera of a child whose sleep camera is on Automatic) | No | Yes |
 | Assign a camera to a child | No | Yes |
 | Add / edit / enable / delete a camera | No | Yes |
@@ -28,11 +28,13 @@ destroy or reconfigure.**
 Deleting by hand is not the same as **retention**: the automatic sweep of old alert clips and wake clips
 (Settings → Recording, admin only to configure) runs on a timer on every install, whoever is signed in.
 
+### Camera history and permissions
+
 **Who did it is recorded.** Silencing a camera's alerts, un-silencing them, restarting its stream and
 rebooting it each add a row to **Camera history** naming the account by its **username** (the login name
 an admin sets, never the first name, which anyone can change on their own account); a restart or reboot
 that failed is recorded too. While a camera is silenced, its tile shows who silenced it, to everyone. The
-morning review shows who last answered it (above). Details, including what happens when the history
+morning review shows who last answered it (see [the capability table](#what-caregivers-and-admins-can-do)). Details, including what happens when the history
 cannot be written, are in [docs/camera-controls.md](camera-controls.md#silencing-a-cameras-alerts-and-who-did-what).
 If a camera's alerts are kept silenced, on and off, for a long time (more than an hour by default, short gaps
 between renewals included), the admins are sent one notification for it, which names no one; on Pushover, ntfy
@@ -51,20 +53,7 @@ they’re signed in on. Demoting an admin to caregiver does *not* sign them out:
 a caregiver and simply lose the admin-only screens. Deleting an account, by contrast, ends its
 sessions at once and signs that person out everywhere.
 
-**There must always be at least one admin.** The only admin on an install can't be changed to
-caregiver until another account is made an admin first, and no account can ever delete itself —
-another admin has to remove it. Both are enforced by the server, not just hidden in the UI: the Role
-field explains it up front when it applies, and a request that tries anyway gets a clear error rather
-than a partial change. If an install somehow already has no admin (a database edited by hand, or
-from before this was enforced), see **[docs/mfa.md](mfa.md)**'s recovery section for the console
-command that fixes it — it's documented there alongside the equivalent two-factor recovery, not
-because it's about two-factor, but because it's the same kind of last-resort console fix.
-
-Any account can also turn on **two-factor authentication** for its own login — see
-**[docs/mfa.md](mfa.md)** for enrolling, one-time backup codes, and how to recover if an
-admin loses their authenticator.
-
-### `SESSION_TTL_DAYS` — how long a sign-in lasts
+## `SESSION_TTL_DAYS` — how long a sign-in lasts
 
 > **⚠️ A sign-in ends at the same time of day it began, and the app's push alerts stop with it, without
 > warning.** The lifetime is counted from sign-in, not from the last use: a phone that signed in at 02:00
@@ -89,3 +78,18 @@ admin loses their authenticator.
   ended from the server at once (sign out a device, remove an account, change a password). Since this
   setting, the 12-hour token in video and snapshot URLs also stops when its sign-in ends. What this means
   for security: [SECURITY.md](../SECURITY.md#how-long-a-sign-in-lasts-and-where-it-is-kept).
+
+## Keep an admin and recover access
+
+**There must always be at least one admin.** The only admin on an install can't be changed to
+caregiver until another account is made an admin first, and no account can ever delete itself —
+another admin has to remove it. Both are enforced by the server, not just hidden in the UI: the Role
+field explains it up front when it applies, and a request that tries anyway gets a clear error rather
+than a partial change. If an install somehow already has no admin (a database edited by hand, or
+from before this was enforced), see **[docs/mfa.md](mfa.md)**'s recovery section for the console
+command that fixes it — it's documented there alongside the equivalent two-factor recovery, not
+because it's about two-factor, but because it's the same kind of last-resort console fix.
+
+Any account can also turn on **two-factor authentication** for its own login — see
+**[docs/mfa.md](mfa.md)** for enrolling, one-time backup codes, and how to recover if an
+admin loses their authenticator.

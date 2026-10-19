@@ -256,26 +256,22 @@ recommended: it never produces a partial file in the first place.
 
 ## Logs
 
-Both the app and MediaMTX log to stdout, captured by Docker in the normal way:
+Use Docker's logs to check what the app and MediaMTX are doing. Both log to stdout, which Docker captures:
 
 ```bash
 docker logs -f nightlight
 ```
 
-Docker's own log rotation (already configured in the `docker run`/Compose examples
-in the [installation guide](installation.md), and in the Unraid template's extra parameters) caps total log storage at 10MB × 3
-files, so this doesn't grow unbounded - this matters particularly on Unraid, where
-Docker's storage is a fixed-size image that can break the whole Docker service if it
-fills up. If you deployed before this was added, add `--log-opt max-size=10m --log-opt
-max-file=3` yourself (or the Unraid template's "Extra Parameters" field) to get the
-same protection.
+Docker's own log rotation caps total log storage at 10MB × 3 files, so the logs don't grow without limit. This matters particularly on Unraid, where Docker's storage is a fixed-size image that can break the whole Docker service if it fills up.
 
-Timestamps use your container's local time (see the `TZ` variable in the [installation guide](installation.md)) rather than
-UTC, so they line up with when you actually remember something happening.
+- The `docker run`/Compose examples in the [installation guide](installation.md) and the Unraid template's extra parameters already configure this rotation.
+- If you deployed before this was added, add `--log-opt max-size=10m --log-opt max-file=3` yourself (or use the Unraid template's "Extra Parameters" field) to get the same protection.
+
+Log timestamps use the container's local time rather than UTC, so they line up with when you actually remember something happening. Set it with the `TZ` variable in the [installation guide](installation.md); `TZ` also names the video buffer's segment files. The times shown in the app follow [Settings → General](#times-and-your-timezone).
 
 ## Times and your timezone
 
-Every time the app shows is in your **home** time: the timezone set in **Settings → General** (an IANA
+Set your home timezone in **Settings → General** so the app's times agree across devices. Every time the app shows is in your **home** time: the timezone set there (an IANA
 name such as `Europe/London`; **default `UTC`** until you set it, so set it first). It is the same zone
 the sleep reports, the morning review and the alert schedule already use, so an alert at "7:00 pm" is
 the same moment on every phone, and it agrees with the sleep card. It is **not** the zone of the phone or
