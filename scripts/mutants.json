@@ -2,8 +2,8 @@
   {
     "label": "#780 camera save starts the transcoder before saving the new address",
     "file": "backend/src/routes/cameras.js",
-    "find": "  const updatedRows = db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,\r\n      talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,\r\n      discovery_source = ?, onvif_capable = ?, onvif_motion_capable = ?, onvif_device_url = ?, backchannel_supported = ?,\r\n      ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?\r\n    WHERE id = ?`).run(\r\n    name?.trim() || existing.name,\r\n    newRtsp,\r\n    child_id !== undefined ? child_id || null : existing.child_id,\r\n    mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic,\r\n    talkBackend,\r\n    talkUser,\r\n    talkPass,\r\n    subUrl,\r\n    discSource,\r\n    onvifCapable,\r\n    onvifMotionCapable,\r\n    onvifUrl,\r\n    backchannel,\r\n    ptz,\r\n    profileToken,\r\n    onvifUser,\r\n    onvifPass,\r\n    req.params.id\r\n  ).changes;\r\n  // The child may have changed (#655): see clearStalePrimaryPointers (lib/primaryCamera.js). Synchronous, straight after the\r\n  // UPDATE, so no other request can run between the two.\r\n  clearStalePrimaryPointers(req.params.id);\r\n  // #780: queue the changed-address start only after the row is saved. Watchdogs and manual restarts\r\n  // read this row; a start they queue after this point must get the new address. `existing` can be\r\n  // stale across the ONVIF probe: a disable or delete may finish while it awaits. Check the saved\r\n  // row, then enqueue without another await so #478's stop generation covers any later disable.\r\n  // A failed UPDATE (including a child deleted during the probe) cannot queue a start. A failed\r\n  // start still errors as before, but leaves the saved row for the next retry.\r\n  const saved = updatedRows ? db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id) : undefined;\r\n  if (saved && !saved.disabled && newRtsp !== existing.rtsp_url) {\r\n    await startTranscoder(saved.id, saved.rtsp_url, saved.mediamtx_path, saved.name);\r\n  }\r\n",
-    "replace": "  if (newRtsp !== existing.rtsp_url && !existing.disabled) {\r\n    await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);\r\n  }\r\n  const updatedRows = db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,\r\n      talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,\r\n      discovery_source = ?, onvif_capable = ?, onvif_motion_capable = ?, onvif_device_url = ?, backchannel_supported = ?,\r\n      ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?\r\n    WHERE id = ?`).run(\r\n    name?.trim() || existing.name,\r\n    newRtsp,\r\n    child_id !== undefined ? child_id || null : existing.child_id,\r\n    mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic,\r\n    talkBackend,\r\n    talkUser,\r\n    talkPass,\r\n    subUrl,\r\n    discSource,\r\n    onvifCapable,\r\n    onvifMotionCapable,\r\n    onvifUrl,\r\n    backchannel,\r\n    ptz,\r\n    profileToken,\r\n    onvifUser,\r\n    onvifPass,\r\n    req.params.id\r\n  ).changes;\r\n  // The child may have changed (#655): see clearStalePrimaryPointers (lib/primaryCamera.js). Synchronous, straight after the\r\n  // UPDATE, so no other request can run between the two.\r\n  clearStalePrimaryPointers(req.params.id);\r\n",
+    "find": "  const updatedRows = db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,\r\n      talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,\r\n      discovery_source = ?, onvif_capable = ?, onvif_motion_capable = ?, onvif_device_url = ?, backchannel_supported = ?,\r\n      ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?\r\n    WHERE id = ?`).run(\r\n    keepFresh('name', name?.trim() || existing.name),\r\n    keepFresh('rtsp_url', newRtsp),\r\n    keepFresh('child_id', child_id !== undefined ? child_id || null : existing.child_id),\r\n    keepFresh('mqtt_topic', mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic),\r\n    keepFresh('talk_backend', talkBackend),\r\n    keepFresh('talk_username', talkUser),\r\n    keepFresh('talk_password', talkPass),\r\n    keepFresh('sub_rtsp_url', subUrl),\r\n    keepFresh('discovery_source', discSource),\r\n    keepFresh('onvif_capable', onvifCapable),\r\n    keepFresh('onvif_motion_capable', onvifMotionCapable),\r\n    keepFresh('onvif_device_url', onvifUrl),\r\n    keepFresh('backchannel_supported', backchannel),\r\n    keepFresh('ptz_supported', ptz),\r\n    keepFresh('onvif_profile_token', profileToken),\r\n    keepFresh('onvif_username', onvifUser),\r\n    keepFresh('onvif_password', onvifPass),\r\n    req.params.id\r\n  ).changes;\r\n",
+    "replace": "  await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);\r\n  const updatedRows = db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,\r\n      talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,\r\n      discovery_source = ?, onvif_capable = ?, onvif_motion_capable = ?, onvif_device_url = ?, backchannel_supported = ?,\r\n      ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?\r\n    WHERE id = ?`).run(\r\n    keepFresh('name', name?.trim() || existing.name),\r\n    keepFresh('rtsp_url', newRtsp),\r\n    keepFresh('child_id', child_id !== undefined ? child_id || null : existing.child_id),\r\n    keepFresh('mqtt_topic', mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic),\r\n    keepFresh('talk_backend', talkBackend),\r\n    keepFresh('talk_username', talkUser),\r\n    keepFresh('talk_password', talkPass),\r\n    keepFresh('sub_rtsp_url', subUrl),\r\n    keepFresh('discovery_source', discSource),\r\n    keepFresh('onvif_capable', onvifCapable),\r\n    keepFresh('onvif_motion_capable', onvifMotionCapable),\r\n    keepFresh('onvif_device_url', onvifUrl),\r\n    keepFresh('backchannel_supported', backchannel),\r\n    keepFresh('ptz_supported', ptz),\r\n    keepFresh('onvif_profile_token', profileToken),\r\n    keepFresh('onvif_username', onvifUser),\r\n    keepFresh('onvif_password', onvifPass),\r\n    req.params.id\r\n  ).changes;\r\n",
     "expect": "killed",
     "tests": [
       "camera-edit-save-before-restart.test.js"
@@ -13,13 +13,46 @@
   {
     "label": "#780 start decided from the stale row read before the probe",
     "file": "backend/src/routes/cameras.js",
-    "find": "  const saved = updatedRows ? db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id) : undefined;\r\n  if (saved && !saved.disabled && newRtsp !== existing.rtsp_url) {\r\n    await startTranscoder(saved.id, saved.rtsp_url, saved.mediamtx_path, saved.name);\r\n  }",
-    "replace": "  if (newRtsp !== existing.rtsp_url && !existing.disabled) {\r\n    await startTranscoder(req.params.id, newRtsp, existing.mediamtx_path, name?.trim() || existing.name);\r\n  }",
+    "find": "  if (saved && !saved.disabled && newRtsp !== existing.rtsp_url) {",
+    "replace": "  if (newRtsp !== existing.rtsp_url && !existing.disabled) {",
     "expect": "killed",
     "tests": [
       "camera-edit-save-before-restart.test.js"
     ],
     "namePattern": "disable during ONVIF probe leaves no live transcoder start"
+  },
+  {
+    "label": "#787 stale main address overwrites concurrent edit",
+    "file": "backend/src/routes/cameras.js",
+    "find": "keepFresh('rtsp_url', newRtsp)",
+    "replace": "newRtsp",
+    "expect": "killed",
+    "tests": [
+      "camera-edit-keep-fresh.test.js"
+    ],
+    "namePattern": "concurrent address survives a no-address ONVIF save"
+  },
+  {
+    "label": "#787 delete during probe misses 404",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  if (!fresh) return res.status(404).json({ error: 'Camera not found' });\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "camera-edit-keep-fresh.test.js"
+    ],
+    "namePattern": "delete during ONVIF probe returns 404 without starting a leg"
+  },
+  {
+    "label": "#787 delete during transcoder start misses 404",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    if (!updated) return res.status(404).json({ error: 'Camera not found' });\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": [
+      "camera-edit-keep-fresh.test.js"
+    ],
+    "namePattern": "delete while transcoder start is awaited returns 404"
   },
   {
     "label": "sound percentile: nearest-rank index off by one",

@@ -12,6 +12,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ### Fixed
 
 - **More reliable tests for recording refreshes, unavailable streams, unsaved drafts and the trusted-proxy default (#736 #737 #738 #753).** The MediaMTX config renderer now keeps the input file's line ending, which matters when running from a Windows checkout (#740); the Docker image is unchanged. Known limit: the slow-request recording test was intermittent in CI and did not fail in five local runs before this change.
+- **A slow camera edit no longer undoes another saved camera change (#787).** If an ONVIF check is still running while another edit changes the address or another field, the waiting save now keeps those newer values while saving its own changes. A camera deleted during the check or stream restart now answers “Camera not found” instead of a server error. Known limit: if a request sends a field's old value again, it is treated as unchanged and keeps a newer value saved meanwhile. A field this request actually changes, including talk or ONVIF credentials, wins when its save finishes.
 
 ## [0.41.2] - 2026-10-19
 
