@@ -147,16 +147,23 @@ neighbouring mechanisms:
   from those bounds, not measured), under Cloudflare's 100 s proxy limit. With more starts ahead of it (a
   watchdog's and the reconcile pass's at once) it can take longer than that.
 - An edit with a new address first registers the MediaMTX path, then saves the camera row, then queues
-  the transcoder start (#780). A failed path registration still answers 502 without saving, and a failed
-  save, including a stale child assignment that answers 409, does not start the transcoder with the new
-  address. Registering the MediaMTX path can still briefly interrupt its publisher. If the transcoder
-  start itself fails, the route still answers 500, but the new address remains saved.
-  The sub-stream and detector restarts and clip-ring reconciliation follow the main start and read the saved row.
+  the transcoder start (#780). An ONVIF backchannel re-probe usually finishes in under 1 s, but a hanging
+  camera can delay that restart by about 25 s. A failed path registration still answers 502 without saving,
+  and a failed save, including a stale child assignment that answers 409, does not start the transcoder with
+  the new address. Registering the MediaMTX path can still briefly interrupt its publisher. A camera disabled
+  or deleted during the probe cannot be started by the edit after it resumes. If the transcoder start rejects,
+  the route answers 500 after saving the whole edited row. It skips the subsequent sub-stream, detector and
+  clip-ring steps and `subscribeAllCameraTopics`; a changed MQTT topic is not subscribed until the MQTT
+  client reconnects. Reconcile and the watchdogs can restart the camera from the saved row because
+  `isRunning` is false after a rejected start.
 - Known limit (#780): the transcoder never reads the database. A watchdog or reconcile pass that fetched
   the old camera row before the edit's write can queue its stale-address start after the edit's start;
-  it then runs last. Moving the write before the start narrows this window from the ONVIF probe's possible
-  seconds to a millisecond-scale interval around the write and queue (not measured). Fully closing it would require
-  the transcoder to re-read the address when its queued start runs; that is outside this fix.
+  it then runs last. The window is the other reader's own wait after fetching the row, not just the time
+  between the edit's write and queue: the camera watchdog can await MediaMTX status for up to 5 s, and
+  the audio watchdog can await that status plus a 6 s audio-flow probe. Reconcile reads all camera rows
+  before looping, though its `isRunning` check usually prevents a duplicate start. This window remains
+  open for several seconds in a stalled case (not measured). Fully closing it would require the transcoder
+  to re-read the address when its queued start runs; that is outside this fix.
 
 When editing this area, preserve the "only write when actually broken" invariant — an
 unconditional reconcile-on-every-tick would cause constant disconnects.

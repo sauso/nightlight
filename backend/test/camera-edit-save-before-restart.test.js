@@ -3,20 +3,24 @@
 import { test, mock, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { createServer as createTcpServer } from 'node:net';
 import { useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, makeCamera, makeChild, signToken, mountRouter, call } from './helpers/harness.js';
 
 useTempDataDir();
 const starts = [];
+const operations = [];
 let db;
 let startError = null;
 // Only transcoder.js is mocked. The route, SQLite schema, MediaMTX client and ONVIF probe are real.
 mock.module('../src/lib/transcoder.js', {
   exports: {
     startTranscoder: async (...args) => {
-      starts.push({ args, savedUrl: db.prepare('SELECT rtsp_url FROM cameras WHERE id = ?').get(args[0])?.rtsp_url });
+      const saved = db.prepare('SELECT rtsp_url, disabled FROM cameras WHERE id = ?').get(args[0]);
+      starts.push({ args, savedUrl: saved?.rtsp_url, disabled: saved?.disabled });
+      operations.push({ type: 'start', id: args[0], savedUrl: starts.at(-1).savedUrl });
       if (startError) throw startError;
     },
-    stopTranscoder: async () => {},
+    stopTranscoder: async (id) => { operations.push({ type: 'stop', id }); },
     isRunning: () => false,
   },
 });
@@ -41,6 +45,7 @@ const row = () => db.prepare('SELECT rtsp_url, disabled FROM cameras WHERE id = 
 
 beforeEach(() => {
   starts.length = 0;
+  operations.length = 0;
   startError = null;
   mediaStatus = 200;
   db.prepare('DELETE FROM cameras WHERE id = ?').run(CAM);
@@ -57,14 +62,76 @@ after(async () => {
 });
 
 test('changed address is saved when startTranscoder is called', async () => {
+  assert.equal(row().rtsp_url, OLD, 'precondition: SQLite held the old address before the edit');
   const res = await put({ rtsp_host: 'new.example', force: true });
   const NEW = 'rtsp://user:pass@new.example:554/stream';
   assert.equal(res.status, 200, JSON.stringify(res.body));
-  assert.notEqual(NEW, OLD, 'precondition: the address really changed');
   assert.equal(starts.length, 1, 'precondition: startTranscoder actually ran');
   assert.equal(starts[0].args[1], NEW);
   assert.equal(starts[0].savedUrl, NEW, 'start was queued while SQLite still held the old address');
   assert.equal(row().rtsp_url, NEW);
+});
+
+// Hold the real RTSP probe after its first request, so another route can finish before this
+// edit resumes. Releasing the socket avoids a real 12 s probe timeout (#780).
+async function duringHeldProbe(during) {
+  let probeSeen;
+  const probing = new Promise((resolve) => { probeSeen = resolve; });
+  let release;
+  const released = new Promise((resolve) => { release = resolve; });
+  const sockets = new Set();
+  const tcp = createTcpServer((socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    socket.once('data', async () => {
+      probeSeen();
+      await released;
+      socket.end('RTSP/1.0 404 Not Found\r\nCSeq: 1\r\n\r\n');
+    });
+  });
+  await new Promise((resolve) => tcp.listen(0, '127.0.0.1', resolve));
+  try {
+    const pending = put({ rtsp_host: '127.0.0.1', rtsp_port: tcp.address().port, force: true,
+      discovery_source: 'onvif', backchannel_supported: 'yes' });
+    await probing;
+    assert.equal(row().rtsp_url, OLD, 'precondition: the edit is still awaiting the probe');
+    const middle = await during();
+    release();
+    return { middle, finish: await pending };
+  } finally {
+    release();
+    for (const socket of sockets) socket.destroy();
+    await new Promise((resolve) => tcp.close(resolve));
+  }
+}
+
+test('disable during ONVIF probe leaves no live transcoder start', async () => {
+  const { middle, finish } = await duringHeldProbe(() => call(`${server.url}/api/cameras/${CAM}/enabled`,
+    { method: 'PUT', token, body: { enabled: false } }));
+  assert.equal(middle.status, 200, JSON.stringify(middle.body));
+  assert.equal(finish.status, 200, JSON.stringify(finish.body));
+  assert.equal(row().disabled, 1);
+  assert.equal(starts.filter((start) => start.disabled === 1).length, 0,
+    'a transcoder start was queued after the camera became disabled');
+  assert.notEqual(operations.at(-1)?.type, 'start', 'a disabled camera was started after its stop');
+});
+
+test('delete during ONVIF probe does not start a camera with no row', async () => {
+  const { middle } = await duringHeldProbe(() => call(`${server.url}/api/cameras/${CAM}`,
+    { method: 'DELETE', token }));
+  assert.equal(middle.status, 204, JSON.stringify(middle.body));
+  assert.equal(row(), undefined);
+  assert.equal(starts.filter((start) => start.savedUrl === undefined).length, 0,
+    'a transcoder start was queued after the camera was deleted');
+  assert.notEqual(operations.at(-1)?.type, 'start', 'a deleted camera was started after its stop');
+});
+
+test('two edits during ONVIF probe leave the saved and started addresses equal', async () => {
+  const { middle, finish } = await duringHeldProbe(() => put({ rtsp_host: 'second.example', force: true }));
+  assert.equal(middle.status, 200, JSON.stringify(middle.body));
+  assert.equal(finish.status, 200, JSON.stringify(finish.body));
+  assert.ok(starts.length >= 2, 'both edits should have queued their address changes');
+  assert.equal(starts.at(-1).args[1], row().rtsp_url);
 });
 
 test('stale child assignment returns 409 after ONVIF probe without starting or saving', async () => {
