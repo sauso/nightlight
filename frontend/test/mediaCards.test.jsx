@@ -461,14 +461,24 @@ describe('RecordingsCard', () => {
   });
 
   test('reloads when the parent bumps the refresh nonce', async () => {
-    vi.spyOn(api, 'get').mockResolvedValueOnce(ROWS).mockResolvedValueOnce([...ROWS, { ...ROWS[0], id: 'r-3' }]);
+    // Answer by URL and by how many times the recordings list was asked for, not with queued values (#736): a
+    // `mockResolvedValueOnce` queue is spent by WHICHEVER request comes first and in the order requests happen to be
+    // made, which is what timed out in the 10 ms CI job (the third row never came, or a surplus request found the
+    // queue empty). The first list has 2 rows; any later one has 3, so the third row can only come from a request made
+    // AFTER the parent bumped the nonce, however many extra requests there are.
+    let listRequests = 0;
+    vi.spyOn(api, 'get').mockImplementation((url) => {
+      if (!String(url).startsWith('/recordings/child/kid-1')) return Promise.resolve(ROWS);
+      listRequests += 1;
+      return Promise.resolve(listRequests === 1 ? ROWS : [...ROWS, { ...ROWS[0], id: 'r-3' }]);
+    });
     const { rerenderWith, container } = renderAsAdmin(<RecordingsCard childId="kid-1" refreshNonce={0} />);
     await waitFor(() => expect(container.querySelectorAll('.rec-strip__item')).toHaveLength(2));
     rerenderWith({ ui: <RecordingsCard childId="kid-1" refreshNonce={1} /> });
     // The tile's Record button finishes on a different screen, so the only way this card learns a
     // new recording exists is the parent nudging it.
     await waitFor(() => expect(container.querySelectorAll('.rec-strip__item')).toHaveLength(3));
-    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(listRequests).toBeGreaterThanOrEqual(2);
   });
 
   test('opening a recording plays it, and a nameless camera does not render "null"', async () => {
