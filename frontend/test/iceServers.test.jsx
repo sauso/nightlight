@@ -85,6 +85,27 @@ describe('#739 warm the ICE lookup at sign-in', () => {
     expect(configs).toHaveLength(0);
   });
 
+  test('a restored session completes sign-in while /api/about remains pending', async () => {
+    // #739: a slow ICE lookup must not delay access to the signed-in app.
+    aboutAnswer = () => new Promise(() => {});
+    serveSignIn();
+    render(<AuthProvider><SignedInProbe /></AuthProvider>);
+    await waitFor(() => expect(aboutRequests()).toHaveLength(1), { timeout: 250 });
+    await waitFor(() => expect(screen.getByTestId('signed-in-user')).toHaveTextContent('viewer'), { timeout: 250 });
+  });
+
+  test('a fresh login completes while /api/about remains pending', async () => {
+    // #739: a slow ICE lookup must not delay access after entering credentials either.
+    setToken(null);
+    aboutAnswer = () => new Promise(() => {});
+    serveSignIn();
+    render(<AuthProvider><SignedInProbe /></AuthProvider>);
+    await waitFor(() => expect(screen.getByTestId('auth-loading')).toHaveTextContent('false'));
+    act(() => { screen.getByText('Sign in').click(); });
+    await waitFor(() => expect(aboutRequests()).toHaveLength(1), { timeout: 250 });
+    await waitFor(() => expect(screen.getByTestId('signed-in-user')).toHaveTextContent('viewer'), { timeout: 250 });
+  });
+
   test('the first tile uses the warmed list without a second /api/about request', async () => {
     aboutAnswer = answerWith(['stun:a.example.org:3478']);
     serveSignIn();

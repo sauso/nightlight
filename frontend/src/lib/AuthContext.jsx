@@ -7,7 +7,8 @@ import { getIceServers } from './iceServers.js';
 
 function warmIceServersForSignedInUser() {
   // #739: /api/about requires a session. Start this before showing the first tile, so its 1s ICE
-  // lookup budget usually finds a cached answer. getIceServers() shares an in-flight request and never
+  // lookup budget usually finds a cached answer. Do not wait for it: a slow /about must not hold sign-in,
+  // and it can run alongside the media-token fetch. getIceServers() shares an in-flight request and never
   // rejects. Keep that cache across sign-out: STUN_SERVERS is server-wide, not tied to a user.
   void getIceServers();
 }
@@ -36,10 +37,10 @@ export function AuthProvider({ children }) {
     setRetrying(true);
     try {
       const me = await api.get('/auth/me');
+      warmIceServersForSignedInUser();
       // Fetch the media token before rendering the authed app, so the first <img>/HLS load already
       // has one (never blocks sign-in on failure — getMediaToken() retries lazily).
       await refreshMediaToken().catch(() => {});
-      warmIceServersForSignedInUser();
       setUser(me);
       setUnreachable(false);
       setFailures(0);
@@ -107,8 +108,8 @@ export function AuthProvider({ children }) {
 
   async function login(token, userObj) {
     setToken(token);
-    await refreshMediaToken().catch(() => {});
     warmIceServersForSignedInUser();
+    await refreshMediaToken().catch(() => {});
     setUser(userObj);
   }
 
