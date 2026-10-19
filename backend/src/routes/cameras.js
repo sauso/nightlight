@@ -30,7 +30,7 @@ import { validateRtspStream, probeRtspDetailed, ffprobeVersion } from '../lib/rt
 import { grabLiveFrame } from '../lib/snapshot.js';
 import { logger } from '../lib/logger.js';
 import { startRecording, stopRecording, recordingState, getOndemandSettings, isRecording } from '../lib/recordings.js';
-import { stripUrlPassword, urlHasPassword, resolveUrlPassword, scrubSecrets, findCredentialLeak } from '../lib/urlCredentials.js';
+import { stripUrlPassword, urlHasPassword, resolveUrlPassword, scrubSecrets, findCredentialLeak, decodeUrlCredential } from '../lib/urlCredentials.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { clearStalePrimaryPointers } from '../lib/primaryCamera.js';
 import { purgeCamera, preflightCameraPurge, purgeFailureReason } from '../lib/entityPurge.js';
@@ -139,8 +139,8 @@ function parseRtspComponents(url) {
       host: u.hostname,
       port: u.port || '554',
       path: (u.pathname || '') + (u.search || ''),
-      username: u.username ? decodeURIComponent(u.username) : '',
-      password: u.password ? decodeURIComponent(u.password) : '',
+      username: u.username ? decodeUrlCredential(u.username) : '',
+      password: u.password ? decodeUrlCredential(u.password) : '',
     };
   } catch {
     return null;

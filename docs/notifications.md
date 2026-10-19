@@ -355,6 +355,8 @@ Leave it blank to use a stream frame.
 | **Alert image URL** | blank | e.g. `http://192.168.1.50/snapshot.jpg`. If the endpoint needs a username, include it: `http://admin@192.168.1.50/snapshot.jpg`. |
 | **Alert image password** | blank | Only if the endpoint needs one. Blank means *keep whatever is already saved*. |
 
+Special characters in the user name or password should be percent-encoded (for example, `%40` for `@`); a stray `%` is now used as typed instead of dropping alerts (#743).
+
 Two limits protect the server from a misbehaving camera (#536). **Redirects are not followed**: if the
 address answers with a redirect (for example `http://` to `https://`), the image is not used and the alert
 falls back to a stream frame, so enter the final address. **The image may be at most 5 MB**; a larger one is

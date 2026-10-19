@@ -2,6 +2,7 @@ import http from 'http';
 import net from 'net';
 import crypto from 'crypto';
 import { logger } from './logger.js';
+import { decodeUrlCredential } from './urlCredentials.js';
 
 // Two-way audio ("talk back"): stream audio from the app to a camera's speaker. The app captures
 // the mic, downsamples + encodes to G.711 mu-law in the browser (see frontend/lib/twoWayTalk.js),
@@ -162,8 +163,8 @@ function parseRtspUrl(rtspUrl) {
       host: u.hostname,
       port: u.port ? Number(u.port) : 554,
       path: (u.pathname || '/') + (u.search || ''),
-      username: decodeURIComponent(u.username || ''),
-      password: decodeURIComponent(u.password || ''),
+      username: decodeUrlCredential(u.username || ''),
+      password: decodeUrlCredential(u.password || ''),
     };
   } catch {
     return null;

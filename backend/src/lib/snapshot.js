@@ -1,5 +1,6 @@
 import { spawnChild } from './childEnv.js';
 import { logger } from './logger.js';
+import { decodeUrlCredential } from './urlCredentials.js';
 
 // Fetch a JPEG straight from a camera's own HTTP snapshot endpoint (thingino, sonoff-hack, and most
 // IP cameras expose one). Preferred over the ffmpeg stream grab when configured: it returns a full
@@ -32,7 +33,7 @@ export async function fetchHttpSnapshot(rawUrl, { timeoutMs = 5000, maxBytes = M
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
   const headers = {};
   if (url.username || url.password) {
-    const creds = `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`;
+    const creds = `${decodeUrlCredential(url.username)}:${decodeUrlCredential(url.password)}`;
     headers.Authorization = `Basic ${Buffer.from(creds).toString('base64')}`;
     url.username = '';
     url.password = '';
