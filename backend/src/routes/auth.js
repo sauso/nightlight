@@ -254,7 +254,8 @@ const mfaEnableUserLimiter = rateLimit({
 // count belongs to, compared as-is. It used to be a sha256 prefix, "so the plaintext is not held twice" (#772), but
 // that bought nothing: the plaintext is in the users row (mfa_secret) and in every request's `user` object already,
 // and CodeQL (js/insufficient-password-hash, alert #27) read the hash of a secret as password hashing (#777). What is
-// held here is a pending, not yet confirmed seed (deleted on a successful confirmation), one per account at most.
+// held here is a pending, not yet confirmed seed, one per account at most, deleted when it is confirmed, cancelled or
+// rotated away, and when two-factor is turned off or reset; a second long-lived plaintext copy (review of #778).
 // A different secret (a start over, a new set-up after a cancel) starts again from 0; a resume (#765: the same secret returned)
 // does NOT, so reloading the set-up page part-way through does not start the count again. The entry is deleted on a
 // successful confirmation and AFTER a cancel's write has succeeded (the order matters: see the cancel in the route).
@@ -977,6 +978,9 @@ router.post('/me/mfa/setup', requireAuth, sessionActionLimiter, asyncHandler(asy
       const current = db.prepare('SELECT mfa_enabled FROM users WHERE id = ?').get(user.id);
       return res.status(400).json({ error: !current || current.mfa_enabled ? SETUP_ALREADY_ON : SETUP_CHANGED_MEANWHILE });
     }
+    // The rotated-away secret's count goes with it (same reason as in /me/mfa/disable). The count would start again
+    // at the next wrong code anyway (the secret differs); this only drops the old plaintext from memory.
+    mfaEnableWrongCodes.delete(user.id);
   }
   const uri = keyUri(user.username, secret, appName());
   const qr = await qrDataUrl(uri);
@@ -1029,9 +1033,12 @@ router.post('/me/mfa/enable', requireAuth, mfaEnableUserLimiter, asyncHandler(as
     // Counted with NO await between the read of `user` above and the cancel below, so requests sent at once
     // cannot all slip past the cap: each one runs this whole block before the next can start.
     res.locals.mfaWrongCode = true;
+    // String() on both sides, as the hash version did: SQLite lets a TEXT column hold a BLOB, which comes back as a
+    // new object on every read and would never compare equal (review of #778, verified by running).
+    const secret = String(user.mfa_secret);
     let entry = mfaEnableWrongCodes.get(user.id);
-    if (!entry || entry.secret !== user.mfa_secret) {
-      entry = { secret: user.mfa_secret, wrong: 0 };
+    if (!entry || entry.secret !== secret) {
+      entry = { secret, wrong: 0 };
       mfaEnableWrongCodes.set(user.id, entry);
     }
     entry.wrong += 1;
@@ -1084,6 +1091,8 @@ router.post('/me/mfa/disable', requireAuth, sessionActionLimiter, asyncHandler(a
   }
   if (signInEnded(req, res)) return;
   db.prepare('UPDATE users SET mfa_enabled = 0, mfa_secret = NULL, mfa_backup_codes = NULL, mfa_last_step = NULL WHERE id = ?').run(user.id);
+  // The pending secret the count belongs to is gone: do not keep its plaintext in memory until the next wrong code.
+  mfaEnableWrongCodes.delete(user.id);
   res.json({ ok: true });
 }));
 
