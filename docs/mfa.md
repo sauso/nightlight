@@ -192,6 +192,56 @@ change these numbers.
 Starting a new set-up, turning two-factor off, or an admin or console reset clears the remembered step,
 so a new authenticator's first code is never refused because of an old one.
 
+### Confirming a set-up has limits of its own
+
+Entering the 6-digit code that confirms a new set-up (**Turn on** in the set-up dialog,
+`POST /api/auth/me/mfa/enable`) is limited separately from everything above, and **only wrong codes count**:
+
+| Limit | Value | Counted per | What happens |
+|---|---|---|---|
+| Wrong codes against one pending set-up | **10** | the account and that set-up's key | The 10th wrong code **cancels the set-up**: the key is discarded, and the answer (HTTP 400) is "Too many wrong codes, so this set-up was cancelled. Choose Continue set-up or Start over to get a new key (also check your phone's clock)." Both buttons ask for your password and now make a **new** key (after a reload the card shows **Set up two-factor** instead); delete the old entry from your authenticator. **Continue set-up** on a key that is still pending does **not** start the count again; **Start over** (a new key) does. |
+| Wrong codes per account | **30 per 15 minutes** | the account alone, whatever the source address | Over it, every confirmation is refused (HTTP 429, "Too many attempts - please wait a few minutes and try again."), even one with the right code, until the 15 minutes are up or the password is changed. |
+
+What does **not** count: a correct code, and a refusal that needed no guess ("Start setup first." when nothing is
+pending, "Two-factor is already on.").
+
+**Why.** The confirmation route takes a signed-in session but not the password, so it limits wrong codes, like
+the other confirmation routes. Every set-up asks for the password, so after a cancel a device without it cannot
+start another one: it gets at most 10 guesses at any one key, odds of about 10 × 3 / 1,000,000 = **0.003%**. The 10
+bounds the guesses per key; the 30 bounds them across keys, because each time you start over such a device gets 10
+more against the new key, so it is held to 30 per 15 minutes in all (and so is someone who has the password and
+starts over every 9 wrong codes). Both numbers are judgements, not measurements: 10 is far more wrong codes than a
+typo or a phone clock that is off costs a real person before they start over, and 30 matches the per-user limit on
+the sign-in second step.
+
+How this differs from the routes beside it:
+
+| | Confirming a set-up (**Turn on**) | Set-up, turning two-factor off, changing your password | Sign-in second step |
+|---|---|---|---|
+| What counts | wrong codes only | every attempt | every attempt, except the per-user limit, which counts failed attempts only |
+| Per source address | **no limit** | 20 per 15 minutes per source and account (one budget shared by the three), and 100 per source | 20 per 15 minutes per source and account, and 100 per source |
+| Per account, any source | 30 wrong codes per 15 minutes | none | 30 failed attempts per 15 minutes |
+| A key that gets too many wrong codes | the set-up is cancelled at 10 | not applicable | nothing is cancelled |
+
+The per-account count here is **separate** from the sign-in second step's: wrong codes while setting up never count
+against your first sign-in with the new authenticator. No limit on this route is keyed on an address, so people
+behind one proxy address share nothing here: each account has its own count. There are no settings for these
+numbers.
+
+**Known limits:**
+
+- A device that is signed in to your account without the password can **cancel your pending set-up** (10 wrong
+  codes) each time you start over, and across those start-overs use up the 30, after which even the right code is
+  refused (HTTP 429) for the rest of the 15 minutes. It blocks nothing else. **Change your password**: that empties the count at once, and the same step discards the pending set-up
+  and signs every other device out; then set up again. An admin setting a new password for you does the same.
+  Signing that device out (**Account → Signed in on → Sign out** beside it) stops it, but does **not** empty the
+  count: the right code is still refused until the 15 minutes are up.
+- The per-account limit counts a confirmation when it arrives and gives it back when it is answered, so 30
+  confirmations in progress **at the same moment** (even ones that will not count) can make a right code that
+  arrives among them a 429 for that moment; it clears as soon as they have been answered.
+- The counts are kept in memory, so a **restart of the container resets them** (as it resets every limit on this
+  page). An admin resetting two-factor for the account also empties them, as it discards the pending set-up.
+
 ## Notes for operators
 
 - The TOTP secret and the (hashed) backup codes live in the `users` table of the app database

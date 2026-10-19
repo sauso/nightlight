@@ -205,7 +205,11 @@ would, even if both of the other two recording features are off. Turning it off 
 *new* wake-up from holding that buffer open, but the buffering itself only drops once nothing else on
 the camera still needs it — including a wake-up that was already being watched at the moment you turned
 it off, which is allowed to run to completion first (see *When the buffering starts* under On-demand
-recordings, above, for how long that can take and when buffering actually stops).
+recordings, above, for how long that can take and when buffering actually stops). A clip that is already
+being cut keeps the footage it needs until it is saved or fails, even if meanwhile the wake-up ends, the sleep
+window closes, sleep tracking is switched off, the camera is unassigned from the child or the server's
+clock jumps (before #471 any of these could let the buffer discard that footage mid-cut and fail the
+clip).
 
 ---
 
@@ -289,6 +293,11 @@ edit, or switching on-demand or wake clips on or off, resizes each camera's buff
 stopping and restarting it — so a recording, a wake-clip capture or a detection clip that's already
 under way keeps everything it needs, and a finished recording always reports the pre-roll length it
 actually started with, not whatever the setting has since been changed to.
+**Saving a camera** (renaming it, changing its address or the child it is assigned to) doesn't restart
+its buffer either (#490; until then every camera save emptied it, and lost any recording or clip in
+progress). An address change restarts the camera's stream, which can leave a short gap in the buffer
+while it reconnects; what the buffer already holds is kept. Unassigning the camera from its child can make the
+buffer unwanted; it then stops the same way as below, once nothing on that camera is still using it.
 Turning **Show a Record button on each camera** off (and pressing **Save changes**) stops the buffering on every camera that isn't also
 saving detection clips or wake clips — but *not instantly* if that camera has a capture already in
 progress: the buffer keeps running until every such capture finishes, then stops at Nightlight's next
@@ -296,12 +305,18 @@ periodic check, which runs about **every 5 minutes**. What "finishes" can take v
 flight: an on-demand recording runs until it hits its auto-stop cap above, at most 600 seconds; a
 detection clip runs until it's saved, typically a few seconds; a wake-up already being watched (see
 *Wake clips*, above) runs until it ends, normally a few minutes but up to 20 minutes if the camera stops
-reporting partway through it. So the *total* delay from flipping the switch to the buffering actually
+reporting partway through it, and a wake clip already being cut runs until it is saved or fails, even after its
+wake-up has ended. So the *total* delay from flipping the switch to the buffering actually
 stopping is that in-progress time plus up to 5 more minutes for the next periodic check — it is not
 simply "5 minutes." The same applies to turning **Record wake-ups without alerting** off, with one
 difference: that switch also stops any *new* wake-up from starting a fresh capture, so only a wake-up
 already under way at the moment you flip it can still hold that camera's buffering open. This is
 deliberate: stopping immediately would have deleted the very footage that capture was still reading.
+**Known limit: cutting a clip has no time limit.** Every clip (on-demand, detection or wake) is cut by
+an FFmpeg process that Nightlight waits for without a deadline. If one never finishes, that camera's
+buffer stops discarding anything recorded since that clip's start (so it grows), and a buffer that is no
+longer wanted keeps running, until the process ends, the camera is switched off or removed, or
+Nightlight restarts.
 
 **No Record button on a camera?** The button hides itself when that camera isn't buffering, because
 reaching backward is the whole point and there'd be nothing to reach into. Check that on-demand

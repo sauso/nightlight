@@ -581,8 +581,6 @@ buffer still holds if that is later.
 - **A payload without the first-frame information** (nothing sends one today) keeps the old anchor, the end
   of the minute; its buffer hold now reaches back 7 seconds before it instead of 15, the same margin the cut
   itself reads.
-- **Not covered by this change:** a settings save or camera edit restarts the buffer and drops the hold, which
-  can still fail a wake clip that is being cut (#413, #490).
 
 **Sleep numbers can move on a borderline night.** Each row moves by less than a minute, but the sleep rules
 have sharp edges (15 quiet minutes to fall asleep, 20 minutes away from the bed to be up for the morning), so
@@ -814,10 +812,6 @@ one moves both. They are constants, not settings, so there is no default to chan
   server's clock interrupted. Since issue #588 the step also ends the run when the first minute that shows it is
   a minute with sound but no video (a stall), with the same log line (`run ended (the clock went back)`); the
   settling count is restarted by the next minute that was actually read, as before.
-- **A clock step can release the ring hold of a clip still being cut.** The run ended by an older label, or
-  replaced by an active label that jumps far forward, gives up its ring hold even if its clip is still being
-  extracted. It needs a step of more than about 2 minutes within about a minute of a wake's 5th active
-  minute; a per-capture hold is the separate issue #471.
 - **An armed watcher whose camera sends nothing between two nights stays armed.** It is reset by the first
   reading outside the sleep window, so the next evening's settling can be recorded as a wake if the camera
   was silent for the whole day.

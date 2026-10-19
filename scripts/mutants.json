@@ -3502,24 +3502,24 @@
   {
     "label": "#E2 M6: PUT /users/:id swallows a non-LastAdminError instead of rethrowing",
     "file": "backend/src/routes/auth.js",
-    "find": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n    throw e;\r\n  }\r\n  res.json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)));",
-    "replace": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n  }\r\n  res.json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)));",
+    "find": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n    throw e;\r\n  }\r\n  // After the transaction, so a refused (rolled-back) change leaves it alone",
+    "replace": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n  }\r\n  // After the transaction, so a refused (rolled-back) change leaves it alone",
     "expect": "killed",
     "tests": [
       "auth-routes-branches.test.js"
     ],
-    "note": "The temp-trigger test aborts the UPDATE and asserts a 500, not 200 — deleting `throw e` falls through to the 200 response below the catch block even though the write never happened."
+    "note": "The temp-trigger test aborts the UPDATE and asserts a 500, not 200 — deleting `throw e` falls through to the 200 response below the catch block even though the write never happened. Re-anchored on the comment that now follows the catch (mfa-enable-limit review fixes: the password-change reset of the confirmation budget sits between the catch and the response). Same mutant."
   },
   {
     "label": "#E2 M7: DELETE /users/:id swallows a non-LastAdminError instead of rethrowing",
     "file": "backend/src/routes/auth.js",
-    "find": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n    throw e;\r\n  }\r\n  res.status(204).end();",
-    "replace": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n  }\r\n  res.status(204).end();",
+    "find": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n    throw e;\r\n  }\r\n  // A removed account must not leave",
+    "replace": "  } catch (e) {\r\n    if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });\r\n  }\r\n  // A removed account must not leave",
     "expect": "killed",
     "tests": [
       "auth-routes-branches.test.js"
     ],
-    "note": "The temp-trigger test aborts the DELETE and asserts a 500, not 204 — deleting `throw e` would falsely report the account removed while it still exists."
+    "note": "The temp-trigger test aborts the DELETE and asserts a 500, not 204 — deleting `throw e` would falsely report the account removed while it still exists. Re-anchored on the comment that now follows the catch (mfa-enable-limit review fixes: the account's confirmation state is cleared between the catch and the response). Same mutant."
   },
   {
     "label": "#E2 M9: demoMaxGuests() nullish-fallback changed from 25 to 30",
@@ -11684,8 +11684,8 @@
   {
     "label": "#412 M-412-31: the hold goes back to `at - 15 s` (the #447 formula)",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "holdRing(cameraId, RING_OWNER.WAKE, clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC));",
-    "replace": "holdRing(cameraId, RING_OWNER.WAKE, at - 15000);",
+    "find": "st.run.holdFromMs = clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC);",
+    "replace": "st.run.holdFromMs = at - 15000;",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)|#447"
@@ -11693,8 +11693,8 @@
   {
     "label": "#412 M-412-32: the hold uses a different lead than the cut (clipCoverStartMs with 0)",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "holdRing(cameraId, RING_OWNER.WAKE, clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC));",
-    "replace": "holdRing(cameraId, RING_OWNER.WAKE, clipCoverStartMs(anchor, 0));",
+    "find": "st.run.holdFromMs = clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC);",
+    "replace": "st.run.holdFromMs = clipCoverStartMs(anchor, 0);",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)|#447"
@@ -18010,13 +18010,14 @@
   {
     "label": "#550 per-user limit: successful sign-ins spend the budget",
     "file": "backend/src/routes/auth.js",
-    "find": "skipSuccessfulRequests: true,",
-    "replace": "skipSuccessfulRequests: false,",
+    "find": "skipSuccessfulRequests: true,\n  skip: (req) => verifiedMfaUserId(req) === null,",
+    "replace": "skipSuccessfulRequests: false,\n  skip: (req) => verifiedMfaUserId(req) === null,",
     "expect": "killed",
     "tests": [
       "mfa-replay-and-async-bcrypt.test.js"
     ],
-    "namePattern": "successful sign-ins never spend the budget"
+    "namePattern": "successful sign-ins never spend the budget",
+    "note": "Re-anchored on its next line when the two-factor confirmation route got its own limiter (mfa-enable-limit): `skipSuccessfulRequests: true,` now occurs twice in the file. Same mutant as before."
   },
   {
     "label": "#550 per-user limit: keyed on an unverified (merely decoded) token",
@@ -18238,6 +18239,63 @@
     ],
     "namePattern": "including a session token belonging to an MFA user",
     "note": "Review of #720 (Opus): once codes became single-use, that test re-sent the code that had just signed in, so the replay rule refused it and this mutant survived. The test now sends an unused code."
+  },
+  {
+    "label": "mfa-enable-limit: cancel threshold >= to > (the 10th wrong code no longer cancels the pending set-up)",
+    "file": "backend/src/routes/auth.js",
+    "find": "    if (entry.wrong >= MFA_ENABLE_MAX_WRONG_CODES) {",
+    "replace": "    if (entry.wrong > MFA_ENABLE_MAX_WRONG_CODES) {",
+    "expect": "killed",
+    "tests": [
+      "mfa-enable-limit.test.js"
+    ],
+    "namePattern": "the 10th wrong code cancels it"
+  },
+  {
+    "label": "mfa-enable-limit: wrong-code flag ignored, so every 400 counts against the per-user limit",
+    "file": "backend/src/routes/auth.js",
+    "find": "  requestWasSuccessful: (req, res) => !res.locals.mfaWrongCode,",
+    "replace": "  requestWasSuccessful: (req, res) => res.statusCode < 400,",
+    "expect": "killed",
+    "tests": [
+      "mfa-enable-limit.test.js"
+    ],
+    "namePattern": "refusals that needed no guess spend nothing",
+    "note": "The first design (count every 400). A device that cancelled the owner's set-up could then fill the bucket with \"Start setup first.\" refusals that cost it no guess."
+  },
+  {
+    "label": "mfa-enable-limit: per-user limiter removed from the confirmation route",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.post('/me/mfa/enable', requireAuth, mfaEnableUserLimiter, asyncHandler(",
+    "replace": "router.post('/me/mfa/enable', requireAuth, asyncHandler(",
+    "expect": "killed",
+    "tests": [
+      "mfa-enable-limit.test.js"
+    ],
+    "namePattern": "30 wrong codes over many keys and addresses"
+  },
+  {
+    "label": "mfa-enable-limit: a successful confirmation is counted (skipSuccessfulRequests off)",
+    "file": "backend/src/routes/auth.js",
+    "find": "  requestWasSuccessful: (req, res) => !res.locals.mfaWrongCode,\n  skipSuccessfulRequests: true,",
+    "replace": "  requestWasSuccessful: (req, res) => !res.locals.mfaWrongCode,\n  skipSuccessfulRequests: false,",
+    "expect": "killed",
+    "tests": [
+      "mfa-enable-limit.test.js"
+    ],
+    "namePattern": "a successful confirmation spends nothing"
+  },
+  {
+    "label": "mfa-enable-limit: changing your own password leaves the confirmation budget in place",
+    "file": "backend/src/routes/auth.js",
+    "find": "  resetMfaEnableLimit(req.user.id);",
+    "replace": "  void req.user.id;",
+    "expect": "killed",
+    "tests": [
+      "mfa-enable-limit.test.js"
+    ],
+    "namePattern": "changing your password empties the confirmation budget",
+    "note": "Review (Opus, verified by running): changing the password, the remedy for a device that used the budget up, left the owner's right code a 429 for the rest of the window."
   },
   {
     "label": "#355 corrected empty: any status is promoted, not only empty",
@@ -21798,5 +21856,50 @@
     "expect": "killed",
     "tests": ["sleep-report-prefs.test.js"],
     "namePattern": "anything but true/false/1/0"
+  },
+  {
+    "label": "#490 a camera save stops and restarts the clip ring again (every hold cleared, every segment deleted)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    reconcileClipRing(updated);\r\n  }\r\n  subscribeAllCameraTopics();",
+    "replace": "    stopClipCapture(updated.id);\r\n    startClipCapture(updated);\r\n  }\r\n  subscribeAllCameraTopics();",
+    "expect": "killed",
+    "tests": ["camera-edit-keeps-ring.test.js"],
+    "namePattern": "a rename keeps the running ring"
+  },
+  {
+    "label": "#471 a wake capture's lease is never released (a leak: the ring grows until the segmenter restarts)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "releaseRing(cameraId, leaseOwner);",
+    "replace": "void 0;",
+    "expect": "killed",
+    "tests": ["wake-capture-lease.test.js"],
+    "namePattern": "the capture's lease holds the footage until the cut settles"
+  },
+  {
+    "label": "#471 a wake capture's lease is released only while its run is still current (leaks whenever the run ended first)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "releaseRing(cameraId, leaseOwner);",
+    "replace": "if (st.run === run) releaseRing(cameraId, leaseOwner);",
+    "expect": "killed",
+    "tests": ["wake-capture-lease.test.js"],
+    "namePattern": "the capture's lease holds the footage until the cut settles"
+  },
+  {
+    "label": "#471 a wake capture takes no lease (its footage is held only by the run's WAKE hold, which endRun releases)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (run.holding) holdRing(cameraId, leaseOwner, run.holdFromMs);",
+    "replace": "if (false) holdRing(cameraId, leaseOwner, run.holdFromMs);",
+    "expect": "killed",
+    "tests": ["wake-capture-lease.test.js"],
+    "namePattern": "the capture's lease holds the footage until the cut settles"
+  },
+  {
+    "label": "#471 a wake capture's lease is keyed RING_OWNER.WAKE (released or overwritten with the run's own hold)",
+    "file": "backend/src/lib/ringHolds.js",
+    "find": "return `wakecap:${captureId}`;",
+    "replace": "return RING_OWNER.WAKE;",
+    "expect": "killed",
+    "tests": ["wake-capture-lease.test.js"],
+    "namePattern": "the capture's lease holds the footage until the cut settles"
   }
 ]
