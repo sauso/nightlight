@@ -76,7 +76,7 @@ const PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 // run = { startMs, activeCount, lastActiveMs, captured, holding, holdFromMs }
 //   startMs = the clip's anchor (#412: first active frame, clamped to the ring); lastActiveMs = the END label of
 //   the last active minute (the bridge arithmetic and the stale-run sweep read it, so it is NOT the anchor)
-//   holdFromMs (#471) = the point the run's WAKE hold reaches back to, null while it holds nothing; the capture's
+//   holdFromMs (#471) = the point the run's WAKE hold reaches back to, null until the run takes that hold (and left as it was once the hold is released); the capture's
 //   own lease reuses it rather than computing it a second time (see the capture in handleMinute)
 // lastAt (#448) = the end-of-minute ms of the last payload ACCEPTED for this camera, null = none yet. It is
 // what lets handleMinute measure TIME between payloads, because activityTracker sends no payload at all for a

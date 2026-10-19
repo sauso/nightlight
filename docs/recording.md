@@ -206,7 +206,7 @@ would, even if both of the other two recording features are off. Turning it off 
 the camera still needs it — including a wake-up that was already being watched at the moment you turned
 it off, which is allowed to run to completion first (see *When the buffering starts* under On-demand
 recordings, above, for how long that can take and when buffering actually stops). A clip that is already
-being cut keeps the footage it needs until it is saved, even if meanwhile the wake-up ends, the sleep
+being cut keeps the footage it needs until it is saved or fails, even if meanwhile the wake-up ends, the sleep
 window closes, sleep tracking is switched off, the camera is unassigned from the child or the server's
 clock jumps (before #471 any of these could let the buffer discard that footage mid-cut and fail the
 clip).
@@ -305,7 +305,7 @@ periodic check, which runs about **every 5 minutes**. What "finishes" can take v
 flight: an on-demand recording runs until it hits its auto-stop cap above, at most 600 seconds; a
 detection clip runs until it's saved, typically a few seconds; a wake-up already being watched (see
 *Wake clips*, above) runs until it ends, normally a few minutes but up to 20 minutes if the camera stops
-reporting partway through it, and a wake clip already being cut runs until it is saved, even after its
+reporting partway through it, and a wake clip already being cut runs until it is saved or fails, even after its
 wake-up has ended. So the *total* delay from flipping the switch to the buffering actually
 stopping is that in-progress time plus up to 5 more minutes for the next periodic check — it is not
 simply "5 minutes." The same applies to turning **Record wake-ups without alerting** off, with one
