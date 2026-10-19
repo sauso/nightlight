@@ -11684,8 +11684,8 @@
   {
     "label": "#412 M-412-31: the hold goes back to `at - 15 s` (the #447 formula)",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "holdRing(cameraId, RING_OWNER.WAKE, clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC));",
-    "replace": "holdRing(cameraId, RING_OWNER.WAKE, at - 15000);",
+    "find": "st.run.holdFromMs = clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC);",
+    "replace": "st.run.holdFromMs = at - 15000;",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)|#447"
@@ -11693,8 +11693,8 @@
   {
     "label": "#412 M-412-32: the hold uses a different lead than the cut (clipCoverStartMs with 0)",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "holdRing(cameraId, RING_OWNER.WAKE, clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC));",
-    "replace": "holdRing(cameraId, RING_OWNER.WAKE, clipCoverStartMs(anchor, 0));",
+    "find": "st.run.holdFromMs = clipCoverStartMs(anchor, WAKE_CLIP_LEAD_SEC);",
+    "replace": "st.run.holdFromMs = clipCoverStartMs(anchor, 0);",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "#412 — the wake clip is anchored|C7 \\(#412\\)|#447"
@@ -21856,5 +21856,50 @@
     "expect": "killed",
     "tests": ["sleep-report-prefs.test.js"],
     "namePattern": "anything but true/false/1/0"
+  },
+  {
+    "label": "#490 a camera save stops and restarts the clip ring again (every hold cleared, every segment deleted)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    reconcileClipRing(updated);\r\n  }\r\n  subscribeAllCameraTopics();",
+    "replace": "    stopClipCapture(updated.id);\r\n    startClipCapture(updated);\r\n  }\r\n  subscribeAllCameraTopics();",
+    "expect": "killed",
+    "tests": ["camera-edit-keeps-ring.test.js"],
+    "namePattern": "a rename keeps the running ring"
+  },
+  {
+    "label": "#471 a wake capture's lease is never released (a leak: the ring grows until the segmenter restarts)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "releaseRing(cameraId, leaseOwner);",
+    "replace": "void 0;",
+    "expect": "killed",
+    "tests": ["wake-capture-lease.test.js"],
+    "namePattern": "the capture's lease holds the footage until the cut settles"
+  },
+  {
+    "label": "#471 a wake capture's lease is released only while its run is still current (leaks whenever the run ended first)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "releaseRing(cameraId, leaseOwner);",
+    "replace": "if (st.run === run) releaseRing(cameraId, leaseOwner);",
+    "expect": "killed",
+    "tests": ["wake-capture-lease.test.js"],
+    "namePattern": "the capture's lease holds the footage until the cut settles"
+  },
+  {
+    "label": "#471 a wake capture takes no lease (its footage is held only by the run's WAKE hold, which endRun releases)",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "if (run.holding) holdRing(cameraId, leaseOwner, run.holdFromMs);",
+    "replace": "if (false) holdRing(cameraId, leaseOwner, run.holdFromMs);",
+    "expect": "killed",
+    "tests": ["wake-capture-lease.test.js"],
+    "namePattern": "the capture's lease holds the footage until the cut settles"
+  },
+  {
+    "label": "#471 a wake capture's lease is keyed RING_OWNER.WAKE (released or overwritten with the run's own hold)",
+    "file": "backend/src/lib/ringHolds.js",
+    "find": "return `wakecap:${captureId}`;",
+    "replace": "return RING_OWNER.WAKE;",
+    "expect": "killed",
+    "tests": ["wake-capture-lease.test.js"],
+    "namePattern": "the capture's lease holds the footage until the cut settles"
   }
 ]

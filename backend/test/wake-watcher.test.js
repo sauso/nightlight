@@ -322,7 +322,11 @@ describe('★ #446 — a WAKE hold is gated on wake clips actually being enabled
     settle();
     for (let i = 0; i < WAKE_ACTIVE_MIN; i++) moving();
 
-    assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], 'a WAKE hold should have been taken');
+    const owners = holdOwners(CAM);
+    assert.equal(owners[0], RING_OWNER.WAKE, 'a WAKE hold should have been taken');
+    // #471: the 5th active minute captured, and that cut holds its own lease beside the run's hold (and nothing else
+    // holds the ring). wake-capture-lease.test.js tests the lease itself.
+    assert.equal(owners.length, 2, JSON.stringify(owners));
   });
 });
 
@@ -2287,7 +2291,9 @@ describe('#588: a minute with sound but no video (videoUnobserved) is a hole, no
       logger.clear();
       for (let i = 0; i < activeMin; i++) moving();
       assert.equal(stateOf().run.holding, true, 'precondition: the run holds the ring');
-      assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE]);
+      assert.equal(holdOwners(CAM)[0], RING_OWNER.WAKE);
+      // #471: a run that reached its 5th active minute captured, and its cut holds its own lease beside the WAKE hold.
+      assert.equal(holdOwners(CAM).length, activeMin >= WAKE_ACTIVE_MIN ? 2 : 1, JSON.stringify(holdOwners(CAM)));
     }
 
     for (const [what, sound] of [['quiet', 0], ['LOUD', LOUD]]) {
@@ -2366,13 +2372,17 @@ describe('#588: a minute with sound but no video (videoUnobserved) is a hole, no
         heldRun(WAKE_ACTIVE_MIN);
         assert.equal(stateOf().run.captured, true, 'precondition: the run captured');
         // The capture is still pending (no await in this test), so the run still holds the ring: the stall must free it.
-        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], 'precondition: the captured run still holds the ring');
+        // #471: the cut also holds its OWN lease, which the stall must leave alone: it goes when the cut settles
+        // (wake-capture-lease.test.js), and until then it keeps the clip's footage from the same point.
+        const lease = holdOwners(CAM).filter((o) => o !== RING_OWNER.WAKE);
+        assert.equal(lease.length, 1, 'precondition: the capture holds its own lease');
+        const holdFrom = effectiveHold(CAM);
         for (let k = 0; k < 3; k++) unobserved(LOUD);
-        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE], 'released early: three unobserved minutes still bridge');
+        assert.deepEqual(holdOwners(CAM), [RING_OWNER.WAKE, ...lease], 'released early: three unobserved minutes still bridge');
         unobserved(LOUD);
         // Hold first: a captured run logs nothing when it ends, so the hold is the only trace that it really ended.
-        assert.deepEqual(holdOwners(CAM), [], 'the 4th unobserved minute must release the captured run\'s hold');
-        assert.equal(effectiveHold(CAM), null, 'no hold point left on the ring');
+        assert.deepEqual(holdOwners(CAM), lease, 'the 4th unobserved minute must release the captured run\'s hold, and only that');
+        assert.equal(effectiveHold(CAM), holdFrom, 'the cut\'s lease no longer holds the clip\'s footage from the run\'s point');
         assert.equal(stateOf().run, null, 'the stall ended the captured run');
         assert.deepEqual(runEndedLines(), []);
         assert.deepEqual(logger.getRecent().filter((l) => l.includes('nothing recorded')), []);

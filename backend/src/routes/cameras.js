@@ -1048,9 +1048,20 @@ router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
     else await stopOnvifMotion(updated.id).catch(() => {});
     if (updated.detect_sound_enabled) await startSoundDetector(updated).catch(() => {});
     else await stopSoundDetector(updated.id).catch(() => {});
-    // Restart the clip segmenter too so it re-attaches to the (possibly changed) path. No-op if off.
-    stopClipCapture(updated.id);
-    startClipCapture(updated);
+    // #490: RECONCILE the clip ring, never restart it. This used to be stopClipCapture + startClipCapture "so it
+    // re-attaches to the (possibly changed) path", but stopSegmenter clears every ring hold and startSegmenter
+    // deletes every segment, so ANY save (a rename too) lost an on-demand recording in progress, a detection clip's
+    // post-roll, a wake clip being cut and the pre-roll of every later clip. The reason never applied: the
+    // segmenter reads only `mediamtx_path`, which this UPDATE does not change (it is set once, from the id, when
+    // the camera is added); an address change restarts the TRANSCODER above, and the segmenter rides out the path's
+    // brief absence through its own exit handler (relaunch every 5 s, old segments kept: clipRecorder.js).
+    // What a save CAN change is whether the ring is wanted (child_id, so clipRingWanted), and reconcileClipRing
+    // already decides every case, as the assign route and index.js's 5-minute reconcile use it: wanted and running
+    // -> resized in place; wanted and not running -> started; no longer wanted -> stopped, but deferred while any
+    // capture still holds the ring (#446).
+    // Given up, deliberately: the old restart also restarted a segmenter that had stalled but still answered
+    // SIGTERM. Nothing designed that, the 5-minute reconcile never did it, and it cost every capture in flight.
+    reconcileClipRing(updated);
   }
   subscribeAllCameraTopics();
   res.json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id), true));
