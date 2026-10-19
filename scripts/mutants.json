@@ -21957,15 +21957,6 @@
     "namePattern": "acceptance: a detection clip"
   },
   {
-    "label": "#773 a settled child's deadline is not cleared, so a finished child is SIGKILLed later (its pid may be another process's by then)",
-    "file": "backend/src/lib/clipRecorder.js",
-    "find": "      settled = true;\r\n      clearTimeout(timer);",
-    "replace": "      settled = true;",
-    "expect": "killed",
-    "tests": ["ffmpeg-stall-deadline.test.js"],
-    "namePattern": "exits just before its deadline"
-  },
-  {
     "label": "#773 the 'error' listener is removed once settled, so a late 'error' throws (the #257 crash class)",
     "file": "backend/src/lib/clipRecorder.js",
     "find": "      settled = true;\r\n      clearTimeout(timer);",
@@ -22000,5 +21991,23 @@
     "expect": "killed",
     "tests": ["ffmpeg-stall-deadline.test.js"],
     "namePattern": "a thumbnail that hangs"
+  },
+  {
+    "label": "#773 (Codex P1 on #783) a child settles on 'exit' again: stdout that arrives after it is lost, the probe parses half its JSON, and a good clip is deleted",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "    proc.on('close', (code) => settleOnCode(exited ? exitCode : code));",
+    "replace": "    proc.on('exit', (code) => settleOnCode(code));",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "is still read: the probe parses all of it"
+  },
+  {
+    "label": "#773 a child that has exited but whose stdio never closes is treated as stuck at its deadline (rejected, so a good clip is deleted)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "        if (exited) return settleOnCode(exitCode);",
+    "replace": "        // (the exited branch is gone)",
+    "expect": "killed",
+    "tests": ["ffmpeg-stall-deadline.test.js"],
+    "namePattern": "a child that exits but whose output never closes"
   }
 ]

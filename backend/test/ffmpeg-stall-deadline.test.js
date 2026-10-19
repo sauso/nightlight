@@ -99,6 +99,18 @@ function blockText({ frame, size, outUs }, progress = 'continue') {
 }
 const block = (proc, counters, progress) => proc.stdout.emit('data', Buffer.from(blockText(counters, progress)));
 
+// Node's documented order lets a child's 'exit' come BEFORE the last of its stdout: 'exit' fires when the process
+// ends, 'close' only once its stdio has drained. FakeFfmpeg.finish() emits everything at once, which hides that; this
+// is the hostile order (Codex review of #783 found an extraction that resolved on 'exit' parsing half its JSON).
+function exitThenDrain(proc, code, ...lateChunks) {
+  proc.ended = true; // so a later finish() is a no-op
+  proc.emit('exit', code, null);
+  for (const c of lateChunks) proc.stdout.emit('data', Buffer.from(c));
+  proc.stdout.emit('end');
+  proc.stderr.emit('end');
+  proc.emit('close', code, null);
+}
+
 // Start a real extractClip against a planted segment and return once its encode child exists.
 async function startExtraction({ outBase, Kind = FakeFfmpeg }) {
   ExtractionKind = Kind;
@@ -255,7 +267,10 @@ describe('#773 the extraction children have a deadline', { concurrency: false },
     assert.equal(result.state, 'rejected');
   });
 
-  test('a child that exits just before its deadline is never signalled afterwards: every timer is cleared on exit (passes on the old code by design: it never signalled anything)', async () => {
+  // Since the Codex fix round (settle on 'close') this holds two ways: the timer is cleared on settling, and a timer
+  // that fired anyway would find the child `exited` and signal nothing. So deleting the clearTimeout alone is an
+  // EQUIVALENT mutant (it survives; it was dropped from the catalogue), and this test pins the outcome, not the line.
+  test('a child that exits just before its deadline is never signalled afterwards (passes on the old code by design: it never signalled anything)', async () => {
     const { result, proc } = await startExtraction({ outBase: 'justintime' });
     mock.timers.tick(119_999);
     proc.finish(0);
@@ -263,7 +278,7 @@ describe('#773 the extraction children have a deadline', { concurrency: false },
     await until(() => result.state !== 'pending', 'the extraction to finish');
     assert.equal(result.state, 'resolved');
     mock.timers.tick(600_000); // far past every deadline that was armed
-    assert.deepEqual(proc.signals, [], 'a finished encode was killed later (on Linux its pid may be someone else\'s by then)');
+    assert.deepEqual(proc.signals, [], 'a finished encode was signalled after it had finished');
     assert.deepEqual(thumbProc('justintime').signals, []);
     assert.deepEqual(probeProc('justintime').signals, []);
   });
@@ -385,6 +400,41 @@ describe('#773 the extraction children have a deadline', { concurrency: false },
     } finally {
       db.prepare("UPDATE settings SET ondemand_enabled = 0 WHERE id = 'app'").run();
     }
+  });
+
+  test('★ output that arrives after the child\'s \'exit\' is still read: the probe parses all of it and the clip is kept, not deleted', async () => {
+    const { result, proc } = await startExtraction({ outBase: 'lateout' });
+    fs.writeFileSync(own('lateout.mp4'), 'a complete clip');
+    proc.finish(0);
+    await until(() => thumbProc('lateout'), 'the thumbnail ffmpeg');
+    fs.writeFileSync(own('lateout.jpg'), 'a thumbnail');
+    thumbProc('lateout').finish(0);
+    await until(() => probeProc('lateout'), 'the ffprobe');
+    const json = JSON.stringify({ format: { duration: '10.0', size: '4096' }, streams: [] });
+    const half = Math.floor(json.length / 2);
+    probeProc('lateout').stdout.emit('data', Buffer.from(json.slice(0, half)));
+    exitThenDrain(probeProc('lateout'), 0, json.slice(half)); // exit(0), THEN the rest of the JSON, end, close
+    await until(() => result.state !== 'pending', 'the extraction to settle');
+    assert.equal(result.state, 'resolved', `rejected: ${result.value?.message}`);
+    assert.equal(result.value.probe.durationSec, 10);
+    assert.equal(fs.existsSync(own('lateout.mp4')), true, 'a successfully encoded clip was deleted');
+    assert.equal(fs.existsSync(own('lateout.jpg')), true, 'its thumbnail was deleted');
+  });
+
+  test('a child that exits but whose output never closes is settled at its deadline on its exit code, and not killed', async () => {
+    const result = track(probeClip(own('never-closes.mp4')));
+    const proc = spawned.find((p) => p.command === 'ffprobe');
+    proc.stdout.emit('data', Buffer.from(JSON.stringify({ format: { duration: '4.0' }, streams: [] })));
+    proc.ended = true;
+    proc.emit('exit', 0, null); // and no 'close': something still holds its stdout open
+    mock.timers.tick(119_999);
+    await flush();
+    assert.equal(result.state, 'pending', 'settled before its output had closed');
+    mock.timers.tick(1);
+    await until(() => result.state !== 'pending', 'the probe to settle at its deadline');
+    assert.equal(result.state, 'resolved', `a child that exited 0 was treated as stuck: ${result.value?.message}`);
+    assert.equal(result.value.durationSec, 4);
+    assert.deepEqual(proc.signals, [], 'a child that had already exited was signalled');
   });
 
   test('one calibration line per extraction, naming the clip, the outcome and the longest wait without progress', async () => {

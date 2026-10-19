@@ -458,14 +458,20 @@ function removeOwnFile(file) {
 const secs = (ms) => (ms == null ? '?' : (ms / 1000).toFixed(1));
 const stalledFor = (ms) => `made no progress for ${secs(ms)} s`;
 
-// One child of extractClip/probeClip, settled exactly once: on 'exit', on 'error', or when its deadline fires.
+// One child of extractClip/probeClip, settled exactly once: on 'close', on 'error', or when its deadline fires.
+// ⚠️ 'close', NOT 'exit' (Codex review of #783, P1, verified by running extractClip with a fake child): Node emits
+// 'exit' when the process ends, which can be BEFORE the last of its stdout has been read; 'close' comes only once its
+// stdio has drained. Resolving on 'exit' handed probeClip half its JSON ("Unexpected end of JSON input"), and the
+// failure cleanup in extractClip then deleted a clip that had been encoded perfectly well. The 'exit' code is still
+// recorded: if 'close' never comes (something else holding the pipe open), the deadline settles on that code instead
+// of treating a child that has already exited as stuck.
 //   deadlineMs      a wall-clock deadline from spawn (probe, thumbnail).
 //   stallLabel      instead: read ffmpeg's `-progress pipe:1` output and apply the stall window above. The label
 //                   names the clip in the one log line per run. Progress output is NOT kept (it would be most of
 //                   the process's output and nothing reads it); the resolved value is then ''.
 // On a deadline the child is SIGKILLed and the promise REJECTS AT ONCE, without waiting for its 'exit': a process
 // stuck in the kernel (uninterruptible I/O) may not exit even on SIGKILL, and waiting for it would rebuild the very
-// hang this exists to end. `settled` makes a later 'exit' or 'error' a no-op.
+// hang this exists to end. `settled` makes a later 'close' or 'error' a no-op.
 function runFfmpeg(args, { tool = 'ffmpeg', deadlineMs = null, stallLabel = null } = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawnChild(tool, args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -473,6 +479,8 @@ function runFfmpeg(args, { tool = 'ffmpeg', deadlineMs = null, stallLabel = null
     const err = [];
     let settled = false;
     let timer = null;
+    let exited = false; // the process has ended ('exit'), its stdio may not have drained yet
+    let exitCode = null;
     // Monotonic, for the calibration line only: a wall-clock step must not read as a 10-minute gap. Nothing
     // DECIDES on it (the deadline is a timer), so it plays no part in when a child is cut.
     const t0 = performance.now();
@@ -493,6 +501,10 @@ function runFfmpeg(args, { tool = 'ffmpeg', deadlineMs = null, stallLabel = null
       if (ok) resolve(value);
       else reject(value);
     };
+    const settleOnCode = (code) => {
+      if (code === 0) settle(true, Buffer.concat(out).toString(), 'finished');
+      else settle(false, new Error(`${tool} exited ${code}: ${Buffer.concat(err).toString().slice(-500)}`), `failed (exit ${code})`);
+    };
 
     // clearTimeout + a NEW setTimeout, never `timer.refresh()` and never setInterval: under node:test's mock timers
     // refresh() does not move the deadline (verified on Node 24.18 while writing #773: a 1 s timer refreshed at
@@ -504,6 +516,9 @@ function runFfmpeg(args, { tool = 'ffmpeg', deadlineMs = null, stallLabel = null
       if (settled) return; // a child that keeps talking after it was given up on must not re-arm anything
       clearTimeout(timer);
       timer = setTimeout(() => {
+        // Already exited, and only its stdio never closed: it is not stuck, so judge it by its exit code on what
+        // arrived, and signal nothing (there is no process left to kill).
+        if (exited) return settleOnCode(exitCode);
         // killIfSpawned, never proc.kill: on Linux, killing a child whose spawn failed signals our whole process
         // group (processGuards.js, #263/#297).
         killIfSpawned(proc, 'SIGKILL');
@@ -545,11 +560,13 @@ function runFfmpeg(args, { tool = 'ffmpeg', deadlineMs = null, stallLabel = null
     proc.stderr.on('data', (c) => err.push(c));
     // Stays attached for the child's whole life, settled or not: an 'error' emitted with no listener THROWS and
     // takes the backend down (the #257 class). So nothing here ever removes a listener.
+    // A spawn that fails emits 'error' and may never emit 'close'; this settles it either way.
     proc.on('error', (e) => settle(false, e, `could not run (${e.code || e.message})`));
     proc.on('exit', (code) => {
-      if (code === 0) settle(true, Buffer.concat(out).toString(), 'finished');
-      else settle(false, new Error(`${tool} exited ${code}: ${Buffer.concat(err).toString().slice(-500)}`), `failed (exit ${code})`);
+      exited = true;
+      exitCode = code;
     });
+    proc.on('close', (code) => settleOnCode(exited ? exitCode : code));
   });
 }
 
@@ -684,6 +701,13 @@ export async function extractClip(
     // MP4 + JPG: no row points at either (the caller marks it failed), and on-demand recordings have no retention
     // sweep, so they stayed on disk for good. ONLY this call's two files, by the names built above from
     // safePathSegment: never the directory, never a sibling (another clip may be being written beside them).
+    // ⚠️ A PROBE failure after a good encode deletes the clip too, deliberately, and this includes an ffprobe that
+    // exits 0 with output that does not parse. Since runFfmpeg settles on 'close' its output is complete, so such a
+    // failure means ffprobe could not describe the file, not that we read it half-way (the P1 the Codex review of
+    // #783 found, when it settled on 'exit'). The alternatives are worse: resolving without the probe would store a
+    // ready row with no duration or size (the UI then shows a zero-second video, see clip-recorder.test.js's probeClip
+    // case, and the clip storage cap cannot count it), and rejecting WITHOUT deleting leaves files no row points at,
+    // which for an on-demand recording nothing ever removes.
     removeOwnFile(outFile);
     removeOwnFile(thumbFile);
     throw err;
