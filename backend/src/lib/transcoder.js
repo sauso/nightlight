@@ -133,9 +133,11 @@ function buildArgs(rtspUrl, mediamtxPath, aacSource) {
 // finished, resolved or rejected, and then runs with ITS OWN arguments. Different cameras never wait for each
 // other. Requests with different arguments are never merged: an edit with a new RTSP address must end with
 // that address running, not with whichever start happened to be in flight. #780 saves the new address
-// before queuing its start. A reader that fetched the old row before that write can still queue its
-// stale-address start after the edit's start; this queue then runs it last. Closing that narrow window
-// requires re-reading the address when a queued start runs, outside this module's current contract.
+// before queuing its start. #787 also preserves camera columns changed by another save while the edit
+// waits for an ONVIF probe; a column this edit changed wins its own write. A reader that fetched the
+// old row before that write can still queue its stale-address start after the edit's start; this queue
+// then runs it last. Closing that narrow window requires re-reading the address when a queued start
+// runs, outside this module's current contract.
 //
 // One record per camera, deleted when its chain drains, so nothing is left behind for a deleted camera:
 //   tail     what the next start waits on. Always `run.then(noop, noop)`, so a start that rejects rejects for

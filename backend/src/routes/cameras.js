@@ -999,28 +999,43 @@ router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
       talkBackend = 'onvif-backchannel';
     }
   }
+  // #787: an ONVIF probe can wait about 25 s while another edit saves this camera. Preserve
+  // that edit's columns unless this request changed them; its own changed columns win last.
+  // Re-sending an old value is indistinguishable from leaving that column untouched.
+  const fresh = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!fresh) return res.status(404).json({ error: 'Camera not found' });
+  const keepFresh = (col, mine) => mine !== existing[col] ? mine : fresh[col];
+  // #787: only a changed sub path follows a concurrently edited main address. The edit form also
+  // re-sends old paths; rebuilding one would overwrite a newer sub path or a removal from another save.
+  if (subUrl !== existing.sub_rtsp_url && sub_rtsp_path !== undefined && newRtsp === existing.rtsp_url && fresh.rtsp_url !== existing.rtsp_url) {
+    const sp = String(sub_rtsp_path).trim();
+    if (sp) {
+      const cur = parseRtspComponents(fresh.rtsp_url) || {};
+      subUrl = assembleRtspUrl({ host: cur.host, port: cur.port, path: sp, username: cur.username, password: cur.password });
+    }
+  }
   const updatedRows = db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,
       talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,
       discovery_source = ?, onvif_capable = ?, onvif_motion_capable = ?, onvif_device_url = ?, backchannel_supported = ?,
       ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?
     WHERE id = ?`).run(
-    name?.trim() || existing.name,
-    newRtsp,
-    child_id !== undefined ? child_id || null : existing.child_id,
-    mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic,
-    talkBackend,
-    talkUser,
-    talkPass,
-    subUrl,
-    discSource,
-    onvifCapable,
-    onvifMotionCapable,
-    onvifUrl,
-    backchannel,
-    ptz,
-    profileToken,
-    onvifUser,
-    onvifPass,
+    keepFresh('name', name?.trim() || existing.name),
+    keepFresh('rtsp_url', newRtsp),
+    keepFresh('child_id', child_id !== undefined ? child_id || null : existing.child_id),
+    keepFresh('mqtt_topic', mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic),
+    keepFresh('talk_backend', talkBackend),
+    keepFresh('talk_username', talkUser),
+    keepFresh('talk_password', talkPass),
+    keepFresh('sub_rtsp_url', subUrl),
+    keepFresh('discovery_source', discSource),
+    keepFresh('onvif_capable', onvifCapable),
+    keepFresh('onvif_motion_capable', onvifMotionCapable),
+    keepFresh('onvif_device_url', onvifUrl),
+    keepFresh('backchannel_supported', backchannel),
+    keepFresh('ptz_supported', ptz),
+    keepFresh('onvif_profile_token', profileToken),
+    keepFresh('onvif_username', onvifUser),
+    keepFresh('onvif_password', onvifPass),
     req.params.id
   ).changes;
   // The child may have changed (#655): see clearStalePrimaryPointers (lib/primaryCamera.js). Synchronous, straight after the
@@ -1034,17 +1049,26 @@ router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
   // start still errors as before, but leaves the saved row for the next retry.
   const saved = updatedRows ? db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id) : undefined;
   if (saved && !saved.disabled && newRtsp !== existing.rtsp_url) {
-    await startTranscoder(saved.id, saved.rtsp_url, saved.mediamtx_path, saved.name);
+    try {
+      await startTranscoder(saved.id, saved.rtsp_url, saved.mediamtx_path, saved.name);
+    } catch (e) {
+      // #787: a delete can stop a pending start, which may reject after its row is gone.
+      if (!db.prepare('SELECT 1 FROM cameras WHERE id = ?').get(req.params.id)) {
+        return res.status(404).json({ error: 'Camera not found' });
+      }
+      throw e;
+    }
   }
   // Apply the sub-stream change to the running pipeline (unless the camera is disabled): start/
   // restart its transcoder if a sub-stream is configured, or tear it down if it was cleared.
   if (!existing.disabled) {
     const updated = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+    if (!updated) return res.status(404).json({ error: 'Camera not found' });
     try {
       if (subConfigured(updated)) await startSubStream(updated);
       else await stopSubStream(updated);
     } catch (e) {
-      logger.error(`[substream] failed to apply for ${updated.name}: ${e.message}`);
+      logger.error(`[substream] failed to apply for ${updated?.name || req.params.id}: ${e.message}`);
     }
     // The stream (or which path the detector should read) may have changed — restart the pixel-diff
     // leg so it re-attaches to the current stream. motionLegWanted covers both the alerting leg and
