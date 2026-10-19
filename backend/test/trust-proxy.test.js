@@ -38,6 +38,12 @@ describe('nothing an operator can type takes the app down', () => {
 });
 
 describe('valid values are honoured exactly', () => {
+  test('#753 the unset default is literally loopback', () => {
+    // README promises loopback; widening this changes which peers can choose a forwarded client IP.
+    assert.equal(DEFAULT_TRUST_PROXY, 'loopback');
+    assert.equal(parseTrustProxy(undefined).value, 'loopback');
+  });
+
   test('unset or blank is the previous behaviour, unchanged', () => {
     // The compatibility promise: an existing install must behave exactly as it did before the setting
     // existed. Anything else is a silent change to who can forge a client address.

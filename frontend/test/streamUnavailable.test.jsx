@@ -13,14 +13,19 @@
 // WHAT IT DOES NOT PROVE: a real WebRTC session (jsdom has none; RTCPeerConnection below is a counter), the
 // look of the notice at phone width or in dark mode (CSS tokens only; check by eye), or MediaMTX itself.
 import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import HlsPlayer from '../src/components/HlsPlayer.jsx';
+import WhepPlayer from '../src/components/WhepPlayer.jsx';
 import LiveMonitor from '../src/components/LiveMonitor.jsx';
 import { CamerasProvider, CamerasContext } from '../src/lib/CamerasContext.jsx';
 import { api } from '../src/lib/api.js';
+import { resetIceServersCache } from '../src/lib/iceServers.js';
 
 const NOTICE = 'Streaming service unavailable. Your camera may still be online.';
+// Scope to the player: LiveMonitor also mounts a drag-and-drop announcer with role="status".
+const playerStatus = (container) => within(container.querySelector('.whep-player'));
 const KIDS = [{ id: 'kid-1', name: 'Child A' }];
 const cam = (extra = {}) => ({ id: 'c1', name: 'Nursery', mediamtx_path: 'p1', child_id: 'kid-1', ...extra });
 
@@ -82,6 +87,22 @@ describe('CamerasProvider reads status.unknown', () => {
     await act(async () => { await seen.refresh(); });
     expect(seen.cameras[0].statusLevel).toBe('connecting'); // first confirmed not-ready poll, not red
   });
+
+  test('#737 an unknown poll clears an already confirmed outage count', async () => {
+    let status = { ready: false };
+    vi.spyOn(api, 'get').mockImplementation(async (url) => (url === '/children' ? KIDS : [cam({ status })]));
+    render(<CamerasProvider><Probe /></CamerasProvider>);
+    await waitFor(() => expect(seen.cameras.length).toBe(1));
+    await act(async () => { await seen.refresh(); await seen.refresh(); });
+    expect(seen.cameras[0].statusLevel).toBe('offline');
+    status = { ready: false, unknown: true };
+    await act(async () => { await seen.refresh(); });
+    expect(seen.cameras[0].statusUnknown).toBe(true);
+    status = { ready: false };
+    await act(async () => { await seen.refresh(); });
+    // The first confirmed poll after uncertainty must earn amber again, even after prior red.
+    expect(seen.cameras[0].statusLevel).toBe('connecting');
+  });
 });
 
 describe.each([['admin', renderAsAdmin], ['caregiver', renderAsCaregiver]])('the tile, as a %s', (_role, renderAs) => {
@@ -95,6 +116,7 @@ describe.each([['admin', renderAsAdmin], ['caregiver', renderAsCaregiver]])('the
     expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy();
     expect(container.textContent).not.toMatch(/No signal|camera offline/i);
     expect(notice.textContent).not.toMatch(/offline/i); // "online" only: it must not claim the camera is down
+    expect(playerStatus(container).getByRole('status')).toContainElement(notice.querySelector('span'));
   });
 
   test('{ ready: false } without unknown keeps the existing wording and shows no notice', async () => {
@@ -120,6 +142,32 @@ describe.each([['admin', renderAsAdmin], ['caregiver', renderAsCaregiver]])('the
   });
 });
 
+describe('#737 player notice boundaries', () => {
+  test('a stopped WebRTC player stays idle despite an unknown status', () => {
+    const { container } = render(<WhepPlayer mediamtxPath="p1" active={false} statusUnknown />);
+    expect(screen.getByText('Tap to view')).toBeInTheDocument();
+    expect(playerStatus(container).queryByRole('status')).toBeNull();
+  });
+
+  test('a live WebRTC player suppresses the notice while status is still unknown', async () => {
+    let peer;
+    vi.spyOn(api, 'get').mockResolvedValue({ stunServers: [] });
+    resetIceServersCache();
+    vi.stubGlobal('RTCPeerConnection', class {
+      constructor() { peer = this; this.connectionState = 'connecting'; }
+      addTransceiver() {}
+      createOffer() { return new Promise(() => {}); }
+      close() {}
+    });
+    const { container } = render(<WhepPlayer mediamtxPath="p1" active statusUnknown />);
+    await waitFor(() => expect(peer).toBeTruthy());
+    expect(playerStatus(container).getByRole('status')).toBeInTheDocument();
+    act(() => { peer.connectionState = 'connected'; peer.onconnectionstatechange(); });
+    expect(container.querySelector('.whep-overlay')).toBeNull();
+    expect(playerStatus(container).queryByRole('status')).toBeNull();
+  });
+});
+
 describe('the Compatibility (HLS) player shows the same notice', () => {
   test('unknown: service wording and Retry; not unknown: the existing No signal / Connecting wording', () => {
     const { container, rerender } = render(<HlsPlayer mediamtxPath="p1-hls" active statusUnknown />);
@@ -128,5 +176,32 @@ describe('the Compatibility (HLS) player shows the same notice', () => {
     rerender(<HlsPlayer mediamtxPath="p1-hls" active />);
     expect(container.querySelector('.stream-unavailable')).toBeNull();
     expect(container.textContent).toMatch(/No signal|Connecting/);
+  });
+
+  test('#737 Retry starts another HLS connection attempt', async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockReturnValue('probably');
+    const listen = vi.spyOn(HTMLMediaElement.prototype, 'addEventListener');
+    const user = userEvent.setup();
+    render(<HlsPlayer mediamtxPath="p1-hls" active statusUnknown />);
+    const attempts = () => listen.mock.calls.filter(([event]) => event === 'loadedmetadata').length;
+    const before = attempts();
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+    await waitFor(() => expect(attempts()).toBeGreaterThan(before));
+  });
+
+  test('#737 live HLS playback suppresses the notice despite the unknown flag', () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockReturnValue('probably');
+    const { container } = render(<HlsPlayer mediamtxPath="p1-hls" active statusUnknown />);
+    expect(playerStatus(container).getByRole('status')).toBeInTheDocument();
+    act(() => { container.querySelector('video').dispatchEvent(new Event('loadedmetadata')); });
+    expect(container.querySelector('.whep-overlay')).toBeNull();
+    expect(playerStatus(container).queryByRole('status')).toBeNull();
+  });
+
+  test('#737 the tile passes unknown status into Compatibility mode', async () => {
+    const { user, container } = renderAsAdmin(<LiveMonitor />, { cameras: [cam({ statusUnknown: true })], kids: KIDS });
+    await user.click(screen.getByRole('button', { name: 'Camera settings' }));
+    await user.click(screen.getByRole('button', { name: 'Compatibility' }));
+    expect(playerStatus(container).getByRole('status')).toHaveTextContent(NOTICE);
   });
 });

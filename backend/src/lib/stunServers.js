@@ -93,8 +93,10 @@ export const MEDIAMTX_ICE_LINE = 'webrtcICEServers2: []';
 export function renderMediamtxConfig(baseText, urls) {
   const re = new RegExp(`^${MEDIAMTX_ICE_LINE.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}[ \\t]*$`, 'm');
   if (!re.test(baseText)) throw new Error(`mediamtx.yml has no "${MEDIAMTX_ICE_LINE}" line to fill in`);
+  // #740: a Windows checkout gives us CRLF; joining with LF made a mixed-ending MediaMTX copy.
+  const newline = baseText.includes('\r\n') ? '\r\n' : '\n';
   const block = urls.length
-    ? `webrtcICEServers2:\n${urls.map((u) => `  - url: ${u}`).join('\n')}`
+    ? `webrtcICEServers2:${newline}${urls.map((u) => `  - url: ${u}`).join(newline)}`
     : MEDIAMTX_ICE_LINE;
   // A replacer function, not a string: `$` in a replacement string is special and a URL is not trusted text.
   return baseText.replace(re, () => block);
