@@ -13,7 +13,8 @@ import { logger } from './logger.js';
 //
 // I originally claimed the crash was reachable from every watchdog via `upsertPath`, which is a bare
 // `fetch` that also throws on a non-2xx. That is only half true, and the half asserted loudest was
-// false. `startTranscoder` ALREADY catches it (transcoder.js:135, `.catch(...)`), and everything else
+// false. `startTranscoder` ALREADY catches it (transcoder.js, the `.catch(...)` on the `-hls` path's
+// `upsertPath` in doStart), and everything else
 // it awaits swallows its own errors — `isPathConfiguredCorrectly` returns `false`, or `null` for a call
 // MediaMTX never answered (#451), and `getPathStatus` returns a not-ready status, all from a `catch`. So
 // `startTranscoder` has no demonstrated rejection path at all, which means the AUDIO watchdog has none
@@ -192,8 +193,10 @@ export function safeInterval(label, ms, fn) {
 // THE DEFECT. safeInterval above does not wait for the previous tick (a timer cannot), and the camera and
 // audio watchdogs had no in-flight guard. Against a MediaMTX that accepted connections and never answered,
 // every 15s tick added one more pending loop; when the stall cleared they all resumed together, and each
-// restarted the same camera. startTranscoder is not safe under two concurrent calls for one camera (both
-// stop, both launch, and the second orphans the first FFmpeg), so that pile-up was real harm, not noise.
+// restarted the same camera. startTranscoder was then not safe under two concurrent calls for one camera (both
+// stopped, both launched, and the second orphaned the first FFmpeg), so that pile-up was real harm, not noise.
+// Since #478 those calls queue per camera instead (transcoder.js), but a pile-up would still restart the
+// camera once per queued call, each restart killing the FFmpeg the previous one had just launched.
 //
 // THE RULES, each pinned by a P-case in test/process-guards.test.js:
 //   * At most ONE pending check per key, ever (AC2). A key still in flight is SKIPPED, never queued a second
@@ -216,10 +219,11 @@ export function safeInterval(label, ms, fn) {
 //     check's `ctx.skipped` flips to true, so a check that resumes after a later tick skipped over it knows
 //     its readings no longer form an unbroken run.
 //
-// ⚠️ Serialisation is per RUNNER. The camera watchdog has two (its main and sub legs) and the audio
+// ⚠️ Serialisation here is per RUNNER. The camera watchdog has two (its main and sub legs) and the audio
 // watchdog one, so this does not stop the camera watchdog, the audio watchdog, reconcile and the camera
-// routes calling startTranscoder for one camera at the same time; that predates #451 and is a follow-up
-// of its own.
+// routes calling startTranscoder for one camera at the same time. That is handled one layer down, in
+// startTranscoder itself (#478): every caller's start for one camera runs one after another, each with its
+// own arguments, and a stop reaches a start that is queued or in flight (transcoder.js).
 
 // ⚠️ A HYPOTHESIS, NOT A MEASUREMENT. Typical installs have 1-4 cameras, so they are checked fully in
 // parallel; bigger ones are bounded. The shape of the load did change: before #451 cameras were checked

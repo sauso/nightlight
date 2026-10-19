@@ -111,22 +111,136 @@ function buildArgs(rtspUrl, mediamtxPath, aacSource) {
   ];
 }
 
+// #478: ONE START AT A TIME PER CAMERA.
+//
+// THE DEFECT. Many callers start a transcoder: the camera watchdog's main leg and the audio watchdog
+// (cameraWatchdogs.js), reconcileCameraPaths (index.js, at boot and every 5 minutes), the camera routes (add,
+// an edit with a new address, enable, restart, a failed delete putting a camera back) and subStream.js (under
+// its own key, `<id>-sub`). #451 serialised the checks of ONE watchdog runner only, so nothing stopped two of
+// these overlapping for one camera. Both then stopped the old process, both awaited the probe and the MediaMTX
+// checks below, and both launched: the second `processes.set` overwrote the first, whose ffmpeg kept running
+// and publishing, invisible to isRunning() and out of stopTranscoder()'s reach. Two lineages on one path kick
+// each other off it forever (the 901-restart incident described in launch()'s exit handler). Found by reading
+// the source while planning #451; never reproduced in production.
+//
+// THE FIX. Each camera has a promise chain. A start waits until the previous start of the SAME camera has
+// finished, resolved or rejected, and then runs with ITS OWN arguments. Different cameras never wait for each
+// other. Requests with different arguments are never merged: an edit with a new RTSP address must end with
+// that address running, not with whichever start happened to be in flight.
+//
+// One record per camera, deleted when its chain drains, so nothing is left behind for a deleted camera:
+//   tail     what the next start waits on. Always `run.then(noop, noop)`, so a start that rejects rejects for
+//            its own caller only and never poisons the starts queued behind it.
+//   epoch    the stop generation, bumped by the exported stopTranscoder(). A start whose generation has moved
+//            since it was QUEUED was stopped meanwhile (camera disabled, deleted, shutting down) and launches
+//            nothing.
+//   pending  starts queued or in flight. While it is above 0, isRunning() reports true.
+//   last     the start queued most recently, kept for the same-arguments dedupe in startTranscoder().
+const startChains = new Map(); // cameraId -> { tail, epoch, pending, last }
+const noop = () => {};
+
+// True while ffmpeg is tracked for this camera, OR a start for it is queued or in flight (#478). The second
+// half matters: between a start's own stop and its launch nothing is in `processes`, so reconcile (index.js)
+// read that as "not running" and queued a second start, whose own stop then killed the first one's fresh
+// ffmpeg. A start that ends without launching leaves `pending` before its caller resumes, so right after
+// `await startTranscoder(...)` this reports only the process.
 export function isRunning(cameraId) {
-  return processes.has(cameraId);
+  return processes.has(cameraId) || (startChains.get(cameraId)?.pending ?? 0) > 0;
 }
 
-export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraName = mediamtxPath) {
+// Test seam ONLY (transcoder-start-chain.test.js), like mediamtx.js's setMediamtxApiTimeoutForTest: how many
+// per-camera chain records exist, so a test can prove they are deleted once their starts have settled.
+// Nothing in src/ uses it, which is why the four-export mock of this module in who-did-it.test.js still loads.
+export function startChainCountForTest() {
+  return startChains.size;
+}
+
+export function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraName = mediamtxPath) {
+  let chain = startChains.get(cameraId);
+  if (!chain) {
+    chain = { tail: Promise.resolve(), epoch: 0, pending: 0, last: null };
+    startChains.set(cameraId, chain);
+  }
+  // ⚠️ CAPTURED HERE, WHEN THE REQUEST IS QUEUED, synchronously. Never when the start begins, and never after
+  // doStart's own stop (Opus plan review of #478, HIGH): a start queued behind another would then read the
+  // generation AFTER a disable that landed while it waited, and launch a disabled camera. Neither reconcile nor
+  // any watchdog stops a disabled camera, so that ffmpeg would relaunch every 5 s for the life of the
+  // container, the #253 failure mode.
+  const epoch = chain.epoch;
+  // Dedupe: a request with the same four arguments, in the same stop generation, as the start queued LAST
+  // shares that start's promise instead of queueing another. It bounds `POST /:id/restart` spam
+  // (routes/cameras.js) to one queued restart. It never joins:
+  //   * the start in flight: a request made while a start is part-way through may be reacting to what that
+  //     start has already done (stopped the stream, probed a camera that was down), so it gets its own start;
+  //   * an earlier queued start that is no longer the last: joining it would run this request BEFORE a later
+  //     one with different arguments, and the camera would end on those;
+  //   * across a stop: disable then enable would otherwise join a start the disable aborted, and the camera
+  //     would come back enabled with no transcoder at all.
+  const last = chain.last;
+  if (last && !last.started && last.epoch === epoch && last.rtspUrl === rtspUrl
+    && last.mediamtxPath === mediamtxPath && last.cameraName === cameraName) {
+    return last.run;
+  }
+  const request = { epoch, rtspUrl, mediamtxPath, cameraName, started: false, run: null };
+  const previous = chain.tail;
+  chain.pending += 1;
+  chain.last = request;
+  const stopped = () => chain.epoch !== epoch;
+  request.run = (async () => {
+    try {
+      await previous; // never rejects: see `tail` above
+      request.started = true;
+      await doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped);
+    } finally {
+      // In the run's OWN finally, so it is done before the caller's `await` resumes: isRunning() must not still
+      // say true straight after a start that launched nothing. Never `run.finally(cleanup)` instead: that is a
+      // second promise, and when the start rejects nothing would catch it, an unhandledRejection that
+      // processGuards.js's backstop logs as a fault on every failed start.
+      chain.pending -= 1;
+      if (chain.last === request) chain.last = null;
+      if (chain.pending === 0 && startChains.get(cameraId) === chain) startChains.delete(cameraId);
+    }
+  })();
+  // The caller gets `run` itself, so a rejection reaches that caller (and anyone deduped onto it) and no one
+  // else; the chain keeps only the settled-either-way copy.
+  chain.tail = request.run.then(noop, noop);
+  return request.run;
+}
+
+// A start that was stopped part-way. It RESOLVES, deliberately, and is not an error: the restart route would
+// answer 502 for a camera that was simply switched off meanwhile, and reconcile's catch (index.js) would
+// re-run its whole pass 3 s later. `when` says how far the start got, for the log.
+function abandon(mediamtxPath, when) {
+  logger.info(`[ffmpeg:${mediamtxPath}] start abandoned ${when}: the camera was stopped while it was starting`);
+}
+
+// The start itself. It runs only through startTranscoder()'s chain, so at most one runs per camera.
+// `stopped()` reports whether the exported stopTranscoder() ran since this request was queued. It is checked
+// after every await below and once more right before launch(), with no await between that check and the
+// launch, the last moment a stop can still be honoured.
+//
+// ⚠️ NOTHING IN HERE MAY START, OR AWAIT A START OF, THE SAME CAMERA (startTranscoder, or anything that calls
+// it). That start would queue behind this one, which would be waiting for it: a deadlock that holds the
+// camera's chain, and every later start of that camera, forever. The 5 s relaunch timer inside launch() calls
+// launch() directly, never startTranscoder, for the same reason, and because a relaunch is not a new start: it
+// is this lineage replacing its own exited process.
+async function doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped) {
+  if (stopped()) return abandon(mediamtxPath, 'while it waited its turn');
   // Wait for any previous process for this camera to actually be gone before
   // starting a new one - previously this fired stop and start back-to-back, which
   // left a real window where the old FFmpeg process was still holding the MediaMTX
   // publish connection when the new one tried to claim the same path. That collision
   // could leave MediaMTX's own state for the path confused well beyond just this one
   // restart, causing repeated "broken pipe" failures rather than a single clean blip.
-  await stopTranscoder(cameraId);
+  // The INTERNAL stop (#478): the exported stopTranscoder() bumps the stop generation, which would abort this
+  // very start.
+  await stopProcess(cameraId);
+  if (stopped()) return abandon(mediamtxPath, 'while the old ffmpeg stopped');
 
   // Probe the source audio codec once (cached) so we can build the right WebRTC audio track. A probe
   // failure/timeout returns false → the current passthrough-copy behaviour, so nothing regresses.
   const aacSource = await sourceIsAac(rtspUrl);
+  if (stopped()) return abandon(mediamtxPath, 'while the camera was probed');
   if (aacSource) logger.info(`[ffmpeg:${mediamtxPath}] AAC-audio source — using G711 for the WebRTC track so HLS stays valid`);
 
   // Ensure the sibling AAC/HLS path exists before we publish to it (see buildArgs — the second output).
@@ -138,6 +252,9 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
   // again once MediaMTX answers.
   const hlsPath = hlsPathName(mediamtxPath);
   if ((await isPathConfiguredCorrectly(hlsPath)) === false) {
+    // Checked before the write as well (#478): a DELETE that stopped this start also removes `-hls`, and the
+    // write would re-create a MediaMTX path for a camera that no longer exists.
+    if (stopped()) return abandon(mediamtxPath, 'before the -hls path was written');
     await upsertPath(hlsPath).catch((e) => logger.error(`[hls-path:${hlsPath}] ${e.message}`));
   }
 
@@ -211,16 +328,36 @@ export async function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraNam
           // Re-checked at fire time too: startTranscoder (watchdog, camera edit)
           // may have started a new owner during the 5s delay - launching anyway
           // would create exactly the two-lineage fight described above.
+          // ⚠️ launch(), never startTranscoder() (#478): this closure runs outside the per-camera chain, and a
+          // start queued from here would wait behind whatever start is in flight (see doStart's header). Any
+          // start that does run cancels this timer first, through its own stop.
           if (!entry.stopped && !processes.has(cameraId)) launch();
         }, RESTART_DELAY_MS));
       }
     });
   }
 
+  // Synchronously before launch(), with no await in between (#478).
+  if (stopped()) return abandon(mediamtxPath, 'before ffmpeg was launched');
   launch();
 }
 
+// The exported stop: every caller outside this file (the routes' disable and delete, stopSubStream, shutdown).
+// It also bumps the camera's stop generation, so a start that is queued or in flight launches nothing (#478).
+// Without that, a disable landing while a start awaited its probe stopped nothing (no process existed yet), and
+// the start then launched the disabled camera. A camera with no start pending has no record, so nothing is
+// bumped and nothing is kept.
+// ⚠️ It does NOT go through the chain: it must never wait behind a queued start (shutdown's 9 s bound, index.js,
+// pinned by recordings-shutdown.test.js), and it needs no turn, because the generation alone stops what is queued.
 export function stopTranscoder(cameraId) {
+  const chain = startChains.get(cameraId);
+  if (chain) chain.epoch += 1;
+  return stopProcess(cameraId);
+}
+
+// Stop and forget the tracked process (and any relaunch armed for it), WITHOUT touching the stop generation.
+// doStart() uses it for its own stop; everything else goes through stopTranscoder() above.
+function stopProcess(cameraId) {
   // FIRST, and before the early return below: a camera in the 5s restart gap has no entry in
   // `processes` but does have a relaunch armed. Without this, stop() returned Promise.resolve() and
   // the relaunch fired anyway (#253).
@@ -264,8 +401,10 @@ export function stopTranscoder(cameraId) {
 }
 
 export async function stopAllTranscoders() {
-  // The union of both maps: a camera sitting in its restart gap is in `pendingRestarts` only, and
-  // iterating `processes` alone would leave its relaunch armed through shutdown.
-  const ids = new Set([...processes.keys(), ...pendingRestarts.keys()]);
+  // The union of all three: a camera sitting in its restart gap is in `pendingRestarts` only, and
+  // iterating `processes` alone would leave its relaunch armed through shutdown. A camera whose start is
+  // queued or in flight is in `startChains` only (#478): stopping it bumps its stop generation, so that start
+  // launches nothing after shutdown has begun. The stops themselves stay outside the chain (see stopTranscoder).
+  const ids = new Set([...processes.keys(), ...pendingRestarts.keys(), ...startChains.keys()]);
   await Promise.all([...ids].map(stopTranscoder));
 }

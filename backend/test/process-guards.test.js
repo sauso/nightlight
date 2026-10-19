@@ -6,7 +6,7 @@
 //
 // ⚠️ WHAT ACTUALLY THROWS — corrected after adversarial review of PR #275. The PR first claimed the
 // crash was reachable from every watchdog through `upsertPath`. That was wrong: `startTranscoder`
-// already catches it (transcoder.js:135) and everything else it awaits swallows its own errors, so the
+// already catches it (transcoder.js, the `-hls` path's `upsertPath`) and everything else it awaits swallows its own errors, so the
 // audio watchdog has no demonstrated rejection path at all. The two real triggers are `subStream.js:38`
 // (the one genuinely bare `upsertPath`) and `db.prepare(...)` at the top of EVERY tick, which
 // better-sqlite3 throws synchronously on SQLITE_BUSY. See lib/processGuards.js.
@@ -233,7 +233,8 @@ describe('perTargetRunner (#451): at most one pending check per camera, bounded 
   // The defect: safeInterval starts a new async tick while the previous one is still pending, and the
   // two camera watchdogs had no in-flight guard. Against a MediaMTX that accepted and never answered,
   // ticks stacked up every 15s, and when the stall cleared they all resumed at once and each restarted
-  // the same camera (startTranscoder is not safe under two concurrent calls for one camera).
+  // the same camera (startTranscoder was then not safe under two concurrent calls for one camera; since #478
+  // such calls queue, but each is still a full restart).
   //
   // ⚠️ Every promise here is CONTROLLED BY THE TEST and the clock is INJECTED. `flush` below drains the
   // microtask queue and a few event-loop turns; it is not a duration, and no assertion depends on how
