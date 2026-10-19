@@ -7,7 +7,8 @@
 // NOT COVERED: that a real browser contacts nobody when the list is empty (jsdom has no ICE), and the server half
 // (backend/test/stun-servers.test.js).
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
+import { AuthProvider, useAuth } from '../src/lib/AuthContext.jsx';
 import WhepPlayer from '../src/components/WhepPlayer.jsx';
 import { setToken } from '../src/lib/api.js';
 import { getIceServers, getIceServersWithin, resetIceServersCache } from '../src/lib/iceServers.js';
@@ -29,6 +30,18 @@ class FakePeerConnection {
   close() { this.connectionState = 'closed'; }
 }
 
+function SignedInProbe() {
+  const { user, loading, login, logout } = useAuth();
+  return (
+    <div>
+      <span data-testid="signed-in-user">{user?.username ?? 'none'}</span>
+      <span data-testid="auth-loading">{String(loading)}</span>
+      <button onClick={() => login('fresh-token', { id: 'u2', username: 'viewer', role: 'caregiver' })}>Sign in</button>
+      <button onClick={logout}>Sign out</button>
+    </div>
+  );
+}
+
 beforeEach(() => {
   configs = [];
   aboutCalls = 0;
@@ -45,6 +58,77 @@ afterEach(() => { vi.unstubAllGlobals(); setToken(null); });
 
 const answerWith = (stunServers) => () => ({
   ok: true, status: 200, headers: { get: () => 'application/json' }, text: async () => JSON.stringify({ version: '1', stunServers }),
+});
+
+describe('#739 warm the ICE lookup at sign-in', () => {
+  const aboutRequests = () => globalThis.fetch.mock.calls.filter(([url]) => String(url).endsWith('/api/about'));
+
+  function serveSignIn() {
+    vi.stubGlobal('fetch', vi.fn(async (url, init = {}) => {
+      if (String(url).endsWith('/api/auth/me')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ id: 'u1', username: 'viewer', role: 'caregiver' }) };
+      }
+      if (String(url).endsWith('/api/auth/media-token')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ token: 'media', expires_in: 43200 }) };
+      }
+      if (String(url).endsWith('/api/about')) return aboutAnswer();
+      return { ok: true, status: 201, headers: { get: () => null }, text: async () => 'v=0 answer' };
+    }));
+  }
+
+  test('a restored sign-in requests /api/about once before any tile mounts', async () => {
+    aboutAnswer = answerWith(['stun:a.example.org:3478']);
+    serveSignIn();
+    render(<AuthProvider><SignedInProbe /></AuthProvider>);
+    await waitFor(() => expect(screen.getByTestId('signed-in-user')).toHaveTextContent('viewer'));
+    await waitFor(() => expect(aboutRequests()).toHaveLength(1));
+    expect(configs).toHaveLength(0);
+  });
+
+  test('the first tile uses the warmed list without a second /api/about request', async () => {
+    aboutAnswer = answerWith(['stun:a.example.org:3478']);
+    serveSignIn();
+    render(<AuthProvider><SignedInProbe /></AuthProvider>);
+    await waitFor(() => expect(aboutRequests()).toHaveLength(1));
+    await waitFor(() => expect(screen.getByTestId('signed-in-user')).toHaveTextContent('viewer'));
+    render(<WhepPlayer mediamtxPath="cam1" active muted />);
+    await waitFor(() => expect(configs).toHaveLength(1));
+    expect(configs[0]).toEqual({ iceServers: [{ urls: ['stun:a.example.org:3478'] }] });
+    expect(aboutRequests()).toHaveLength(1);
+  });
+
+  test('a signed-out app makes no /api/about request', async () => {
+    setToken(null);
+    serveSignIn();
+    render(<AuthProvider><SignedInProbe /></AuthProvider>);
+    await waitFor(() => expect(screen.getByTestId('auth-loading')).toHaveTextContent('false'));
+    expect(screen.getByTestId('signed-in-user')).toHaveTextContent('none');
+    expect(aboutRequests()).toHaveLength(0);
+  });
+
+  test('signing out and in as another user reuses the server-wide list', async () => {
+    aboutAnswer = answerWith(['stun:a.example.org:3478']);
+    serveSignIn();
+    render(<AuthProvider><SignedInProbe /></AuthProvider>);
+    await waitFor(() => expect(aboutRequests()).toHaveLength(1));
+    await waitFor(() => expect(screen.getByTestId('signed-in-user')).toHaveTextContent('viewer'));
+    await act(async () => { screen.getByText('Sign out').click(); });
+    expect(screen.getByTestId('signed-in-user')).toHaveTextContent('none');
+    await act(async () => { screen.getByText('Sign in').click(); });
+    expect(screen.getByTestId('signed-in-user')).toHaveTextContent('viewer');
+    expect(aboutRequests()).toHaveLength(1);
+  });
+
+  test('a failed /api/about does not change a fresh sign-in', async () => {
+    setToken(null);
+    aboutAnswer = () => { throw new TypeError('offline'); };
+    serveSignIn();
+    render(<AuthProvider><SignedInProbe /></AuthProvider>);
+    await waitFor(() => expect(screen.getByTestId('auth-loading')).toHaveTextContent('false'));
+    await act(async () => { screen.getByText('Sign in').click(); });
+    expect(screen.getByTestId('signed-in-user')).toHaveTextContent('viewer');
+    await waitFor(() => expect(aboutRequests()).toHaveLength(1));
+  });
 });
 
 describe('#558 the player uses the server\'s STUN list', () => {
