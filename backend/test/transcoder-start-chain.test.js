@@ -20,6 +20,8 @@
 // before; a lock that is global instead of per camera fails it). Two were added by the code review of the first
 // version of #478: s failed on that version (a start overtook a stop still in progress), and i2 passed on it but
 // kills a stopAllTranscoders that skips a camera with more than one start pending, which survived every other case.
+// Round 2 added s2, which failed on the round-1 version (shutdown did not wait for a stop already in progress), and
+// s3, which kills a stop record that is never deleted (it survived every other case).
 import { test, mock, describe, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { FakeFfmpeg, WedgedFfmpeg } from './helpers/fakeFfmpeg.js';
@@ -325,10 +327,12 @@ describe('#478: a stop reaches a start that is queued or in flight', () => {
     assert.equal(spawned.length, 0, `${spawned.length} ffmpeg launched after shutdown had stopped everything`);
   });
 
-  test('s: a start waits for a stop still in progress, so two ffmpeg are never alive at once, even when the old one ignores SIGTERM', async (t) => {
+  test('s: a start waits for a stop still in progress, up to its SIGKILL fallback, even when the old ffmpeg ignores SIGTERM', async (t) => {
     // #478 code review (Codex): a stop deletes the camera from the map at once and then waits up to 3 s for the
     // process to exit. A start in that window found nothing to stop and launched next to the dying process.
     // The 3 s is the SIGKILL fallback (FORCE_KILL_TIMEOUT_MS); mocked, so it is ticked, not waited.
+    // NOT covered, by design (round 2): the wait ends when SIGKILL is SENT, and this fake dies at once on it. A real
+    // process is gone a moment later, so the start can spawn while it is still exiting; see stopProcess.
     t.mock.timers.enable({ apis: ['setTimeout'] });
     SpawnAs = WedgedFfmpeg;
     await startTranscoder('cam-s', URL1, 'path_s', 'S');
@@ -354,6 +358,35 @@ describe('#478: a stop reaches a start that is queued or in flight', () => {
     assert.ok(c.settled && c.ok, 'the start never launched once the old process was gone');
     assert.equal(live().length, 1);
     assert.equal(urlOf(live()[0]), URL2);
+  });
+
+  test('s2: stopAllTranscoders does not settle while an earlier stop is still waiting on its ffmpeg', async (t) => {
+    // #478 code review, round 2 (Codex): a process an earlier stop is waiting on is in no map but
+    // `stopsInProgress`, so a shutdown that iterated only the other three settled while it was still alive.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    SpawnAs = WedgedFfmpeg;
+    await startTranscoder('cam-s2', URL1, 'path_s2', 'S2');
+    SpawnAs = FakeFfmpeg;
+    const old = spawned[0];
+
+    const s = track(stopTranscoder('cam-s2')); // a disable: SIGTERM, ignored
+    const all = track(stopAllTranscoders()); // shutdown while that stop still waits
+    await flush(20);
+    try {
+      assert.equal(all.settled, false, 'shutdown settled while an earlier stop was still waiting on a live ffmpeg');
+    } finally {
+      // As in s: the SIGKILL must fire even when the assertion fails, or the stop never settles.
+      t.mock.timers.tick(3000);
+      await flush(20);
+    }
+    assert.deepEqual(old.signals, ['SIGTERM', 'SIGKILL']);
+    assert.ok(s.settled && all.settled, 'shutdown never settled after the SIGKILL fallback');
+  });
+
+  test('s3: a stop that has settled leaves no record behind', async () => {
+    await startTranscoder('cam-s3', URL1, 'path_s3', 'S3');
+    await stopTranscoder('cam-s3');
+    assert.equal(transcoder.stopsInProgressCountForTest(), 0, 'a settled stop kept its record');
   });
 });
 

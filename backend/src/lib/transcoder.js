@@ -20,7 +20,8 @@ const processes = new Map();
 const pendingRestarts = new Map(); // cameraId -> timeout handle
 
 // Stops whose process has not exited yet (#478 code review): cameraId -> a promise that resolves once it has, or
-// once the SIGKILL fallback fired. A stop deletes the camera from `processes` before its process is gone, so this
+// once the 3 s fallback has SENT SIGKILL (not once that took effect: see stopProcess for what that leaves
+// uncovered). A stop deletes the camera from `processes` before its process is gone, so this
 // is the only record that one is still dying; see stopProcess. Deleted as soon as the stop settles.
 const stopsInProgress = new Map();
 
@@ -161,6 +162,11 @@ export function startChainCountForTest() {
   return startChains.size;
 }
 
+// Test seam ONLY, the same kind: how many stop records are kept, so a test can prove a settled stop's is deleted.
+export function stopsInProgressCountForTest() {
+  return stopsInProgress.size;
+}
+
 export function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraName = mediamtxPath) {
   let chain = startChains.get(cameraId);
   if (!chain) {
@@ -240,8 +246,9 @@ async function doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped) {
   // restart, causing repeated "broken pipe" failures rather than a single clean blip.
   // The INTERNAL stop (#478): the exported stopTranscoder() bumps the stop generation, which would abort this
   // very start. It also waits for a stop of this camera that is still in progress (a disable, a delete or
-  // stopSubStream whose process has not exited yet), so nothing below can launch next to a process that is
-  // still alive.
+  // stopSubStream whose process has not exited yet), for at most that stop's 3 s fallback: until the old process
+  // exits or SIGKILL is sent. After a SIGKILL the old process is gone a moment later, not at once, and one that
+  // survives SIGKILL is not waited for (see stopProcess).
   await stopProcess(cameraId);
   if (stopped()) return abandon(mediamtxPath, 'while the old ffmpeg stopped');
 
@@ -376,8 +383,14 @@ function stopProcess(cameraId) {
   // "nothing running". A stop deletes the entry at once, then waits up to FORCE_KILL_TIMEOUT_MS for the process
   // to exit. A start arriving in that window found no entry, its own stop returned at once, and it launched next
   // to the old process, still alive until the SIGKILL: two publishers on one path. So a stop with nothing tracked
-  // waits for the stop still in progress. Bounded by that same timeout, and still outside the start chain, so
-  // shutdown's bound is unchanged (stopAllTranscoders runs these in parallel).
+  // waits for the stop still in progress, and for no longer than that stop does.
+  // ⚠️ WHAT THIS DOES NOT COVER (round 2, accepted as a limit): the wait ends at the old process's 'exit', OR when
+  // the fallback SENDS SIGKILL, not when the process has died from it. A process killed that way is gone a moment
+  // later, not at once, so a queued start can spawn while it is still exiting (Codex showed it with a fake that
+  // exits one event-loop turn after SIGKILL); one that survives SIGKILL (stuck in the kernel) is not waited for at
+  // all. Deliberate: waiting on, or abandoning the start for, a child that cannot be killed would leave the camera
+  // down for good, and resolving at the SIGKILL is what this stop always did.
+  // Still outside the start chain, so shutdown's bound is unchanged (stopAllTranscoders runs these in parallel).
   if (!entry) return stopsInProgress.get(cameraId) ?? Promise.resolve();
 
   entry.stopped = true;
@@ -430,10 +443,13 @@ function killAndWait(entry) {
 }
 
 export async function stopAllTranscoders() {
-  // The union of all three: a camera sitting in its restart gap is in `pendingRestarts` only, and
+  // The union of all four: a camera sitting in its restart gap is in `pendingRestarts` only, and
   // iterating `processes` alone would leave its relaunch armed through shutdown. A camera whose start is
   // queued or in flight is in `startChains` only (#478): stopping it bumps its stop generation, so that start
-  // launches nothing after shutdown has begun. The stops themselves stay outside the chain (see stopTranscoder).
-  const ids = new Set([...processes.keys(), ...pendingRestarts.keys(), ...startChains.keys()]);
+  // launches nothing after shutdown has begun. A camera whose ffmpeg an earlier stop (a disable, a delete) is
+  // still waiting on is in `stopsInProgress` only (#478 code review, round 2): without it, shutdown settled while
+  // that process was still alive. Its stop is awaited like the rest, in parallel, each bounded by the 3 s
+  // fallback, so the shutdown bound is unchanged. The stops themselves stay outside the chain (see stopTranscoder).
+  const ids = new Set([...processes.keys(), ...pendingRestarts.keys(), ...startChains.keys(), ...stopsInProgress.keys()]);
   await Promise.all([...ids].map(stopTranscoder));
 }

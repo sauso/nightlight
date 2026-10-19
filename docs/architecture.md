@@ -132,9 +132,13 @@ neighbouring mechanisms:
   this list.
 - A stop (switching the camera off, deleting it, shutting down) reaches a start that is queued or part-way
   through: it launches nothing and finishes quietly, logging `start abandoned …` at INFO. The stop itself
-  never waits in the queue, which keeps shutdown inside its 9 s bound. The other way round, a start waits for
-  a stop of the same camera that is still in progress (its process not yet exited: up to 3 s, until the SIGKILL
-  fallback), so it never launches next to a process that ignored SIGTERM.
+  never waits in the queue, which keeps shutdown inside its 9 s bound; shutdown does wait for a stop that is
+  already in progress, in parallel with the others. The other way round, a start waits for a stop of the same
+  camera that is still in progress, for at most that stop's 3 s fallback: until the old process exits, or until
+  SIGKILL is sent to one that ignored SIGTERM. After the SIGKILL the old process is gone within a moment, not
+  instantly, so the new FFmpeg can start while it is still exiting; a process that survives SIGKILL (stuck in
+  the kernel) is not waited for at all. Deliberately: waiting on, or giving up the start for, a process that
+  cannot be killed would leave the camera down for good.
 - While a start is queued or running, the camera counts as running for the reconcile pass, which therefore
   does not queue another one behind it.
 - Known cost: a request now waits for every start ahead of it to finish. Each start is bounded (the old

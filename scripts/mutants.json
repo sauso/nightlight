@@ -22067,8 +22067,8 @@
   {
     "label": "#478 stopAllTranscoders misses a camera whose start is queued or in flight",
     "file": "backend/src/lib/transcoder.js",
-    "find": "  const ids = new Set([...processes.keys(), ...pendingRestarts.keys(), ...startChains.keys()]);",
-    "replace": "  const ids = new Set([...processes.keys(), ...pendingRestarts.keys()]);",
+    "find": ", ...startChains.keys(), ",
+    "replace": ", ",
     "expect": "killed",
     "tests": ["transcoder-start-chain.test.js"],
     "namePattern": "^i2?:"
@@ -22081,6 +22081,15 @@
     "expect": "killed",
     "tests": ["transcoder-start-chain.test.js"],
     "namePattern": "^s:"
+  },
+  {
+    "label": "#478 shutdown skips a stop in progress (stopAllTranscoders settles while an earlier stop's ffmpeg is alive)",
+    "file": "backend/src/lib/transcoder.js",
+    "find": ", ...stopsInProgress.keys()]",
+    "replace": "]",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^s2:"
   },
   {
     "label": "#478 isRunning misses a pending start (reconcile queues a second one behind it)",
