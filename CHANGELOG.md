@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.41.2] - 2026-10-19
+
 ### Fixed
 
 - **After turning on two-factor, keyboard focus no longer drops to the top of the page (#768).** Closing the backup-codes dialog now puts focus back on the Two-factor card (on its **Turn off two-factor** button), instead of leaving it on nothing so the next Tab starts from the top of the page. The same goes for any dialog that is opened from inside another one that closes as it opens: focus goes back to whatever opened the first dialog, and if that button has since been replaced, to the first control in the place where it was. Nothing changes for a dialog opened and closed on its own, or one whose opener is still on the page. Known limit: if nothing from where the dialog was opened is left on the page, focus is still left to the browser. This is keyboard and screen-reader behaviour only; it has been checked in tests, not with a real screen reader.
