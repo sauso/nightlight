@@ -1,5 +1,7 @@
 # Nightlight — self-hosted baby monitor
 
+> **This is the previous README, kept in full while it is split into separate guides.** The [README](../README.md) is now the short introduction; settings, known limits and the sleep-tracking explanation live here for now. Other guides: [documentation hub](README.md).
+
 A mobile-friendly web app for watching multiple RTSP cameras, grouped by child, over your
 home network. Live video uses WebRTC (via [MediaMTX](https://github.com/bluenviron/mediamtx))
 for sub-second latency — much lower than a typical HLS-based viewer. Use it in any browser,
@@ -17,7 +19,7 @@ below). No cloud, no subscription, no account anywhere but your own network.
 > Google), or to your own server: see [`STUN_SERVERS`](#stun_servers--which-stun-servers-low-latency-webrtc-uses).
 > **Compatibility (HLS)** viewing does not use WebRTC and never contacts a STUN server. Push
 > notifications, if you enable a provider, also leave your network: see
-> [Push notifications](docs/notifications.md).
+> [Push notifications](notifications.md).
 
 > **⚠️ Not a safety device.** Nightlight is a convenience tool, not a safety device. It is
 > not a medical device, is not certified for safety monitoring of any kind, and must never
@@ -27,7 +29,7 @@ below). No cloud, no subscription, no account anywhere but your own network.
 
 ## Screenshots
 
-See the [visual walkthrough](docs/README.md) for a tour of the main screens (the nursery
+See the [visual walkthrough](README.md) for a tour of the main screens (the nursery
 dashboard, adding a camera, and settings). The images are captured by the end-to-end test
 suite but committed by hand, so they can lag behind the actual UI.
 
@@ -78,7 +80,7 @@ docker run -d \
 Nightlight records video three ways — **automatic clips** attached to motion/sound alerts (opt-in per
 camera), **wake clips** saved silently when your child wakes up, and **on-demand recordings** you
 capture with the Record button. They have different retention rules, so see
-[docs/recording.md](docs/recording.md) for all of it and for every setting under *Settings →
+[docs/recording.md](recording.md) for all of it and for every setting under *Settings →
 Recording*. Video defaults to `<data dir>/clips`; you can point it at your array instead with a
 `/recordings` mount + `CLIPS_DIR`.
 
@@ -101,7 +103,7 @@ not tightened, and on a filesystem that ignores `chmod` (a Docker Desktop for Wi
 a CIFS mount with a fixed `file_mode`) modes cannot change at all, so that filesystem's own access
 control is what protects the data. Details, including what this may mean for SMB shares (not
 verified) and backups:
-[Who can read the data directory](docs/operations.md#who-can-read-the-data-directory).
+[Who can read the data directory](operations.md#who-can-read-the-data-directory).
 
 The `--log-opt` flags cap Docker's own log storage at 10MB × 3 files - without them,
 logs default to growing unbounded, which can be a real problem on Unraid specifically
@@ -261,7 +263,7 @@ a JSON file that stays on your device — it holds the camera's address, usernam
 stream codecs, with any password replaced by `***`. It is meant to be attached to a GitHub issue, so
 it is worth opening and reading before you post it: the redaction covers passwords, not everything a
 particular camera's firmware might put in an error message. If you find something sensitive that
-shouldn't be there, see [SECURITY.md](SECURITY.md) for how to report it privately instead.
+shouldn't be there, see [SECURITY.md](../SECURITY.md) for how to report it privately instead.
 
 **Cameras are trusted input.** Nightlight trusts everything a camera sends it: the video and audio
 stream, the ONVIF replies and the snapshot images. The stream is parsed by FFmpeg and ffprobe, and
@@ -269,7 +271,7 @@ the rest by the server itself, all as the same user that owns the data directory
 saved secrets and the recordings): nothing separates the media processes from the data on disk. They
 are not handed the server's environment: FFmpeg and ffprobe start with only `PATH`, `TZ`, `LANG` and
 `LC_ALL`, MediaMTX with the same plus your `MTX_*` overrides
-([details](docs/architecture.md#child-process-environment-backendsrclibchildenvjs-553)). That narrows what
+([details](architecture.md#child-process-environment-backendsrclibchildenvjs-553)). That narrows what
 a bug in one of them could leak, but it is not a sandbox: running as the same user, a media process that a
 camera managed to take over could still read the server's own environment (`JWT_SECRET` included) through
 the process table, as well as the files. Cameras are often the least-updated devices on a network, so put them on
@@ -308,7 +310,7 @@ which is set up automatically from the ONVIF probe using the camera's own stream
 one** — it's never sent back to your browser. Changing the address re-tests the stream, the
 same as adding.
 
-**Removing** — Remove asks for confirmation, then stops the stream and **permanently deletes everything for the camera**: its bed transitions and snapshot photos, activity history, alerts with their clips and snapshots, recordings, event log and sensor history. You can add the camera again, but none of that comes back. See [Removing a child or a camera](docs/recording.md#removing-a-child-or-a-camera).
+**Removing** — Remove asks for confirmation, then stops the stream and **permanently deletes everything for the camera**: its bed transitions and snapshot photos, activity history, alerts with their clips and snapshots, recordings, event log and sensor history. You can add the camera again, but none of that comes back. See [Removing a child or a camera](recording.md#removing-a-child-or-a-camera).
 
 **Assigning to a child** — use the "Assigned to" dropdown on each camera (admin only; a caregiver
 sees the assignment as text). It is more than grouping: a camera's nights are tracked only while it is
@@ -375,7 +377,7 @@ measurement**, and (like everything here) never a safety device — see the warn
   movement elsewhere in the picture, and no noise. There is no setting for any of it, and the numbers are
   unchanged: at least 3 minutes with movement in the bed, however slight, in the 2½ hours after the
   child settles.
-  **Known limits** (details, and the nights they come from, in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)):
+  **Known limits** (details, and the nights they come from, in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md)):
   - A very still child whose bedtime is followed by a second *got into bed* that is not quiet either
     side (a parent at the bed for a couple of minutes, the same put-down logged twice, or a one-minute
     check with a noise from elsewhere in the house beside it) before the bed has shown 3 such minutes
@@ -714,7 +716,7 @@ measurement**, and (like everything here) never a safety device — see the warn
         Only a "no one in the bed" night is promoted; "no data" and "no sleep" nights are not.
       - A corrected total still subtracts every unwatched minute the detector counted for the night,
         even ones outside your corrected times (the camera-outage limit under "Minutes with no video are
-        unknown" in [KNOWN-ISSUES.md](KNOWN-ISSUES.md)). Locking makes that figure stop changing; it
+        unknown" in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md)). Locking makes that figure stop changing; it
         does not make it exact.
       - Nights corrected **before this version** are locked from the moment you update, as they were
         last saved.
@@ -821,7 +823,7 @@ measurement**, and (like everything here) never a safety device — see the warn
   that would now come out "no data" for another reason — for example most of it had sound but no video.
   (The page only offers Recompute on a night that still scores, so in practice that refusal is only seen
   through the API; its 409 says which reason applied — `reason`, `status`, `coverage_minutes` — see
-  [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "Minutes with no video are unknown in the sleep numbers".)
+  [KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "Minutes with no video are unknown in the sleep numbers".)
 - **In bed, then asleep.** On a night where your child was put down a while before they fell asleep
   (a bedtime story, a slow settle), the card and the detail page show both: **In bed** is the
   put-down the camera recorded, and **Asleep** is when the room went quiet. That's the same time the
@@ -871,7 +873,7 @@ measurement**, and (like everything here) never a safety device — see the warn
   first estimate, not a setting; on a night still in progress, 90% of the part so far), because
   that answer also discards the night's timelapse. A
   frozen picture still counts as watched — see
-  [KNOWN-ISSUES.md](KNOWN-ISSUES.md), "Minutes with no video are unknown in the sleep numbers".
+  [KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "Minutes with no video are unknown in the sleep numbers".
 - **Room temperature (optional).** If a camera reports temperature/humidity over **MQTT** (set
   up under **Settings → MQTT**, e.g. via Zigbee2MQTT — the readings also show on the camera
   tile), the sleep detail overlays the night's room temperature beneath the timeline, aligned to
@@ -926,10 +928,10 @@ rebooting it each add a row to **Camera history** naming the account by its **us
 an admin sets, never the first name, which anyone can change on their own account); a restart or reboot
 that failed is recorded too. While a camera is silenced, its tile shows who silenced it, to everyone. The
 morning review shows who last answered it (above). Details, including what happens when the history
-cannot be written, are in [docs/camera-controls.md](docs/camera-controls.md#silencing-a-cameras-alerts-and-who-did-what).
+cannot be written, are in [docs/camera-controls.md](camera-controls.md#silencing-a-cameras-alerts-and-who-did-what).
 If a camera's alerts are kept silenced, on and off, for a long time (more than an hour by default, short gaps
 between renewals included), the admins are sent one notification for it, which names no one; on Pushover, ntfy
-and Gotify everyone on them gets it too. See [Long-silence alerts](docs/camera-controls.md#long-silence-alerts).
+and Gotify everyone on them gets it too. See [Long-silence alerts](camera-controls.md#long-silence-alerts).
 
 On a caregiver's screen the admin-only controls are not shown (sleep tracking, the window and the sleep
 camera are shown, greyed out, with a note); the server refuses them too, so a page opened before an update that changed a
@@ -949,12 +951,12 @@ caregiver until another account is made an admin first, and no account can ever 
 another admin has to remove it. Both are enforced by the server, not just hidden in the UI: the Role
 field explains it up front when it applies, and a request that tries anyway gets a clear error rather
 than a partial change. If an install somehow already has no admin (a database edited by hand, or
-from before this was enforced), see **[docs/mfa.md](docs/mfa.md)**'s recovery section for the console
+from before this was enforced), see **[docs/mfa.md](mfa.md)**'s recovery section for the console
 command that fixes it — it's documented there alongside the equivalent two-factor recovery, not
 because it's about two-factor, but because it's the same kind of last-resort console fix.
 
 Any account can also turn on **two-factor authentication** for its own login — see
-**[docs/mfa.md](docs/mfa.md)** for enrolling, one-time backup codes, and how to recover if an
+**[docs/mfa.md](mfa.md)** for enrolling, one-time backup codes, and how to recover if an
 admin loses their authenticator.
 
 ### `SESSION_TTL_DAYS` — how long a sign-in lasts
@@ -981,7 +983,7 @@ admin loses their authenticator.
 - The sign-in token is kept in the browser's (or the Android app's) `localStorage`, and every sign-in can be
   ended from the server at once (sign out a device, remove an account, change a password). Since this
   setting, the 12-hour token in video and snapshot URLs also stops when its sign-in ends. What this means
-  for security: [SECURITY.md](SECURITY.md#how-long-a-sign-in-lasts-and-where-it-is-kept).
+  for security: [SECURITY.md](../SECURITY.md#how-long-a-sign-in-lasts-and-where-it-is-kept).
 
 ## Running behind a reverse proxy (e.g. SWAG on Unraid)
 
@@ -1081,7 +1083,7 @@ Cloudflare dashboard.
 > variable ("Add another Path, Port, Variable, Label or Device") with the key `CLOUDFLARE_ANALYTICS`.
 
 With it off (the default), the page can only run scripts from your own server. The rest of the policy
-is the same either way; see "CSP is enforced" in [docs/architecture.md](docs/architecture.md#csp-is-enforced--keep-it-that-way).
+is the same either way; see "CSP is enforced" in [docs/architecture.md](architecture.md#csp-is-enforced--keep-it-that-way).
 
 ## Remote / internet access (watching from outside your home network)
 
@@ -1113,7 +1115,7 @@ outbound UDP (some corporate/public Wi-Fi).
 > in **Low latency** mode only — its WebRTC audio lets Nightlight fully own the lock screen (camera
 > name, artwork, Pause/Play). **Compatibility** is HLS, which iOS runs its own native lock-screen
 > session for that we can't reliably control, so Background isn't offered for a Compatibility camera
-> on iOS (it was tried and removed for being inconsistent — see [KNOWN-ISSUES.md](KNOWN-ISSUES.md)).
+> on iOS (it was tried and removed for being inconsistent — see [KNOWN-ISSUES.md](../KNOWN-ISSUES.md)).
 > Compatibility still works for live viewing. Android is unaffected — its background-listening
 > service keeps both modes alive.
 
@@ -1177,7 +1179,7 @@ What the native apps add over the browser/PWA:
   audio is unreliable by comparison. **On iOS this requires a camera in Low latency mode** —
   Compatibility (HLS) can't do reliable background audio on iOS (iOS runs its own native
   lock-screen session for it), so Background is only offered for Low-latency cameras there; see the
-  Low latency / Compatibility notes above and [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
+  Low latency / Compatibility notes above and [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 - **Pause/Resume from the system controls** — Android's notification and iOS's Now Playing
   (Control Center / lock screen), plus a Stop on Android.
 - **Picture-in-Picture** — float a camera in a small always-on-top window while you use
@@ -1210,7 +1212,7 @@ Firebase project: drop `google-services.json` + a `firebase-service-account.json
 into your data dir (e.g. `/mnt/user/appdata/nightlight`, keep the key `chmod 600`), then enable it
 under **Settings → Push notifications**. Each phone opts in under **Account → Notifications**.
 
-Full walkthrough for both, with troubleshooting: **[docs/notifications.md](docs/notifications.md)**.
+Full walkthrough for both, with troubleshooting: **[docs/notifications.md](notifications.md)**.
 
 **Getting them:**
 - **Android** — download the signed APK from the
@@ -1296,7 +1298,7 @@ browser you happen to be using.
 - **A camera says "No signal" only in Compatibility mode**: usually the camera sending bad
   audio timestamps, which can stall the HLS pipeline. Nightlight resamples/rewrites camera
   timestamps to ride through this, but if it persists, power-cycle or update that camera's
-  firmware. See [`KNOWN-ISSUES.md`](KNOWN-ISSUES.md).
+  firmware. See [`KNOWN-ISSUES.md`](../KNOWN-ISSUES.md).
 - **Checking whether MediaMTX has registered your cameras**: its API is loopback-only (not
   reachable directly from a browser), so check it from inside the container:
   ```bash
@@ -1309,7 +1311,7 @@ browser you happen to be using.
 
 For a catalogue of understood quirks (camera glitches, WebRTC reconnects, the watchdog's
 recovery window) with what each one means and whether it needs any action, see
-[`KNOWN-ISSUES.md`](KNOWN-ISSUES.md).
+[`KNOWN-ISSUES.md`](../KNOWN-ISSUES.md).
 
 ## Building from source
 

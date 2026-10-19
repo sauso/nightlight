@@ -6,7 +6,7 @@ Nightlight brings your nursery cameras together in one place. Check in on your l
 
 Built for parents. Friendly to self-hosters. Open source.
 
-[Website](https://nightlightbaby.app/) · [Get started](#get-started) · [Documentation](docs/README.md) · [Report an issue](https://github.com/sauso/nightlight/issues)
+[Website](https://nightlightbaby.app/) · [Quick start](#quick-start) · [Documentation](docs/README.md) · [Report an issue](https://github.com/sauso/nightlight/issues)
 
 > **Important:** Nightlight is a convenience tool, **not a safety or medical device**. Streams and alerts can fail. It must never replace adult supervision or be relied on to detect a child in distress.
 
@@ -28,19 +28,11 @@ Built for parents. Friendly to self-hosters. Open source.
 
 Nightlight is designed for local-network use first. Remote viewing is possible, but requires additional setup.
 
-## Get started
+## Quick start
 
 You'll need an always-on Linux host running Docker (such as Unraid or an arm64 Raspberry Pi) and a camera that exposes an RTSP stream. ONVIF is useful but optional. Performance depends on your hardware, camera count and enabled analysis features; there isn't a published minimum-hardware benchmark.
 
-### Unraid
-
-In **Community Applications**, search for **Nightlight**, select **Install**, check the data directory and apply. No extra plugin is needed.
-
-[Manual Unraid template and setup details](docs/installation.md#unraid)
-
-### Docker
-
-Run Nightlight on a trusted home network:
+On Unraid? Jump to [Running on Unraid](#running-on-unraid). Anywhere else, run Nightlight on a trusted home network:
 
 ```bash
 docker run -d \
@@ -59,9 +51,19 @@ docker run -d \
 
 Replace `/path/to/your/data` with a persistent folder on your host. `PUID=99` and `PGID=100` suit Unraid; on other hosts, choose the appropriate non-root user and group. Set `TZ` to your timezone if desired (it controls log timestamps).
 
+`--stop-timeout 30` gives Nightlight time to finish saving a recording when the container is stopped; without it Docker can kill the container first. `--log-opt` stops Docker's logs growing without limit.
+
 Open `http://<server-ip>:4000` from a device on the same network. Create your administrator account, add a child, then connect a camera from the **Cameras** tab.
 
 Prefer Compose, or need different networking or storage settings? See the [installation guide](docs/installation.md).
+
+## Running on Unraid
+
+In **Community Applications**, search for **Nightlight**, select **Install**, check the data directory and apply. No extra plugin is needed. Then open `http://<server-ip>:4000` and follow the steps above to create your administrator account.
+
+**Already installed from an older template?** Unraid keeps your saved template, so it doesn't pick up the shutdown setting by itself. Edit the container and make sure **Extra Parameters** contains `--stop-timeout 30`, so recordings can finish saving when the container stops.
+
+[Manual template install and other setup details](docs/installation.md#unraid)
 
 ## What can it do?
 
@@ -69,7 +71,7 @@ Prefer Compose, or need different networking or storage settings? See the [insta
 
 **Camera controls.** Discover supported cameras using ONVIF, configure RTSP streams, and use supported pan/tilt and two-way audio features.
 
-**Sleep and recordings.** Review sleep activity and, if enabled, save motion/sound clips, wake clips or recordings you start yourself. See [recording options](docs/recording.md).
+**Sleep and recordings.** Review sleep activity and, if enabled, save motion/sound clips, wake clips or recordings you start yourself. See [how sleep tracking works](docs/readme-reference.md#sleep-tracking) and [recording options](docs/recording.md).
 
 **Caregiver access.** Create accounts for people who need access to your nursery.
 
@@ -100,6 +102,7 @@ Start with the [documentation hub](docs/README.md), or jump directly to:
 - [Troubleshooting and known issues](docs/troubleshooting.md)
 - [Architecture](docs/architecture.md)
 - [Building and testing](docs/development.md)
+- [Full reference](docs/readme-reference.md) — sleep tracking, reverse proxy and `TRUST_PROXY`, timezones, caregivers, logs (the old README, being split into guides)
 
 ## Help make Nightlight better
 

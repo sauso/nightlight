@@ -20,7 +20,7 @@ HLS compatibility playback doesn't use STUN. Optional push notification provider
 
 Do not expose Nightlight directly to the public internet without understanding authentication, HTTPS and network restrictions. A VPN is often the simplest way to reach your home network securely.
 
-For a reverse proxy such as SWAG, use HTTPS and configure proxy trust only for proxies you control. WebRTC media may require a reachable UDP port even when the website loads correctly through HTTPS. HLS travels over HTTP(S) but generally has higher latency.
+For a reverse proxy such as SWAG, use HTTPS and set `TRUST_PROXY` to the address your proxy connects from, for proxies you control only. The default, `loopback`, trusts only a proxy on the same host, so a proxy that reaches Nightlight by its LAN IP is not trusted until you set it. Details: [`TRUST_PROXY`](readme-reference.md#trust_proxy--telling-nightlight-your-real-client-addresses). WebRTC media may require a reachable UDP port even when the website loads correctly through HTTPS. HLS travels over HTTP(S) but generally has higher latency.
 
 A router that remaps the external WebRTC UDP port to a different internal port can break the advertised connection. Set `PUBLIC_HOST` and `WEBRTC_UDP_PORT` as appropriate for your deployment.
 

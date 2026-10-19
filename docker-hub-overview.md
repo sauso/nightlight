@@ -24,8 +24,8 @@ docker run -d \
 Nightlight needs a routable LAN address so WebRTC (the low-latency viewing mode) works
 correctly. **Host networking (shown above) is the simplest default** and needs no extra setup; a
 dedicated `ipvlan`/`macvlan` address is also supported if you'd rather avoid host-mode port
-conflicts — see [Networking modes](https://github.com/sauso/nightlight#networking-modes) in the
-main README for both options and their trade-offs.
+conflicts — see [Networking modes](https://github.com/sauso/nightlight/blob/main/docs/readme-reference.md#networking-modes) in the
+full reference for both options and their trade-offs.
 
 ### Example
 
@@ -62,7 +62,7 @@ a trusted device.
   (`stun:stun.l.google.com:19302`); **blank = no STUN at all**, so nothing contacts Google;
   otherwise a comma-separated list of `stun:host[:port]` URLs (anything else is ignored with
   a warning). Viewing on your own network never needs STUN; viewers outside it, behind NAT,
-  may. Details: the README's `STUN_SERVERS` section.
+  may. Details: the `STUN_SERVERS` section of the [full reference](https://github.com/sauso/nightlight/blob/main/docs/readme-reference.md#stun_servers--which-stun-servers-low-latency-webrtc-uses).
 - The image has a Docker `HEALTHCHECK` (`GET /api/health`, 2 minute start period). It only
   marks the container healthy/unhealthy; nothing restarts it.
 - `CLOUDFLARE_ANALYTICS` is off by default: Cloudflare Web Analytics' beacon, which
@@ -71,7 +71,7 @@ a trusted device.
   if you serve Nightlight through Cloudflare with Web Analytics on; blank, `0`, `false`,
   `no` and `off` keep it blocked, and any other value also blocks it and logs a warning.
   It used to be allowed on every install: if you rely on it, set this when you upgrade. Details:
-  [`CLOUDFLARE_ANALYTICS`](https://github.com/sauso/nightlight#cloudflare_analytics--cloudflare-web-analytics-through-cloudflares-proxy).
+  [`CLOUDFLARE_ANALYTICS`](https://github.com/sauso/nightlight/blob/main/docs/readme-reference.md#cloudflare_analytics--cloudflare-web-analytics-through-cloudflares-proxy).
 - `--stop-timeout 30` lets Nightlight shut down cleanly - a recording in progress is
   assembled from its buffer as the app stops, and being killed part-way loses it.
   Stopping normally takes a few seconds; the container exits as soon as it's done, so

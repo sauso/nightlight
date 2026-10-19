@@ -29,6 +29,10 @@ New here? Start with the [main README](../README.md), then choose the guide that
 - [Demo mode](demo-mode.md) — public read-only demo deployments
 - [Security reporting](../SECURITY.md) — report vulnerabilities privately
 
+## Full reference
+
+- [Full reference](readme-reference.md) — the previous README in full. It holds sleep tracking and its known limits, the reverse proxy and `TRUST_PROXY` settings, `SESSION_TTL_DAYS`, timezones, caregivers, logs and the longer troubleshooting notes. It is being split into separate guides; until then, settings and known limits that are not in a guide above live here.
+
 ## Visual walkthrough
 
 These screenshots are captured by automated tests but committed manually, so they may lag behind the latest UI. They show a synthetic camera rather than real footage.
