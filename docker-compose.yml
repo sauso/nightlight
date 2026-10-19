@@ -47,7 +47,8 @@ services:
       # volume: set it BEFORE upgrading, it only affects new files after one start at 077.
       # See docs/operations.md, "Who can read the data directory".
       - UMASK=${UMASK:-077}
-      # Your local timezone (e.g. Australia/Melbourne) - affects log timestamps only.
+      # Your local timezone (e.g. Australia/Melbourne) - affects log timestamps and the names of the video
+      # buffer files only; the times the app shows follow Settings -> General.
       # Defaults to UTC if unset. Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
       - TZ=${TZ:-UTC}
       # Optional. A random, persistent secret is auto-generated and stored in the

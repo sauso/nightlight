@@ -49,7 +49,7 @@ docker run -d \
   sauso/nightlight:latest
 ```
 
-Replace `/path/to/your/data` with a persistent folder on your host. `PUID=99` and `PGID=100` suit Unraid; on other hosts, choose the appropriate non-root user and group. Set `TZ` to your timezone if desired (it controls log timestamps).
+Replace `/path/to/your/data` with a persistent folder on your host. `PUID=99` and `PGID=100` suit Unraid; on other hosts, choose the appropriate non-root user and group. Set `TZ` to your timezone if desired (it sets log timestamps and the names of the video buffer files; the times the app shows follow the timezone in Settings → General).
 
 `--stop-timeout 30` gives Nightlight time to finish saving a recording when the container is stopped; without it Docker can kill the container first. `--log-opt` stops Docker's logs growing without limit.
 
