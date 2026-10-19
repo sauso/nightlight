@@ -196,7 +196,8 @@ describe('every process the backend starts goes through the helper (#553, source
 
   test('each known spawn site calls spawnChild the expected number of times, and MediaMTX asks for MTX_*', () => {
     const expected = {
-      'lib/soundDetector.js': 1, 'lib/timelapse.js': 1, 'lib/transcoder.js': 1, 'lib/clipRecorder.js': 2,
+      // timelapse.js is not listed: since #781 it runs ffmpeg through clipRecorder.js's runFfmpeg (the call counted below).
+      'lib/soundDetector.js': 1, 'lib/transcoder.js': 1, 'lib/clipRecorder.js': 2,
       'lib/snapshot.js': 1, 'lib/audioLiveness.js': 2, 'lib/motionDetector.js': 1, 'lib/rtspProbe.js': 4,
       'lib/mediamtxProcess.js': 1,
     };

@@ -7,7 +7,7 @@
 // ★ THE RULE THIS FILE EXISTS FOR: no secret ever reaches browser storage. The camera test plants a marker in
 // both password boxes and then scans EVERY value in sessionStorage and localStorage for it.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, act } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin } from './helpers/render.jsx';
 import ChildSettings from '../src/pages/ChildSettings.jsx';
@@ -33,12 +33,13 @@ const mountChild = (id = KID.id) => renderAsAdmin(
   </Routes>,
   { kids: [KID], route: `/children/${id}` },
 );
-const mountCamera = () => renderAsAdmin(
+const mountCamera = (id = CAM.id) => renderAsAdmin(
   <Routes>
+    <Route path="/cameras/new" element={<CameraSettings />} />
     <Route path="/cameras/:id" element={<CameraSettings />} />
     <Route path="*" element={<div>elsewhere</div>} />
   </Routes>,
-  { cameras: [CAM], kids: [KID], route: `/cameras/${CAM.id}` },
+  { cameras: [CAM], kids: [KID], route: `/cameras/${id}` },
 );
 
 beforeEach(() => {
@@ -131,6 +132,20 @@ describe('child form', () => {
     expect((await screen.findByLabelText('Name')).value).toBe('Half typed');
   });
 
+  test('#738 saving a new child clears its unsaved state before leaving', async () => {
+    const { user, camerasValue } = mountChild('new');
+    let finishRefresh;
+    camerasValue.refresh.mockImplementation(() => new Promise((resolve) => { finishRefresh = resolve; }));
+    await user.type(await screen.findByLabelText('Name'), 'A child');
+    expect(screen.getByText('Unsaved changes.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Add child' }));
+    await waitFor(() => expect(camerasValue.refresh).toHaveBeenCalled());
+    // Save has succeeded, but refresh is held so the form remains mounted for this assertion.
+    await waitFor(() => expect(screen.queryByText('Unsaved changes.')).toBeNull());
+    await act(async () => { finishRefresh(); });
+    await screen.findByText('elsewhere');
+  });
+
   test('a draft belongs to one child: another child\'s form is not affected', async () => {
     const first = mountChild();
     await first.user.type(await screen.findByLabelText('Name'), ' edited');
@@ -167,6 +182,16 @@ describe('camera form', () => {
     expect(everythingStored()).not.toContain(PASSWORD);
   });
 
+  test('#738 a camera draft restores its edited RTSP host', async () => {
+    const first = mountCamera();
+    const host = await screen.findByLabelText('Camera IP address');
+    await first.user.clear(host);
+    await first.user.type(host, '10.0.0.9');
+    first.unmount();
+    mountCamera();
+    expect((await screen.findByLabelText('Camera IP address')).value).toBe('10.0.0.9');
+  });
+
   test('a typed password alone counts as unsaved (the person would lose it) but stores nothing', async () => {
     const { user } = mountCamera();
     await user.type(await screen.findByLabelText('Password'), PASSWORD);
@@ -181,6 +206,20 @@ describe('camera form', () => {
     await user.click(screen.getByRole('button', { name: /^Save/ }));
     await screen.findByText('elsewhere');
     expect(Object.keys(sessionStorage)).toEqual([]);
+  });
+
+  test('#738 saving a new camera clears its unsaved state before navigation', async () => {
+    const { user, camerasValue } = mountCamera('new');
+    let finishRefresh;
+    camerasValue.refresh.mockImplementation(() => new Promise((resolve) => { finishRefresh = resolve; }));
+    await user.type(await screen.findByLabelText('Name'), 'Playroom');
+    await user.type(screen.getByLabelText('Camera IP address'), '10.0.0.9');
+    expect(screen.getByText('Unsaved changes.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Add camera' }));
+    await waitFor(() => expect(camerasValue.refresh).toHaveBeenCalled());
+    // The same screen remains mounted after adding a camera; no stale draft may follow it.
+    await waitFor(() => expect(screen.queryByText('Unsaved changes.')).toBeNull());
+    await act(async () => { finishRefresh(); });
   });
 
   test('★ removing the camera clears its draft', async () => {

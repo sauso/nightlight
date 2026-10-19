@@ -9,6 +9,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **More reliable tests for recording refreshes, unavailable streams, unsaved drafts and the trusted-proxy default (#736 #737 #738 #753).** The MediaMTX config renderer now keeps the input file's line ending, which matters when running from a Windows checkout (#740); the Docker image is unchanged. Known limit: the slow-request recording test was intermittent in CI and did not fail in five local runs before this change.
+- **A slow camera edit no longer undoes another saved camera change (#787).** If an ONVIF check is still running while another edit changes the address or another field, the waiting save now keeps those newer values while saving its own changes, including a changed or removed sub-stream path when the waiting form re-sends the old path. A camera deleted during the check or stream restart now answers “Camera not found” instead of a server error. Known limits: if a request sends a field's old value again, it is treated as unchanged and keeps a newer value saved meanwhile; because the merge is per column, talk or ONVIF username and password can come from different overlapping saves when one save leaves a password blank. A field this request actually changes wins when its save finishes.
+- **A stuck nightly timelapse no longer waits forever (#781).** If assembly stops making progress for 2 minutes plus 1 second per 2 MB written, Nightlight stops it, marks the night failed and keeps its sampled frames and any partial video on disk; nothing sweeps them, so repeated failures use space until the child is removed. A thumbnail that hangs is given up on after 2 minutes; the video stays ready without one. The limits are unmeasured guesses, recorded for calibration in a `[timelapse] assemble` log line. A slow assembly that keeps progressing is allowed to finish. There is no automatic retry or retry button for a failed night, and a process that keeps reporting progress forever is not stopped by this rule. See `docs/recording.md`.
+
 ## [0.41.2] - 2026-10-19
 
 ### Fixed

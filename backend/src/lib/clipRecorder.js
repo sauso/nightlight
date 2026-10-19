@@ -469,10 +469,12 @@ const stalledFor = (ms) => `made no progress for ${secs(ms)} s`;
 //   stallLabel      instead: read ffmpeg's `-progress pipe:1` output and apply the stall window above. The label
 //                   names the clip in the one log line per run. Progress output is NOT kept (it would be most of
 //                   the process's output and nothing reads it); the resolved value is then ''.
+//   progressKind    #781 lets timelapse use the same helper and identify its calibration line; the default
+//                   preserves every byte of the existing [clip] cut line for clipRecorder callers.
 // On a deadline the child is SIGKILLed and the promise REJECTS AT ONCE, without waiting for its 'exit': a process
 // stuck in the kernel (uninterruptible I/O) may not exit even on SIGKILL, and waiting for it would rebuild the very
 // hang this exists to end. `settled` makes a later 'close' or 'error' a no-op.
-function runFfmpeg(args, { tool = 'ffmpeg', deadlineMs = null, stallLabel = null } = {}) {
+export function runFfmpeg(args, { tool = 'ffmpeg', deadlineMs = null, stallLabel = null, progressKind = 'clip' } = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawnChild(tool, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     const out = [];
@@ -497,7 +499,7 @@ function runFfmpeg(args, { tool = 'ffmpeg', deadlineMs = null, stallLabel = null
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (run) logProgressRun(stallLabel, run, t0, outcome);
+      if (run) logProgressRun(stallLabel, run, t0, outcome, progressKind);
       if (ok) resolve(value);
       else reject(value);
     };
@@ -578,12 +580,12 @@ function runFfmpeg(args, { tool = 'ffmpeg', deadlineMs = null, stallLabel = null
 //                  Measured to the last CONTINUE block, not the last block, because ffmpeg prints its final
 //                  `progress=end` block only after writing the trailer (our reading of fftools/ffmpeg.c, not
 //                  verified by running ffmpeg), so counting that block would hide the very tail this is for.
-function logProgressRun(label, run, t0, outcome) {
+function logProgressRun(label, run, t0, outcome, progressKind) {
   const now = performance.now();
   const maxGapMs = Math.max(run.maxGapMs, now - run.lastAdvanceAt);
   const tailMs = run.lastContinueAt == null ? null : now - run.lastContinueAt;
   logger.info(
-    `[clip] cut ${label}: ${outcome} after ${secs(now - t0)} s; longest wait for progress ${secs(maxGapMs)} s, ` +
+    `[${progressKind}] ${progressKind === 'clip' ? 'cut' : 'assemble'} ${label}: ${outcome} after ${secs(now - t0)} s; longest wait for progress ${secs(maxGapMs)} s, ` +
       `${secs(tailMs)} s after the last progress report; stall window at the end ${secs(run.windowMs)} s`
   );
 }

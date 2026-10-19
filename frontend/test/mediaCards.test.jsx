@@ -461,13 +461,14 @@ describe('RecordingsCard', () => {
   });
 
   test('reloads when the parent bumps the refresh nonce', async () => {
-    vi.spyOn(api, 'get').mockResolvedValue(ROWS);
-    const { rerenderWith } = renderAsAdmin(<RecordingsCard childId="kid-1" refreshNonce={0} />);
-    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    vi.spyOn(api, 'get').mockResolvedValueOnce(ROWS).mockResolvedValueOnce([...ROWS, { ...ROWS[0], id: 'r-3' }]);
+    const { rerenderWith, container } = renderAsAdmin(<RecordingsCard childId="kid-1" refreshNonce={0} />);
+    await waitFor(() => expect(container.querySelectorAll('.rec-strip__item')).toHaveLength(2));
     rerenderWith({ ui: <RecordingsCard childId="kid-1" refreshNonce={1} /> });
     // The tile's Record button finishes on a different screen, so the only way this card learns a
     // new recording exists is the parent nudging it.
-    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(container.querySelectorAll('.rec-strip__item')).toHaveLength(3));
+    expect(api.get).toHaveBeenCalledTimes(2);
   });
 
   test('opening a recording plays it, and a nameless camera does not render "null"', async () => {

@@ -1,10 +1,9 @@
-import { spawnChild } from './childEnv.js';
 import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { safeInterval } from './processGuards.js';
-import { CLIPS_DIR } from './clipRecorder.js';
+import { CLIPS_DIR, PROBE_DEADLINE_MS, runFfmpeg } from './clipRecorder.js';
 import { clipStorageReady, hasMinFreeSpace } from './clipStorage.js';
 import { captureSnapshot, fetchHttpSnapshot } from './snapshot.js';
 import { childTracksSleep, childWindowActiveNow, currentNightDate } from './sleepAnalysis.js';
@@ -47,16 +46,6 @@ function safeReaddir(dir) {
 }
 function rmrf(dir) {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
-}
-
-function runFfmpeg(args) {
-  return new Promise((resolve, reject) => {
-    const proc = spawnChild('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
-    const err = [];
-    proc.stderr.on('data', (c) => err.push(c));
-    proc.on('error', reject);
-    proc.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}: ${Buffer.concat(err).toString().slice(-400)}`))));
-  });
 }
 
 // --- DB helpers (own table; see db.js) ---
@@ -274,8 +263,11 @@ export async function assembleTimelapse(childId, nightDate) {
     const outFile = path.join(outDir, `${base}.mp4`);
     const thumbFile = path.join(outDir, `${base}.jpg`);
 
+    // #781 reuses #773's unmeasured 120 s plus 1 s per 2 MB stall hypothesis. The
+    // [timelapse] assemble line records waits for calibration. A slower machine keeps
+    // encoding while its counters increase; only a stretch without progress is cut.
     await runFfmpeg([
-      '-nostdin', '-loglevel', 'error',
+      '-nostdin', '-loglevel', 'error', '-nostats', '-progress', 'pipe:1',
       '-framerate', String(fps),
       '-i', path.join(seqDir, '%06d.jpg'),
       // Downscale only if wider than MAX_WIDTH; -2 keeps aspect with an even height (yuv420p needs even).
@@ -283,14 +275,17 @@ export async function assembleTimelapse(childId, nightDate) {
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '25', '-pix_fmt', 'yuv420p',
       '-movflags', '+faststart',
       '-y', outFile,
-    ]);
+    ], { stallLabel: `${childId} ${nightDate}`, progressKind: 'timelapse' });
 
     // Thumbnail: a frame from ~1/3 in (past the lights-on settling, still recognisably the room).
     await runFfmpeg([
       '-nostdin', '-loglevel', 'error',
       '-ss', String((frames.length / fps) / 3),
       '-i', outFile, '-frames:v', '1', '-q:v', '4', '-y', thumbFile,
-    ]).catch(() => {});
+    ], { deadlineMs: PROBE_DEADLINE_MS }).catch(() => {
+      // #781: a timed-out thumbnail can leave a partial JPG; a ready row must not point at it.
+      try { fs.rmSync(thumbFile, { force: true }); } catch { /* already gone */ }
+    });
 
     const bytes = (() => { try { return fs.statSync(outFile).size; } catch { return null; } })();
     const durationS = Math.round(frames.length / fps);
