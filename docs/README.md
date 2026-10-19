@@ -1,84 +1,58 @@
 # Nightlight documentation
 
-## Guides
+New here? Start with the [main README](../README.md), then choose the guide that matches what you're trying to do.
 
-- **[Push notifications](notifications.md)** — providers, one-time setup, what each event sends.
-- **[Recording](recording.md)** — automatic clips, wake clips, manual recordings, retention.
-- **[Camera controls](camera-controls.md)** — the global PTZ step and offline-alert settings.
-- **[MQTT](mqtt.md)** — broker connection, temperature/humidity payloads, camera-native motion.
-- **[Operations](operations.md)** — backup, restore, upgrade, rollback.
-- **[Multi-factor authentication](mfa.md)** — enrolling, one-time backup codes, admin/console
-  recovery if you lose your authenticator.
-- **[Demo mode](demo-mode.md)** — only for hosting a public read-only demo; not needed for a normal
-  install.
-- **[Mutation testing](mutation-testing.md)** — contributor reference: running the mutant catalogue (weekly in CI, sharded) and reading the result.
-- **[Design language](design-language.md)** — contributor reference: colors, type, icons.
+## Get Nightlight running
 
-## Elsewhere in the repo
+- [Installation](installation.md) — Unraid, Docker, Compose, storage and first setup
+- [Cameras and caregivers](cameras.md) — add cameras and share access
+- [Networking and remote access](networking.md) — LAN options, WebRTC, STUN, HTTPS and privacy
+- [Troubleshooting](troubleshooting.md) — common problems and first checks
+- [Known issues](../KNOWN-ISSUES.md) — documented limitations and workarounds
 
-- **[Main README](../README.md)** — install, configure, add cameras/children, all features.
-- **[KNOWN-ISSUES.md](../KNOWN-ISSUES.md)** — confirmed limitations and workarounds.
-- **[SECURITY.md](../SECURITY.md)** — supported versions and how to report a vulnerability
-  privately.
+## Everyday features
+
+- [Visual walkthrough](#visual-walkthrough) — dashboard, camera setup and settings
+- [Camera controls](camera-controls.md) — PTZ and offline alerts
+- [Recording](recording.md) — clips, wake events, manual recordings and retention
+- [Push notifications](notifications.md) — supported providers and event delivery
+- [MQTT](mqtt.md) — broker setup and sensor data
+- [Multi-factor authentication](mfa.md) — enrollment and recovery
+
+## Run and develop
+
+- [Operations](operations.md) — backup, restore, permissions, upgrades and rollback
+- [Architecture](architecture.md) — implementation details
+- [Building and testing](development.md) — local development and tests
+- [Design language](design-language.md) — UI conventions
+- [Mutation testing](mutation-testing.md) — contributor test reference
+- [Demo mode](demo-mode.md) — public read-only demo deployments
+- [Security reporting](../SECURITY.md) — report vulnerabilities privately
+
+## Full reference
+
+- [Full reference](readme-reference.md) — the previous README in full. It holds sleep tracking and its known limits, the reverse proxy and `TRUST_PROXY` settings, `SESSION_TTL_DAYS`, timezones, caregivers, logs and the longer troubleshooting notes. It is being split into separate guides; until then, settings and known limits that are not in a guide above live here.
 
 ## Visual walkthrough
 
-A quick tour of the app's main screens.
+These screenshots are captured by automated tests but committed manually, so they may lag behind the latest UI. They show a synthetic camera rather than real footage.
 
-> The screenshots below are **captured** by the end-to-end test suite
-> (`e2e/playwright/tests/05-screenshots.spec.js`) on every e2e run, but publishing them is a
-> **manual step**: CI uploads the captures as a `docs-screenshots` workflow artifact, and a
-> maintainer downloads it and commits the images under `docs/screenshots/` — nothing here
-> updates itself. So these can drift from the real UI between refreshes; if a screen has
-> changed recently and looks off, that's why. See
-> [e2e/README.md](../e2e/README.md#refreshing-the-documentation-screenshots) for how to refresh
-> them.
->
-> Each screen is shown at **both form factors**, because the layout genuinely changes: below
-> 1200px wide the navigation is a bottom tab bar, and at 1200px and up the same component
-> becomes a left sidebar rail.
+### Nursery dashboard
 
-## The nursery dashboard
+![Nightlight dashboard on a phone](screenshots/dashboard-mobile.png)
 
-The home screen is a live grid of camera tiles. Each tile plays low-latency video and shows
-the camera's name, which child it's assigned to, a connection indicator, and controls for
-audio, fullscreen, picture-in-picture, and stream quality. Tiles can be dragged to reorder (admin only, because for a child with more than one camera and the sleep camera left on **Automatic**, the order picks the main camera their sleep is measured from; an admin can choose that camera explicitly in the child's settings instead, and then the order is only layout).
+![Nightlight dashboard on desktop](screenshots/dashboard-desktop.png)
 
-On a phone, with the bottom tab bar:
+### Adding a camera
 
-![The nursery dashboard on a phone, with a camera tile and the bottom tab bar](screenshots/dashboard-mobile.png)
+![Add camera on a phone](screenshots/add-camera-mobile.png)
 
-On a desktop browser the tabs become a sidebar and the tiles lay out in a wider grid:
+![Add camera on desktop](screenshots/add-camera-desktop.png)
 
-![The same dashboard on a desktop browser, with the navigation as a left sidebar rail](screenshots/dashboard-desktop.png)
+### Settings
 
-> These captures come from the automated test environment, which has a synthetic camera and
-> no real video source behind the tile — hence the "No signal". On a real deployment the
-> tile shows the camera's live feed.
+![Settings on a phone](screenshots/settings-mobile.png)
 
-## Adding a camera
+![Settings on desktop](screenshots/settings-desktop.png)
 
-Cameras are added by their address — IP, RTSP port, stream path, and credentials — or
-auto-filled by IP over ONVIF. You can also set an optional low-quality sub-stream and
-two-way-audio credentials here.
-
-![The add-camera form on a phone](screenshots/add-camera-mobile.png)
-
-![The add-camera form on a desktop browser](screenshots/add-camera-desktop.png)
-
-## Settings
-
-Admins can theme the app (name, colors, font), set the timezone and temperature unit, and
-connect an MQTT broker to show room temperature/humidity on each tile. The timezone (default
-`UTC`) is the **home** time every time in the app is shown in; a zone label appears next to a time only
-when the device is in a different zone (see [Times and your timezone](../README.md#times-and-your-timezone)).
-
-![The settings screen on a phone](screenshots/settings-mobile.png)
-
-![The settings screen on a desktop browser](screenshots/settings-desktop.png)
-
-## Push notifications
-
-Nightlight can push a motion alert to your phone even when the app is closed — through your choice of
-**Pushover, ntfy, Gotify, or your own Firebase project** (nothing is shared through a Nightlight cloud).
-It's optional and off by default. See **[notifications.md](notifications.md)** for the one-time setup.
+For refreshing these captures, see [the e2e guide](../e2e/README.md#refreshing-the-documentation-screenshots).

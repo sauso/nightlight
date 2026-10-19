@@ -121,8 +121,8 @@ Notes for the camera source, which are the parts that are easy to get wrong:
 - **Override the container's `CMD`, never its `ENTRYPOINT`.** The entrypoint fixes ownership of
   `DATA_DIR` before dropping privileges; skipping it leaves a fresh, root-owned volume unwritable.
 - **Get WebRTC reachable** the same way any remote install does — see
-  [Remote / internet access](../README.md#remote--internet-access-watching-from-outside-your-home-network)
-  in the README. Video is the only part that needs UDP; everything else is ordinary HTTPS.
+  [Remote / internet access](readme-reference.md#remote--internet-access-watching-from-outside-your-home-network)
+  in the full reference. Video is the only part that needs UDP; everything else is ordinary HTTPS.
 
 ## Capacity and abuse limits
 
@@ -140,7 +140,7 @@ Notes for the camera source, which are the parts that are easy to get wrong:
   busy visitor locks everyone out of the guest endpoint) or a visitor can forge `X-Forwarded-For` to
   dodge the limits. Which value is right depends on your platform's proxy chain — capture the real
   addresses on the running machine, pick the setting, and test with two different clients and a forged
-  header. See [`TRUST_PROXY`](../README.md#trust_proxy--telling-nightlight-your-real-client-addresses).
+  header. See [`TRUST_PROXY`](readme-reference.md#trust_proxy--telling-nightlight-your-real-client-addresses).
 
 ## Known limits
 

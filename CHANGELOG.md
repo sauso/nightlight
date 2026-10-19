@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- **The README is now a short introduction, and the documentation is easier to find.** Installation, cameras, networking, troubleshooting and development each have their own short guide under `docs/`, there is a documentation hub (`docs/README.md`) and a page on how we write docs (`docs/writing-guidelines.md`). The previous README is kept in full as `docs/readme-reference.md` (sleep tracking and its known limits, `TRUST_PROXY`, `SESSION_TTL_DAYS`, timezones, caregivers, logs) while it is split into guides; links elsewhere now point there. No setting or behaviour changed.
+
 ### Fixed
 
 - **More reliable tests for recording refreshes, unavailable streams, unsaved drafts and the trusted-proxy default (#736 #737 #738 #753).** The MediaMTX config renderer now keeps the input file's line ending, which matters when running from a Windows checkout (#740); the Docker image is unchanged. Known limit: the slow-request recording test was intermittent in CI and did not fail in five local runs before this change.
