@@ -172,6 +172,251 @@ describe('★ the page behind an open dialog is inert', () => {
   });
 });
 
+// A dialog that replaces another in the same step (#768): two-factor set-up is password -> QR code -> backup codes,
+// and each one is opened by a click INSIDE the one that disappears. `swapOpener` also swaps the page's opener for a
+// different button when the chain starts, as the Two-factor card does ("Set up" becomes "Turn off").
+function Chain({ swapOpener = false }) {
+  const [step, setStep] = useState(0);
+  const [started, setStarted] = useState(false);
+  return (
+    <div id="app">
+      <nav><button>Nav item</button></nav>
+      <main>
+        <div data-testid="card">
+          {swapOpener && started
+            ? <button>Turn off</button>
+            : <button onClick={() => { setStep(1); if (swapOpener) setStarted(true); }}>Set up</button>}
+        </div>
+        <button>Other page button</button>
+      </main>
+      {step === 1 && (
+        <Modal title="Password" onClose={() => setStep(0)}>
+          <input aria-label="Password" />
+          <button onClick={() => setStep(2)}>Continue</button>
+        </Modal>
+      )}
+      {step === 2 && (
+        <Modal title="Code" onClose={() => setStep(0)}>
+          <input aria-label="Code" />
+          <button onClick={() => setStep(3)}>Confirm</button>
+        </Modal>
+      )}
+      {step === 3 && (
+        <Modal title="Backup codes" dismissible={false} onClose={() => setStep(0)}>
+          <button onClick={() => setStep(0)}>I have saved them</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+const walkChain = async (user) => {
+  await user.click(screen.getByRole('button', { name: 'Set up' }));
+  await user.click(screen.getByRole('button', { name: 'Continue' }));
+  await user.click(screen.getByRole('button', { name: 'Confirm' }));
+  expect(screen.getByRole('dialog', { name: 'Backup codes' })).toBeTruthy();
+};
+
+describe('★ a dialog that replaces another hands focus back to where the chain began (#768)', () => {
+  test('closing the last of three dialogs focuses the control that opened the first', async () => {
+    const user = userEvent.setup();
+    render(<Chain />);
+    await walkChain(user);
+    await user.click(screen.getByRole('button', { name: 'I have saved them' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // Not "something on the page": the exact original opener. On the unfixed code focus is on <body> here.
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Set up' }));
+  });
+
+  test('an intermediate dialog closing by itself still returns to the opener', async () => {
+    const user = userEvent.setup();
+    render(<Chain />);
+    await user.click(screen.getByRole('button', { name: 'Set up' }));
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Set up' }));
+  });
+
+  test('when the original opener was swapped for another control, focus goes to its replacement, not <body>', async () => {
+    const user = userEvent.setup();
+    render(<Chain swapOpener />);
+    await walkChain(user);
+    expect(screen.queryByRole('button', { name: 'Set up' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'I have saved them' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Turn off' }));
+  });
+
+  test('a region with nothing to press in it takes focus itself, and its tabindex is not left behind', async () => {
+    // The opener is the only thing in its region, and the dialog's action removes it.
+    function Lonely() {
+      const [open, setOpen] = useState(false);
+      const [gone, setGone] = useState(false);
+      return (
+        <main>
+          <div data-testid="empty-region">{!gone && <button onClick={() => setOpen(true)}>Lonely opener</button>}</div>
+          {open && (
+            <Modal title="Lonely" onClose={() => setOpen(false)}>
+              <button onClick={() => setGone(true)}>Remove opener</button>
+              <button onClick={() => setOpen(false)}>Done</button>
+            </Modal>
+          )}
+        </main>
+      );
+    }
+    const user = userEvent.setup();
+    const { container } = render(<Lonely />);
+    const region = container.querySelector('[data-testid="empty-region"]');
+    await user.click(screen.getByRole('button', { name: 'Lonely opener' }));
+    await user.click(screen.getByRole('button', { name: 'Remove opener' }));
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(document.activeElement).toBe(region);
+    expect(region.getAttribute('tabindex')).toBe('-1');
+    // It is a temporary stop, not a new tab stop for the rest of the session.
+    region.blur();
+    expect(region.hasAttribute('tabindex')).toBe(false);
+  });
+
+  // Fallback regions that LOOK usable but are not (review of #779). `build({ opener, gone })` lays out the page around
+  // the opener, which the dialog's action then removes.
+  async function removeOpenerThenClose(build) {
+    function Scene() {
+      const [open, setOpen] = useState(false);
+      const [gone, setGone] = useState(false);
+      const opener = !gone && <button onClick={() => setOpen(true)}>Lonely opener</button>;
+      return (
+        <main>
+          {build({ opener, gone })}
+          {open && (
+            <Modal title="Lonely" onClose={() => setOpen(false)}>
+              <button onClick={() => setGone(true)}>Remove opener</button>
+              <button onClick={() => setOpen(false)}>Done</button>
+            </Modal>
+          )}
+        </main>
+      );
+    }
+    const user = userEvent.setup();
+    const view = render(<Scene />);
+    await user.click(screen.getByRole('button', { name: 'Lonely opener' }));
+    await user.click(screen.getByRole('button', { name: 'Remove opener' }));
+    return { user, ...view };
+  }
+
+  test('a nearer region that is hidden is skipped; focus goes to the next one up, with no tabindex left on the hidden one', async () => {
+    const { user, container } = await removeOpenerThenClose(({ opener, gone }) => (
+      <div data-testid="outer">
+        <div data-testid="inner" hidden={gone}>{opener}</div>
+        <button>Fallback sibling</button>
+      </div>
+    ));
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(container.querySelector('[data-testid="inner"]').hasAttribute('tabindex')).toBe(false);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Fallback sibling' }));
+  });
+
+  test('a region that refuses focus is cleaned up and the search goes on (it never ends on <body>)', async () => {
+    const { user, container } = await removeOpenerThenClose(({ opener }) => (
+      <div data-testid="outer">
+        <div data-testid="inner">{opener}</div>
+        <button>Fallback sibling</button>
+      </div>
+    ));
+    // What a real browser does for a region that is not rendered: focus() returns and nothing moves.
+    container.querySelector('[data-testid="inner"]').focus = () => {};
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(container.querySelector('[data-testid="inner"]').hasAttribute('tabindex')).toBe(false);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Fallback sibling' }));
+  });
+
+  test('a control that is aria-hidden, or inside something that is, is not chosen', async () => {
+    const { user } = await removeOpenerThenClose(({ opener }) => (
+      <div data-testid="region">
+        {opener}
+        <div aria-hidden="true"><button>Buried</button></div>
+        <button aria-hidden="true">Hidden twin</button>
+        <button>Visible one</button>
+      </div>
+    ));
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Visible one' }));
+  });
+
+  test('a region that already had a tabindex gets exactly that value back, not none', async () => {
+    const { user, container } = await removeOpenerThenClose(({ opener }) => (
+      <div data-testid="region" tabIndex={0}>{opener}</div>
+    ));
+    const region = container.querySelector('[data-testid="region"]');
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(document.activeElement).toBe(region);
+    region.blur();
+    expect(region.getAttribute('tabindex')).toBe('0');
+  });
+
+  test('a dialog opened while nothing had focus (<body>) does not focus <body> on close', async () => {
+    document.activeElement?.blur();
+    expect(document.activeElement).toBe(document.body);
+    const bodyFocus = vi.spyOn(document.body, 'focus');
+    try {
+      const { unmount } = render(<Modal title="T" onClose={() => {}}><button>Go</button></Modal>);
+      unmount();
+      expect(bodyFocus).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(document.body);
+    } finally {
+      bodyFocus.mockRestore();
+    }
+  });
+
+  test('with the whole chain gone from the page, closing does not throw and does not invent a focus', async () => {
+    const opener = document.createElement('button');
+    document.body.appendChild(opener);
+    opener.focus();
+    const { unmount } = render(<Modal title="T" onClose={() => {}}><button>Go</button></Modal>);
+    opener.remove();
+    expect(() => unmount()).not.toThrow();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  test('a dialog opened from inside another that stays open still returns to its own opener, not the page behind', async () => {
+    const user = userEvent.setup();
+    render(<Page nested />);
+    await openIt(user);
+    const confirm = screen.getByRole('button', { name: 'Confirm' });
+    await user.click(confirm);
+    await user.keyboard('{Escape}');
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(document.activeElement).toBe(confirm);
+  });
+
+  test('focus is never handed to something the dialog still beneath keeps inert', async () => {
+    // The inner dialog's opener is removed as it opens; the only fallbacks are behind the outer dialog.
+    function Over() {
+      const [outer, setOuter] = useState(false);
+      const [inner, setInner] = useState(false);
+      return (
+        <main>
+          <button onClick={() => setOuter(true)}>Open outer</button>
+          {outer && (
+            <Modal title="Outer" onClose={() => setOuter(false)}>
+              {!inner && <button onClick={() => setInner(true)}>Open inner</button>}
+              <button>Outer other</button>
+              {inner && <Modal title="Inner" onClose={() => setInner(false)}><button>Inner action</button></Modal>}
+            </Modal>
+          )}
+        </main>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Over />);
+    await user.click(screen.getByRole('button', { name: 'Open outer' }));
+    await user.click(screen.getByRole('button', { name: 'Open inner' }));
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('dialog', { name: 'Outer' })).toBeTruthy();
+    // Whatever has focus, it is not the inert page behind the outer dialog.
+    expect(document.activeElement.closest('[inert]')).toBeNull();
+    expect(document.activeElement).not.toBe(screen.getByRole('button', { name: 'Open outer' }, { hidden: true }));
+  });
+});
+
 describe('the dialog keeps its semantics', () => {
   test('still a labelled modal dialog', async () => {
     const user = userEvent.setup();
