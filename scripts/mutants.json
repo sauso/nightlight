@@ -13903,22 +13903,68 @@
     "namePattern": "told an admin can remove it"
   },
   {
-    "label": "W5 role gate M5: PUT /api/cameras/reorder loses requireAdmin (a caregiver's drag changes the scoring camera)",
+    "label": "#675 (re-points W5 role gate M5): PUT /api/cameras/reorder regains requireAdmin (a caregiver can rearrange no tile at all)",
     "file": "backend/src/routes/cameras.js",
-    "find": "router.put('/reorder', requireAdmin, (req, res) => {",
-    "replace": "router.put('/reorder', (req, res) => {",
+    "find": "router.put('/reorder', (req, res) => {",
+    "replace": "router.put('/reorder', requireAdmin, (req, res) => {",
     "expect": "killed",
-    "tests": ["route-permissions.test.js", "role-gates-destroy.test.js"],
-    "note": "#552: sort_order picks the camera a child's sleep is scored from, the timelapse camera and the review's camera list."
+    "tests": ["route-permissions.test.js", "reorder-scoring-guard.test.js"],
+    "note": "Deliberate repair: until #675 this entry REMOVED requireAdmin from the reorder route (#552). #675 removed the gate on purpose (any signed-in user may reorder; a non-admin's move of a tracked child's sleep camera is refused in the handler), so the old find no longer exists and the entry now restores the gate instead."
   },
   {
-    "label": "W5 role UI M24: a caregiver's live tiles get the drag handle again",
+    "label": "#675 (re-points W5 role UI M24): a caregiver's live tiles lose the drag handle again",
     "file": "frontend/src/components/LiveMonitor.jsx",
-    "find": "  const canReorder = isAdmin;",
-    "replace": "  const canReorder = true;",
+    "find": "  const canReorder = !!user;",
+    "replace": "  const canReorder = isAdmin;",
     "expect": "killed",
     "tests": ["liveMonitor.test.jsx"],
-    "namePattern": "no drag handle"
+    "namePattern": "a caregiver gets a drag handle on every tile too",
+    "note": "Deliberate repair: until #675 this entry gave a caregiver the drag handle (canReorder = isAdmin -> true) and was killed by the 'no drag handle' test. #675 gives every signed-in user the handle on purpose, so the entry now takes it away from a caregiver again."
+  },
+  {
+    "label": "#675 G1: the sleep-camera guard is removed (a caregiver's reorder that moves a tracked child's sleep camera is stored)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (moved.length) throw new ReorderWouldChangeSleepCamera(moved);",
+    "replace": "// guard removed",
+    "expect": "killed",
+    "tests": ["reorder-scoring-guard.test.js"],
+    "namePattern": "making the second camera of an Automatic child first"
+  },
+  {
+    "label": "#675 G2: only the 'id' tie-break is compared (a reorder that moves only the timelapse camera is stored)",
+    "file": "backend/src/routes/cameras.js",
+    "find": " || before[i].byRowid !== after[i].byRowid",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["reorder-scoring-guard.test.js"],
+    "namePattern": "moves ONLY the timelapse pick"
+  },
+  {
+    "label": "#675 G3: only the 'rowid' tie-break is compared (a reorder that moves only the scoring camera is stored)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "before[i].byId !== after[i].byId || ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["reorder-scoring-guard.test.js"],
+    "namePattern": "moves ONLY the scoring pick"
+  },
+  {
+    "label": "#675 G4: an admin's reorder is checked too (admins lose the unrestricted reorder)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "const guarded = isAdmin ? [] : trackedChildren();",
+    "replace": "const guarded = trackedChildren();",
+    "expect": "killed",
+    "tests": ["reorder-scoring-guard.test.js"],
+    "namePattern": "an admin doing the SAME reorder"
+  },
+  {
+    "label": "#675 G5: children with sleep tracking off are guarded too (a caregiver is refused for a swap nobody sees)",
+    "file": "backend/src/routes/cameras.js",
+    "find": ".filter((c) => childTracksSleep(c.id))",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["reorder-scoring-guard.test.js"],
+    "namePattern": "sleep tracking OFF is not guarded"
   },
   {
     "label": "#552 PR2 M01: the snooze history row loses its actor",

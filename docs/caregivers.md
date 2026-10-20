@@ -13,7 +13,7 @@ destroy or reconfigure.**
 | View live cameras; watch and download alert clips, recordings, wake clips and timelapses | Yes | Yes |
 | Record, move a PTZ camera, talk through a camera | Yes | Yes |
 | Restart, reboot, or snooze camera alerts (recorded with your username; see [Camera history](#camera-history-and-permissions)) | Yes | Yes |
-| Reorder cameras on the live grid (the order also picks the measuring camera of a child whose sleep camera is on Automatic) | No | Yes |
+| Reorder cameras on the live grid | Yes, except a move that would change which camera a child's sleep is measured from (the app refuses that one and says why; see [Rearranging the live grid](#rearranging-the-live-grid)) | Yes |
 | Assign a camera to a child | No | Yes |
 | Add / edit / enable / delete a camera | No | Yes |
 | Change a child's name, birthday, colour and photo | Yes | Yes |
@@ -27,6 +27,22 @@ destroy or reconfigure.**
 
 Deleting by hand is not the same as **retention**: the automatic sweep of old alert clips and wake clips
 (Settings → Recording, admin only to configure) runs on a timer on every install, whoever is signed in.
+
+### Rearranging the live grid
+
+Anyone signed in can drag the camera tiles, and the order is shared by everyone who views the grid. For a
+child whose sleep camera is on **Automatic** (the default, and every child set up before the setting
+existed), the first camera that is turned on in that order is the one their sleep is measured from and
+their nightly timelapse is taken from. So a **caregiver's** move that would change that camera, for any
+child whose sleep tracking is on, is refused: the tiles go back to where they were, a message above the
+grid says why, and nothing is saved.
+
+**On a child set to Automatic with two or more cameras, a caregiver cannot move that child's first
+camera** until an admin chooses a main camera for the child (**Camera used for this child's sleep**, in
+the child's settings). In a home with one child and two cameras, both theirs, that means no tile can be
+moved at all until then. Once a main camera is chosen, the tiles can be rearranged freely. An admin's
+moves are never refused. Details, and what the check does not cover:
+[One camera does the measuring](sleep-tracking.md#one-camera-does-the-measuring).
 
 ### Camera history and permissions
 

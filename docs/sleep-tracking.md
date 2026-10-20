@@ -106,10 +106,20 @@ for as long as the room stays that steady.
 If a child has several cameras, sleep is worked out from their
 **main camera**, and an admin can choose which one it is: **Camera used for this child's sleep** in
 the child's settings (shown once a child has two or more cameras).
-- **Default: Automatic** — the first camera in the order an admin has arranged them on the live grid,
+- **Default: Automatic** — the first camera in the order the tiles are arranged on the live grid,
   skipping any that are turned off. This is how every child behaved before the setting existed, so
-  nothing changes until an admin picks a camera. With Automatic, dragging the tiles still changes the
-  main camera, which is why only an admin can rearrange them.
+  nothing changes until an admin picks a camera. With Automatic, dragging the tiles can still change
+  the main camera, so anyone may rearrange them but a **caregiver's** move that would change the
+  camera a child's sleep or nightly timelapse comes from (for any child whose sleep tracking is on) is
+  refused: the tiles go back, a message says why, and nothing is saved. On a child set to Automatic
+  with two or more cameras, a caregiver therefore cannot move that child's first camera, and in a home
+  with one child and two cameras, both theirs, no tile can be moved at all, until an admin chooses a
+  camera here; after that the tiles can be rearranged freely. An admin's moves are never refused.
+  - **Known limit: the check protects the cameras that are measuring a tracked child now.** A caregiver
+    can freely place a camera that belongs to no child, one that is turned off, one of a child whose
+    sleep tracking is off, or one that is not first. A later admin action (assigning a camera, turning
+    one on or off, deleting one, setting a child back to Automatic, turning sleep tracking on) then
+    picks the main camera from that order, exactly as it would from an order an admin had set.
 - **Range: any camera assigned to that child**, including one that is turned off. A chosen camera
   that is turned off (or has been deleted) is skipped and Automatic is used until it is back on;
   turning it back on makes it the main camera again. Moving the chosen camera to another child, or

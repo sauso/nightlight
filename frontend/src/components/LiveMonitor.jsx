@@ -60,12 +60,13 @@ export default function LiveMonitor() {
   const isActive = location.pathname === '/';
   const { kids, cameras, error, loaded, refresh } = useCameras();
   const { settings } = useSettings();
-  // Reordering is admin-only (#552): the camera order also picks the camera each child's sleep is measured
-  // from, so a caregiver's tiles get no drag handle and their sortables are disabled, and no PUT is ever
-  // sent for them (the server would refuse it anyway).
+  // Every signed-in user can reorder (#675; admin-only from #552 until then). The camera order can still pick the
+  // camera a child's sleep is measured from, so the SERVER refuses a non-admin's reorder that would change it
+  // (routes/cameras.js, PUT /reorder), and handleDragEnd puts the tiles back and shows why. `!!user`, not
+  // `true`: no drag handle on a page with nobody signed in (the server would answer it 401 anyway).
   const { user } = useAuth() || {};
   const isAdmin = user?.role === 'admin';
-  const canReorder = isAdmin;
+  const canReorder = !!user;
 
   // Bumping this remounts every camera player (see CameraTile), which rebuilds each
   // stream connection from scratch - the in-app equivalent of restarting the app to
@@ -106,6 +107,16 @@ export default function LiveMonitor() {
   const orderRef = useRef(orderedCameras);
   orderRef.current = orderedCameras;
 
+  // The reorder saves, sent one at a time (#675; why, in handleDragEnd). `saveChainRef` is the tail of the chain;
+  // `pendingSavesRef` counts drops whose save has not settled; `refusalsRef` counts refusals, so a drop queued
+  // before one can tell it was built on a refused order; `refreshWhenIdleRef` asks for one refresh() once the
+  // chain is idle. `reorderRefusal` is the server's message for the banner above the grid.
+  const saveChainRef = useRef(Promise.resolve());
+  const pendingSavesRef = useRef(0);
+  const refusalsRef = useRef(0);
+  const refreshWhenIdleRef = useRef(false);
+  const [reorderRefusal, setReorderRefusal] = useState('');
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
@@ -121,13 +132,49 @@ export default function LiveMonitor() {
     // setOrderedCameras updater (#562). React may call an updater more than once (StrictMode does it on
     // purpose in development, to flush out exactly this), and a side effect inside it sent the same
     // reorder twice. An updater must be pure.
-    // The fire-and-forget `.catch` stays: telling the person a reorder did not save is a design change
-    // (where to show it, whether to roll the grid back), tracked on the issue rather than done here.
     // Built from the ref, not the closure, and the ref is advanced at once: see orderRef above.
+    const before = orderRef.current;
     const next = reorderCameras(orderRef.current, active.id, over.id);
     orderRef.current = next;
     setOrderedCameras(next);
-    api.put('/cameras/reorder', { order: next.map((c) => c.id) }).catch(() => {});
+    // THE SAVE (#675). The grid moved optimistically above, and the server may now refuse the move: 409 with
+    // reason `would_change_sleep_camera` when a non-admin moved the camera a tracked child is measured from.
+    //   - SERIALISED (one promise chain): a drop is sent only after the previous drop's save has settled, so a
+    //     later drop is never judged by the server before an earlier one.
+    //   - On THAT refusal the tiles go back AT ONCE to the order from before this drop (the state AND the ref),
+    //     and the server's message is shown. Not left to refresh(): it can fail (and is an inert spy in the
+    //     tests), and then the refused order would stay on screen with the ref still holding it.
+    //   - A drop queued behind a refused one is NOT sent: it was built on the refused order, and judged alone it
+    //     would be refused too and "put back" the refused order. The tiles stay where the refusal put them.
+    //   - Once the chain is idle after a refusal, refresh() loads the server's order, which is the truth (the
+    //     order is shared, and another viewer may have moved tiles meanwhile).
+    //   - Every OTHER failure stays silent, exactly as before #675 (the grid keeps the new order): the public
+    //     demo's read-only 403 (a banner on every drag there otherwise), a 401 (api.js already sends the person
+    //     to sign in), another 4xx, a 5xx, a network failure. KNOWN LIMIT: such a drop did not save and nothing
+    //     says so; the next cameras poll (15 s, lib/CamerasContext.jsx) puts the grid back to the server's order.
+    const generation = refusalsRef.current;
+    pendingSavesRef.current += 1;
+    saveChainRef.current = saveChainRef.current
+      .then(() => {
+        if (refusalsRef.current !== generation) return undefined;
+        return api.put('/cameras/reorder', { order: next.map((c) => c.id) }).catch((err) => {
+          if (err?.data?.reason !== 'would_change_sleep_camera') return;
+          refusalsRef.current += 1;
+          orderRef.current = before;
+          setOrderedCameras(before);
+          setReorderRefusal(err.message);
+          refreshWhenIdleRef.current = true;
+        });
+      })
+      .finally(() => {
+        pendingSavesRef.current -= 1;
+        if (pendingSavesRef.current === 0 && refreshWhenIdleRef.current) {
+          refreshWhenIdleRef.current = false;
+          refresh?.();
+        }
+      })
+      // The tail must never stay rejected: every later `.then` would be skipped and no drop would save again.
+      .catch(() => {});
   }
 
   // Native Android tells us when it enters/leaves PiP; toggle a body class so the CSS can
@@ -255,6 +302,17 @@ export default function LiveMonitor() {
       <main className="app-main app-main--wide">
         {(listState === 'error' || listState === 'stale') && (
           <LoadFailed what="cameras" error={error} onRetry={refresh} stale={listState === 'stale'} />
+        )}
+
+        {/* A drop the server refused (#675): only the sleep-camera refusal reaches here (see handleDragEnd), and
+            the tiles are already back where they were. Beside the grid, never a browser popup
+            (docs/design-language.md); role="alert" so it is spoken when it appears; it stays until dismissed,
+            because it is about one drop and the person may look up only after letting go. */}
+        {reorderRefusal && (
+          <div className="error-banner" role="alert" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <span>{reorderRefusal}</span>
+            <button type="button" className="btn btn-sm btn-secondary" onClick={() => setReorderRefusal('')}>Dismiss</button>
+          </div>
         )}
 
         {listState === 'loading' && <div className="empty-state">Loading…</div>}

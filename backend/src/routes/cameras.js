@@ -32,7 +32,10 @@ import { logger } from '../lib/logger.js';
 import { startRecording, stopRecording, recordingState, getOndemandSettings, isRecording } from '../lib/recordings.js';
 import { stripUrlPassword, urlHasPassword, resolveUrlPassword, scrubSecrets, findCredentialLeak, decodeUrlCredential } from '../lib/urlCredentials.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-import { clearStalePrimaryPointers } from '../lib/primaryCamera.js';
+import { clearStalePrimaryPointers, primaryCameraRowFor } from '../lib/primaryCamera.js';
+// For the reorder guard (#675). Not a new import cycle: this file already reaches sleepAnalysis.js through
+// recordingReadiness.js and clipCapture.js, and sleepAnalysis.js imports no route.
+import { childTracksSleep } from '../lib/sleepAnalysis.js';
 import { purgeCamera, preflightCameraPurge, purgeFailureReason } from '../lib/entityPurge.js';
 import { recordingReadiness } from '../lib/recordingReadiness.js';
 
@@ -725,25 +728,106 @@ router.post('/clips/delete', requireAdmin, (req, res) => {
   res.json({ deleted });
 });
 
+// Thrown inside the reorder transaction to roll it back (#675). A class of its own so that ONLY this refusal
+// becomes the 409 below: anything else thrown in there (a locked database, a bug) is re-thrown and stays a 500
+// through the error handler, rather than telling a person to fix what is a server fault.
+class ReorderWouldChangeSleepCamera extends Error {
+  constructor(children) {
+    super('the reorder would change the camera a tracked child is measured from');
+    this.children = children;
+  }
+}
+
+// "A", "A and B", "A, B and C": the names in the refusal's sentence.
+const joinNames = (names) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
+
+// The camera each child is measured from, under BOTH tie-breaks (why both: see the route comment). `?? null`: a
+// child with no enabled camera answers null, before and after alike, since sort_order cannot enable a camera.
+function sleepCameraPicks(kids) {
+  return kids.map((c) => ({
+    byId: primaryCameraRowFor(c.id, { tieBreak: 'id' })?.id ?? null,
+    byRowid: primaryCameraRowFor(c.id, { tieBreak: 'rowid' })?.id ?? null,
+  }));
+}
+
 // Persists a custom drag-and-drop order for the Nursery page. Mounted before /:id so
 // Express matches this literal path first, rather than treating "reorder" as an :id.
-// Admin-only (owner decision 2026-10-10, #552). `sort_order` is not only layout: for a child with no
-// primary camera chosen (children.primary_camera_id NULL, the default; #655), or whose chosen one is
-// turned off or gone, the first enabled camera in it is the ONE that child's sleep is scored from and the
-// nightly timelapse is built from (lib/primaryCamera.js, used by lib/sleepAnalysis.js and lib/timelapse.js).
-// A caregiver's drag would therefore still reconfigure sleep tracking for such a child, which is why this
-// stays admin-only after #655 (reopening it is a follow-up). The cost: a caregiver can no longer rearrange
-// the tiles, and the order is shared by every viewer anyway (one sort_order per camera, not per person).
-router.put('/reorder', requireAdmin, (req, res) => {
+//
+// ANY SIGNED-IN USER, with one refusal for a non-admin (#675, owner 2026-10-20, "option A"). History: #552
+// (owner decision 2026-10-10) made this admin-only because `sort_order` is not only layout. For a child with no
+// main camera chosen (children.primary_camera_id NULL: the default, and every child set up before #655), or
+// whose chosen one is turned off or gone, the first ENABLED camera in it is the ONE that child's sleep is scored
+// from and the nightly timelapse is built from (lib/primaryCamera.js, used by lib/sleepAnalysis.js and
+// lib/timelapse.js), so a caregiver's drag could reconfigure sleep tracking. #675 reopens the drag and refuses
+// only that: a non-admin's order is written inside the transaction, and if any TRACKED child is then measured
+// from a different camera than before, the whole transaction is rolled back and the answer is 409 with
+// { error, reason: 'would_change_sleep_camera', children: [{ id, name }] } (a 4xx so Cloudflare keeps the body;
+// additive JSON). An admin's reorder is not checked: admins keep the unrestricted reorder #552 left them.
+//
+// Why the REAL resolver on the REAL post-write state, not a rule written out here: it cannot drift from what
+// scoring and the timelapse do. A chosen main camera, a turned-off camera, a camera that left the child, ties
+// and partial `order` lists (cameras left out keep their sort_order) are all handled by construction.
+// Why BOTH tie-breaks: scoring ('id', and the camera child settings names) and the nightly timelapse ('rowid')
+// have always broken a sort_order tie differently, and a parent sees both; a reorder that settles a tie can
+// move one pick and not the other (pinned by a pair of tests in reorder-scoring-guard.test.js).
+// Why only TRACKED children (childTracksSleep): an untracked child is not scored (its nights answer `off`) and
+// gets no timelapse, so moving its cameras changes nothing anyone sees and must not cause a refusal.
+//
+// ⚠️ A NORMAL HOUSEHOLD CAN BE FULLY LOCKED for a caregiver: one tracked child on Automatic with two cameras means
+// every swap of those two moves the first one, so nothing can be moved until an admin chooses a main camera for
+// that child (child settings), after which its tiles move freely. That is option A as chosen, and the refusal's
+// text says it.
+// ⚠️ KNOWN LIMIT, the general rule (stated once here and in docs/sleep-tracking.md): the guard protects the
+// cameras that are measuring a tracked child NOW. A caregiver may freely place an unassigned camera, a turned-off
+// one, an untracked child's, or one that is not first; a later ADMIN action (assigning a camera, enabling,
+// disabling or deleting one, clearing a child's main camera, turning tracking on) then picks from that order,
+// exactly as it would from an order an admin had set. The order is also shared by every viewer (one sort_order
+// per camera, not per person; a per-person order was option C, not chosen).
+// Cost, measured on a dev laptop (2026-10-20, #675 build): per tracked child one tracking lookup and four
+// resolver calls (each a primary-key lookup or a scan of the small cameras table); 0.24 ms for 2 children and
+// 6 cameras, 1.1 ms for 10 and 30, 6.5 ms for 50 and 150. Once per drop, so not worth caching.
+router.put('/reorder', (req, res) => {
   const { order } = req.body || {};
   if (!Array.isArray(order) || order.some((id) => typeof id !== 'string')) {
     return res.status(400).json({ error: 'order must be an array of camera ids' });
   }
+  // Bounded, for everyone (#675 review): the UI sends each camera once, so a longer list is abuse-only input,
+  // and without a bound one request runs an UPDATE (and, for a non-admin, the guard) per element for as long as
+  // the body limit allows. Side effect: a page whose list is still one 15 s poll behind an admin DELETING a
+  // camera sends one id too many and gets this 400 (silently, LiveMonitor.jsx); its next poll puts the grid
+  // right and the drag can be made again.
+  if (order.length > db.prepare('SELECT COUNT(*) AS n FROM cameras').get().n) {
+    return res.status(400).json({ error: 'order lists more cameras than there are' });
+  }
+  const isAdmin = isAdminRequest(req);
   const setOrder = db.prepare('UPDATE cameras SET sort_order = ? WHERE id = ?');
+  const trackedChildren = () => db.prepare('SELECT id, name FROM children').all().filter((c) => childTracksSleep(c.id));
   const applyOrder = db.transaction((ids) => {
+    const guarded = isAdmin ? [] : trackedChildren();
+    const before = sleepCameraPicks(guarded);
     ids.forEach((id, index) => setOrder.run(index, id));
+    const after = sleepCameraPicks(guarded);
+    const moved = guarded.filter((c, i) => before[i].byId !== after[i].byId || before[i].byRowid !== after[i].byRowid);
+    // Thrown INSIDE db.transaction, so every UPDATE above is rolled back: a refused reorder writes nothing.
+    if (moved.length) throw new ReorderWouldChangeSleepCamera(moved);
   });
-  applyOrder(order);
+  try {
+    applyOrder(order);
+  } catch (err) {
+    if (!(err instanceof ReorderWouldChangeSleepCamera)) throw err;
+    // Ids, not names: server logs go into the support bundle (the same reason the snooze line has no username).
+    logger.info(`[reorder] user ${req.user?.id}: refused, it would change the sleep camera of child ${err.children.map((c) => c.id).join(', ')}`);
+    const names = joinNames(err.children.map((c) => c.name));
+    return res.status(409).json({
+      error: `This move would change which camera is used for sleep tracking and the nightly timelapse of ${names}, so the new order was not saved. ` +
+        `An admin can choose a main camera for ${names} in their settings, after which tiles can be rearranged freely.`,
+      reason: 'would_change_sleep_camera',
+      children: err.children.map(({ id, name }) => ({ id, name })),
+    });
+  }
+  // One line per non-admin reorder (#675 review): a snooze records who did it, and a reorder that can now come
+  // from any account recorded nothing. An admin's is not logged, as before.
+  if (!isAdmin) logger.info(`[reorder] user ${req.user?.id}: accepted (${order.length} cameras)`);
   res.json({ ok: true });
 });
 
@@ -874,8 +958,8 @@ router.post('/', requireAdmin, asyncHandler(async (req, res) => {
 
 // Admin-only, same as adding one: editing includes changing the RTSP URL, which
 // points this server's FFmpeg at an arbitrary address - that's camera management,
-// not day-to-day caregiving. (Reordering and child assignment below stay open to
-// every signed-in user - those are cosmetic.)
+// not day-to-day caregiving. (Reordering, above, is open to every signed-in user with a
+// sleep-camera guard for a non-admin, #675; child assignment, below, is admin-only, #552.)
 router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
   const existing = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Camera not found' });
