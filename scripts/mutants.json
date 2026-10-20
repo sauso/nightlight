@@ -22608,12 +22608,12 @@
     "namePattern": "an admin store with context=auto"
   },
   {
-    "label": "#361 PR4: a child whose sleep tracking is off gets a scoring_view and a replay",
+    "label": "#361 PR4: the detail page's timeline is dropped for every night with a scoring_view",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "  if (!childSleepConfig(childId).track) return null;",
-    "replace": "  if (false) return null;",
+    "find": "  const night = computeNight(childId, nightDate, { includeTimeline, context: applied === 'stored' ? choice.stored : null });",
+    "replace": "  const night = computeNight(childId, nightDate, { context: applied === 'stored' ? choice.stored : null });",
     "expect": "killed",
     "tests": ["display-stored-context.test.js"],
-    "namePattern": "tracking off"
+    "namePattern": "the timeline is kept in both modes"
   }
 ]

@@ -358,8 +358,10 @@ provisional last night with today's settings: a stated limit, pinned by a test.
 `backend/test/display-stored-context.test.js`, the page in `frontend/src/pages/SleepDetail.jsx`, its URL builder in
 `frontend/src/lib/nightView.js`). `computeNightForDisplay(childId, nightDate, { includeTimeline, mode })` in
 `lib/sleepAnalysis.js` is the one place that decides. In mode `'auto'` it replays the saved row's context iff the child
-tracks sleep, a row exists, the WALL CLOCK has reached that row's own `window_end`, the context parses and
-`scoringContextChoice(...).differs`; otherwise it is the plain `computeNight`. It does not use the job's "final" test
+tracks sleep, a row exists, the WALL CLOCK has reached that row's own `window_end`, the night is not in progress
+under today's window (`currentNightDate`: a window end moved later after the save keeps it live, as the card and
+`/sleep/live` show it), the context parses and `scoringContextChoice(...).differs`; otherwise it is the plain
+`computeNight`. It does not use the job's "final" test
 (the row's own `computed_at` past the evidence horizon, #351) on purpose: a night locked by a correction before the
 horizon, and a row whose later passes are refused (`would_downgrade`, the #361 case of a camera turned off after the
 first pass), are never written again after the horizon, so that test would show them with today's settings for ever

@@ -30,7 +30,7 @@ useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const {
   computeNight, computeAndStoreNight, computeNightForDisplay, runNightlySleepJob, SCORING_ALGO, parseScoringContext,
-  currentScoringContext,
+  currentScoringContext, currentNightDate,
 } = await import('../src/lib/sleepAnalysis.js');
 const { TRANSITION } = await import('../src/lib/bedTransitions.js');
 const { default: childrenRouter } = await import('../src/routes/children.js');
@@ -187,6 +187,29 @@ for (const [label, extra, change] of TRIGGERS) {
   });
 }
 
+// The detail page always asks with `detail=1` (includeTimeline), and a night with a scoring_view is exactly the one
+// this PR changes. Code review of PR 4a: dropping `includeTimeline` from the helper's computeNight call survived every
+// other test (they compare numbers, or use identical settings where the plain path runs).
+test('the timeline is kept in both modes: a replay with includeTimeline is the full detail answer, and so is today\'s', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: NOON_AFTER });
+  addCamera(CAM2, CHILD, 1, 'Door cam');
+  layA(CAM);
+  layB(CAM2);
+  const { raw } = storeOriginal();
+  setPrimary(CAM2);
+  const auto = display('auto', { includeTimeline: true });
+  const current = display('current', { includeTimeline: true });
+  assert.equal(auto.scoring_view?.applied, 'stored');
+  assert.equal(current.scoring_view?.applied, 'current');
+  assert.deepEqual(omit(auto, 'scoring_view'), plain({ includeTimeline: true, context: raw }));
+  assert.deepEqual(omit(current, 'scoring_view'), plain({ includeTimeline: true }));
+  for (const [label, out] of [['auto', auto], ['current', current]]) {
+    for (const k of ['segments', 'wakes']) assert.ok(Array.isArray(out[k]) && out[k].length > 0, `${label}: ${k} present`);
+    // These fixtures record no movement outside the bed, so the list is there and empty.
+    assert.ok(Array.isArray(out.visits), `${label}: visits present`);
+  }
+});
+
 // --- 2. when the saved settings are NOT used: the answer is the plain compute, with no new key ------------------
 
 test('identical settings: auto is EXACTLY the plain compute (no scoring, no scoring_view), with and without the timeline', (t) => {
@@ -229,6 +252,21 @@ test('a night whose saved window has NOT ended is live, even with differing sett
   assert.deepEqual(omit(atEnd, 'scoring_view'), plain({ context: raw }));
 });
 
+// Rule 2 on its own. In the test above today's window is the saved one, so rule 5 (in progress under today's window)
+// also keeps the page live; here today's window has already CLOSED (its end was moved earlier, to 22:00) while the
+// saved window still runs to 07:00, so only rule 2 does. (The rule 2 catalogue mutant survived without this test once
+// rule 5 was added in the PR 4a review.)
+test('a saved window that has NOT ended keeps the page live even after today\'s window has closed (rule 2 alone)', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: at(23, 0).getTime() });
+  layA(CAM);
+  const { raw } = storeOriginal(); // during the night: the saved window runs to 07:00
+  setWindow('19:30', '22:00');
+  assertSettingsDiffer(raw);
+  assert.equal(currentNightDate(CHILD), null, 'precondition: not in progress under today\'s window');
+  assert.equal(plain().in_progress, false, 'precondition: today\'s settings call the night over');
+  assert.deepEqual(display('auto'), plain(), 'live: today\'s settings, no new key');
+});
+
 test('a provisional row (window ended, evidence horizon not reached) uses its saved settings: the rule is window_end', (t) => {
   // 07:30, half an hour after the window: the job's first pass. Its horizon (10:00) is still ahead, so a rule that
   // waited for "final evidence" would show today's settings here while the card shows this row.
@@ -243,6 +281,37 @@ test('a provisional row (window ended, evidence horizon not reached) uses its sa
   assert.equal(auto.scoring_view?.applied, 'stored');
   assert.deepEqual(numbers(auto), original);
   assert.deepEqual(numbers(auto), numbers(rowOf()));
+});
+
+// Code review of PR 4a, reproduced from its probe: the window END moved later after the night was saved, so the saved
+// row's window_end has passed while today's window is still open. The card and /sleep/live show the night LIVE; the
+// page used to show a finished replay beside them (in progress false, other minutes).
+test('a night still in progress under TODAY\'s window stays live even though its saved window has ended (rule 5)', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: at(7, 30, 1).getTime() });
+  layA(CAM);
+  const { raw } = storeOriginal(); // 07:30, the 19:30-07:00 window
+  t.mock.timers.setTime(at(7, 45, 1).getTime());
+  setWindow('19:30', '09:00');
+  t.mock.timers.setTime(at(8, 0, 1).getTime());
+  assertSettingsDiffer(raw);
+  assert.ok(Date.now() >= Date.parse(`${rowOf().window_end.replace(' ', 'T')}Z`), 'precondition: the saved window has ended');
+
+  const live = await call(`${server.url}/api/children/${CHILD}/sleep/live`, { token: adminToken });
+  assert.equal(live.body.scope, 'tonight', 'precondition: the card shows it as tonight');
+  assert.equal(live.body.night.in_progress, true);
+
+  const page = await get('?detail=1&context=auto');
+  assert.equal(page.status, 200);
+  assert.equal(page.body.in_progress, true, 'the page is live too');
+  assert.ok(!('scoring_view' in page.body) && !('scoring' in page.body), 'no saved-settings view while it is in progress');
+  assert.equal(page.body.asleep_minutes, live.body.night.asleep_minutes, 'and agrees with the card');
+  assert.deepEqual(display('auto'), plain());
+
+  // Once today's window has closed too, the saved settings apply (the boundary is today's window end, 09:00).
+  t.mock.timers.setTime(at(8, 59, 1).getTime());
+  assert.ok(!('scoring_view' in display('auto')), '08:59: still in progress');
+  t.mock.timers.setTime(at(9, 0, 1).getTime());
+  assert.equal(display('auto').scoring_view?.applied, 'stored', '09:00: finished under both');
 });
 
 test('no saved row, a legacy NULL context, or an unreadable one: today\'s settings, byte-identical, no new key', async (t) => {

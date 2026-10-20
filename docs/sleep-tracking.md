@@ -90,9 +90,10 @@ could show different numbers from its card, or "no data".
 
 | The night | Settings the detail page uses |
 |---|---|
-| Finished (its saved window has ended), saved settings differ from today's | the saved ones, with the line and the switch |
+| Finished (its saved window and today's window have both ended), saved settings differ from today's | the saved ones, with the line and the switch |
 | Finished, saved settings the same as today's | today's (the same; no line) |
-| Still in progress (the saved night's window has not ended yet) | today's |
+| Still in progress under today's sleep window, even if the saved night's window has ended (for example the wake time was moved later after it was saved) | today's, live, as on the child's card |
+| The saved night's window has not ended yet | today's |
 | Nothing saved yet, saved before nights recorded their settings, or a record that can't be read | today's |
 | Sleep tracking is off | none: "Sleep tracking is off" (no line, no switch) |
 
@@ -116,9 +117,9 @@ Known limits. For the first three, use **Show with today's settings**, or have a
   could work it out.
 - A night whose minute-by-minute data has **aged out** (kept 30 days) shows "no data" with either settings, while
   the card keeps its numbers. Nothing brings that data back.
-- "Finished" is the saved night's own window: last night uses its saved settings from the moment its window ends,
-  including the ~3 hours the nightly update may still re-save it. When that update re-saves it with today's
-  settings, the page follows.
+- "Finished" means both the saved night's own window and today's window have ended: last night uses its saved
+  settings from then on, including the ~3 hours the nightly update may still re-save it. When that update re-saves
+  it with today's settings, the page follows.
 
 ### Room temperature (optional)
 
@@ -760,7 +761,8 @@ Known limits:
 For developers (the API behind the dialog and the detail page):
 - `GET /api/children/:id/sleep/:date?context=auto|stored|current`: `current`, or no `context`, is today's
   settings, as before. `auto` (reads only; the detail page sends it) uses the night's saved settings when the night
-  is finished (the saved row's `window_end` has passed), its `scoring_context` can be read, sleep tracking is on
+  is finished (the saved row's `window_end` has passed, and the night is not in progress under today's window),
+  its `scoring_context` can be read, sleep tracking is on
   and the saved camera, timezone or window differ from today's, and today's otherwise. `stored` always uses the
   night's saved `scoring_context`; anything else is a `400`. A night with no usable record (no saved row, `null`,
   or a record that can't be read) answers `400` with `reason: "no_stored_context"` for `stored`. Like any read,
