@@ -53,7 +53,7 @@ export default function SettingsPushPushover() {
       // Server validates the tokens with Pushover when enabling and 400s if they don't check out.
       // Blank fields keep the saved secrets.
       const next = await api.put('/pushover/config', { enabled: po.enabled, app_token: appToken, user_key: userKey, device: po.device || '' });
-      setPo(next); setLastSaved(next); setAppToken(''); setUserKey(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
+      setPo(next); setLastSaved(next); setConfigLoaded(true); setAppToken(''); setUserKey(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 

@@ -122,9 +122,10 @@ function UserSettingsForm() {
   // True while anything on screen differs from what is saved, INCLUDING a typed password (never stored).
   const unsaved = useFormDraft({ key: draftKey, allow: DRAFT_FIELDS, form, baseline, ready: formReady, secrets: [form.password] });
 
-  // Back to what is saved. The photo is left as it is: an existing account's photo already saved on its own.
+  // Back to what is saved. An EXISTING account's photo is left as it is: it already saved on its own the moment it
+  // was chosen. A NEW account has nothing saved, so its chosen photo is part of what is being discarded.
   function discardDraft() {
-    setForm((f) => ({ ...baseline, photo: f.photo }));
+    setForm((f) => ({ ...baseline, photo: isNew ? baseline.photo : f.photo }));
     setRestored(false);
   }
 

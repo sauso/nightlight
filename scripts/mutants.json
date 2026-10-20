@@ -22353,7 +22353,7 @@
     "replace": "    const unlockScroll = () => {};",
     "expect": "killed",
     "tests": ["modal.test.jsx"],
-    "namePattern": "Modal scroll lock \\(#376\\) ★ locked while"
+    "namePattern": "locked while a Modal is open, unlocked when it closes"
   },
   {
     "label": "#376 the scroll lock is a flag, not a count",

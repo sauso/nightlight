@@ -48,7 +48,7 @@ export default function SettingsPushGotify() {
     setBusy(true); setError(''); setSaved(false); setTestMsg(null);
     try {
       const next = await api.put('/gotify/config', { enabled: form.enabled, server_url: form.server_url, app_token: appToken, priority: form.priority });
-      setForm(next); setLastSaved(next); setAppToken(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
+      setForm(next); setLastSaved(next); setConfigLoaded(true); setAppToken(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 

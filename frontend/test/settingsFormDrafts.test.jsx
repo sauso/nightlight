@@ -25,6 +25,9 @@ import SettingsPushPushover from '../src/pages/SettingsPushPushover.jsx';
 import UserSettings from '../src/pages/UserSettings.jsx';
 import { api } from '../src/lib/api.js';
 
+// The caregiver screen turns a chosen file into a data URL with a canvas, which jsdom does not have.
+vi.mock('../src/lib/imageResize.js', () => ({ fileToAvatarDataUrl: vi.fn(async () => 'data:image/png;base64,AAAA') }));
+
 const everythingStored = () => [localStorage, sessionStorage]
   .flatMap((s) => Object.keys(s).map((k) => `${k}=${s.getItem(k)}`)).join('\n');
 const MARK = 'PLANTED-SECRET-377';
@@ -303,6 +306,27 @@ describe('Settings -> push providers', () => {
     await waitFor(() => expect(screen.getByLabelText(/Priority/).value).toBe('9'));
   });
 
+  test('Gotify: a Save that succeeds after a FAILED load still clears an older draft (it must not come back next visit)', async () => {
+    api.get.mockResolvedValue(GOTIFY);
+    const first = renderAsAdmin(<SettingsPushGotify />);
+    const p1 = await screen.findByLabelText(/Priority/);
+    await first.user.clear(p1);
+    await first.user.type(p1, '9');
+    first.unmount();
+    expect(Object.keys(sessionStorage)).toHaveLength(1);
+
+    api.get.mockRejectedValue(new Error('offline'));
+    putSpy.mockResolvedValue({ ...GOTIFY, priority: 4 });
+    const second = renderAsAdmin(<SettingsPushGotify />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled());
+    const p2 = screen.getByLabelText(/Priority/);
+    await second.user.clear(p2);
+    await second.user.type(p2, '4');
+    await second.user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    await waitFor(() => expect(Object.keys(sessionStorage)).toEqual([]));
+  });
+
   test('Gotify: Save clears the draft', async () => {
     api.get.mockResolvedValue(GOTIFY);
     putSpy.mockResolvedValue({ ...GOTIFY, priority: 8 });
@@ -445,6 +469,27 @@ describe('add / edit caregiver', () => {
     await user.click(screen.getByRole('button', { name: 'Discard changes' }));
     expect(screen.getByLabelText('Last name').value).toBe('');
     expect(Object.keys(sessionStorage)).toEqual([]);
+  });
+
+  test('Discard changes also drops a photo chosen for a NEW caregiver, but keeps an existing one\'s (it saved itself)', async () => {
+    const png = new File(['x'], 'p.png', { type: 'image/png' });
+    const newOne = mount('/settings/users/new');
+    await newOne.user.upload(document.querySelector('input[type="file"]'), png);
+    expect(await screen.findByRole('button', { name: 'Remove' })).toBeInTheDocument();
+    await newOne.user.type(screen.getByLabelText('First name'), 'Zed');
+    await newOne.user.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
+    expect(screen.getByLabelText('First name').value).toBe('');
+    newOne.unmount();
+
+    const existing = mount('/settings/users/u-a');
+    await screen.findByLabelText('Last name'); // the form renders once the account has loaded
+    await existing.user.upload(document.querySelector('input[type="file"]'), png);
+    await waitFor(() => expect(putSpy).toHaveBeenCalledWith('/auth/users/u-a', { photo: expect.stringContaining('data:') }, expect.anything()));
+    await existing.user.type(screen.getByLabelText('Last name'), 'Smith');
+    await existing.user.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(screen.getByLabelText('Last name').value).toBe('');
+    expect(screen.getByText('Change photo')).toBeInTheDocument();
   });
 
   test('removing a caregiver clears its draft', async () => {

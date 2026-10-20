@@ -53,7 +53,7 @@ export default function SettingsPushNtfy() {
       const payload = { enabled: form.enabled, server_url: form.server_url, topic: form.topic, token, username: form.username };
       if (password) payload.password = password;
       const next = await api.put('/ntfy/config', payload);
-      setForm(next); setLastSaved(next); setToken(''); setPassword(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
+      setForm(next); setLastSaved(next); setConfigLoaded(true); setToken(''); setPassword(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 
