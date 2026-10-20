@@ -749,7 +749,8 @@ export function applyCorrections(childId, nights) {
 // EMPTY BED early return leaves at `base`'s null defaults (sleepAnalysis.js), and so exactly the columns
 // upsertNight stores as NULL for such a night, including the shadow and algo figures (plan review R7).
 // Everything NOT listed is an OBSERVATION about the night and is kept as measured: its window, how many
-// minutes the camera actually saw (coverage_minutes), the room's temperature, which camera scored it, and
+// minutes the camera actually saw (coverage_minutes), the room's temperature, which camera scored it (and,
+// since #361, the stored `scoring_context`: camera id, timezone, window and scoring version), and
 // what the parent was already notified. "Nobody was in the bed" is a statement about the child. It says
 // nothing about whether the camera was watching, and a detector-empty night keeps all of those too.
 //

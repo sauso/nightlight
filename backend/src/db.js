@@ -205,6 +205,7 @@ db.exec(`
     coverage_minutes INTEGER,
     unknown_minutes INTEGER,
     in_bed_at TEXT,
+    scoring_context TEXT,
     computed_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (child_id, night_date)
   );
@@ -941,6 +942,20 @@ if (!sleepNightsColumns.includes('unknown_minutes')) {
 // installs, same as unknown_minutes; this guard is the upgrade path.
 if (!sleepNightsColumns.includes('in_bed_at')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN in_bed_at TEXT');
+}
+
+// What produced a stored night (#361): a small versioned JSON of the scored camera's id, the timezone, the
+// window actually used and the scoring version (`SCORING_ALGO`), written by upsertNight on every store
+// (sleepAnalysis.js scoringContextFor). Before this, a row kept the answer but not the question, so a later
+// re-score silently used today's camera and settings. NULL means "unknown provenance": every row stored
+// before this column. There is no automatic backfill, on purpose: the old camera cannot be known, and
+// inventing one would be worse than NULL. A legacy row stays NULL until it is next successfully re-stored (the
+// nightly job or a review save re-storing a provisional last night, or an admin Recompute), which writes a
+// context like any other store.
+// Every reader must treat NULL as "today's behaviour"; in this release nothing reads the column yet. Also in
+// the CREATE TABLE above for fresh installs; this guard is the upgrade path.
+if (!sleepNightsColumns.includes('scoring_context')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN scoring_context TEXT');
 }
 
 // Quick-silence: a per-camera temporary mute of ALL alerts (motion/sound/ONVIF/MQTT), for when you're

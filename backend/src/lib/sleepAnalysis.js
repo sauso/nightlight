@@ -21,6 +21,25 @@ const REPORT_FRESH_MS = 2 * 60 * 60 * 1000;
 // All thresholds are deliberately conservative constants up here so we can tune against real nights
 // without schema/UI churn (they can graduate to settings later).
 
+// The version of the scoring rules, recorded in every stored night's `scoring_context` (#361) so a night
+// can later be told apart as "scored by rules N" after rules N+1 ship.
+//
+// ⚠️ BUMP RULE: bump this by hand, in the SAME commit, whenever a threshold or rule in this file changes
+// what computeNight returns for the same inputs (the samples, the transitions, the camera, the timezone and
+// the window). Do NOT bump it for a refactor, a comment, or a change that leaves every output identical.
+// The golden test in scoring-context.test.js is one tripwire (it fails when the output for its one fixture
+// night moves), not a proof that an untouched golden means nothing moved. It is a label,
+// not the app version: a release changes the version without touching scoring, and one release can change
+// scoring twice.
+//
+// Why by hand and not a hash of these constants (decided for #361 PR 1; design question 2 in
+// planning/361-scoring-context.md, the owner may overrule): a hash flags harmless edits and still misses a
+// rule change that is code rather than a constant. The stored value is a plain string, so moving to a
+// derived tag later costs only a new value.
+// ⚠️ KNOWN LIMIT: nothing enforces the bump. A scoring change that forgets it stores the old label on nights
+// the new rules produced. Nothing reads the label yet, so today that only costs the history its accuracy.
+export const SCORING_ALGO = '1';
+
 const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = real movement (sleeping room ~0)
 // Outside-bed changed-fraction above this = real activity outside the bed (someone in the room, or the
 // child out of it). Deliberately HIGHER than MOTION_ACTIVE, and not for symmetry's sake: the outside
@@ -758,8 +777,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // re-scores any night that is computed again, not only new ones: the nightly job's re-store of the
   // last completed night (until ~3h after its window), storeNightBeforeCorrection, the admin Recompute
   // button, and every fresh read (the detail page, the morning review, /sleep/live). A stored row that is
-  // never re-stored keeps the numbers of the camera it was scored from; sleep_nights does not record
-  // which camera that was (`analysis_camera_*` below is on the computed result only).
+  // never re-stored keeps the numbers of the camera it was scored from. Since #361 the stored row records
+  // that camera's id in `scoring_context` (see scoringContextFor), but nothing reads it back yet, so every
+  // compute here still resolves the camera afresh; rows stored before #361 have no record (NULL).
   //
   // Why one and not all (owner's call, 2026-08-29): the old code ORed every camera's timeline together,
   // so a minute counted as active if ANY camera saw something. That is not the conservative choice it
@@ -2209,16 +2229,23 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
 // goes through — a SQL-side `datetime('now')` would silently read the REAL wall clock even in a test
 // that has frozen "now" to a fictional date, making that comparison meaningless. Binding a JS-derived
 // value keeps `computed_at` in the same clock domain as `window_end` and `isEvidenceFinal`.
+//
+// `scoring_context` (#361) is in BOTH the insert and the ON CONFLICT update, and is written by this one
+// statement together with the numbers it explains, never by a separate UPDATE. A provisional night (inside
+// its 3 h evidence window) is re-stored by the nightly job and may legitimately be scored from a different
+// camera on a later pass (an admin fixed the primary), so a context frozen on the first write would describe
+// numbers it did not produce. Once the row is final the existing finality rule stops re-storing it, so its
+// context freezes with it.
 const upsertNight = db.prepare(
   `INSERT INTO sleep_nights
      (child_id, night_date, window_start, window_end, status, onset_at, wake_at,
       onset_at_shadow, wake_at_shadow, onset_at_algo, wake_at_algo,
       asleep_minutes, awake_minutes, wake_count, longest_stretch_minutes, coverage_minutes,
-      unknown_minutes, in_bed_at, avg_temperature, avg_humidity, computed_at)
+      unknown_minutes, in_bed_at, avg_temperature, avg_humidity, scoring_context, computed_at)
    VALUES (@child_id, @night_date, @window_start, @window_end, @status, @onset_at, @wake_at,
            @onset_at_shadow, @wake_at_shadow, @onset_at_algo, @wake_at_algo,
            @asleep_minutes, @awake_minutes, @wake_count, @longest_stretch_minutes, @coverage_minutes,
-           @unknown_minutes, @in_bed_at, @avg_temperature, @avg_humidity, @computed_at)
+           @unknown_minutes, @in_bed_at, @avg_temperature, @avg_humidity, @scoring_context, @computed_at)
    ON CONFLICT(child_id, night_date) DO UPDATE SET
      window_start=excluded.window_start, window_end=excluded.window_end, status=excluded.status,
      onset_at=excluded.onset_at, wake_at=excluded.wake_at, in_bed_at=excluded.in_bed_at,
@@ -2229,8 +2256,37 @@ const upsertNight = db.prepare(
      longest_stretch_minutes=excluded.longest_stretch_minutes, coverage_minutes=excluded.coverage_minutes,
      unknown_minutes=excluded.unknown_minutes,
      avg_temperature=excluded.avg_temperature, avg_humidity=excluded.avg_humidity,
+     scoring_context=excluded.scoring_context,
      computed_at=excluded.computed_at`
 );
+
+// The QUESTION a stored night answered (#361; design: planning/361-scoring-context.md section 3): which
+// camera scored it, in which timezone, over which window, by which version of the rules. Returned as the
+// JSON string upsertNight stores. Nothing reads it back yet; it exists so a later change can re-score a
+// night with the settings it was scored with instead of today's.
+//
+// - The SAME reads computeNight makes (appSettings, childSleepConfig, parseHm), so the context records what
+//   was actually used. computeAndStoreNight calls this straight after computeNight with nothing in between
+//   that can yield (better-sqlite3 is synchronous), so the two cannot see different settings.
+// - `window` is the EFFECTIVE window, `HH:MM` of what parseHm made of the saved text, never the raw text: a
+//   malformed saved time (sleepInsights.test.js allows one) scores the night as 19:00, so 19:00 is stored.
+// - `tz` is the configured zone or computeNight's own 'UTC' fallback, never a zone assumed here.
+// - `camera_id` is the analysis camera's ID only (null when none was enabled). No camera name, address or
+//   credential, and nothing about the child: the name can change and is looked up live, and those fields
+//   can identify a household. Camera ids are uuids minted at creation (routes/cameras.js).
+// - `v` versions this JSON's own shape; `algo` versions the scoring rules (SCORING_ALGO, bumped by hand).
+function scoringContextFor(childId, summary) {
+  const scoredTz = appSettings().timezone || 'UTC';
+  const cfg = childSleepConfig(childId);
+  const hm = ({ h, m }) => `${pad(h)}:${pad(m)}`;
+  return JSON.stringify({
+    v: 1,
+    camera_id: summary.analysis_camera_id ?? null,
+    tz: scoredTz,
+    window: { start: hm(parseHm(cfg.start)), end: hm(parseHm(cfg.end)) },
+    algo: SCORING_ALGO,
+  });
+}
 
 // ROADMAP §1.6: what the parent was actually TOLD about a night's wake time, so a later recompute can
 // tell "never notified" from "notified, wake was unknown" apart — see runNightlySleepJob. Deliberately
@@ -2389,6 +2445,10 @@ export function computeAndStoreNight(childId, nightDate, { allowDowngrade = true
     ...summary,
     avg_temperature: summary.climate?.temp_avg ?? null,
     avg_humidity: summary.climate?.humidity_avg ?? null,
+    // After `...summary`, so it can never be shadowed by a computeNight key. Only bound here, never added
+    // to `summary` or the return value below: computeNight's output, and so every API response built from
+    // it, stays exactly as it was (#361 PR 1 changes no number and no response shape except the stored row).
+    scoring_context: scoringContextFor(childId, summary),
     // toSqlUtc truncates to the minute (it exists to match activity_samples.bucket_start) — a harmless
     // sub-minute fuzz against runNightlySleepJob's 3h/30min-granularity finality check, and nothing else
     // reads computed_at at second precision.

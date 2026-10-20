@@ -168,6 +168,48 @@ describe('issue #501 columns: sleep_nights.in_bed_at and bed_transitions.wrong_r
   });
 });
 
+describe('#361 sleep_nights.scoring_context', () => {
+  // Same shape as the #501 test above, for the same reason: the column is in the literal CREATE TABLE (fresh
+  // installs) AND a guarded ALTER (upgrades), and a fresh boot cannot tell them apart. Rewinding a real
+  // database proves the ALTER path, that a night stored before the upgrade reads NULL ("unknown provenance",
+  // never invented: nothing recorded which camera scored it) and that a second boot changes nothing.
+  test('an existing install gains the column on upgrade, TEXT, nullable, no default, old rows NULL', () => {
+    const dir = freshDir();
+    assert.equal(bootDbJs(dir).status, 0);
+    const full = columnsOf(dir, 'sleep_nights');
+    assert.ok(full.includes('scoring_context'), 'a fresh install has scoring_context');
+    {
+      const db = new Database(join(dir, 'babymonitor.db'));
+      try {
+        db.exec('ALTER TABLE sleep_nights DROP COLUMN scoring_context');
+        db.exec(`INSERT INTO sleep_nights (child_id, night_date, window_start, window_end, status, asleep_minutes)
+                 VALUES ('old-kid', '2026-09-01', '2026-09-01 09:30:00', '2026-09-01 21:00:00', 'ok', 600)`);
+      } finally {
+        db.close();
+      }
+    }
+    assert.ok(!columnsOf(dir, 'sleep_nights').includes('scoring_context'), 'setup: rewound');
+
+    for (let bootNumber = 1; bootNumber <= 2; bootNumber++) {
+      const boot = bootDbJs(dir);
+      assert.equal(boot.status, 0, `upgrade/reboot ${bootNumber}: ${boot.stderr}`);
+      assert.deepEqual(columnsOf(dir, 'sleep_nights').sort(), [...full].sort(), `sleep_nights after boot ${bootNumber}`);
+      const db = new Database(join(dir, 'babymonitor.db'));
+      try {
+        const def = db.prepare('PRAGMA table_info(sleep_nights)').all().find((c) => c.name === 'scoring_context');
+        assert.equal(def.type, 'TEXT');
+        assert.equal(def.notnull, 0, 'nullable: NULL is the honest answer for every night stored before this column');
+        assert.equal(def.dflt_value, null, 'no default: a default would invent a context for old rows');
+        const old = db.prepare("SELECT scoring_context, asleep_minutes FROM sleep_nights WHERE child_id = 'old-kid'").get();
+        assert.equal(old.scoring_context, null, 'no backfill');
+        assert.equal(old.asleep_minutes, 600, 'and the old night is otherwise untouched');
+      } finally {
+        db.close();
+      }
+    }
+  });
+});
+
 describe('sleep_reviews.nobody_in_bed ("no one was in the bed")', () => {
   // Plan review R6. The loop beside this migration adds its columns as a bare INTEGER, which leaves every
   // EXISTING review NULL — a third state that `nobody_in_bed = 1` / `= 0` in SQL silently fails to match.
