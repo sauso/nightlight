@@ -22416,5 +22416,32 @@
     "expect": "killed",
     "tests": ["settingsFormDrafts.test.jsx"],
     "namePattern": "failed load neither writes nor erases a stored draft, and the page stays usable"
+  },
+  {
+    "label": "#361 the scoring context is frozen on the first write (left out of ON CONFLICT)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "     scoring_context=excluded.scoring_context,",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["scoring-context.test.js"],
+    "namePattern": "a provisional re-store refreshes the context"
+  },
+  {
+    "label": "#361 the scoring context never records the scored camera",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    camera_id: summary.analysis_camera_id ?? null,",
+    "replace": "    camera_id: null,",
+    "expect": "killed",
+    "tests": ["scoring-context.test.js"],
+    "namePattern": "a stored night records exactly v, camera_id, tz, window and algo"
+  },
+  {
+    "label": "#361 the scoring context assumes UTC instead of the timezone that scored the night",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  const scoredTz = appSettings().timezone || 'UTC';",
+    "replace": "  const scoredTz = 'UTC';",
+    "expect": "killed",
+    "tests": ["scoring-context.test.js"],
+    "namePattern": "tz and window are the ones computeNight used"
   }
 ]

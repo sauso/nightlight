@@ -301,6 +301,25 @@ the bottom of `db.js` (`PRAGMA table_info` + conditional `ALTER TABLE`) — ther
 framework. Follow this same pattern for new columns: check `table_info`, `ALTER TABLE` if
 missing, keep it idempotent.
 
+**`sleep_nights.scoring_context` records what produced a stored night** (#361, design in
+`planning/361-scoring-context.md`). A stored night used to keep the answer (times, minutes, status) but not the
+question, so any later re-score silently used today's camera and settings. Every store (`computeAndStoreNight`,
+through `upsertNight`, in the same statement as the numbers, including the re-stores of a provisional night)
+now writes a small JSON string: `v` (the JSON's own version, `1`), `camera_id` (the id of the camera the night
+was scored from, `null` when none was enabled; never its name, address or credentials), `tz` (the app timezone
+used, or `UTC` when none is set), `window` (`start`/`end` as `HH:MM`, the window actually used, so a malformed
+saved time is stored as the `19:00` it scored with) and `algo` (`SCORING_ALGO` in `lib/sleepAnalysis.js`). It is
+written for every status, `off` and `no_data` included. **Nothing reads it yet**, so nothing a person sees
+changes; the only visible difference is one more key, a string, on the endpoints that return the raw stored row
+(`GET /api/children/:id/sleep`, `GET /api/children/:id/sleep/:date?stored=1`, and `GET
+/api/children/:id/sleep/live` when it serves last night's saved row). Nights stored before the column existed read `NULL` ("unknown provenance"): there is no automatic
+backfill, and a legacy row stays `NULL` until it is next successfully re-stored (the nightly job, or a review
+save, re-storing a provisional last night; or an admin Recompute). A final row is never re-stored by the nightly job, so its context, like its
+numbers, stays as written. **`SCORING_ALGO` is bumped by hand**, in the same commit as any change to a threshold
+or rule that changes what `computeNight` returns for the same inputs (not for refactors, and not the app
+version). Known limit: nothing enforces the bump; the golden test in `backend/test/scoring-context.test.js`
+fails when `computeNight`'s output for its one fixture night moves, which is a reminder, not a guarantee.
+
 **Deleting a child or a camera is `lib/entityPurge.js`** (#540, #554), and it deletes everything that belongs to
 it. Most of the history tables have **no foreign key** to `children` / `cameras` (deliberately: `bed_transitions`,
 `activity_samples`, `detection_events`, `camera_events`, `sensor_readings`, `sleep_nights`, `sleep_reviews`), so
