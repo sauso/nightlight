@@ -43,6 +43,20 @@ describe('★ secrets are never stored', () => {
   test('non-primitive values (a photo object, a nested object) are not stored', () => {
     expect(pickDraftFields({ name: 'a', photo: { url: 'x' }, list: [1] }, ['name', 'photo', 'list'])).toEqual({ name: 'a' });
   });
+
+  test('#377 a URL that carries credentials is dropped whatever the field is called, a plain URL is kept', () => {
+    // SECRET_KEY_RE reads key NAMES, and `server_url` is an innocent name for a field that can hold a password.
+    const values = {
+      server_url: `https://user:${SECRET}@push.example.com/path`,
+      topic_url: `https://${SECRET}@push.example.com`,   // a token as the whole userinfo
+      plain_url: 'https://push.example.com/path?x=a@b',   // '@' in a query is not userinfo
+      host_note: 'mail me at me@example.com',             // not a URL authority
+    };
+    const allow = Object.keys(values);
+    saveDraft('k', values, allow);
+    expect(allStoredText()).not.toContain(SECRET);
+    expect(loadDraft('k', allow)).toEqual({ plain_url: values.plain_url, host_note: values.host_note });
+  });
 });
 
 describe('storing and restoring', () => {

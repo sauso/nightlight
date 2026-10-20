@@ -22363,5 +22363,68 @@
     "expect": "killed",
     "tests": ["lib/scrollLock.test.js"],
     "namePattern": "locks on the first lock and unlocks only when the LAST"
+  },
+  {
+    "label": "#377 General: a draft is judged against the placeholder settings before the server's arrive",
+    "file": "frontend/src/pages/SettingsGeneral.jsx",
+    "find": "ready: loaded !== false });",
+    "replace": "ready: true });",
+    "expect": "killed",
+    "tests": ["settingsFormDrafts.test.jsx"],
+    "namePattern": "equals the placeholder"
+  },
+  {
+    "label": "#377 caregiver screen is not keyed by id: one account's draft is written under another's key",
+    "file": "frontend/src/pages/UserSettings.jsx",
+    "find": "key={id || 'new'}",
+    "replace": "key=\"same\"",
+    "expect": "killed",
+    "tests": ["settingsFormDrafts.test.jsx"],
+    "namePattern": "never writes the first one"
+  },
+  {
+    "label": "#377 a URL carrying a login is stored in a draft",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "if (typeof v === 'string' && URL_USERINFO_RE.test(v)) continue;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["lib/formDraft.test.js", "settingsFormDrafts.test.jsx"],
+    "namePattern": "carries credentials|login written into it"
+  },
+  {
+    "label": "#377 the ntfy topic is stored in a draft",
+    "file": "frontend/src/pages/SettingsPushNtfy.jsx",
+    "find": "const DRAFT_FIELDS = ['enabled', 'server_url', 'username'];",
+    "replace": "const DRAFT_FIELDS = ['enabled', 'server_url', 'username', 'topic'];",
+    "expect": "killed",
+    "tests": ["settingsFormDrafts.test.jsx"],
+    "namePattern": "the topic, token and password are never stored"
+  },
+  {
+    "label": "#377 the MQTT certificate text is stored in a draft",
+    "file": "frontend/src/pages/SettingsMqtt.jsx",
+    "find": "'mqtt_tls', 'mqtt_tls_verify'];",
+    "replace": "'mqtt_tls', 'mqtt_tls_ca', 'mqtt_tls_verify'];",
+    "expect": "killed",
+    "tests": ["settingsFormDrafts.test.jsx"],
+    "namePattern": "a typed password and certificate text are never stored"
+  },
+  {
+    "label": "#377 MQTT Save counts an unsent certificate as saved",
+    "file": "frontend/src/pages/SettingsMqtt.jsx",
+    "find": "setBaseline((b) => ({ ...b, ...sent }));",
+    "replace": "setBaseline((b) => ({ ...b, ...form, ...sent }));",
+    "expect": "killed",
+    "tests": ["settingsFormDrafts.test.jsx"],
+    "namePattern": "NOT counted as saved by a Save"
+  },
+  {
+    "label": "#377 Gotify: a failed config load erases a stored draft",
+    "file": "frontend/src/pages/SettingsPushGotify.jsx",
+    "find": "ready: configLoaded, secrets: [appToken]",
+    "replace": "ready: loaded, secrets: [appToken]",
+    "expect": "killed",
+    "tests": ["settingsFormDrafts.test.jsx"],
+    "namePattern": "failed load neither writes nor erases a stored draft, and the page stays usable"
   }
 ]
