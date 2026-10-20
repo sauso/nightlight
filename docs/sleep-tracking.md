@@ -660,9 +660,11 @@ through the API; its 409 says which reason applied — `reason`, `status`, `cove
 
 **Each saved night also records what it was worked out from**: which camera (by its id), the timezone, the
 sleep window actually used, and the version of the detection rules. Recompute does not use it yet: it still
-works the night out with today's camera and settings, as described above, and nothing on screen changes. It
-appears only as a `scoring_context` field on the API's saved-night answers. Nights saved before this was added
-have none (`null`), and are not filled in after the fact: an older night gets one only when it is saved again
+works the night out with today's camera and settings, as described above, and nothing on screen changes. (The
+sleep calculation can now be handed that record and work a night out again with the camera, timezone and window it
+names, still with today's detection rules, but nothing uses that yet: it is groundwork for a later choice in
+Recompute.) It appears only as a `scoring_context` field on the API's saved-night answers. Nights saved before
+this was added have none (`null`), and are not filled in after the fact: an older night gets one only when it is saved again
 (for example by the morning update while it is still last night, or by a Recompute). Details for developers:
 [architecture.md](architecture.md), "Data layer".
 

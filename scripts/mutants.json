@@ -22475,8 +22475,8 @@
   {
     "label": "#361 the scoring context never records the scored camera",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "    camera_id: summary.analysis_camera_id ?? null,",
-    "replace": "    camera_id: null,",
+    "find": "camera_id: summary.analysis_camera_id ?? null",
+    "replace": "camera_id: null",
     "expect": "killed",
     "tests": ["scoring-context.test.js"],
     "namePattern": "a stored night records exactly v, camera_id, tz, window and algo"
@@ -22484,10 +22484,46 @@
   {
     "label": "#361 the scoring context assumes UTC instead of the timezone that scored the night",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "  const scoredTz = appSettings().timezone || 'UTC';",
-    "replace": "  const scoredTz = 'UTC';",
+    "find": "    tz: appSettings().timezone || 'UTC',",
+    "replace": "    tz: 'UTC',",
     "expect": "killed",
     "tests": ["scoring-context.test.js"],
     "namePattern": "tz and window are the ones computeNight used"
+  },
+  {
+    "label": "#361 step 2: a context replay ignores the stored camera and scores today's primary",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    mainCam = contextCameraStmt.get(ctx.camera_id) || null;",
+    "replace": "    mainCam = currentScoringCamera(childId);",
+    "expect": "killed",
+    "tests": ["scoring-context-replay.test.js"],
+    "namePattern": "replay: naming a different primary camera"
+  },
+  {
+    "label": "#361 step 2: a context replay ignores the stored timezone",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  const tz = ctx ? ctx.tz : appSettings().timezone || 'UTC';",
+    "replace": "  const tz = appSettings().timezone || 'UTC';",
+    "expect": "killed",
+    "tests": ["scoring-context-replay.test.js"],
+    "namePattern": "replay: changing the app timezone"
+  },
+  {
+    "label": "#361 step 2: a context replay ignores the stored window",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  const win = ctx ? ctx.window : cfg;",
+    "replace": "  const win = cfg;",
+    "expect": "killed",
+    "tests": ["scoring-context-replay.test.js"],
+    "namePattern": "replay: changing the child window"
+  },
+  {
+    "label": "#361 step 2: a deleted context camera silently falls back to today's primary",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (!mainCam) cameraProblem = 'camera_deleted';",
+    "replace": "    if (!mainCam) mainCam = currentScoringCamera(childId);",
+    "expect": "killed",
+    "tests": ["scoring-context-replay.test.js"],
+    "namePattern": "a deleted context camera is no_data"
   }
 ]
