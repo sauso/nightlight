@@ -46,13 +46,24 @@
   {
     "label": "#787 delete during transcoder start misses 404",
     "file": "backend/src/routes/cameras.js",
-    "find": "    if (!updated) return res.status(404).json({ error: 'Camera not found' });\r\n",
+    "find": "  if (!updated) return res.status(404).json({ error: 'Camera not found' });\r\n",
     "replace": "",
     "expect": "killed",
     "tests": [
       "camera-edit-keep-fresh.test.js"
     ],
     "namePattern": "delete while transcoder start is awaited returns 404"
+  },
+  {
+    "label": "#793 sub-stream leg gated on the row read before the probe",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  if (!updated.disabled) {\r\n    try {\r\n      if (subConfigured(updated))",
+    "replace": "  if (!existing.disabled) {\r\n    try {\r\n      if (subConfigured(updated))",
+    "expect": "killed",
+    "tests": [
+      "camera-edit-keep-fresh.test.js"
+    ],
+    "namePattern": "#793 a camera disabled while the ONVIF probe waits"
   },
   {
     "label": "#787 re-sent old sub path overwrites concurrent sub-stream change",

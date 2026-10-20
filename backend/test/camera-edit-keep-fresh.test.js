@@ -32,6 +32,7 @@ await new Promise((resolve) => mediamtx.listen(0, '127.0.0.1', resolve));
 process.env.MEDIAMTX_API = `http://127.0.0.1:${mediamtx.address().port}`;
 ({ default: db } = await import('../src/db.js'));
 const { default: camerasRouter } = await import('../src/routes/cameras.js');
+const { subCameraId } = await import('../src/lib/subStream.js');
 const server = await mountRouter('/api/cameras', camerasRouter);
 const admin = makeUser(db, { id: 'u-787', username: 'admin-787', role: 'admin' });
 const token = signToken({ sub: admin.id, role: 'admin', sid: makeSession(db, admin.id) });
@@ -242,6 +243,42 @@ test('delete while a rejecting transcoder start is awaited returns 404', async (
     assert.equal(finish.status, 404, JSON.stringify(finish.body));
     assert.deepEqual(finish.body, { error: 'Camera not found' });
   } finally { release(); }
+});
+
+// #793: the sub-stream leg used to be gated on `existing.disabled`, the row read before the probe, so a camera
+// disabled while the probe waited still got a low-quality transcoder. startSubStream calls the (mocked)
+// startTranscoder with `<id>-sub`, so a sub start is visible in `starts`; the control test below proves a
+// skipped leg cannot make the regression test pass.
+const SUB = 'rtsp://user:pass@example/low';
+const subStarts = () => starts.filter((start) => start[0] === subCameraId(CAM));
+const withSub = () => db.prepare('UPDATE cameras SET sub_rtsp_url = ? WHERE id = ?').run(SUB, CAM);
+
+test('#793 control: an enabled camera with a sub-stream gets exactly one sub start from an ONVIF save', async () => {
+  const { finish } = await duringProbe({ name: 'My rename' }, () => {}, { setup: withSub });
+  assert.equal(finish.status, 200, JSON.stringify(finish.body));
+  assert.equal(subStarts().length, 1);
+  assert.equal(subStarts()[0][1], SUB);
+});
+
+test('#793 a camera disabled while the ONVIF probe waits does not get its sub-stream started', async () => {
+  const { finish } = await duringProbe({ name: 'My rename' }, () => {
+    db.prepare('UPDATE cameras SET disabled = 1 WHERE id = ?').run(CAM);
+  }, { setup: withSub });
+  assert.equal(finish.status, 200, JSON.stringify(finish.body));
+  assert.equal(row().disabled, 1, 'precondition: the camera was disabled during the probe');
+  assert.equal(row().name, 'My rename');
+  assert.equal(starts.length, 0, 'no transcoder of any kind may start for a camera that is now disabled');
+});
+
+test('#793 a camera enabled while the probe waits gets the saved sub-stream applied', async () => {
+  // Gating on the saved row alone (not on `existing` too): the enable route may have started the camera from a
+  // row that predates this save's sub path, so this save applies the saved one.
+  const { finish } = await duringProbe({ name: 'My rename' }, () => {
+    db.prepare('UPDATE cameras SET disabled = 0 WHERE id = ?').run(CAM);
+  }, { setup: () => { withSub(); db.prepare('UPDATE cameras SET disabled = 1 WHERE id = ?').run(CAM); } });
+  assert.equal(finish.status, 200, JSON.stringify(finish.body));
+  assert.equal(row().disabled, 0, 'precondition: the camera was enabled during the probe');
+  assert.equal(subStarts().length, 1);
 });
 
 test('unknown camera is 404 and a plain rename saves', async () => {

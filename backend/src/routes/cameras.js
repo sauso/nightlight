@@ -1061,9 +1061,14 @@ router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
   }
   // Apply the sub-stream change to the running pipeline (unless the camera is disabled): start/
   // restart its transcoder if a sub-stream is configured, or tear it down if it was cleared.
-  if (!existing.disabled) {
-    const updated = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
-    if (!updated) return res.status(404).json({ error: 'Camera not found' });
+  // #793: gate on the row as saved NOW, not on `existing`, which was read before the ONVIF probe (up to ~25 s).
+  // `existing.disabled` let a camera disabled during the probe get its sub-stream transcoder started, because
+  // startSubStream never checks `disabled` itself (the legs below do, each on the row it is handed). The other
+  // direction is deliberate too: a camera enabled during the probe was started by the enable route from a row that
+  // may predate this save's sub path, so this save applies the saved one (starts are serialised per camera, #478).
+  const updated = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!updated) return res.status(404).json({ error: 'Camera not found' });
+  if (!updated.disabled) {
     try {
       if (subConfigured(updated)) await startSubStream(updated);
       else await stopSubStream(updated);

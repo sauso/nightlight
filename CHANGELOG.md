@@ -11,6 +11,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **A camera disabled while its settings were being saved no longer gets its low-quality stream started.** Saving a camera that uses ONVIF can wait up to about 25 seconds while the camera is probed. If someone disabled the camera in that window, the save still started its low-quality stream, because it checked whether the camera was disabled before the wait. It now checks after the save, so a disabled camera stays fully stopped (and a camera enabled in that window gets the saved low-quality stream applied).
 - **Four statements in the documentation were checked against the code and corrected.** The remote-access page said a TURN relay would not change the media path and that both viewing modes work once the proxy and `PUBLIC_HOST` are set up; it now says Nightlight does not support TURN, that the one UDP port forward is required for Low latency in this setup, and that Compatibility needs only the proxy. The mobile page now says only delivery through the Nightlight app (Firebase) is Android-only, while Pushover and ntfy alerts also reach an iPhone. The sleep-tracking page now names the release (0.35.0) behind its "before this version" notes. Documentation only.
 
 ## [0.41.3] - 2026-10-20
