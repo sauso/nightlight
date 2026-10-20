@@ -39,7 +39,9 @@
 //     (your own session, or any if admin), GET /api/children/:id/sleep/:date?store=1 (admin-only store),
 //     PUT /api/children/:id (a caregiver may change a child's name, birthday, colour and photo, but not
 //     track_sleep, the sleep window, the primary camera or the two sleep report switches sleep_report_enabled and
-//     sleep_report_show_name: #542/#655, children-role-fields.test.js; #397/#398, sleep-report-prefs.test.js), and the admin-shaped responses
+//     sleep_report_show_name: #542/#655, children-role-fields.test.js; #397/#398, sleep-report-prefs.test.js), PUT /api/cameras/reorder
+//     (a non-admin's reorder that would change the camera a tracked child is measured from is refused with a
+//     409: #675, reorder-scoring-guard.test.js), and the admin-shaped responses
 //     of GET /api/cameras and GET /api/settings. Most have their own tests (auth-routes.test.js,
 //     recompute-night.test.js, settings-exposure.test.js); the admin-vs-caregiver shape of the GET
 //     /api/cameras LIST has none that was found when this file was written (2026-10-09). PUT
@@ -156,7 +158,7 @@ const ROUTE_GATES = {
   'GET /api/cameras/:id/activity-history': SIGNED_IN,
   'GET /api/cameras/:id/recording-readiness': ADMIN, //        #394: read-only status for the camera settings page, which is admin-only
   'POST /api/cameras/clips/delete': ADMIN,
-  'PUT /api/cameras/reorder': ADMIN, //                         #552: sort_order picks the scoring, timelapse and review camera
+  'PUT /api/cameras/reorder': SIGNED_IN, //                     #675 (was ADMIN, #552): arranging the tiles is day-to-day; a non-admin's reorder that would change a tracked child's sleep camera is refused IN THE HANDLER (409, see header)
   'POST /api/cameras/verify-talk': ADMIN,
   'POST /api/cameras': ADMIN,
   'PUT /api/cameras/:id': ADMIN,
