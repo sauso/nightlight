@@ -68,7 +68,8 @@ const mount = (tz = 'Australia/Melbourne') =>
     { kids: [KID], settings: { timezone: tz }, route: '/children/kid-1/sleep' }
   );
 
-// The path of the last detail request, which is where the requested night date shows up.
+// The path of the last detail request, which is where the requested night date shows up. Since #361 PR 4a every
+// one ends `&context=auto` (the page's default settings view; the block "#361 PR 4a" below tests the view itself).
 const lastNightPath = (get) =>
   get.mock.calls.map((c) => c[0]).filter((p) => p.includes('/sleep/') && !p.includes('live') && !p.includes('insights')).at(-1);
 
@@ -94,7 +95,7 @@ describe('which night it opens on', () => {
   test('the night the server calls live', async () => {
     const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-30' } } });
     mount();
-    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-30?detail=1'));
+    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-30?detail=1&context=auto'));
   });
 
   // ★ `?date=` — how saving a review returns you to the night you just corrected.
@@ -112,7 +113,7 @@ describe('which night it opens on', () => {
   test('★ a date in the query string wins over the live night', async () => {
     const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-30' } } });
     mountAt('/children/kid-1/sleep?date=2026-08-24');
-    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-24?detail=1'));
+    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-24?detail=1&context=auto'));
   });
 
   // ⚠️⚠️ THE SHAPE HERE IS THE ROUTE'S, NOT A CONVENIENT ONE. `GET /children/:id/review/:date`
@@ -167,7 +168,7 @@ describe('which night it opens on', () => {
 
     // Wait for the night itself to have been requested, so the absence below is a real absence rather
     // than a screen that simply has not finished loading yet.
-    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-24?detail=1'));
+    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-24?detail=1&context=auto'));
     expect(screen.queryByText('Thanks — that’s recorded')).toBeNull();
     expect(get.mock.calls.map((c) => c[0]).some((p) => p.includes('/review/'))).toBe(false);
   });
@@ -304,7 +305,7 @@ describe('which night it opens on', () => {
     // by a day fails here. (#534 — the old fixture asked for 2026-09-30 and went stale with the real clock.)
     const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-30' } } });
     mountAt('/children/kid-1/sleep?date=2026-08-31');
-    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-30?detail=1'));
+    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-30?detail=1&context=auto'));
   });
 
   // The other side of the same boundary: the newest night itself IS allowed. Without it, a clamp that
@@ -313,13 +314,13 @@ describe('which night it opens on', () => {
   test('★ and the newest browsable night itself is honoured', async () => {
     const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-29' } } });
     mountAt('/children/kid-1/sleep?date=2026-08-30');
-    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-30?detail=1'));
+    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-30?detail=1&context=auto'));
   });
 
   test('★ and a malformed date falls back rather than requesting it', async () => {
     const get = mockSleep({ live: { scope: 'tonight', night: { night_date: '2026-08-30' } } });
     mountAt('/children/kid-1/sleep?date=yesterday');
-    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-30?detail=1'));
+    await waitFor(() => expect(lastNightPath(get)).toBe('/children/kid-1/sleep/2026-08-30?detail=1&context=auto'));
     // Asserting the fallback alone would pass if the component simply ignored the param on a later
     // render; this pins that the bad value was never requested at all.
     expect(get.mock.calls.map((c) => c[0]).some((p) => p.includes('yesterday'))).toBe(false);
@@ -347,7 +348,7 @@ describe('which night it opens on', () => {
     expected.setUTCDate(expected.getUTCDate() - 1);
     const wanted = expected.toISOString().slice(0, 10);
 
-    await waitFor(() => expect(api.get).toHaveBeenCalledWith(`/children/kid-1/sleep/${wanted}?detail=1`));
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith(`/children/kid-1/sleep/${wanted}?detail=1&context=auto`));
   });
 
   test('a live night ahead of yesterday raises the browsable maximum', async () => {
@@ -850,6 +851,173 @@ describe('#361 PR 3: Recompute on a night today\'s settings cannot score', () =>
     await act(async () => {});
     expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
     expect(storedReads(get)).toHaveLength(0);
+  });
+});
+
+// #361 PR 4a: a FINISHED night whose saved settings differ from today's is shown with the saved ones, and the page
+// says so, with a switch to today's. The server decides (it answers `scoring_view` only when that applies); these
+// pin what the page does with it: the line for every status but `off` (plan R3), the wording, the switch and its
+// requests, that the view is per night and never remembered (plan R5), that the 2-minute refresh keeps it (R9), and
+// that a Recompute save takes the page back to its default view (R4). The clock is pinned as in "moving between
+// nights", so 2026-08-30 is the newest browsable night (and so the one that is refreshed every 2 minutes).
+describe('#361 PR 4a: a finished night shown with the settings it was saved with', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-08-31T02:00:00Z'));
+  });
+
+  const CTX_SAVED = { v: 1, camera_id: 'cam-a', tz: 'Australia/Melbourne', window: { start: '19:30', end: '07:00' }, algo: '1' };
+  const CTX_NOW = { ...CTX_SAVED, camera_id: 'cam-b', window: { start: '20:00', end: '07:00' } };
+  const view = (applied, extra = {}) => ({
+    applied, stored: CTX_SAVED, current: CTX_NOW, camera_names: { stored: 'Bed cam', current: 'Door cam' }, algo_differs: false, ...extra,
+  });
+  const SAVED_LINE = 'Worked out with the settings this night was saved with (Bed cam, 19:30–07:00, Australia/Melbourne), using today’s detection rules.';
+  const TODAY_LINE = 'Showing today’s settings (Door cam, 20:00–07:00, Australia/Melbourne). The saved summary for this night keeps the settings it was saved with.';
+  const TO_TODAY = 'Show with today’s settings';
+  const TO_SAVED = 'Show with the settings this night was saved with';
+  const STORED_VIEW = { ...NIGHT, scoring_view: view('stored') };
+  const TODAY_VIEW = { ...NIGHT, onset_at: '2026-08-30 10:10:00', scoring_view: view('current') };
+
+  // Answers by the view the page asks for (`context=current` or the default), plus anything `extra` claims first.
+  function mockViews({ auto = STORED_VIEW, current = TODAY_VIEW, extra } = {}) {
+    const get = vi.fn((path) => {
+      if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'last', night: { night_date: '2026-08-30' } });
+      if (path.includes('/sleep/insights')) return Promise.resolve(null);
+      const claimed = extra?.(path);
+      if (claimed !== undefined) return claimed;
+      if (path.includes('context=current')) return Promise.resolve(current);
+      if (path.includes('/sleep/')) return Promise.resolve(auto);
+      return Promise.resolve(null);
+    });
+    vi.spyOn(api, 'get').mockImplementation(get);
+    return get;
+  }
+  // The page's own night reads (not ?stored=1, the Recompute preview or a store).
+  const nightPaths = (get) => get.mock.calls.map((c) => c[0]).filter((p) => /\/sleep\/\d{4}-\d{2}-\d{2}\?detail=1&context=/.test(p));
+  // The 2-minute refresh, captured so a test can fire it (as loadStates.test.jsx does).
+  function captureRefresh() {
+    const box = { fire: null };
+    const realSet = globalThis.setInterval;
+    vi.spyOn(globalThis, 'setInterval').mockImplementation((fn, ms, ...a) => {
+      if (ms === 2 * 60 * 1000) { box.fire = fn; return 0; }
+      return realSet(fn, ms, ...a);
+    });
+    return box;
+  }
+
+  for (const status of ['ok', 'no_data', 'no_sleep', 'empty']) {
+    test(`★ a "${status}" night shown with its saved settings says so, with the switch to today's`, async () => {
+      mockViews({ auto: { ...STORED_VIEW, status, coverage_minutes: 720 } });
+      mount();
+      expect(await screen.findByText(SAVED_LINE)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: TO_TODAY })).toBeInTheDocument();
+    });
+  }
+
+  test('an `off` night has no line and no switch, even if a server sent the settings (plan R3)', async () => {
+    mockViews({ auto: { ...STORED_VIEW, status: 'off' } });
+    mount();
+    expect(await screen.findByText(/Sleep tracking is off for this child/)).toBeInTheDocument();
+    expect(screen.queryByText(SAVED_LINE)).toBeNull();
+    expect(screen.queryByRole('button', { name: TO_TODAY })).toBeNull();
+  });
+
+  test('a night without `scoring_view` (today\'s settings, or nothing to choose) has no line and no switch', async () => {
+    mockViews({ auto: NIGHT });
+    mount();
+    await screen.findByText('Wake-ups');
+    expect(screen.queryByRole('button', { name: TO_TODAY })).toBeNull();
+    expect(screen.queryByRole('button', { name: TO_SAVED })).toBeNull();
+    expect(screen.queryByText(/Worked out with the settings|Showing today’s settings/)).toBeNull();
+  });
+
+  test('★ a saved camera that no longer exists: that is the line, in place of the "No sleep data" text', async () => {
+    mockViews({
+      auto: {
+        ...NIGHT, status: 'no_data', onset_at: null, wake_at: null, coverage_minutes: 0,
+        scoring: { source: 'stored', algo: '1', current_algo: '1', algo_differs: false, problem: 'camera_deleted' },
+        scoring_view: view('stored', { camera_names: { stored: null, current: 'Door cam' } }),
+      },
+    });
+    mount();
+    expect(await screen.findAllByText('The camera this night was measured from no longer exists, so it can’t be worked out with those settings.')).toHaveLength(1);
+    expect(screen.queryByText(/No sleep data for this night/)).toBeNull();
+    expect(screen.getByRole('button', { name: TO_TODAY })).toBeInTheDocument();
+  });
+
+  test('a night first worked out under earlier rules says its numbers can differ from the card', async () => {
+    mockViews({ auto: { ...NIGHT, scoring_view: view('stored', { algo_differs: true }) } });
+    mount();
+    expect(await screen.findByText(`${SAVED_LINE} It was first worked out under earlier detection rules, so the numbers can differ from the child’s card.`)).toBeInTheDocument();
+  });
+
+  test('★ the switch asks for today\'s settings, and back', async () => {
+    const get = mockViews();
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: TO_TODAY }));
+    expect(await screen.findByText(TODAY_LINE)).toBeInTheDocument();
+    expect(nightPaths(get).at(-1)).toBe('/children/kid-1/sleep/2026-08-30?detail=1&context=current');
+    // The numbers are today's too (TODAY_VIEW's 10:10Z is 8:10 pm in Melbourne).
+    expect(screen.getByText(/8:10\s*pm/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: TO_SAVED }));
+    expect(await screen.findByText(SAVED_LINE)).toBeInTheDocument();
+    expect(nightPaths(get).at(-1)).toBe('/children/kid-1/sleep/2026-08-30?detail=1&context=auto');
+  });
+
+  // ★ Plan R5. Without a reset the 08-29 request carries 'current'. With a reset done only by a setState in the reset
+  // effect (the plan's literal wording), the same commit's fetch still reads the old value, so ONE 08-29 request goes
+  // out with 'current' before the re-render corrects it. And without forgetting the choice, coming back to 08-30
+  // would bring 'current' back.
+  test('★ the view is per night: no request for another night carries it, and coming back does not restore it', async () => {
+    const get = mockViews();
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: TO_TODAY }));
+    await screen.findByText(TODAY_LINE);
+    await user.click(screen.getByLabelText('Previous night'));
+    await waitFor(() => expect(nightPaths(get).some((p) => p.includes('/2026-08-29?'))).toBe(true));
+    await act(async () => {});
+    const for29 = nightPaths(get).filter((p) => p.includes('/2026-08-29?'));
+    expect(for29).toEqual(['/children/kid-1/sleep/2026-08-29?detail=1&context=auto']);
+    await user.click(screen.getByLabelText('Next night'));
+    await waitFor(() => expect(nightPaths(get).at(-1)).toBe('/children/kid-1/sleep/2026-08-30?detail=1&context=auto'));
+    expect(await screen.findByText(SAVED_LINE)).toBeInTheDocument();
+  });
+
+  test('★ the 2-minute refresh keeps the view the page is in', async () => {
+    const refresh = captureRefresh();
+    const get = mockViews();
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: TO_TODAY }));
+    await screen.findByText(TODAY_LINE);
+    const before = nightPaths(get).length;
+    await act(async () => { refresh.fire(); });
+    expect(nightPaths(get).slice(before)).toEqual(['/children/kid-1/sleep/2026-08-30?detail=1&context=current']);
+    expect(screen.getByText(TODAY_LINE)).toBeInTheDocument();
+  });
+
+  test('★ a Recompute save from today\'s settings takes the page back to its default view (and its refresh with it)', async () => {
+    const refresh = captureRefresh();
+    const contexts = { stored_state: 'ok', stored: CTX_SAVED, current: CTX_NOW, differs: true, camera_names: { stored: 'Bed cam', current: 'Door cam' } };
+    const get = mockViews({
+      extra: (path) => {
+        if (path.includes('?stored=1')) return Promise.resolve({ night: { ...NIGHT, asleep_minutes: 1 }, locked: false, contexts });
+        if (path.includes('context=current&raw=1')) return Promise.resolve({ ...NIGHT, onset_at: '2026-08-30 10:10:00' });
+        if (path.includes('store=1')) return Promise.resolve({ ...NIGHT, stored: true });
+        return undefined;
+      },
+    });
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: TO_TODAY }));
+    await screen.findByText(TODAY_LINE);
+    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(await screen.findByRole('button', { name: /save the new numbers/i }));
+    expect(await screen.findByText(SAVED_LINE)).toBeInTheDocument();
+    const stores = get.mock.calls.map((c) => c[0]).filter((p) => /[?&]store=1/.test(p));
+    expect(stores).toEqual(['/children/kid-1/sleep/2026-08-30?store=1&detail=1']);
+    // The view itself is back to the default, not only the night on screen: the next refresh asks for it.
+    const before = nightPaths(get).length;
+    await act(async () => { refresh.fire(); });
+    expect(nightPaths(get).slice(before)).toEqual(['/children/kid-1/sleep/2026-08-30?detail=1&context=auto']);
   });
 });
 

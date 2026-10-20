@@ -1209,6 +1209,13 @@ body.in-pip .tile-menu-backdrop {
 /* Which camera the night was scored from. Only one camera is analysed, so when a child has several this says which. */
 .sleep-detail__source { font-size: 12px; color: var(--text-secondary); }
 .sleep-detail__source strong { font-weight: 600; color: var(--text-primary); }
+/* #361 PR 4a: which settings the night was worked out with (saved or today's), and the switch to the other. Secondary
+   text like the source line above; the switch is a real button sized like Recompute, allowed to wrap on a phone
+   because its longer label ("...the settings this night was saved with") is wider than a narrow card. */
+.sleep-settings-view { display: flex; flex-direction: column; gap: 10px; }
+.sleep-settings-view--in-card { padding: 14px; }
+.sleep-settings-view__text { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); }
+.sleep-settings-view__switch { width: auto; align-self: flex-start; white-space: normal; text-align: left; }
 /* Admin-only recompute control, and the before -> after table it shows. Every colour comes from a
    token so both themes follow; `is-changed` is what the eye should land on, so only that row uses
    the accent. Digits are tabular so the two columns line up. */
