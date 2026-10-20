@@ -271,6 +271,12 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
       </div>
     );
   }
+  // #361 PR 3 (plan R1): Recompute on a night TODAY's settings cannot score. The night the feature exists for (its
+  // camera turned off, moved or demoted since it was saved) reads exactly like this, and the control used to be
+  // unreachable here. RecomputeNight decides for itself whether to show anything: only for an admin, only after
+  // its own read finds usable saved settings that differ from today's on an unlocked night, and then it offers
+  // only the stored-settings re-score. Otherwise it renders nothing and these cards look as they always did. Not
+  // for a null night (nothing to compare) or `off` (tracking is off: nothing is scored either way).
   if (!night || night.status === 'no_data') {
     return (
       <div className="card">
@@ -278,11 +284,19 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
           No sleep data for this night — either it predates tracking, or the cameras weren’t running motion/sound
           detection with enough coverage.
         </div>
+        {night && <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime}
+          onRecomputed={onRecomputed} onCorrectionRemoved={onCorrectionRemoved} />}
       </div>
     );
   }
   if (night.status === 'no_sleep') {
-    return <div className="card"><div className="camera-tile__sub" style={{ padding: 14 }}>No clear sleep detected in this night’s window.</div></div>;
+    return (
+      <div className="card">
+        <div className="camera-tile__sub" style={{ padding: 14 }}>No clear sleep detected in this night’s window.</div>
+        <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime}
+          onRecomputed={onRecomputed} onCorrectionRemoved={onCorrectionRemoved} />
+      </div>
+    );
   }
   if (night.status === 'empty') {
     // `nobody_in_bed` splits the copy, deliberately NOT `corrected` (code-review finding, 2026-09-29):
@@ -324,8 +338,9 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
             previews the saved row against this one before anything is written (the second press applies),
             and the server's allowDowngrade / locked refusals still decide what can be stored. A flagged night
             is a corrected night, so it normally opens on "locked" (nothing to recompute until the correction
-            is removed). Not offered on no_data / no_sleep: the issue is about `empty`, and those are a
-            coverage or scoring question, not a "did the detector change its mind" one. */}
+            is removed). On no_data / no_sleep it is offered only for the stored-settings re-score (#361 PR 3,
+            see those branches above): with today's settings those are a coverage or scoring question, not a
+            "did the detector change its mind" one. */}
         <div style={{ padding: '0 14px 14px' }}>
           <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime} onRecomputed={onRecomputed}
             onCorrectionRemoved={onCorrectionRemoved} />

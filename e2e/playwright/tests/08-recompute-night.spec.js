@@ -12,7 +12,10 @@ const { test, expect } = require('@playwright/test');
 // ★ WHAT THIS SPEC LEARNED, AND WHY IT IS SHAPED THIS WAY. The destructive case — recomputing a night
 // whose activity has been pruned, so a scored summary would be replaced by `no_data` — turns out to be
 // UNREACHABLE THROUGH THE BROWSER. A no_data night short-circuits SleepDetail to "No sleep data for
-// this night" and the recompute button is never rendered. So:
+// this night" and the recompute button is never rendered. (Since #361 PR 3 it IS rendered there for a
+// night whose saved settings are usable and differ from today's, and then offers only a re-score with
+// those settings, never today's. The seeded row is written without a scoring_context, a legacy NULL, so
+// this spec still sees no button; the stored-settings path is covered by the unit tests only.) So:
 //   * the UI half is asserted as what it is: the destructive path is not offered;
 //   * the guard itself is driven through the ROUTE, which is where `allowDowngrade: false` is actually
 //     wired (routes/children.js) and therefore where a regression would land. A lib-level unit test of

@@ -1222,6 +1222,16 @@ body.in-pip .tile-menu-backdrop {
 .recompute-diff__arrow { color: var(--text-secondary); text-align: center; }
 .recompute-diff__now { color: var(--text-primary); font-weight: 600; }
 .recompute-diff__row.is-changed .recompute-diff__now { color: var(--accent); }
+/* #361 PR 3: "Use the settings this night was saved with". The whole label row is the hit area (a real
+   checkbox inside a label), at least 44px tall per the touch-target rule; the help lines are secondary text. */
+.recompute-choice { margin: 0 0 12px; }
+.recompute-choice__option { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; cursor: pointer; }
+.recompute-choice__option input { width: 18px; height: 18px; margin: 0; flex: none; accent-color: var(--accent); }
+.recompute-choice__option:has(input:disabled) { cursor: default; opacity: 0.55; }
+.recompute-choice__help { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); margin-left: 28px; }
+.recompute-choice__help strong { font-weight: 600; color: var(--text-primary); }
+/* On a no-data / no-sleep card (SleepDetail), which has no padding of its own around this control. */
+.sleep-detail__recompute-unscored { padding: 0 14px 14px; }
 .sleep-detail__section-title { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-secondary); margin: 0 0 12px; }
 
 .sleep-tl { padding-top: 2px; }

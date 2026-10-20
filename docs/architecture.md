@@ -309,8 +309,8 @@ now writes a small JSON string: `v` (the JSON's own version, `1`), `camera_id` (
 was scored from, `null` when none was enabled; never its name, address or credentials), `tz` (the app timezone
 used, or `UTC` when none is set), `window` (`start`/`end` as `HH:MM`, the window actually used, so a malformed
 saved time is stored as the `19:00` it scored with) and `algo` (`SCORING_ALGO` in `lib/sleepAnalysis.js`). It is
-written for every status, `off` and `no_data` included. **Nothing reads it yet**, so nothing a person sees
-changes; the only visible difference is one more key, a string, on the endpoints that return the raw stored row
+written for every status, `off` and `no_data` included. Its one reader is the admin Recompute's stored-settings
+option (below); otherwise it is one more key, a string, on the endpoints that return the raw stored row
 (`GET /api/children/:id/sleep`, `GET /api/children/:id/sleep/:date?stored=1`, and `GET
 /api/children/:id/sleep/live` when it serves last night's saved row). Nights stored before the column existed read `NULL` ("unknown provenance"): there is no automatic
 backfill, and a legacy row stays `NULL` until it is next successfully re-stored (the nightly job, or a review
@@ -335,8 +335,23 @@ stored JSON is built from it, byte for byte what step 1 wrote. What a context do
 implementation runs, today's; `algo_differs` marks a night saved under other rules), tracking on/off (`off` still
 comes first), room climate and the alert list (today's cameras), and who owned the camera when (samples are read by
 camera id and time, so a camera moved to another child inside the span a night reads, window start - 3 h to window
-end + 3 h, replays with that child's activity). **Nothing calls it with a context yet**, so no number a person sees
-changes; the admin Recompute choice is the next step.
+end + 3 h, replays with that child's activity).
+
+**The admin Recompute is its one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the
+dialog in `frontend/src/components/RecomputeNight.jsx`). `GET /api/children/:id/sleep/:date?context=stored` reads the
+row's `scoring_context` and parses it (no row, `NULL` or unparseable: `400` with `reason: 'no_stored_context'`, never a
+silent fall back to today's settings); `context=current` or no `context` is today's path, unchanged; any other value
+is a `400` before anything is computed. A read passes the context to `computeNight` and lays a correction over the
+answer as usual, unless `raw=1`. With `store=1` (admin), `computeAndStoreNight(childId, date, { allowDowngrade: false,
+context })` stores it, and `scoringContextFor` writes the replayed camera, timezone and window with the CURRENT
+`SCORING_ALGO` (the numbers came from today's rules). Refusals, in order: `reviewed` (locked), `stored_camera_missing`
+(a replay whose camera was deleted is never stored, whatever `allowDowngrade` says), `would_downgrade`,
+`would_blank_notified_wake`; before any of them the route answers `409 context_changed` when `expect_context` is not the
+row's current string (the dialog echoes what it was shown, so a re-save from another phone cannot be overwritten with
+numbers nobody previewed). `?stored=1` adds `contexts` (`scoringContextChoice`: `stored_state`, both contexts, `differs`
+on camera, timezone or effective window, live camera names). Every other caller (the nightly job, the review's
+store-first, the detail page, the morning review, `/sleep/live`, the demo seed) passes no context, so the nightly job
+re-stores a provisional last night with today's settings: a stated limit, pinned by a test.
 
 **Deleting a child or a camera is `lib/entityPurge.js`** (#540, #554), and it deletes everything that belongs to
 it. Most of the history tables have **no foreign key** to `children` / `cameras` (deliberately: `bed_transitions`,

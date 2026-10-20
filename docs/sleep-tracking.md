@@ -133,7 +133,8 @@ the child's settings (shown once a child has two or more cameras).
   while it can still be updated (up to about three hours after the wake time), a review correction
   that saves the night first, and an admin's **Recompute**. Older saved summaries (the child's card)
   are not recomputed and keep the numbers of the camera they were measured from, so after a change a
-  past night's detail page can show different figures from its card.
+  past night's detail page can show different figures from its card. An admin's Recompute can instead
+  use the camera a night was saved with: see [Using the settings a night was saved with](#using-the-settings-a-night-was-saved-with).
 
 The others carry on streaming, alerting and recording as normal; they just don't affect the numbers.
 The nightly timelapse is taken from the same main camera.
@@ -433,7 +434,9 @@ the API locks nothing. This is the same for every child and every install.
 **No one in the bed**, whether the detector scored it empty or you flagged it. It works the same way
 there: the first press compares the saved summary with the current one and saves nothing, the second
 saves. A flagged night is a corrected night, so it normally opens on "locked" until you remove the correction (once its saved summary is final, as described in [A night you have corrected is locked](#a-night-you-have-corrected-is-locked)). It is
-not offered on nights with no data, no clear sleep, or with sleep tracking off.
+not offered on nights with sleep tracking off. On a night that now shows no data or no clear sleep it is
+offered only to re-score the night with the settings it was saved with, and only when those differ from
+today's (see [Using the settings a night was saved with](#using-the-settings-a-night-was-saved-with)).
 
 #### What gets locked is the night as it is when you save
 
@@ -654,19 +657,72 @@ days — the same span the date picker offers — so the oldest night you can br
 edge. If its data has aged out, the recompute is refused and the saved summary is left alone, rather
 than being replaced with "no data". The same refusal protects a night saved before a detection change
 that would now come out "no data" for another reason — for example most of it had sound but no video.
-(The page only offers Recompute on a night that still scores, so in practice that refusal is only seen
-through the API; its 409 says which reason applied — `reason`, `status`, `coverage_minutes` — see
-[KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "Minutes with no video are unknown in the sleep numbers".)
+(With today's settings the page only offers Recompute on a night that still scores, so that refusal is only
+seen through the API, or after choosing the saved settings below; its 409 says which reason applied —
+`reason`, `status`, `coverage_minutes` — see [KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "Minutes with no video
+are unknown in the sleep numbers".)
 
-**Each saved night also records what it was worked out from**: which camera (by its id), the timezone, the
-sleep window actually used, and the version of the detection rules. Recompute does not use it yet: it still
-works the night out with today's camera and settings, as described above, and nothing on screen changes. (The
-sleep calculation can now be handed that record and work a night out again with the camera, timezone and window it
-names, still with today's detection rules, but nothing uses that yet: it is groundwork for a later choice in
-Recompute.) It appears only as a `scoring_context` field on the API's saved-night answers. Nights saved before
-this was added have none (`null`), and are not filled in after the fact: an older night gets one only when it is saved again
-(for example by the morning update while it is still last night, or by a Recompute). Details for developers:
-[architecture.md](architecture.md), "Data layer".
+### Using the settings a night was saved with
+
+Each saved night records what it was worked out from: which camera (by its id), the timezone, the sleep
+window actually used, and the version of the detection rules. If the camera, timezone or window has changed
+since (the camera was turned off, moved to another child or is no longer the main camera, the tiles were
+rearranged, or the window or timezone was changed), the Recompute dialog offers **Use the settings this night
+was saved with**, and says what changed ("Saved with: … Now: …").
+
+**Default: off, every time the dialog opens.** Left off, Recompute works the night out with today's settings,
+exactly as before. Ticked, the dialog shows the night worked out with the camera, timezone and window it was
+saved with, beside the saved summary, and **Save the new numbers** saves that. This is what makes a night
+whose camera has since been turned off re-scorable at all: with today's settings it reads "no data", so on
+such a night (and on one that now reads "no clear sleep") the dialog offers only this choice.
+
+| | Today's settings (the default) | The settings the night was saved with |
+|---|---|---|
+| Camera, timezone and sleep window | today's | the ones saved with the night |
+| Detection rules | today's | today's too: rules can't be replayed |
+| Room temperature and the alert list | today's cameras | today's cameras |
+| A night that now reads "no data" or "no clear sleep" | not offered | offered, when its saved settings differ from today's |
+| A night saved before nights recorded their settings | — | shown greyed out: "This night was saved before the app recorded its settings." |
+| A record that can't be read | — | greyed out: "The settings saved with this night can't be read." |
+| The saved camera has since been deleted | — | nothing is saved; the dialog says the camera no longer exists |
+| A night you have corrected (locked) | refused | refused |
+| Turning a scored night into "no data" | refused | refused |
+
+The option does not appear when the saved settings are the same as today's (there is nothing to choose), or
+when nothing is saved for the night yet. Nights saved before this was recorded have no record and are not
+filled in after the fact; an older night gets one the next time it is saved (for example by the morning
+update while it is still last night, or by a Recompute).
+
+Known limits:
+- **Last night can be re-saved with today's settings.** For about 3 hours after its window closes, the nightly
+  update keeps refining last night's saved summary, and it always uses today's settings. A save with the saved
+  settings in that time can be replaced on its next pass (every 30 minutes). To keep it, save once the night has
+  settled, about 3 hours after the window closes.
+- **The detail page still shows today's settings.** After a save with the saved settings, the child's card (for
+  last night) and the history list show the saved numbers, but the sleep detail page keeps working the night out with today's
+  settings, and a line under the button says so. After a reload or on another night the line is gone and the
+  page shows today's figures. Showing finished nights with the settings they were saved with is planned.
+- A camera that moved to another child during the night or the 3 hours either side of it is replayed with what
+  it saw in its new room. One that moved later is replayed correctly.
+- Whether sleep tracking is on follows today's setting.
+
+For developers (the API behind the dialog):
+- `GET /api/children/:id/sleep/:date?context=stored|current`: `current`, or no `context`, is today's settings,
+  exactly as before. `stored` uses the night's saved `scoring_context`; anything else is a `400`. A night with no
+  usable record (no saved row, `null`, or a record that can't be read) answers `400` with
+  `reason: "no_stored_context"`. Like any read, the answer has a parent's correction laid over it; add `raw=1`
+  (only with `context`) for the detector's own answer, which is what a save stores. With `stored` the answer
+  carries `scoring: { source, algo, current_algo, algo_differs, problem }`.
+- Add `store=1` (admins only; for anyone else it stays a read) to save it. The saved record is the night's
+  camera, timezone and window with today's rules version. Refusals, in this order: `reviewed` (a corrected,
+  locked night), `stored_camera_missing` (`409`: the saved camera has been deleted; nothing is saved), then the
+  usual `would_downgrade` and wake-time refusals. `expect_context=<the scoring_context string you read>` makes
+  the save answer `409` with `reason: "context_changed"`, saving nothing, if the night was saved again in the
+  meantime; the dialog always sends it.
+- `?stored=1` also returns `contexts: { stored_state, stored, current, differs, camera_names }`, where
+  `stored_state` is `none` (no record), `unreadable` or `ok`, and `differs` counts the camera, timezone and
+  window but not the rules version. Camera names are looked up when asked (`null` for one that no longer
+  exists). More in [architecture.md](architecture.md), "Data layer".
 
 ## Known limits
 
@@ -676,5 +732,6 @@ The limits are described beside the behaviour they affect:
 - [Getting up and returning to bed](#a-child-who-gets-out-and-climbs-straight-back-in-has-not-got-up)
 - [Motion camera sampling](#when-the-motion-camera-samples)
 - [Review corrections and locks](#known-limits-all-documented-rather-than-fixed)
+- [Recompute with a night's saved settings](#using-the-settings-a-night-was-saved-with)
 - [Video gaps on the detail page](#the-detail-view)
 - [Room temperature comparisons](#room-temperature-optional)

@@ -952,7 +952,8 @@ if (!sleepNightsColumns.includes('in_bed_at')) {
 // inventing one would be worse than NULL. A legacy row stays NULL until it is next successfully re-stored (the
 // nightly job or a review save re-storing a provisional last night, or an admin Recompute), which writes a
 // context like any other store.
-// Every reader must treat NULL as "today's behaviour"; in this release nothing reads the column yet. Also in
+// Every reader must treat NULL as "today's behaviour". The one reader (#361 PR 3) is the admin Recompute's
+// "use the settings this night was saved with", which a NULL row cannot offer (the dialog says why). Also in
 // the CREATE TABLE above for fresh installs; this guard is the upgrade path.
 if (!sleepNightsColumns.includes('scoring_context')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN scoring_context TEXT');

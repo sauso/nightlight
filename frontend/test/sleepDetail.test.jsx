@@ -763,7 +763,10 @@ describe('#521 Recompute is reachable on an empty night', () => {
     expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
   });
 
-  test('it is not added to the other empty states (no_data, no_sleep, off)', async () => {
+  // Since #361 PR 3 a no_data / no_sleep night CAN show it, but only for a night whose saved settings are usable and
+  // differ from today's (the block below). This server answers `?stored=1` with no `contexts` (an older backend),
+  // so the three cards must look exactly as they did.
+  test('it is not added to the other empty states (no_data, no_sleep, off) without usable, differing saved settings', async () => {
     for (const status of ['no_data', 'no_sleep', 'off']) {
       mockEmpty({ night: { ...NIGHT, status } });
       const { unmount } = mount();
@@ -772,6 +775,81 @@ describe('#521 Recompute is reachable on an empty night', () => {
       unmount();
       vi.restoreAllMocks();
     }
+  });
+});
+
+// #361 PR 3, plan R1: the night the stored-settings re-score exists for is exactly the one that reads "No sleep
+// data" today (its camera turned off, moved or demoted since it was saved), and SleepDetail returned that card
+// before any Recompute was rendered, so the feature was unreachable in its motivating case. These cross the
+// SleepDetail -> RecomputeNight seam the component tests cannot: the page must render the control on those cards,
+// and the control must decide, from the server's `contexts`, whether to show anything at all.
+describe('#361 PR 3: Recompute on a night today\'s settings cannot score', () => {
+  const CTX_SAVED = { v: 1, camera_id: 'cam-a', tz: 'Australia/Melbourne', window: { start: '19:30', end: '07:00' }, algo: '1' };
+  const CTX_NOW = { ...CTX_SAVED, camera_id: 'cam-b' };
+  const contextsWith = (differs) => ({
+    stored_state: 'ok', stored: CTX_SAVED, current: differs ? CTX_NOW : CTX_SAVED, differs,
+    camera_names: { stored: 'Bed cam', current: differs ? 'Door cam' : 'Bed cam' },
+  });
+  const SAVED = { night_date: '2026-08-30', status: 'ok', onset_at: '2026-08-30 09:30:00', wake_at: '2026-08-30 20:15:00',
+    asleep_minutes: 600, awake_minutes: 20, wake_count: 1, scoring_context: JSON.stringify(CTX_SAVED) };
+
+  function mockUnscored({ status = 'no_data', contexts = contextsWith(true) } = {}) {
+    const get = vi.fn((path) => {
+      if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'last', night: { night_date: '2026-08-30' } });
+      if (path.includes('/sleep/insights')) return Promise.resolve(null);
+      if (path.includes('?stored=1')) return Promise.resolve({ night: SAVED, locked: false, contexts });
+      return Promise.resolve({ ...NIGHT, status, onset_at: null, wake_at: null, coverage_minutes: status === 'no_data' ? 0 : 700 });
+    });
+    vi.spyOn(api, 'get').mockImplementation(get);
+    return get;
+  }
+  const storedReads = (get) => get.mock.calls.map((c) => c[0]).filter((p) => p.includes('?stored=1'));
+
+  test('★ an admin sees it on a no_data night whose saved settings differ, and the dialog offers the stored settings', async () => {
+    mockUnscored();
+    const { user } = mount();
+    expect(await screen.findByText(/No sleep data for this night/)).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+    expect(await screen.findByText(/Today’s settings find no data for this night/)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /use the settings this night was saved with/i })).not.toBeChecked();
+    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+  });
+
+  test('…and on a no_sleep night', async () => {
+    mockUnscored({ status: 'no_sleep' });
+    mount();
+    expect(await screen.findByText(/No clear sleep detected/)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /recompute this night/i })).toBeInTheDocument();
+  });
+
+  test('not when the saved settings are the same as today\'s (nothing to choose)', async () => {
+    const get = mockUnscored({ contexts: contextsWith(false) });
+    mount();
+    await screen.findByText(/No sleep data for this night/);
+    await waitFor(() => expect(storedReads(get)).toHaveLength(1));
+    await act(async () => {});
+    expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+  });
+
+  test('not for a caregiver, who also causes no read of the saved row', async () => {
+    const get = mockUnscored();
+    renderAsCaregiver(
+      <Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes>,
+      { kids: [KID], settings: { timezone: 'Australia/Melbourne' }, route: '/children/kid-1/sleep' }
+    );
+    await screen.findByText(/No sleep data for this night/);
+    await act(async () => {});
+    expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+    expect(storedReads(get)).toHaveLength(0);
+  });
+
+  test('not on an `off` night (tracking is off: nothing is scored either way)', async () => {
+    const get = mockUnscored({ status: 'off' });
+    mount();
+    await screen.findByText(/Sleep tracking is off for this child/);
+    await act(async () => {});
+    expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+    expect(storedReads(get)).toHaveLength(0);
   });
 });
 
