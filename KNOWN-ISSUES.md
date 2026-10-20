@@ -662,9 +662,11 @@ nightly job, which only ever scores a night whose window has closed, against the
 
 **Nights already stored** change only when recomputed (the nightly job's own passes in the ~3 hours after
 the window closes, or **Recompute this night**). Recompute never turns a scored night into "no data", so a
-night stored before this update whose video stalled for most of it keeps its old numbers. The refusal is
-**API-only today**: the Sleep detail page shows no Recompute button on a night that now reads "no data" or
-"no clear sleep", so no parent sees it. From the API (`GET /api/children/:id/sleep/:date?store=1`, admin),
+night stored before this update whose video stalled for most of it keeps its old numbers. With today's
+settings the refusal is **API-only**: on a night that now reads "no data" or "no clear sleep" the Sleep detail
+page offers Recompute only to re-score it with the settings it was saved with (when those differ from today's),
+never a save with today's settings. A save with the saved settings can still meet this refusal, and the dialog
+then shows its message. From the API (`GET /api/children/:id/sleep/:date?store=1`, admin),
 the 409 no longer claims the data aged out when it did not: it adds `reason` (`aged_out` when nothing is
 left to read; `too_little_watched` when the video was seen for too few minutes to score the night, or to
 call it empty, and says how many; `no_longer_scored` when the night was watched but now reads, for example,

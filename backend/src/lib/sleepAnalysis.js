@@ -38,7 +38,9 @@ const REPORT_FRESH_MS = 2 * 60 * 60 * 1000;
 // derived tag later costs only a new value.
 // ⚠️ KNOWN LIMIT: nothing enforces the bump. A scoring change that forgets it stores the old label on nights
 // the new rules produced. The only reader is a context replay's `scoring.algo_differs` (#361 step 2, see
-// computeNight), and nothing passes computeNight a context yet, so today that only costs the history its accuracy.
+// computeNight). Its one caller is the admin Recompute's "use the settings this night was saved with" (#361 PR 3),
+// which re-scores with today's rules whatever the label says and writes TODAY's label (scoringContextFor), so a
+// forgotten bump costs the history its accuracy and that flag its truth, never a number.
 export const SCORING_ALGO = '1';
 
 const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = real movement (sleeping room ~0)
@@ -749,9 +751,10 @@ export function quietStretchBeforeExit(cribAct, fromIdx, gapStart, minLen, maxTr
 // Step 1 (#808) stores, beside every night, the camera, timezone, window and rules version that produced it
 // (`scoring_context`, written by scoringContextFor below). Step 2, this block, is the reading side:
 // parseScoringContext turns a stored record into a context, currentScoringContext says what today's settings
-// would be, and computeNight accepts a context in place of today's settings. NOTHING passes a context yet (the
-// admin Recompute choice is the next step, planning/361-scoring-context.md section 9), so no number anyone
-// sees can move by this block alone.
+// would be, and computeNight accepts a context in place of today's settings. Its ONE caller (#361 PR 3) is the
+// admin Recompute route's opt-in `context=stored` (routes/children.js, planning/361-scoring-context.md section 9):
+// a number moves only when an admin ticks "use the settings this night was saved with" and saves. Every other
+// compute (the nightly job, the detail page, the review, /sleep/live) still passes none.
 
 // `HH:MM` of what parseHm makes of a saved window time: the EFFECTIVE time, never the raw text (see
 // scoringContextFor for why). One helper, so the writer and currentScoringContext cannot spell it twice.
@@ -771,7 +774,7 @@ function currentScoringCamera(childId) {
 // THE ONE DEFINITION of "the scoring context this child's night would get if it were computed NOW": the v1
 // shape step 1 stores, in step 1's key order. scoringContextFor builds the stored JSON from it (and only swaps
 // in the camera the summary was actually scored from), so a stored row and this function cannot disagree, and
-// a later "today's settings" choice (the next step) can describe exactly what a plain compute uses. A plain
+// the Recompute dialog's "Now:" line (scoringContextChoice, #361 PR 3) describes exactly what a plain compute uses. A plain
 // computeNight still makes these reads itself (left untouched so its output stays byte-identical); the test
 // "replaying with currentScoringContext reproduces a plain computeNight exactly" fails if the two ever drift.
 export function currentScoringContext(childId) {
@@ -907,8 +910,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // button, and every fresh read (the detail page, the morning review, /sleep/live). A stored row that is
   // never re-stored keeps the numbers of the camera it was scored from. Since #361 the stored row records
   // that camera's id in `scoring_context` (see scoringContextFor), and a caller can hand that record back as
-  // `context` to score from the same camera again (below); nothing does yet, so every compute here still
-  // resolves the camera afresh. Rows stored before #361 have no record (NULL).
+  // `context` to score from the same camera again (below). Only the admin Recompute's opt-in does (#361 PR 3);
+  // every other compute here still resolves the camera afresh. Rows stored before #361 have no record (NULL).
   //
   // Why one and not all (owner's call, 2026-08-29): the old code ORed every camera's timeline together,
   // so a minute counted as active if ANY camera saw something. That is not the conservative choice it
@@ -2435,7 +2438,8 @@ const upsertNight = db.prepare(
 // The QUESTION a stored night answered (#361; design: planning/361-scoring-context.md section 3): which
 // camera scored it, in which timezone, over which window, by which version of the rules. Returned as the
 // JSON string upsertNight stores. computeNight can be handed it back as `context` (#361 step 2,
-// parseScoringContext) to re-score the night with these settings instead of today's; nothing does yet.
+// parseScoringContext) to re-score the night with these settings instead of today's; the admin Recompute's
+// opt-in does (#361 PR 3), and then `ctx` below is that context.
 //
 // - Built from currentScoringContext, the one definition of today's settings (the SAME reads computeNight
 //   makes: appSettings, childSleepConfig, parseHm), so the context records what was actually used.
@@ -2448,14 +2452,61 @@ const upsertNight = db.prepare(
 //   credential, and nothing about the child: the name can change and is looked up live, and those fields
 //   can identify a household. Camera ids are uuids minted at creation (routes/cameras.js). Taken from the
 //   SUMMARY rather than re-resolved, so it is always the camera that produced the numbers it is stored with.
-//   (Today the two are the same camera, because computeAndStoreNight passes computeNight no context; the
-//   difference starts to matter once a store can be given one, and no test can tell them apart before then.)
 // - `v` versions this JSON's own shape; `algo` versions the scoring rules (SCORING_ALGO, bumped by hand).
 // ⚠️ BYTE-IDENTICAL to what step 1 wrote: the spread keeps currentScoringContext's key order (v, camera_id, tz,
 // window, algo), and overriding `camera_id` replaces the value in place without moving the key. Pinned by the
 // literal strings in "the stored scoring_context string is byte-identical to step 1" (scoring-context-replay).
-function scoringContextFor(childId, summary) {
+//
+// WITH `ctx` (#361 PR 3: the admin Recompute re-scored the night with the settings it was saved with; `ctx` is
+// parseScoringContext's normalised object, so the spread is in step 1's key order too). What is written is the
+// context the numbers were produced WITH, which is the replayed one, except for one key:
+// - `algo` is TODAY's SCORING_ALGO, never the stored label (plan revision 1: settings are replayable, rules are
+//   not). computeNight has one implementation, so the numbers just written came from today's rules; keeping an
+//   older label would tell a later replay (and anyone reading the row) that new numbers are old rules' work.
+//   Pinned by "the written context is the stored camera, timezone and window with TODAY's algo"
+//   (recompute-stored-context.test.js), which plants `algo: 'older-rules'` first.
+// - `camera_id` is the context's, not re-read from the summary. The two are the SAME whenever a row gets here:
+//   the replay scores exactly the camera the context names, `camera_id: null` replays with no camera (null on
+//   both sides), and a context camera that no longer exists is refused before the write
+//   (computeAndStoreNight, `stored_camera_missing`). So this is not a second source of truth, only the shorter
+//   path to the same id; the same test asserts the written id equals the stored one.
+function scoringContextFor(childId, summary, ctx = null) {
+  if (ctx) return JSON.stringify({ ...ctx, algo: SCORING_ALGO });
   return JSON.stringify({ ...currentScoringContext(childId), camera_id: summary.analysis_camera_id ?? null });
+}
+
+// What the admin Recompute dialog needs to offer the choice between the settings a night was saved with and
+// today's (#361 PR 3), returned by the route's `?stored=1` as `contexts`. ADDED to that answer, never replacing
+// a key (a running page is a deployed client). Built here rather than in the route so "what counts as a
+// difference" has one definition beside the context code it compares.
+//   - `stored_state`: 'none' (no saved row, or a row saved before #361 with a NULL column: a legacy night),
+//     'unreadable' (a value parseScoringContext refuses), or 'ok'. The UI shows the choice disabled with a
+//     reason for the first two on a saved night, so a legacy night is not silently missing the option.
+//   - `differs`: the camera, the timezone or the window differ between the two. NOT `algo`: the re-score uses
+//     today's rules whichever settings are chosen (computeNight has one implementation), so a different rules
+//     label alone leaves nothing to choose between. The windows are compared as the EFFECTIVE `HH:MM`
+//     (effectiveHm), the form both sides are written in, so `7:5` and `07:05` (one hand-edited row) are equal.
+//   - `camera_names`: looked up LIVE by id (null for none, or for a camera that no longer exists), so a renamed
+//     camera shows its new name. Names only: no address, credential or other camera field reaches the browser,
+//     and nothing about the child.
+export function scoringContextChoice(childId, storedRaw) {
+  const current = currentScoringContext(childId);
+  const stored = storedRaw == null ? null : parseScoringContext(storedRaw);
+  const storedState = storedRaw == null ? 'none' : stored ? 'ok' : 'unreadable';
+  const nameOf = (id) => (id == null ? null : contextCameraStmt.get(id)?.name ?? null);
+  const differs = !!stored && (
+    stored.camera_id !== current.camera_id
+    || stored.tz !== current.tz
+    || effectiveHm(stored.window.start) !== current.window.start
+    || effectiveHm(stored.window.end) !== current.window.end
+  );
+  return {
+    stored_state: storedState,
+    stored,
+    current,
+    differs,
+    camera_names: { stored: stored ? nameOf(stored.camera_id) : null, current: nameOf(current.camera_id) },
+  };
 }
 
 // ROADMAP §1.6: what the parent was actually TOLD about a night's wake time, so a later recompute can
@@ -2584,30 +2635,55 @@ export function nightIsLocked(childId, nightDate) {
 // computeAndStoreNight the only writer of the computed summary that the lock has to guard; the
 // notification-ledger updates (recordFirstNotified / recordFollowupNotified) and deleting a child touch
 // sleep_nights separately and are unaffected.
-export function computeAndStoreNight(childId, nightDate, { allowDowngrade = true } = {}) {
-  const summary = computeNight(childId, nightDate);
-  if (!allowDowngrade) {
-    const existing = db
+//
+// `context` (#361 PR 3): a scoring context (parseScoringContext's shape, or the stored JSON string) to re-score
+// the night WITH instead of today's settings; the admin Recompute's opt-in "use the settings this night was
+// saved with" is the only caller that passes one. Omitted or null: exactly the call it always was (the job,
+// the review's store-first, the demo seed and the default Recompute all pass none). Garbage THROWS, as
+// computeNight does, and before anything is computed or written: a caller that meant "the stored settings"
+// must never get today's silently. It is normalised here so the context written (scoringContextFor) is in step
+// 1's key order whatever object a caller handed over.
+//
+// ⚠️ A FOURTH REFUSAL, `stored_camera_missing` (#361 PR 3): a replay whose context camera no longer exists
+// (computeNight answers no_data with `scoring.problem: 'camera_deleted'`) is NEVER stored, whatever
+// `allowDowngrade` says and whatever the saved row's status. Storing it would add nothing (a no_data row that
+// only says the camera is gone) and, over a scored row, the `would_downgrade` refusal would blame aged-out
+// data for what is really a deleted camera. It comes AFTER `reviewed`, so a locked night still says it is
+// locked (the precedence the lock was given above), and BEFORE the two downgrade guards, so the reason given
+// is the real one. Order: reviewed, stored_camera_missing, would_downgrade, would_blank_notified_wake.
+export function computeAndStoreNight(childId, nightDate, { allowDowngrade = true, context = null } = {}) {
+  const ctx = context == null ? null : parseScoringContext(context);
+  if (context != null && !ctx) {
+    throw new TypeError('computeAndStoreNight: `context` is not a valid scoring context (see parseScoringContext)');
+  }
+  const summary = computeNight(childId, nightDate, { context: ctx });
+  // Read only for the guarded path, exactly as before: `allowDowngrade: true` (tests only) skips every guard
+  // except `stored_camera_missing`.
+  const existing = allowDowngrade
+    ? null
+    : db
       .prepare('SELECT status, notified_wake_at FROM sleep_nights WHERE child_id = ? AND night_date = ?')
       .get(childId, nightDate);
-    if (existing) {
-      if (nightIsLocked(childId, nightDate)) {
-        return { ...summary, stored: false, refused: 'reviewed' };
-      }
-      if (!SCORED.has(summary.status) && SCORED.has(existing.status)) {
-        return { ...summary, stored: false, refused: 'would_downgrade', stored_status: existing.status };
-      }
-      // ROADMAP §1.6: once a parent has been TOLD a specific wake time (a follow-up notification
-      // fired, see notifySleepReportUpdates/runNightlySleepJob), never let a later, weaker pass
-      // quietly take it back. The departure scan can lose a previously-qualifying exit candidate as
-      // accumulated daytime activity grows (activeSuffix, this file's !inProgress block) and fall back
-      // to wake_at: null while status stays 'ok' — the allowDowngrade guard above does not catch this,
-      // it only protects `status`. Without this second guard, the notification tray could say "up
-      // 06:50" while the stored card silently went back to "still asleep" minutes later — a
-      // self-contradiction this feature would introduce, not one that exists today.
-      if (existing.notified_wake_at != null && summary.wake_at == null) {
-        return { ...summary, stored: false, refused: 'would_blank_notified_wake' };
-      }
+  if (existing && nightIsLocked(childId, nightDate)) {
+    return { ...summary, stored: false, refused: 'reviewed' };
+  }
+  if (ctx && summary.scoring?.problem) {
+    return { ...summary, stored: false, refused: 'stored_camera_missing' };
+  }
+  if (existing) {
+    if (!SCORED.has(summary.status) && SCORED.has(existing.status)) {
+      return { ...summary, stored: false, refused: 'would_downgrade', stored_status: existing.status };
+    }
+    // ROADMAP §1.6: once a parent has been TOLD a specific wake time (a follow-up notification
+    // fired, see notifySleepReportUpdates/runNightlySleepJob), never let a later, weaker pass
+    // quietly take it back. The departure scan can lose a previously-qualifying exit candidate as
+    // accumulated daytime activity grows (activeSuffix, this file's !inProgress block) and fall back
+    // to wake_at: null while status stays 'ok' — the allowDowngrade guard above does not catch this,
+    // it only protects `status`. Without this second guard, the notification tray could say "up
+    // 06:50" while the stored card silently went back to "still asleep" minutes later — a
+    // self-contradiction this feature would introduce, not one that exists today.
+    if (existing.notified_wake_at != null && summary.wake_at == null) {
+      return { ...summary, stored: false, refused: 'would_blank_notified_wake' };
     }
   }
   upsertNight.run({
@@ -2618,7 +2694,8 @@ export function computeAndStoreNight(childId, nightDate, { allowDowngrade = true
     // After `...summary`, so it can never be shadowed by a computeNight key. Only bound here, never added
     // to `summary` or the return value below: computeNight's output, and so every API response built from
     // it, stays exactly as it was (#361 PR 1 changes no number and no response shape except the stored row).
-    scoring_context: scoringContextFor(childId, summary),
+    // With a context, the context the night was re-scored WITH, and today's rules label (see scoringContextFor).
+    scoring_context: scoringContextFor(childId, summary, ctx),
     // toSqlUtc truncates to the minute (it exists to match activity_samples.bucket_start) — a harmless
     // sub-minute fuzz against runNightlySleepJob's 3h/30min-granularity finality check, and nothing else
     // reads computed_at at second precision.

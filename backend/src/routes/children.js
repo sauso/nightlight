@@ -9,6 +9,7 @@ import { primaryCameraRowFor } from '../lib/primaryCamera.js';
 import {
   getStoredNights, computeNight, computeAndStoreNight, currentNightDate, lastCompletedNightDate,
   childTracksSleep, sleepInsights, nightIsLocked, storeNightBeforeCorrection, reportableSpanMs, MIN_COVERAGE_FRAC, EMPTY_MIN_COVERAGE_FRAC,
+  parseScoringContext, scoringContextChoice,
 } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
 import { reconcileClipRing } from '../lib/clipCapture.js';
@@ -329,7 +330,8 @@ router.get('/:id/sleep', (req, res) => {
 // Compute one night on demand for a specific LOCAL start date ('YYYY-MM-DD'). ?detail=1 includes the
 // timeline segments + wake list for the Sleep detail view; ?debug=1 also adds the raw per-minute
 // timeline (tuning); ?store=1 (admin) persists the recompute; ?stored=1 returns the SAVED row instead
-// of computing anything.
+// of computing anything. ?context=stored|current and ?raw=1 (#361 PR 3): which settings the night is
+// worked out with, and whether a parent's correction is laid over the answer (see below).
 router.get('/:id/sleep/:date', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
@@ -356,23 +358,80 @@ router.get('/:id/sleep/:date', (req, res) => {
   // parent corrected it, decided HERE by the same function the refusal uses (nightIsLocked). The UI keys
   // on this rather than on `night.corrected` (plan review R8): a corrected night whose saved row is
   // missing or unscored is NOT locked, and Recompute is exactly how that one gets fixed.
+  //
+  // `contexts` (#361 PR 3, added; `night` and `locked` are unchanged): the settings this night was saved with
+  // beside today's, and whether they differ (sleepAnalysis.js scoringContextChoice). It rides on THIS call
+  // because the Recompute dialog already makes it when it opens: the choice arrives with the "before" column,
+  // with no second request and no probing `?context=stored` (and its 400) on every legacy night. Ids, zone and
+  // window strings and live camera names only: nothing about the child, no camera address or credential.
   if (req.query.stored === '1') {
     const row = db
       .prepare('SELECT * FROM sleep_nights WHERE child_id = ? AND night_date = ?')
       .get(req.params.id, req.params.date);
-    return res.json({ night: row || null, locked: nightIsLocked(req.params.id, req.params.date) });
+    const contexts = scoringContextChoice(req.params.id, row?.scoring_context ?? null);
+    return res.json({ night: row || null, contexts, locked: nightIsLocked(req.params.id, req.params.date) });
+  }
+  // #361 PR 3: WHICH SETTINGS the night is worked out with. `current` (also what an absent param means) is
+  // today's camera, timezone and window: every request that does not name this param behaves exactly as it
+  // did before it existed, byte for byte. It is the DEFAULT because the owner chose it (2026-10-20, #361 Q4):
+  // a re-score with the stored settings is an opt-in an admin ticks in the Recompute dialog, never a quiet
+  // change to what "Recompute" means. `stored` replays the camera, timezone and window this night's saved row
+  // was scored with (computeNight's `context`), with TODAY's detection rules either way.
+  // Anything else is a 400 BEFORE any compute or write, including with `store=1`: a typo must not quietly fall
+  // back to today's settings, which is the very substitution #361 exists to end. Every refusal on this route is
+  // a 4xx with a readable `error` (and a `reason` to branch on): a 5xx body is stripped by Cloudflare.
+  const contextChoice = req.query.context;
+  if (contextChoice !== undefined && contextChoice !== 'stored' && contextChoice !== 'current') {
+    return res.status(400).json({ error: 'context must be "stored" or "current"' });
   }
   const wantStore = req.query.store === '1' && req.user?.role === 'admin';
+  let context = null;
+  if (contextChoice === 'stored') {
+    const saved = db
+      .prepare('SELECT scoring_context FROM sleep_nights WHERE child_id = ? AND night_date = ?')
+      .get(req.params.id, req.params.date);
+    context = parseScoringContext(saved?.scoring_context ?? null);
+    // No saved row, a row saved before #361 (NULL: nothing was recorded, and there is no backfill), or a value
+    // the parser refuses. computeNight would THROW on a bad context, so it is checked here and answered as a
+    // readable 400 rather than becoming a 500 the browser cannot read.
+    if (!context) {
+      return res.status(400).json({
+        error: "This night has no saved settings that can be used (it was saved before the app recorded them, "
+          + "or what was saved can't be read). Recompute it with the current settings instead.",
+        reason: 'no_stored_context',
+      });
+    }
+    // The write must be the one the person previewed (#361 plan R2). Between opening the dialog and pressing
+    // Save, another phone can re-save this night (an admin's Recompute, a review save that stores first, the
+    // nightly job), and that save writes a DIFFERENT valid context: replaying it would store numbers nobody
+    // saw. So the dialog echoes the exact `scoring_context` string it was shown, and a mismatch is a 409 with
+    // nothing written. Compared as a string, in the same synchronous tick as the store below (better-sqlite3
+    // cannot yield), so nothing can slip in between this check and the write. Optional for an API caller.
+    if (wantStore && req.query.expect_context !== undefined && req.query.expect_context !== saved.scoring_context) {
+      return res.status(409).json({
+        error: 'This night was saved again while you were looking at it. Close this and open Recompute again.',
+        reason: 'context_changed',
+      });
+    }
+  }
   if (!wantStore) {
-    return res.json(applyCorrection(req.params.id, computeNight(req.params.id, req.params.date, {
+    const night = computeNight(req.params.id, req.params.date, {
       includeTimeline: req.query.debug === '1' || req.query.detail === '1',
-    })));
+      context,
+    });
+    // `raw=1` (#361 PR 3, honoured only when `context` is named, so no existing request changes): the answer
+    // WITHOUT a parent's correction laid over it. The Recompute dialog's preview needs it because a store
+    // writes the DETECTOR's summary, never the overlay (see the store's own 200 below), and a corrected night
+    // whose saved row is missing or unscored is still recompute-eligible: comparing the saved row against an
+    // overlaid preview would show the parent's times as what Save would store.
+    const raw = contextChoice !== undefined && req.query.raw === '1';
+    return res.json(raw ? night : applyCorrection(req.params.id, night));
   }
   // Storing a recompute can only ever improve or re-score a night, never un-score one — see the
   // allowDowngrade guard in computeAndStoreNight. A refusal is not a server fault (the night is too old,
   // too little of it was watched, or it no longer scores — below), so it is a 4xx with a readable reason:
   // a 5xx would have its body stripped by Cloudflare and the user would see nothing at all.
-  const summary = computeAndStoreNight(req.params.id, req.params.date, { allowDowngrade: false });
+  const summary = computeAndStoreNight(req.params.id, req.params.date, { allowDowngrade: false, context });
   // A night a parent has corrected is locked (see nightIsLocked in sleepAnalysis.js): it is kept as it was
   // when they corrected it, and the owner's rule is that nothing, this button included, re-scores it after
   // that. A 409 with a readable reason, like the other refusals below, because a 5xx body would be
@@ -384,6 +443,17 @@ router.get('/:id/sleep/:date', (req, res) => {
         + 'is locked. To change it, change or remove the correction ("Change what you told us about this '
         + 'night"). The saved summary has been left as it is.',
       reason: 'reviewed',
+    });
+  }
+  // #361 PR 3: `context=stored` asked for the camera this night was saved from, and that camera has since been
+  // deleted. computeAndStoreNight refuses it whatever the saved row says (see its comment): there is nothing to
+  // re-score from, and over a scored row the `would_downgrade` wording below would blame aged-out data for what
+  // is really a deleted camera. Only a stored-settings request can reach this; the default never passes a context.
+  if (summary.refused === 'stored_camera_missing') {
+    return res.status(409).json({
+      error: 'The camera this night was saved from no longer exists, so it cannot be re-scored with those settings. '
+        + 'Nothing was saved. Recompute with the current settings instead.',
+      reason: 'stored_camera_missing',
     });
   }
   if (summary.refused === 'would_downgrade') {
@@ -407,10 +477,12 @@ router.get('/:id/sleep/:date', (req, res) => {
     // Telling a user "aged out" about last week's night, or "the video was missing" about a fully watched
     // one, is simply false — the same class of defect #508 exists to remove from the numbers.
     //
-    // ⚠️ API-ONLY TODAY: SleepDetail returns early for a fresh `no_data` / `no_sleep` / `empty` night
-    // before it ever renders RecomputeNight, so the browser cannot reach this refusal (the e2e spec
-    // `08-recompute-night` says so and drives it through this route). The wording is still written for a
-    // person, because RecomputeNight shows `error` verbatim if it ever does arrive.
+    // ⚠️ THE DEFAULT PATH IS STILL API-ONLY: on a fresh `no_data` / `no_sleep` night the dialog offers only
+    // the stored-settings re-score (#361 PR 3, and only when the night has usable saved settings that differ
+    // from today's), never a Save with today's settings, so the browser cannot send the request that would
+    // be refused here with today's settings (the e2e spec `08-recompute-night` drives it through this route).
+    // A stored-settings save CAN arrive here (a replay whose data has aged out comes back `no_data` too), so
+    // the wording is written for a person: RecomputeNight shows `error` verbatim.
     //
     // ADDED to the response shape, never removed (a running SPA is a deployed client): `error` keeps its
     // meaning and its closing sentence (the e2e spec matches /aged out|left as it is/); `reason`,

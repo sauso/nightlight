@@ -6678,8 +6678,8 @@
   {
     "label": "nobody-in-bed frontend R3: RecomputeNight trusts the raw store response again",
     "file": "frontend/src/components/RecomputeNight.jsx",
-    "find": "      await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });\r\n      const overlaid = await api.get(`/children/${childId}/sleep/${date}?detail=1`);\r\n      onRecomputed?.(overlaid);",
-    "replace": "      const result = await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });\r\n      onRecomputed?.(result);",
+    "find": "      await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1${storedSettings}`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });\r\n      const overlaid = await api.get(`/children/${childId}/sleep/${date}?detail=1`);\r\n      onRecomputed?.(overlaid);",
+    "replace": "      const result = await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1${storedSettings}`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });\r\n      onRecomputed?.(result);",
     "expect": "killed",
     "tests": ["RecomputeNight.test.jsx"],
     "namePattern": "OVERLAID night"
@@ -7957,8 +7957,8 @@
   {
     "label": "in-bed/lock L2: computeAndStoreNight no longer refuses a locked night",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "        return { ...summary, stored: false, refused: 'reviewed' };",
-    "replace": "        // mutant: no reviewed refusal",
+    "find": "    return { ...summary, stored: false, refused: 'reviewed' };",
+    "replace": "    // mutant: no reviewed refusal",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "refused with a 409"
@@ -7966,8 +7966,8 @@
   {
     "label": "in-bed/lock L3: the reviewed refusal is checked AFTER would_downgrade (a locked night is told its data aged out)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "      if (nightIsLocked(childId, nightDate)) {",
-    "replace": "      if (SCORED.has(summary.status) && nightIsLocked(childId, nightDate)) {",
+    "find": "  if (existing && nightIsLocked(childId, nightDate)) {",
+    "replace": "  if (existing && SCORED.has(summary.status) && nightIsLocked(childId, nightDate)) {",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "comes BEFORE"
@@ -22525,5 +22525,50 @@
     "expect": "killed",
     "tests": ["scoring-context-replay.test.js"],
     "namePattern": "a deleted context camera is no_data"
+  },
+  {
+    "label": "#361 PR3: the Recompute route ignores context=stored on a store (re-scores with today's settings)",
+    "file": "backend/src/routes/children.js",
+    "find": "computeAndStoreNight(req.params.id, req.params.date, { allowDowngrade: false, context });",
+    "replace": "computeAndStoreNight(req.params.id, req.params.date, { allowDowngrade: false });",
+    "expect": "killed",
+    "tests": ["recompute-stored-context.test.js"],
+    "namePattern": "a disabled camera"
+  },
+  {
+    "label": "#361 PR3: a stored-settings save writes TODAY's timezone and window into the context",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  if (ctx) return JSON.stringify({ ...ctx, algo: SCORING_ALGO });",
+    "replace": "  if (ctx) return JSON.stringify({ ...currentScoringContext(childId), camera_id: ctx.camera_id });",
+    "expect": "killed",
+    "tests": ["recompute-stored-context.test.js"],
+    "namePattern": "the written context is the stored camera"
+  },
+  {
+    "label": "#361 PR3: a stored-settings save copies the stored rules label (new numbers labelled as old rules)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  if (ctx) return JSON.stringify({ ...ctx, algo: SCORING_ALGO });",
+    "replace": "  if (ctx) return JSON.stringify({ ...ctx });",
+    "expect": "killed",
+    "tests": ["recompute-stored-context.test.js"],
+    "namePattern": "the written context is the stored camera"
+  },
+  {
+    "label": "#361 PR3: the route's default flips to the stored settings (owner chose today's, #361 Q4)",
+    "file": "backend/src/routes/children.js",
+    "find": "  const contextChoice = req.query.context;",
+    "replace": "  const contextChoice = req.query.context ?? 'stored';",
+    "expect": "killed",
+    "tests": ["recompute-stored-context.test.js"],
+    "namePattern": "context=current is exactly the default"
+  },
+  {
+    "label": "#361 PR3: a replay whose stored camera was deleted is stored (stored_camera_missing removed)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  if (ctx && summary.scoring?.problem) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["recompute-stored-context.test.js"],
+    "namePattern": "a deleted stored camera"
   }
 ]

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -10,6 +10,34 @@ function fmtDur(min) {
   const h = Math.floor(min / 60);
   const m = min % 60;
   return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+// The parts of one scoring context, as the dialog names them: the camera (by its LIVE name from the server; the
+// context itself holds only the id), the window as saved, and the timezone.
+function settingsParts(ctx, cameraName) {
+  let camera = cameraName;
+  if (ctx.camera_id == null) camera = 'no camera';
+  else if (!cameraName) camera = 'a camera that no longer exists';
+  return { camera, window: `${ctx.window.start}–${ctx.window.end}`, tz: ctx.tz };
+}
+
+// For example "Saved with: Bed cam, 19:30–07:00, Europe/London. Now: Door cam, 19:30–07:00, Europe/London."
+// Only what differs is emphasised: the reader's question is "what changed since this night was saved?".
+function SettingsCompare({ contexts }) {
+  const was = settingsParts(contexts.stored, contexts.camera_names?.stored);
+  const now = settingsParts(contexts.current, contexts.camera_names?.current);
+  const differs = {
+    camera: contexts.stored.camera_id !== contexts.current.camera_id,
+    window: was.window !== now.window,
+    tz: was.tz !== now.tz,
+  };
+  const show = (parts, key) => (differs[key] ? <strong>{parts[key]}</strong> : parts[key]);
+  return (
+    <>
+      Saved with: {show(was, 'camera')}, {show(was, 'window')}, {show(was, 'tz')}. Now: {show(now, 'camera')},{' '}
+      {show(now, 'window')}, {show(now, 'tz')}.
+    </>
+  );
 }
 
 // Admin-only "Recompute this night".
@@ -43,6 +71,32 @@ function fmtDur(min) {
 // nothing said why. "Remove my correction" is that missing control. It is a plain save of the EXISTING review
 // route, deliberately and only with the three times, their three frame ids and (only when the stored review
 // says no one was in the bed) the flag. See `removeCorrection` for exactly what is and is not sent.
+//
+// ⚠️ #361 PR 3: A THIRD BASELINE, "the settings this night was saved with". The "before" column is still the
+// saved row; what changes is the "after". By default it is the PAGE's night, worked out with TODAY's camera,
+// timezone and window (with a parent's correction laid over it, as the page shows it), exactly as before. Ticking
+// "Use the settings this night was saved with" swaps it for a PREVIEW from `?context=stored&raw=1`: the night
+// worked out with the camera, timezone and window it was saved with (today's detection rules either way), WITHOUT
+// the correction overlay, because a store writes the detector's answer and the dialog must show what Save will
+// write. Comparing the saved row with the page's night while saving the replay would preview one thing and write
+// another. The choice arrives with `?stored=1` (`contexts`), so opening the dialog costs no extra request.
+//   - The box starts UNTICKED every time the dialog opens, and an unticked save sends exactly today's URL (no
+//     `context` at all): the owner chose today's settings as the default (2026-10-20, #361 Q4).
+//   - It is offered only when the saved settings are usable AND differ from today's (camera, timezone or
+//     window). A night saved before the app recorded its settings, or whose record can't be read, shows the
+//     box disabled with the reason, so the option is not silently missing; identical settings show nothing.
+//   - Save sends `expect_context` (the exact record the dialog was shown): another phone that re-saves the night
+//     in between makes the server answer 409 rather than store numbers nobody previewed (plan R2).
+//   - After a stored-settings save the page is re-read with TODAY's settings like any other save, and a line
+//     says the child's card now holds the stored-settings numbers while this page still works the night out
+//     with today's (plan R3: repainting with the replay would flip back on the page's 2-minute refresh or a
+//     reload). The line belongs to that child and night only.
+//   - On a night today's settings cannot score (`no_data`, `no_sleep`) this control used to be absent, so the
+//     night the feature exists for (a camera turned off since) could not reach it (plan R1). There it renders
+//     ONLY after its own `?stored=1` finds usable, differing saved settings on an unlocked night (otherwise the
+//     page looks exactly as before), and the dialog offers only the stored-settings path: a save with today's
+//     settings could at best store "no data" again (over a scored row it is refused, `would_downgrade`), and
+//     comparing the saved row with "no data" means nothing.
 export default function RecomputeNight({ childId, date, night, fmtTime, onRecomputed, onCorrectionRemoved }) {
   const { user } = useAuth();
   const [stored, setStored] = useState(undefined); // the saved row: undefined = not looked yet, null = none
@@ -51,8 +105,34 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
   const [confirming, setConfirming] = useState(false); // the "Remove my correction" confirm step, in the modal
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // #361 PR 3 (see the header): the two contexts from `?stored=1` (null = an older server sent none), the box,
+  // the stored-settings preview, which child/night a stored-settings save was made for, and (no_data/no_sleep
+  // nights only) whether this control is offered at all.
+  const [contexts, setContexts] = useState(null);
+  const [useStoredSettings, setUseStoredSettings] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [savedWithStoredFor, setSavedWithStoredFor] = useState(null);
+  const [offered, setOffered] = useState(false);
+
+  const isAdmin = user?.role === 'admin';
+  const unscored = night?.status === 'no_data' || night?.status === 'no_sleep';
+  const inProgress = !!night?.in_progress;
+  // Plan R1: one read, admin only, and only on a night today's settings cannot score. Any failure, or an answer
+  // without usable differing settings, leaves the control hidden: the page then looks exactly as before.
+  useEffect(() => {
+    setOffered(false);
+    if (!isAdmin || !unscored || inProgress || !childId || !date) return undefined;
+    let alive = true;
+    api.get(`/children/${childId}/sleep/${date}?stored=1`)
+      .then((r) => {
+        if (alive) setOffered(r?.locked !== true && r?.contexts?.stored_state === 'ok' && r?.contexts?.differs === true);
+      })
+      .catch(() => { /* not offered */ });
+    return () => { alive = false; };
+  }, [isAdmin, unscored, inProgress, childId, date]);
 
   if (user?.role !== 'admin' || !childId || !date || night?.in_progress) return null;
+  if (unscored && !offered) return null;
 
   const closeDialog = () => {
     setOpen(false);
@@ -109,6 +189,7 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
       const r = await api.get(`/children/${childId}/sleep/${date}?stored=1`);
       setStored(r?.night ?? null);
       setLocked(r?.locked === true);
+      setContexts(r?.contexts ?? null);
       setConfirming(false);
       // The normal (overlaid) read, as `save` does: the page then shows the detector's own night.
       const overlaid = await api.get(`/children/${childId}/sleep/${date}?detail=1`);
@@ -122,19 +203,65 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
     }
   };
 
-  const rows = open && stored ? [
-    ['Fell asleep', fmtTime(stored.onset_at), fmtTime(night.onset_at)],
-    ['Woke', fmtTime(stored.wake_at), fmtTime(night.wake_at)],
-    ['Asleep', fmtDur(stored.asleep_minutes), fmtDur(night.asleep_minutes)],
-    ['Awake', fmtDur(stored.awake_minutes), fmtDur(night.awake_minutes)],
-    ['Wake-ups', String(stored.wake_count ?? 0), String(night.wake_count ?? 0)],
+  // What the "after" column is (the third baseline, see the header): the stored-settings preview while the box is
+  // ticked, else the page's night. No table while the preview is loading or names a camera that is gone. (An
+  // unscored night's today's-settings side shows its explanation instead of the table, and `canSave` refuses it.)
+  const afterNight = useStoredSettings ? preview : night;
+  const previewGone = useStoredSettings && preview?.scoring?.problem === 'camera_deleted';
+  const showTable = !!afterNight && !previewGone;
+  const rows = open && stored && showTable ? [
+    ['Fell asleep', fmtTime(stored.onset_at), fmtTime(afterNight.onset_at)],
+    ['Woke', fmtTime(stored.wake_at), fmtTime(afterNight.wake_at)],
+    ['Asleep', fmtDur(stored.asleep_minutes), fmtDur(afterNight.asleep_minutes)],
+    ['Awake', fmtDur(stored.awake_minutes), fmtDur(afterNight.awake_minutes)],
+    ['Wake-ups', String(stored.wake_count ?? 0), String(afterNight.wake_count ?? 0)],
   ] : [];
   const changed = !locked && rows.some(([, before, after]) => before !== after);
   const nothingSaved = !locked && open && stored === null;
+  // The settings choice, on an unlocked night with a saved row. 'offer': usable saved settings that differ from
+  // today's. 'none' (a legacy row: no record) and 'unreadable': shown disabled, with the reason. Identical
+  // settings, or no `contexts` from the server: no choice at all.
+  let choice = null;
+  if (!locked && stored && contexts) {
+    if (contexts.stored_state === 'ok' && contexts.differs) choice = 'offer';
+    else if (contexts.stored_state === 'none' || contexts.stored_state === 'unreadable') choice = contexts.stored_state;
+  }
+  // Unscored nights offer ONLY the stored-settings save (plan R1): unticked, their saved row against the page's "no
+  // data" would read as a change, and a "Save this night" for a row that vanished since the offer would store
+  // today's "no data". A preview whose camera is gone builds no table, so `changed` is already false there.
+  const canSave = !locked && !(unscored && !useStoredSettings) && (changed || nothingSaved);
+
+  // Ticking fetches the stored-settings preview; unticking goes back to the page's night (today's behaviour).
+  // The box is disabled while a request runs, so two previews cannot race.
+  const chooseStored = async (checked) => {
+    setError(null);
+    setPreview(null);
+    setUseStoredSettings(checked);
+    if (!checked) return;
+    setBusy(true);
+    try {
+      // `raw=1`: no correction overlay, so this is what a store would write (see the header).
+      const r = await api.get(`/children/${childId}/sleep/${date}?context=stored&raw=1`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
+      setPreview(r ?? null);
+    } catch (e) {
+      // A 400 `no_stored_context` means the server no longer has usable settings for this night (another phone
+      // changed it after this dialog opened): say so in the server's words and go back to today's settings.
+      setUseStoredSettings(false);
+      setError(e?.message || 'Could not work this night out with the settings it was saved with.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const save = async () => {
     setBusy(true);
     setError(null);
+    const withStored = useStoredSettings;
+    // Ticked: the stored settings, bound to the exact record this dialog was shown (`expect_context`, plan R2).
+    // Unticked: NOTHING is added, so the request is byte-for-byte the one this dialog always sent.
+    const storedSettings = withStored
+      ? `&context=stored&expect_context=${encodeURIComponent(stored?.scoring_context ?? '')}`
+      : '';
     try {
       // ⚠️ `?store=1` is RAW BY DESIGN (see the route's own comment in children.js): it reports what the
       // detector just saved to sleep_nights, not what the page should show. A parent's correction — a
@@ -144,19 +271,27 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
       // correction was showing a moment before — true for a time correction already, and it would have
       // been just as true for the new flag if this had not been fixed (plan review R3). Re-fetching the
       // normal route after the write is what keeps the overlay in force.
-      await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
+      // #361 PR 3: the re-read is the NORMAL one (today's settings) after a stored-settings save too, on purpose
+      // (see the header): the line below the button says what was saved.
+      await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1${storedSettings}`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       const overlaid = await api.get(`/children/${childId}/sleep/${date}?detail=1`);
       onRecomputed?.(overlaid);
+      // A later default save replaces the stored-settings numbers, so it also takes the line away.
+      setSavedWithStoredFor(withStored ? `${childId}|${date}` : null);
       setOpen(false);
       setStored(undefined); // force a fresh look next time
     } catch (e) {
+      if (e?.data?.reason === 'no_stored_context') {
+        setUseStoredSettings(false);
+        setPreview(null);
+      }
       setError(e?.message || 'Could not save the recomputed night.');
     } finally {
       setBusy(false);
     }
   };
 
-  return (
+  const body = (
     <>
       <button
         type="button"
@@ -170,6 +305,10 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
             setStored(r?.night ?? null);
             // Strictly `true`: a server from before this field sends nothing, which must read as unlocked.
             setLocked(r?.locked === true);
+            setContexts(r?.contexts ?? null);
+            // Every opening starts on today's settings (#361 Q4): the choice is never remembered.
+            setUseStoredSettings(false);
+            setPreview(null);
             setConfirming(false);
             setOpen(true);
           } catch (e) {
@@ -196,6 +335,16 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
             ? 'Your answer that no one was in the bed is kept, and recomputing never replaces it. To change it, use '
             : 'These times are the ones you told us, and recomputing never replaces them. To change them, use '}
           <strong>Change what you told us about this night</strong>.
+        </div>
+      )}
+      {/* #361 PR 3, plan R3: after a stored-settings save the page is re-read with today's settings, so its
+          figures are NOT the ones just saved. Say so, for this child and night only (it is keyed to both, so
+          it cannot follow the page to another night). Until finished nights are shown with their saved
+          settings (#361's next step), a reload shows today's figures here too. */}
+      {savedWithStoredFor === `${childId}|${date}` && (
+        <div className="sleep-detail__recompute-note">
+          Saved using the settings this night was recorded with. The child’s card shows these numbers; this
+          page still works the night out with today’s settings.
         </div>
       )}
 
@@ -226,32 +375,81 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
               To change it, use <strong>Change what you told us about this night</strong>, or remove your
               correction here to unlock it.
             </p>
+          ) : nothingSaved && unscored ? (
+            // The offer was made from a saved row that has gone since (another phone, a removed child): there are
+            // no saved settings left to use, and today's give this night nothing to save.
+            <p style={{ marginTop: 0 }}>
+              Nothing is saved for this night any more, so there are no saved settings to use.
+            </p>
           ) : nothingSaved ? (
             <p style={{ marginTop: 0 }}>
               Nothing is saved for this night yet, so there is no summary on the child’s page to correct.
               Saving now records the night as it is shown here.
             </p>
-          ) : changed ? (
-            <>
-              <p style={{ marginTop: 0 }}>
-                The summary saved for this night — the one on the child’s page — no longer matches what
-                the recorded movement says. Saving replaces it with the figures on the right.
-              </p>
-              <div className="recompute-diff">
-                {rows.map(([label, before, after]) => (
-                  <div key={label} className={`recompute-diff__row${before === after ? '' : ' is-changed'}`}>
-                    <span className="recompute-diff__label">{label}</span>
-                    <span className="recompute-diff__was">{before || '—'}</span>
-                    <span className="recompute-diff__arrow" aria-hidden="true">→</span>
-                    <span className="recompute-diff__now">{after || '—'}</span>
-                  </div>
-                ))}
-              </div>
-            </>
           ) : (
-            <p style={{ marginTop: 0 }}>
-              The saved summary already matches the recorded movement, so there is nothing to change.
-            </p>
+            <>
+              {/* #361 PR 3: the settings choice (see the header). A real checkbox in a label, so it is
+                  reachable by keyboard and named for a screen reader; disabled, with the reason beside it, when
+                  this night has no usable record of its settings. */}
+              {choice && (
+                <div className="recompute-choice">
+                  <label className="recompute-choice__option">
+                    <input type="checkbox" checked={useStoredSettings} disabled={choice !== 'offer' || busy}
+                      onChange={(e) => chooseStored(e.target.checked)} />
+                    Use the settings this night was saved with
+                  </label>
+                  {choice === 'offer' ? (
+                    <>
+                      <div className="recompute-choice__help"><SettingsCompare contexts={contexts} /></div>
+                      <div className="recompute-choice__help">Uses today’s detection rules either way.</div>
+                    </>
+                  ) : (
+                    <div className="recompute-choice__help">
+                      {choice === 'none'
+                        ? 'This night was saved before the app recorded its settings.'
+                        : 'The settings saved with this night can’t be read.'}
+                    </div>
+                  )}
+                </div>
+              )}
+              {useStoredSettings && !preview ? (
+                busy && <p style={{ marginTop: 0 }}>Working the night out with the settings it was saved with…</p>
+              ) : previewGone ? (
+                <p style={{ marginTop: 0 }}>
+                  The camera this night was saved from no longer exists, so the night can’t be worked out with
+                  those settings. Nothing will be saved.
+                </p>
+              ) : unscored && !useStoredSettings ? (
+                // Plan R1: today's settings give this night nothing to compare (the page shows why).
+                <p style={{ marginTop: 0 }}>
+                  {night?.status === 'no_sleep'
+                    ? 'Today’s settings find no clear sleep in this night. '
+                    : 'Today’s settings find no data for this night. '}
+                  The settings it was saved with may still work.
+                </p>
+              ) : changed ? (
+                <>
+                  <p style={{ marginTop: 0 }}>
+                    The summary saved for this night — the one on the child’s page — no longer matches what
+                    the recorded movement says. Saving replaces it with the figures on the right.
+                  </p>
+                  <div className="recompute-diff">
+                    {rows.map(([label, before, after]) => (
+                      <div key={label} className={`recompute-diff__row${before === after ? '' : ' is-changed'}`}>
+                        <span className="recompute-diff__label">{label}</span>
+                        <span className="recompute-diff__was">{before || '—'}</span>
+                        <span className="recompute-diff__arrow" aria-hidden="true">→</span>
+                        <span className="recompute-diff__now">{after || '—'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p style={{ marginTop: 0 }}>
+                  The saved summary already matches the recorded movement, so there is nothing to change.
+                </p>
+              )}
+            </>
           )}
           {error && <div className="sleep-detail__recompute-error">{error}</div>}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -266,7 +464,7 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
               </>
             ) : (
               <button type="button" className="btn" onClick={closeDialog} disabled={busy}>
-                {changed || nothingSaved ? 'Cancel' : 'Close'}
+                {canSave ? 'Cancel' : 'Close'}
               </button>
             )}
             {locked && !confirming && (
@@ -274,7 +472,7 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
                 Remove my correction
               </button>
             )}
-            {(changed || nothingSaved) && (
+            {canSave && (
               <button type="button" className="btn btn-primary" onClick={save} disabled={busy}>
                 {busy ? 'Saving…' : nothingSaved ? 'Save this night' : 'Save the new numbers'}
               </button>
@@ -284,4 +482,8 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
       )}
     </>
   );
+  // On a night today's settings cannot score, the card around this has no padding of its own (SleepDetail's
+  // no-data / no-sleep cards), so the control brings its own. It only renders here once it is offered, so a
+  // night without the offer gains no empty space.
+  return unscored ? <div className="sleep-detail__recompute-unscored">{body}</div> : body;
 }

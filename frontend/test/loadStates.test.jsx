@@ -281,6 +281,10 @@ describe('Sleep detail', () => {
       vi.spyOn(api, 'get').mockImplementation((p) => {
         if (p.includes('/sleep/live')) return Promise.resolve({ scope: 'tonight', night: { night_date: '2026-08-30' } });
         if (p.includes('/sleep/insights')) return Promise.resolve(null);
+        // #361 PR 3: on a no_data / no_sleep night the admin-only Recompute control reads the saved row once on
+        // mount, to decide whether to offer anything. Answered apart (nothing saved, so no offer), so it neither
+        // takes the night's `first` answer nor counts as one of the night's reads below.
+        if (p.includes('?stored=1')) return Promise.resolve({ night: null, locked: false });
         calls += 1;
         return calls === 1 ? Promise.resolve(first) : later();
       });
@@ -300,7 +304,7 @@ describe('Sleep detail', () => {
       await fireRefresh();
       expect(await screen.findByText(/Couldn’t refresh this night/)).toBeTruthy();
       await user.click(screen.getByRole('button', { name: /retry/i }));
-      await waitFor(() => expect(api.get.mock.calls.filter((c) => /\/sleep\/2026-08-30/.test(c[0])).length).toBe(3));
+      await waitFor(() => expect(api.get.mock.calls.filter((c) => /\/sleep\/2026-08-30\?detail=1/.test(c[0])).length).toBe(3));
       // The night never went away and the banner is still the stale one, not the blocking failure.
       expect(screen.getByText(/No clear sleep detected/)).toBeTruthy();
       expect(screen.getByText(/Couldn’t refresh this night/)).toBeTruthy();
