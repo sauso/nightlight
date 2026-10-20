@@ -5,20 +5,43 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
 import Modal from '../components/Modal.jsx';
+import UnsavedNotice from '../components/UnsavedNotice.jsx';
+import { loadDraft, clearDraft } from '../lib/formDraft.js';
+import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
 import { fileToAvatarDataUrl } from '../lib/imageResize.js';
 
 const BLANK = { username: '', password: '', role: 'caregiver', first_name: '', last_name: '', photo: null };
 
+// What a reload-surviving draft may store (#377). Not the password (a secret) and not the photo (an existing
+// account's photo saves the moment it is chosen, and a data URL is not what a draft keeps).
+const DRAFT_FIELDS = ['username', 'first_name', 'last_name', 'role'];
+
+// The screen is reused across caregivers (one route, `:id`). Keyed by the id so each caregiver gets a FRESH copy of
+// the whole component: a draft, a baseline or a "loaded" flag from one account can then never be written under
+// another's key while the new account's data is still loading (#377 plan review).
+export default function UserSettings() {
+  const { id } = useParams();
+  return <UserSettingsForm key={id || 'new'} />;
+}
+
 // Add / edit a caregiver on its own routed screen (replaces the modal), reached from the Family
 // hub or User management. Admin-only (gated by the route). The username stays editable here (an
 // admin action), unlike self-service on the Account screen.
-export default function UserSettings() {
+function UserSettingsForm() {
   const { id } = useParams();
   const isNew = !id || id === 'new';
   const navigate = useNavigate();
   const { user: me, refresh: refreshMe } = useAuth();
 
-  const [form, setForm] = useState(BLANK);
+  // Unsaved edits survive the background reload and a trip to another screen (#377, formDraft.js).
+  const draftKey = useDraftKey(isNew ? 'user:new' : `user:${id}`);
+  // A new caregiver's form starts from any draft; an existing one's is restored once the account has loaded.
+  const [restoredDraft] = useState(() => (isNew ? loadDraft(draftKey, DRAFT_FIELDS) : null));
+  const [form, setForm] = useState(() => ({ ...BLANK, ...restoredDraft }));
+  // The form as last loaded: what "unsaved" is measured against. Typing never touches it.
+  const [baseline, setBaseline] = useState(BLANK);
+  const [restored, setRestored] = useState(!!restoredDraft);
+  const [formReady, setFormReady] = useState(isNew);
   const [loaded, setLoaded] = useState(isNew);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -83,13 +106,28 @@ export default function UserSettings() {
     api.get('/auth/users').then((users) => {
       const u = users.find((x) => x.id === id);
       if (u) {
-        setForm({ username: u.username, password: '', role: u.role, first_name: u.first_name || '', last_name: u.last_name || '', photo: u.photo || null });
+        const loadedForm = { username: u.username, password: '', role: u.role, first_name: u.first_name || '', last_name: u.last_name || '', photo: u.photo || null };
+        const draft = loadDraft(draftKey, DRAFT_FIELDS);
+        setBaseline(loadedForm);
+        setForm({ ...loadedForm, ...draft });
+        setRestored(!!draft);
+        setFormReady(true);
         setMfaEnabled(!!u.mfa_enabled);
         setOnlyAdmin(u.role === 'admin' && users.filter((x) => x.role === 'admin').length === 1);
       }
       setLoaded(true);
     }).catch((err) => { setError(err.message); setLoaded(true); });
-  }, [id, isNew]);
+  }, [id, isNew]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // True while anything on screen differs from what is saved, INCLUDING a typed password (never stored).
+  const unsaved = useFormDraft({ key: draftKey, allow: DRAFT_FIELDS, form, baseline, ready: formReady, secrets: [form.password] });
+
+  // Back to what is saved. An EXISTING account's photo is left as it is: it already saved on its own the moment it
+  // was chosen. A NEW account has nothing saved, so its chosen photo is part of what is being discarded.
+  function discardDraft() {
+    setForm((f) => ({ ...baseline, photo: isNew ? baseline.photo : f.photo }));
+    setRestored(false);
+  }
 
   async function save(e) {
     e.preventDefault();
@@ -104,6 +142,9 @@ export default function UserSettings() {
         await api.put(`/auth/users/${id}`, payload);
         if (id === me?.id) await refreshMe();
       }
+      // Saved, so the draft is stale. Cleared outright rather than left to useFormDraft's effect: we navigate away
+      // on the next line, and the effect would not necessarily run before this screen is gone.
+      clearDraft(draftKey);
       navigate(back.to);
     } catch (err) {
       setError(err.message);
@@ -133,6 +174,7 @@ export default function UserSettings() {
     setRemoveError('');
     try {
       await api.del(`/auth/users/${id}`);
+      clearDraft(draftKey);
       navigate(back.to);
     } catch (err) {
       // Dialog stays open, button re-enabled: the person can read why and retry or cancel.
@@ -152,6 +194,10 @@ export default function UserSettings() {
         ) : (
           <form onSubmit={save}>
             {error && <div className="error-banner">{error}</div>}
+            {unsaved && (
+              <UnsavedNotice restored={restored} onDiscard={discardDraft}
+                note={isNew || form.password ? 'The password is not kept if this page reloads; enter it again.' : ''} />
+            )}
 
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 16 }}>
               <Avatar name={fullName} src={form.photo} size={84} />

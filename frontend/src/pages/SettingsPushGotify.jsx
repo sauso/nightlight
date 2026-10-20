@@ -4,39 +4,67 @@ import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 import SecretField from '../components/SecretField.jsx';
 import { hasUnsavedEdits, UNSAVED_TEST_HINT } from '../lib/unsavedEdits.js';
+import UnsavedNotice from '../components/UnsavedNotice.jsx';
+import { loadDraft } from '../lib/formDraft.js';
+import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
 
 const BACK = { to: '/settings/push', label: 'Push notifications' };
 
 const INITIAL = { enabled: false, configured: false, server_url: '', app_token_set: false, app_token_masked: '', priority: 5 };
 
+// What a reload-surviving draft may store (#377). Not the application token (a secret, and kept apart from `form`).
+// A server URL that carries credentials is dropped by formDraft.js whatever the field is called.
+const DRAFT_FIELDS = ['enabled', 'server_url', 'priority'];
+
 export default function SettingsPushGotify() {
+  const draftKey = useDraftKey('push:gotify');
+  // Read once on mount: edits typed before a background reload, or before a visit to another screen.
+  const [restoredDraft] = useState(() => loadDraft(draftKey, DRAFT_FIELDS));
+  const [restored, setRestored] = useState(!!restoredDraft);
   const [form, setForm] = useState(INITIAL);
   // The config as last loaded or last successfully SAVED, never touched by typing: Send test tests this,
   // so it is what the on-screen form is compared against (#396). A failed save leaves it alone.
   const [lastSaved, setLastSaved] = useState(INITIAL);
   const [appToken, setAppToken] = useState(''); // secret input, blank = keep saved
   const [loaded, setLoaded] = useState(false);
+  // The GET answered. Separate from `loaded` (which also becomes true after a FAILED load so the page stays usable):
+  // a draft is written, restored and cleared only against a config that really arrived, or an unloaded form would
+  // read as "nothing changed" and wipe it.
+  const [configLoaded, setConfigLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
   const [testMsg, setTestMsg] = useState(null);
 
   useEffect(() => {
-    api.get('/gotify/config').then((c) => { setForm(c); setLastSaved(c); setLoaded(true); }).catch(() => setLoaded(true));
-  }, []);
+    api.get('/gotify/config').then((c) => {
+      // The restored draft goes back over the server's values (the load replaces the whole form object).
+      setForm({ ...c, ...restoredDraft }); setLastSaved(c); setConfigLoaded(true); setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function save(e) {
     e.preventDefault();
     setBusy(true); setError(''); setSaved(false); setTestMsg(null);
     try {
       const next = await api.put('/gotify/config', { enabled: form.enabled, server_url: form.server_url, app_token: appToken, priority: form.priority });
-      setForm(next); setLastSaved(next); setAppToken(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
+      setForm(next); setLastSaved(next); setConfigLoaded(true); setAppToken(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 
   // Send test goes to the SAVED config (POST has no body), so it is held back while the screen differs.
   // `priority` is a number from the server and a string once typed: hasUnsavedEdits compares as strings.
   const dirty = hasUnsavedEdits(form, lastSaved, [appToken]);
+  // Keeps the stored draft equal to "what is on screen, if it differs from what is saved". Its return value is not
+  // used: `dirty` above is what gates Send test and works on a failed load too (settingsPush.test.jsx).
+  useFormDraft({ key: draftKey, allow: DRAFT_FIELDS, form, baseline: lastSaved, ready: configLoaded, secrets: [appToken] });
+
+  // Back to what is saved: useFormDraft sees form == baseline and removes the stored draft.
+  function discardChanges() {
+    setForm(lastSaved);
+    setAppToken('');
+    setRestored(false);
+  }
 
   async function sendTest() {
     setBusy(true); setTestMsg(null); setError('');
@@ -50,6 +78,10 @@ export default function SettingsPushGotify() {
       <main className="app-main">
         {error && <div className="error-banner">{error}</div>}
         {saved && <div className="saved-banner">Saved ✓</div>}
+        {dirty && configLoaded && (
+          <UnsavedNotice restored={restored} onDiscard={discardChanges}
+            note="The application token is not kept if this page reloads; enter it again." />
+        )}
         <form onSubmit={save}>
           <div className="card">
             <div className="camera-tile__sub" style={{ marginBottom: 10 }}>

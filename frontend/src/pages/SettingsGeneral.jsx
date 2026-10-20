@@ -1,9 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../lib/api.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { getCommonTimezones } from '../lib/greeting.js';
 import { FONT_PRESETS } from '../lib/fonts.js';
 import AppHeader from '../components/AppHeader.jsx';
+import UnsavedNotice from '../components/UnsavedNotice.jsx';
+import { loadDraft } from '../lib/formDraft.js';
+import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
+import { useSettingsDraft } from '../lib/useSettingsDraft.js';
 
 const PRESETS = [
   { label: 'Nursery (default)', accent: '#f4c56a', live: '#7FBFA3', offline: '#E08585' },
@@ -12,15 +16,36 @@ const PRESETS = [
   { label: 'Rose quartz', accent: '#F5B8C6', live: '#8FBF9F', offline: '#E08585' },
 ];
 
+// The fields this screen edits: what Save sends, and what a reload-surviving draft may store (#377). All plain
+// strings, no secrets on this page.
+const DRAFT_FIELDS = ['app_name', 'timezone', 'font_choice', 'accent_color', 'live_color', 'offline_color', 'temp_unit'];
+
+const valuesOf = (src) => Object.fromEntries(DRAFT_FIELDS.map((k) => [k, src[k]]));
+
 export default function SettingsGeneral() {
-  const { settings, refresh } = useSettings();
-  const [form, setForm] = useState(settings);
+  const { settings, refresh, commit, loaded } = useSettings();
+  // Server settings vs. this screen's own unsaved edits, kept separate (#377, the #449 pattern from the Recording
+  // screen). This page used to copy `settings` into its form in an effect on every change, so ANY refresh of the
+  // context (a background poll, a save on another screen) silently overwrote what was being typed.
+  const draftKey = useDraftKey('settings:general');
+  // Read once on mount: edits typed before a background reload, or before a visit to another screen.
+  const [restoredDraft] = useState(() => loadDraft(draftKey, DRAFT_FIELDS));
+  const { form, setField, setFields, markSaved, discard } = useSettingsDraft(settings, restoredDraft || {});
+  const [restored, setRestored] = useState(!!restoredDraft);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [timezones] = useState(getCommonTimezones);
 
-  useEffect(() => setForm((f) => ({ ...f, ...settings })), [settings]);
+  // `ready` waits for the server's settings: until then `settings` is the provider's placeholder (a placeholder
+  // timezone and colours), and a restored draft that happens to equal one would read as "no change" and be
+  // cleared from storage, one reload from lost.
+  const unsaved = useFormDraft({ key: draftKey, allow: DRAFT_FIELDS, form: valuesOf(form), baseline: valuesOf(settings), ready: loaded !== false });
+
+  function discardChanges() {
+    discard();
+    setRestored(false);
+  }
 
   async function save(e) {
     e.preventDefault();
@@ -38,16 +63,19 @@ export default function SettingsGeneral() {
       // occasionally harmful: the Recording page's switch applies the instant it is flipped, so a
       // General page still holding the old value would silently revert it on its next Save, with
       // nothing shown to either person.
-      await api.put('/settings', {
-        app_name: form.app_name,
-        accent_color: form.accent_color,
-        live_color: form.live_color,
-        offline_color: form.offline_color,
-        timezone: form.timezone,
-        font_choice: form.font_choice,
-        temp_unit: form.temp_unit,
-      });
-      await refresh();
+      const payload = valuesOf(form);
+      const response = await api.put('/settings', payload);
+      if (response && typeof response === 'object') {
+        // Commit this write's own response, as the Recording screen does, instead of a second refresh() that could
+        // fail silently and leave the old value in the context: with drafts, the edit would then be dropped as
+        // "saved" while the field reverted on screen. markSaved only drops a draft that still equals what was sent.
+        commit(response);
+        markSaved(payload);
+      } else {
+        // Defensive fallback (the route always answers with the settings object): drafts stay, nothing has
+        // confirmed the save landed.
+        await refresh();
+      }
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (err) {
@@ -58,11 +86,11 @@ export default function SettingsGeneral() {
   }
 
   function useBrowserTimezone() {
-    setForm({ ...form, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+    setField('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone);
   }
 
   function applyPreset(preset) {
-    setForm({ ...form, accent_color: preset.accent, live_color: preset.live, offline_color: preset.offline });
+    setFields({ accent_color: preset.accent, live_color: preset.live, offline_color: preset.offline });
   }
 
   return (
@@ -71,6 +99,7 @@ export default function SettingsGeneral() {
       <main className="app-main">
         {error && <div className="error-banner">{error}</div>}
         {saved && <div className="saved-banner">Saved ✓</div>}
+        {unsaved && <UnsavedNotice restored={restored} onDiscard={discardChanges} />}
 
         <form onSubmit={save}>
           <div className="card">
@@ -80,7 +109,7 @@ export default function SettingsGeneral() {
               <input
                 id="app-name"
                 value={form.app_name || ''}
-                onChange={(e) => setForm({ ...form, app_name: e.target.value })}
+                onChange={(e) => setField('app_name', e.target.value)}
                 required
               />
             </div>
@@ -89,7 +118,7 @@ export default function SettingsGeneral() {
               <select
                 id="timezone"
                 value={form.timezone || ''}
-                onChange={(e) => setForm({ ...form, timezone: e.target.value })}
+                onChange={(e) => setField('timezone', e.target.value)}
               >
                 {!timezones.includes(form.timezone) && (
                   <option value={form.timezone}>{form.timezone}</option>
@@ -136,7 +165,7 @@ export default function SettingsGeneral() {
                   type="button"
                   key={key}
                   className={`font-btn${form.font_choice === key ? ' font-btn--active' : ''}`}
-                  onClick={() => setForm({ ...form, font_choice: key })}
+                  onClick={() => setField('font_choice', key)}
                 >
                   <span className="font-btn__sample" style={{ fontFamily: preset.display }}>
                     {preset.sample}
@@ -156,7 +185,7 @@ export default function SettingsGeneral() {
                   id="accent-color"
                   type="color"
                   value={form.accent_color || '#000000'}
-                  onChange={(e) => setForm({ ...form, accent_color: e.target.value })}
+                  onChange={(e) => setField('accent_color', e.target.value)}
                 />
                 <span className="camera-tile__sub">{form.accent_color}</span>
               </div>
@@ -168,7 +197,7 @@ export default function SettingsGeneral() {
                   id="live-color"
                   type="color"
                   value={form.live_color || '#000000'}
-                  onChange={(e) => setForm({ ...form, live_color: e.target.value })}
+                  onChange={(e) => setField('live_color', e.target.value)}
                 />
                 <span className="camera-tile__sub">{form.live_color}</span>
               </div>
@@ -180,7 +209,7 @@ export default function SettingsGeneral() {
                   id="offline-color"
                   type="color"
                   value={form.offline_color || '#000000'}
-                  onChange={(e) => setForm({ ...form, offline_color: e.target.value })}
+                  onChange={(e) => setField('offline_color', e.target.value)}
                 />
                 <span className="camera-tile__sub">{form.offline_color}</span>
               </div>
@@ -193,14 +222,14 @@ export default function SettingsGeneral() {
               <button
                 type="button"
                 className={`font-btn${form.temp_unit === 'C' ? ' font-btn--active' : ''}`}
-                onClick={() => setForm({ ...form, temp_unit: 'C' })}
+                onClick={() => setField('temp_unit', 'C')}
               >
                 <span className="font-btn__label">°C</span>
               </button>
               <button
                 type="button"
                 className={`font-btn${form.temp_unit === 'F' ? ' font-btn--active' : ''}`}
-                onClick={() => setForm({ ...form, temp_unit: 'F' })}
+                onClick={() => setField('temp_unit', 'F')}
               >
                 <span className="font-btn__label">°F</span>
               </button>

@@ -106,6 +106,7 @@ player components, or the camera tile.
 | ☐ | **Android app:** picture-in-picture by double-tap works |
 | ☐ | **Android app:** pinch-zoom works in a browser view |
 | ☐ | **Android app:** a camera tile loads and plays |
+| ☐ | **Phone and desktop browser:** open a dialog (for example Remove camera) on a long page, scroll or swipe behind it; the page does not move, the dialog's own content still scrolls, and closing it leaves the page where it was (#376; the tests only prove the lock's bookkeeping, not scrolling) |
 
 A failure here blocks the release the same as a red gate in §2.
 

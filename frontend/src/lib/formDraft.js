@@ -36,6 +36,10 @@ export const DRAFT_TTL_MS = 6 * 60 * 60 * 1000;
 // api_key, user_key, and so on; a plain `name`, `birthday`, `color` or `sleep_window_start` does not match.
 export const SECRET_KEY_RE = /pass|secret|token|key|credential|auth/i;
 
+// `//user@host` or `//user:pass@host`: userinfo in a URL authority (up to the first '/', '?' or '#'). Any
+// user@ counts, not only user:pass@, because a token can be the whole userinfo.
+export const URL_USERINFO_RE = /\/\/[^/?#\s]*@/;
+
 export function draftKey(userId, formId) {
   return `${DRAFT_PREFIX}${userId ?? 'anon'}:${formId}`;
 }
@@ -56,6 +60,10 @@ export function pickDraftFields(values, allow) {
     if (SECRET_KEY_RE.test(k)) continue;
     if (!values || !(k in values)) continue;
     const v = values[k];
+    // A value that carries URL credentials (`https://user:pass@host`) is a secret whatever the field is called:
+    // SECRET_KEY_RE reads key NAMES only, and a `server_url` can hold a password (#377). Dropping it costs retyping
+    // one address; keeping it would put a password in browser storage.
+    if (typeof v === 'string' && URL_USERINFO_RE.test(v)) continue;
     if (v === null || ['string', 'number', 'boolean'].includes(typeof v)) out[k] = v;
   }
   return out;

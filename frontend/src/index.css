@@ -64,6 +64,12 @@ html, body, #root {
   overscroll-behavior-y: contain;
 }
 
+/* Added to <html> while a dialog is open (lib/scrollLock.js, #376). overflow on html propagates to the viewport,
+   which is what scrolls; the page stays where it is and the dialog card scrolls itself. */
+html.modal-scroll-locked {
+  overflow: hidden;
+}
+
 /* Static height:100% is based on the layout viewport, which mobile browsers actually
    resize as the address bar hides/shows during scrolling - that mismatch is what
    causes fixed-position elements to visibly drift mid-scroll. 100dvh tracks the real
