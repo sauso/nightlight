@@ -37,7 +37,8 @@ const REPORT_FRESH_MS = 2 * 60 * 60 * 1000;
 // rule change that is code rather than a constant. The stored value is a plain string, so moving to a
 // derived tag later costs only a new value.
 // ⚠️ KNOWN LIMIT: nothing enforces the bump. A scoring change that forgets it stores the old label on nights
-// the new rules produced. Nothing reads the label yet, so today that only costs the history its accuracy.
+// the new rules produced. The only reader is a context replay's `scoring.algo_differs` (#361 step 2, see
+// computeNight), and nothing passes computeNight a context yet, so today that only costs the history its accuracy.
 export const SCORING_ALGO = '1';
 
 const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = real movement (sleeping room ~0)
@@ -743,12 +744,139 @@ export function quietStretchBeforeExit(cribAct, fromIdx, gapStart, minLen, maxTr
   return null;
 }
 
+// --- #361: a night's scoring context (WHAT it was scored with), read back --------------------------------
+//
+// Step 1 (#808) stores, beside every night, the camera, timezone, window and rules version that produced it
+// (`scoring_context`, written by scoringContextFor below). Step 2, this block, is the reading side:
+// parseScoringContext turns a stored record into a context, currentScoringContext says what today's settings
+// would be, and computeNight accepts a context in place of today's settings. NOTHING passes a context yet (the
+// admin Recompute choice is the next step, planning/361-scoring-context.md section 9), so no number anyone
+// sees can move by this block alone.
+
+// `HH:MM` of what parseHm makes of a saved window time: the EFFECTIVE time, never the raw text (see
+// scoringContextFor for why). One helper, so the writer and currentScoringContext cannot spell it twice.
+const effectiveHm = (s) => {
+  const { h, m } = parseHm(s);
+  return `${pad(h)}:${pad(m)}`;
+};
+
+// The camera a night is scored from TODAY: the child's primary camera (lib/primaryCamera.js, the named one
+// while it is still the child's and enabled, else the first enabled one by sort_order). One function, so a
+// plain computeNight and currentScoringContext cannot resolve two different cameras.
+function currentScoringCamera(childId) {
+  // tieBreak 'id': this query's own tie-break before #655, kept so a child with no primary is unchanged.
+  return primaryCameraRowFor(childId, { tieBreak: 'id' });
+}
+
+// THE ONE DEFINITION of "the scoring context this child's night would get if it were computed NOW": the v1
+// shape step 1 stores, in step 1's key order. scoringContextFor builds the stored JSON from it (and only swaps
+// in the camera the summary was actually scored from), so a stored row and this function cannot disagree, and
+// a later "today's settings" choice (the next step) can describe exactly what a plain compute uses. A plain
+// computeNight still makes these reads itself (left untouched so its output stays byte-identical); the test
+// "replaying with currentScoringContext reproduces a plain computeNight exactly" fails if the two ever drift.
+export function currentScoringContext(childId) {
+  const cfg = childSleepConfig(childId);
+  const cam = currentScoringCamera(childId);
+  return {
+    v: 1,
+    camera_id: cam ? cam.id : null,
+    tz: appSettings().timezone || 'UTC',
+    window: { start: effectiveHm(cfg.start), end: effectiveHm(cfg.end) },
+    algo: SCORING_ALGO,
+  };
+}
+
+// A stored window time: digits, a colon, digits. NOT an in-range HH:MM, on purpose (#361 plan, refinement b,
+// second Codex round): parseHm does no range check and the writer stores pad(h):pad(m) of whatever it read, so
+// a saved `25:00` (refused by the route's HH:MM check today, but an older install or a restored database can
+// hold one) became a valid v1 context, and that night really was scored 19:30 to 01:00. A replay must accept
+// it and hand it to windowBoundsUtc exactly as the original run did.
+// ⚠️ Not quite "exactly what the writer can produce", and deliberately so: the writer can also emit a NEGATIVE
+// part (`-5:00` from a saved `-5:00`, which only a hand-edited database can hold), and the plan treats a
+// negative, a letter or an empty part as "no context". Digits it never pads (`7:5`) are accepted: parseHm reads
+// them exactly as it reads `07:05`, so the replay is the same.
+const CONTEXT_HM = /^\d+:\d+$/;
+// `algo` is a short label bumped by hand (SCORING_ALGO). The bound only rejects text we never wrote.
+const CONTEXT_ALGO_MAX = 64;
+const CONTEXT_KEYS = ['algo', 'camera_id', 'tz', 'v', 'window'];
+const CONTEXT_WINDOW_KEYS = ['end', 'start'];
+const isPlainObject = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
+const hasExactlyKeys = (o, sortedKeys) => {
+  const k = Object.keys(o).sort();
+  return k.length === sortedKeys.length && k.every((x, i) => x === sortedKeys[i]);
+};
+// The same check computeNight's own window maths (tzOffsetMs) would fail on, made up front: a zone Intl
+// refuses could never have scored a night (that compute would have thrown before anything was stored).
+function isUsableTimeZone(tz) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// A stored `scoring_context` (its JSON string, or an already-parsed object) -> a fresh, normalised context
+// object in step 1's shape and key order, or null when it is anything step 1 could not have written. NEVER
+// throws: a corrupt row must read as "no usable context", for the caller to say so (plan revision 6).
+// The WHOLE v1 shape is checked, not only the keys a replay reads: exactly the five keys (an extra one means
+// another writer, or a future shape that must not be half-understood), `v === 1` (a number), `camera_id` a
+// string or null (null = no enabled camera then, which replays as no_data), `algo` a non-empty bounded string,
+// `tz` a zone Intl accepts, `window` exactly { start, end } of CONTEXT_HM text.
+export function parseScoringContext(raw) {
+  let c = raw;
+  if (typeof raw === 'string') {
+    try {
+      c = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!isPlainObject(c) || !hasExactlyKeys(c, CONTEXT_KEYS) || c.v !== 1) return null;
+  if (c.camera_id !== null && typeof c.camera_id !== 'string') return null;
+  if (typeof c.algo !== 'string' || c.algo.length === 0 || c.algo.length > CONTEXT_ALGO_MAX) return null;
+  if (typeof c.tz !== 'string' || !isUsableTimeZone(c.tz)) return null;
+  const w = c.window;
+  if (!isPlainObject(w) || !hasExactlyKeys(w, CONTEXT_WINDOW_KEYS)) return null;
+  if (typeof w.start !== 'string' || typeof w.end !== 'string') return null;
+  if (!CONTEXT_HM.test(w.start) || !CONTEXT_HM.test(w.end)) return null;
+  return { v: 1, camera_id: c.camera_id, tz: c.tz, window: { start: w.start, end: w.end }, algo: c.algo };
+}
+
+// The camera a context names, looked up DIRECTLY by id: any owner, enabled or not. Deliberately NOT
+// primaryCameraRowFor, which answers "which camera would score this child today" (enabled cameras of this
+// child only): the cases a replay exists for are exactly the ones that rule now refuses (#361: the camera was
+// disabled, moved to another child, demoted by a new primary, or dragged down the tile order).
+const contextCameraStmt = db.prepare('SELECT id, name FROM cameras WHERE id = ?');
+
 // Compute (but do not store) a child's sleep summary for the night starting on local date `nightDate`.
 // Returns { status, ...metrics, timeline? } — timeline only when includeTimeline is set (for tuning).
-export function computeNight(childId, nightDate, { includeTimeline = false } = {}) {
-  const tz = appSettings().timezone || 'UTC';
+//
+// `context` (#361 step 2): a scoring context (parseScoringContext's shape, or a stored `scoring_context` JSON
+// string, which is parsed the same way). Omitted or null: today's behaviour, byte for byte (the golden tests in
+// scoring-context.test.js and scoring-context-replay.test.js), and no `scoring` key. Given: the timezone, the
+// window and the scored camera come from the context instead of today's settings, and the result gains
+// `scoring: { source: 'stored', algo, current_algo, algo_differs, problem }`. A context that does not parse
+// THROWS: a caller handing over garbage must find out, not get today's settings silently, which is the very
+// behaviour #361 is about. What a context does NOT replay (each also stated where it applies below):
+//   - the RULES: one implementation runs, today's. `algo_differs` says the saved numbers came from other rules
+//     than the ones this compute used (plan revision 1: settings are replayable, rules are not);
+//   - `cfg.track`: tracking off still returns `off` first, whatever the context says (plan refinement a);
+//   - `cams` (room climate, the alert list) and the wake clips: today's, as context rather than a score;
+//   - who owned the camera when: samples and transitions are read by camera id and time (revision 7).
+// The window bounds are rebuilt from the stored zone and window against `nightDate` exactly as the original run
+// built them (refinement c), never read from the saved row. ⚠️ KNOWN LIMIT: `nightDate` is a local date key; if
+// the timezone has changed since, the caller's key is replayed in the STORED zone, which is the right night for
+// a key taken from the stored row and may not be for a key derived under today's zone.
+export function computeNight(childId, nightDate, { includeTimeline = false, context = null } = {}) {
+  const ctx = context == null ? null : parseScoringContext(context);
+  if (context != null && !ctx) {
+    throw new TypeError('computeNight: `context` is not a valid scoring context (see parseScoringContext)');
+  }
+  const tz = ctx ? ctx.tz : appSettings().timezone || 'UTC';
   const cfg = childSleepConfig(childId);
-  const { startUtc, endUtc } = windowBoundsUtc(nightDate, tz, cfg.start, cfg.end);
+  const win = ctx ? ctx.window : cfg;
+  const { startUtc, endUtc } = windowBoundsUtc(nightDate, tz, win.start, win.end);
   const startSql = toSqlUtc(startUtc);
   const endSql = toSqlUtc(endUtc);
 
@@ -778,8 +906,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   // last completed night (until ~3h after its window), storeNightBeforeCorrection, the admin Recompute
   // button, and every fresh read (the detail page, the morning review, /sleep/live). A stored row that is
   // never re-stored keeps the numbers of the camera it was scored from. Since #361 the stored row records
-  // that camera's id in `scoring_context` (see scoringContextFor), but nothing reads it back yet, so every
-  // compute here still resolves the camera afresh; rows stored before #361 have no record (NULL).
+  // that camera's id in `scoring_context` (see scoringContextFor), and a caller can hand that record back as
+  // `context` to score from the same camera again (below); nothing does yet, so every compute here still
+  // resolves the camera afresh. Rows stored before #361 have no record (NULL).
   //
   // Why one and not all (owner's call, 2026-08-29): the old code ORed every camera's timeline together,
   // so a minute counted as active if ANY camera saw something. That is not the conservative choice it
@@ -792,9 +921,33 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
   //
   // NB this also fixes a quieter bug: the old query filtered nothing at all, so a DISABLED camera's
   // historical samples were still being merged into the analysis.
+  //
+  // ⚠️ With a `context` (#361), `cams` STAYS today's on purpose: climate and the alert list cannot move a
+  // reported time, and the cameras the child has now are the ones whose readings a person can check. A
+  // replay's climate can therefore differ from the stored night's (KNOWN LIMIT, pinned by the test "known
+  // limit: climate still comes from the child's cameras today").
   const cams = db.prepare('SELECT id FROM cameras WHERE child_id = ?').all(childId).map((c) => c.id);
-  // tieBreak 'id': this query's own tie-break before #655, kept so a child with no primary is unchanged.
-  const mainCam = primaryCameraRowFor(childId, { tieBreak: 'id' });
+  // The scored camera. With no context, today's primary (currentScoringCamera). With one, the camera it names
+  // and nothing else (#361 plan, PR 2):
+  //   - `camera_id: null` means the night had no enabled camera, so it replays faithfully as no_data;
+  //   - a camera that no longer exists is no_data with `scoring.problem = 'camera_deleted'`, NEVER a quiet
+  //     fallback to today's primary: that would report another camera's night as this one's replay, the
+  //     silent substitution #361 exists to end (design section 4, "never fall back silently").
+  // ⚠️ KNOWN LIMIT (plan revision 7): samples and bed transitions below are selected by camera id and time, not
+  // by who owned the camera at that time, and no ownership-at-time record exists. A context camera that moved to
+  // another child INSIDE the span this night reads (window start - 3 h to window end + 3 h) replays with what it
+  // saw in its new room after the move; one that moved after the span replays correctly. Pinned by the test
+  // "known limit: a camera that moved to another child within the night's span".
+  let mainCam;
+  let cameraProblem = null;
+  if (!ctx) {
+    mainCam = currentScoringCamera(childId);
+  } else if (ctx.camera_id === null) {
+    mainCam = null;
+  } else {
+    mainCam = contextCameraStmt.get(ctx.camera_id) || null;
+    if (!mainCam) cameraProblem = 'camera_deleted';
+  }
   const scoreCams = mainCam ? [mainCam.id] : [];
   // Room climate over the window so far — present on every non-off status (independent of whether we
   // detected sleep). The bigger per-5-min series only when a timeline is asked for (the detail view).
@@ -830,7 +983,26 @@ export function computeNight(childId, nightDate, { includeTimeline = false } = {
     longest_stretch_minutes: null,
     coverage_minutes: 0,
     climate,
+    // #361: present ONLY when a context was passed, so a plain compute's output keeps its exact shape (every
+    // API response is built from it). In `base`, so every return below carries it, early ones included.
+    // `source` is 'stored' because the only contexts there are come from stored rows. `problem` reports a
+    // context camera that no longer exists on EVERY status, `off` included: the camera is looked up before the
+    // `off` return, just as a plain compute resolves (and reports, as analysis_camera_id) its camera on an off
+    // night. The status itself keeps today's precedence (`off` first).
+    ...(ctx
+      ? {
+          scoring: {
+            source: 'stored',
+            algo: ctx.algo,
+            current_algo: SCORING_ALGO,
+            algo_differs: ctx.algo !== SCORING_ALGO,
+            problem: cameraProblem,
+          },
+        }
+      : {}),
   };
+  // `cfg.track` is today's even with a context (plan refinement a): a child whose tracking is off now reports
+  // `off`, whatever camera the context names, as a plain compute does.
   if (!cfg.track) return { ...base, status: 'off' };
   if (scoreCams.length === 0) return { ...base, status: 'no_data' };
 
@@ -2262,30 +2434,28 @@ const upsertNight = db.prepare(
 
 // The QUESTION a stored night answered (#361; design: planning/361-scoring-context.md section 3): which
 // camera scored it, in which timezone, over which window, by which version of the rules. Returned as the
-// JSON string upsertNight stores. Nothing reads it back yet; it exists so a later change can re-score a
-// night with the settings it was scored with instead of today's.
+// JSON string upsertNight stores. computeNight can be handed it back as `context` (#361 step 2,
+// parseScoringContext) to re-score the night with these settings instead of today's; nothing does yet.
 //
-// - The SAME reads computeNight makes (appSettings, childSleepConfig, parseHm), so the context records what
-//   was actually used. computeAndStoreNight calls this straight after computeNight with nothing in between
-//   that can yield (better-sqlite3 is synchronous), so the two cannot see different settings.
+// - Built from currentScoringContext, the one definition of today's settings (the SAME reads computeNight
+//   makes: appSettings, childSleepConfig, parseHm), so the context records what was actually used.
+//   computeAndStoreNight calls this straight after computeNight with nothing in between that can yield
+//   (better-sqlite3 is synchronous), so the two cannot see different settings.
 // - `window` is the EFFECTIVE window, `HH:MM` of what parseHm made of the saved text, never the raw text: a
 //   malformed saved time (sleepInsights.test.js allows one) scores the night as 19:00, so 19:00 is stored.
 // - `tz` is the configured zone or computeNight's own 'UTC' fallback, never a zone assumed here.
 // - `camera_id` is the analysis camera's ID only (null when none was enabled). No camera name, address or
 //   credential, and nothing about the child: the name can change and is looked up live, and those fields
-//   can identify a household. Camera ids are uuids minted at creation (routes/cameras.js).
+//   can identify a household. Camera ids are uuids minted at creation (routes/cameras.js). Taken from the
+//   SUMMARY rather than re-resolved, so it is always the camera that produced the numbers it is stored with.
+//   (Today the two are the same camera, because computeAndStoreNight passes computeNight no context; the
+//   difference starts to matter once a store can be given one, and no test can tell them apart before then.)
 // - `v` versions this JSON's own shape; `algo` versions the scoring rules (SCORING_ALGO, bumped by hand).
+// ⚠️ BYTE-IDENTICAL to what step 1 wrote: the spread keeps currentScoringContext's key order (v, camera_id, tz,
+// window, algo), and overriding `camera_id` replaces the value in place without moving the key. Pinned by the
+// literal strings in "the stored scoring_context string is byte-identical to step 1" (scoring-context-replay).
 function scoringContextFor(childId, summary) {
-  const scoredTz = appSettings().timezone || 'UTC';
-  const cfg = childSleepConfig(childId);
-  const hm = ({ h, m }) => `${pad(h)}:${pad(m)}`;
-  return JSON.stringify({
-    v: 1,
-    camera_id: summary.analysis_camera_id ?? null,
-    tz: scoredTz,
-    window: { start: hm(parseHm(cfg.start)), end: hm(parseHm(cfg.end)) },
-    algo: SCORING_ALGO,
-  });
+  return JSON.stringify({ ...currentScoringContext(childId), camera_id: summary.analysis_camera_id ?? null });
 }
 
 // ROADMAP §1.6: what the parent was actually TOLD about a night's wake time, so a later recompute can

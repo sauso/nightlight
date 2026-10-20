@@ -320,6 +320,24 @@ or rule that changes what `computeNight` returns for the same inputs (not for re
 version). Known limit: nothing enforces the bump; the golden test in `backend/test/scoring-context.test.js`
 fails when `computeNight`'s output for its one fixture night moves, which is a reminder, not a guarantee.
 
+**`computeNight` can re-score a night with a stored context** (#361 step 2; tests in
+`backend/test/scoring-context-replay.test.js`). `computeNight(childId, nightDate, { context })` takes a context, and
+`parseScoringContext` makes one from a stored `scoring_context` (string or object): it returns `null`, and never
+throws, for anything the writer could not have produced (a `v` other than `1`, a missing or extra key, a camera id
+that is not a string or `null`, an empty or over-long `algo`, a timezone `Intl` refuses, a window part that is not
+digits, a colon and digits; a stored `25:00` is accepted, because a night really was scored with it). With a context,
+the timezone, the window and the scored camera come from it: the camera is looked up by id whichever child owns it
+now and whether or not it is enabled; `camera_id: null` stays `no_data`; a camera that no longer exists is `no_data`
+with `scoring.problem: 'camera_deleted'`, never a fallback to today's main camera. The result then gains `scoring:
+{ source: 'stored', algo, current_algo, algo_differs, problem }`; without a context it is exactly what it was, with
+no `scoring` key (golden test). `currentScoringContext(childId)` is the one definition of today's settings, and the
+stored JSON is built from it, byte for byte what step 1 wrote. What a context does **not** replay: the rules (one
+implementation runs, today's; `algo_differs` marks a night saved under other rules), tracking on/off (`off` still
+comes first), room climate and the alert list (today's cameras), and who owned the camera when (samples are read by
+camera id and time, so a camera moved to another child inside the span a night reads, window start - 3 h to window
+end + 3 h, replays with that child's activity). **Nothing calls it with a context yet**, so no number a person sees
+changes; the admin Recompute choice is the next step.
+
 **Deleting a child or a camera is `lib/entityPurge.js`** (#540, #554), and it deletes everything that belongs to
 it. Most of the history tables have **no foreign key** to `children` / `cameras` (deliberately: `bed_transitions`,
 `activity_samples`, `detection_events`, `camera_events`, `sensor_readings`, `sleep_nights`, `sleep_reviews`), so
