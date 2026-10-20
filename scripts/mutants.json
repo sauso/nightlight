@@ -22345,5 +22345,23 @@
     "expect": "killed",
     "tests": ["timelapse-deadline.test.js"],
     "namePattern": "^#781 hung thumbnail"
+  },
+  {
+    "label": "#376 a Modal never takes the scroll lock",
+    "file": "frontend/src/components/Modal.jsx",
+    "find": "    const unlockScroll = lockScroll();",
+    "replace": "    const unlockScroll = () => {};",
+    "expect": "killed",
+    "tests": ["modal.test.jsx"],
+    "namePattern": "Modal scroll lock \\(#376\\) ★ locked while"
+  },
+  {
+    "label": "#376 the scroll lock is a flag, not a count",
+    "file": "frontend/src/lib/scrollLock.js",
+    "find": "    locks -= 1;",
+    "replace": "    locks = 0;",
+    "expect": "killed",
+    "tests": ["lib/scrollLock.test.js"],
+    "namePattern": "locks on the first lock and unlocks only when the LAST"
   }
 ]

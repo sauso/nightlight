@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef } from 'react';
+import { lockScroll } from '../lib/scrollLock.js';
 
 // The modals currently open, innermost last. Escape and the Tab trap belong to the TOP one only: a dialog opened
 // from inside another (a confirmation over a form) must not close, or be tabbed out of, the one beneath it.
@@ -142,6 +143,9 @@ export default function Modal({ title, onClose, children, placement = 'bottom', 
     const me = { card, targets: targetsRef.current };
     openModals.push(me);
     const marked = makeRestInert(overlay);
+    // The page behind must not scroll either (#376). Counted in lib/scrollLock.js, so a chain of dialogs or one
+    // opened over another never unlocks it early.
+    const unlockScroll = lockScroll();
 
     // A child with autoFocus has already placed focus well; otherwise the first field or action. The close button
     // in the header is the way OUT, not where someone wants to start, so it is only chosen when it is all there is.
@@ -177,6 +181,7 @@ export default function Modal({ title, onClose, children, placement = 'bottom', 
       const i = openModals.indexOf(me);
       if (i !== -1) openModals.splice(i, 1);
       for (const el of marked) el.removeAttribute('inert');
+      unlockScroll();
       // Back to the opener if it is still on the page; if the dialog's action removed it, to the next best thing
       // (#768). Never to <body>.
       restoreFocus(targetsRef.current);
