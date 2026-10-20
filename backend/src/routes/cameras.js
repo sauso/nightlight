@@ -820,7 +820,7 @@ router.put('/reorder', (req, res) => {
     const names = joinNames(err.children.map((c) => c.name));
     return res.status(409).json({
       error: `This move would change which camera is used for sleep tracking and the nightly timelapse of ${names}, so the new order was not saved. ` +
-        `An admin can choose a main camera for ${names} in their settings, after which tiles can be rearranged freely.`,
+        `An admin can choose a main camera that is turned on for ${names} in their settings, after which tiles can be rearranged freely.`,
       reason: 'would_change_sleep_camera',
       children: err.children.map(({ id, name }) => ({ id, name })),
     });

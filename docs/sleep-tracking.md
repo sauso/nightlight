@@ -112,9 +112,10 @@ the child's settings (shown once a child has two or more cameras).
   the main camera, so anyone may rearrange them but a **caregiver's** move that would change the
   camera a child's sleep or nightly timelapse comes from (for any child whose sleep tracking is on) is
   refused: the tiles go back, a message says why, and nothing is saved. On a child set to Automatic
-  with two or more cameras, a caregiver therefore cannot move that child's first camera, and in a home
-  with one child and two cameras, both theirs, no tile can be moved at all, until an admin chooses a
-  camera here; after that the tiles can be rearranged freely. An admin's moves are never refused.
+  with two or more turned-on cameras, a caregiver therefore cannot put another of that child's turned-on
+  cameras ahead of the one measuring now, and in a home with one child and two cameras, both theirs and
+  both on, no tile can be moved at all, until an admin chooses a camera here (one that is turned on);
+  after that the tiles can be rearranged freely. An admin's moves are never refused.
   - **Known limit: the check protects the cameras that are measuring a tracked child now.** A caregiver
     can freely place a camera that belongs to no child, one that is turned off, one of a child whose
     sleep tracking is off, or one that is not first. A later admin action (assigning a camera, turning

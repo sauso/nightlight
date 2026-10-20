@@ -37,10 +37,11 @@ their nightly timelapse is taken from. So a **caregiver's** move that would chan
 child whose sleep tracking is on, is refused: the tiles go back to where they were, a message above the
 grid says why, and nothing is saved.
 
-**On a child set to Automatic with two or more cameras, a caregiver cannot move that child's first
-camera** until an admin chooses a main camera for the child (**Camera used for this child's sleep**, in
-the child's settings). In a home with one child and two cameras, both theirs, that means no tile can be
-moved at all until then. Once a main camera is chosen, the tiles can be rearranged freely. An admin's
+**On a child set to Automatic with two or more turned-on cameras, a caregiver cannot put another of
+that child's turned-on cameras ahead of the one measuring now** until an admin chooses a main camera for
+the child (**Camera used for this child's sleep**, in the child's settings; it has to be a camera that is
+turned on). In a home with one child and two cameras, both theirs and both on, that means no tile can be
+moved at all until then. Once a main camera that is on is chosen, the tiles can be rearranged freely. An admin's
 moves are never refused. Details, and what the check does not cover:
 [One camera does the measuring](sleep-tracking.md#one-camera-does-the-measuring).
 

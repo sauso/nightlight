@@ -180,7 +180,7 @@ const CAMS4 = [
   { id: 'c4', name: 'Landing', mediamtx_path: 'p4' },
 ];
 const REFUSAL = 'This move would change which camera is used for sleep tracking and the nightly timelapse of '
-  + 'Child A, so the new order was not saved. An admin can choose a main camera for Child A in their settings, '
+  + 'Child A, so the new order was not saved. An admin can choose a main camera that is turned on for Child A in their settings, '
   + 'after which tiles can be rearranged freely.';
 // The error lib/api.js throws for the server's 409 (message = the body's `error`, plus `status` and `data`).
 function refusalError() {

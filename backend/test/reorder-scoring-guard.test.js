@@ -95,7 +95,7 @@ describe('★★ a caregiver may not move the camera a tracked child is measured
     // camera, revision 3). Tokens, not the exact sentence.
     assert.match(res.body.error, /Child A/);
     assert.match(res.body.error, /sleep tracking and the nightly timelapse/);
-    assert.match(res.body.error, /An admin can choose a main camera for Child A in their settings, after which tiles can be rearranged freely\.$/);
+    assert.match(res.body.error, /An admin can choose a main camera that is turned on for Child A in their settings, after which tiles can be rearranged freely\.$/);
     assert.deepEqual(picks('c-a'), { byId: 'cam-1', byRowid: 'cam-1' }, 'the sleep camera moved anyway');
   });
 
