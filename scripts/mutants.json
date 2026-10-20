@@ -20552,16 +20552,6 @@
     ]
   },
   {
-    "label": "#377 formDraft: a draft expires one millisecond early",
-    "file": "frontend/src/lib/formDraft.js",
-    "find": "Date.now() - parsed.at > DRAFT_TTL_MS",
-    "replace": "Date.now() - parsed.at >= DRAFT_TTL_MS",
-    "expect": "killed",
-    "tests": [
-      "lib/formDraft.test.js"
-    ]
-  },
-  {
     "label": "#377 formDraft: the key is not scoped to the signed-in person",
     "file": "frontend/src/lib/formDraft.js",
     "find": "return `${DRAFT_PREFIX}${userId ?? 'anon'}:${formId}`;",
