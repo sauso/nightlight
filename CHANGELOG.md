@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.42.1] - 2026-10-21
+
 ### Changed
 
 - **Recording setup now calls out the external folder's write permission (#567).** The folder must be writable by the app's PUID/PGID or clip recording is disabled; the setup notes link to the fix.
