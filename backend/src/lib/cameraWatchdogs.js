@@ -504,7 +504,10 @@ export const DETECTOR_RESTART_CAP_MS = 30 * 60 * 1000;
 // probes, 2880 MediaMTX calls and 1440 INFO lines per leg per day, wrapping logger.js's 1000-line ring in ~17 h
 // (processGuards.js, at RELOG_INTERVAL_MS, warns against exactly that eviction). This ladder is at most ~288 lines
 // a day per leg (the attempt ladder: 48), and the first real restart after the cause clears comes at most 5
-// minutes and one tick later (the attempt ladder: up to 30). CHOSEN, NOT MEASURED: no install has been seen with
+// minutes and one tick later (the attempt ladder: up to 30). The 288 bound is the sound leg's, and a motion leg's
+// before its first counted attempt (a detector stuck `returning`, say): a motion detector that survives SIGKILL
+// had a REAL first kill, so its later refused kills post a request and stay on the attempt ladder (the boundary
+// at the refusal classification in createDetectorWatchdog). CHOSEN, NOT MEASURED: no install has been seen with
 // a refusal that lasts.
 export const DETECTOR_REFUSAL_CAP_MS = 5 * 60 * 1000;
 // Continuous health for this long ends the episode (its attempts, refusals and backoff are forgotten). A leg that
@@ -842,11 +845,16 @@ export function createDetectorWatchdog(overrides = {}) {
     // REFUSED: a kill was attempted, nothing was signalled, no request was posted, and the lever did not throw
     // (the `threw` FLAG, for the reason above). Not an attempt: the count goes back to what it was before this
     // action and the refusal ladder takes over. Anything else (something acted, or the lever threw: E7) is an
-    // attempt, and ends the run of refusals.
-    // ⚠️ Known boundary, documented in KNOWN-ISSUES.md: on a MOTION leg with a mailbox, once attempts >= 1 the
-    // request is posted BEFORE the lever, so a refused kill there is part of an action that acted (the request)
-    // and the attempt ladder doubles as before. This rule covers refusals before an episode's first attempt, and
-    // at any count on the sound leg, a camera without a mailbox, or a path the request does not match.
+    // attempt, and ends the run of refusals. A lever that returned a non-boolean (a Promise, say) would be classed
+    // as a refusal too; the levers are synchronous today (killStalledDetector in processGuards.js), and E7 then
+    // rests on the refusal floor being above 0, which C22h pins (#585 M4).
+    // ⚠️ Known boundary, documented in KNOWN-ISSUES.md: on a MOTION leg, once attempts >= 1 the request is posted
+    // BEFORE the lever, so a refused kill there is part of an action that acted (the request) and the attempt
+    // ladder doubles as before. In production this rule therefore covers motion refusals before an episode's
+    // first attempt, and every sound-leg refusal. (A motion leg with no mailbox, which only a mis-wiring or a test
+    // gives since index.js always passes one, posts nothing, so its refusals are refusals at any count. A path
+    // that is neither the camera's main nor its sub, where publisherOf answers null, is not reached in production:
+    // a detector only ever reads one of the two, and a camera's mediamtx_path never changes.)
     const refused = kill && !restarted && !requestKind && !threw;
     if (refused) {
       ep.attempts = attempts;

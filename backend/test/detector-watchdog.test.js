@@ -1201,6 +1201,38 @@ describe('C22 (#585): a refused kill is not an attempt, and is backed off on a r
     const dp = g.wd.episodeOf(d.id, 'motion');
     assert.deepEqual([dp.attempts, dp.refusals], [1, 4]);
   });
+
+  test('C22j: SOUND leg, three real kills (75, 135, 255), then a refusal at 495: the retry is the REFUSAL ladder\'s 1 minute (555), not the attempt ladder\'s 4', async () => {
+    // Review finding 1: at attempts 1 (C22f) the two ladders agree on the first step, so a refusal floor bounded
+    // below by the attempt ladder (Math.max of the two) survived every other test.
+    const c = cam('c22j', { sound: 1 });
+    const h = detectorHarness([c]);
+    h.wanted = () => false; // this camera runs no motion leg
+    h.onKill = scripted([true, true, true, false], true);
+    h.run('sound', c.id, { path: c.mediamtx_path, spawned: -600, data: 0 });
+    await h.ticks(15, 570);
+    assert.deepEqual(h.killTimes('sound'), [75, 135, 255, 495, 555], 'the refusal after three attempts waited the attempt ladder');
+    const ep = h.wd.episodeOf(c.id, 'sound');
+    assert.deepEqual([ep.attempts, ep.refusals], [4, 0]);
+  });
+
+  test('C22k: H1, mixed: a refusal-only episode whose crash-loop tick ALSO finds an entry-stalled replacement posts the request AND kills (as before #585)', async () => {
+    const { c, h } = motionHarness('c22k', () => false);
+    const P = `${c.mediamtx_path}-sub`;
+    await h.ticks(15, 75); // refused at 75: attempts 0
+    await h.ticks(90, 270, (s) => {
+      // Two replacements that die young, then one (spawned at 170) that never delivers and stays: first past its
+      // 90 s grace at 270, which is also the first tick past EPISODE_STALL (75 + 180).
+      if (s === 90) h.run('motion', c.id, { path: P, spawned: 88 });
+      if (s === 120) h.run('motion', c.id, { path: P, spawned: 118 });
+      if (s === 105 || s === 135) h.gap('motion', c.id);
+      if (s === 180) h.run('motion', c.id, { path: P, spawned: 170 });
+    });
+    assert.deepEqual(h.killTimes(), [75, 270], 'the entry-stalled replacement was not killed at the crash-loop tick');
+    assert.deepEqual(h.postTimes(), [270], 'the crash loop with an entry-stalled replacement did not ask for the stream restart');
+    const ep = h.wd.episodeOf(c.id, 'motion');
+    assert.deepEqual([ep.attempts, ep.refusals], [1, 0], 'the posted request did not make it an attempt');
+  });
 });
 
 // ---------------------------------------------------------------------------------------------------------

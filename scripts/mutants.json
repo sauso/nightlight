@@ -10544,6 +10544,25 @@
     "namePattern": "^C22e"
   },
   {
+    "label": "#585 M9: the refusal floor is bounded below by the attempt ladder (Math.max of the two)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    ? detectorRestartFloorMs(st.refusals, DETECTOR_REFUSAL_CAP_MS)",
+    "replace": "    ? Math.max(detectorRestartFloorMs(st.refusals, DETECTOR_REFUSAL_CAP_MS), detectorRestartFloorMs(st.attempts))",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C22j",
+    "note": "Found surviving by the independent review of the #585 build: at attempts 1 (C22f) the two ladders agree on the first step, so only a refusal after three attempts (C22j) tells them apart."
+  },
+  {
+    "label": "#585 M10 (H1, mixed): a refusal-only episode's crash-loop tick that also finds an entry-stalled replacement kills but asks for no stream restart",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    } else if ((attempts >= 1 || verdict.episodeStalled) && deps.restartRequests) {",
+    "replace": "    } else if ((attempts >= 1 || (verdict.episodeStalled && !verdict.entryStalled)) && deps.restartRequests) {",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C22k"
+  },
+  {
     "label": "#448 M0: control: a comment edit in wakeWatcher.js must change nothing",
     "file": "backend/src/lib/wakeWatcher.js",
     "find": "// Whole minutes since the last accepted payload: 1 = the very next minute, 2 = one minute had no payload.",

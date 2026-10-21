@@ -1088,16 +1088,23 @@ alert cannot fire sooner than **Motion cooldown** after it, whatever happened to
 - **A refused stop request is not an attempt, with one exception (issues #578, #585).** The attempt is
   counted before the stop request is made, so that a request that errors or hangs can never cause a retry
   without backoff. Once the request has been refused, with nothing else done in that step, the count is
-  taken back and the refusal waits its own backoff (1, 2, 4, then every 5 minutes). A detector that can never
-  be signalled (one that survives being killed) therefore costs at most about 288 `[INFO]` lines a day (the
-  attempt backoff's 30-minute cap gives 48), and once the cause clears the first real restart comes within
-  about 5 minutes and one 15-second check. **The exception:** on a motion detector that has already had an
-  attempt, the stream restart is asked for in the same step and *before* the stop request, so that a stop
-  request that errors cannot swallow it. A refusal there is part of a step that did something, so it counts
-  as an attempt and the backoff doubles exactly as it did before #585; on a camera whose detector reads the
-  main stream that restart briefly interrupts live view. A refusal before the first attempt, and any refusal
-  on a sound detector, is not counted. A **sound** detector's refused stop writes no Camera history row (before
+  taken back and the refusal waits its own backoff (1, 2, 4, then every 5 minutes). A refusal that never
+  clears on a sound detector, or on a motion detector before its first counted attempt (for example one stuck
+  on its way back to the Low stream), therefore costs at most about 288 `[INFO]` lines a day (the attempt
+  backoff's 30-minute cap gives 48), and once the cause clears the first real restart comes within about 5
+  minutes and one 15-second check. **The exception:** on a motion detector that has already had an attempt,
+  the stream restart is asked for in the same step and *before* the stop request, so that a stop request that
+  errors cannot swallow it. A refusal there is part of a step that did something, so it counts as an attempt
+  and the backoff doubles exactly as it did before #585; on a camera whose detector reads the main stream that
+  restart briefly interrupts live view. This is also what happens to a motion detector that survives being
+  killed: its first stop worked, so it stays on the attempt backoff, with up to 48 `[WARN]` lines, Camera
+  history rows and stream restarts a day, as before. A refusal before the first attempt, and any refusal on a
+  sound detector, is not counted. A **sound** detector's refused stop writes no Camera history row (before
   #578 it wrote a false one), so a sound detector that is repeatedly refused leaves only the `[INFO]` lines.
+  A crash loop that follows a refused stop is one step behind on the attempt backoff, because the refusal did
+  not count: its first stream-restart request comes at the same time as before (about 270 s after the last
+  frame), but the later ones come at about 465, 660, 900 and 1380 s instead of 465, 705 and 1185 s. Both reach
+  the same 30-minute cap, and on a detector reading the main stream each request briefly interrupts live view.
   The 5-minute cap was chosen, not measured: no install has been seen with a refusal that lasts.
 - **The minutes before the restart are still lost.** Since issue #508 the sleep numbers report those dark
   minutes as unknown ("No data") rather than as quiet sleep (previous section), so a restart shortens a hole
