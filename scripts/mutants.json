@@ -8138,8 +8138,8 @@
   {
     "label": "in-bed/lock A9: the route accepts a got-OUT-of-bed event as the put-down",
     "file": "backend/src/routes/children.js",
-    "find": "inBedFrameId, TRANSITION.INTO_BED);",
-    "replace": "inBedFrameId);",
+    "find": "inBedFrameId, TRANSITION.INTO_BED, shown);",
+    "replace": "inBedFrameId, null, shown);",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "only a got-into-bed event"
@@ -8655,8 +8655,8 @@
   {
     "label": "in-bed/lock fix2 R1: the store-first compute runs AFTER applyVerdicts again (a compute that throws 500s a save whose verdicts were written)",
     "file": "backend/src/routes/children.js",
-    "find": "  if (reviewCorrectsNight(merged)) storeNightBeforeCorrection(req.params.id, req.params.date);\r\n\r\n  // Verdicts (and the reasons paired with them) are scoped to THIS child and THIS night inside\r\n  // applyVerdicts, and rejected as a batch — except a reason for a non-'wrong' verdict, which it drops.\r\n  const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons);\r\n  if (check.error) return res.status(400).json({ error: check.error });",
-    "replace": "  const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons);\r\n  if (check.error) return res.status(400).json({ error: check.error });\r\n  if (reviewCorrectsNight(merged)) storeNightBeforeCorrection(req.params.id, req.params.date);",
+    "find": "  if (reviewCorrectsNight(merged)) storeNightBeforeCorrection(req.params.id, req.params.date);\r\n\r\n  // Verdicts (and the reasons paired with them) are scoped to THIS child and THIS night inside\r\n  // applyVerdicts, and rejected as a batch — except a reason for a non-'wrong' verdict, which it drops.\r\n  // Against `shown`, the list the page was built from: the store-first above may just have re-saved the night with\r\n  // today's settings, and a fresh decision would then refuse the page's own events (#361 PR 4b; see applyVerdicts).\r\n  const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons, shown);\r\n  if (check.error) return res.status(400).json({ error: check.error });",
+    "replace": "  const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons, shown);\r\n  if (check.error) return res.status(400).json({ error: check.error });\r\n  if (reviewCorrectsNight(merged)) storeNightBeforeCorrection(req.params.id, req.params.date);",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "save-time compute throws"

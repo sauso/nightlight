@@ -233,6 +233,39 @@ test('the saved camera is listed, accepted and counted while it is this child\'s
   }
 });
 
+// Codex code review of PR #814: the route takes its settings decision once, but the store-first step (a correction on a
+// still-provisional last night) re-stores the row with TODAY's settings before applyVerdicts runs. A fresh decision
+// there saw today's settings, and a verdict on an event the page showed from the saved camera was refused ("not part
+// of this night") after sleep_nights had already been re-stored.
+test('a verdict on the saved camera\'s event survives the store-first re-save of a provisional last night', async (t) => {
+  // 07:30, half an hour after the window: the row is provisional (its evidence horizon is 10:00), so a correction
+  // makes the route re-store it first.
+  t.mock.timers.enable({ apis: ['Date'], now: at(7, 30, 1).getTime() });
+  addCamera(CAM2, CHILD, 1, 'Door cam');
+  layA(CAM);
+  const camEvening = layTransition(CAM, TRANSITION.INTO_BED, at(19, 35));
+  layB(CAM2);
+  const raw = storeOriginal();
+  db.prepare('UPDATE cameras SET disabled = 1 WHERE id = ?').run(CAM);
+
+  const res = await getReview();
+  assert.equal(res.body.settings.key, raw, 'precondition: the page shows the saved settings');
+  assert.ok(idsOf(res.body).includes(camEvening), 'precondition: the saved camera\'s event is on the page');
+  const shown = res.body.computed;
+  assert.ok(shown.onset_at && shown.wake_at, 'precondition: a night with both times');
+
+  // "Save review" with the times as shown (a correction, so the store-first step runs) and a verdict on that event.
+  const saved = await put({
+    true_onset_local: localHm(shown.onset_at), true_wake_local: localHm(shown.wake_at),
+    computed_onset_at: shown.onset_at, computed_wake_at: shown.wake_at,
+    verdicts: { [camEvening]: 'correct' }, reasons: {}, settings_key: res.body.settings.key,
+  });
+  assert.equal(JSON.parse(rowOf().scoring_context).camera_id, CAM2, 'precondition: the store-first re-saved it with today\'s settings');
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal(verdictOf(camEvening), 'correct', 'the verdict is stored');
+  assert.equal(reviewRow().true_onset_at, shown.onset_at);
+});
+
 // --- (5) the timezone: the saved zone's noon to noon -------------------------------------------------------------
 
 test('timezone change: the list covers the SAVED zone\'s noon to noon, and settings.tz names it', async (t) => {

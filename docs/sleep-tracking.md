@@ -455,6 +455,10 @@ camera's, even if that camera has since been turned off. Times are still shown, 
   isn't checked until it is reloaded.
 - A night with no saved settings (not saved yet, or saved before nights recorded them) isn't checked this way
   either. If you change the sleep window or timezone, reload any review page that is already open.
+- Times you type are read in the timezone set in Settings when you press save. A timezone change on a night
+  already shown with its saved settings doesn't change those settings, so that save isn't refused, and times
+  typed on a page opened before the change can land at the wrong hour. Reload the page after changing the
+  timezone.
 
 #### Your times become the ones shown
 

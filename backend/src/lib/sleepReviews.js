@@ -213,11 +213,15 @@ function localReading(sqlUtc, tz) {
 //
 // The id is read by parseTransitionId (below), the same parser the review route uses for the id it stores,
 // so the two can no longer disagree about what was sent (#522).
-export function transitionInstant(childId, nightDate, id, wantType = null) {
+//
+// `shown` (optional, #361 PR 4b): the review route's ONE settings decision for the request (displayContextFor), so
+// every check in a save reads the same list (see applyVerdicts for why it matters). Left out (undefined), the list
+// makes its own decision, as for every other caller.
+export function transitionInstant(childId, nightDate, id, wantType = null, shown = undefined) {
   const n = parseTransitionId(id);
   if (n === null) return null;
   if (Number.isNaN(n)) return undefined;
-  const match = transitionsFor(childId, nightDate).find((t) => t.id === n);
+  const match = transitionsFor(childId, nightDate, shown).find((t) => t.id === n);
   if (!match || (wantType && match.type !== wantType)) return undefined;
   return match.created_at;
 }
@@ -582,11 +586,19 @@ export function asleepAfterWake(r) {
 // ⚠️ "After this save" is `Object.hasOwn(verdicts, id) ? verdicts[id] : stored`, NEVER
 // `verdicts[id] ?? stored`: an explicit null in `verdicts` CLEARS the verdict, and `??` would fall
 // through to a stored 'wrong' and keep a reason for a verdict that no longer exists.
-export function applyVerdicts(childId, nightDate, verdicts, reasons) {
+//
+// `shown` (optional, #361 PR 4b): the review route's settings decision, taken ONCE at the top of the save. It must be
+// passed, not re-made here: the route runs the store-first step (storeNightBeforeCorrection) BEFORE this, and on a
+// still-provisional last night that re-stores the row with TODAY's settings, rewriting its scoring_context. A fresh
+// decision here would then see today's settings, and a verdict on an event the page showed from the saved camera
+// (say one turned off since) was refused as "not part of this night" after the night had already been re-stored
+// (Codex code review of PR #814, reproduced by review-stored-context.test.js). Left out (undefined), the list makes
+// its own decision, as for every other caller.
+export function applyVerdicts(childId, nightDate, verdicts, reasons, shown = undefined) {
   const entries = Object.entries(verdicts || {});
   const reasonEntries = Object.entries(reasons || {});
   if (entries.length === 0 && reasonEntries.length === 0) return { applied: 0, reasons_applied: 0 };
-  const byId = new Map(transitionsFor(childId, nightDate).map((t) => [String(t.id), t]));
+  const byId = new Map(transitionsFor(childId, nightDate, shown).map((t) => [String(t.id), t]));
   for (const [id, verdict] of entries) {
     if (!byId.has(String(id))) return { error: `Transition ${id} is not part of this night` };
     if (verdict != null && !VERDICTS.includes(verdict)) return { error: `Not a valid verdict for transition ${id}` };

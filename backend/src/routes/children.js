@@ -672,15 +672,16 @@ router.put('/:id/review/:date', (req, res) => {
   const onsetFrameId = frameIdOf(body.true_onset_transition_id);
   const wakeFrameId = frameIdOf(body.true_wake_transition_id);
   const inBedFrameId = frameIdOf(body.true_in_bed_transition_id);
-  const onsetFromFrame = transitionInstant(req.params.id, req.params.date, onsetFrameId);
-  const wakeFromFrame = transitionInstant(req.params.id, req.params.date, wakeFrameId);
+  // `shown`: every list check in this save reads the ONE decision taken above (#361 PR 4b; see applyVerdicts).
+  const onsetFromFrame = transitionInstant(req.params.id, req.params.date, onsetFrameId, null, shown);
+  const wakeFromFrame = transitionInstant(req.params.id, req.params.date, wakeFrameId, null, shown);
   for (const [label, v] of [['true_onset_transition_id', onsetFromFrame], ['true_wake_transition_id', wakeFromFrame]]) {
     if (v === undefined) return res.status(400).json({ error: `${label} is not an event of this night` });
   }
   // The put-down frame must be a GOT-INTO-BED event of this night: "they went into bed" cannot be read
   // off a got-out-of-bed frame. New with this field only; the onset and wake ids keep their old,
   // untyped check (see transitionInstant) so an already-open page cannot start failing.
-  const inBedFromFrame = transitionInstant(req.params.id, req.params.date, inBedFrameId, TRANSITION.INTO_BED);
+  const inBedFromFrame = transitionInstant(req.params.id, req.params.date, inBedFrameId, TRANSITION.INTO_BED, shown);
   if (inBedFromFrame === undefined) {
     return res.status(400).json({ error: 'true_in_bed_transition_id is not a got-into-bed event of this night' });
   }
@@ -832,7 +833,9 @@ router.put('/:id/review/:date', (req, res) => {
 
   // Verdicts (and the reasons paired with them) are scoped to THIS child and THIS night inside
   // applyVerdicts, and rejected as a batch — except a reason for a non-'wrong' verdict, which it drops.
-  const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons);
+  // Against `shown`, the list the page was built from: the store-first above may just have re-saved the night with
+  // today's settings, and a fresh decision would then refuse the page's own events (#361 PR 4b; see applyVerdicts).
+  const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons, shown);
   if (check.error) return res.status(400).json({ error: check.error });
 
   // Is this save an ANSWER, for "Answered by" (#552, review finding A5)? Yes if it carries a time (typed or a
