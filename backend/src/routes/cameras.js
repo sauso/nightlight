@@ -999,12 +999,16 @@ router.put('/:id', requireAdmin, asyncHandler(async (req, res) => {
     }
   }
 
+  // #793: validation can wait while DELETE or disable removes the path. Check the current row before
+  // registering it again; the later saved-row check is too late to undo a MediaMTX write.
+  const afterValidation = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+  if (!afterValidation) return res.status(404).json({ error: 'Camera not found' });
   // A disabled camera has no MediaMTX path or transcoder by design - just save the new
   // address; it takes effect when the camera is re-enabled. Touching MediaMTX here would
   // silently bring a turned-off camera back to life.
-  if (newRtsp !== existing.rtsp_url && !existing.disabled) {
+  if (newRtsp !== existing.rtsp_url && !afterValidation.disabled) {
     try {
-      await upsertPath(existing.mediamtx_path);
+      await upsertPath(afterValidation.mediamtx_path);
     } catch (e) {
       return res.status(502).json({ error: `Could not update stream: ${e.message}` });
     }
