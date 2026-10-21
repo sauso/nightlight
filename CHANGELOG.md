@@ -9,6 +9,20 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.42.1] - 2026-10-21
+
+### Changed
+
+- **Recording setup now calls out the external folder's write permission (#567).** The folder must be writable by the app's PUID/PGID or clip recording is disabled; the setup notes link to the fix.
+
+### Fixed
+
+- **The sleep detail settings switch can retry a failed view change, and keeps keyboard focus when a saved camera is gone (#813).** If the new view cannot load, the previous night remains visible and pressing the same settings button retries. Switching away from a deleted camera no longer replaces the focused button.
+- **Startup failures are caught from the first background task (#555 item 7).** Nightlight now installs its crash backstop before starting MediaMTX and other background jobs. A failure before the web server listens still stops startup so Docker can restart the container; after it listens, the backstop logs an unexpected background failure and keeps the monitor running.
+- **A camera removed or turned off while its new address is being checked no longer gets a stream path registered by the pending save (#793 item 2).** Removing it now returns "Camera not found" from that save; turning it off still saves the new address for the next time it is turned on. Known limit: a narrow window remains (milliseconds, not measured): a remove or turn-off that has already taken the stream path down but not yet recorded the change at the moment the address check finishes, or that starts while MediaMTX is answering the path update, can still race with that update.
+- **Camera tiles can be reordered with a keyboard (#381).** Focus a tile's Reorder handle, press Space or Enter, use the arrow keys to move it, and press Space or Enter to place it. Escape cancels. A screen reader is given the camera's name and its position among the tiles shown. A move refused by the server still puts the tiles back and shows why. Checked in automated tests, not yet with a real screen reader or browser.
+- **A detector stop that is refused no longer delays the next real restart (#585).** When the detector watchdog asks to stop a stalled motion or sound detector and the stop is refused (the detector is already being stopped, is on its way back to the Low stream, or there is nothing to signal), that try no longer counts as an attempt. Before, each refusal doubled the wait before the next try, up to 30 minutes before the first real restart, and on a motion detector the try after a refusal also asked for a stream restart (which briefly interrupts live view when the detector reads the main stream) although no detector had been restarted. A refusal now waits a shorter backoff of its own (1, 2 and 4 minutes, then every 5) and never asks for a stream restart by itself; a crash loop after a refusal is still escalated to a stream restart. Known limit: on a motion detector that has already had an attempt, the stream restart is asked for in the same step as the stop, so a refusal there still counts as an attempt, as before. See "A detector was restarted" in [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
+
 ## [0.42.0] - 2026-10-21
 
 ### Added

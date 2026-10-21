@@ -7,7 +7,8 @@ const TALK_GAIN = 3;
 
 // G.711 mu-law encode: one 16-bit signed PCM sample -> one 8-bit mu-law byte. The camera's
 // two-way-audio channel expects G.711 mu-law at 8 kHz mono (see backend/lib/twoWayAudio.js).
-function linearToMuLaw(sample) {
+// Exported for conversion tests; the microphone/WebSocket path is not unit-testable.
+export function linearToMuLaw(sample) {
   const BIAS = 0x84;
   const CLIP = 32635;
   let sign = sample < 0 ? 0x80 : 0;
@@ -24,7 +25,8 @@ function linearToMuLaw(sample) {
 
 // Downsample the mic (native rate, usually 48 kHz) to 8 kHz by box-averaging each output sample
 // over its source window - a cheap low-pass that keeps voice intelligible without much aliasing.
-function downsample(input, inRate) {
+// Exported for conversion tests; the microphone/WebSocket path is not unit-testable.
+export function downsample(input, inRate) {
   if (inRate <= 8000) return input;
   const ratio = inRate / 8000;
   const outLen = Math.floor(input.length / ratio);

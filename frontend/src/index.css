@@ -1213,7 +1213,6 @@ body.in-pip .tile-menu-backdrop {
    text like the source line above; the switch is a real button sized like Recompute, allowed to wrap on a phone
    because its longer label ("...the settings this night was saved with") is wider than a narrow card. */
 .sleep-settings-view { display: flex; flex-direction: column; gap: 10px; }
-.sleep-settings-view--in-card { padding: 14px; }
 .sleep-settings-view__text { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); }
 .sleep-settings-view__switch { width: auto; align-self: flex-start; white-space: normal; text-align: left; }
 /* Admin-only recompute control, and the before -> after table it shows. Every colour comes from a

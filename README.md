@@ -71,7 +71,7 @@ In **Community Applications**, search for **Nightlight**, select **Install**, ch
 
 **Camera controls.** Add a camera by its IP address and let ONVIF fill in the stream details where it is supported, or set up the RTSP stream by hand. Use pan/tilt and two-way audio on cameras that support them.
 
-**Sleep and recordings.** Review sleep activity and, if enabled, save motion/sound clips, wake clips or recordings you start yourself. See [how sleep tracking works](docs/sleep-tracking.md) and [recording options](docs/recording.md).
+**Sleep and recordings.** Review sleep activity and, if enabled, save motion/sound clips, wake clips or recordings you start yourself. See [how sleep tracking works](docs/sleep-tracking.md) and [recording options](docs/recording.md). A separate recordings folder must be writable by the app's `PUID`/`PGID`, or clip recording turns off; see [recording storage and fixes](docs/recording.md#where-recordings-are-stored).
 
 **Caregiver access.** Create accounts for people who need access to your nursery.
 

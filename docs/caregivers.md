@@ -30,8 +30,11 @@ Deleting by hand is not the same as **retention**: the automatic sweep of old al
 
 ### Rearranging the live grid
 
-Anyone signed in can drag the camera tiles, and the order is shared by everyone who views the grid. For a
-child whose sleep camera is on **Automatic** (the default, and every child set up before the setting
+Anyone signed in can drag the camera tiles, and the order is shared by everyone who views the grid. With a
+keyboard, focus a tile's **Reorder** handle, press Space or Enter to pick it up, use the arrow keys to move
+it, then press Space or Enter to place it (Escape cancels).
+
+For a child whose sleep camera is on **Automatic** (the default, and every child set up before the setting
 existed), the first camera that is turned on in that order is the one their sleep is measured from and
 their nightly timelapse is taken from. So a **caregiver's** move that would change that camera, for any
 child whose sleep tracking is on, is refused: the tiles go back to where they were, a message above the

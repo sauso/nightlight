@@ -88,6 +88,8 @@ back. The choice is for that night only and is not remembered: another night, a 
 back to the saved settings. Before, the page always used today's settings, so after such a change a finished night
 could show different numbers from its card, or "no data". The morning review uses the same settings as this page
 (see [A night whose settings have changed](#a-night-whose-settings-have-changed)).
+If switching views fails, the page keeps showing the previous night and shows an error. Press the same settings
+button again to retry.
 
 | The night | Settings the detail page uses |
 |---|---|
