@@ -106,7 +106,7 @@ function SettingsCompare({ contexts }) {
 //   - "Remove my correction" re-reads the page in the view it is ALREADY in (`settingsView`): removing a correction
 //     changes no settings, so it must not flip what the page is showing.
 export default function RecomputeNight({ childId, date, night, fmtTime, onRecomputed, onCorrectionRemoved,
-  settingsView = 'auto', onSettingsViewChange }) {
+  settingsView = 'auto', onSettingsViewChange, standaloneCard = false }) {
   const { user } = useAuth();
   const [stored, setStored] = useState(undefined); // the saved row: undefined = not looked yet, null = none
   const [locked, setLocked] = useState(false);
@@ -503,5 +503,7 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
   // On a night today's settings cannot score, the card around this has no padding of its own (SleepDetail's
   // no-data / no-sleep cards), so the control brings its own. It only renders here once it is offered, so a
   // night without the offer gains no empty space.
-  return unscored ? <div className="sleep-detail__recompute-unscored">{body}</div> : body;
+  // #813: the deleted-camera settings line now has its own stable card. If this control is offered
+  // beneath it, give the control its own card; when it is not offered, return null above as before.
+  return unscored ? <div className={standaloneCard ? 'card' : 'sleep-detail__recompute-unscored'}>{body}</div> : body;
 }
