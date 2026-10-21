@@ -3,12 +3,13 @@ import { useLocation } from 'react-router-dom';
 import { RefreshCw } from 'lucide-react';
 import {
   DndContext,
+  KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
   closestCenter,
 } from '@dnd-kit/core';
-import { SortableContext, rectSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import { SortableContext, rectSortingStrategy, arrayMove, sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 
 // Move `activeId` to where `overId` sits, in the FULL camera list.
 //
@@ -118,8 +119,28 @@ export default function LiveMonitor() {
   const [reorderRefusal, setReorderRefusal] = useState('');
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
+
+  // The grid hides disabled cameras, while the saved order includes them. Speak positions in the
+  // visible grid (#381), so a camera beside the second tile is called second even if hidden cameras
+  // sit before it in the full order sent by handleDragEnd.
+  const cameraName = (id) => visibleCameras.find((cam) => cam.id === id)?.name;
+  const visiblePosition = (id) => visibleCameras.findIndex((cam) => cam.id === id) + 1;
+  const announcements = {
+    onDragStart: ({ active }) => `Picked up ${cameraName(active.id)}. Position ${visiblePosition(active.id)} of ${visibleCameras.length}.`,
+    onDragOver: ({ active, over }) => over
+      ? `Moved ${cameraName(active.id)} to position ${visiblePosition(over.id)} of ${visibleCameras.length}`
+      : undefined,
+    onDragEnd: ({ active, over }) => over
+      ? `Moved ${cameraName(active.id)} to position ${visiblePosition(over.id)} of ${visibleCameras.length}`
+      : `Stopped moving ${cameraName(active.id)}.`,
+    onDragCancel: ({ active }) => `Cancelled moving ${cameraName(active.id)}.`,
+  };
+  const screenReaderInstructions = {
+    draggable: 'To reorder a camera, press Space or Enter to pick it up. Use the arrow keys to move it, then press Space or Enter to place it. Press Escape to cancel.',
+  };
 
   function childNameFor(cam) {
     return kids.find((k) => k.id === cam.child_id)?.name;
@@ -329,7 +350,12 @@ export default function LiveMonitor() {
         )}
 
         {visibleCameras.length > 0 && (
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            accessibility={{ announcements, screenReaderInstructions }}
+            onDragEnd={handleDragEnd}
+          >
             <SortableContext items={visibleCameras.map((c) => c.id)} strategy={rectSortingStrategy}>
               <div className="card-grid">
                 {visibleCameras.map((cam) => (
