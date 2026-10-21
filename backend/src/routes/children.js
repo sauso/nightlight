@@ -9,7 +9,7 @@ import { primaryCameraRowFor } from '../lib/primaryCamera.js';
 import {
   getStoredNights, computeNight, computeAndStoreNight, currentNightDate, lastCompletedNightDate,
   childTracksSleep, sleepInsights, nightIsLocked, storeNightBeforeCorrection, reportableSpanMs, MIN_COVERAGE_FRAC, EMPTY_MIN_COVERAGE_FRAC,
-  parseScoringContext, scoringContextChoice,
+  parseScoringContext, scoringContextChoice, computeNightForDisplay,
 } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
 import { reconcileClipRing } from '../lib/clipCapture.js';
@@ -28,6 +28,8 @@ const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 // The UTC shape every timestamp in this database uses. Only used to sanity-check the values the
 // client echoes back as "what you showed me"; times a person TYPES arrive as wall-clock 'HH:MM'.
 const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+// The values `GET /:id/sleep/:date?context=` accepts (#361; see that route for what each means).
+const CONTEXT_CHOICES = new Set(['auto', 'stored', 'current']);
 
 // `primary_camera` (#655, ADDED to the shape; every existing key is unchanged): the camera this child's
 // sleep is measured from RIGHT NOW, resolved by the same function scoring uses (lib/primaryCamera.js), or
@@ -330,8 +332,8 @@ router.get('/:id/sleep', (req, res) => {
 // Compute one night on demand for a specific LOCAL start date ('YYYY-MM-DD'). ?detail=1 includes the
 // timeline segments + wake list for the Sleep detail view; ?debug=1 also adds the raw per-minute
 // timeline (tuning); ?store=1 (admin) persists the recompute; ?stored=1 returns the SAVED row instead
-// of computing anything. ?context=stored|current and ?raw=1 (#361 PR 3): which settings the night is
-// worked out with, and whether a parent's correction is laid over the answer (see below).
+// of computing anything. ?context=auto|stored|current and ?raw=1 (#361 PR 3, `auto` PR 4a): which settings
+// the night is worked out with, and whether a parent's correction is laid over the answer (see below).
 router.get('/:id/sleep/:date', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
@@ -371,20 +373,36 @@ router.get('/:id/sleep/:date', (req, res) => {
     const contexts = scoringContextChoice(req.params.id, row?.scoring_context ?? null);
     return res.json({ night: row || null, contexts, locked: nightIsLocked(req.params.id, req.params.date) });
   }
-  // #361 PR 3: WHICH SETTINGS the night is worked out with. `current` (also what an absent param means) is
-  // today's camera, timezone and window: every request that does not name this param behaves exactly as it
-  // did before it existed, byte for byte. It is the DEFAULT because the owner chose it (2026-10-20, #361 Q4):
-  // a re-score with the stored settings is an opt-in an admin ticks in the Recompute dialog, never a quiet
-  // change to what "Recompute" means. `stored` replays the camera, timezone and window this night's saved row
-  // was scored with (computeNight's `context`), with TODAY's detection rules either way.
+  // #361: WHICH SETTINGS the night is worked out with.
+  //   - `current`, and an ABSENT param: today's camera, timezone and window. Absent stays `current` for reads AND
+  //     stores (plan R2 of #361 PR 4a): a page still open in a browser from before PR 4a is a deployed client that
+  //     sends no param and must keep getting what it always got, and Recompute without the param re-scores with
+  //     today's settings because the owner chose that (2026-10-20, #361 Q4: the stored settings are an opt-in an
+  //     admin ticks, never a quiet change to what "Recompute" means). A read goes through computeNightForDisplay in
+  //     mode 'current', which is the plain compute plus, only for a finished night whose saved settings differ, a
+  //     `scoring_view` key (an ADDED key; a night without one is byte-identical to before).
+  //   - `auto` (#361 PR 4a), READS ONLY: what the sleep detail page sends. A finished night whose saved settings
+  //     differ from today's is worked out WITH them, so the page and the child's card agree; anything else is
+  //     today's settings, as `current` (computeNightForDisplay decides, and says why there). An admin `store=1` with
+  //     it is a 400 before anything is computed: a store must name the settings it writes, and "whatever the page
+  //     would show" is not a setting. A caregiver's `store=1` is a read (below), so it honours `auto`.
+  //   - `stored` (#361 PR 3): forces a replay of the camera, timezone and window this night's saved row was scored
+  //     with (computeNight's `context`), finished or not, with TODAY's detection rules either way. The admin
+  //     Recompute's opt-in.
   // Anything else is a 400 BEFORE any compute or write, including with `store=1`: a typo must not quietly fall
   // back to today's settings, which is the very substitution #361 exists to end. Every refusal on this route is
   // a 4xx with a readable `error` (and a `reason` to branch on): a 5xx body is stripped by Cloudflare.
   const contextChoice = req.query.context;
-  if (contextChoice !== undefined && contextChoice !== 'stored' && contextChoice !== 'current') {
-    return res.status(400).json({ error: 'context must be "stored" or "current"' });
+  if (contextChoice !== undefined && !CONTEXT_CHOICES.has(contextChoice)) {
+    return res.status(400).json({ error: 'context must be "stored" or "current", or "auto" on a read' });
   }
   const wantStore = req.query.store === '1' && req.user?.role === 'admin';
+  if (wantStore && contextChoice === 'auto') {
+    return res.status(400).json({
+      error: 'context=auto is only for reading a night. To save it, use context=stored, or context=current '
+        + "(or no context) for today's settings.",
+    });
+  }
   let context = null;
   if (contextChoice === 'stored') {
     const saved = db
@@ -415,10 +433,16 @@ router.get('/:id/sleep/:date', (req, res) => {
     }
   }
   if (!wantStore) {
-    const night = computeNight(req.params.id, req.params.date, {
-      includeTimeline: req.query.debug === '1' || req.query.detail === '1',
-      context,
-    });
+    const includeTimeline = req.query.debug === '1' || req.query.detail === '1';
+    // `stored` is the forced replay exactly as PR 3 built it (no `scoring_view`: the Recompute dialog's preview
+    // asked for those settings by name). `auto`, `current` and no param go through the ONE helper that decides
+    // whether a finished night is shown with its saved settings (see the comment above `contextChoice`).
+    const night = contextChoice === 'stored'
+      ? computeNight(req.params.id, req.params.date, { includeTimeline, context })
+      : computeNightForDisplay(req.params.id, req.params.date, {
+        includeTimeline,
+        mode: contextChoice === 'auto' ? 'auto' : 'current',
+      });
     // `raw=1` (#361 PR 3, honoured only when `context` is named, so no existing request changes): the answer
     // WITHOUT a parent's correction laid over it. The Recompute dialog's preview needs it because a store
     // writes the DETECTOR's summary, never the overlay (see the store's own 200 below), and a corrected night

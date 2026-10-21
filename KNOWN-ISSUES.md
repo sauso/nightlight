@@ -707,7 +707,11 @@ closing sentence.
   night can therefore shrink its displayed sleep more than the stall alone explains. Since a corrected
   night's saved summary is locked (docs/sleep-tracking.md, "A night you have corrected is locked"), that no longer happens
   to the child's card after the correction is saved; the figure stops changing but is not made exact. The
-  sleep detail page works the night out fresh each time, so it can still show it.
+  sleep detail page works the night out fresh each time, so it can still show it. Since a finished night is
+  shown with the camera, timezone and window it was saved with (docs/sleep-tracking.md, "Finished nights use
+  the settings they were saved with"), a later change of camera, timezone or window no longer adds to that
+  difference for a night saved with its settings recorded; a change to the detection rules, or data recorded
+  after the night was locked, still can.
 
 **What to do:** nothing. If a night shows a long "No data" stretch while the camera was plainly on, check
 the Camera history for a `[detector-watchdog]` restart (next section) around that time.

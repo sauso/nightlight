@@ -751,10 +751,12 @@ export function quietStretchBeforeExit(cribAct, fromIdx, gapStart, minLen, maxTr
 // Step 1 (#808) stores, beside every night, the camera, timezone, window and rules version that produced it
 // (`scoring_context`, written by scoringContextFor below). Step 2, this block, is the reading side:
 // parseScoringContext turns a stored record into a context, currentScoringContext says what today's settings
-// would be, and computeNight accepts a context in place of today's settings. Its ONE caller (#361 PR 3) is the
-// admin Recompute route's opt-in `context=stored` (routes/children.js, planning/361-scoring-context.md section 9):
-// a number moves only when an admin ticks "use the settings this night was saved with" and saves. Every other
-// compute (the nightly job, the detail page, the review, /sleep/live) still passes none.
+// would be, and computeNight accepts a context in place of today's settings. Two callers pass one: the admin
+// Recompute route's opt-in `context=stored` (#361 PR 3; routes/children.js, planning/361-scoring-context.md
+// section 9), where a stored number moves only when an admin ticks "use the settings this night was saved with"
+// and saves; and the sleep detail page's `context=auto` (#361 PR 4a, computeNightForDisplay below), which SHOWS a
+// finished night with the settings it was saved with and stores nothing. Every other compute (the nightly job,
+// the morning review, /sleep/live, the review's store-first) still passes none.
 
 // `HH:MM` of what parseHm makes of a saved window time: the EFFECTIVE time, never the raw text (see
 // scoringContextFor for why). One helper, so the writer and currentScoringContext cannot spell it twice.
@@ -907,11 +909,14 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // which camera a stored night came from. ⚠️ This is read on EVERY compute, so changing the primary
   // re-scores any night that is computed again, not only new ones: the nightly job's re-store of the
   // last completed night (until ~3h after its window), storeNightBeforeCorrection, the admin Recompute
-  // button, and every fresh read (the detail page, the morning review, /sleep/live). A stored row that is
+  // button, and every fresh read (the morning review, /sleep/live, and the detail page except where the
+  // exception below applies). A stored row that is
   // never re-stored keeps the numbers of the camera it was scored from. Since #361 the stored row records
   // that camera's id in `scoring_context` (see scoringContextFor), and a caller can hand that record back as
-  // `context` to score from the same camera again (below). Only the admin Recompute's opt-in does (#361 PR 3);
-  // every other compute here still resolves the camera afresh. Rows stored before #361 have no record (NULL).
+  // `context` to score from the same camera again (below). Two do: the admin Recompute's opt-in (#361 PR 3), and
+  // the sleep detail page for a finished night whose saved settings differ from today's (#361 PR 4a,
+  // computeNightForDisplay); neither the nightly job nor the morning review does, so they still resolve the
+  // camera afresh. Rows stored before #361 have no record (NULL).
   //
   // Why one and not all (owner's call, 2026-08-29): the old code ORed every camera's timeline together,
   // so a minute counted as active if ANY camera saw something. That is not the conservative choice it
@@ -2507,6 +2512,110 @@ export function scoringContextChoice(childId, storedRaw) {
     differs,
     camera_names: { stored: stored ? nameOf(stored.camera_id) : null, current: nameOf(current.camera_id) },
   };
+}
+
+// --- #361 PR 4a: a FINISHED night is shown with the settings it was saved with -------------------------------
+//
+// Why (owner, 2026-10-20, #361 Q1): the sleep detail page worked every night out afresh with TODAY's camera,
+// timezone and window, while the child's card shows the SAVED row. So after a camera was turned off, moved to
+// another child, demoted by a new main camera or dragged down the tile order, or after the window or the timezone
+// changed, a finished night's page changed (or went `no_data`, the #361 report) while its card did not. This is the
+// ONE place that decides which settings the page uses: the route's `context=auto` (what the detail page sends)
+// calls it with mode 'auto', and `context=current` or no `context` (the page's "Show with today's settings", and
+// every older client) with mode 'current'.
+//
+// The rule, for mode 'auto': replay the saved row's context iff ALL of these hold, else work the night out with
+// today's settings exactly as before:
+//   1. the child tracks sleep (plan R3). `off` wins over a context inside computeNight too, and an off night has
+//      nothing to choose between, so it gets no `scoring_view` (no line, no toggle on the page);
+//   2. a saved row exists and the WALL CLOCK has reached that row's own `window_end` (plan R1, the ⚠️ below);
+//   3. its `scoring_context` parses: a legacy NULL row (saved before #361, never backfilled) or an unreadable one
+//      stays live, as today;
+//   4. it differs from today's in camera, timezone or window (scoringContextChoice's `differs`; NOT the rules label,
+//      which a replay cannot honour anyway). With identical settings a replay would give the same numbers and only
+//      add keys, so the plain compute is returned untouched and the page shows nothing new;
+//   5. the night is NOT in progress under TODAY's settings (`currentNightDate(childId) !== nightDate`; checked right
+//      after rule 2, before the parse, because it is cheaper). Found in the PR 4a code review, by a probe: a window
+//      END moved later after the night was saved (Melbourne, 19:30-07:00, stored at 07:30; at 07:45 the end becomes
+//      09:00; at 08:00) leaves the saved row's window_end in the past while today's window is still open. The child's
+//      card and /sleep/live then show the night LIVE ("tonight", in progress), and without this rule the page showed
+//      a finished replay beside them (in progress false, other minutes). Staying live is what keeps the three
+//      agreeing; the saved settings apply once today's window has closed too.
+//
+// ⚠️ WHY THE WALL CLOCK AGAINST `window_end`, NOT THE ROW'S `computed_at` (plan R1, from the Opus plan review). The
+// nightly job and storeNightBeforeCorrection judge "final" by the row's OWN computed_at (#351), and the first draft
+// of this rule copied them. But two common states never get a write after the evidence horizon, so under that rule
+// they would be shown LIVE for good while their card shows the saved row:
+//   (a) a night a parent corrected before ~10:00. It is locked, the job skips it for ever, and its computed_at stays
+//       early (storeNightBeforeCorrection: "a locked row's computed_at stays early for good");
+//   (b) THE #361 CASE ITSELF. The job stores `ok` at 07:30, an admin turns the camera off at 08:00, and every later
+//       pass computes `no_data`, is refused `would_downgrade` and leaves computed_at at 07:30, so the page would say
+//       "no data" for good while the card says `ok`.
+// With the window-end rule the page uses the SAME settings as the row the card shows, in every state: a re-store
+// that succeeds rewrites the context with today's settings (identical, so rule 4 makes it a plain compute), and a
+// refused one leaves the old context beside the old numbers, which is what the card shows. The job's own worry (a
+// full-evidence replay while the card still serves an earlier pass) applies just as much to today's live compute, so
+// it never favoured computed_at. `window_end` is the ROW's (the pass that was saved), never rebuilt from today's
+// window. A row whose window has not ended (an admin store or the demo seed during the night) is live, as today.
+//
+// Returns computeNight's answer, plus, ONLY when rules 1-5 hold, `scoring_view: { applied, stored, current,
+// camera_names, algo_differs }` in BOTH modes (plan R3), so the page can say which settings it used and offer the
+// other: `applied` is 'stored' for mode 'auto', 'current' for mode 'current'. A replay also carries computeNight's
+// `scoring` block, and a saved camera that no longer exists makes it `no_data` with `scoring.problem:
+// 'camera_deleted'`, never a quiet fallback to today's camera. When rules 1-5 do not hold there is NO new key in
+// either mode (a plain night's answer is byte-identical: display-stored-context.test.js).
+//
+// KNOWN LIMITS (docs/sleep-tracking.md, "Finished nights use the settings they were saved with"; where one has a
+// remedy it is the page's "Show with today's settings" or an admin's Recompute with today's settings):
+//   - the RULES are today's (one implementation); `algo_differs` says the saved numbers came from older ones;
+//   - room climate, the alert list and the wake clips follow the child's cameras today, and a camera that moved to
+//     another child within the night's span replays with its new room (computeNight's PR 2 limits). Room activity
+//     (`visits`) is NOT one of them: it is read from the scored camera, so it follows the replay;
+//   - a deleted camera's samples are purged with it (entityPurge), so its nights replay as `no_data` where today's
+//     settings would show another camera's night;
+//   - a context saved with `camera_id: null` (no camera was on) replays as `no_data` even after a camera is assigned;
+//   - a night whose samples have aged out (kept 30 days) is `no_data` either way, while its card keeps the numbers.
+//
+// Reads only, writes nothing, so a scratch script can call it with Date.now pinned (the old-vs-new A/B).
+const displayRowStmt = db.prepare('SELECT window_end, scoring_context FROM sleep_nights WHERE child_id = ? AND night_date = ?');
+const DISPLAY_MODES = new Set(['auto', 'current']);
+
+export function computeNightForDisplay(childId, nightDate, { includeTimeline = false, mode = 'auto' } = {}) {
+  // A mode nobody asked for must not quietly become one of the two (the route validates first; this is for any
+  // other caller).
+  if (!DISPLAY_MODES.has(mode)) {
+    throw new TypeError(`computeNightForDisplay: mode must be 'auto' or 'current', got ${JSON.stringify(mode)}`);
+  }
+  const choice = savedSettingsToShow(childId, nightDate);
+  if (!choice) return computeNight(childId, nightDate, { includeTimeline });
+  const applied = mode === 'auto' ? 'stored' : 'current';
+  const night = computeNight(childId, nightDate, { includeTimeline, context: applied === 'stored' ? choice.stored : null });
+  return {
+    ...night,
+    scoring_view: {
+      applied,
+      stored: choice.stored,
+      current: choice.current,
+      camera_names: choice.camera_names,
+      algo_differs: choice.stored.algo !== SCORING_ALGO,
+    },
+  };
+}
+
+// Rules 1-5 above: scoringContextChoice's answer when the saved settings would be replayed, else null.
+function savedSettingsToShow(childId, nightDate) {
+  if (!childSleepConfig(childId).track) return null;
+  const row = displayRowStmt.get(childId, nightDate);
+  if (!row || row.scoring_context == null) return null;
+  // Written as "not at or past", so a window_end that does not parse (NaN; never written by upsertNight) is live.
+  const windowEndMs = new Date(`${row.window_end.replace(' ', 'T')}Z`).getTime();
+  if (!(Date.now() >= windowEndMs)) return null;
+  // Rule 5: still in progress under today's window (a window end moved later after the save), so live, as the
+  // card and /sleep/live show it.
+  if (currentNightDate(childId) === nightDate) return null;
+  const choice = scoringContextChoice(childId, row.scoring_context);
+  if (choice.stored_state !== 'ok' || !choice.differs) return null;
+  return choice;
 }
 
 // ROADMAP §1.6: what the parent was actually TOLD about a night's wake time, so a later recompute can
