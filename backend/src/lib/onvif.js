@@ -103,7 +103,8 @@ function pcall(cam, method, arg) {
   });
 }
 
-function profileToken(p) {
+// Exported for tests to pin both ONVIF profile token shapes used by the probe.
+export function profileToken(p) {
   return p?.token || p?.$?.token || p?.$?.Token || null;
 }
 
@@ -111,7 +112,8 @@ function profileToken(p) {
 // A populated GetAudioOutputConfigurations list => yes; an empty list, or an explicit
 // "AudioOutputNotSupported"/"not supported" fault (what the Sonoff returns) => no; any other
 // error/timeout => unknown (don't claim either way). Returns 'yes' | 'no' | 'unknown'.
-function classifyBackchannel(err, configs) {
+// Exported for tests to pin the probe's three backchannel verdicts.
+export function classifyBackchannel(err, configs) {
   if (!err) return configs && configs.length > 0 ? 'yes' : 'no';
   const msg = (err.message || '').toLowerCase();
   if (msg.includes('not supported') || msg.includes('audiooutputnotsupported')) return 'no';
@@ -119,7 +121,8 @@ function classifyBackchannel(err, configs) {
 }
 
 // Highest-resolution profile is normally the "main" stream.
-function pickBestProfile(profiles) {
+// Exported for tests to pin which profile becomes the main stream.
+export function pickBestProfile(profiles) {
   return [...profiles].sort((a, b) => {
     const ar = a?.videoEncoderConfiguration?.resolution || {};
     const br = b?.videoEncoderConfiguration?.resolution || {};
@@ -129,7 +132,8 @@ function pickBestProfile(profiles) {
 
 // Lowest-resolution profile other than the main - the optional "Low quality" sub-stream. Returns
 // null when the camera only exposes one profile.
-function pickSubProfile(profiles, best) {
+// Exported for tests to pin the optional low-quality stream selection.
+export function pickSubProfile(profiles, best) {
   const bestToken = profileToken(best);
   const others = profiles.filter((p) => profileToken(p) !== bestToken);
   if (others.length === 0) return null;
@@ -145,7 +149,8 @@ function pickSubProfile(profiles, best) {
 // pair them with the host we connected to. The app assembles these with the user's
 // credentials into the final rtsp:// URL server-side (see routes/cameras.js), so the
 // password never lands in a URL field in the UI.
-function rtspPartsFromStreamUri({ streamUri, host }) {
+// Exported for tests to pin the address components stored after a probe.
+export function rtspPartsFromStreamUri({ streamUri, host }) {
   let path = '/';
   let port = DEFAULT_RTSP_PORT;
   const m = /^rtsps?:\/\/([^/]*)(\/.*)?$/i.exec((streamUri || '').trim());
@@ -364,7 +369,8 @@ async function detectMotionEvents(cam) {
 
 // Classify a GetEventProperties response: 'yes' if its TopicSet names a motion topic, 'no' if we
 // got a valid TopicSet without one, 'unknown' if the call errored / didn't respond.
-function classifyMotionEvents(err, xml) {
+// Exported for tests to pin motion capability verdicts from event properties.
+export function classifyMotionEvents(err, xml) {
   if (err || !xml) return 'unknown';
   const s = String(xml);
   // Motion topic names as they appear in the TopicSet across brands: tns1:VideoSource/MotionAlarm,
@@ -377,7 +383,8 @@ function classifyMotionEvents(err, xml) {
 // Pull a motion signal out of an ONVIF NotificationMessage (as linerased by the onvif lib). Returns
 // { topic, state } where state is true (motion), false (clear), or null (motion topic but the
 // boolean couldn't be read), or null if this isn't a motion topic at all (e.g. tampering/analytics).
-function extractMotion(message) {
+// Exported for tests to pin motion and clear notifications from camera messages.
+export function extractMotion(message) {
   const topic = (message?.topic?._ ?? message?.topic ?? '').toString();
   if (!/MotionAlarm|CellMotionDetector|(^|[:/])Motion([/]|$)|IsMotion/i.test(topic)) return null;
   // Data lives under message.message (WS-Notification) → .data.simpleItem, with attributes on `$`.
