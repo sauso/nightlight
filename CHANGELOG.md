@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-10-21
+
 ### Added
 
 - **Recompute can use the settings a night was saved with (#361).** When a night's camera, timezone or sleep window has changed since it was saved (for example its camera was turned off, moved to another child or is no longer the main camera), an admin's **Recompute this night** now offers **Use the settings this night was saved with**, and says what changed. It is off each time the dialog opens, so by default Recompute works the night out with today's settings, as before. Ticked, the dialog previews the night worked out with the saved camera, timezone and window (still with today's detection rules) beside the saved summary, and saves that. It is also offered on a night that now reads "no data" or "no clear sleep", where it is the only choice (before, Recompute did not appear on those nights at all). A night saved before nights recorded their settings shows the option greyed out with the reason; a night whose saved camera has been deleted cannot be re-scored this way and nothing is saved. Known limit: for about 3 hours after its window closes the nightly update re-saves last night with today's settings, which can replace such a save. API: `context=stored|current` and `raw=1` on `GET /api/children/:id/sleep/:date` (also with `store=1`), `expect_context`, the new reasons `no_stored_context` (400), `stored_camera_missing` and `context_changed` (409), and `contexts` on `?stored=1`; nothing changes for a request without them. See "Using the settings a night was saved with" in [docs/sleep-tracking.md](docs/sleep-tracking.md#using-the-settings-a-night-was-saved-with).
