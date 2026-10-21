@@ -79,7 +79,12 @@ export default function SleepDetail() {
   const nightKey = `${id}|${date}`;
   const [viewChoice, setViewChoice] = useState({ key: null, view: 'auto' });
   const settingsView = viewChoice.key === nightKey ? viewChoice.view : 'auto';
-  const chooseSettingsView = (view) => setViewChoice({ key: nightKey, view });
+  const chooseSettingsView = (view) => {
+    // #813: after a failed switch the old night still supplies the button's label, but the requested view
+    // is already selected. Pressing that same button must retry instead of setting the same state again.
+    if (view === settingsView && nightError) setNightRetry((n) => n + 1);
+    else setViewChoice({ key: nightKey, view });
+  };
   // The receipt for a correction just saved, when we arrived here from the review screen.
   const [receipt, setReceipt] = useState(null);
   // Bumped each time the receipt is dropped because the correction it quotes was removed (#679). The receipt
@@ -279,12 +284,14 @@ function NightBody({ night, error, onRetry, ...rest }) {
   // One fragment shape whether or not the banner is there, so NightContent keeps its state (an open clip
   // modal) when the banner comes and goes. The settings line (#361 PR 4a) is a slot of its own in that same
   // shape, so it coming and going does not remount NightContent either. It sits ABOVE NightContent, whose
-  // statuses each return early, so it is there for every status that can carry it (plan D4/R3), except a saved
-  // camera that no longer exists: that line takes the place of the no-data card's text (NightContent, below).
+  // statuses each return early, so it is there for every status that can carry it (plan D4/R3). For a saved
+  // camera that no longer exists, the line takes the place of the no-data card's text (NightContent, below).
+  // #813: keep it in this slot even when the deleted-camera night changes to today's view, so its button
+  // remains the same focused element across the switch.
   return (
     <>
       {error && <LoadFailed what="this night" error={error} onRetry={onRetry} stale />}
-      {night?.scoring_view && !(savedCameraGone(night) && night.status === 'no_data') && (
+      {night?.scoring_view && (
         <SettingsViewLine night={night} onSettingsView={rest.onSettingsView} />
       )}
       <NightContent night={night} {...rest} />
@@ -305,7 +312,7 @@ const savedCameraGone = (night) => night?.scoring?.problem === 'camera_deleted';
 // ⚠️ What the line names are the SETTINGS, from the server's two contexts, with the camera's LIVE name (a deleted one
 // reads "a camera that no longer exists"). The timezone it names is the one the night was saved in, while every
 // time on the page is shown in today's (the app setting): a stated limit (docs/sleep-tracking.md).
-function SettingsViewLine({ night, onSettingsView, inCard = false }) {
+function SettingsViewLine({ night, onSettingsView }) {
   if (!night?.scoring_view || night.status === 'off') return null;
   const v = night.scoring_view;
   const showingSaved = v.applied === 'stored';
@@ -321,9 +328,8 @@ function SettingsViewLine({ night, onSettingsView, inCard = false }) {
     text = `Showing today’s settings (${describeSettings(v.current, v.camera_names?.current)}). `
       + 'The saved summary for this night keeps the settings it was saved with.';
   }
-  // Its own card above the night, or (a deleted camera, inside the no-data card) just the content of one.
   return (
-    <div className={inCard ? 'sleep-settings-view sleep-settings-view--in-card' : 'card sleep-settings-view'}>
+    <div className="card sleep-settings-view">
       <div className="sleep-settings-view__text">{text}</div>
       <button type="button" className="btn btn-secondary btn-sm sleep-settings-view__switch"
         onClick={() => onSettingsView?.(showingSaved ? 'current' : 'auto')}>
@@ -357,18 +363,18 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
   // only the stored-settings re-score. Otherwise it renders nothing and these cards look as they always did. Not
   // for a null night (nothing to compare) or `off` (tracking is off: nothing is scored either way).
   if (!night || night.status === 'no_data') {
+    // #813: the deleted-camera explanation is the stable settings line above this content. Its replay
+    // has no generic no-data explanation; only an offered Recompute control belongs below the line.
+    if (savedCameraGone(night) && night.scoring_view) {
+      return <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime}
+        onRecomputed={onRecomputed} onCorrectionRemoved={onCorrectionRemoved} standaloneCard {...viewProps} />;
+    }
     return (
       <div className="card">
-        {/* #361 PR 4a (plan R3): a saved camera that has been deleted is the REASON there is no data here, so the
-            settings line says so in place of the generic text, which would blame coverage. */}
-        {savedCameraGone(night) && night.scoring_view ? (
-          <SettingsViewLine night={night} onSettingsView={onSettingsView} inCard />
-        ) : (
-          <div className="camera-tile__sub" style={{ padding: 14 }}>
-            No sleep data for this night — either it predates tracking, or the cameras weren’t running motion/sound
-            detection with enough coverage.
-          </div>
-        )}
+        <div className="camera-tile__sub" style={{ padding: 14 }}>
+          No sleep data for this night — either it predates tracking, or the cameras weren’t running motion/sound
+          detection with enough coverage.
+        </div>
         {night && <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime}
           onRecomputed={onRecomputed} onCorrectionRemoved={onCorrectionRemoved} {...viewProps} />}
       </div>

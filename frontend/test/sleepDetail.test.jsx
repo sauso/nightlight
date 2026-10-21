@@ -945,6 +945,23 @@ describe('#361 PR 4a: a finished night shown with the settings it was saved with
     expect(screen.getByRole('button', { name: TO_TODAY })).toBeInTheDocument();
   });
 
+  test('the deleted-camera settings switch keeps the same focused button after showing today', async () => {
+    mockViews({
+      auto: {
+        ...NIGHT, status: 'no_data', onset_at: null, wake_at: null, coverage_minutes: 0,
+        scoring: { problem: 'camera_deleted' }, scoring_view: view('stored'),
+      },
+    });
+    const { user } = mount();
+    const button = await screen.findByRole('button', { name: TO_TODAY });
+    button.focus();
+    expect(document.activeElement).toBe(button);
+    await user.click(button);
+    expect(await screen.findByText(TODAY_LINE)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: TO_SAVED })).toBe(button);
+    expect(document.activeElement).toBe(button);
+  });
+
   test('a night first worked out under earlier rules says its numbers can differ from the card', async () => {
     mockViews({ auto: { ...NIGHT, scoring_view: view('stored', { algo_differs: true }) } });
     mount();
@@ -962,6 +979,28 @@ describe('#361 PR 4a: a finished night shown with the settings it was saved with
     await user.click(screen.getByRole('button', { name: TO_SAVED }));
     expect(await screen.findByText(SAVED_LINE)).toBeInTheDocument();
     expect(nightPaths(get).at(-1)).toBe('/children/kid-1/sleep/2026-08-30?detail=1&context=auto');
+  });
+
+  test('a failed switch can be retried from the same button while the saved night stays visible', async () => {
+    let currentReads = 0;
+    const get = mockViews({
+      extra: (path) => {
+        if (!path.includes('context=current')) return undefined;
+        currentReads += 1;
+        return currentReads === 1 ? Promise.reject(new Error('Temporary failure')) : Promise.resolve(TODAY_VIEW);
+      },
+    });
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: TO_TODAY }));
+    expect(await screen.findByText(/Couldn’t refresh this night\. Showing what we had\./i)).toBeInTheDocument();
+    expect(screen.getByText(SAVED_LINE)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: TO_TODAY }));
+    expect(await screen.findByText(TODAY_LINE)).toBeInTheDocument();
+    expect(currentReads).toBe(2);
+    expect(nightPaths(get).slice(-2)).toEqual([
+      '/children/kid-1/sleep/2026-08-30?detail=1&context=current',
+      '/children/kid-1/sleep/2026-08-30?detail=1&context=current',
+    ]);
   });
 
   // ★ Plan R5. Without a reset the 08-29 request carries 'current'. With a reset done only by a setState in the reset

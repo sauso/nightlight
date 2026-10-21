@@ -879,6 +879,13 @@ describe('#361 PR 4a: on a page showing the saved settings, the dialog compares 
     expect(await screen.findByText(/already matches/i)).toBeInTheDocument();
   });
 
+  test('today’s no_sleep preview chooses the no-clear-sleep wording even when the page night scores', async () => {
+    mockToday({ today: { ...TODAY_NO_DATA, status: 'no_sleep' } });
+    await open({ night: PAGE });
+    expect(await screen.findByText(/Today’s settings find no clear sleep in this night\./)).toBeInTheDocument();
+    expect(screen.queryByText(/Today’s settings find no data for this night\./)).not.toBeInTheDocument();
+  });
+
   test('★ the saved settings find no data but today\'s do: the dialog compares today\'s, and never says they find no data', async () => {
     // The page shows `no_data` (a saved camera since deleted, or one with nothing recorded). The control appears from
     // its own `?stored=1` (PR 3, plan R1); once open, today's settings are the ones that score.
