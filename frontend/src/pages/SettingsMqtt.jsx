@@ -2,13 +2,30 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
+import UnsavedNotice from '../components/UnsavedNotice.jsx';
+import { loadDraft } from '../lib/formDraft.js';
+import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
+
+// What a reload-surviving draft may store (#377). NOT the password, and NOT the certificate text: the box takes
+// arbitrary pasted text and the page itself warns against pasting a private key into it, so it is kept out of
+// browser storage rather than trusted to be a public certificate. The cost is pasting it again after a reload.
+const DRAFT_FIELDS = ['mqtt_enabled', 'mqtt_host', 'mqtt_port', 'mqtt_username', 'mqtt_tls', 'mqtt_tls_verify'];
 
 export default function SettingsMqtt() {
+  const draftKey = useDraftKey('settings:mqtt');
+  // Read once on mount: edits typed before a background reload, or before a visit to another screen.
+  const [restoredDraft] = useState(() => loadDraft(draftKey, DRAFT_FIELDS));
+  const [restored, setRestored] = useState(!!restoredDraft);
   const [form, setForm] = useState({
     mqtt_enabled: false, mqtt_host: '', mqtt_port: '', mqtt_username: '', mqtt_password: '',
     // TLS (#537). Off by default, as for every install that existed before it; verification on.
     mqtt_tls: false, mqtt_tls_ca: '', mqtt_tls_verify: true,
+    ...restoredDraft,
   });
+  // The form as last loaded or last accepted by the server (never touched by typing). `ready` is false until the
+  // server's values have arrived, and stays false if that request fails: a failed load must neither write nor CLEAR
+  // a stored draft (an unloaded form would read as "nothing changed").
+  const [baseline, setBaseline] = useState(null);
   const [passwordSet, setPasswordSet] = useState(false);
   const [error, setError] = useState('');
   // A refusal that belongs to one control (the CA text) is shown beside it, not in the banner above the form.
@@ -18,6 +35,19 @@ export default function SettingsMqtt() {
   const loadStatus = () => api.get('/settings/mqtt/status').then((r) => setStatus(r || null)).catch(() => setStatus(null));
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // True while anything on screen differs from what is stored, INCLUDING a typed password and an edited certificate,
+  // which are never written to storage (so after a reload there is nothing to restore and the notice goes).
+  const draftUnsaved = useFormDraft({
+    key: draftKey, allow: DRAFT_FIELDS, form, baseline: baseline || {}, ready: baseline !== null, secrets: [form.mqtt_password],
+  });
+  const unsaved = draftUnsaved || (baseline !== null && String(form.mqtt_tls_ca ?? '') !== String(baseline.mqtt_tls_ca ?? ''));
+
+  // Back to what is stored: useFormDraft sees form == baseline and removes the stored draft.
+  function discardChanges() {
+    setForm((f) => ({ ...f, ...baseline, mqtt_password: '' }));
+    setRestored(false);
+  }
 
   useEffect(() => {
     api.get('/settings/mqtt').then((mqtt) => {
@@ -37,7 +67,9 @@ export default function SettingsMqtt() {
         mqtt_tls_ca: cfg.mqtt_tls_ca || '',
         mqtt_tls_verify: cfg.mqtt_tls_verify !== false,
       };
-      setForm((f) => ({ ...f, ...next }));
+      // A restored draft goes back over the server's values, so what was typed before the reload is what is on screen.
+      setForm((f) => ({ ...f, ...next, ...restoredDraft }));
+      setBaseline(next);
       setPasswordSet(cfg.mqtt_password_set);
     }).catch(() => {});
     loadStatus();
@@ -66,6 +98,10 @@ export default function SettingsMqtt() {
       // Only send a new password if one was actually typed — blank means "keep current".
       if (form.mqtt_password) payload.mqtt_password = form.mqtt_password;
       await api.put('/settings', payload);
+      // The baseline becomes what the server was SENT, not the whole form: the certificate text is left out of the
+      // payload while TLS is off, so it was not saved and must stay a difference (and the unsaved notice on).
+      const { mqtt_password: sentPassword, ...sent } = payload; // eslint-disable-line no-unused-vars
+      setBaseline((b) => ({ ...b, ...sent }));
       setForm((f) => ({ ...f, mqtt_password: '' }));
       if (form.mqtt_password) setPasswordSet(true);
       setSaved(true);
@@ -88,6 +124,10 @@ export default function SettingsMqtt() {
       <main className="app-main">
         {error && <div className="error-banner">{error}</div>}
         {saved && <div className="saved-banner">Saved ✓</div>}
+        {unsaved && (
+          <UnsavedNotice restored={restored} onDiscard={discardChanges}
+            note="The password and the certificate text are not kept if this page reloads; enter them again." />
+        )}
 
         <form onSubmit={save}>
           <div className="card">

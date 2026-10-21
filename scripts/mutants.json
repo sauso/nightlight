@@ -46,13 +46,24 @@
   {
     "label": "#787 delete during transcoder start misses 404",
     "file": "backend/src/routes/cameras.js",
-    "find": "    if (!updated) return res.status(404).json({ error: 'Camera not found' });\r\n",
+    "find": "  if (!updated) return res.status(404).json({ error: 'Camera not found' });\r\n",
     "replace": "",
     "expect": "killed",
     "tests": [
       "camera-edit-keep-fresh.test.js"
     ],
     "namePattern": "delete while transcoder start is awaited returns 404"
+  },
+  {
+    "label": "#793 sub-stream leg gated on the row read before the probe",
+    "file": "backend/src/routes/cameras.js",
+    "find": "  if (!updated.disabled) {\r\n    try {\r\n      if (subConfigured(updated))",
+    "replace": "  if (!existing.disabled) {\r\n    try {\r\n      if (subConfigured(updated))",
+    "expect": "killed",
+    "tests": [
+      "camera-edit-keep-fresh.test.js"
+    ],
+    "namePattern": "#793 a camera disabled while the ONVIF probe waits"
   },
   {
     "label": "#787 re-sent old sub path overwrites concurrent sub-stream change",
@@ -6667,8 +6678,8 @@
   {
     "label": "nobody-in-bed frontend R3: RecomputeNight trusts the raw store response again",
     "file": "frontend/src/components/RecomputeNight.jsx",
-    "find": "      await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });\r\n      const overlaid = await api.get(`/children/${childId}/sleep/${date}?detail=1`);\r\n      onRecomputed?.(overlaid);",
-    "replace": "      const result = await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });\r\n      onRecomputed?.(result);",
+    "find": "      await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1${storedSettings}`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });\r\n      const overlaid = await api.get(nightDetailPath(childId, date, 'auto'));\r\n      onSettingsViewChange?.('auto');\r\n      onRecomputed?.(overlaid);",
+    "replace": "      const result = await api.get(`/children/${childId}/sleep/${date}?store=1&detail=1${storedSettings}`, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });\r\n      onSettingsViewChange?.('auto');\r\n      onRecomputed?.(result);",
     "expect": "killed",
     "tests": ["RecomputeNight.test.jsx"],
     "namePattern": "OVERLAID night"
@@ -7946,8 +7957,8 @@
   {
     "label": "in-bed/lock L2: computeAndStoreNight no longer refuses a locked night",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "        return { ...summary, stored: false, refused: 'reviewed' };",
-    "replace": "        // mutant: no reviewed refusal",
+    "find": "    return { ...summary, stored: false, refused: 'reviewed' };",
+    "replace": "    // mutant: no reviewed refusal",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "refused with a 409"
@@ -7955,8 +7966,8 @@
   {
     "label": "in-bed/lock L3: the reviewed refusal is checked AFTER would_downgrade (a locked night is told its data aged out)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "      if (nightIsLocked(childId, nightDate)) {",
-    "replace": "      if (SCORED.has(summary.status) && nightIsLocked(childId, nightDate)) {",
+    "find": "  if (existing && nightIsLocked(childId, nightDate)) {",
+    "replace": "  if (existing && SCORED.has(summary.status) && nightIsLocked(childId, nightDate)) {",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "comes BEFORE"
@@ -8127,8 +8138,8 @@
   {
     "label": "in-bed/lock A9: the route accepts a got-OUT-of-bed event as the put-down",
     "file": "backend/src/routes/children.js",
-    "find": "inBedFrameId, TRANSITION.INTO_BED);",
-    "replace": "inBedFrameId);",
+    "find": "inBedFrameId, TRANSITION.INTO_BED, shown);",
+    "replace": "inBedFrameId, null, shown);",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "only a got-into-bed event"
@@ -8644,8 +8655,8 @@
   {
     "label": "in-bed/lock fix2 R1: the store-first compute runs AFTER applyVerdicts again (a compute that throws 500s a save whose verdicts were written)",
     "file": "backend/src/routes/children.js",
-    "find": "  if (reviewCorrectsNight(merged)) storeNightBeforeCorrection(req.params.id, req.params.date);\r\n\r\n  // Verdicts (and the reasons paired with them) are scoped to THIS child and THIS night inside\r\n  // applyVerdicts, and rejected as a batch — except a reason for a non-'wrong' verdict, which it drops.\r\n  const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons);\r\n  if (check.error) return res.status(400).json({ error: check.error });",
-    "replace": "  const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons);\r\n  if (check.error) return res.status(400).json({ error: check.error });\r\n  if (reviewCorrectsNight(merged)) storeNightBeforeCorrection(req.params.id, req.params.date);",
+    "find": "  if (reviewCorrectsNight(merged)) storeNightBeforeCorrection(req.params.id, req.params.date);\r\n\r\n  // Verdicts (and the reasons paired with them) are scoped to THIS child and THIS night inside\r\n  // applyVerdicts, and rejected as a batch — except a reason for a non-'wrong' verdict, which it drops.\r\n  // Against `shown`, the list the page was built from: the store-first above may just have re-saved the night with\r\n  // today's settings, and a fresh decision would then refuse the page's own events (#361 PR 4b; see applyVerdicts).\r\n  const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons, shown);\r\n  if (check.error) return res.status(400).json({ error: check.error });",
+    "replace": "  const check = applyVerdicts(req.params.id, req.params.date, verdicts, reasons, shown);\r\n  if (check.error) return res.status(400).json({ error: check.error });\r\n  if (reviewCorrectsNight(merged)) storeNightBeforeCorrection(req.params.id, req.params.date);",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
     "namePattern": "save-time compute throws"
@@ -9031,7 +9042,7 @@
   {
     "label": "in-bed/lock fix4 S7: the route passes no span (the round-3 calendar bound again: a hand-made echo moves a time to the next evening)",
     "file": "backend/src/routes/children.js",
-    "find": "  const echoSpan = reportableSpanMs(req.params.id, req.params.date);",
+    "find": "  const echoSpan = reportableSpanMs(req.params.id, req.params.date, shown?.context ?? null);",
     "replace": "  const echoSpan = null;",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
@@ -13892,22 +13903,68 @@
     "namePattern": "told an admin can remove it"
   },
   {
-    "label": "W5 role gate M5: PUT /api/cameras/reorder loses requireAdmin (a caregiver's drag changes the scoring camera)",
+    "label": "#675 (re-points W5 role gate M5): PUT /api/cameras/reorder regains requireAdmin (a caregiver can rearrange no tile at all)",
     "file": "backend/src/routes/cameras.js",
-    "find": "router.put('/reorder', requireAdmin, (req, res) => {",
-    "replace": "router.put('/reorder', (req, res) => {",
+    "find": "router.put('/reorder', (req, res) => {",
+    "replace": "router.put('/reorder', requireAdmin, (req, res) => {",
     "expect": "killed",
-    "tests": ["route-permissions.test.js", "role-gates-destroy.test.js"],
-    "note": "#552: sort_order picks the camera a child's sleep is scored from, the timelapse camera and the review's camera list."
+    "tests": ["route-permissions.test.js", "reorder-scoring-guard.test.js"],
+    "note": "Deliberate repair: until #675 this entry REMOVED requireAdmin from the reorder route (#552). #675 removed the gate on purpose (any signed-in user may reorder; a non-admin's move of a tracked child's sleep camera is refused in the handler), so the old find no longer exists and the entry now restores the gate instead."
   },
   {
-    "label": "W5 role UI M24: a caregiver's live tiles get the drag handle again",
+    "label": "#675 (re-points W5 role UI M24): a caregiver's live tiles lose the drag handle again",
     "file": "frontend/src/components/LiveMonitor.jsx",
-    "find": "  const canReorder = isAdmin;",
-    "replace": "  const canReorder = true;",
+    "find": "  const canReorder = !!user;",
+    "replace": "  const canReorder = isAdmin;",
     "expect": "killed",
     "tests": ["liveMonitor.test.jsx"],
-    "namePattern": "no drag handle"
+    "namePattern": "a caregiver gets a drag handle on every tile too",
+    "note": "Deliberate repair: until #675 this entry gave a caregiver the drag handle (canReorder = isAdmin -> true) and was killed by the 'no drag handle' test. #675 gives every signed-in user the handle on purpose, so the entry now takes it away from a caregiver again."
+  },
+  {
+    "label": "#675 G1: the sleep-camera guard is removed (a caregiver's reorder that moves a tracked child's sleep camera is stored)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (moved.length) throw new ReorderWouldChangeSleepCamera(moved);",
+    "replace": "// guard removed",
+    "expect": "killed",
+    "tests": ["reorder-scoring-guard.test.js"],
+    "namePattern": "making the second camera of an Automatic child first"
+  },
+  {
+    "label": "#675 G2: only the 'id' tie-break is compared (a reorder that moves only the timelapse camera is stored)",
+    "file": "backend/src/routes/cameras.js",
+    "find": " || before[i].byRowid !== after[i].byRowid",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["reorder-scoring-guard.test.js"],
+    "namePattern": "moves ONLY the timelapse pick"
+  },
+  {
+    "label": "#675 G3: only the 'rowid' tie-break is compared (a reorder that moves only the scoring camera is stored)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "before[i].byId !== after[i].byId || ",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["reorder-scoring-guard.test.js"],
+    "namePattern": "moves ONLY the scoring pick"
+  },
+  {
+    "label": "#675 G4: an admin's reorder is checked too (admins lose the unrestricted reorder)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "const guarded = isAdmin ? [] : trackedChildren();",
+    "replace": "const guarded = trackedChildren();",
+    "expect": "killed",
+    "tests": ["reorder-scoring-guard.test.js"],
+    "namePattern": "an admin doing the SAME reorder"
+  },
+  {
+    "label": "#675 G5: children with sleep tracking off are guarded too (a caregiver is refused for a swap nobody sees)",
+    "file": "backend/src/routes/cameras.js",
+    "find": ".filter((c) => childTracksSleep(c.id))",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["reorder-scoring-guard.test.js"],
+    "namePattern": "sleep tracking OFF is not guarded"
   },
   {
     "label": "#552 PR2 M01: the snooze history row loses its actor",
@@ -20541,16 +20598,6 @@
     ]
   },
   {
-    "label": "#377 formDraft: a draft expires one millisecond early",
-    "file": "frontend/src/lib/formDraft.js",
-    "find": "Date.now() - parsed.at > DRAFT_TTL_MS",
-    "replace": "Date.now() - parsed.at >= DRAFT_TTL_MS",
-    "expect": "killed",
-    "tests": [
-      "lib/formDraft.test.js"
-    ]
-  },
-  {
     "label": "#377 formDraft: the key is not scoped to the signed-in person",
     "file": "frontend/src/lib/formDraft.js",
     "find": "return `${DRAFT_PREFIX}${userId ?? 'anon'}:${formId}`;",
@@ -22334,5 +22381,275 @@
     "expect": "killed",
     "tests": ["timelapse-deadline.test.js"],
     "namePattern": "^#781 hung thumbnail"
+  },
+  {
+    "label": "#376 a Modal never takes the scroll lock",
+    "file": "frontend/src/components/Modal.jsx",
+    "find": "    const unlockScroll = lockScroll();",
+    "replace": "    const unlockScroll = () => {};",
+    "expect": "killed",
+    "tests": ["modal.test.jsx"],
+    "namePattern": "locked while a Modal is open, unlocked when it closes"
+  },
+  {
+    "label": "#376 the scroll lock is a flag, not a count",
+    "file": "frontend/src/lib/scrollLock.js",
+    "find": "    locks -= 1;",
+    "replace": "    locks = 0;",
+    "expect": "killed",
+    "tests": ["lib/scrollLock.test.js"],
+    "namePattern": "locks on the first lock and unlocks only when the LAST"
+  },
+  {
+    "label": "#377 General: a draft is judged against the placeholder settings before the server's arrive",
+    "file": "frontend/src/pages/SettingsGeneral.jsx",
+    "find": "ready: loaded !== false });",
+    "replace": "ready: true });",
+    "expect": "killed",
+    "tests": ["settingsFormDrafts.test.jsx"],
+    "namePattern": "equals the placeholder"
+  },
+  {
+    "label": "#377 caregiver screen is not keyed by id: one account's draft is written under another's key",
+    "file": "frontend/src/pages/UserSettings.jsx",
+    "find": "key={id || 'new'}",
+    "replace": "key=\"same\"",
+    "expect": "killed",
+    "tests": ["settingsFormDrafts.test.jsx"],
+    "namePattern": "never writes the first one"
+  },
+  {
+    "label": "#377 a URL carrying a login is stored in a draft",
+    "file": "frontend/src/lib/formDraft.js",
+    "find": "if (typeof v === 'string' && URL_USERINFO_RE.test(v)) continue;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["lib/formDraft.test.js", "settingsFormDrafts.test.jsx"],
+    "namePattern": "carries credentials|login written into it"
+  },
+  {
+    "label": "#377 the ntfy topic is stored in a draft",
+    "file": "frontend/src/pages/SettingsPushNtfy.jsx",
+    "find": "const DRAFT_FIELDS = ['enabled', 'server_url', 'username'];",
+    "replace": "const DRAFT_FIELDS = ['enabled', 'server_url', 'username', 'topic'];",
+    "expect": "killed",
+    "tests": ["settingsFormDrafts.test.jsx"],
+    "namePattern": "the topic, token and password are never stored"
+  },
+  {
+    "label": "#377 the MQTT certificate text is stored in a draft",
+    "file": "frontend/src/pages/SettingsMqtt.jsx",
+    "find": "'mqtt_tls', 'mqtt_tls_verify'];",
+    "replace": "'mqtt_tls', 'mqtt_tls_ca', 'mqtt_tls_verify'];",
+    "expect": "killed",
+    "tests": ["settingsFormDrafts.test.jsx"],
+    "namePattern": "a typed password and certificate text are never stored"
+  },
+  {
+    "label": "#377 MQTT Save counts an unsent certificate as saved",
+    "file": "frontend/src/pages/SettingsMqtt.jsx",
+    "find": "setBaseline((b) => ({ ...b, ...sent }));",
+    "replace": "setBaseline((b) => ({ ...b, ...form, ...sent }));",
+    "expect": "killed",
+    "tests": ["settingsFormDrafts.test.jsx"],
+    "namePattern": "NOT counted as saved by a Save"
+  },
+  {
+    "label": "#377 Gotify: a failed config load erases a stored draft",
+    "file": "frontend/src/pages/SettingsPushGotify.jsx",
+    "find": "ready: configLoaded, secrets: [appToken]",
+    "replace": "ready: loaded, secrets: [appToken]",
+    "expect": "killed",
+    "tests": ["settingsFormDrafts.test.jsx"],
+    "namePattern": "failed load neither writes nor erases a stored draft, and the page stays usable"
+  },
+  {
+    "label": "#361 the scoring context is frozen on the first write (left out of ON CONFLICT)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "     scoring_context=excluded.scoring_context,",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["scoring-context.test.js"],
+    "namePattern": "a provisional re-store refreshes the context"
+  },
+  {
+    "label": "#361 the scoring context never records the scored camera",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "camera_id: summary.analysis_camera_id ?? null",
+    "replace": "camera_id: null",
+    "expect": "killed",
+    "tests": ["scoring-context.test.js"],
+    "namePattern": "a stored night records exactly v, camera_id, tz, window and algo"
+  },
+  {
+    "label": "#361 the scoring context assumes UTC instead of the timezone that scored the night",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    tz: appSettings().timezone || 'UTC',",
+    "replace": "    tz: 'UTC',",
+    "expect": "killed",
+    "tests": ["scoring-context.test.js"],
+    "namePattern": "tz and window are the ones computeNight used"
+  },
+  {
+    "label": "#361 step 2: a context replay ignores the stored camera and scores today's primary",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    mainCam = contextCameraStmt.get(ctx.camera_id) || null;",
+    "replace": "    mainCam = currentScoringCamera(childId);",
+    "expect": "killed",
+    "tests": ["scoring-context-replay.test.js"],
+    "namePattern": "replay: naming a different primary camera"
+  },
+  {
+    "label": "#361 step 2: a context replay ignores the stored timezone",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  const tz = ctx ? ctx.tz : appSettings().timezone || 'UTC';",
+    "replace": "  const tz = appSettings().timezone || 'UTC';",
+    "expect": "killed",
+    "tests": ["scoring-context-replay.test.js"],
+    "namePattern": "replay: changing the app timezone"
+  },
+  {
+    "label": "#361 step 2: a context replay ignores the stored window",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  const win = ctx ? ctx.window : cfg;",
+    "replace": "  const win = cfg;",
+    "expect": "killed",
+    "tests": ["scoring-context-replay.test.js"],
+    "namePattern": "replay: changing the child window"
+  },
+  {
+    "label": "#361 step 2: a deleted context camera silently falls back to today's primary",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (!mainCam) cameraProblem = 'camera_deleted';",
+    "replace": "    if (!mainCam) mainCam = currentScoringCamera(childId);",
+    "expect": "killed",
+    "tests": ["scoring-context-replay.test.js"],
+    "namePattern": "a deleted context camera is no_data"
+  },
+  {
+    "label": "#361 PR3: the Recompute route ignores context=stored on a store (re-scores with today's settings)",
+    "file": "backend/src/routes/children.js",
+    "find": "computeAndStoreNight(req.params.id, req.params.date, { allowDowngrade: false, context });",
+    "replace": "computeAndStoreNight(req.params.id, req.params.date, { allowDowngrade: false });",
+    "expect": "killed",
+    "tests": ["recompute-stored-context.test.js"],
+    "namePattern": "a disabled camera"
+  },
+  {
+    "label": "#361 PR3: a stored-settings save writes TODAY's timezone and window into the context",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  if (ctx) return JSON.stringify({ ...ctx, algo: SCORING_ALGO });",
+    "replace": "  if (ctx) return JSON.stringify({ ...currentScoringContext(childId), camera_id: ctx.camera_id });",
+    "expect": "killed",
+    "tests": ["recompute-stored-context.test.js"],
+    "namePattern": "the written context is the stored camera"
+  },
+  {
+    "label": "#361 PR3: a stored-settings save copies the stored rules label (new numbers labelled as old rules)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  if (ctx) return JSON.stringify({ ...ctx, algo: SCORING_ALGO });",
+    "replace": "  if (ctx) return JSON.stringify({ ...ctx });",
+    "expect": "killed",
+    "tests": ["recompute-stored-context.test.js"],
+    "namePattern": "the written context is the stored camera"
+  },
+  {
+    "label": "#361 PR3: the route's default flips to the stored settings (owner chose today's, #361 Q4)",
+    "file": "backend/src/routes/children.js",
+    "find": "  const contextChoice = req.query.context;",
+    "replace": "  const contextChoice = req.query.context ?? 'stored';",
+    "expect": "killed",
+    "tests": ["recompute-stored-context.test.js"],
+    "namePattern": "context=current is exactly the default"
+  },
+  {
+    "label": "#361 PR3: a replay whose stored camera was deleted is stored (stored_camera_missing removed)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  if (ctx && summary.scoring?.problem) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["recompute-stored-context.test.js"],
+    "namePattern": "a deleted stored camera"
+  },
+  {
+    "label": "#361 PR4: a night whose saved window has not ended is shown with its saved settings",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  if (!(Date.now() >= windowEndMs)) return null;",
+    "replace": "  if (false) return null;",
+    "expect": "killed",
+    "tests": ["display-stored-context.test.js"],
+    "namePattern": "has NOT ended"
+  },
+  {
+    "label": "#361 PR4: saved settings identical to today's are replayed anyway (differs ignored)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  if (choice.stored_state !== 'ok' || !choice.differs) return null;",
+    "replace": "  if (choice.stored_state !== 'ok') return null;",
+    "expect": "killed",
+    "tests": ["display-stored-context.test.js"],
+    "namePattern": "identical settings"
+  },
+  {
+    "label": "#361 PR4: the route reads context=auto as today's settings",
+    "file": "backend/src/routes/children.js",
+    "find": "        mode: contextChoice === 'auto' ? 'auto' : 'current',",
+    "replace": "        mode: 'current',",
+    "expect": "killed",
+    "tests": ["display-stored-context.test.js"],
+    "namePattern": "route: context=auto is the saved settings"
+  },
+  {
+    "label": "#361 PR4: an admin store with context=auto is accepted (and writes today's settings)",
+    "file": "backend/src/routes/children.js",
+    "find": "  if (wantStore && contextChoice === 'auto') {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["display-stored-context.test.js"],
+    "namePattern": "an admin store with context=auto"
+  },
+  {
+    "label": "#361 PR4: the detail page's timeline is dropped for every night with a scoring_view",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  const night = computeNight(childId, nightDate, { includeTimeline, context: applied === 'stored' ? choice.stored : null });",
+    "replace": "  const night = computeNight(childId, nightDate, { context: applied === 'stored' ? choice.stored : null });",
+    "expect": "killed",
+    "tests": ["display-stored-context.test.js"],
+    "namePattern": "the timeline is kept in both modes"
+  },
+  {
+    "label": "#361 PR4b: the review lists (and accepts) the saved camera after it moved to another child",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "const contextCamForChild = db.prepare('SELECT id, name FROM cameras WHERE id = ? AND child_id = ?');",
+    "replace": "const contextCamForChild = db.prepare('SELECT id, name FROM cameras WHERE id = ? AND ? IS NOT NULL');",
+    "expect": "killed",
+    "tests": ["review-stored-context.test.js"],
+    "namePattern": "the saved camera is listed, accepted and counted"
+  },
+  {
+    "label": "#361 PR4b: the review's list ignores the saved timezone (today's noon to noon)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  const { startSql, endSql } = nightBounds(nightDate, ctx ? ctx.tz : appTz());",
+    "replace": "  const { startSql, endSql } = nightBounds(nightDate, appTz());",
+    "expect": "killed",
+    "tests": ["review-stored-context.test.js"],
+    "namePattern": "timezone change: the list covers"
+  },
+  {
+    "label": "#361 PR4b: a review save is not refused when the settings it was built with changed",
+    "file": "backend/src/routes/children.js",
+    "find": "    if (body.settings_key !== (shown?.key ?? '')) {",
+    "replace": "    if (false) {",
+    "expect": "killed",
+    "tests": ["review-stored-context.test.js"],
+    "namePattern": "settings_changed"
+  },
+  {
+    "label": "#361 PR4b: \"Before bedtime\" is judged in today's zone, not the zone the list was built in",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "  const groupTz = data.settings?.tz ?? tz;",
+    "replace": "  const groupTz = tz;",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"],
+    "namePattern": "judged in that zone"
   }
 ]

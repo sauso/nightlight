@@ -45,7 +45,7 @@ before "asleep", so most nights still show one time. If you corrected a night's 
 camera's "In bed" is hidden and only your time is shown: the recorded put-down belongs to the bedtime
 you corrected, so it may not match yours. Correcting only the wake-up time keeps it. If you gave the
 **In bed** time yourself in the morning review, yours is shown, beside your asleep time too. A night
-saved before this update has no "in bed" time on the child's card until it's recomputed, and a night
+saved before 0.35.0 has no "in bed" time on the child's card until it's recomputed, and a night
 you corrected in the morning review is locked against that until the correction is removed (or give
 its **In bed** time yourself in the review). The detail page works the night out fresh each time, so
 it shows the time straight away.
@@ -75,6 +75,50 @@ first estimate, not a setting; on a night still in progress, 90% of the part so 
 that answer also discards the night's timelapse. A
 frozen picture still counts as watched — see
 [KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "Minutes with no video are unknown in the sleep numbers".
+
+### Finished nights use the settings they were saved with
+
+Each saved night records what it was worked out from: the camera, the timezone and the sleep window. If one of
+those has changed since (the camera was turned off, moved to another child or is no longer the main camera, the
+tiles were rearranged, or the window or timezone was changed), the detail page works a **finished** night out with
+the settings it was saved with, so it uses the same settings as the child's card. A line above the night says so,
+for example "Worked out with the settings this night was saved with (Bed cam, 19:30–07:00, Europe/London), using
+today's detection rules". **Show with today's settings** switches the page to today's, and a second button switches
+back. The choice is for that night only and is not remembered: another night, a reload, or a Recompute save goes
+back to the saved settings. Before, the page always used today's settings, so after such a change a finished night
+could show different numbers from its card, or "no data". The morning review uses the same settings as this page
+(see [A night whose settings have changed](#a-night-whose-settings-have-changed)).
+
+| The night | Settings the detail page uses |
+|---|---|
+| Finished (its saved window and today's window have both ended), saved settings differ from today's | the saved ones, with the line and the switch |
+| Finished, saved settings the same as today's | today's (the same; no line) |
+| Still in progress under today's sleep window, even if the saved night's window has ended (for example the wake time was moved later after it was saved) | today's, live, as on the child's card |
+| The saved night's window has not ended yet | today's |
+| Nothing saved yet, saved before nights recorded their settings, or a record that can't be read | today's |
+| Sleep tracking is off | none: "Sleep tracking is off" (no line, no switch) |
+
+The card and the page then share the **settings**, not necessarily every number. The page still works the night
+out again from the recorded movement, with today's detection rules and whatever data is still kept, so:
+- The **detection rules** are always today's. A night first worked out under earlier rules says so ("…so the
+  numbers can differ from the child's card").
+- Room temperature, the alert list and wake clips come from the child's cameras today. Movement outside the bed
+  comes from the saved camera, like the sleep numbers.
+- Times are shown in today's timezone (the one in Settings), even when the line names the timezone the night was
+  saved in.
+
+Known limits. For the first three, use **Show with today's settings**, or have an admin
+[Recompute](#re-working-out-a-night-admins) the night with today's settings (which saves today's settings with it):
+- A new install's timezone is **UTC** until you set yours. Nights saved before you set it keep the UTC window.
+- Deleting a camera deletes its recorded movement too, so a night saved from it shows "The camera this night was
+  measured from no longer exists…" where today's settings would show another camera's night.
+- A night saved while **no camera was on** stays "no data" after a camera is assigned, even if today's settings
+  could work it out.
+- A night whose minute-by-minute data has **aged out** (kept 30 days) shows "no data" with either settings, while
+  the card keeps its numbers. Nothing brings that data back.
+- "Finished" means both the saved night's own window and today's window have ended: last night uses its saved
+  settings from then on, including the ~3 hours the nightly update may still re-save it. When that update re-saves
+  it with today's settings, the page follows.
 
 ### Room temperature (optional)
 
@@ -106,10 +150,21 @@ for as long as the room stays that steady.
 If a child has several cameras, sleep is worked out from their
 **main camera**, and an admin can choose which one it is: **Camera used for this child's sleep** in
 the child's settings (shown once a child has two or more cameras).
-- **Default: Automatic** — the first camera in the order an admin has arranged them on the live grid,
+- **Default: Automatic** — the first camera in the order the tiles are arranged on the live grid,
   skipping any that are turned off. This is how every child behaved before the setting existed, so
-  nothing changes until an admin picks a camera. With Automatic, dragging the tiles still changes the
-  main camera, which is why only an admin can rearrange them.
+  nothing changes until an admin picks a camera. With Automatic, dragging the tiles can still change
+  the main camera, so anyone may rearrange them but a **caregiver's** move that would change the
+  camera a child's sleep or nightly timelapse comes from (for any child whose sleep tracking is on) is
+  refused: the tiles go back, a message says why, and nothing is saved. On a child set to Automatic
+  with two or more turned-on cameras, a caregiver therefore cannot put another of that child's turned-on
+  cameras ahead of the one measuring now, and in a home with one child and two cameras, both theirs and
+  both on, no tile can be moved at all, until an admin chooses a camera here (one that is turned on);
+  after that the tiles can be rearranged freely. An admin's moves are never refused.
+  - **Known limit: the check protects the cameras that are measuring a tracked child now.** A caregiver
+    can freely place a camera that belongs to no child, one that is turned off, one of a child whose
+    sleep tracking is off, or one that is not first. A later admin action (assigning a camera, turning
+    one on or off, deleting one, setting a child back to Automatic, turning sleep tracking on) then
+    picks the main camera from that order, exactly as it would from an order an admin had set.
 - **Range: any camera assigned to that child**, including one that is turned off. A chosen camera
   that is turned off (or has been deleted) is skipped and Automatic is used until it is back on;
   turning it back on makes it the main camera again. Moving the chosen camera to another child, or
@@ -117,12 +172,15 @@ the child's settings (shown once a child has two or more cameras).
 - Only an **admin** can change it (a caregiver sees it, greyed out). The settings screen says which
   camera the night is being measured from right now.
 - **What a change affects.** The camera is looked up each time a night is worked out, so a change
-  applies to every night computed afterwards, not only future ones: tonight's figures, a night's
-  **detail page** and the **morning review** (always worked out fresh), last night's saved summary
-  while it can still be updated (up to about three hours after the wake time), a review correction
-  that saves the night first, and an admin's **Recompute**. Older saved summaries (the child's card)
-  are not recomputed and keep the numbers of the camera they were measured from, so after a change a
-  past night's detail page can show different figures from its card.
+  applies to every night computed afterwards, not only future ones: tonight's figures, the **morning
+  review** (always worked out fresh), last night's saved summary while it can still be updated (up to
+  about three hours after the wake time), a review correction that saves the night first, and an
+  admin's **Recompute**. Older saved summaries (the child's card) are not recomputed and keep the
+  numbers of the camera they were measured from. A finished night's **detail page** uses the camera it
+  was saved with too, with a switch to today's (see [Finished nights use the settings they were saved
+  with](#finished-nights-use-the-settings-they-were-saved-with)); a night saved before nights recorded
+  their camera uses today's. An admin's Recompute can instead use the camera a night was saved with:
+  see [Using the settings a night was saved with](#using-the-settings-a-night-was-saved-with).
 
 The others carry on streaming, alerting and recording as normal; they just don't affect the numbers.
 The nightly timelapse is taken from the same main camera.
@@ -343,7 +401,7 @@ closest to when they settled (or type the asleep time).
 - This is **not** the same as marking an event *correct*. An exit can be perfectly real and
   still not be the end of the night — a child who gets out at 5:45, goes back, and gets up
   again at 6:00 had two genuine exits and only one of them ended the night.
-- **Before this version** there was only one button on a *got into bed* event, **Put down here**,
+- **Before 0.35.0** there was only one button on a *got into bed* event, **Put down here**,
   and it set the *asleep* time. Reviews saved that way are kept exactly as they are: there is no way
   to tell which stored asleep times came from that button, so none is reinterpreted as "in bed". If
   one of yours is wrong, open the night and correct it. A page that was already open when the app
@@ -364,7 +422,8 @@ in the full list with your answer shown, but without the follow-up. **That was m
 #### Afternoon events are grouped out of the way
 
 Events recorded before **16:00** on the night's
-date, in the timezone set in Settings, are collected at the top of the full list as **Before
+date, in the timezone set in Settings (or the one the night was saved in, see [A night whose settings have
+changed](#a-night-whose-settings-have-changed)), are collected at the top of the full list as **Before
 bedtime (N)**, collapsed. They are usually someone walking across the bed zone. **None of these
 were a bedtime event** marks them all **No** in one tap. The button stays greyed out until you
 have opened the group at least once, so a real nap can't be marked "No" before anyone has looked
@@ -379,10 +438,32 @@ the app has loaded your timezone setting. That is usually a moment after the pag
 lasts the whole visit if the settings can't be loaded. Grouping by a guessed timezone could put
 a real evening bedtime in the afternoon group, where the button would mark it "No".
 
+#### A night whose settings have changed
+
+The review uses the same settings as the sleep detail page. For a finished night whose camera, timezone or
+sleep window has changed since it was saved, **What we recorded**, the recorded events and the **Before
+bedtime** group all use the settings the night was saved with (see [Finished nights use the settings they
+were saved with](#finished-nights-use-the-settings-they-were-saved-with)). So the times you confirm are the
+ones the child's card shows, and the events run from noon to noon in the saved timezone and include the saved
+camera's, even if that camera has since been turned off. Times are still shown, and typed, in today's timezone.
+- A camera that has since been moved to another child, or deleted, shows no events here. Its events now
+  belong to that other child (or to no one).
+- If the settings for the night change while the review is open (someone edits the sleep window or the
+  timezone, changes the camera, or the night is saved again), saving is refused: "The settings for this night
+  changed while you were reviewing. Reload the page and check your times." Nothing is saved. **No one was in
+  the bed** carries no time, so it is never refused for this. A review page that was open before this update
+  isn't checked until it is reloaded.
+- A night with no saved settings (not saved yet, or saved before nights recorded them) isn't checked this way
+  either. If you change the sleep window or timezone, reload any review page that is already open.
+- Times you type are read in the timezone set in Settings when you press save. A timezone change on a night
+  already shown with its saved settings doesn't change those settings, so that save isn't refused, and times
+  typed on a page opened before the change can land at the wrong hour. Reload the page after changing the
+  timezone.
+
 #### Your times become the ones shown
 
-Once you correct a night, the child's card, the history list
-and the sleep detail page all show *your* times, marked **You corrected this**, with the total
+Once you correct a night, the child's card and the sleep
+detail page both show *your* times, marked **You corrected this**, with the total
 sleep recalculated to match wherever an asleep or wake-up time you saved differs from the one that
 screen had (a time that is the same keeps that screen's own total). This is different from
 **Recompute this night**, which re-runs the detector: correcting records what *you* know,
@@ -415,14 +496,16 @@ the API locks nothing. This is the same for every child and every install.
 | Nightly update (the ~3 hours after the window closes) | keeps refining the saved summary | leaves it alone |
 | **Recompute this night** (admins) | can re-save it | refused: "locked because you corrected it" |
 | Follow-up "Sleep report updated" push | can be sent once, within about 3 hours of the window closing | not sent |
-| Sleep detail page | worked out fresh each time | still worked out fresh each time, with your times laid over it |
+| Sleep detail page | worked out fresh each time (once finished, with the settings it was saved with) | still worked out fresh each time, with the settings it was saved with and your times laid over it |
 | Editing or removing your correction | — | always allowed |
 
 **Recompute this night** (admins only) is on every night that was scored, including one that shows
 **No one in the bed**, whether the detector scored it empty or you flagged it. It works the same way
 there: the first press compares the saved summary with the current one and saves nothing, the second
 saves. A flagged night is a corrected night, so it normally opens on "locked" until you remove the correction (once its saved summary is final, as described in [A night you have corrected is locked](#a-night-you-have-corrected-is-locked)). It is
-not offered on nights with no data, no clear sleep, or with sleep tracking off.
+not offered on nights with sleep tracking off. On a night that now shows no data or no clear sleep it is
+offered only to re-score the night with the settings it was saved with, and only when those differ from
+today's (see [Using the settings a night was saved with](#using-the-settings-a-night-was-saved-with)).
 
 #### What gets locked is the night as it is when you save
 
@@ -485,10 +568,14 @@ Either:
     first summary has no wake-up time yet (the morning's departure was still being confirmed when it
     was saved), the night keeps showing no wake-up time until you add one to your review.
   - The sleep detail page always works the night out fresh and lays your times over it, so its
-    total asleep and wake-ups can differ a little from the locked summary on the child's card.
-  - The review page starts from the night worked out fresh when you open it, while the child's card
-    and history show the night as it was saved. When those differ (a page left open while the
-    detected wake-up moved on, or an older night saved by an earlier version of the detector), the
+    total asleep and wake-ups can differ a little from the locked summary on the child's card. That
+    holds even though a locked night is shown with the settings it was saved with (see [Finished nights
+    use the settings they were saved with](#finished-nights-use-the-settings-they-were-saved-with)):
+    the page sees the whole morning's data, which a night locked early did not.
+  - The review page starts from the night worked out fresh when you open it (with the same settings as
+    the detail page), while the child's card shows the night as it was saved. When those differ (a page
+    left open while the detected wake-up moved on, or an older night saved by an earlier version of the
+    detector), the
     asleep and wake-up times you save unchanged are the review page's, so the card shows those and
     recalculates its total to fit them, even if you only marked **In bed**. The sleep detail page,
     which works the night out fresh, may keep its own total instead. Each screen's total always fits
@@ -527,8 +614,8 @@ Either:
     even ones outside your corrected times (the camera-outage limit under "Minutes with no video are
     unknown" in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md)). Locking makes that figure stop changing; it
     does not make it exact.
-  - Nights corrected **before this version** are locked from the moment you update, as they were
-    last saved.
+  - Nights corrected **before 0.35.0** were locked, as they were last saved, from the moment that
+    version was installed.
   - The sleep ↔ temperature averages read the detector's saved figures and never apply time
     corrections, locked or not (a night marked "No one was in the bed" is left out of them).
   - The app's own asleep and wake-up times, saved unchanged (**That's right**, or the form with those
@@ -572,7 +659,7 @@ Either:
     your review, is not checked against the app's wake-up time, so an asleep time after it can be left
     standing. The review form always sends its asleep time along with the wake-up time, and that save
     is checked.
-  - Only just after updating: a review page that was already open before the update has no **In
+  - Only just after updating to 0.35.0: a review page that was already open before the update has no **In
     bed** field. If it saves an asleep time earlier than an in-bed time someone else has since saved
     from an updated page, the save is refused ("In bed can't be after Fell asleep") and that old page
     has no way to show or change the in-bed time. Reload the page.
@@ -630,9 +717,11 @@ its frame, so a labelled picture is never deleted on a timer.
 
 A night's summary is worked out once, the morning after, and
 then kept as it is — so if sleep detection is improved later, an already-recorded night keeps showing
-the old answer while the detail view, which works the night out fresh each time you open it, shows the
-new one. **Recompute this night** on the sleep detail page reconciles them. It compares what is
-*saved* — the summary on the child's page — against what the recorded movement now says, and shows
+the old answer while the detail view, which works the night out fresh each time you open it (always with
+today's detection rules), shows the new one. **Recompute this night** on the sleep detail page reconciles
+them. It compares what is *saved* — the summary on the child's page — against what the recorded movement
+now says with today's settings (even when the page is showing the night with the settings it was saved
+with; tick the option below to use those instead), and shows
 you exactly what would change (bedtime, wake time, how long they slept, how many wake-ups) *before*
 anything is saved. You can cancel. Admins only. **A night someone has corrected in the morning review
 is locked and is not recomputed** — the dialog says so, and the API answers `409` with
@@ -643,9 +732,85 @@ days — the same span the date picker offers — so the oldest night you can br
 edge. If its data has aged out, the recompute is refused and the saved summary is left alone, rather
 than being replaced with "no data". The same refusal protects a night saved before a detection change
 that would now come out "no data" for another reason — for example most of it had sound but no video.
-(The page only offers Recompute on a night that still scores, so in practice that refusal is only seen
-through the API; its 409 says which reason applied — `reason`, `status`, `coverage_minutes` — see
-[KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "Minutes with no video are unknown in the sleep numbers".)
+(With today's settings the page only offers Recompute on a night that still scores, so that refusal is only
+seen through the API, or after choosing the saved settings below; its 409 says which reason applied —
+`reason`, `status`, `coverage_minutes` — see [KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "Minutes with no video
+are unknown in the sleep numbers".)
+
+### Using the settings a night was saved with
+
+Each saved night records what it was worked out from: which camera (by its id), the timezone, the sleep
+window actually used, and the version of the detection rules. If the camera, timezone or window has changed
+since (the camera was turned off, moved to another child or is no longer the main camera, the tiles were
+rearranged, or the window or timezone was changed), the Recompute dialog offers **Use the settings this night
+was saved with**, and says what changed ("Saved with: … Now: …").
+
+**Default: off, every time the dialog opens.** Left off, Recompute works the night out with today's settings,
+exactly as before. Ticked, the dialog shows the night worked out with the camera, timezone and window it was
+saved with, beside the saved summary, and **Save the new numbers** saves that. This is what makes a night
+whose camera has since been turned off re-scorable at all: with today's settings it reads "no data", so on
+such a night (and on one that now reads "no clear sleep") the dialog offers only this choice.
+
+| | Today's settings (the default) | The settings the night was saved with |
+|---|---|---|
+| Camera, timezone and sleep window | today's | the ones saved with the night |
+| Detection rules | today's | today's too: rules can't be replayed |
+| Room temperature and the alert list | today's cameras | today's cameras |
+| A night that now reads "no data" or "no clear sleep" | not offered | offered, when its saved settings differ from today's |
+| A night saved before nights recorded their settings | — | shown greyed out: "This night was saved before the app recorded its settings." |
+| A record that can't be read | — | greyed out: "The settings saved with this night can't be read." |
+| The saved camera has since been deleted | — | nothing is saved; the dialog says the camera no longer exists |
+| A night you have corrected (locked) | refused | refused |
+| Turning a scored night into "no data" | refused | refused |
+
+The option does not appear when the saved settings are the same as today's (there is nothing to choose), or
+when nothing is saved for the night yet. Nights saved before this was recorded have no record and are not
+filled in after the fact; an older night gets one the next time it is saved (for example by the morning
+update while it is still last night, or by a Recompute).
+
+Known limits:
+- **Last night can be re-saved with today's settings.** For about 3 hours after its window closes, the nightly
+  update keeps refining last night's saved summary, and it always uses today's settings. A save with the saved
+  settings in that time can be replaced on its next pass (every 30 minutes). To keep it, save once the night has
+  settled, about 3 hours after the window closes.
+- After any save the detail page goes back to its default view, which shows the night with the settings it was
+  just saved with (see [Finished nights use the settings they were saved
+  with](#finished-nights-use-the-settings-they-were-saved-with)).
+- A camera that moved to another child during the night or the 3 hours either side of it is replayed with what
+  it saw in its new room. One that moved later is replayed correctly.
+- Whether sleep tracking is on follows today's setting.
+
+For developers (the API behind the dialog, the detail page and the morning review):
+- `GET /api/children/:id/sleep/:date?context=auto|stored|current`: `current`, or no `context`, is today's
+  settings, as before. `auto` (reads only; the detail page sends it) uses the night's saved settings when the night
+  is finished (the saved row's `window_end` has passed, and the night is not in progress under today's window),
+  its `scoring_context` can be read, sleep tracking is on
+  and the saved camera, timezone or window differ from today's, and today's otherwise. `stored` always uses the
+  night's saved `scoring_context`; anything else is a `400`. A night with no usable record (no saved row, `null`,
+  or a record that can't be read) answers `400` with `reason: "no_stored_context"` for `stored`. Like any read,
+  the answer has a parent's correction laid over it; add `raw=1` (only with `context`) for the detector's own
+  answer, which is what a save stores. When saved settings are used (`stored`, or `auto` when it applies) the
+  answer carries `scoring: { source, algo, current_algo, algo_differs, problem }`.
+- With `auto`, `current` or no `context`, a night for which `auto` would use the saved settings also gets
+  `scoring_view: { applied, stored, current, camera_names, algo_differs }`: `applied` is `stored` or `current`
+  (which settings this answer used), `stored` and `current` are the two settings, `camera_names` their cameras'
+  names now (`null` for a deleted one). Any other night has no `scoring_view` and is unchanged.
+- Add `store=1` (admins only; for anyone else it stays a read) to save it. `auto` cannot be saved (`400`): a
+  save names its settings, `stored` or `current` (or no `context`, today's). The saved record is the night's
+  camera, timezone and window with today's rules version. Refusals, in this order: `reviewed` (a corrected,
+  locked night), `stored_camera_missing` (`409`: the saved camera has been deleted; nothing is saved), then the
+  usual `would_downgrade` and wake-time refusals. `expect_context=<the scoring_context string you read>` makes
+  the save answer `409` with `reason: "context_changed"`, saving nothing, if the night was saved again in the
+  meantime; the dialog always sends it.
+- The morning review, `GET /api/children/:id/review/:date`, makes the same choice as `auto` and adds
+  `settings: { key, tz }`: `key` is the night's `scoring_context` string when its saved settings are used, else
+  `""`, and `tz` is the timezone its event list was built in. A `PUT` that sends `settings_key` answers `409` with
+  `reason: "settings_changed"`, saving nothing, when the key no longer matches; without `settings_key` nothing is
+  checked.
+- `?stored=1` also returns `contexts: { stored_state, stored, current, differs, camera_names }`, where
+  `stored_state` is `none` (no record), `unreadable` or `ok`, and `differs` counts the camera, timezone and
+  window but not the rules version. Camera names are looked up when asked (`null` for one that no longer
+  exists). More in [architecture.md](architecture.md), "Data layer".
 
 ## Known limits
 
@@ -655,5 +820,7 @@ The limits are described beside the behaviour they affect:
 - [Getting up and returning to bed](#a-child-who-gets-out-and-climbs-straight-back-in-has-not-got-up)
 - [Motion camera sampling](#when-the-motion-camera-samples)
 - [Review corrections and locks](#known-limits-all-documented-rather-than-fixed)
+- [The detail page and a night's saved settings](#finished-nights-use-the-settings-they-were-saved-with)
+- [Recompute with a night's saved settings](#using-the-settings-a-night-was-saved-with)
 - [Video gaps on the detail page](#the-detail-view)
 - [Room temperature comparisons](#room-temperature-optional)

@@ -1,8 +1,11 @@
-// What a caregiver can no longer destroy (an alert clip, #538) or rearrange (the camera order, #552; it
-// picks the camera a child's sleep is measured from). Owner decision 2026-10-10: a caregiver can watch and
-// act in the moment, but cannot destroy or reconfigure.
+// What a caregiver can no longer destroy (an alert clip, #538). Owner decision 2026-10-10: a caregiver can
+// watch and act in the moment, but cannot destroy or reconfigure. The camera order was gated here too (#552:
+// it picks the camera a child's sleep is measured from); #675 (owner 2026-10-20) reopened it to every
+// signed-in user with a guard, and its block below now pins only that the gate is gone. The guard itself
+// (a non-admin's reorder that would change a tracked child's sleep camera is refused) is
+// reorder-scoring-guard.test.js.
 //
-// route-permissions.test.js already proves each of these routes answers a caregiver with requireAdmin's
+// route-permissions.test.js already proves each gated route answers a caregiver with requireAdmin's
 // 403. That is a status code. This file proves the CONSEQUENCE, over real HTTP against the real router:
 // the thing a caregiver tried to destroy is still there afterwards, file on disk included, and an admin
 // doing the same thing really does destroy it (so "still there" is not passing because the route never
@@ -80,10 +83,11 @@ describe('DELETE /api/cameras/alerts/:id/clip (#538)', () => {
   });
 });
 
-describe('PUT /api/cameras/reorder (#552)', () => {
-  // `sort_order` is not only layout: the first enabled camera in it is the one a child's sleep is scored
-  // from, the timelapse camera and the first in the review's list. So a caregiver's drag would
-  // reconfigure sleep tracking; it is refused, and nothing in the order moves.
+describe('PUT /api/cameras/reorder (#552, reopened by #675)', () => {
+  // #552 refused a caregiver's reorder outright, because `sort_order` can pick the camera a child's sleep is
+  // scored from. #675 replaced that gate with a guard that refuses only a move of a tracked child's sleep
+  // camera (reorder-scoring-guard.test.js). These cameras belong to no child, so there is nothing to guard:
+  // a caregiver's reorder must now be stored exactly like an admin's.
   const order = () => db.prepare('SELECT id, sort_order FROM cameras ORDER BY id').all();
   const reorder = (ids, token) => call(`${server.url}/api/cameras/reorder`, { method: 'PUT', token, body: { order: ids } });
 
@@ -95,12 +99,13 @@ describe('PUT /api/cameras/reorder (#552)', () => {
     }
   });
 
-  test('a caregiver gets 403 and every sort_order is unchanged', async () => {
-    const before = order();
+  test('a caregiver reorders now (#675): 200, and the new order is stored', async () => {
     const res = await reorder(['cam-3', 'cam-1', 'cam-2'], caregiverToken);
-    assert.equal(res.status, 403);
-    assert.deepEqual(res.body, { error: 'Admin access required' });
-    assert.deepEqual(order(), before);
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, { ok: true });
+    assert.deepEqual(order(), [
+      { id: 'cam-1', sort_order: 1 }, { id: 'cam-2', sort_order: 2 }, { id: 'cam-3', sort_order: 0 },
+    ]);
   });
 
   test('an admin reorders: 200, and the new order is stored', async () => {

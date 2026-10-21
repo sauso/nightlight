@@ -18,19 +18,22 @@ has a toggle to switch between them ("Low latency" / "Compatibility"):
 3. Forward **UDP port 8189** (or your `WEBRTC_UDP_PORT`, see "Running more than one instance" in [Networking modes](networking.md#running-more-than-one-instance-eg-staging--production)) on your router to your server's
    LAN IP.
 
-This is a hard requirement of WebRTC, not a workaround — the actual audio/video always
-travels over UDP between your browser and MediaMTX, no matter what. A TURN relay server
-doesn't change this (it only changes how the *signaling* connects, not the media itself),
-so there's no way to get the low-latency mode down to zero UDP ports. This single UDP
-port forward is all you need, unless you're behind CGNAT.
+In Nightlight's setup the actual audio/video travels over UDP between your browser and MediaMTX,
+so low-latency viewing from outside needs this one UDP port forward; it is a requirement of this
+setup, not a workaround. There is no setting that removes it: Nightlight does not support TURN relay
+servers (`STUN_SERVERS` accepts `stun:` URLs only), and MediaMTX's optional TCP media listener
+(`webrtcLocalTCPAddress`) is off by default and is neither configured nor tested by Nightlight. This
+single UDP port forward is all you need, unless you're behind CGNAT. If you would rather not forward
+a port, use Compatibility (HLS) below.
 
 **Compatibility (HLS)** — a few seconds of delay, but pure HTTP/TCP, so it rides through
 the same port 443 as everything else with **no extra port forwarding at all**. Use this if
 you'd rather not forward a UDP port, or if you're ever watching from a network that blocks
 outbound UDP (some corporate/public Wi-Fi).
 
-Both modes work automatically once SWAG + `PUBLIC_HOST` are set up — Compatibility mode
-needs nothing further, since it's already proxied through the app's normal port.
+Compatibility mode works as soon as SWAG is set up — it needs nothing further, since it's already
+proxied through the app's normal port. Low latency additionally needs `PUBLIC_HOST` and the UDP port
+forward (steps 2 and 3 above).
 
 > **iOS background audio:** On iPhone/iPad, background listening (screen off / app minimised) works
 > in **Low latency** mode only — its WebRTC audio lets Nightlight fully own the lock screen (camera

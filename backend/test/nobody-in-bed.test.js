@@ -197,9 +197,11 @@ test('the flag reaches /sleep?nights, /sleep/:date (with and without detail) and
 // is treated as a sleep claim that must read null — so a column added later is a claim until somebody
 // decides otherwise, and this test fails until they do. That default is deliberate: a leaked claim
 // ("slept 10h") on a night the parent said was empty is the harmful direction.
+// `scoring_context` (#361) is an observation: which camera, timezone, window and scoring version produced the
+// row. A detector-empty night stores one too, and "nobody was in the bed" changes none of it.
 const OBSERVED_COLUMNS = [
   'id', 'child_id', 'night_date', 'window_start', 'window_end', 'coverage_minutes',
-  'avg_temperature', 'avg_humidity', 'computed_at', 'notified_at', 'notified_wake_at',
+  'avg_temperature', 'avg_humidity', 'computed_at', 'notified_at', 'notified_wake_at', 'scoring_context',
 ];
 
 test('★ a flagged stored row reads exactly like a detector-empty row: every claim column null, every observation kept', async () => {

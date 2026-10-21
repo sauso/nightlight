@@ -64,6 +64,12 @@ html, body, #root {
   overscroll-behavior-y: contain;
 }
 
+/* Added to <html> while a dialog is open (lib/scrollLock.js, #376). overflow on html propagates to the viewport,
+   which is what scrolls; the page stays where it is and the dialog card scrolls itself. */
+html.modal-scroll-locked {
+  overflow: hidden;
+}
+
 /* Static height:100% is based on the layout viewport, which mobile browsers actually
    resize as the address bar hides/shows during scrolling - that mismatch is what
    causes fixed-position elements to visibly drift mid-scroll. 100dvh tracks the real
@@ -1203,6 +1209,13 @@ body.in-pip .tile-menu-backdrop {
 /* Which camera the night was scored from. Only one camera is analysed, so when a child has several this says which. */
 .sleep-detail__source { font-size: 12px; color: var(--text-secondary); }
 .sleep-detail__source strong { font-weight: 600; color: var(--text-primary); }
+/* #361 PR 4a: which settings the night was worked out with (saved or today's), and the switch to the other. Secondary
+   text like the source line above; the switch is a real button sized like Recompute, allowed to wrap on a phone
+   because its longer label ("...the settings this night was saved with") is wider than a narrow card. */
+.sleep-settings-view { display: flex; flex-direction: column; gap: 10px; }
+.sleep-settings-view--in-card { padding: 14px; }
+.sleep-settings-view__text { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); }
+.sleep-settings-view__switch { width: auto; align-self: flex-start; white-space: normal; text-align: left; }
 /* Admin-only recompute control, and the before -> after table it shows. Every colour comes from a
    token so both themes follow; `is-changed` is what the eye should land on, so only that row uses
    the accent. Digits are tabular so the two columns line up. */
@@ -1216,6 +1229,16 @@ body.in-pip .tile-menu-backdrop {
 .recompute-diff__arrow { color: var(--text-secondary); text-align: center; }
 .recompute-diff__now { color: var(--text-primary); font-weight: 600; }
 .recompute-diff__row.is-changed .recompute-diff__now { color: var(--accent); }
+/* #361 PR 3: "Use the settings this night was saved with". The whole label row is the hit area (a real
+   checkbox inside a label), at least 44px tall per the touch-target rule; the help lines are secondary text. */
+.recompute-choice { margin: 0 0 12px; }
+.recompute-choice__option { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; cursor: pointer; }
+.recompute-choice__option input { width: 18px; height: 18px; margin: 0; flex: none; accent-color: var(--accent); }
+.recompute-choice__option:has(input:disabled) { cursor: default; opacity: 0.55; }
+.recompute-choice__help { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); margin-left: 28px; }
+.recompute-choice__help strong { font-weight: 600; color: var(--text-primary); }
+/* On a no-data / no-sleep card (SleepDetail), which has no padding of its own around this control. */
+.sleep-detail__recompute-unscored { padding: 0 14px 14px; }
 .sleep-detail__section-title { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-secondary); margin: 0 0 12px; }
 
 .sleep-tl { padding-top: 2px; }

@@ -77,8 +77,9 @@ What the native apps add over the browser/PWA:
   other apps (Android; the browser has its own PiP too).
 - **Battery-friendly** — minimising the app disconnects streams unless a camera is in
   Background mode, so nothing keeps pulling video in the background.
-- **Push notifications** — a phone alert when a camera sees motion, even with the app closed
-  (Android only for now). See [Push notifications (motion alerts)](#push-notifications-motion-alerts).
+- **Push notifications** — a phone alert when a camera sees motion, even with the app closed. Delivery
+  through the Nightlight app itself (Firebase) is Android only for now; Pushover and ntfy
+  alerts also reach an iPhone, through their own apps. See [Push notifications (motion alerts)](#push-notifications-motion-alerts).
 
 ### Push notifications (motion alerts)
 

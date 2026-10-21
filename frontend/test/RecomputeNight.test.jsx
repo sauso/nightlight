@@ -15,7 +15,7 @@
 //      undoing whatever correction was showing. The fix re-fetches the normal route after storing.
 
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, act } from '@testing-library/react';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import RecomputeNight from '../src/components/RecomputeNight.jsx';
 import { api } from '../src/lib/api.js';
@@ -61,7 +61,8 @@ function mockApi({ stored = STORED, onStore = FRESH, overlaid = FRESH, locked } 
 const setup = (renderer, props = {}) =>
   renderer(
     <RecomputeNight childId="c-1" date="2026-08-28" night={props.night || FRESH} fmtTime={fmtTime}
-      onRecomputed={props.onRecomputed || vi.fn()} onCorrectionRemoved={props.onCorrectionRemoved} />
+      onRecomputed={props.onRecomputed || vi.fn()} onCorrectionRemoved={props.onCorrectionRemoved}
+      settingsView={props.settingsView} onSettingsViewChange={props.onSettingsViewChange} />
   );
 
 beforeEach(() => mockApi());
@@ -507,5 +508,415 @@ describe('when there is nothing to act on', () => {
   test('a night still in progress has no control — there is nothing settled to store', () => {
     setup(renderAsAdmin, { night: { ...FRESH, in_progress: true } });
     expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+  });
+});
+
+// #361 PR 3: "Use the settings this night was saved with".
+//
+// The claims worth testing, each one a way the feature could quietly do the wrong thing:
+//   1. THE DEFAULT IS TODAY'S SETTINGS, unchanged: unticked, the save URL is EXACTLY the one this dialog always
+//      sent (no `context` at all), and the box starts unticked every time the dialog opens (owner, #361 Q4).
+//   2. TICKED, THE "AFTER" COLUMN IS THE STORED-SETTINGS PREVIEW (`?context=stored&raw=1`), not the page's night:
+//      previewing one thing and saving another is the #222 class of bug again. REPLAY differs from FRESH on every
+//      row, so a table built from the wrong side is visible.
+//   3. The save is bound to the record the dialog was shown (`expect_context`, plan R2), and the page is re-read
+//      afterwards in its default view (since #361 PR 4a; PR 3 re-read it with today's settings and showed a line).
+//   4. The option is shown only where there is something to choose, disabled WITH A REASON where the night
+//      cannot offer it, and never on a locked night.
+//   5. On a night today's settings cannot score, the control appears only for that choice (plan R1).
+describe('#361 PR 3: "Use the settings this night was saved with"', () => {
+  const CTX_SAVED = { v: 1, camera_id: 'cam-a', tz: 'Australia/Melbourne', window: { start: '19:30', end: '07:00' }, algo: '1' };
+  const CTX_NOW = { ...CTX_SAVED, camera_id: 'cam-b', window: { start: '20:00', end: '07:00' } };
+  const DIFFERS = {
+    stored_state: 'ok', stored: CTX_SAVED, current: CTX_NOW, differs: true,
+    camera_names: { stored: 'Bed cam', current: 'Door cam' },
+  };
+  const SAVED_ROW = { ...STORED, status: 'ok', scoring_context: JSON.stringify(CTX_SAVED) };
+  // What the stored settings give: different from FRESH (the page's night) AND from the saved row on every row.
+  const REPLAY = {
+    night_date: '2026-08-28', status: 'ok', onset_at: '2026-08-28 09:40:00', wake_at: '2026-08-28 20:00:00',
+    asleep_minutes: 620, awake_minutes: 5, wake_count: 1,
+    scoring: { source: 'stored', algo: '1', current_algo: '1', algo_differs: false, problem: null },
+  };
+  const OVERLAID = { ...FRESH, night__marker: 'normal-read' };
+  const BASE = '/children/c-1/sleep/2026-08-28';
+
+  // Routes by query, in an order where no URL can match an earlier branch by accident: `?stored=1` (the dialog's
+  // opening read), the preview (`context=stored&raw=1`), a store, then the normal read. `contexts: null` answers
+  // with no `contexts` key at all, the shape a server from before #361 PR 3 sends.
+  function mockChoiceApi({ contexts = DIFFERS, stored = SAVED_ROW, locked = false, preview = REPLAY, previewError = null, storeError = null } = {}) {
+    const calls = [];
+    vi.spyOn(api, 'get').mockImplementation((url) => {
+      calls.push(url);
+      if (url.includes('?stored=1')) return Promise.resolve(contexts === null ? { night: stored, locked } : { night: stored, locked, contexts });
+      if (url.includes('context=stored&raw=1')) return previewError ? Promise.reject(previewError) : Promise.resolve(preview);
+      if (url.includes('store=1')) return storeError ? Promise.reject(storeError) : Promise.resolve({ ...preview, stored: true });
+      if (url.includes('detail=1')) return Promise.resolve(OVERLAID);
+      return Promise.reject(new Error(`unexpected call: ${url}`));
+    });
+    return calls;
+  }
+  const httpError = (status, data) => Object.assign(new Error(data.error), { status, data });
+  const box = () => screen.getByRole('checkbox', { name: /use the settings this night was saved with/i });
+  async function openDialog(props = {}) {
+    const rendered = setup(renderAsAdmin, props);
+    await rendered.user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await screen.findByRole('dialog');
+    return rendered;
+  }
+
+  test('★ the box starts unticked, names both settings, says today\'s rules are used, and the table is the page\'s night', async () => {
+    mockChoiceApi();
+    await openDialog();
+    expect(box()).not.toBeChecked();
+    expect(box()).toBeEnabled();
+    const line = screen.getByText(/^Saved with:/);
+    expect(line.textContent).toBe('Saved with: Bed cam, 19:30–07:00, Australia/Melbourne. Now: Door cam, 20:00–07:00, Australia/Melbourne.');
+    // Only what changed is emphasised: the camera and the window, not the unchanged timezone.
+    expect([...line.querySelectorAll('strong')].map((n) => n.textContent)).toEqual(['Bed cam', '19:30–07:00', 'Door cam', '20:00–07:00']);
+    expect(screen.getByText('Uses today’s detection rules either way.')).toBeInTheDocument();
+    // Unticked: today's comparison, exactly as before (FRESH's 10:15 on the right, nothing from REPLAY).
+    expect(screen.getByText('10:15')).toBeInTheDocument();
+    expect(screen.queryByText('09:40')).not.toBeInTheDocument();
+  });
+
+  test('★ ticking fetches the RAW stored-settings preview and the table compares the saved row with IT', async () => {
+    const calls = mockChoiceApi();
+    const { user } = await openDialog();
+    await user.click(box());
+    await waitFor(() => expect(screen.getByText('09:40')).toBeInTheDocument());
+    expect(calls).toContain(`${BASE}?context=stored&raw=1`);
+    // The saved row on the left, the replay on the right; the page's night (10:15) is gone from the table.
+    expect(screen.getByText('06:56')).toBeInTheDocument();
+    expect(screen.getByText('10h 20m')).toBeInTheDocument();
+    expect(screen.queryByText('10:15')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /save the new numbers/i })).toBeInTheDocument();
+    // Unticking goes back to today's comparison.
+    await user.click(box());
+    expect(box()).not.toBeChecked();
+    expect(screen.getByText('10:15')).toBeInTheDocument();
+    expect(screen.queryByText('09:40')).not.toBeInTheDocument();
+  });
+
+  test('★ unticked, Save sends EXACTLY today\'s URL: no context, no expect_context', async () => {
+    const calls = mockChoiceApi();
+    const onRecomputed = vi.fn();
+    const { user } = await openDialog({ onRecomputed });
+    await user.click(screen.getByRole('button', { name: /save the new numbers/i }));
+    await waitFor(() => expect(onRecomputed).toHaveBeenCalledWith(OVERLAID));
+    expect(calls.filter((u) => /[?&]store=1/.test(u))).toEqual([`${BASE}?store=1&detail=1`]);
+    // The only `context` anywhere is the page's re-read in its default view (#361 PR 4a), never on the store.
+    expect(calls.filter((u) => u.includes('context='))).toEqual([`${BASE}?detail=1&context=auto`]);
+  });
+
+  // #361 PR 4a (plan R4) replaced PR 3's ending here. PR 3 re-read the page with TODAY's settings and showed a line
+  // saying the page "still works the night out with today's settings"; the page now shows a finished night with the
+  // settings it was saved with by default, so the re-read is the page's DEFAULT view and the page is told to go back
+  // to it, and the line is gone (it would now be false).
+  test('★ ticked, Save sends context=stored with the record it was shown, then re-reads the page in its DEFAULT view and resets it', async () => {
+    const calls = mockChoiceApi();
+    const onRecomputed = vi.fn();
+    const onSettingsViewChange = vi.fn();
+    const { user } = setup(renderAsAdmin, { onRecomputed, onSettingsViewChange, settingsView: 'current' });
+    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await screen.findByRole('dialog');
+    await user.click(box());
+    await screen.findByText('09:40');
+    await user.click(screen.getByRole('button', { name: /save the new numbers/i }));
+    await waitFor(() => expect(onRecomputed).toHaveBeenCalledTimes(1));
+
+    expect(calls.filter((u) => /[?&]store=1/.test(u))).toEqual([
+      `${BASE}?store=1&detail=1&context=stored&expect_context=${encodeURIComponent(SAVED_ROW.scoring_context)}`,
+    ]);
+    // Re-read in the DEFAULT view even though the page was showing today's settings, and the page is told so.
+    expect(calls.at(-1)).toBe(`${BASE}?detail=1&context=auto`);
+    expect(onSettingsViewChange).toHaveBeenCalledWith('auto');
+    expect(onRecomputed).toHaveBeenCalledWith(OVERLAID);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Saved using the settings this night was recorded with/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/this page still works the night out with today’s settings/)).not.toBeInTheDocument();
+  });
+
+  test('★ the dialog opens unticked every time, even after it was ticked', async () => {
+    mockChoiceApi();
+    const { user } = await openDialog();
+    await user.click(box());
+    await screen.findByText('09:40');
+    await user.click(screen.getByRole('button', { name: /^cancel$/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await screen.findByRole('dialog');
+    expect(box()).not.toBeChecked();
+    expect(screen.getByText('10:15')).toBeInTheDocument();
+  });
+
+  test('identical settings: no option at all (nothing to choose)', async () => {
+    mockChoiceApi({ contexts: { ...DIFFERS, current: CTX_SAVED, differs: false, camera_names: { stored: 'Bed cam', current: 'Bed cam' } } });
+    await openDialog();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Saved with:/)).not.toBeInTheDocument();
+  });
+
+  for (const [state, reason] of [
+    ['none', 'This night was saved before the app recorded its settings.'],
+    ['unreadable', 'The settings saved with this night can’t be read.'],
+  ]) {
+    test(`a ${state === 'none' ? 'legacy (no record)' : 'unreadable'} night shows the option DISABLED with the reason`, async () => {
+      mockChoiceApi({ contexts: { stored_state: state, stored: null, current: CTX_NOW, differs: false, camera_names: { stored: null, current: 'Door cam' } } });
+      await openDialog();
+      expect(box()).toBeDisabled();
+      expect(screen.getByText(reason)).toBeInTheDocument();
+      // The ordinary comparison is still offered beside it.
+      expect(screen.getByRole('button', { name: /save the new numbers/i })).toBeInTheDocument();
+    });
+  }
+
+  test('no option when nothing is saved, or the night is locked, or the server sends no `contexts` (an older backend)', async () => {
+    mockChoiceApi({ stored: null, contexts: { ...DIFFERS, stored_state: 'none', stored: null, differs: false } });
+    let rendered = await openDialog();
+    expect(screen.getByText(/nothing is saved for this night yet/i)).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    rendered.unmount();
+    vi.restoreAllMocks();
+
+    mockChoiceApi({ locked: true });
+    rendered = await openDialog({ night: { ...FRESH, corrected: true } });
+    expect(screen.getByText(/This night is locked because you corrected it/)).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    rendered.unmount();
+    vi.restoreAllMocks();
+
+    mockChoiceApi({ contexts: null });
+    await openDialog();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /save the new numbers/i })).toBeInTheDocument();
+  });
+
+  test('★ a preview whose camera no longer exists says so and offers no table and no Save', async () => {
+    mockChoiceApi({ preview: { ...REPLAY, status: 'no_data', onset_at: null, wake_at: null, scoring: { ...REPLAY.scoring, problem: 'camera_deleted' } } });
+    const { user } = await openDialog();
+    await user.click(box());
+    expect(await screen.findByText(/The camera this night was saved from no longer exists/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+    expect(document.querySelector('.recompute-diff')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^cancel$/i })).not.toBeInTheDocument(); // nothing to cancel
+    expect(screen.getAllByRole('button', { name: /^close$/i }).length).toBeGreaterThan(0);
+  });
+
+  test('a 400 no_stored_context on the preview shows the server\'s message and goes back to today\'s settings', async () => {
+    const message = "This night has no saved settings that can be used (it was saved before the app recorded them, or what was saved can't be read). Recompute it with the current settings instead.";
+    mockChoiceApi({ previewError: httpError(400, { error: message, reason: 'no_stored_context' }) });
+    const { user } = await openDialog();
+    await user.click(box());
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(box()).not.toBeChecked();
+    expect(screen.getByText('10:15')).toBeInTheDocument();
+  });
+
+  test('a 409 context_changed on Save shows the server\'s message and saves nothing else', async () => {
+    const message = 'This night was saved again while you were looking at it. Close this and open Recompute again.';
+    const calls = mockChoiceApi({ storeError: httpError(409, { error: message, reason: 'context_changed' }) });
+    const onRecomputed = vi.fn();
+    const { user } = await openDialog({ onRecomputed });
+    await user.click(box());
+    await screen.findByText('09:40');
+    await user.click(screen.getByRole('button', { name: /save the new numbers/i }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(onRecomputed).not.toHaveBeenCalled();
+    expect(calls.filter((u) => /[?&]store=1/.test(u))).toHaveLength(1);
+    expect(screen.queryByText(/Saved using the settings/)).not.toBeInTheDocument();
+  });
+
+  // Plan R1: a night today's settings cannot score.
+  describe('on a no_data / no_sleep night', () => {
+    const NO_DATA = { night_date: '2026-08-28', status: 'no_data', in_progress: false, onset_at: null, wake_at: null, coverage_minutes: 0 };
+
+    test('★ the control appears only after its own read finds usable, DIFFERING saved settings; the dialog offers only that path', async () => {
+      const calls = mockChoiceApi();
+      const { user } = setup(renderAsAdmin, { night: NO_DATA });
+      await user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+      await screen.findByRole('dialog');
+      expect(calls[0]).toBe(`${BASE}?stored=1`); // the mount-time read
+      expect(screen.getByText(/Today’s settings find no data for this night\. The settings it was saved with may still work\./)).toBeInTheDocument();
+      expect(box()).not.toBeChecked();
+      // Unticked: no comparison with "no data" and nothing to save with today's settings.
+      expect(document.querySelector('.recompute-diff')).toBeNull();
+      expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+      // Ticked: the stored-settings preview and its save.
+      await user.click(box());
+      expect(await screen.findByText('09:40')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /save the new numbers/i }));
+      await waitFor(() => expect(calls.some((u) => u.startsWith(`${BASE}?store=1&detail=1&context=stored&expect_context=`))).toBe(true));
+      expect(calls.filter((u) => /[?&]store=1/.test(u)).every((u) => u.includes('context=stored'))).toBe(true);
+    });
+
+    test('a saved row that vanished after the offer: no Save with today\'s settings (it would store "no data")', async () => {
+      // The control was offered from one read, then the dialog's own read finds nothing saved (another phone).
+      let reads = 0;
+      vi.spyOn(api, 'get').mockImplementation((url) => {
+        if (url.includes('?stored=1')) {
+          reads += 1;
+          return Promise.resolve(reads === 1 ? { night: SAVED_ROW, locked: false, contexts: DIFFERS } : { night: null, locked: false, contexts: { ...DIFFERS, stored_state: 'none', stored: null, differs: false } });
+        }
+        return Promise.reject(new Error(`unexpected call: ${url}`));
+      });
+      const { user } = setup(renderAsAdmin, { night: NO_DATA });
+      await user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+      expect(await screen.findByText(/Nothing is saved for this night any more/)).toBeInTheDocument();
+      expect(screen.queryByText(/Saving now records the night/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+    });
+
+    test('a no_sleep night says "no clear sleep", not "no data"', async () => {
+      mockChoiceApi();
+      const { user } = setup(renderAsAdmin, { night: { ...NO_DATA, status: 'no_sleep', coverage_minutes: 700 } });
+      await user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+      expect(await screen.findByText(/Today’s settings find no clear sleep in this night\./)).toBeInTheDocument();
+    });
+
+    for (const [label, opts] of [
+      ['identical saved settings', { contexts: { ...DIFFERS, current: CTX_SAVED, differs: false } }],
+      ['a legacy night (no record)', { contexts: { ...DIFFERS, stored_state: 'none', stored: null, differs: false } }],
+      ['an unreadable record', { contexts: { ...DIFFERS, stored_state: 'unreadable', stored: null, differs: false } }],
+      ['a locked night', { locked: true }],
+      ['an older server (no contexts)', { contexts: null }],
+    ]) {
+      test(`nothing is shown for ${label}`, async () => {
+        const calls = mockChoiceApi(opts);
+        setup(renderAsAdmin, { night: NO_DATA });
+        await waitFor(() => expect(calls).toEqual([`${BASE}?stored=1`]));
+        // Let the answer land; the control must still not appear.
+        await act(async () => {});
+        expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+      });
+    }
+
+    test('a caregiver gets nothing, and no request is made for them', async () => {
+      const calls = mockChoiceApi();
+      setup(renderAsCaregiver, { night: NO_DATA });
+      await act(async () => {});
+      expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+      expect(calls).toEqual([]);
+    });
+  });
+});
+
+// #361 PR 4a (plan R4): the page can now show a finished night WITH the settings it was saved with (the server says
+// so in `night.scoring_view`). The unticked "after" column must still be TODAY's settings, so on such a page the
+// dialog reads its own today's preview (`?context=current&raw=1`) and judges everything about "today's settings" on
+// it: the comparison, and whether today's settings can score the night at all. Each fixture makes the page's night
+// and today's preview DIFFERENT in the way that matters, so a dialog that used the page's night shows something else.
+describe('#361 PR 4a: on a page showing the saved settings, the dialog compares against TODAY\'s', () => {
+  const CTX_SAVED = { v: 1, camera_id: 'cam-a', tz: 'Australia/Melbourne', window: { start: '19:30', end: '07:00' }, algo: '1' };
+  const CTX_NOW = { ...CTX_SAVED, camera_id: 'cam-b' };
+  const NAMES = { stored: 'Bed cam', current: 'Door cam' };
+  const VIEW = { applied: 'stored', stored: CTX_SAVED, current: CTX_NOW, camera_names: NAMES, algo_differs: false };
+  const DIFFERS = { stored_state: 'ok', stored: CTX_SAVED, current: CTX_NOW, differs: true, camera_names: NAMES };
+  const SAVED_ROW = { ...STORED, status: 'ok', scoring_context: JSON.stringify(CTX_SAVED) };
+  // The page: the saved settings worked out again, so the same numbers as the saved row (what the card shows).
+  const PAGE = { ...STORED, status: 'ok', in_progress: false, scoring_view: VIEW };
+  // Today's settings: other numbers on every row.
+  const TODAY = { night_date: '2026-08-28', status: 'ok', onset_at: '2026-08-28 11:05:00', wake_at: '2026-08-28 19:00:00',
+    asleep_minutes: 480, awake_minutes: 10, wake_count: 2 };
+  const TODAY_NO_DATA = { night_date: '2026-08-28', status: 'no_data', onset_at: null, wake_at: null, coverage_minutes: 0 };
+  const BASE = '/children/c-1/sleep/2026-08-28';
+  const TODAY_URL = `${BASE}?context=current&raw=1`;
+
+  function mockToday({ today = TODAY, locked = false } = {}) {
+    const calls = [];
+    vi.spyOn(api, 'get').mockImplementation((url) => {
+      calls.push(url);
+      if (url.includes('?stored=1')) return Promise.resolve({ night: SAVED_ROW, locked, contexts: DIFFERS });
+      if (url === TODAY_URL) return Promise.resolve(today);
+      if (url.includes('context=stored&raw=1')) return Promise.resolve({ ...SAVED_ROW, scoring: { source: 'stored', problem: null } });
+      if (url.includes('store=1')) return Promise.resolve({ ...today, stored: true });
+      if (url.includes('detail=1')) return Promise.resolve({ ...PAGE, night__marker: 're-read' });
+      return Promise.reject(new Error(`unexpected call: ${url}`));
+    });
+    return calls;
+  }
+  async function open(props) {
+    const rendered = setup(renderAsAdmin, props);
+    await rendered.user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+    await screen.findByRole('dialog');
+    return rendered;
+  }
+
+  test('★ opening reads today\'s preview, and the unticked table is the saved row against IT, not against the page', async () => {
+    const calls = mockToday();
+    await open({ night: PAGE });
+    expect(calls).toEqual([`${BASE}?stored=1`, TODAY_URL]);
+    // The page's night IS the saved row's numbers, so a dialog comparing against it would say "already matches".
+    expect(await screen.findByText(/no longer matches/i)).toBeInTheDocument();
+    expect(screen.getByText('06:56')).toBeInTheDocument(); // saved
+    expect(screen.getByText('11:05')).toBeInTheDocument(); // today's settings
+    expect(screen.getByRole('button', { name: /save the new numbers/i })).toBeInTheDocument();
+  });
+
+  test('a page showing today\'s settings (no scoring_view) makes no extra read: its own night is today\'s', async () => {
+    const calls = mockToday();
+    await open({ night: FRESH });
+    expect(calls).toEqual([`${BASE}?stored=1`]);
+  });
+
+  test('a locked night reads no today\'s preview (there is nothing to compare)', async () => {
+    const calls = mockToday({ locked: true });
+    await open({ night: { ...PAGE, corrected: true } });
+    expect(await screen.findByText(/This night is locked because you corrected it/)).toBeInTheDocument();
+    expect(calls).toEqual([`${BASE}?stored=1`]);
+  });
+
+  test('★ the saved settings score the night but today\'s do not: the dialog says so and offers no today\'s-settings Save', async () => {
+    // The page shows `ok` (the saved settings). Judged on the page, the dialog would offer a Save with today's settings
+    // that the server is certain to refuse, with the false "aged out" wording.
+    mockToday({ today: TODAY_NO_DATA });
+    const { user } = await open({ night: PAGE });
+    expect(await screen.findByText(/Today’s settings find no data for this night\. The settings it was saved with may still work\./)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+    expect(document.querySelector('.recompute-diff')).toBeNull();
+    // The stored-settings path is still there.
+    await user.click(screen.getByRole('checkbox', { name: /use the settings this night was saved with/i }));
+    expect(await screen.findByText(/already matches/i)).toBeInTheDocument();
+  });
+
+  test('★ the saved settings find no data but today\'s do: the dialog compares today\'s, and never says they find no data', async () => {
+    // The page shows `no_data` (a saved camera since deleted, or one with nothing recorded). The control appears from
+    // its own `?stored=1` (PR 3, plan R1); once open, today's settings are the ones that score.
+    const calls = mockToday();
+    const { user } = setup(renderAsAdmin, { night: { ...PAGE, status: 'no_data', onset_at: null, wake_at: null } });
+    await user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+    expect(await screen.findByText(/no longer matches/i)).toBeInTheDocument();
+    expect(calls).toContain(TODAY_URL);
+    expect(screen.queryByText(/Today’s settings find no/)).not.toBeInTheDocument();
+    expect(screen.getByText('11:05')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /save the new numbers/i })).toBeInTheDocument();
+  });
+
+  test('★ "Remove my correction" reads today\'s preview once unlocked, and re-reads the page in the view it is IN', async () => {
+    const state = { locked: true };
+    const calls = [];
+    vi.spyOn(api, 'get').mockImplementation((url) => {
+      calls.push(url);
+      if (url.includes('?stored=1')) return Promise.resolve({ night: SAVED_ROW, locked: state.locked, contexts: DIFFERS });
+      if (url.includes('/review/')) return Promise.resolve({ review: { nobody_in_bed: 0, true_onset_at: '2026-08-28 10:30:00' } });
+      if (url === TODAY_URL) return Promise.resolve(TODAY);
+      if (url.includes('detail=1')) return Promise.resolve({ ...PAGE, night__marker: 're-read' });
+      return Promise.reject(new Error(`unexpected call: ${url}`));
+    });
+    vi.spyOn(api, 'put').mockImplementation(() => { state.locked = false; return Promise.resolve({ review: {} }); });
+    const onRecomputed = vi.fn();
+    const onSettingsViewChange = vi.fn();
+    const { user } = setup(renderAsAdmin, {
+      night: { ...PAGE, corrected: true, scoring_view: { ...VIEW, applied: 'current' } },
+      settingsView: 'current', onRecomputed, onSettingsViewChange,
+    });
+    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(await screen.findByRole('button', { name: /^remove my correction$/i }));
+    await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
+    await waitFor(() => expect(onRecomputed).toHaveBeenCalledTimes(1));
+    // Unlocked: today's preview is read for the comparison, and the page is re-read in ITS view, not reset.
+    expect(calls.slice(-3)).toEqual([`${BASE}?stored=1`, TODAY_URL, `${BASE}?detail=1&context=current`]);
+    expect(onSettingsViewChange).not.toHaveBeenCalled();
+    expect(await screen.findByText('11:05')).toBeInTheDocument();
   });
 });

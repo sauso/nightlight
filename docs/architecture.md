@@ -301,6 +301,94 @@ the bottom of `db.js` (`PRAGMA table_info` + conditional `ALTER TABLE`) — ther
 framework. Follow this same pattern for new columns: check `table_info`, `ALTER TABLE` if
 missing, keep it idempotent.
 
+**`sleep_nights.scoring_context` records what produced a stored night** (#361, design in
+`planning/361-scoring-context.md`). A stored night used to keep the answer (times, minutes, status) but not the
+question, so any later re-score silently used today's camera and settings. Every store (`computeAndStoreNight`,
+through `upsertNight`, in the same statement as the numbers, including the re-stores of a provisional night)
+now writes a small JSON string: `v` (the JSON's own version, `1`), `camera_id` (the id of the camera the night
+was scored from, `null` when none was enabled; never its name, address or credentials), `tz` (the app timezone
+used, or `UTC` when none is set), `window` (`start`/`end` as `HH:MM`, the window actually used, so a malformed
+saved time is stored as the `19:00` it scored with) and `algo` (`SCORING_ALGO` in `lib/sleepAnalysis.js`). It is
+written for every status, `off` and `no_data` included. Its readers are the admin Recompute's stored-settings
+option, the sleep detail page's `context=auto` and the morning review (all below); otherwise it is one more key, a string, on the
+endpoints that return the raw stored row
+(`GET /api/children/:id/sleep`, `GET /api/children/:id/sleep/:date?stored=1`, and `GET
+/api/children/:id/sleep/live` when it serves last night's saved row). Nights stored before the column existed read `NULL` ("unknown provenance"): there is no automatic
+backfill, and a legacy row stays `NULL` until it is next successfully re-stored (the nightly job, or a review
+save, re-storing a provisional last night; or an admin Recompute). A final row is never re-stored by the nightly job, so its context, like its
+numbers, stays as written. **`SCORING_ALGO` is bumped by hand**, in the same commit as any change to a threshold
+or rule that changes what `computeNight` returns for the same inputs (not for refactors, and not the app
+version). Known limit: nothing enforces the bump; the golden test in `backend/test/scoring-context.test.js`
+fails when `computeNight`'s output for its one fixture night moves, which is a reminder, not a guarantee.
+
+**`computeNight` can re-score a night with a stored context** (#361 step 2; tests in
+`backend/test/scoring-context-replay.test.js`). `computeNight(childId, nightDate, { context })` takes a context, and
+`parseScoringContext` makes one from a stored `scoring_context` (string or object): it returns `null`, and never
+throws, for anything the writer could not have produced (a `v` other than `1`, a missing or extra key, a camera id
+that is not a string or `null`, an empty or over-long `algo`, a timezone `Intl` refuses, a window part that is not
+digits, a colon and digits; a stored `25:00` is accepted, because a night really was scored with it). With a context,
+the timezone, the window and the scored camera come from it: the camera is looked up by id whichever child owns it
+now and whether or not it is enabled; `camera_id: null` stays `no_data`; a camera that no longer exists is `no_data`
+with `scoring.problem: 'camera_deleted'`, never a fallback to today's main camera. The result then gains `scoring:
+{ source: 'stored', algo, current_algo, algo_differs, problem }`; without a context it is exactly what it was, with
+no `scoring` key (golden test). `currentScoringContext(childId)` is the one definition of today's settings, and the
+stored JSON is built from it, byte for byte what step 1 wrote. What a context does **not** replay: the rules (one
+implementation runs, today's; `algo_differs` marks a night saved under other rules), tracking on/off (`off` still
+comes first), room climate and the alert list (today's cameras), and who owned the camera when (samples are read by
+camera id and time, so a camera moved to another child inside the span a night reads, window start - 3 h to window
+end + 3 h, replays with that child's activity).
+
+**The admin Recompute is one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the
+dialog in `frontend/src/components/RecomputeNight.jsx`). `GET /api/children/:id/sleep/:date?context=stored` reads the
+row's `scoring_context` and parses it (no row, `NULL` or unparseable: `400` with `reason: 'no_stored_context'`, never a
+silent fall back to today's settings); `context=current` or no `context` is today's settings; `context=auto` is the
+detail page's (next paragraph); any other value is a `400` before anything is computed. A read passes the context to `computeNight` and lays a correction over the
+answer as usual, unless `raw=1`. With `store=1` (admin), `computeAndStoreNight(childId, date, { allowDowngrade: false,
+context })` stores it, and `scoringContextFor` writes the replayed camera, timezone and window with the CURRENT
+`SCORING_ALGO` (the numbers came from today's rules). Refusals, in order: `reviewed` (locked), `stored_camera_missing`
+(a replay whose camera was deleted is never stored, whatever `allowDowngrade` says), `would_downgrade`,
+`would_blank_notified_wake`; before any of them the route answers `409 context_changed` when `expect_context` is not the
+row's current string (the dialog echoes what it was shown, so a re-save from another phone cannot be overwritten with
+numbers nobody previewed). `?stored=1` adds `contexts` (`scoringContextChoice`: `stored_state`, both contexts, `differs`
+on camera, timezone or effective window, live camera names). The detail page and the morning review (below) also pass
+one; every other caller (the nightly job, the review's store-first, `/sleep/live`, the demo seed) passes none, so the
+nightly job re-stores a provisional last night with today's settings: a stated limit, pinned by a test.
+
+**The sleep detail page shows a finished night with its saved settings** (#361 step 4a; tests in
+`backend/test/display-stored-context.test.js`, the page in `frontend/src/pages/SleepDetail.jsx`, its URL builder in
+`frontend/src/lib/nightView.js`). `computeNightForDisplay(childId, nightDate, { includeTimeline, mode })` in
+`lib/sleepAnalysis.js` is the one place that decides. In mode `'auto'` it replays the saved row's context iff the child
+tracks sleep, a row exists, the WALL CLOCK has reached that row's own `window_end`, the night is not in progress
+under today's window (`currentNightDate`: a window end moved later after the save keeps it live, as the card and
+`/sleep/live` show it), the context parses and `scoringContextChoice(...).differs`; otherwise it is the plain
+`computeNight`. It does not use the job's "final" test
+(the row's own `computed_at` past the evidence horizon, #351) on purpose: a night locked by a correction before the
+horizon, and a row whose later passes are refused (`would_downgrade`, the #361 case of a camera turned off after the
+first pass), are never written again after the horizon, so that test would show them with today's settings for ever
+while the card shows the saved row. Whenever the replay would apply, the answer gains `scoring_view: { applied, stored,
+current, camera_names, algo_differs }` in mode `'auto'` (`applied: 'stored'`) AND in mode `'current'` (`applied:
+'current'`); otherwise there is no new key. Route: `context=auto` (reads only; an admin `store=1` with it is a `400`, a
+caregiver's `store=1` is a read and honours it) calls mode `'auto'`; `context=current` and no `context` call mode
+`'current'`, so a page from before this change (which sends no `context`) is unchanged except for that added key;
+`context=stored` is the forced replay above, without `scoring_view`. The page sends `context=auto`, keeps the person's
+switch to today's (`'current'`) for that child and night only, and the Recompute dialog, when the page shows the saved
+settings, reads its own today's baseline (`?context=current&raw=1`).
+
+**The morning review uses the same settings as the detail page** (#361 step 4b; tests in
+`backend/test/review-stored-context.test.js`). `displayContextFor(childId, nightDate)` in `lib/sleepAnalysis.js`
+returns the detail page's decision (the same rules as `computeNightForDisplay`'s mode `'auto'`, no rule of its own)
+as `{ context, key }`, or `null` for today's settings. `lib/sleepReviews.js` uses that one answer for everything
+the review reads: `getNightReview`'s `computed` (a replay with the context), and `transitionsFor`, which is the
+saved zone's noon to noon over the child's enabled cameras plus the saved camera ONLY while its `child_id` is still
+this child (a camera moved to another child, or deleted, contributes nothing: its events are not this child's to
+show or label). That one list is what the page shows, what a save's frame ids and verdicts are checked against, and
+the card's count. The route passes the context to `reportableSpanMs(childId, date, context)`, so an echoed time is
+trusted in the span it was computed in. `GET /review/:date` adds `settings: { key, tz }` (`key` the exact
+`scoring_context` string when the saved settings are used, else `''`); a `PUT` carrying `settings_key` answers
+`409 settings_changed`, before anything is written, when the key it would compute now differs, and one without it
+(a page from before) is not checked. Typed times keep today's zone (`localHmToUtcSql`), the zone the page shows.
+Not covered by the key: a night with no usable saved context, whose key is `''` before and after a settings change.
+
 **Deleting a child or a camera is `lib/entityPurge.js`** (#540, #554), and it deletes everything that belongs to
 it. Most of the history tables have **no foreign key** to `children` / `cameras` (deliberately: `bed_transitions`,
 `activity_samples`, `detection_events`, `camera_events`, `sensor_readings`, `sleep_nights`, `sleep_reviews`), so
@@ -457,10 +545,11 @@ a new deploy has replaced, the reload is what fixes it too (the app also reloads
 
 **Unsaved form edits survive the background reload (#377).** `App.jsx` reloads the page after 15 s in the
 background to repair stale media connections, and that empties React state. The child form, the camera form
-and Settings → Recording therefore store what is different from the saved values in `sessionStorage`
+Settings → Recording, General and MQTT, the Gotify, ntfy and Pushover pages and the caregiver form therefore store what is different from the saved values in `sessionStorage`
 (`lib/formDraft.js`, kept in step by `lib/useFormDraft.js`) and restore it on mount. Rules that must hold:
 **no secret is ever written** (each form passes an allow-list of fields, credential-named keys are dropped
-even if allowed, and a camera password is lost on reload by design); a draft is **per signed-in user**, expires
+even if allowed, a value that is a URL with credentials in it is dropped whatever its key, and a camera
+password is lost on reload by design); a draft is **per signed-in user**, expires
 after 6 hours, and is removed by a successful save, an explicit discard, removing the thing, and sign-out
 (an expired sign-in keeps it, so signing back in resumes). "Unsaved" is always derived (form versus last
 saved), never a flag set by `onChange`. Forms with an explicit Save show `components/UnsavedNotice.jsx`.

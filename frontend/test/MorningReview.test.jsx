@@ -1480,6 +1480,50 @@ describe('the review screen', () => {
       expect(verdicts[61], 'the real put-down').toBeUndefined();
       expect(verdicts[63]).toBeUndefined();
     });
+
+    // #361 PR 4b (plan R2). The server built this night's list in the zone the night was SAVED with (Melbourne) and
+    // says so in `settings.tz`; today's zone has since been changed to UTC. The grouping must follow the server's
+    // zone: in today's, the real 19:20 put-down (61, 09:20 UTC) is "before 16:00", and the one-tap would save it "No".
+    test('#361 PR 4b: with the night shown in its saved zone, "Before bedtime" is judged in that zone, not today\'s', async () => {
+      api.get.mockResolvedValue({ ...TZ_NIGHT, settings: { key: '{"saved":"context"}', tz: 'Australia/Melbourne' } });
+      const { user } = renderAsAdmin(routed, {
+        route: '/children/c-1/review/2026-08-29', kids: [{ id: 'c-1', name: 'Child B' }], settings: { timezone: 'UTC' },
+      });
+      await openEvents(user);
+      expect(await screen.findByRole('button', { name: /Before bedtime \(1\)/ })).toBeInTheDocument();
+      await openGroup(user);
+      expect(earlyBox().contains(rowOf(62))).toBe(true);
+      expect(earlyBox().contains(rowOf(61))).toBe(false);
+      // The times on the page stay in today's zone, like the detail page's: the computed asleep time 09:33 UTC.
+      expect(screen.getByText('09:33')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /None of these were a bedtime event/ }));
+
+      await user.click(screen.getByRole('button', { name: /Save just the event answers/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      const { verdicts, settings_key: key } = api.put.mock.calls[0][1];
+      expect(verdicts[62], 'the genuinely early event').toBe('wrong');
+      expect(verdicts[61], 'the real put-down').toBeUndefined();
+      expect(verdicts[63]).toBeUndefined();
+      expect(key, 'and the save says which settings it was built with').toBe('{"saved":"context"}');
+    });
+  });
+
+  // #361 PR 4b (plan R1): every save that carries times or event answers sends back the `settings.key` the GET gave,
+  // so the server can refuse it if the night would now be worked out with other settings. A page from a server that
+  // sends no `settings` sends no key (the server then does not check).
+  test('#361 PR 4b: "That\'s right" sends back the settings key it was given, and nothing when there was none', async () => {
+    api.get.mockResolvedValue({ ...NIGHT, settings: { key: '', tz: 'Australia/Melbourne' } });
+    const { user, unmount } = at();
+    await user.click(await screen.findByRole('button', { name: /That.s right/ }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    expect(api.put.mock.calls[0][1]).toHaveProperty('settings_key', '');
+    unmount();
+
+    api.get.mockResolvedValue(NIGHT);
+    const second = at();
+    await second.user.click(await screen.findByRole('button', { name: /That.s right/ }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(api.put.mock.calls[1][1].settings_key).toBeUndefined();
   });
 
   // --- "no one was in the bed" (the nobody-in-bed plan, R5) ---------------------------------------

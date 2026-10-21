@@ -1113,7 +1113,10 @@ test('a caregiver\'s ?store=1 on a corrected night is still just a read, as on a
 test('?stored=1 says whether the night is locked, beside the saved row it always returned', async () => {
   layPlainNight();
   let res = await get(`/sleep/${DATE}?stored=1`);
-  assert.deepEqual(res.body, { night: null, locked: false });
+  // #361 PR 3 ADDED `contexts` beside these two (its shape is pinned in recompute-stored-context.test.js); the
+  // two keys this test is about are unchanged, and nothing else was added.
+  assert.deepEqual({ night: res.body.night, locked: res.body.locked }, { night: null, locked: false });
+  assert.deepEqual(Object.keys(res.body).sort(), ['contexts', 'locked', 'night']);
 
   computeAndStoreNight(CHILD, DATE);
   res = await get(`/sleep/${DATE}?stored=1`);

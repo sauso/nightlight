@@ -375,9 +375,17 @@ is typed is kept for 6 hours in the browser tab (`lib/formDraft.js`) and restore
 background reload or a visit to another screen, with the notice saying so; **a secret field is never
 kept**, so a screen with a password must say, when it restores, that the password has to be typed again.
 
-Covered today: the child form, the camera form and Settings → Recording. **Not covered** (they still lose
-unsaved edits on a reload): Settings → General, MQTT, the four push provider pages, Users, and the Account and
-user-settings screens. A new Save-button form should join this, not invent another store.
+Covered today: the child form, the camera form, Settings → Recording, General and MQTT, the Gotify, ntfy and
+Pushover pages, and the add/edit caregiver screen. **Not covered** (they still lose unsaved edits on a reload):
+the Firebase page (one switch), the caregiver list, the Account name form (two fields, and its values come
+from the sign-in context), and Detection settings (no Save button; they recover through their own save queue,
+`lib/detectionSaves.js`). A new Save-button form should join this, not invent another store.
+
+What a covered form keeps is a per-form allow-list, and it is narrower than "everything not a password" on
+purpose: the ntfy **topic** (the page itself calls it the only thing keeping a public feed private), the MQTT
+**certificate text** (a free text box where a private key could be pasted) and any value holding a URL with
+credentials in it (`https://user:pass@host`) are never kept, whatever the field is called, because the
+credential-name check reads field names only. A screen that restores must say which of its fields are not kept.
 
 ### Badges, chips, status
 - `.status-badge` — filled pill, 3px 10px, 12px/600, white text; `--ok` `--live`, `--bad`

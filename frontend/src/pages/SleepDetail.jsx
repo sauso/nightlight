@@ -12,11 +12,18 @@ import ReviewNightButton from '../components/ReviewNightButton.jsx';
 import ReviewReceipt from '../components/ReviewReceipt.jsx';
 import LoadFailed from '../components/LoadFailed.jsx';
 import { showsInBed } from '../lib/inBed.js';
+import { nightDetailPath, describeSettings } from '../lib/nightView.js';
 
 // Sleep detail: a to-scale timeline of one night for a child, with the wake-ups marked, plus a date
 // picker to browse back through the retained nights (~30 days of activity_samples). Reached by tapping
 // the "last night" summary on the child page. Data comes from GET /children/:id/sleep/:date?detail=1,
 // which recomputes the night (segments + wake list) from the per-minute activity samples on demand.
+//
+// #361 PR 4a: WITH WHICH SETTINGS. The page asks with `context=auto`, so a FINISHED night whose saved camera,
+// timezone or sleep window differ from today's is worked out with the saved ones (what the child's card shows),
+// and the server says so in `night.scoring_view`; every other night is worked out with today's settings, as it
+// always was. `settingsView` is the person's switch between the two ('auto' or 'current'): page state only, never
+// remembered, back to 'auto' on another child or night and after any Recompute save.
 
 const HISTORY_DAYS = 30; // how far back the underlying activity_samples are retained
 
@@ -59,6 +66,20 @@ export default function SleepDetail() {
   // data for this night - either it predates tracking...". `night` is now only ever set by an answer.
   const [nightError, setNightError] = useState('');
   const [nightRetry, setNightRetry] = useState(0); // bumped by Retry to re-run the fetch effect
+  // #361 PR 4a: 'auto' (the default: a finished night with differing saved settings is shown with them) or
+  // 'current' (today's settings, after "Show with today's settings"). See the header.
+  //
+  // ⚠️ KEYED TO THE CHILD AND NIGHT IT WAS CHOSEN ON, and DERIVED during render, not only reset by an effect. The
+  // plan (R5) put a reset in the reset effect below, declared before the fetch effect, to keep the first request for
+  // another night from carrying the old view. That alone does not do it: a setState inside an effect only takes
+  // effect on the NEXT render, so the fetch effect of the same commit still reads the old value, sends one request
+  // with it, and only the re-render fixes it (the first answer is dropped by `alive`, but the request is wrong).
+  // Deriving the view from the key makes it 'auto' in the very render that changes the night, so the first request
+  // is right; the reset effect then forgets the choice, so coming back to a night does not bring it back either.
+  const nightKey = `${id}|${date}`;
+  const [viewChoice, setViewChoice] = useState({ key: null, view: 'auto' });
+  const settingsView = viewChoice.key === nightKey ? viewChoice.view : 'auto';
+  const chooseSettingsView = (view) => setViewChoice({ key: nightKey, view });
   // The receipt for a correction just saved, when we arrived here from the review screen.
   const [receipt, setReceipt] = useState(null);
   // Bumped each time the receipt is dropped because the correction it quotes was removed (#679). The receipt
@@ -108,15 +129,22 @@ export default function SleepDetail() {
   // a night that was on screen, and a retry that failed again became a blocking first-load error that
   // unmounted NightContent (an open clip modal with it). Declared BEFORE the fetch effect so a date change
   // resets and then fetches within the same commit. (Review finding on PR #716.)
+  //
+  // #361 PR 4a: the settings view is forgotten here too (see `viewChoice` above for why that is not what keeps the
+  // first request for another night right, and what does), so it is never remembered across nights.
   useEffect(() => {
     setNight(undefined);
     setNightError('');
+    setViewChoice({ key: null, view: 'auto' });
   }, [id, date]);
 
+  // ONE read of the night, used for the first load, the 2-minute refresh and Retry, always in the page's current
+  // settings view (`settingsView` is a dependency, so the switch only sets state and this effect refetches, under
+  // its own `alive` guard). The Recompute dialog's re-reads build the same URL (lib/nightView.js).
   useEffect(() => {
     if (!date) return;
     let alive = true;
-    const load = () => api.get(`/children/${id}/sleep/${date}?detail=1`)
+    const load = () => api.get(nightDetailPath(id, date, settingsView))
       .then((r) => { if (alive) { setNight(r || null); setNightError(''); } })
       // A failed 2-minute refresh leaves the night already on screen in place (stale) rather than blanking it.
       .catch((err) => { if (alive) setNightError(err?.message || 'Request failed'); });
@@ -124,7 +152,7 @@ export default function SleepDetail() {
     // Keep the live (in-progress) night fresh — only the latest night can still be changing.
     const t = date === maxDate ? setInterval(load, 2 * 60 * 1000) : null;
     return () => { alive = false; if (t) clearInterval(t); };
-  }, [id, date, maxDate, nightRetry]);
+  }, [id, date, maxDate, nightRetry, settingsView]);
 
   // ⚠️ THE RECEIPT HAS TO FOLLOW YOU HERE, and this is not a nicety.
   //
@@ -223,7 +251,8 @@ export default function SleepDetail() {
         )}
 
         <NightBody night={night} error={nightError} onRetry={() => setNightRetry((n) => n + 1)} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit}
-          childId={id} date={date} onRecomputed={setNight} onCorrectionRemoved={() => { receiptRemovals.current += 1; setReceipt(null); }} />
+          childId={id} date={date} onRecomputed={setNight} onCorrectionRemoved={() => { receiptRemovals.current += 1; setReceipt(null); }}
+          settingsView={settingsView} onSettingsView={chooseSettingsView} />
 
         <SleepInsights childId={id} tempUnit={settings.temp_unit} childName={kid?.name} />
 
@@ -248,20 +277,70 @@ function NightBody({ night, error, onRetry, ...rest }) {
   }
   // A refresh failed but the last night is still shown: say it may be out of date, then render it as usual.
   // One fragment shape whether or not the banner is there, so NightContent keeps its state (an open clip
-  // modal) when the banner comes and goes.
+  // modal) when the banner comes and goes. The settings line (#361 PR 4a) is a slot of its own in that same
+  // shape, so it coming and going does not remount NightContent either. It sits ABOVE NightContent, whose
+  // statuses each return early, so it is there for every status that can carry it (plan D4/R3), except a saved
+  // camera that no longer exists: that line takes the place of the no-data card's text (NightContent, below).
   return (
     <>
       {error && <LoadFailed what="this night" error={error} onRetry={onRetry} stale />}
+      {night?.scoring_view && !(savedCameraGone(night) && night.status === 'no_data') && (
+        <SettingsViewLine night={night} onSettingsView={rest.onSettingsView} />
+      )}
       <NightContent night={night} {...rest} />
     </>
   );
 }
 
-function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed, onCorrectionRemoved }) {
+// #361 PR 4a: the saved settings name a camera that has since been deleted, so the replay is `no_data` with
+// `scoring.problem` set (never quietly another camera's night: sleepAnalysis.js computeNight).
+const savedCameraGone = (night) => night?.scoring?.problem === 'camera_deleted';
+
+// #361 PR 4a: which settings this night was worked out with, and the switch to the other ones. Shown only when the
+// server sent `scoring_view`, which it does only for a FINISHED night whose saved camera, timezone or window differ
+// from today's, and never for a child whose sleep tracking is off (sleepAnalysis.js computeNightForDisplay, plan R3:
+// `off` has nothing to choose between, so no line and no switch; checked here too, so an `off` night never offers
+// one). The switch only changes the page's view: SleepDetail's fetch effect does the request.
+//
+// ⚠️ What the line names are the SETTINGS, from the server's two contexts, with the camera's LIVE name (a deleted one
+// reads "a camera that no longer exists"). The timezone it names is the one the night was saved in, while every
+// time on the page is shown in today's (the app setting): a stated limit (docs/sleep-tracking.md).
+function SettingsViewLine({ night, onSettingsView, inCard = false }) {
+  if (!night?.scoring_view || night.status === 'off') return null;
+  const v = night.scoring_view;
+  const showingSaved = v.applied === 'stored';
+  let text;
+  if (showingSaved && savedCameraGone(night)) {
+    text = 'The camera this night was measured from no longer exists, so it can’t be worked out with those settings.';
+  } else if (showingSaved) {
+    text = `Worked out with the settings this night was saved with (${describeSettings(v.stored, v.camera_names?.stored)}), `
+      + 'using today’s detection rules.'
+      // The saved numbers came from older rules: the replay can match the settings but not the rules (plan R3).
+      + (v.algo_differs ? ' It was first worked out under earlier detection rules, so the numbers can differ from the child’s card.' : '');
+  } else {
+    text = `Showing today’s settings (${describeSettings(v.current, v.camera_names?.current)}). `
+      + 'The saved summary for this night keeps the settings it was saved with.';
+  }
+  // Its own card above the night, or (a deleted camera, inside the no-data card) just the content of one.
+  return (
+    <div className={inCard ? 'sleep-settings-view sleep-settings-view--in-card' : 'card sleep-settings-view'}>
+      <div className="sleep-settings-view__text">{text}</div>
+      <button type="button" className="btn btn-secondary btn-sm sleep-settings-view__switch"
+        onClick={() => onSettingsView?.(showingSaved ? 'current' : 'auto')}>
+        {showingSaved ? 'Show with today’s settings' : 'Show with the settings this night was saved with'}
+      </button>
+    </div>
+  );
+}
+
+function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed, onCorrectionRemoved, settingsView, onSettingsView }) {
   // The wake↔alert clip currently open in the shared player (or null). Lives here so it survives a
   // 2-min live refresh of `night` without tearing the modal down mid-watch.
   const [clipFor, setClipFor] = useState(null);
   const [wakeClip, setWakeClip] = useState(null);
+  // #361 PR 4a: the page's settings view travels into every Recompute below, so its re-reads keep (or, after a
+  // save, reset) the view the page is in.
+  const viewProps = { settingsView, onSettingsViewChange: onSettingsView };
   if (night && night.status === 'off') {
     return (
       <div className="card">
@@ -271,18 +350,38 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
       </div>
     );
   }
+  // #361 PR 3 (plan R1): Recompute on a night TODAY's settings cannot score. The night the feature exists for (its
+  // camera turned off, moved or demoted since it was saved) reads exactly like this, and the control used to be
+  // unreachable here. RecomputeNight decides for itself whether to show anything: only for an admin, only after
+  // its own read finds usable saved settings that differ from today's on an unlocked night, and then it offers
+  // only the stored-settings re-score. Otherwise it renders nothing and these cards look as they always did. Not
+  // for a null night (nothing to compare) or `off` (tracking is off: nothing is scored either way).
   if (!night || night.status === 'no_data') {
     return (
       <div className="card">
-        <div className="camera-tile__sub" style={{ padding: 14 }}>
-          No sleep data for this night — either it predates tracking, or the cameras weren’t running motion/sound
-          detection with enough coverage.
-        </div>
+        {/* #361 PR 4a (plan R3): a saved camera that has been deleted is the REASON there is no data here, so the
+            settings line says so in place of the generic text, which would blame coverage. */}
+        {savedCameraGone(night) && night.scoring_view ? (
+          <SettingsViewLine night={night} onSettingsView={onSettingsView} inCard />
+        ) : (
+          <div className="camera-tile__sub" style={{ padding: 14 }}>
+            No sleep data for this night — either it predates tracking, or the cameras weren’t running motion/sound
+            detection with enough coverage.
+          </div>
+        )}
+        {night && <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime}
+          onRecomputed={onRecomputed} onCorrectionRemoved={onCorrectionRemoved} {...viewProps} />}
       </div>
     );
   }
   if (night.status === 'no_sleep') {
-    return <div className="card"><div className="camera-tile__sub" style={{ padding: 14 }}>No clear sleep detected in this night’s window.</div></div>;
+    return (
+      <div className="card">
+        <div className="camera-tile__sub" style={{ padding: 14 }}>No clear sleep detected in this night’s window.</div>
+        <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime}
+          onRecomputed={onRecomputed} onCorrectionRemoved={onCorrectionRemoved} {...viewProps} />
+      </div>
+    );
   }
   if (night.status === 'empty') {
     // `nobody_in_bed` splits the copy, deliberately NOT `corrected` (code-review finding, 2026-09-29):
@@ -324,11 +423,12 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
             previews the saved row against this one before anything is written (the second press applies),
             and the server's allowDowngrade / locked refusals still decide what can be stored. A flagged night
             is a corrected night, so it normally opens on "locked" (nothing to recompute until the correction
-            is removed). Not offered on no_data / no_sleep: the issue is about `empty`, and those are a
-            coverage or scoring question, not a "did the detector change its mind" one. */}
+            is removed). On no_data / no_sleep it is offered only for the stored-settings re-score (#361 PR 3,
+            see those branches above): with today's settings those are a coverage or scoring question, not a
+            "did the detector change its mind" one. */}
         <div style={{ padding: '0 14px 14px' }}>
           <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime} onRecomputed={onRecomputed}
-            onCorrectionRemoved={onCorrectionRemoved} />
+            onCorrectionRemoved={onCorrectionRemoved} {...viewProps} />
         </div>
       </div>
     );
@@ -378,7 +478,7 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
           <ReviewNightButton childId={childId} date={date} corrected={night.corrected} />
         )}
         <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime} onRecomputed={onRecomputed}
-          onCorrectionRemoved={onCorrectionRemoved} />
+          onCorrectionRemoved={onCorrectionRemoved} {...viewProps} />
       </div>
 
       <div className="card">
