@@ -66,7 +66,8 @@ const WRONG_REASONS = [
 // (the 4:20am mis-onset case sleepAnalysis.js documents) would put the REAL put-down inside the
 // collapsed group, "Put down here" button and all — hiding the one event the person needs to find.
 // This cannot move with whatever the algorithm currently believes. It is in the app's configured
-// timezone like every other time here, so it means the same thing in any house. ⚠️ KNOWN LIMIT, stated
+// timezone (or, for a night shown with its saved settings, the zone it was saved in: see `groupTz`), so it
+// means the same thing in any house. ⚠️ KNOWN LIMIT, stated
 // in the README rather than left silent: a family whose night genuinely starts before 16:00 still sees
 // every event (grouped, nothing answered without a tap), but the one-tap button would mark their real
 // put-down "No" — so for them the button is wrong, and the README says not to use it.
@@ -366,6 +367,11 @@ export default function NightReview() {
         // review then read "the app had no opinion", which was false for every one of them.
         computed_onset_at: data?.computed?.onset_at ?? null,
         computed_wake_at: data?.computed?.wake_at ?? null,
+        // Which settings this page's times and events were worked out with (#361 PR 4b), sent back as given. The
+        // server refuses the save (409, "settings changed… reload") if the night would now be worked out with
+        // other ones, because the times above and the event ids below belong to the settings the page was built
+        // with. Not sent by `saveNobody`: "No one was in the bed" carries no time and no event.
+        settings_key: data?.settings?.key,
         verdicts,
         // Beside the verdicts they belong to. The server keeps a reason only where the verdict after
         // this save is 'wrong', and drops (not refuses) the rest.
@@ -486,8 +492,15 @@ export default function NightReview() {
     data.computed?.in_bed_at || onsetFrame || inBedFrame || data.computed?.onset_at || data.review?.true_onset_at
     || data.review?.true_in_bed_at
   );
+  // The zone the server built this night's event list in (#361 PR 4b, plan R2): the zone the night was SAVED with
+  // when the review shows its saved settings, else today's. The night's date key was made in that zone, so "16:00 on
+  // the night's date" must be read there too. In today's zone after a timezone change, a real 19:20 bedtime can land
+  // before 16:00 and in this group, where "None of these" would save it "No" (a stored wrong label). Only the
+  // grouping uses it: every time shown stays in today's zone, like the detail page. `tz` when the server sends no
+  // `settings` (a server from before this).
+  const groupTz = data.settings?.tz ?? tz;
   const isEarly = (t) => {
-    const { date: localDate, hour } = localDateHour(t.created_at, tz);
+    const { date: localDate, hour } = localDateHour(t.created_at, groupTz);
     return localDate === date && hour < EARLY_CUTOFF_HOUR;
   };
   // ⚠️ ...and only once the app's REAL timezone has arrived. The fourth time a late timezone has bitten
