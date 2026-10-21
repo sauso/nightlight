@@ -5405,8 +5405,8 @@
   {
     "label": "#369 M07d (claim 7): escalation to a publisher request waits for attempt 3",
     "file": "backend/src/lib/cameraWatchdogs.js",
-    "find": "    } else if (attempts >= 1 && deps.restartRequests) {",
-    "replace": "    } else if (attempts >= 2 && deps.restartRequests) {",
+    "find": "    } else if ((attempts >= 1 || verdict.episodeStalled) && deps.restartRequests) {",
+    "replace": "    } else if ((attempts >= 2 || verdict.episodeStalled) && deps.restartRequests) {",
     "expect": "killed",
     "tests": ["detector-watchdog.test.js"],
     "namePattern": "^C7:"
@@ -5414,8 +5414,8 @@
   {
     "label": "#369 M07e (claim 7): the FIRST action already requests a publisher restart",
     "file": "backend/src/lib/cameraWatchdogs.js",
-    "find": "    } else if (attempts >= 1 && deps.restartRequests) {",
-    "replace": "    } else if (attempts >= 0 && deps.restartRequests) {",
+    "find": "    } else if ((attempts >= 1 || verdict.episodeStalled) && deps.restartRequests) {",
+    "replace": "    } else if ((attempts >= 0 || verdict.episodeStalled) && deps.restartRequests) {",
     "expect": "killed",
     "tests": ["detector-watchdog.test.js"],
     "namePattern": "^C7:"
@@ -5585,8 +5585,8 @@
   {
     "label": "#369 M10b (claim 10): the backoff doubles one step early",
     "file": "backend/src/lib/cameraWatchdogs.js",
-    "find": "DETECTOR_RESTART_FLOOR_MS * 2 ** (attempts - 1), DETECTOR_RESTART_CAP_MS);",
-    "replace": "DETECTOR_RESTART_FLOOR_MS * 2 ** attempts, DETECTOR_RESTART_CAP_MS);",
+    "find": "DETECTOR_RESTART_FLOOR_MS * 2 ** (attempts - 1), cap);",
+    "replace": "DETECTOR_RESTART_FLOOR_MS * 2 ** attempts, cap);",
     "expect": "killed",
     "tests": ["detector-watchdog.test.js"],
     "namePattern": "^C10a:"
@@ -5603,7 +5603,7 @@
   {
     "label": "#369 M10d (claim 10): the backoff has no cap",
     "file": "backend/src/lib/cameraWatchdogs.js",
-    "find": "  return Math.min(DETECTOR_RESTART_FLOOR_MS * 2 ** (attempts - 1), DETECTOR_RESTART_CAP_MS);",
+    "find": "  return Math.min(DETECTOR_RESTART_FLOOR_MS * 2 ** (attempts - 1), cap);",
     "replace": "  return DETECTOR_RESTART_FLOOR_MS * 2 ** (attempts - 1);",
     "expect": "killed",
     "tests": ["detector-watchdog.test.js"],
@@ -5612,8 +5612,8 @@
   {
     "label": "#369 M10e (claim 10): the backoff gate boundary flips (< becomes <=)",
     "file": "backend/src/lib/cameraWatchdogs.js",
-    "find": "    if (st && now - st.lastActionMono < detectorRestartFloorMs(st.attempts)) return;",
-    "replace": "    if (st && now - st.lastActionMono <= detectorRestartFloorMs(st.attempts)) return;",
+    "find": "    if (st && now - st.lastActionMono < backoffOf(st)) return;",
+    "replace": "    if (st && now - st.lastActionMono <= backoffOf(st)) return;",
     "expect": "killed",
     "tests": ["detector-watchdog.test.js"],
     "namePattern": "^C10a:"
@@ -10389,14 +10389,14 @@
     "namePattern": "^C(21|12b)"
   },
   {
-    "label": "#578 M6: a refused or thrown kill rolls the attempt back (the backoff is lost)",
+    "label": "#578 M6: a thrown kill rolls the attempt back (the backoff is lost)",
     "file": "backend/src/lib/cameraWatchdogs.js",
     "find": "    if (threw) throw leverError;",
     "replace": "    if (kill && !restarted) { ep.attempts -= 1; ep.lastActionMono = null; }\r\n    if (threw) throw leverError;",
     "expect": "killed",
     "tests": ["detector-watchdog.test.js"],
     "namePattern": "^C(21|12b)",
-    "note": "namePattern is a regex: a refusal commits the attempt the same before or after the lever, so only a rollback (and the throwing lever of C12b) tell the orderings apart. 'The commit moves to just after the lever' is an EQUIVALENT mutation since #578: the lever is synchronous and its throw is caught before the commit would run, so nothing observable differs. The existing #369 M12a (`^C12b:`) covers the commit never being stored."
+    "note": "namePattern is a regex: only a rollback (and the throwing lever of C12b) tell the orderings apart. Since #585 a clean refusal IS taken back out of the attempt count, but keeps the commit's lastActionMono (so it is backed off on the refusal ladder); this mutant also nulls lastActionMono, so C21a still kills it through an immediate retry. 'The commit moves to just after the lever' is an EQUIVALENT mutation since #578: the lever is synchronous and its throw is caught before the commit would run, so nothing observable differs. The existing #369 M12a (`^C12b:`) covers the commit never being stored."
   },
   {
     "label": "#578 M7: a throwing lever is swallowed instead of rethrown to the per-leg guard",
@@ -10426,10 +10426,10 @@
     "namePattern": "^C(21|12b)"
   },
   {
-    "label": "#578 M10: the request-only row says `restart(s)` again for a count that includes refused attempts",
+    "label": "#578 M10: the request-only row says `restart(s)` again for a count that includes request-only and thrown attempts",
     "file": "backend/src/lib/cameraWatchdogs.js",
-    "find": "no data through ${attempts} attempt(s) and the relaunches since",
-    "replace": "no data through ${attempts} restart(s) and the relaunches since",
+    "find": "attempts > 0 && `${attempts} attempt(s)`",
+    "replace": "attempts > 0 && `${attempts} restart(s)`",
     "expect": "killed",
     "tests": ["detector-watchdog.test.js"],
     "namePattern": "^C9[bf]"
@@ -10469,6 +10469,79 @@
     "expect": "killed",
     "tests": ["detector-watchdog.test.js"],
     "namePattern": "^C12b"
+  },
+  {
+    "label": "#585 M1 (the bug): a refused kill is counted as an attempt again (the rollback is gone)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      ep.attempts = attempts;",
+    "replace": "      void attempts;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C2[12]"
+  },
+  {
+    "label": "#585 M2: a kill refused while a request was posted is classed as a refusal (`!requestKind` dropped)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "const refused = kill && !restarted && !requestKind && !threw;",
+    "replace": "const refused = kill && !restarted && !threw;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C2(1d|2i)"
+  },
+  {
+    "label": "#585 M3: a lever that threw is classed as a refusal (`!threw` dropped): E7 lost, the throw no longer counts",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "const refused = kill && !restarted && !requestKind && !threw;",
+    "replace": "const refused = kill && !restarted && !requestKind;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C(12b|22d)"
+  },
+  {
+    "label": "#585 M4: the refusal floor is 0 (a refusal is retried on every 15 s tick)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    ? detectorRestartFloorMs(st.refusals, DETECTOR_REFUSAL_CAP_MS)",
+    "replace": "    ? 0",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C22[ah]",
+    "note": "C22h is the guard for a lever that one day returns a Promise: `=== true` would class every call as a refusal, and E7 then holds only because this floor is above 0."
+  },
+  {
+    "label": "#585 M5: the refusal ladder is capped at the attempt ladder's 30 minutes, not 5",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    ? detectorRestartFloorMs(st.refusals, DETECTOR_REFUSAL_CAP_MS)",
+    "replace": "    ? detectorRestartFloorMs(st.refusals)",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C22a"
+  },
+  {
+    "label": "#585 M6: after a refusal the gate uses the attempt ladder (the refusal ladder never applies)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "  const backoffOf = (st) => (st.refusals > 0",
+    "replace": "  const backoffOf = (st) => (false",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C22f"
+  },
+  {
+    "label": "#585 M7: an attempt does not end the run of refusals (`refusals = 0` dropped)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "      ep.refusals = 0;",
+    "replace": "      void 0;",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C22[cdf]"
+  },
+  {
+    "label": "#585 M8 (H1): an episode started by refused kills cannot escalate a crash loop (the episode-stall term is dropped from the request gate)",
+    "file": "backend/src/lib/cameraWatchdogs.js",
+    "find": "    } else if ((attempts >= 1 || verdict.episodeStalled) && deps.restartRequests) {",
+    "replace": "    } else if (attempts >= 1 && deps.restartRequests) {",
+    "expect": "killed",
+    "tests": ["detector-watchdog.test.js"],
+    "namePattern": "^C22e"
   },
   {
     "label": "#448 M0: control: a comment edit in wakeWatcher.js must change nothing",

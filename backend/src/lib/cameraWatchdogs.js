@@ -446,12 +446,15 @@ export function createAudioWatchdog(overrides = {}) {
 //               request the camera watchdog consumes. THIS WATCHDOG NEVER STARTS OR STOPS A PUBLISHER
 //               ITSELF: concurrent startTranscoder calls for one camera queue (#478) rather than orphan an
 //               FFmpeg, but each is still a full restart, and the camera watchdog's leg check is the one place
-//               that judges a leg's publisher, one check per camera at a time (see createCameraWatchdog).
+//               that judges a leg's publisher, one check per camera at a time (see createCameraWatchdog). A
+//               crash loop (DETECTOR_EPISODE_STALL_MS) asks for it even at attempt 1 when every earlier action of
+//               the episode was a refused kill (#585).
 // Every action that actually DID something records one camera_events RESTART naming what acted (the detector
 // only if its kill really signalled a process, #578), and ONE diagnosis line (path status, a video/audio probe,
-// the ffmpeg input tap's age) - that line is how the unknown root cause gets learned. An attempt whose kill was
+// the ffmpeg input tap's age) - that line is how the unknown root cause gets learned. An action whose kill was
 // refused and that posted no request did nothing: it writes the diagnosis line at INFO ("lever refused") and NO
-// row, because Camera history is a claim about what happened to the camera.
+// row, because Camera history is a claim about what happened to the camera. Since #585 it is not an ATTEMPT
+// either: it does not climb this ladder, and waits a shorter one of its own (DETECTOR_REFUSAL_CAP_MS).
 //
 // ⚠️ NO PROBE RESULT EVER VETOES AN ACTION (Astra R1/R2, Sol R2). A probe cannot prove a negative (live RTSP
 // never ends, a stalled setup looks like silence), and a video PACKET is not a decodable FRAME (the publisher
@@ -484,14 +487,29 @@ export const DETECTOR_STARTUP_GRACE_MS = 90 * 1000;
 // ever entry-stalled. After this long with NO healthy tick since the last action AND at least two replacement
 // generations without data, the episode escalates to a publisher request on its own (never to a kill).
 export const DETECTOR_EPISODE_STALL_MS = 3 * 60 * 1000;
-// The backoff between actions on one leg: 1, 2, 4, 8, 16, 30, 30... minutes. The first retry waits one STALE
-// window after the action, time for the relaunch to prove itself; the cap bounds a leg that never recovers to
-// 48 restarts and 48 camera_events rows a day (that table is capped at 2000 rows SHARED by every camera).
+// The backoff between ATTEMPTS on one leg (an action that restarted something, posted a request, or whose lever
+// threw): 1, 2, 4, 8, 16, 30, 30... minutes. The first retry waits one STALE window after the action, time for the
+// relaunch to prove itself; the cap bounds a leg that never recovers to 48 restarts and 48 camera_events rows a
+// day (that table is capped at 2000 rows SHARED by every camera).
 export const DETECTOR_RESTART_FLOOR_MS = 60 * 1000;
 export const DETECTOR_RESTART_CAP_MS = 30 * 60 * 1000;
-// Continuous health for this long ends the episode (its attempts and backoff are forgotten). A leg that delivers
-// a byte inside each STALE window but never holds 5 minutes of health keeps its attempt count, so it backs off to
-// the 30-minute cap instead of restarting every minute: a documented churn bound.
+// #585: the backoff after a REFUSED kill (the lever signalled nothing, no request was posted, nothing threw): the
+// same 1-minute first step doubling, but counted by refusals IN A ROW and capped at 5 minutes: 1, 2, 4, 5, 5...
+// A refusal is not an attempt. Counted as one (as it was from #369 to #585), each refusal doubled the attempt
+// ladder, delaying the first real restart by up to 30 minutes, and on motion made the next action ask for a
+// stream restart that no detector restart had preceded. Simply un-counting it is wrong too: the gate would read
+// floor 0 and re-probe (up to 8 s) on every 15 s tick. WHY A LADDER AND NOT A FIXED 60 s: a refusal usually
+// clears in seconds (a `returning` detector's SIGTERM, then SIGKILL after 3 s; a kill already in flight); the only
+// long-lived case is a process that survives SIGKILL, and at a fixed 60 s that one would cost ~1440 diagnosis
+// probes, 2880 MediaMTX calls and 1440 INFO lines per leg per day, wrapping logger.js's 1000-line ring in ~17 h
+// (processGuards.js, at RELOG_INTERVAL_MS, warns against exactly that eviction). This ladder is at most ~288 lines
+// a day per leg (the attempt ladder: 48), and the first real restart after the cause clears comes at most 5
+// minutes and one tick later (the attempt ladder: up to 30). CHOSEN, NOT MEASURED: no install has been seen with
+// a refusal that lasts.
+export const DETECTOR_REFUSAL_CAP_MS = 5 * 60 * 1000;
+// Continuous health for this long ends the episode (its attempts, refusals and backoff are forgotten). A leg that
+// delivers a byte inside each STALE window but never holds 5 minutes of health keeps its attempt count, so it
+// backs off to the 30-minute cap instead of restarting every minute: a documented churn bound.
 export const DETECTOR_RECOVERED_MS = 5 * 60 * 1000;
 // How long a posted publisher request stays valid: four camera-watchdog ticks. One not consumed by then
 // describes a situation that has moved on, and the detector watchdog will post again if it has not.
@@ -505,10 +523,11 @@ export function detectorLegHealthy(health) {
   return health != null && health.dataAgeMs != null && health.dataAgeMs <= DETECTOR_STALE_MS;
 }
 
-// The backoff after `attempts` actions: 0 before the first, then FLOOR doubling, capped.
-export function detectorRestartFloorMs(attempts) {
+// The backoff after `attempts` actions: 0 before the first, then FLOOR doubling, capped at `cap`: the attempt
+// ladder's 30 minutes by default, the refusal ladder's 5 when it passes DETECTOR_REFUSAL_CAP_MS (#585).
+export function detectorRestartFloorMs(attempts, cap = DETECTOR_RESTART_CAP_MS) {
   if (attempts <= 0) return 0;
-  return Math.min(DETECTOR_RESTART_FLOOR_MS * 2 ** (attempts - 1), DETECTOR_RESTART_CAP_MS);
+  return Math.min(DETECTOR_RESTART_FLOOR_MS * 2 ** (attempts - 1), cap);
 }
 
 // The mailbox between the detector watchdog (posts) and the camera watchdog (takes). ONE instance, built in
@@ -600,10 +619,16 @@ export function createDetectorWatchdog(overrides = {}) {
   const keyOf = ({ cam, leg }) => `${cam.id}:${leg}`;
   const nameOf = ({ cam, leg }) => `${cam.name}:${leg}`;
 
-  // Per leg, created by the FIRST action and kept through the relaunch gap, `waiting` and a young replacement,
-  // so the backoff and the escalation survive them (Opus R1). Deleted only by sustained recovery, the leg
-  // becoming unwanted or disabled, or the camera leaving listCameras() - each restarts at attempts = 0.
-  //   { camId, attempts, lastActionMono, lastHealthyMono, flowingSinceMono, lastSeenSpawnMono, gensWithoutData, path }
+  // Per leg, created by the FIRST action (a refused kill included) and kept through the relaunch gap, `waiting`
+  // and a young replacement, so the backoff and the escalation survive them (Opus R1). Deleted only by sustained
+  // recovery, the leg becoming unwanted or disabled, or the camera leaving listCameras() - each restarts at
+  // attempts = 0 and refusals = 0.
+  //   { camId, attempts, refusals, lastActionMono, lastHealthyMono, flowingSinceMono, lastSeenSpawnMono,
+  //     gensWithoutData, path }
+  // `attempts` counts the actions that did something or whose lever threw (the attempt ladder, and on motion the
+  // stream-restart request from the second on); `refusals` the kills refused IN A ROW since the last attempt (the
+  // refusal ladder, #585). An episode is only ever created by one or the other, so it always has attempts >= 1 or
+  // refusals >= 1, and its backoff (backoffOf) is never 0.
   const episodes = new Map();
   // Sound legs whose PREVIOUS eligible probe answered neither true nor false (key -> camId). See the sound gate.
   const inconclusiveProbe = new Map();
@@ -612,6 +637,12 @@ export function createDetectorWatchdog(overrides = {}) {
     episodes.delete(key);
     inconclusiveProbe.delete(key);
   }
+
+  // The wait before the next action on a leg that has an episode (#585): while the episode's last action was a
+  // refused kill, the refusal ladder (by refusals in a row, capped at 5 minutes); otherwise the attempt ladder.
+  const backoffOf = (st) => (st.refusals > 0
+    ? detectorRestartFloorMs(st.refusals, DETECTOR_REFUSAL_CAP_MS)
+    : detectorRestartFloorMs(st.attempts));
 
   // The stall verdict for a leg already known NOT healthy (E2), or null when there is nothing to act on.
   function stallOf(leg, st, health, now) {
@@ -687,7 +718,7 @@ export function createDetectorWatchdog(overrides = {}) {
     // must not cost the leg its attempt count).
     if (!stallOf(leg, st, health, now)) return;
     // E4 before E3 (no await for a leg inside its backoff; same outcome either way).
-    if (st && now - st.lastActionMono < detectorRestartFloorMs(st.attempts)) return;
+    if (st && now - st.lastActionMono < backoffOf(st)) return;
     // Always defined here: an entry-stall means a spawned process (which has its path), and an episode-stall
     // means an episode (which remembers the path of its last action).
     const path = health?.path ?? st?.path;
@@ -732,10 +763,15 @@ export function createDetectorWatchdog(overrides = {}) {
         inconclusiveProbe.set(key, cam.id);
         return;
       }
-    } else if (attempts >= 1 && deps.restartRequests) {
+    } else if ((attempts >= 1 || verdict.episodeStalled) && deps.restartRequests) {
       // L2: this leg has already been restarted and is dark again. `main` when the detector reads the main path
       // (a camera with no sub, or a fallback while the sub is down, which #500 now ends by itself once the sub is
       // up and the room quiet): that costs the live view a brief interruption.
+      // `|| verdict.episodeStalled` (#585, hazard H1 of its plan review): an episode whose only actions were
+      // refused kills has attempts 0, and a crash loop's replacements die inside their grace, so none is ever
+      // entry-stalled (killed and counted): without this term such an episode could never escalate to the request
+      // a crash loop needs. It changes nothing else: an episode-stall needs an episode, and before #585 every
+      // episode had attempts >= 1.
       requestKind = publisherOf(cam, path);
     }
     if (!kill && !requestKind) return;
@@ -748,12 +784,17 @@ export function createDetectorWatchdog(overrides = {}) {
     // once the outcome is known: it used to be written first and said "detector restarted" for a kill that
     // killStalledDetector had refused (no process to signal, a replaced process, data that arrived meanwhile,
     // a process too young, or - since #500 - a detector `returning` from main to the sub stream, whose own SIGTERM
-    // is already in flight). A REFUSED kill still counts as an attempt (the next action waits the backoff, and on
-    // motion the second action also asks for the stream restart): changing that is a change to the ladder, not to
-    // what is recorded, and is documented as a limit in KNOWN-ISSUES.md. (Known, not guarded: a throw from the
-    // logger or from recordCameraEvent AFTER a real kill would still skip the steps after it, as it always did.)
+    // is already in flight).
+    // ⚠️ #585: a kill the lever REFUSED, with no request posted and no throw, is then taken back out of the attempt
+    // count (just after the lever, below) and counted as a refusal instead. It did nothing, so it must not double
+    // the attempt ladder (up to 30 minutes before the first real restart) nor, on motion, make the next action ask
+    // for a stream restart that no detector restart preceded. The COMMIT still happens here, before the lever, so
+    // E7 holds: a throw (or anything but a clean refusal) stays counted, and a refusal's `lastActionMono` is
+    // already `at`, so it waits the refusal ladder (DETECTOR_REFUSAL_CAP_MS), never 0. (Known, not guarded: a throw
+    // from the logger or from recordCameraEvent AFTER a real kill would still skip the steps after it, as it always
+    // did.)
     const ep = episodes.get(key) ?? {
-      camId: cam.id, attempts: 0, lastActionMono: null, lastHealthyMono: null, flowingSinceMono: null,
+      camId: cam.id, attempts: 0, refusals: 0, lastActionMono: null, lastHealthyMono: null, flowingSinceMono: null,
       lastSeenSpawnMono: null, gensWithoutData: 0, path: null,
     };
     ep.attempts += 1;
@@ -767,9 +808,14 @@ export function createDetectorWatchdog(overrides = {}) {
     inconclusiveProbe.delete(key);
 
     const publisher = requestKind === 'sub' ? 'sub-stream (Low)' : 'transcoder';
-    // `attempt(s)`, not `restart(s)`: `attempts` counts a refused kill too (#578), so it is no longer a count of
-    // restarts.
-    const dark = verdict.entryStalled ? darkFor(fresh) : `no data through ${attempts} attempt(s) and the relaunches since`;
+    // `attempt(s)`, not `restart(s)`: `attempts` also counts request-only actions, a kill refused while a request
+    // was posted and a lever that threw (#578), so it is not a count of restarts. Since #585 the refused kills that
+    // were not attempts are named apart, and only when there were any: an episode started by refusals has
+    // attempts 0, and "no data through 0 attempt(s)" would read as if nothing had been tried. Both counts are this
+    // episode's BEFORE this action (the commit above has not touched `refusals` yet).
+    const through = [attempts > 0 && `${attempts} attempt(s)`, ep.refusals > 0 && `${ep.refusals} refused stop(s)`]
+      .filter(Boolean).join(', ');
+    const dark = verdict.entryStalled ? darkFor(fresh) : `no data through ${through} and the relaunches since`;
     // The request is posted BEFORE the lever, as it always was: it asks the CAMERA watchdog for a publisher
     // restart, which does not depend on whether this detector's kill landed, and a lever that throws must not
     // swallow it.
@@ -791,6 +837,23 @@ export function createDetectorWatchdog(overrides = {}) {
         leverError = err;
       }
     }
+    // #585: classify the action, in the same synchronous block as the lever (no await between them, so no other
+    // check can see the attempt before it is taken back; perTargetRunner also runs one check per leg at a time).
+    // REFUSED: a kill was attempted, nothing was signalled, no request was posted, and the lever did not throw
+    // (the `threw` FLAG, for the reason above). Not an attempt: the count goes back to what it was before this
+    // action and the refusal ladder takes over. Anything else (something acted, or the lever threw: E7) is an
+    // attempt, and ends the run of refusals.
+    // ⚠️ Known boundary, documented in KNOWN-ISSUES.md: on a MOTION leg with a mailbox, once attempts >= 1 the
+    // request is posted BEFORE the lever, so a refused kill there is part of an action that acted (the request)
+    // and the attempt ladder doubles as before. This rule covers refusals before an episode's first attempt, and
+    // at any count on the sound leg, a camera without a mailbox, or a path the request does not match.
+    const refused = kill && !restarted && !requestKind && !threw;
+    if (refused) {
+      ep.attempts = attempts;
+      ep.refusals += 1;
+    } else {
+      ep.refusals = 0;
+    }
     // What ACTUALLY acted, for the row and the line. Both are built from this, never from `kill`, which only says
     // what was attempted.
     const lever = [restarted && 'detector', requestKind && `${requestKind} publisher`].filter(Boolean).join(' + ');
@@ -802,7 +865,8 @@ export function createDetectorWatchdog(overrides = {}) {
       `path ready, ${status.readers ?? '?'} reader(s), tracks ${(status.tracks || []).join('+') || 'none'}; ` +
       `probe: ${words[String(probe)] ?? 'inconclusive'}; ` +
       `input tap: ${fresh?.inputRecordAgeMs != null ? `last record ${seconds(fresh.inputRecordAgeMs)}s ago` : 'no record (inconclusive)'}; ` +
-      `attempt ${ep.attempts}`;
+      // A refusal is not an attempt (#585): its line counts the refusals, never an attempt that did not count.
+      (refused ? `refused ${ep.refusals} in a row (not counted as an attempt)` : `attempt ${ep.attempts}`);
     // The diagnosis line goes BEFORE the row. This is DEFENSIVE, not a case that happens today (recordCameraEvent
     // catches its own database errors): if a row ever could throw after a real kill, the one line that says what
     // was found and what was done must already be written.

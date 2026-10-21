@@ -33,7 +33,8 @@ const { EVENT } = await import('../src/lib/cameraEvents.js');
 const {
   createDetectorWatchdog, createRestartRequests, createCameraWatchdog,
   DETECTOR_CHECK_INTERVAL_MS, DETECTOR_STALE_MS, DETECTOR_STARTUP_GRACE_MS, DETECTOR_EPISODE_STALL_MS,
-  DETECTOR_RESTART_FLOOR_MS, DETECTOR_RESTART_CAP_MS, DETECTOR_RECOVERED_MS, RESTART_REQUEST_TTL_MS, MIN_KILL_AGE_MS,
+  DETECTOR_RESTART_FLOOR_MS, DETECTOR_RESTART_CAP_MS, DETECTOR_REFUSAL_CAP_MS, DETECTOR_RECOVERED_MS, RESTART_REQUEST_TTL_MS,
+  MIN_KILL_AGE_MS,
 } = wd;
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -252,6 +253,7 @@ describe('C3/C4: stale legs are restarted, healthy ones never', () => {
     assert.equal(DETECTOR_EPISODE_STALL_MS, 180_000);
     assert.equal(DETECTOR_RESTART_FLOOR_MS, 60_000);
     assert.equal(DETECTOR_RESTART_CAP_MS, 1_800_000);
+    assert.equal(DETECTOR_REFUSAL_CAP_MS, 300_000); // #585: the refusal ladder's cap
     assert.equal(DETECTOR_RECOVERED_MS, 300_000);
     assert.equal(RESTART_REQUEST_TTL_MS, 60_000);
     assert.equal(MIN_KILL_AGE_MS, 10_000);
@@ -375,10 +377,11 @@ describe('C6: path readiness (#451)', () => {
 describe('C7: the ladder is by attempt count, and the probe never vetoes it', () => {
   // Per action, the exact sequence of collaborator calls: path, probe, path again, [request], kill, event.
   // The event is LAST since #578: it records what the lever achieved, so it can only be written once the lever
-  // has answered (before, it came first and said "restarted" for a kill the lever had refused). C12b and C21a
-  // pin that the attempt COUNTS when the lever threw or refused. They do not pin where the commit sits relative
-  // to the lever: the lever is synchronous, so moving the commit to just after it is an equivalent mutation
-  // (observable only through a lever that re-enters the watchdog, which nothing does).
+  // has answered (before, it came first and said "restarted" for a kill the lever had refused). C12b pins that
+  // the attempt COUNTS when the lever threw; C21a and C22 that a refusal does not count since #585 but is still
+  // backed off. They do not pin where the commit sits relative to the lever: the lever is synchronous, so moving
+  // the commit to just after it is an equivalent mutation (observable only through a lever that re-enters the
+  // watchdog, which nothing does).
   const L1 = ['status', 'probe:video', 'status', 'kill:motion', 'event'];
   const L2 = ['status', 'probe:video', 'status', 'post', 'kill:motion', 'event'];
   for (const probe of [true, 'video-missing', null]) {
@@ -543,7 +546,9 @@ describe('C9: the episode survives the gaps, and escalates on a crash loop', () 
     // 75 + 180 = 255 is AT the limit; the first tick past it is 270.
     assert.deepEqual(h.postTimes(), [270]);
     assert.deepEqual(h.killTimes(), [75]);
-    // `attempt(s)`, not `restart(s)` (#578): the count includes a refused kill, so it is not a count of restarts.
+    // `attempt(s)`, not `restart(s)` (#578): the count includes request-only actions (this one), a kill refused
+    // while a request was posted, and a lever that threw, so it is not a count of restarts. (Since #585 a kill
+    // refused with nothing else done is not counted at all: C22e shows how such an episode is worded.)
     assert.match(h.events[1].detail, /no data through 1 attempt\(s\)/);
     assert.doesNotMatch(h.events[1].detail, /restart\(s\)/);
   });
@@ -912,7 +917,8 @@ describe('C11/C12: the recheck after the probe, and commit-before-mutate', () =>
 // that arrived meanwhile, a process too young, or nothing to signal. The watchdog used to write the camera_events
 // RESTART row and the WARN line BEFORE calling the lever and to ignore its answer, so every one of those wrote
 // "detector restarted" for a restart that never happened. The row and the line now follow the lever and name only
-// what acted. The attempt is still COMMITTED first (E7): a refused kill counts, which is documented, not hidden.
+// what acted. The attempt is still COMMITTED first (E7); since #585 a kill refused with nothing else done is then
+// taken back out of the attempt count and backed off on a refusal ladder of its own (C22, below).
 // The detector-side half (the REAL lever refusing a `returning` entry) is in motion-return-to-sub.test.js.
 describe('C21 (#578): a kill the lever refused is not recorded as a restart', () => {
   // Every line the watchdog wrote about this camera's legs (the diagnosis lines; the guard's own lines differ).
@@ -925,7 +931,7 @@ describe('C21 (#578): a kill the lever refused is not recorded as a restart', ()
     return { c, h };
   };
 
-  test('C21a: motion, lever REFUSES: no row, exactly one INFO line saying so, no WARN, the attempt still counted (E7)', async () => {
+  test('C21a: motion, lever REFUSES: no row, exactly one INFO line saying so, no WARN, not counted as an attempt but backed off', async () => {
     const { c, h } = motionHarness('c21a', () => false);
     await h.ticks(15, 120);
     assert.deepEqual(h.killTimes(), [75], 'the refused kill was retried inside the backoff floor (or never tried)');
@@ -935,10 +941,13 @@ describe('C21 (#578): a kill the lever refused is not recorded as a restart', ()
     assert.equal(lines.length, 1, `expected one diagnosis line, got ${lines.length}`);
     assert.ok(lines[0].includes('[INFO]') && lines[0].includes('lever refused'), `not an INFO "lever refused" line: ${lines[0]}`);
     assert.equal(lines.filter((l) => l.includes('[WARN]')).length, 0, 'a refused kill logged a WARN');
-    assert.match(lines[0], /no data for 75s; path ready, 2 reader\(s\), tracks H264\+Opus; probe: video packets arriving \(packets, not frames\); input tap: no record \(inconclusive\); attempt 1; lever refused: /,
-      'the INFO line lost the diagnosis the WARN carries');
-    // E7: the attempt is counted although nothing was killed, so the backoff applies (the 60 s floor after t=75).
-    assert.equal(h.wd.episodeOf(c.id, 'motion').attempts, 1);
+    // #585: the line counts the refusal, never an attempt that did not count.
+    assert.match(lines[0], /no data for 75s; path ready, 2 reader\(s\), tracks H264\+Opus; probe: video packets arriving \(packets, not frames\); input tap: no record \(inconclusive\); refused 1 in a row \(not counted as an attempt\); lever refused: /,
+      'the INFO line lost the diagnosis the WARN carries, or claims an attempt');
+    // #585: not an attempt, but a refusal, and still backed off (E7: the commit before the lever stays, so the 60 s
+    // refusal floor after t=75 applies).
+    const ep = h.wd.episodeOf(c.id, 'motion');
+    assert.deepEqual([ep.attempts, ep.refusals, ep.lastActionMono], [0, 1, h.ms(75)]);
     // ... and it expires: at t=135 the floor has elapsed and the lever is tried again.
     await h.tickAt(135);
     assert.deepEqual(h.killTimes(), [75, 135]);
@@ -957,7 +966,7 @@ describe('C21 (#578): a kill the lever refused is not recorded as a restart', ()
     assert.equal(h.wd.episodeOf(c.id, 'motion').attempts, 1);
   });
 
-  test('C21c: SOUND leg, lever REFUSES: no row, exactly one INFO line, the attempt counted', async () => {
+  test('C21c: SOUND leg, lever REFUSES: no row, exactly one INFO line, a refusal (not an attempt)', async () => {
     const c = cam('c21c', { sound: 1 });
     const h = detectorHarness([c]);
     h.wanted = () => false; // this camera runs no motion leg
@@ -969,26 +978,31 @@ describe('C21 (#578): a kill the lever refused is not recorded as a restart', ()
     const lines = linesOf(c);
     assert.equal(lines.length, 1);
     assert.ok(lines[0].includes('[INFO]') && lines[0].includes('lever refused'), lines[0]);
-    assert.match(lines[0], /sound on cam_c21c: no data for 75s; .*probe: audio flowing; .*attempt 1; lever refused: /);
-    assert.equal(h.wd.episodeOf(c.id, 'sound').attempts, 1);
+    assert.match(lines[0], /sound on cam_c21c: no data for 75s; .*probe: audio flowing; .*refused 1 in a row \(not counted as an attempt\); lever refused: /);
+    assert.doesNotMatch(lines[0], /attempt \d/, 'a refusal is worded as an attempt');
+    const ep = h.wd.episodeOf(c.id, 'sound');
+    assert.deepEqual([ep.attempts, ep.refusals], [0, 1]);
   });
 
   test('C21d: motion, attempt 2: the kill is REFUSED but the publisher request is posted: the row names only the request, one WARN says the kill was refused', async () => {
-    const { c, h } = motionHarness('c21d', () => false);
+    // Attempt 1 is a REAL kill (since #585 a refused first kill is not an attempt, so it could not lead to this
+    // attempt 2); the kill of attempt 2 is refused.
+    const answers = [true, false];
+    const { c, h } = motionHarness('c21d', () => answers.shift() ?? false);
     await h.ticks(15, 120);
-    assert.deepEqual(h.events, [], 'precondition: attempt 1 (refused) wrote a row');
+    assert.equal(h.events.length, 1, 'precondition: attempt 1 (a real kill) did not write its row');
     const from = h.calls.length;
     await h.tickAt(135);
     // The order inside an action: request, lever, then the row (written last, from what acted).
     assert.deepEqual(h.calls.slice(from), ['status', 'probe:video', 'status', 'post', 'kill:motion', 'event']);
     assert.deepEqual(h.postTimes(), [135], 'a refused kill swallowed the publisher request');
-    assert.equal(h.events.length, 1);
-    assert.equal(h.events[0].detail,
+    assert.equal(h.events.length, 2);
+    assert.equal(h.events[1].detail,
       'motion detector getting no frames (no data for 135s) - sub-stream (Low) restart requested by the detector watchdog');
-    assert.ok(!h.events[0].detail.includes('detector restarted'), 'the row still says the detector was restarted');
+    assert.ok(!h.events[1].detail.includes('detector restarted'), 'the row still says the detector was restarted');
     const lines = linesOf(c);
     assert.equal(lines.length, 2, 'a mixed outcome must be ONE line, not two');
-    assert.ok(lines[0].includes('[INFO]') && lines[0].includes('lever refused'), lines[0]);
+    assert.ok(lines[0].includes('[WARN]') && lines[0].endsWith('attempt 1; lever: detector'), lines[0]);
     assert.ok(lines[1].includes('[WARN]') && lines[1].endsWith('attempt 2; lever: sub publisher; detector kill refused'), lines[1]);
     assert.equal(h.wd.episodeOf(c.id, 'motion').attempts, 2);
   });
@@ -1009,6 +1023,184 @@ describe('C21 (#578): a kill the lever refused is not recorded as a restart', ()
       assert.ok(lines[0].includes('[INFO]') && lines[0].includes('lever refused'), lines[0]);
     });
   }
+});
+
+// ---------------------------------------------------------------------------------------------------------
+// #585: a kill the lever REFUSED (nothing signalled, no request posted, no throw) is not an attempt. Before, it was
+// committed as one (E7) and kept: every refusal doubled the attempt ladder (1, 2, 4 ... 30 minutes before the first
+// real restart), and on motion the second one asked for a stream restart that no detector restart had preceded.
+// Now the attempt is taken back once the lever has answered and counted as a refusal, which waits a ladder of its
+// own (1 minute doubling to a 5-minute cap, by refusals in a row). The commit before the lever stays, so E7 holds:
+// a throw still counts as an attempt, and a refusal is never retried without backoff.
+describe('C22 (#585): a refused kill is not an attempt, and is backed off on a refusal ladder of its own', () => {
+  const linesOf = (c) => logger.getRecent().filter((l) => l.includes(`[detector-watchdog] "${c.name}"`));
+  // A lever that answers from `answers` in order, then `rest` for every later call; the answer 'throw' throws.
+  const scripted = (answers, rest) => () => {
+    const answer = answers.length ? answers.shift() : rest;
+    if (answer === 'throw') throw new Error('lever exploded (planted)');
+    return answer;
+  };
+  // A motion leg silent since t=0 whose process stays (the fake lever never touches it): stale from t=75 on.
+  const motionHarness = (id, onKill, { path: p, withMailbox = true } = {}) => {
+    const c = cam(id);
+    const h = detectorHarness([c], { withMailbox });
+    h.onKill = onKill;
+    h.run('motion', c.id, { path: p ?? `${c.mediamtx_path}-sub`, spawned: -600, data: 0 });
+    return { c, h };
+  };
+  const REFUSAL_LADDER = [75, 135, 255, 495, 795, 1095]; // gaps of 1, 2, 4, 5 and 5 minutes
+
+  test('C22a: six refusals in a row are retried at 75, 135, 255, 495, 795 and 1095 s (1, 2, 4, 5, 5 minutes): attempts stays 0, the refusals grow', async () => {
+    const { c, h } = motionHarness('c22a', () => false);
+    const seen = []; // the episode's attempts/refusals each time it changed
+    await h.ticks(15, 1380, () => {
+      const ep = h.wd.episodeOf(c.id, 'motion');
+      const now = ep && `${ep.attempts}/${ep.refusals}`;
+      if (now && now !== seen.at(-1)) seen.push(now);
+    });
+    // The attempt ladder would have been 75, 135, 255, 495, 975 (and 1935 ...): the refusals doubled it.
+    assert.deepEqual(h.killTimes(), REFUSAL_LADDER, 'refusals were not backed off on the refusal ladder');
+    assert.deepEqual(seen, ['0/1', '0/2', '0/3', '0/4', '0/5', '0/6'], 'a refusal was counted as an attempt');
+    assert.deepEqual(h.posted, [], 'a refused kill asked for a stream restart');
+    assert.deepEqual(h.events, [], 'a refused kill wrote a Camera history row');
+  });
+
+  test('C22b: refusals on a motion detector reading the MAIN stream never ask for a stream restart: the mailbox stays empty, no row, INFO lines only', async () => {
+    const { c, h } = motionHarness('c22b', () => false, { path: 'cam_c22b' });
+    await h.ticks(15, 1380);
+    assert.deepEqual(h.killTimes(), REFUSAL_LADDER, 'precondition: the refused kills were not tried on the refusal ladder');
+    assert.deepEqual(h.posted, [], 'a refused kill asked for a transcoder restart (which interrupts live view)');
+    assert.equal(h.mailbox.size, 0);
+    assert.deepEqual(h.events, [], 'a refused kill wrote a Camera history row');
+    const lines = linesOf(c);
+    assert.equal(lines.length, REFUSAL_LADDER.length);
+    lines.forEach((line, i) => {
+      assert.ok(line.includes('[INFO]') && line.includes(`refused ${i + 1} in a row (not counted as an attempt); lever refused: `), line);
+      assert.doesNotMatch(line, /attempt \d/, `a refusal is worded as an attempt: ${line}`);
+    });
+  });
+
+  test('C22c: refusals, then a REAL kill: it is attempt 1 (no request, then the 1-minute floor), and the refusals are reset', async () => {
+    const { c, h } = motionHarness('c22c', scripted([false, false], true));
+    await h.ticks(15, 255); // refused at 75 and 135; the real kill at 255 (the refusal ladder's 2 minutes)
+    assert.deepEqual(h.killTimes(), [75, 135, 255]);
+    const ep = h.wd.episodeOf(c.id, 'motion');
+    assert.deepEqual([ep.attempts, ep.refusals], [1, 0], 'the real kill after two refusals is not attempt 1, or the refusals were kept');
+    assert.deepEqual(h.postTimes(), [], 'the first real kill asked for a stream restart: the refusals counted as attempts');
+    assert.equal(h.events.length, 1);
+    assert.ok(linesOf(c).at(-1).endsWith('attempt 1; lever: detector'), linesOf(c).at(-1));
+    // The attempt ladder starts at its FIRST step: 60 s, not 2^N minutes, and not the refusal ladder's 4 minutes.
+    await h.ticks(270, 330);
+    assert.deepEqual(h.killTimes(), [75, 135, 255, 315], 'the first real kill after refusals was not followed by the 1-minute floor');
+    assert.deepEqual(h.postTimes(), [315], 'attempt 2 did not ask for the stream restart');
+  });
+
+  test('C22d: E7 kept: after refusals, a lever that THROWS is attempt 1, ends the refusals, and cannot be retried inside the 60 s floor', async () => {
+    const { c, h } = motionHarness('c22d', scripted([false, false, 'throw'], 'throw'));
+    guards.resetGuardRateLimit();
+    await h.ticks(15, 300);
+    assert.deepEqual(h.killTimes(), [75, 135, 255], 'the throwing lever was retried inside the floor, or the refusals were not backed off');
+    const ep = h.wd.episodeOf(c.id, 'motion');
+    assert.deepEqual([ep.attempts, ep.refusals, ep.lastActionMono], [1, 0, h.ms(255)], 'a throw was not counted as an attempt (E7)');
+    assert.equal(logged('[guard:detector-watchdog:Cam c22d:motion]'), 1, 'the throw did not reach the guard');
+    const last = linesOf(c).at(-1);
+    assert.ok(last.includes('[INFO]') && last.includes('attempt 1; lever threw'), last);
+    await h.tickAt(315);
+    assert.deepEqual(h.killTimes(), [75, 135, 255, 315]);
+    assert.equal(h.wd.episodeOf(c.id, 'motion').attempts, 2);
+  });
+
+  test('C22e: H1: a refused first kill, then a crash loop: the episode still escalates to ONE stream-restart request, as attempt 1', async () => {
+    // An episode created by a refusal has attempts 0, and a crash loop's replacements die inside their grace, so
+    // none is ever entry-stalled (killed and counted). Without the episode-stall term in the request gate, this
+    // episode could never ask for the publisher restart a crash loop needs.
+    const { c, h } = motionHarness('c22e', () => false);
+    const P = `${c.mediamtx_path}-sub`;
+    await h.ticks(15, 75); // refused at 75
+    await h.ticks(90, 300, (s) => {
+      // A new process every 30 s, none of which ever delivers (each dies inside its grace), as in C9b.
+      if (s % 30 === 0) h.run('motion', c.id, { path: P, spawned: s - 2 });
+      else h.gap('motion', c.id);
+    });
+    assert.deepEqual(h.killTimes(), [75]);
+    assert.deepEqual(h.postTimes(), [270], 'a crash loop after a refused kill did not escalate exactly once, at the first tick past EPISODE_STALL');
+    const ep = h.wd.episodeOf(c.id, 'motion');
+    assert.deepEqual([ep.attempts, ep.refusals], [1, 0]);
+    // What the row and the line count is what counted: never "0 attempt(s)".
+    assert.equal(h.events.length, 1);
+    assert.equal(h.events[0].detail,
+      'motion detector getting no frames (no data through 1 refused stop(s) and the relaunches since) - sub-stream (Low) restart requested by the detector watchdog');
+    assert.ok(linesOf(c).at(-1).endsWith('attempt 1; lever: sub publisher'), linesOf(c).at(-1));
+  });
+
+  test('C22f: SOUND leg: a real kill (attempt 1), then refusals wait the REFUSAL ladder, and the next real kill is attempt 2', async () => {
+    const c = cam('c22f', { sound: 1 });
+    const h = detectorHarness([c]);
+    h.wanted = () => false; // this camera runs no motion leg
+    h.onKill = scripted([true, false, false], true);
+    h.run('sound', c.id, { path: c.mediamtx_path, spawned: -600, data: 0 });
+    // 75 real; 135 refused (the attempt ladder's 1 minute); 195 refused (the refusal ladder's 1 minute); then 315
+    // (its 2). Counting the refusals on the attempt ladder would have given 255 (ladder(1) again) or, before #585,
+    // 255 and 495 (attempts 2 and 3).
+    await h.ticks(15, 300);
+    assert.deepEqual(h.killTimes('sound'), [75, 135, 195]);
+    let ep = h.wd.episodeOf(c.id, 'sound');
+    assert.deepEqual([ep.attempts, ep.refusals], [1, 2], 'a refused sound kill was counted as an attempt');
+    await h.ticks(315, 420);
+    assert.deepEqual(h.killTimes('sound'), [75, 135, 195, 315], 'the refusals were not backed off on the refusal ladder');
+    ep = h.wd.episodeOf(c.id, 'sound');
+    assert.deepEqual([ep.attempts, ep.refusals], [2, 0]);
+    assert.equal(h.events.length, 2, 'not exactly one row per REAL kill');
+    assert.deepEqual(h.posted, []);
+    // The attempt ladder resumes at its SECOND step: 2 minutes after 315.
+    await h.tickAt(435);
+    assert.deepEqual(h.killTimes('sound'), [75, 135, 195, 315, 435]);
+  });
+
+  test('C22g: RECOVERED_MS of health forgets the refusals with the episode: the next refusal is the first in a row again', async () => {
+    const { c, h } = motionHarness('c22g', () => false);
+    await h.ticks(15, 135); // refused at 75 and 135
+    assert.equal(h.wd.episodeOf(c.id, 'motion').refusals, 2, 'precondition: two refusals');
+    // The SAME process delivers again from the tick at 150 to the one at 450 (300 s of health), then stops.
+    await h.ticks(150, 450, (s) => h.feed('motion', c.id, s));
+    assert.equal(h.wd.episodeOf(c.id, 'motion'), null, 'five minutes of health did not end the episode');
+    await h.ticks(465, 600); // last byte at 450: dark (75 s old) at 525
+    assert.deepEqual(h.killTimes(), [75, 135, 525, 585], 'the refusals after a recovery did not start the refusal ladder again (60 s)');
+    const ep = h.wd.episodeOf(c.id, 'motion');
+    assert.deepEqual([ep.attempts, ep.refusals], [0, 2]);
+    assert.ok(linesOf(c).at(-2).includes('refused 1 in a row'), linesOf(c).at(-2));
+  });
+
+  test('C22h: a lever that returns a pending Promise is a refusal, and still waits the 60 s floor: never retried on every tick', async () => {
+    // GUARD, kept on purpose: E7 holds for a refusal only because the refusal floor is above 0. The lever is
+    // synchronous today; if it ever returned a Promise, `=== true` would class every call as a refusal, and a
+    // refusal floor of 0 would then re-probe (up to 8 s) and re-signal on every 15 s tick.
+    const { h } = motionHarness('c22h', () => new Promise(() => {}));
+    await h.ticks(15, 120);
+    assert.deepEqual(h.killTimes(), [75], 'a refusal was retried inside its 60 s floor');
+    await h.tickAt(135);
+    assert.deepEqual(h.killTimes(), [75, 135]);
+    assert.deepEqual(h.posted, []);
+    assert.deepEqual(h.events, []);
+  });
+
+  test('C22i: the documented boundary: with a mailbox, once an attempt has counted, a motion action posts the request BEFORE the lever, so a refused kill there counts and the ladder doubles; with no mailbox it is a refusal', async () => {
+    // Pins a limit stated in KNOWN-ISSUES.md, so a change to it is deliberate: the mailbox half's kill and request
+    // times are the same before and after #585. The request is posted before the lever so that a lever that
+    // throws cannot swallow it (#578).
+    const { c, h } = motionHarness('c22i', scripted([true], false));
+    await h.ticks(15, 600);
+    assert.deepEqual(h.killTimes(), [75, 135, 255, 495]);
+    assert.deepEqual(h.postTimes(), [135, 255, 495]);
+    const ep = h.wd.episodeOf(c.id, 'motion');
+    assert.deepEqual([ep.attempts, ep.refusals], [4, 0]);
+    // The same lever where nothing can be posted: after the real kill at 75, refusals on the refusal ladder.
+    const { c: d, h: g } = motionHarness('c22i2', scripted([true], false), { withMailbox: false });
+    await g.ticks(15, 600);
+    assert.deepEqual(g.killTimes(), [75, 135, 195, 315, 555]);
+    const dp = g.wd.episodeOf(d.id, 'motion');
+    assert.deepEqual([dp.attempts, dp.refusals], [1, 4]);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------------------

@@ -969,13 +969,16 @@ back from the main stream to the Low one (#500), or had nothing to signal. Then 
 restart**, and the log has one line at `[INFO]` instead of `[WARN]`:
 
 ```
-[INFO] [detector-watchdog] "Nursery Cam" motion on cam_…-sub: no data for 75s; path ready, 2 reader(s), tracks H264+Opus; probe: video packets arriving (packets, not frames); input tap: last record 74s ago; attempt 1; lever refused: the detector was already being stopped, returning to the sub stream, or nothing could be signalled
+[INFO] [detector-watchdog] "Nursery Cam" motion on cam_…-sub: no data for 75s; path ready, 2 reader(s), tracks H264+Opus; probe: video packets arriving (packets, not frames); input tap: last record 74s ago; refused 1 in a row (not counted as an attempt); lever refused: the detector was already being stopped, returning to the sub stream, or nothing could be signalled
 ```
 
-It has the same diagnosis as the `[WARN]` one. The log does not say which of the reasons applied. If the
-stream restart was requested in the same step, the row says only that (*sub-stream (Low) restart requested*,
-never *detector restarted*) and the one `[WARN]` line ends `lever: sub publisher; detector kill refused`.
-Before issue #578 a refused kill was recorded as a restart anyway. If the detector's stop request raised an
+It has the same diagnosis as the `[WARN]` one. The log does not say which of the reasons applied. A refusal
+is not counted as an attempt (issue #585): the line counts the refusals in a row instead, and the next try
+waits a shorter backoff of its own (point 3 below). On a motion detector that has already had an attempt,
+the stream restart is requested in the same step as the stop; then the row says only that (*sub-stream (Low)
+restart requested*, never *detector restarted*), the one `[WARN]` line ends `lever: sub publisher; detector
+kill refused`, and the step counts as an attempt because something was done. Before issue #578 a refused kill
+was recorded as a restart anyway. If the detector's stop request raised an
 error (a bug, not a refusal), the `[INFO]` line says `lever threw` instead (in the mixed case above, the
 `[WARN]` line ends `detector kill threw`), and the error is reported separately under
 `[guard:detector-watchdog:…]` as before.
@@ -999,7 +1002,10 @@ quiet night never trips it. When one has gone dark, it:
    that stream fails too, the request for it comes at the next backoff step in point 3 (2 minutes after a
    second attempt, doubling to 30), not when the dropped one would have expired;
 3. backs off between attempts: 1, 2, 4, 8, 16, then every 30 minutes, until the detector has been healthy
-   for 5 unbroken minutes.
+   for 5 unbroken minutes. A stop request that is refused, with nothing else done in that step, is not an
+   attempt (issue #585): it does not move this backoff on, and it does not count towards the stream restart
+   in point 2. While the refusals continue, the next try comes 1, 2 and 4 minutes later, then every 5
+   minutes; the first attempt that does something (or raises an error) ends that run.
 
 For a **sound** detector, the watchdog first checks whether audio is arriving on the stream. "No audio on the
 stream" leaves the case to the audio watchdog. An inconclusive check (it could not run, or it failed; a failed
@@ -1018,8 +1024,9 @@ camera rebooting, MediaMTX down) is the camera watchdog's job, not this one's.
 | Check interval | 15 s | How often each detector is looked at. |
 | Stale after | 60 s | No output for longer than this = dark. A healthy detector writes ~5 times a second. |
 | Startup grace | 90 s | How long a new detector gets for its first output. |
-| Backoff | 1 min doubling, capped at 30 min | Between two attempts on the same detector. An attempt whose stop request was refused counts too (limits, below), so not every attempt has a Camera history row. |
-| Recovered after | 5 min | Unbroken health that forgets the attempt count. |
+| Backoff | 1 min doubling, capped at 30 min | Between two attempts on the same detector. An attempt is a step that restarted the detector, asked for a stream restart, or whose stop request raised an error, so not every attempt has a Camera history row. |
+| Retry after a refused stop | 1 min doubling, capped at 5 min | A refusal is not counted as an attempt; it does not advance the backoff above or ask for a stream restart (one exception: limits, below). Counted by refusals in a row; the next attempt ends the run. |
+| Recovered after | 5 min | Unbroken health that forgets the attempt count and the refusals. |
 | Crash-loop escalation | 3 min | Stream restart asked for when two or more relaunched detectors in a row delivered nothing, with no healthy moment since the last action (the relaunch keeps dying before anyone can judge it). |
 | Request expiry | 60 s | A stream-restart request not acted on by then is dropped. |
 | Worst case to recover | ~90-105 s | From the last frame to fresh frames, for a stuck detector on the Low stream. Up to ~150 s if it was on the main stream, because a relaunched motion detector waits up to 45 s for the Low stream first. A stuck restream takes ~5-6 minutes (detector first, then the stream). |
@@ -1078,17 +1085,20 @@ alert cannot fire sooner than **Motion cooldown** after it, whatever happened to
   can store one stray time for the deleted camera (a number, nothing else); not guarded.
 
 **Limits, stated rather than hidden:**
-- **A refused stop request still counts as an attempt (issue #578).** The attempt and its backoff are counted
-  before the request is made, so that a request that errors or hangs can never cause a retry without backoff.
-  A refusal is counted the same way, which has three consequences. (1) Every refusal in a row doubles the
-  backoff (1, 2, 4 ... 30 minutes), so a detector that cannot be signalled (one stuck "being stopped" or
-  "returning") can delay the first real restart by up to 30 minutes. (2) On a motion detector the second
-  attempt also asks for the stream restart, **even though no detector restart happened**, so a refusal can
-  bring that request one step earlier than a real restart would; on a camera whose detector reads the main
-  stream that restarts the transcoder and briefly interrupts live view, and it repeats at the later backoff
-  steps. (3) A **sound** detector's refused attempt writes no Camera history row at all (before #578 it wrote
-  a false one), so a sound detector that is repeatedly refused leaves only the `[INFO]` lines. A refusal that
-  should not feed the backoff would need a different retry rule; not done, filed as #585.
+- **A refused stop request is not an attempt, with one exception (issues #578, #585).** The attempt is
+  counted before the stop request is made, so that a request that errors or hangs can never cause a retry
+  without backoff. Once the request has been refused, with nothing else done in that step, the count is
+  taken back and the refusal waits its own backoff (1, 2, 4, then every 5 minutes). A detector that can never
+  be signalled (one that survives being killed) therefore costs at most about 288 `[INFO]` lines a day (the
+  attempt backoff's 30-minute cap gives 48), and once the cause clears the first real restart comes within
+  about 5 minutes and one 15-second check. **The exception:** on a motion detector that has already had an
+  attempt, the stream restart is asked for in the same step and *before* the stop request, so that a stop
+  request that errors cannot swallow it. A refusal there is part of a step that did something, so it counts
+  as an attempt and the backoff doubles exactly as it did before #585; on a camera whose detector reads the
+  main stream that restart briefly interrupts live view. A refusal before the first attempt, and any refusal
+  on a sound detector, is not counted. A **sound** detector's refused stop writes no Camera history row (before
+  #578 it wrote a false one), so a sound detector that is repeatedly refused leaves only the `[INFO]` lines.
+  The 5-minute cap was chosen, not measured: no install has been seen with a refusal that lasts.
 - **The minutes before the restart are still lost.** Since issue #508 the sleep numbers report those dark
   minutes as unknown ("No data") rather than as quiet sleep (previous section), so a restart shortens a hole
   in the night; it does not fill it.
