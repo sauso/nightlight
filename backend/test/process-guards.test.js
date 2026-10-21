@@ -617,6 +617,19 @@ describe('index.js wiring', () => {
 
   test('the crash backstop is installed at startup and released once listening', () => {
     assert.match(indexSrc, /^installCrashGuards\(\);$/m, 'installCrashGuards() is not called at top level');
+    // #555 item 7 / #543: imports mention these names too, so check call tokens after removing comments.
+    // A startup task can fail before the backstop exists if any call moves above installation.
+    const startupCalls = stripCommentsOnly(indexSrc);
+    const guardCall = /\binstallCrashGuards\s*\(/.exec(startupCalls);
+    assert.ok(guardCall, 'installCrashGuards() call is missing');
+    for (const name of [
+      'writeMediamtxConfig', 'startMediaMTX', 'refreshMqttConnection', 'startSensorSampler',
+      'startActivityTracker', 'startSleepJob', 'startWakeWatcher', 'startObservationLog',
+    ]) {
+      const taskCall = new RegExp(`\\b${name}\\s*\\(`).exec(startupCalls);
+      assert.ok(taskCall, `${name}() call is missing`);
+      assert.ok(guardCall.index < taskCall.index, `installCrashGuards() must precede ${name}()`);
+    }
     assert.match(indexSrc, /markBootComplete\(\);/, 'markBootComplete() is never called — every startup fault stays fatal');
     // Order matters: releasing the boot gate before the server binds would reinstate the exact hole.
     assert.ok(

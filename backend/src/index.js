@@ -59,6 +59,14 @@ import {
   createDetectorWatchdog, createRestartRequests, DETECTOR_CHECK_INTERVAL_MS,
 } from './lib/cameraWatchdogs.js';
 
+// Before anything can fail: a background task that throws must not take the monitor down at 3am.
+// Install this before startup work (#555 item 7 / #543), including MediaMTX config and the first
+// background task; otherwise a failure there occurs before the backstop exists. The individual call
+// sites are guarded too (see safeInterval, and the per-camera guard the watchdogs in
+// lib/cameraWatchdogs.js get from perTargetRunner). See lib/processGuards.js for why an unattended
+// monitor deliberately does NOT follow Node's exit-on-uncaught guidance.
+installCrashGuards();
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
 
@@ -83,13 +91,6 @@ startActivityTracker(); // bucket motion/sound activity per minute (Stage-2 slee
 startSleepJob(); // compute the nightly per-child sleep summary from that timeline
 startWakeWatcher(); // record a short clip when a wake starts — deliberately WITHOUT alerting
 startObservationLog(); // the 15-minute `[obs]` line per camera and leg (issue #373; KNOWN-ISSUES.md)
-
-// Before anything can fail: a background task that throws must not take the monitor down at 3am.
-// The individual call sites are guarded too (see safeInterval, and the per-camera guard the watchdogs in
-// lib/cameraWatchdogs.js get from perTargetRunner); this is the backstop for the ones nobody has thought
-// of. See lib/processGuards.js for why an unattended monitor deliberately does NOT follow Node's
-// exit-on-uncaught guidance.
-installCrashGuards();
 
 const app = express();
 
