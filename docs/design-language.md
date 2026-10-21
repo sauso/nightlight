@@ -476,6 +476,11 @@ be at least 14px apart** or their enlarged areas overlap and a tap lands on the 
 three inner buttons (Record, Picture-in-Picture, PTZ) sit 54px from the edge, not the 48px they used to: the
 visible change is 6px more space between those pairs. The icons did not change size.
 
+**Keyboard reorder (#381).** Focus a camera tile's reorder handle. Press Space or Enter to pick it up,
+use the arrow keys to move it, then press Space or Enter to place it. Press Escape to cancel. The handle
+keeps the global focus ring, and screen readers hear the camera's name and its position among the tiles
+shown on the grid. A disabled camera stays in the saved order but is not counted in that spoken position.
+
 ### Not-found page (`pages/NotFound.jsx`, #379)
 The last route in the shell's route table (`path="*"`), so an address that matches no screen shows the app
 chrome around a short page instead of a blank one: header **"Page not found"**, one sentence, and a
