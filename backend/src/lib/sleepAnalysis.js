@@ -501,10 +501,16 @@ function windowBoundsUtc(nightDate, tz, startHM, endHM) {
 // ways: too narrow for a window opening 00:00-02:59, whose lookbehind reaches the PREVIOUS date (the app's
 // own asleep time was refused), and too wide for a hand-made echo, which could put a typed time on the
 // following evening. Every child gets its own window, in whatever timezone the install is set to.
-export function reportableSpanMs(childId, nightDate) {
-  const tz = appSettings().timezone || 'UTC';
-  const cfg = childSleepConfig(childId);
-  const { startUtc, endUtc } = windowBoundsUtc(nightDate, tz, cfg.start, cfg.end);
+//
+// `ctx` (#361 PR 4b): the saved scoring context the review page showed the night with (displayContextFor, below),
+// or null for today's settings. With one, the timezone and window are the CONTEXT's, because the times the page
+// echoes were computed with them: after a window or timezone change, a replayed wake of 12:05 can lie outside
+// today's span, and the noon rule would then file the person's "That's right" a day early (or refuse it as
+// "asleep after up"). Null is exactly the old behaviour.
+export function reportableSpanMs(childId, nightDate, ctx = null) {
+  const tz = ctx ? ctx.tz : (appSettings().timezone || 'UTC');
+  const win = ctx ? ctx.window : childSleepConfig(childId);
+  const { startUtc, endUtc } = windowBoundsUtc(nightDate, tz, win.start, win.end);
   return { fromMs: startUtc.getTime() - ONSET_LOOKBEHIND_MS, toMs: endUtc.getTime() + WAKE_LOOKAHEAD_MS };
 }
 
@@ -751,12 +757,13 @@ export function quietStretchBeforeExit(cribAct, fromIdx, gapStart, minLen, maxTr
 // Step 1 (#808) stores, beside every night, the camera, timezone, window and rules version that produced it
 // (`scoring_context`, written by scoringContextFor below). Step 2, this block, is the reading side:
 // parseScoringContext turns a stored record into a context, currentScoringContext says what today's settings
-// would be, and computeNight accepts a context in place of today's settings. Two callers pass one: the admin
+// would be, and computeNight accepts a context in place of today's settings. Three callers pass one: the admin
 // Recompute route's opt-in `context=stored` (#361 PR 3; routes/children.js, planning/361-scoring-context.md
 // section 9), where a stored number moves only when an admin ticks "use the settings this night was saved with"
-// and saves; and the sleep detail page's `context=auto` (#361 PR 4a, computeNightForDisplay below), which SHOWS a
-// finished night with the settings it was saved with and stores nothing. Every other compute (the nightly job,
-// the morning review, /sleep/live, the review's store-first) still passes none.
+// and saves; the sleep detail page's `context=auto` (#361 PR 4a, computeNightForDisplay below), which SHOWS a
+// finished night with the settings it was saved with and stores nothing; and the morning review (#361 PR 4b,
+// displayContextFor below), which follows the detail page's decision. Every other compute (the nightly job,
+// /sleep/live, the review's store-first) still passes none.
 
 // `HH:MM` of what parseHm makes of a saved window time: the EFFECTIVE time, never the raw text (see
 // scoringContextFor for why). One helper, so the writer and currentScoringContext cannot spell it twice.
@@ -909,14 +916,14 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // which camera a stored night came from. ⚠️ This is read on EVERY compute, so changing the primary
   // re-scores any night that is computed again, not only new ones: the nightly job's re-store of the
   // last completed night (until ~3h after its window), storeNightBeforeCorrection, the admin Recompute
-  // button, and every fresh read (the morning review, /sleep/live, and the detail page except where the
+  // button, and every fresh read (/sleep/live, and the detail page and the morning review except where the
   // exception below applies). A stored row that is
   // never re-stored keeps the numbers of the camera it was scored from. Since #361 the stored row records
   // that camera's id in `scoring_context` (see scoringContextFor), and a caller can hand that record back as
-  // `context` to score from the same camera again (below). Two do: the admin Recompute's opt-in (#361 PR 3), and
+  // `context` to score from the same camera again (below). Three do: the admin Recompute's opt-in (#361 PR 3),
   // the sleep detail page for a finished night whose saved settings differ from today's (#361 PR 4a,
-  // computeNightForDisplay); neither the nightly job nor the morning review does, so they still resolve the
-  // camera afresh. Rows stored before #361 have no record (NULL).
+  // computeNightForDisplay), and the morning review for the same nights (#361 PR 4b, displayContextFor); the
+  // nightly job does not, so it still resolves the camera afresh. Rows stored before #361 have no record (NULL).
   //
   // Why one and not all (owner's call, 2026-08-29): the old code ORed every camera's timeline together,
   // so a minute counted as active if ANY camera saw something. That is not the conservative choice it
@@ -2602,7 +2609,8 @@ export function computeNightForDisplay(childId, nightDate, { includeTimeline = f
   };
 }
 
-// Rules 1-5 above: scoringContextChoice's answer when the saved settings would be replayed, else null.
+// Rules 1-5 above: scoringContextChoice's answer when the saved settings would be replayed, else null. `raw` is the
+// row's `scoring_context` exactly as stored, for displayContextFor's key.
 function savedSettingsToShow(childId, nightDate) {
   if (!childSleepConfig(childId).track) return null;
   const row = displayRowStmt.get(childId, nightDate);
@@ -2615,7 +2623,35 @@ function savedSettingsToShow(childId, nightDate) {
   if (currentNightDate(childId) === nightDate) return null;
   const choice = scoringContextChoice(childId, row.scoring_context);
   if (choice.stored_state !== 'ok' || !choice.differs) return null;
-  return choice;
+  return { ...choice, raw: row.scoring_context };
+}
+
+// --- #361 PR 4b: the morning review uses the same settings as the detail page ---------------------------------
+//
+// Why (owner, #361, "Do both", 2026-10-21): after PR 4a the detail page works a finished night out with the camera,
+// timezone and window it was saved with, but the review page ("Was this night right?") still used today's. After a
+// window, timezone or camera change its "What we recorded" differed from the page, its photo list came from today's
+// cameras and today's timezone's noon to noon, and the save-time check of an echoed time (reportableSpanMs) used
+// today's window, which could file a replayed time a day out.
+//
+// So this is the ONE decision for the review, and it is the detail page's: `savedSettingsToShow`, rules 1-5 above, no
+// rule of its own. Returns `{ context, key }` when the page would show the saved settings (`context` the parsed saved
+// context, `key` the row's `scoring_context` string exactly as stored), else null (today's settings). One decision
+// serves all four uses, so they cannot disagree with each other or with the detail page: the review's `computed`
+// numbers, the photo list (which camera set, whose noon to noon), the frame ids and verdicts a save may name (they
+// are validated against that same list), and the span an echoed time is trusted in (reportableSpanMs). Reads only.
+//
+// `key` exists for the PUT (plan R1): the review route sends it with the page and the page sends it back, and a save
+// whose key no longer matches is refused (409 `settings_changed`) BEFORE anything is written. Without that, a night
+// shown with its saved 00:00-08:00 window (asleep just after midnight, up at 07:00) and re-saved with today's
+// 19:00-07:00 before the save is checked against today's span: both times fall outside it, the noon rule dates BOTH a
+// day later, they still pass the ordering checks, and a wrong night is stored (review-stored-context.test.js).
+// The exact string, not the parsed fields: any re-save of the night (the nightly job, a Recompute, a review's
+// store-first) is a reason to look again, and string equality cannot be fooled by key order. ⚠️ KNOWN LIMIT: with
+// no usable saved context the key is '' before and after a settings change, so the PUT cannot see that change.
+export function displayContextFor(childId, nightDate) {
+  const choice = savedSettingsToShow(childId, nightDate);
+  return choice ? { context: choice.stored, key: choice.raw } : null;
 }
 
 // ROADMAP §1.6: what the parent was actually TOLD about a night's wake time, so a later recompute can

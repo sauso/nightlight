@@ -310,7 +310,7 @@ was scored from, `null` when none was enabled; never its name, address or creden
 used, or `UTC` when none is set), `window` (`start`/`end` as `HH:MM`, the window actually used, so a malformed
 saved time is stored as the `19:00` it scored with) and `algo` (`SCORING_ALGO` in `lib/sleepAnalysis.js`). It is
 written for every status, `off` and `no_data` included. Its readers are the admin Recompute's stored-settings
-option and the sleep detail page's `context=auto` (both below); otherwise it is one more key, a string, on the
+option, the sleep detail page's `context=auto` and the morning review (all below); otherwise it is one more key, a string, on the
 endpoints that return the raw stored row
 (`GET /api/children/:id/sleep`, `GET /api/children/:id/sleep/:date?stored=1`, and `GET
 /api/children/:id/sleep/live` when it serves last night's saved row). Nights stored before the column existed read `NULL` ("unknown provenance"): there is no automatic
@@ -350,9 +350,9 @@ context })` stores it, and `scoringContextFor` writes the replayed camera, timez
 `would_blank_notified_wake`; before any of them the route answers `409 context_changed` when `expect_context` is not the
 row's current string (the dialog echoes what it was shown, so a re-save from another phone cannot be overwritten with
 numbers nobody previewed). `?stored=1` adds `contexts` (`scoringContextChoice`: `stored_state`, both contexts, `differs`
-on camera, timezone or effective window, live camera names). Every other caller (the nightly job, the review's
-store-first, the morning review, `/sleep/live`, the demo seed) passes no context, so the nightly job re-stores a
-provisional last night with today's settings: a stated limit, pinned by a test.
+on camera, timezone or effective window, live camera names). The detail page and the morning review (below) also pass
+one; every other caller (the nightly job, the review's store-first, `/sleep/live`, the demo seed) passes none, so the
+nightly job re-stores a provisional last night with today's settings: a stated limit, pinned by a test.
 
 **The sleep detail page shows a finished night with its saved settings** (#361 step 4a; tests in
 `backend/test/display-stored-context.test.js`, the page in `frontend/src/pages/SleepDetail.jsx`, its URL builder in
@@ -373,6 +373,21 @@ caregiver's `store=1` is a read and honours it) calls mode `'auto'`; `context=cu
 `context=stored` is the forced replay above, without `scoring_view`. The page sends `context=auto`, keeps the person's
 switch to today's (`'current'`) for that child and night only, and the Recompute dialog, when the page shows the saved
 settings, reads its own today's baseline (`?context=current&raw=1`).
+
+**The morning review uses the same settings as the detail page** (#361 step 4b; tests in
+`backend/test/review-stored-context.test.js`). `displayContextFor(childId, nightDate)` in `lib/sleepAnalysis.js`
+returns the detail page's decision (the same rules as `computeNightForDisplay`'s mode `'auto'`, no rule of its own)
+as `{ context, key }`, or `null` for today's settings. `lib/sleepReviews.js` uses that one answer for everything
+the review reads: `getNightReview`'s `computed` (a replay with the context), and `transitionsFor`, which is the
+saved zone's noon to noon over the child's enabled cameras plus the saved camera ONLY while its `child_id` is still
+this child (a camera moved to another child, or deleted, contributes nothing: its events are not this child's to
+show or label). That one list is what the page shows, what a save's frame ids and verdicts are checked against, and
+the card's count. The route passes the context to `reportableSpanMs(childId, date, context)`, so an echoed time is
+trusted in the span it was computed in. `GET /review/:date` adds `settings: { key, tz }` (`key` the exact
+`scoring_context` string when the saved settings are used, else `''`); a `PUT` carrying `settings_key` answers
+`409 settings_changed`, before anything is written, when the key it would compute now differs, and one without it
+(a page from before) is not checked. Typed times keep today's zone (`localHmToUtcSql`), the zone the page shows.
+Not covered by the key: a night with no usable saved context, whose key is `''` before and after a settings change.
 
 **Deleting a child or a camera is `lib/entityPurge.js`** (#540, #554), and it deletes everything that belongs to
 it. Most of the history tables have **no foreign key** to `children` / `cameras` (deliberately: `bed_transitions`,

@@ -1,6 +1,7 @@
 import db from '../db.js';
 import {
   computeNight, lastCompletedNightDate, childTracksSleep, zonedToUtc, toSqlUtc, storeNightBeforeCorrection,
+  displayContextFor,
 } from './sleepAnalysis.js';
 import {
   getBedTransitions, getActivitySamples, getPriorTransitionType, setTransitionVerdict, setTransitionReason,
@@ -68,6 +69,13 @@ const upsertReviewStmt = db.prepare(
 const camsForChild = db.prepare(
   'SELECT id, name FROM cameras WHERE child_id = ? AND disabled = 0 ORDER BY sort_order, id'
 );
+// The camera a night was SAVED from, when the review shows the saved settings (#361 PR 4b), but only while it still
+// belongs to THIS child (enabled or not). This is an ownership boundary, not a display choice: a context names a
+// camera by id, and that id may since have been given to another child (its events are then the other child's
+// nights) or deleted. Listing it would show another child's photos, and since the same list validates the frame ids
+// and verdicts a save may name, it would let this child's review label another child's events. A turned-off camera of
+// this child is the case the saved settings exist for, so it is included.
+const contextCamForChild = db.prepare('SELECT id, name FROM cameras WHERE id = ? AND child_id = ?');
 
 const appTz = () => db.prepare("SELECT timezone FROM settings WHERE id = 'app'").get()?.timezone || 'UTC';
 
@@ -83,8 +91,11 @@ const appTz = () => db.prepare("SELECT timezone FROM settings WHERE id = 'app'")
 // HAPPENED, and an event landing outside the window is exactly the sort of thing worth being able to
 // see. `zonedToUtc` carries the DST refinement pass, and `d + 1` is normalised by Date.UTC, so month
 // and year ends need no special case.
-function nightBounds(nightDate) {
-  const tz = appTz();
+//
+// `tz` (#361 PR 4b): the zone of the settings the review shows the night with, the saved one when it uses the saved
+// settings (transitionsFor). The night's date key was made in that zone, so its noon to noon is the night's; today's
+// zone after a timezone change would shift the list by the difference and drop the edge events.
+function nightBounds(nightDate, tz = appTz()) {
   const [y, mo, d] = nightDate.split('-').map(Number);
   return {
     startSql: toSqlUtc(zonedToUtc(y, mo - 1, d, 12, 0, tz)),
@@ -123,7 +134,8 @@ function nightBounds(nightDate) {
 //
 // ⚠️ THE ECHO IS THE CLIENT'S WORD, so it is only taken for a time the detector could actually have shown
 // for this night: inside `span`, the night's own window opened ONSET_LOOKBEHIND_MS early and closed
-// WAKE_LOOKAHEAD_MS late (sleepAnalysis.reportableSpanMs; the route passes it). Anything outside that span
+// WAKE_LOOKAHEAD_MS late (sleepAnalysis.reportableSpanMs; the route passes it, built from the same settings the
+// page showed the night with, #361 PR 4b). Anything outside that span
 // is not an echo of this night, and the noon rule decides. Fix round 3 bounded it by CALENDAR DAY (the
 // night's date or the next) and fix round 4 (2026-10-02, Opus #1 + Codex #1, both reproduced by a test)
 // found that wrong in both directions: a window opening between 00:00 and 02:59 reports an asleep time on
@@ -143,6 +155,9 @@ export function localHmToUtcSql(nightDate, hhmm, shownAt = null, span = null) {
   if (hhmm == null || hhmm === '') return null;
   const m = HHMM.exec(String(hhmm));
   if (!m) return undefined;
+  // Today's zone even when the review shows a night with its SAVED settings (#361 PR 4b): the page shows every
+  // time in today's zone, so a typed time and the echo are read on the clock the person saw. Known limit (docs): after
+  // a timezone change, the noon rule for a typed time is today's noon, not the saved zone's.
   const tz = appTz();
   const [y, mo, d] = nightDate.split('-').map(Number);
   const shown = localReading(shownAt, tz);
@@ -238,10 +253,21 @@ export function parseTransitionId(v) {
   return NaN;
 }
 
-function transitionsFor(childId, nightDate) {
+// THE review's camera set and span, for every caller: the list the page shows, the frame ids and verdicts a save may
+// name (transitionInstant, applyVerdicts), and the card's count (pendingReview). `shown` is displayContextFor's answer
+// (#361 PR 4b): with the saved settings, the bounds are the saved zone's noon to noon and the saved camera joins the
+// child's enabled cameras if it still belongs to this child (contextCamForChild says why only then). Computed here by
+// default so every caller gets the same answer the review page got; getNightReview passes the one it already has, so
+// one response cannot mix two answers (the decision can flip between two calls, at the window's end).
+function transitionsFor(childId, nightDate, shown = displayContextFor(childId, nightDate)) {
+  const ctx = shown?.context ?? null;
   const cams = camsForChild.all(childId);
+  if (ctx?.camera_id != null && !cams.some((c) => c.id === ctx.camera_id)) {
+    const own = contextCamForChild.get(ctx.camera_id, childId);
+    if (own) cams.push(own);
+  }
   const byId = new Map(cams.map((c) => [c.id, c.name]));
-  const { startSql, endSql } = nightBounds(nightDate);
+  const { startSql, endSql } = nightBounds(nightDate, ctx ? ctx.tz : appTz());
   const camIds = cams.map((c) => c.id);
   const rows = getBedTransitions(camIds, startSql, endSql);
   // A goodnight kiss (or similar) can read as `out_of_bed` seconds after a genuine `into_bed` — see
@@ -313,11 +339,26 @@ export function reviewForBrowser(row) {
 
 // Everything the review screen needs for one night: what the app currently says, what a person has
 // already said, and every recorded transition with whether it has a frame and a verdict.
+//
+// "What the app currently says" uses the SAME settings as the sleep detail page (#361 PR 4b): a finished night whose
+// saved camera, timezone or window differ from today's is worked out with the saved ones, so the times a person
+// confirms here are the ones the detail page and the child's card show. One decision (displayContextFor) for the
+// whole answer, the numbers and the list alike. Equivalent to the detail page's computeNightForDisplay in mode
+// 'auto' for every key read here; called with the decision rather than through that helper so the numbers and the
+// list cannot come from two different answers.
+//
+// `settings` (additive; plan R1 and R2): `key` is the saved `scoring_context` string when the saved settings are
+// used, else '' (today's). The page sends it back with a save, which is refused if it no longer matches (the
+// route's `settings_changed`). `tz` is the zone the list and the night's date were worked out in (the saved one, or
+// today's), which the page groups "Before bedtime" in. The times on the page stay in today's zone, like the detail
+// page's.
 export function getNightReview(childId, nightDate) {
-  const computed = computeNight(childId, nightDate);
+  const shown = displayContextFor(childId, nightDate);
+  const computed = computeNight(childId, nightDate, { context: shown?.context ?? null });
   return {
     child_id: childId,
     night_date: nightDate,
+    settings: { key: shown?.key ?? '', tz: shown ? shown.context.tz : appTz() },
     computed: {
       status: computed.status,
       onset_at: computed.onset_at ?? null,
@@ -334,7 +375,7 @@ export function getNightReview(childId, nightDate) {
     // reaches the screen without a change here, and none is ever dropped from what an open page reads.
     // The one exception is the answerer's account id, which never leaves the server (reviewForBrowser).
     review: reviewForBrowser(getReviewStmt.get(childId, nightDate)),
-    transitions: transitionsFor(childId, nightDate),
+    transitions: transitionsFor(childId, nightDate, shown),
   };
 }
 

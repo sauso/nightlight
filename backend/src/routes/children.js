@@ -9,7 +9,7 @@ import { primaryCameraRowFor } from '../lib/primaryCamera.js';
 import {
   getStoredNights, computeNight, computeAndStoreNight, currentNightDate, lastCompletedNightDate,
   childTracksSleep, sleepInsights, nightIsLocked, storeNightBeforeCorrection, reportableSpanMs, MIN_COVERAGE_FRAC, EMPTY_MIN_COVERAGE_FRAC,
-  parseScoringContext, scoringContextChoice, computeNightForDisplay,
+  parseScoringContext, scoringContextChoice, computeNightForDisplay, displayContextFor,
 } from '../lib/sleepAnalysis.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
 import { reconcileClipRing } from '../lib/clipCapture.js';
@@ -598,6 +598,31 @@ router.put('/:id/review/:date', (req, res) => {
     true_onset_local: onsetHm, true_wake_local: wakeHm, true_in_bed_local: inBedHm, note, dismissed, verdicts, reasons,
   } = body;
 
+  // ⚠️ A SAVE IS BOUND TO THE SETTINGS THE PAGE WAS BUILT WITH (#361 PR 4b, plan R1). The review works a finished
+  // night out with its saved settings or today's (displayContextFor, the detail page's decision), and everything below
+  // reads that same decision: the span an echoed time is trusted in, and the list a frame id or verdict must belong to.
+  // If the answer changed between the page's GET and this PUT (the window or timezone was edited, the camera changed,
+  // or the night was saved again), the page's times were worked out with settings this save would not use. Reproduced
+  // by review-stored-context.test.js ("a page shown with the saved settings, then the night re-saved with today's"): a
+  // night shown with its saved 00:00-08:00 window (asleep just after midnight, up at 07:00) and re-saved with today's
+  // 19:00-07:00 before the save puts both times outside today's span; the noon rule dates BOTH a day later, they pass
+  // every ordering check, and a wrong night is stored. So the page sends back the `settings.key` it was given, and a
+  // mismatch is a 409 before anything is written (a 4xx, so the message survives Cloudflare). An absent key is a page
+  // loaded before this existed: no check, exactly as before (never break an open client; the same test pins what such a
+  // page then stores). A key that is not text is a client bug, refused like every other malformed field.
+  // ⚠️ KNOWN LIMIT (docs/sleep-tracking.md, "A night whose settings have changed"): a night with no usable saved
+  // context has the key '' before and after a settings change, so this check cannot see the change there.
+  const shown = displayContextFor(req.params.id, req.params.date);
+  if (body.settings_key !== undefined) {
+    if (typeof body.settings_key !== 'string') return res.status(400).json({ error: 'settings_key must be text' });
+    if (body.settings_key !== (shown?.key ?? '')) {
+      return res.status(409).json({
+        reason: 'settings_changed',
+        error: 'The settings for this night changed while you were reviewing. Reload the page and check your times.',
+      });
+    }
+  }
+
   // Anything not a string reaches better-sqlite3 as an unbindable value and comes back as a 500 whose
   // body Cloudflare strips — the user would see nothing at all. Same reasoning as the verdict check.
   // ⚠️ `typeof` first, not `UTC_TIMESTAMP.test(String(v))` (fix round 3, 2026-10-02, Opus #3 / Codex #2,
@@ -618,8 +643,9 @@ router.put('/:id/review/:date', (req, res) => {
   // exactly as shown is saved as the instant shown rather than dated by the noon rule (fix round 3, Opus #1:
   // a detected wake after local noon was refused as "before the asleep time"). See localHmToUtcSql. Nothing is
   // echoed for "in bed", which keeps the noon rule. The echo counts only inside the span this child's detector
-  // can report for the night (fix round 4, Opus #1 + Codex #1: a calendar-day bound was wrong both ways).
-  const echoSpan = reportableSpanMs(req.params.id, req.params.date);
+  // can report for the night (fix round 4, Opus #1 + Codex #1: a calendar-day bound was wrong both ways), in the
+  // settings the page showed the night with (#361 PR 4b: `shown`, checked above).
+  const echoSpan = reportableSpanMs(req.params.id, req.params.date, shown?.context ?? null);
   const onsetHm2 = localHmToUtcSql(req.params.date, onsetHm, body.computed_onset_at, echoSpan);
   const wakeHm2 = localHmToUtcSql(req.params.date, wakeHm, body.computed_wake_at, echoSpan);
   const inBedHm2 = localHmToUtcSql(req.params.date, inBedHm);

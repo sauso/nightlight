@@ -9042,7 +9042,7 @@
   {
     "label": "in-bed/lock fix4 S7: the route passes no span (the round-3 calendar bound again: a hand-made echo moves a time to the next evening)",
     "file": "backend/src/routes/children.js",
-    "find": "  const echoSpan = reportableSpanMs(req.params.id, req.params.date);",
+    "find": "  const echoSpan = reportableSpanMs(req.params.id, req.params.date, shown?.context ?? null);",
     "replace": "  const echoSpan = null;",
     "expect": "killed",
     "tests": ["review-in-bed-and-lock.test.js"],
@@ -22615,5 +22615,41 @@
     "expect": "killed",
     "tests": ["display-stored-context.test.js"],
     "namePattern": "the timeline is kept in both modes"
+  },
+  {
+    "label": "#361 PR4b: the review lists (and accepts) the saved camera after it moved to another child",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "const contextCamForChild = db.prepare('SELECT id, name FROM cameras WHERE id = ? AND child_id = ?');",
+    "replace": "const contextCamForChild = db.prepare('SELECT id, name FROM cameras WHERE id = ? AND ? IS NOT NULL');",
+    "expect": "killed",
+    "tests": ["review-stored-context.test.js"],
+    "namePattern": "the saved camera is listed, accepted and counted"
+  },
+  {
+    "label": "#361 PR4b: the review's list ignores the saved timezone (today's noon to noon)",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  const { startSql, endSql } = nightBounds(nightDate, ctx ? ctx.tz : appTz());",
+    "replace": "  const { startSql, endSql } = nightBounds(nightDate, appTz());",
+    "expect": "killed",
+    "tests": ["review-stored-context.test.js"],
+    "namePattern": "timezone change: the list covers"
+  },
+  {
+    "label": "#361 PR4b: a review save is not refused when the settings it was built with changed",
+    "file": "backend/src/routes/children.js",
+    "find": "    if (body.settings_key !== (shown?.key ?? '')) {",
+    "replace": "    if (false) {",
+    "expect": "killed",
+    "tests": ["review-stored-context.test.js"],
+    "namePattern": "settings_changed"
+  },
+  {
+    "label": "#361 PR4b: \"Before bedtime\" is judged in today's zone, not the zone the list was built in",
+    "file": "frontend/src/pages/NightReview.jsx",
+    "find": "  const groupTz = data.settings?.tz ?? tz;",
+    "replace": "  const groupTz = tz;",
+    "expect": "killed",
+    "tests": ["MorningReview.test.jsx"],
+    "namePattern": "judged in that zone"
   }
 ]
