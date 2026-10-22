@@ -112,9 +112,12 @@ paths:
     } 'camera readiness and recording buffer'
     $snapshot = Invoke-WebRequest -UseBasicParsing "$base/api/cameras/$($camera.id)/snapshot" -Headers $script:Headers -TimeoutSec 30
     Assert-True ($snapshot.RawContentLength -gt 500) 'No decoded snapshot was returned'
-    $hlsUrl = "$base/hls/$($camera.mediamtx_path)-hls/index.m3u8"
+    # Match the browser player: HLS uses a short-lived media token in the URL,
+    # including when redirects/segment requests cannot carry a session header.
+    $media = Api '/api/auth/media-token' 'POST'
+    $hlsUrl = "$base/hls/$($camera.mediamtx_path)-hls/index.m3u8?token=$([Uri]::EscapeDataString($media.token))"
     Wait-Until {
-        (Invoke-WebRequest -UseBasicParsing $hlsUrl -Headers $script:Headers -TimeoutSec 10).Content -match '#EXTM3U'
+        (Invoke-WebRequest -UseBasicParsing $hlsUrl -TimeoutSec 10).Content -match '#EXTM3U'
     } 'the HLS playlist'
 
     $null = Api "/api/cameras/$($camera.id)/record/start" 'POST'
