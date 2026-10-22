@@ -135,7 +135,11 @@ export function pickBestProfile(profiles) {
 // Exported for tests to pin the optional low-quality stream selection.
 export function pickSubProfile(profiles, best) {
   const bestToken = profileToken(best);
-  const others = profiles.filter((p) => profileToken(p) !== bestToken);
+  // #824, found by the #826 table test: a metadata-only profile has no video, so its stream
+  // address cannot be used for the Low-quality feed.
+  const others = profiles.filter((p) =>
+    profileToken(p) !== bestToken && typeof p?.videoEncoderConfiguration === 'object' && p.videoEncoderConfiguration !== null
+  );
   if (others.length === 0) return null;
   return others.sort((a, b) => {
     const ar = a?.videoEncoderConfiguration?.resolution || {};

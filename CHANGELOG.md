@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **A camera that lists a profile without video no longer loses its Low-quality stream option (#824).** When a separate video profile is available, Nightlight now uses it for that option. Found in tests; not seen on a real camera.
+
 ## [0.42.1] - 2026-10-21
 
 ### Changed
