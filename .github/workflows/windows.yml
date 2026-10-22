@@ -1,0 +1,46 @@
+name: Windows setup
+
+on:
+  push:
+    branches: [dev, main]
+    paths: ['windows/**', '.github/workflows/windows.yml']
+  pull_request:
+    paths: ['windows/**', '.github/workflows/windows.yml']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    name: Windows setup (${{ matrix.shell }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Install.cmd uses the Windows-bundled 5.1; also support PowerShell 7.
+        shell: [powershell, pwsh]
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test installer actions and failure paths
+        run: ./windows/test/setup.tests.ps1
+      - name: Validate published ports and persistent storage with real Compose
+        run: ./windows/test/compose.tests.ps1
+      - name: Package the Windows setup
+        if: matrix.shell == 'powershell'
+        run: |
+          Compress-Archive -Path windows/Install.cmd, windows/Setup-Nightlight.ps1, windows/docker-compose.yml, windows/README.md -DestinationPath Nightlight-Windows-Setup.zip
+      - uses: actions/upload-artifact@v4
+        if: matrix.shell == 'powershell'
+        with:
+          name: Nightlight-Windows-Setup
+          path: Nightlight-Windows-Setup.zip
+          if-no-files-found: error
+          retention-days: 30

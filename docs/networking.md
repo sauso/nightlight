@@ -4,12 +4,14 @@ Nightlight is made for your home network first: add your cameras, watch them fro
 
 ## Networking modes
 
-Nightlight needs its own routable IP on your LAN so WebRTC has no NAT/ICE trouble: MediaMTX advertises that IP to browsers. There are two supported ways to provide one:
+Low-latency video needs a reachable LAN address and UDP port: MediaMTX advertises them to browsers. On Linux there are two ways to provide them:
 
 - **Host networking (the default, and the simplest).** The container shares the host's IP (`--network host`, or `<Network>host</Network>` in the Unraid template). There's nothing to configure; it's what the quick start and the template use. The trade-off is that it binds its ports (4000, plus MediaMTX's) directly on the host, which clashes if something else there already uses them.
 - **A dedicated LAN IP (ipvlan / macvlan).** Put the container on a Docker `ipvlan` or `macvlan` network so it gets its **own** address on your LAN, separate from the host. Nightlight detects the container's IP and has MediaMTX advertise it, so WebRTC works on the LAN with **no extra configuration** (no `PUBLIC_HOST` needed for local viewing). Use this to avoid host-mode port conflicts, or just to keep the app on a tidy fixed IP of its own.
   - **On Unraid:** create a custom Docker network on your NIC (for example `br0`, or a VLAN like `br0.10`), then set the container template's **Network Type** to that network and give it a fixed IP.
   - **macvlan caveat:** with plain `macvlan`, the **host itself usually can't reach the container** (a Linux kernel limitation). That matters if your reverse proxy (for example SWAG) runs on the same host. Use **`ipvlan`**, or add a macvlan shim interface, so the host can reach it.
+
+**Windows / Docker Desktop:** the [Windows setup](windows.md) uses Docker's bridge network, publishes TCP 4000 and UDP 8189, and sets `PUBLIC_HOST` to the Windows PC's LAN IPv4 address plus `127.0.0.1`. The container's automatically detected address belongs to Docker's VM/network and is insufficient by itself. Keep the published UDP port equal to `WEBRTC_UDP_PORT`, and allow the ports through Windows Firewall on your private home network. Host networking is not required. Reserve the PC's LAN address in your router, or update the saved setup settings when it changes.
 
 | | Host networking | ipvlan | macvlan |
 |---|---|---|---|

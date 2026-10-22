@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- **Windows server setup with Docker Desktop.** Extract the Windows setup files and run `Install.cmd` to start Nightlight and add a Start menu shortcut. The setup publishes the web and WebRTC ports, advertises the PC's LAN address, and stores data in a Linux-backed Docker volume. Start, stop, update, status and uninstall commands are included; uninstall keeps accounts, cameras and recordings. Requires Docker Desktop's WSL 2 Linux engine. Automated checks cover installer actions and Compose configuration on Windows; real camera playback on Docker Desktop has not been verified. See [Windows setup](docs/windows.md).
+
 ### Fixed
 
 - **A camera that lists a profile without video no longer loses its Low-quality stream option (#824).** When a separate video profile is available, Nightlight now uses it for that option. Found in tests; not seen on a real camera.
