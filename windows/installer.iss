@@ -90,8 +90,8 @@ begin
   PortPage := CreateInputQueryPage(wpSelectDir, 'Nightlight server',
     'Choose the web port', 'Open this port in your browser to use Nightlight. Existing cameras and recordings are kept when upgrading.');
   PortPage.Add('Web port:', False);
-  PortPage.Values[0] := IntToStr(GetIniInt('Server', 'Port', 4000,
-    ExpandConstant('{commonappdata}\Nightlight\server.ini')));
+  PortPage.Values[0] := GetIniString('Server', 'Port', '4000',
+    ExpandConstant('{commonappdata}\Nightlight\server.ini'));
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
