@@ -15,6 +15,16 @@ foreach ($dir in @($payload, "$payload\bin", "$payload\app", "$payload\licenses"
     $null = New-Item -ItemType Directory -Path $dir -Force
 }
 
+# Compile the script with a tiny payload first. Catch syntax/flag mistakes before
+# spending time building the frontend and downloading the large video runtimes.
+$compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+if (-not (Test-Path $compiler)) { throw 'Install Inno Setup 6 to build the Windows installer.' }
+$syntaxPayload = Join-Path $build 'syntax-payload'
+$null = New-Item -ItemType Directory -Path $syntaxPayload -Force
+Set-Content "$syntaxPayload\placeholder.txt" -Value 'Installer compiler check' -Encoding ASCII
+& $compiler '/Qp' "/DPayloadDir=$syntaxPayload" "/DOutputDir=$build\syntax-output" "$PSScriptRoot\installer.iss"
+if ($LASTEXITCODE -ne 0) { throw 'Installer script compilation failed' }
+
 function Get-Download {
     param([string] $Url, [string] $File, [string] $Sha256)
     Write-Host "Downloading $([IO.Path]::GetFileName($File))"
@@ -95,8 +105,6 @@ $hashes = @('node.exe', 'Nightlight.Service.exe', 'bin\ffmpeg.exe', 'bin\ffprobe
 }
 $hashes | ConvertTo-Json | Set-Content "$payload\runtime-manifest.json" -Encoding ASCII
 $version = (Get-Content "$repo\backend\package.json" -Raw | ConvertFrom-Json).version
-$compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-if (-not (Test-Path $compiler)) { throw 'Install Inno Setup 6 to build the Windows installer.' }
 & $compiler "/DAppVersion=$version" "/DPayloadDir=$payload" "/DOutputDir=$OutputDirectory" "$PSScriptRoot\installer.iss"
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed' }
 $installer = Join-Path $OutputDirectory "Nightlight-$version-windows-x64-setup.exe"

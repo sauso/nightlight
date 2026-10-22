@@ -50,7 +50,11 @@ Type: filesandordirs; Name: "{app}\licenses"
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [INI]
-Filename: "{app}\Nightlight.url"; Section: "InternetShortcut"; Key: "URL"; String: "http://localhost:{code:GetHttpPort}"; Flags: uninsdeleteentry uninsdeletesectionifempty uninsdeletefileifempty
+Filename: "{app}\Nightlight.url"; Section: "InternetShortcut"; Key: "URL"; String: "http://localhost:{code:GetHttpPort}"
+
+[UninstallDelete]
+Type: files; Name: "{app}\Nightlight.url"
+Type: dirifempty; Name: "{app}"
 
 [Icons]
 Name: "{group}\Nightlight"; Filename: "{app}\Nightlight.url"
