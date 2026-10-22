@@ -57,6 +57,19 @@ test('a single profile has no separate low-quality stream', () => {
   assert.equal(pickSubProfile([main], main), null);
 });
 
+test('a metadata-only profile cannot displace the low-quality video profile', () => {
+  assert.equal(pickSubProfile([main, low, noEncoder], main), low);
+});
+
+test('a metadata-only profile does not create a low-quality stream', () => {
+  assert.equal(pickSubProfile([main, noEncoder], main), null);
+});
+
+test('a video profile without a resolution remains eligible for low quality', () => {
+  const noResolution = { ...low, videoEncoderConfiguration: { encoding: 'H264' } };
+  assert.equal(pickSubProfile([main, noResolution], main), noResolution);
+});
+
 test('a duplicate main token is not a separate low-quality stream', () => {
   assert.equal(pickSubProfile([main, { ...main }], main), null);
 });
