@@ -11,7 +11,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
-- **Windows server setup with Docker Desktop.** Extract the Windows setup files and run `Install.cmd` to start Nightlight and add a Start menu shortcut. The setup publishes the web and WebRTC ports, advertises the PC's LAN address, and stores data in a Linux-backed Docker volume. Start, stop, update, status and uninstall commands are included; uninstall keeps accounts, cameras and recordings. Requires Docker Desktop's WSL 2 Linux engine. Automated checks cover installer actions and Compose configuration on Windows; real camera playback on Docker Desktop has not been verified. See [Windows setup](docs/windows.md).
+- **Native Windows installer.** The Windows setup executable bundles Node.js, FFmpeg and MediaMTX, installs an automatic background service and adds a Start menu shortcut to the web app. Docker is not required. The service runs as LocalService, keeps data under ProgramData, and allows time to finish recordings when stopped. Upgrades and uninstall preserve cameras, accounts and recordings. The Windows workflow builds the installer and checks native streaming, recording, service shutdown and data preservation with a synthetic camera. See [Windows installation](docs/windows.md).
 
 ### Fixed
 

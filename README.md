@@ -30,7 +30,7 @@ Nightlight is designed for local-network use first. Remote viewing is possible, 
 
 ## Quick start
 
-**On Windows?** Use the [Windows setup](docs/windows.md) to install the server with Docker Desktop and add a Start menu shortcut.
+**On Windows?** Use the [Windows installer](docs/windows.md) to run Nightlight as a background service. It includes the runtime and video tools; Docker is not required.
 
 You'll need an always-on Linux host running Docker (such as Unraid or an arm64 Raspberry Pi) and a camera that exposes an RTSP stream. ONVIF is useful but optional. Performance depends on your hardware, camera count and enabled analysis features; there isn't a published minimum-hardware benchmark.
 

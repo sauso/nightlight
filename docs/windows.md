@@ -1,141 +1,124 @@
 # Install Nightlight on Windows
 
-The Windows setup runs the **Nightlight server** on your PC using Docker Desktop's
-WSL 2 Linux engine. It adds a Start menu shortcut and management commands. Docker
-Desktop must be installed first; this package does not include a native Windows
-server executable.
-
-## What you need
-
-- A Windows PC supported by the current [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/), with hardware virtualization and WSL 2 enabled.
-- Docker Desktop installed, started, and using **Linux containers** with its WSL 2 engine. Its `desktop-linux` context and bundled Docker Compose are used by setup.
-- The PC must be able to reach your RTSP/ONVIF cameras by their LAN addresses.
-- Keep the PC powered on and awake while monitoring. Docker Desktop must keep running. This setup does not create a Windows service; enable Docker Desktop's **Start Docker Desktop when you sign in** option to resume after signing in following a restart.
-
-No Node.js, FFmpeg or MediaMTX installation is needed on Windows; they come in
-Nightlight's Docker image. The setup script itself does not require administrator
-rights. Installing Docker Desktop or adding firewall rules may require them.
+The Windows installer runs Nightlight as a background service, much like a
+Sonarr installation. It includes Node.js, FFmpeg and MediaMTX. You do not need
+Docker, WSL or a separate runtime installation.
 
 ## Install
 
-1. Download the [repository ZIP](https://github.com/sauso/nightlight/archive/refs/heads/main.zip), extract it, and open its **windows** folder. Alternatively, download and extract `Nightlight-Windows-Setup.zip` from a successful [Windows setup workflow](https://github.com/sauso/nightlight/actions/workflows/windows.yml) run (GitHub sign-in is required for workflow downloads).
-2. Start Docker Desktop and wait until its engine is running.
-3. Double-click **Install.cmd**. Keep the window open while Nightlight's image downloads and the server passes its health check. A first download can take several minutes.
-4. Nightlight opens at **http://localhost:4000**. Create your administrator account, add a child and add your cameras by IP address or RTSP details. A **Nightlight** browser shortcut is now in your Start menu.
+1. Download `Nightlight-<version>-windows-x64-setup.exe` from a successful [Windows installer build](https://github.com/sauso/nightlight/actions/workflows/windows.yml). Open the run and download **Nightlight-Windows-x64**, then extract the installer. GitHub sign-in is required for workflow artifact downloads.
+2. Run the installer and approve the Windows administrator prompt.
+3. Choose an installation folder and web port (default **4000**). Leave **Allow devices on my private home network to connect** selected if you want to use phones or other computers at home.
+4. Open **Nightlight** from the Start menu, or visit **http://localhost:4000**. Create your administrator account, then add a child and your cameras.
 
-The setup chooses the active IPv4 adapter with a default gateway. If it finds
-several (for example Wi-Fi plus a VPN), it asks you to supply the correct address.
-Open PowerShell in the extracted **windows** folder and run:
+The target is 64-bit Windows 10 version 2004 or later and Windows 11. The build
+and installation checks run on GitHub's current Windows runner; older Windows
+versions have not been separately verified. The installer is currently unsigned.
 
-```powershell
-.\Setup-Nightlight.ps1 -ServerAddress 192.168.1.50
-```
+Nightlight starts automatically at boot as the **Nightlight** Windows service,
+including before anyone signs in. Its account is **NT AUTHORITY\LocalService**.
+Keep the PC powered on and prevent Windows from sleeping while monitoring.
 
-Replace the address with this PC's LAN IPv4 address from `ipconfig`, on the network
-that reaches your cameras. If PowerShell blocks a downloaded script, run the
-launcher from that same folder instead:
+## Watch from another device
 
-```powershell
-.\Install.cmd -ServerAddress 192.168.1.50
-```
+On the same home network, open `http://<PC-LAN-IP>:4000`, replacing the address
+with the PC's IPv4 address shown by `ipconfig`. Use the web port you chose during
+installation if it differs from 4000.
 
-For different ports, add `-HttpPort 4080 -WebRtcPort 8190` to the first install.
-Both accept whole numbers from 1 to 65535; defaults are 4000 and 8189. Use the
-chosen ports in your browser and firewall rules. The UDP port is mapped to the
-same port inside the container so WebRTC's advertised port stays correct.
+The installer's optional firewall rules allow the web port over TCP and
+low-latency video on UDP **8189**. They apply only to the **Private** network
+profile and **local subnet**. They do not change your network profile. Only mark
+your trusted home network Private.
 
-## Watch from phones and other computers
+Camera RTSP and ONVIF traffic is outbound from the PC. Add cameras by their LAN
+address or stream details as described in [cameras](cameras.md). Internal
+MediaMTX ports remain on loopback; they do not need firewall exceptions.
 
-Open `http://<PC-LAN-IP>:4000` on a device connected to the same home network.
-For example, if setup used `192.168.1.50`, open `http://192.168.1.50:4000`.
+## Start, stop and update
 
-If Windows Firewall blocks access, allow Docker Desktop on your private home
-network, or add these rules from **PowerShell as administrator**:
-
-```powershell
-New-NetFirewallRule -DisplayName 'Nightlight web' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4000 -Profile Private -RemoteAddress LocalSubnet
-New-NetFirewallRule -DisplayName 'Nightlight video' -Direction Inbound -Action Allow -Protocol UDP -LocalPort 8189 -Profile Private -RemoteAddress LocalSubnet
-```
-
-These example rules are restricted to the local subnet and the Private network
-profile. Setup does not change your firewall or network profile automatically.
-Only mark a network Private if it is your trusted home network. Use your custom
-ports if you changed them. Removing these optional rules is a separate Windows
-Firewall action; uninstall does not remove rules you added yourself.
-
-Reserve the PC's IP address in your router's DHCP settings so it stays stable.
-If it changes, edit `NIGHTLIGHT_HOST` in
-`%LOCALAPPDATA%\Nightlight\nightlight.env`, then use **Start** below to recreate
-the container with the new address. Camera setup uses camera IP addresses;
-multicast discovery through Docker Desktop's VM is not part of this setup.
-
-## Start, stop, update and uninstall
-
-Open PowerShell and load the installed script path into a variable:
+Open **Services** from the Windows Start menu and find **Nightlight** to start,
+stop or restart it. From PowerShell as administrator you can also use:
 
 ```powershell
-$nightlightSetup = "$env:LOCALAPPDATA\Nightlight\Setup-Nightlight.ps1"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $nightlightSetup -Action Status
+Get-Service Nightlight
+Stop-Service Nightlight
+Start-Service Nightlight
+Restart-Service Nightlight
 ```
 
-Use the same command with the action you need:
+Stopping allows up to **30 seconds** for Nightlight to finish its shutdown,
+including an in-flight recording. Avoid ending its Node process from Task
+Manager when you can stop the service instead.
 
-| Action | What it does |
+To update, back up your data, download the newer installer and run it over the
+existing installation. The installer stops the service before replacing the app
+files and starts it again afterward. It keeps your cameras, accounts, recordings
+and selected web port. Updates are installed manually; no updater runs in the
+background.
+
+The web port is saved in `%ProgramData%\Nightlight\server.ini`:
+
+```ini
+[Server]
+Port=4000
+```
+
+The allowed range is 1 to 65535. To change it together with the Start menu link
+and firewall rule, run the installer again and choose the new port. Directly
+editing the file and restarting the service changes the server port but does not
+rewrite the shortcut or firewall rule.
+
+## Data, logs and backups
+
+Program files default to `C:\Program Files\Nightlight`. Data is separate, under
+**`%ProgramData%\Nightlight`** (normally `C:\ProgramData\Nightlight`):
+
+| Location | Contents |
 | --- | --- |
-| `Start` | Starts Nightlight, applies edited settings, waits for its health check and opens the browser. |
-| `Stop` | Stops monitoring and allows up to 30 seconds for recordings to finish saving. |
-| `Update` | Pulls `sauso/nightlight:latest`, recreates the container and waits for its health check. Saved data and settings are kept. Back up before updating. |
-| `Status` | Shows the container's status and health. |
-| `Uninstall` | Stops and removes the container, installed setup files and Start menu shortcut. **Keeps the data volume.** Reinstalling reuses it. |
+| `babymonitor.db` and its WAL files | Accounts, camera credentials and settings |
+| `clips` | Recordings and saved media |
+| `server.ini` | Native server's web port |
+| `logs` | Service output and startup/shutdown errors |
+| `tmp` | Temporary runtime configuration |
 
-Add `-NoBrowser` for Start or Update if you want to keep the browser closed.
-Running Install again resumes an interrupted installation and keeps existing
-settings. To change an existing address or port, edit `nightlight.env` and use
-Start; Install refuses arguments that would overwrite those settings.
+The installer grants LocalService access to the data directory, with full access
+for administrators and SYSTEM. Camera passwords and other stored secrets are
+unencrypted in the database; protect backups as well.
 
-The Docker project is always `nightlight-windows`. It is separate from a Linux
-Compose install. The setup uses the local `desktop-linux` context regardless of
-which Docker context you selected elsewhere. One Windows setup per Docker Desktop
-engine is supported.
+Stop the Nightlight service, copy the **entire** data directory to a protected
+backup location, then start the service again. For a restore, stop the service,
+restore the complete directory and its permissions, then restart it. See
+[operations](operations.md) for the database and media backup rules.
 
-## Where your data lives and how to back it up
+## Uninstall
 
-Settings, accounts, camera credentials and recordings live in the named Docker
-volume **nightlight-windows_data**. The volume is stored inside Docker Desktop's
-Linux storage, rather than a Windows folder shared into the container, so SQLite
-and Linux file permissions work normally. Keep sufficient free disk space for
-Docker Desktop's virtual disk and your recordings.
+Remove **Nightlight** from Windows **Installed apps**, or use **Uninstall
+Nightlight** in its Start menu group. This removes the service, application,
+shortcuts and installer-created firewall rules.
 
-Stopping, updating and uninstalling Nightlight keep that volume. Deleting it in
-Docker Desktop, or resetting/uninstalling Docker Desktop with its data removed,
-can erase it. Protect backups: they contain camera passwords and other secrets.
+**Uninstall keeps `%ProgramData%\Nightlight`.** Reinstalling reuses your accounts,
+cameras and recordings. Remove that directory yourself only if you intend to
+erase all Nightlight data.
 
-To back up a stopped server from PowerShell:
+## Troubleshooting and validation
 
-```powershell
-$nightlightSetup = "$env:LOCALAPPDATA\Nightlight\Setup-Nightlight.ps1"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $nightlightSetup -Action Stop
-$backupDirectory = (New-Item -ItemType Directory -Path "$env:USERPROFILE\NightlightBackups" -Force).FullName
-docker --context desktop-linux run --rm --mount type=volume,source=nightlight-windows_data,target=/data,readonly --mount "type=bind,source=$backupDirectory,target=/backup" alpine sh -c 'tar -czf /backup/nightlight-data.tar.gz -C /data .'
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File $nightlightSetup -Action Start -NoBrowser
-```
+- **The browser cannot connect:** check the Nightlight service in Services, then check `%ProgramData%\Nightlight\logs`. A port conflict or invalid `server.ini` setting can stop startup.
+- **The PC works but a phone cannot connect:** check the PC's LAN address, chosen web port and the Private network firewall rules. Networks outside the local subnet need their own networking setup.
+- **The page loads but low-latency video does not:** check UDP 8189 and try **Compatibility (HLS)** mode to check the HTTP path separately. HLS has higher latency.
+- **Monitoring stops while idle:** check Windows sleep and power settings. A service cannot monitor while the PC sleeps or is turned off.
+- **Remote viewing:** this package is configured for your home network, with public STUN disabled. Follow [remote access](remote-access.md) for HTTPS, VPN and public WebRTC configuration.
 
-Check that the archive was created successfully before relying on it. This
-example overwrites a previous archive of the same name. More about backups and
-restore: [operations](operations.md).
+The Windows workflow installs the actual setup executable and checks its service
+account, boot startup mode, frontend, synthetic RTSP input, snapshot, HLS,
+recording, graceful stop, upgrade, uninstall and reinstall. It uses generated
+video, not household footage. Physical camera compatibility and playback from
+other devices on a real home network still need a manual check.
 
-## Troubleshooting and current limits
+## Build from source
 
-- **Docker Desktop is not running / wrong engine:** start it with the WSL 2 Linux engine, then retry Install. Setup stops before writing files if the engine check fails.
-- **Download failed:** check Docker Hub connectivity and free disk space, then rerun Install. Existing settings are preserved. A failed update download leaves the existing container running.
-- **Server failed its health check:** settings are kept for retry. Run `docker --context desktop-linux compose --project-name nightlight-windows --file "$env:LOCALAPPDATA\Nightlight\docker-compose.yml" --env-file "$env:LOCALAPPDATA\Nightlight\nightlight.env" logs --tail 100`. Fix the reported error, then run Start. A failed health check is not reported as a successful installation.
-- **Port is already allocated:** edit `NIGHTLIGHT_HTTP_PORT` or `NIGHTLIGHT_WEBRTC_PORT` in `nightlight.env` and run Start. Match your firewall rules to the new ports.
-- **Page loads, low-latency video does not:** check the PC's saved LAN address and the UDP firewall rule. Try **Compatibility (HLS)** mode to check the HTTP path separately. HLS has higher latency. Do not publish MediaMTX's internal API, RTSP, HLS or signalling ports; the authenticated web app proxies the needed HTTP traffic.
-- **Monitoring stops after a restart or while idle:** start Docker Desktop, enable its sign-in startup option, and check Windows sleep settings. Start menu launches the browser; it does not wake a stopped Docker engine or PC.
-- **Remote viewing:** this setup is configured for the home network, with public STUN disabled. Follow [remote access](remote-access.md) for HTTPS, VPN or public WebRTC setup; do not assume the LAN firewall rules provide internet access.
-
-Automated checks exercise the installer with Docker/network/browser commands
-stubbed, and validate the configuration with the real Docker Compose parser, on
-Windows PowerShell 5.1 and PowerShell 7. They do **not** run Docker Desktop with a
-real camera. Camera connectivity, Windows Firewall behaviour and WebRTC/HLS
-playback on a Windows host still need a manual end-to-end check.
+On a Windows build machine with Node.js 24 and Inno Setup 6 installed, run
+`windows/build.ps1` from PowerShell. It installs the committed npm lockfiles,
+builds the frontend, downloads pinned Windows runtimes, and writes the installer
+and SHA-256 checksum to `windows/dist`. Bundled licenses and runtime hashes are
+installed alongside the application. The FFmpeg and MediaMTX version/checksum
+pins live in the build script and must be updated together when changing tools.

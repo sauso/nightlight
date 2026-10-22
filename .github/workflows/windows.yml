@@ -1,11 +1,11 @@
-name: Windows setup
+name: Windows installer
 
 on:
   push:
     branches: [dev, main]
-    paths: ['windows/**', '.github/workflows/windows.yml']
+    paths: ['windows/**', 'backend/**', 'frontend/**', 'mediamtx/**', '.github/workflows/windows.yml']
   pull_request:
-    paths: ['windows/**', '.github/workflows/windows.yml']
+    paths: ['windows/**', 'backend/**', 'frontend/**', 'mediamtx/**', '.github/workflows/windows.yml']
   workflow_dispatch: {}
 
 permissions:
@@ -16,31 +16,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  setup:
-    name: Windows setup (${{ matrix.shell }})
+  installer:
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # Install.cmd uses the Windows-bundled 5.1; also support PowerShell 7.
-        shell: [powershell, pwsh]
+    timeout-minutes: 30
     defaults:
       run:
-        shell: ${{ matrix.shell }}
+        shell: powershell
     steps:
       - uses: actions/checkout@v4
-      - name: Test installer actions and failure paths
-        run: ./windows/test/setup.tests.ps1
-      - name: Validate published ports and persistent storage with real Compose
-        run: ./windows/test/compose.tests.ps1
-      - name: Package the Windows setup
-        if: matrix.shell == 'powershell'
-        run: |
-          Compress-Archive -Path windows/Install.cmd, windows/Setup-Nightlight.ps1, windows/docker-compose.yml, windows/README.md -DestinationPath Nightlight-Windows-Setup.zip
-      - uses: actions/upload-artifact@v4
-        if: matrix.shell == 'powershell'
+      - uses: actions/setup-node@v7
         with:
-          name: Nightlight-Windows-Setup
-          path: Nightlight-Windows-Setup.zip
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - name: Test launcher and child-process environment
+        run: node --experimental-test-module-mocks --test backend/test/windows-launcher.test.js backend/test/child-env.test.js
+      - name: Ensure Inno Setup is available
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Could not install Inno Setup' }
+          }
+      - name: Build the self-contained Windows installer
+        run: ./windows/build.ps1
+      - name: Install, stream, record, upgrade and uninstall on Windows
+        run: |
+          $installer = (Get-ChildItem windows/dist/*-setup.exe).FullName
+          ./windows/test/smoke.ps1 -Installer $installer
+      - name: Upload tested Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nightlight-Windows-x64
+          path: |
+            windows/dist/*-setup.exe
+            windows/dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
+      - name: Upload native test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nightlight-Windows-logs
+          path: |
+            ${{ runner.temp }}/nightlight-*.log
+            C:/ProgramData/Nightlight/logs/*
+          if-no-files-found: ignore

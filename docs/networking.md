@@ -11,7 +11,7 @@ Low-latency video needs a reachable LAN address and UDP port: MediaMTX advertise
   - **On Unraid:** create a custom Docker network on your NIC (for example `br0`, or a VLAN like `br0.10`), then set the container template's **Network Type** to that network and give it a fixed IP.
   - **macvlan caveat:** with plain `macvlan`, the **host itself usually can't reach the container** (a Linux kernel limitation). That matters if your reverse proxy (for example SWAG) runs on the same host. Use **`ipvlan`**, or add a macvlan shim interface, so the host can reach it.
 
-**Windows / Docker Desktop:** the [Windows setup](windows.md) uses Docker's bridge network, publishes TCP 4000 and UDP 8189, and sets `PUBLIC_HOST` to the Windows PC's LAN IPv4 address plus `127.0.0.1`. The container's automatically detected address belongs to Docker's VM/network and is insufficient by itself. Keep the published UDP port equal to `WEBRTC_UDP_PORT`, and allow the ports through Windows Firewall on your private home network. Host networking is not required. Reserve the PC's LAN address in your router, or update the saved setup settings when it changes.
+**Native Windows installation:** the [Windows installer](windows.md) runs directly on the PC and MediaMTX advertises its LAN interfaces plus loopback. The installer can add Windows Firewall rules for the web port (TCP 4000 by default) and UDP 8189, restricted to the Private network profile and local subnet. Only these two ports need inbound access; internal MediaMTX services remain on loopback.
 
 | | Host networking | ipvlan | macvlan |
 |---|---|---|---|
