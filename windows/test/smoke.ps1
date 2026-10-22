@@ -116,8 +116,12 @@ paths:
     # including when redirects/segment requests cannot carry a session header.
     $media = Api '/api/auth/media-token' 'POST'
     $hlsUrl = "$base/hls/$($camera.mediamtx_path)-hls/index.m3u8?token=$([Uri]::EscapeDataString($media.token))"
+    $playlistFile = Join-Path $env:RUNNER_TEMP 'nightlight-playlist.m3u8'
     Wait-Until {
-        (Invoke-WebRequest -UseBasicParsing $hlsUrl -TimeoutSec 10).Content -match '#EXTM3U'
+        # Windows PowerShell treats the playlist MIME type as binary. Read the
+        # downloaded UTF-8 text instead of applying a regex to a byte array.
+        Invoke-WebRequest -UseBasicParsing $hlsUrl -TimeoutSec 10 -OutFile $playlistFile
+        (Get-Content $playlistFile -Raw) -match '^#EXTM3U'
     } 'the HLS playlist'
 
     $null = Api "/api/cameras/$($camera.id)/record/start" 'POST'
