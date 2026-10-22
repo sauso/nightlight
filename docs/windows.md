@@ -1,8 +1,9 @@
 # Install Nightlight on Windows
 
 The Windows installer runs Nightlight as a background service, much like a
-Sonarr installation. It includes Node.js, FFmpeg and MediaMTX. You do not need
-Docker, WSL or a separate runtime installation.
+Sonarr installation. It includes Node.js, FFmpeg and MediaMTX, plus Microsoft's
+Visual C++ prerequisite for native database bindings. You do not need Docker,
+WSL or a separate runtime download.
 
 ## Install
 
@@ -11,7 +12,7 @@ Docker, WSL or a separate runtime installation.
 3. Choose an installation folder and web port (default **4000**). Leave **Allow devices on my private home network to connect** selected if you want to use phones or other computers at home.
 4. Open **Nightlight** from the Start menu, or visit **http://localhost:4000**. Create your administrator account, then add a child and your cameras.
 
-The target is 64-bit Windows 10 version 2004 or later and Windows 11. The build
+The target is 64-bit Windows 10 version 22H2 or later and Windows 11. The build
 and installation checks run on GitHub's current Windows runner; older Windows
 versions have not been separately verified. The installer is currently unsigned.
 
@@ -96,6 +97,8 @@ Remove **Nightlight** from Windows **Installed apps**, or use **Uninstall
 Nightlight** in its Start menu group. This removes the service, application,
 shortcuts and installer-created firewall rules.
 
+Microsoft's shared Visual C++ runtime is kept because other applications may use it.
+
 **Uninstall keeps `%ProgramData%\Nightlight`.** Reinstalling reuses your accounts,
 cameras and recordings. Remove that directory yourself only if you intend to
 erase all Nightlight data.
@@ -107,6 +110,13 @@ erase all Nightlight data.
 - **The page loads but low-latency video does not:** check UDP 8189 and try **Compatibility (HLS)** mode to check the HTTP path separately. HLS has higher latency.
 - **Monitoring stops while idle:** check Windows sleep and power settings. A service cannot monitor while the PC sleeps or is turned off.
 - **Remote viewing:** this package is configured for your home network, with public STUN disabled. Follow [remote access](remote-access.md) for HTTPS, VPN and public WebRTC configuration.
+
+Advanced environment settings such as `PUBLIC_HOST`, `STUN_SERVERS` and
+`TRUST_PROXY` can be added as WinSW `<env name="..." value="..." />` entries
+inside the installed `Nightlight.Service.xml`, then applied by restarting the
+service. Explicit STUN and public-host values are honored; loopback remains an
+advertised host for local viewing. Keep a copy of a customized service XML before
+upgrading, because setup replaces that application file.
 
 The Windows workflow installs the actual setup executable and checks its service
 account, boot startup mode, frontend, synthetic RTSP input, snapshot, HLS,

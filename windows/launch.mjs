@@ -33,8 +33,8 @@ export function configureEnvironment({ installDir, dataDir, ini, env = process.e
     PORT: String(readPort(ini)),
     // Native MediaMTX also advertises the PC's interfaces itself. Explicit
     // loopback keeps the Start menu's localhost URL working without STUN.
-    PUBLIC_HOST: '127.0.0.1',
-    STUN_SERVERS: '',
+    PUBLIC_HOST: [...new Set(['127.0.0.1', ...(env.PUBLIC_HOST || '').split(',').map((host) => host.trim()).filter(Boolean)])].join(','),
+    STUN_SERVERS: env.STUN_SERVERS ?? '',
     PATH: [path.join(installDir, 'bin'), env.PATH || env.Path || ''].filter(Boolean).join(path.delimiter),
     TEMP: tempDir,
     TMP: tempDir,

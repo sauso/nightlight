@@ -38,4 +38,12 @@ describe('native Windows service configuration', () => {
     assert.throws(() => configureEnvironment({ installDir: '.', dataDir: '/data', ini: '' }), /absolute/);
     assert.throws(() => configureEnvironment({ installDir: process.cwd(), dataDir: '.', ini: '' }), /absolute/);
   });
+  test('preserves explicit remote networking settings while retaining local viewing', (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-native-network-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const env = { PUBLIC_HOST: 'remote.example,127.0.0.1', STUN_SERVERS: 'stun:stun.example:3478' };
+    configureEnvironment({ installDir: root, dataDir: path.join(root, 'data'), ini: '', env });
+    assert.equal(env.PUBLIC_HOST, '127.0.0.1,remote.example');
+    assert.equal(env.STUN_SERVERS, 'stun:stun.example:3478');
+  });
 });

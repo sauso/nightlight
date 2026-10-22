@@ -20,12 +20,12 @@ DefaultGroupName=Nightlight
 DisableProgramGroupPage=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-MinVersion=10.0.19041
+MinVersion=10.0.19045
 PrivilegesRequired=admin
 LicenseFile=..\LICENSE
 OutputDir={#OutputDir}
 OutputBaseFilename=Nightlight-{#AppVersion}-windows-x64-setup
-Compression=lzma2
+Compression=lzma2/fast
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\node.exe
@@ -61,6 +61,9 @@ Name: "{group}\Nightlight"; Filename: "{app}\Nightlight.url"
 Name: "{group}\Uninstall Nightlight"; Filename: "{uninstallexe}"
 
 [Run]
+; The Microsoft installer repairs/updates the shared C++ runtime if needed. It
+; is deliberately retained on uninstall because other applications may use it.
+Filename: "{app}\redist\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Checking the Microsoft Visual C++ runtime..."; Flags: runhidden waituntilterminated
 Filename: "{app}\Nightlight.Service.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; Check: NeedsServiceInstall
 Filename: "{app}\Nightlight.Service.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
 Filename: "{app}\Nightlight.url"; Description: "Open Nightlight"; Flags: postinstall shellexec nowait skipifsilent

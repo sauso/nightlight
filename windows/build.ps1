@@ -11,7 +11,7 @@ $payload = Join-Path $build 'payload'
 $downloads = Join-Path $build 'downloads'
 $null = New-Item -ItemType Directory -Path $downloads -Force
 if (Test-Path $payload) { Remove-Item $payload -Recurse -Force }
-foreach ($dir in @($payload, "$payload\bin", "$payload\app", "$payload\licenses", $OutputDirectory)) {
+foreach ($dir in @($payload, "$payload\bin", "$payload\app", "$payload\licenses", "$payload\redist", $OutputDirectory)) {
     $null = New-Item -ItemType Directory -Path $dir -Force
 }
 
@@ -67,15 +67,16 @@ Copy-Item "$nodeDir\node.exe" "$payload\node.exe"
 Copy-Item "$nodeDir\LICENSE" "$payload\licenses\Node.txt"
 
 # Pins are deliberate: the detector's showinfo grammar is exercised against
-# FFmpeg 8.1. Update the asset URL AND checksum together when upgrading tools.
+# FFmpeg 8.1. Use a month-end build (retained for two years), not a daily build
+# that upstream deletes after 14 days. Update URLs and checksums together.
 $mtxUrl = 'https://github.com/bluenviron/mediamtx/releases/download/v1.21.2/mediamtx_v1.21.2_windows_amd64.zip'
 Get-Download $mtxUrl "$downloads\mediamtx.zip" 'a84224f5a490855684e62ba6fb71e80ea2a5e16aed61883bb58380290e93e467'
 Expand-Archive "$downloads\mediamtx.zip" "$downloads\mediamtx" -Force
 Copy-Item "$downloads\mediamtx\mediamtx.exe" "$payload\bin\mediamtx.exe"
 Get-Download 'https://raw.githubusercontent.com/bluenviron/mediamtx/v1.21.2/LICENSE' "$payload\licenses\MediaMTX.txt" ''
 
-$ffmpegUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-22-13-06/ffmpeg-n8.1.3-23-g5c4f5744cd-win64-gpl-8.1.zip'
-Get-Download $ffmpegUrl "$downloads\ffmpeg.zip" '75f5d6b673be7d93f59dcffb81a92c003580a7dcdbff768976b7907869aee09a'
+$ffmpegUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767-win64-gpl-8.1.zip'
+Get-Download $ffmpegUrl "$downloads\ffmpeg.zip" '7b801cdd3a1a0bb54ae6f572187e68b4ed54f52086cfee133fab2180bfb429fa'
 Expand-Archive "$downloads\ffmpeg.zip" "$downloads\ffmpeg" -Force
 $ffmpegDir = @(Get-ChildItem "$downloads\ffmpeg" -Directory)[0].FullName
 Copy-Item "$ffmpegDir\bin\ffmpeg.exe", "$ffmpegDir\bin\ffprobe.exe" "$payload\bin"
@@ -88,24 +89,35 @@ $winswUrl = 'https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.
 Get-Download $winswUrl "$payload\Nightlight.Service.exe" ''
 Get-Download 'https://raw.githubusercontent.com/winsw/winsw/v2.12.0/LICENSE.txt' "$payload\licenses\WinSW.txt" ''
 
+# Native SQLite bindings can need the MSVC runtime on a clean Windows machine.
+# Bundle Microsoft's redistributable so setup works without a separate download
+# on the target PC. Verify the Microsoft signature on this serviced prerequisite.
+$redist = "$payload\redist\vc_redist.x64.exe"
+Get-Download 'https://aka.ms/vc14/vc_redist.x64.exe' $redist ''
+$signature = Get-AuthenticodeSignature $redist
+if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+    throw 'The Visual C++ prerequisite does not have a valid Microsoft signature.'
+}
+
 @"
 Nightlight bundles separate executables from these projects:
 Node.js ${nodeVersion}: $nodeBase/ (MIT and bundled third-party notices in Node.txt)
 MediaMTX 1.21.2: https://github.com/bluenviron/mediamtx/tree/v1.21.2 (MIT)
 WinSW 2.12.0: https://github.com/winsw/winsw/tree/v2.12.0 (MIT)
-FFmpeg 8.1.3, revision 5c4f5744cd: https://github.com/FFmpeg/FFmpeg/tree/5c4f5744cd (GPL build, including libx264)
-FFmpeg build configuration and dependency sources: https://github.com/BtbN/FFmpeg-Builds/tree/autobuild-2026-10-22-13-06
+FFmpeg 8.1.3, revision 29e619e767: https://github.com/FFmpeg/FFmpeg/tree/29e619e767 (GPL build, including libx264)
+FFmpeg build configuration and dependency sources: https://github.com/BtbN/FFmpeg-Builds/tree/autobuild-2026-09-30-13-08
 FFmpeg binary: $ffmpegUrl
+Microsoft Visual C++ Redistributable: https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist (Microsoft license, embedded in the signed prerequisite installer)
 License texts are in this directory. FFmpeg is invoked as a separate process.
 "@ | Set-Content "$payload\licenses\THIRD-PARTY-NOTICES.txt" -Encoding UTF8
 
-$hashes = @('node.exe', 'Nightlight.Service.exe', 'bin\ffmpeg.exe', 'bin\ffprobe.exe', 'bin\mediamtx.exe') | ForEach-Object {
+$hashes = @('node.exe', 'Nightlight.Service.exe', 'bin\ffmpeg.exe', 'bin\ffprobe.exe', 'bin\mediamtx.exe', 'redist\vc_redist.x64.exe') | ForEach-Object {
     $file = Join-Path $payload $_
     [pscustomobject]@{ file = $_; sha256 = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() }
 }
 $hashes | ConvertTo-Json | Set-Content "$payload\runtime-manifest.json" -Encoding ASCII
 $version = (Get-Content "$repo\backend\package.json" -Raw | ConvertFrom-Json).version
-& $compiler "/DAppVersion=$version" "/DPayloadDir=$payload" "/DOutputDir=$OutputDirectory" "$PSScriptRoot\installer.iss"
+& $compiler '/Qp' "/DAppVersion=$version" "/DPayloadDir=$payload" "/DOutputDir=$OutputDirectory" "$PSScriptRoot\installer.iss"
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed' }
 $installer = Join-Path $OutputDirectory "Nightlight-$version-windows-x64-setup.exe"
 "$((Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($installer))" | Set-Content "$OutputDirectory\SHA256SUMS.txt" -Encoding ASCII

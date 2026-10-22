@@ -54,12 +54,19 @@ jobs:
             windows/dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
+      - name: Collect native test logs
+        if: always()
+        run: |
+          $logs = "$env:RUNNER_TEMP\nightlight-logs"
+          New-Item -ItemType Directory -Path $logs -Force | Out-Null
+          Get-ChildItem "$env:RUNNER_TEMP\nightlight-*.log" -ErrorAction SilentlyContinue | Copy-Item -Destination $logs
+          if (Test-Path "$env:ProgramData\Nightlight\logs") {
+            Copy-Item "$env:ProgramData\Nightlight\logs" "$logs\service" -Recurse -Force
+          }
       - name: Upload native test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Nightlight-Windows-logs
-          path: |
-            ${{ runner.temp }}/nightlight-*.log
-            C:/ProgramData/Nightlight/logs/*
+          path: ${{ runner.temp }}/nightlight-logs/
           if-no-files-found: ignore

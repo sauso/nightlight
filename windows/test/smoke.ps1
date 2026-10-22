@@ -65,6 +65,7 @@ try {
     @"
 rtsp: yes
 rtspAddress: 127.0.0.1:18554
+rtspTransports: [tcp]
 api: no
 webrtc: no
 hls: no
@@ -76,6 +77,10 @@ paths:
 "@ | Set-Content $sourceConfig -Encoding ASCII
     $source = Start-Process "$installDir\bin\mediamtx.exe" -ArgumentList "`"$sourceConfig`"" -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\nightlight-source-out.log" -RedirectStandardError "$env:RUNNER_TEMP\nightlight-source-err.log"
     Start-Sleep -Seconds 2
+    $source.Refresh()
+    if ($source.HasExited) {
+        throw "Synthetic RTSP source exited: $(Get-Content "$env:RUNNER_TEMP\nightlight-source-err.log" -Raw)"
+    }
     $publisher = Start-Process "$installDir\bin\ffmpeg.exe" -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\nightlight-publisher-out.log" -RedirectStandardError "$env:RUNNER_TEMP\nightlight-publisher-err.log" -ArgumentList @(
         '-nostdin', '-loglevel', 'warning', '-re', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=10',
         '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
