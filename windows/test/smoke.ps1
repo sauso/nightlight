@@ -29,7 +29,10 @@ function Api {
     param([string] $Path, [string] $Method = 'GET', $Body = $null)
     $params = @{ Uri = "$base$Path"; Method = $Method; Headers = $script:Headers; TimeoutSec = 90 }
     if ($null -ne $Body) { $params.Body = ConvertTo-Json -InputObject $Body; $params.ContentType = 'application/json' }
-    Invoke-RestMethod @params
+    # Windows PowerShell emits a JSON array as one pipeline object. Enumerate
+    # it here so callers count records rather than counting the array wrapper.
+    $response = Invoke-RestMethod @params
+    Write-Output -InputObject $response
 }
 function Install-Native {
     $process = Start-Process $Installer -Wait -PassThru -ArgumentList @(
