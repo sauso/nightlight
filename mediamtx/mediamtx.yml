@@ -15,6 +15,10 @@ logLevel: info
 # login entirely.
 rtsp: yes
 rtspAddress: 127.0.0.1:8554
+# Every internal FFmpeg reader/publisher explicitly uses TCP. Leaving the default
+# UDP/multicast transports on opens additional listeners on all interfaces and
+# causes avoidable port conflicts when another media service shares the PC.
+rtspTransports: [tcp]
 
 # --- API (used by the backend to register/remove RTSP camera sources) ---
 api: yes
@@ -77,6 +81,9 @@ hlsAllowOrigins: ["*"]
 # --- RTMP/SRT outputs not needed for this project ---
 rtmp: no
 srt: no
+# MediaMTX 1.21 enables MoQ by default, including listeners on all interfaces.
+# Nightlight serves authenticated WebRTC/HLS only; never start that unused server.
+moq: no
 
 # No static paths — everything is created dynamically by the backend.
 paths: {}

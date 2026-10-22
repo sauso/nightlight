@@ -22,7 +22,7 @@ Built for parents. Friendly to self-hosters. Open source.
 
 - **Use your existing cameras.** Connect compatible RTSP cameras. On supported ONVIF cameras, Nightlight can fill in the stream details from the camera's IP address.
 - **Watch with less delay.** WebRTC provides low-latency live video, with an HLS compatibility option.
-- **Keep things in your hands.** Nightlight runs on your own Docker host and stores its settings and recordings locally.
+- **Keep things in your hands.** Nightlight runs on your own hardware and stores its settings and recordings locally.
 - **One place for the nursery.** Group cameras by child and manage access for caregivers.
 - **More than a live feed.** Explore sleep tracking, camera controls, recording and optional notifications.
 

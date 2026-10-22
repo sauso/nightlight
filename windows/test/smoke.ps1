@@ -42,6 +42,17 @@ function Install-Native {
     Assert-True ($service.State -eq 'Running') 'Service is not running'
     Assert-True ($service.StartMode -eq 'Auto') 'Service will not start at boot'
     Assert-True ($service.StartName -match 'LocalService$') 'Service is running with an unexpected account'
+    # Exercise the real media-server defaults, not just the template text. A new
+    # upstream protocol must not silently add public listeners to this bundle.
+    $script:MediaProcess = $null
+    Wait-Until {
+        $script:MediaProcess = Get-CimInstance Win32_Process -Filter "Name='mediamtx.exe'" | Where-Object { $_.ExecutablePath -eq "$installDir\bin\mediamtx.exe" } | Select-Object -First 1
+        $script:MediaProcess -and @(Get-NetUDPEndpoint -OwningProcess $script:MediaProcess.ProcessId -ErrorAction SilentlyContinue).Count -ge 1
+    } 'the media server listener'
+    $tcp = @(Get-NetTCPConnection -OwningProcess $script:MediaProcess.ProcessId -State Listen -ErrorAction SilentlyContinue)
+    $udp = @(Get-NetUDPEndpoint -OwningProcess $script:MediaProcess.ProcessId)
+    Assert-True (@($tcp | Where-Object { $_.LocalAddress -notin @('127.0.0.1', '::1') }).Count -eq 0) 'An internal media TCP listener is exposed on the network'
+    Assert-True (@($udp | Where-Object { $_.LocalPort -ne 8189 }).Count -eq 0) 'Unused UDP media listeners are open'
 }
 function Uninstall-Native {
     $uninstaller = Join-Path $installDir 'unins000.exe'
@@ -71,6 +82,7 @@ webrtc: no
 hls: no
 rtmp: no
 srt: no
+moq: no
 paths:
   synthetic:
     source: publisher
@@ -79,7 +91,7 @@ paths:
     Start-Sleep -Seconds 2
     $source.Refresh()
     if ($source.HasExited) {
-        throw "Synthetic RTSP source exited: $(Get-Content "$env:RUNNER_TEMP\nightlight-source-err.log" -Raw)"
+        throw "Synthetic RTSP source exited: $(Get-Content "$env:RUNNER_TEMP\nightlight-source-out.log" -Raw) $(Get-Content "$env:RUNNER_TEMP\nightlight-source-err.log" -Raw)"
     }
     $publisher = Start-Process "$installDir\bin\ffmpeg.exe" -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\nightlight-publisher-out.log" -RedirectStandardError "$env:RUNNER_TEMP\nightlight-publisher-err.log" -ArgumentList @(
         '-nostdin', '-loglevel', 'warning', '-re', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=10',
