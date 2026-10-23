@@ -39,6 +39,9 @@ let healthySince = null; // monotonic ms of the first HTTP answer in this run of
 let consecutiveRestarts = 0;
 let running = false;
 let timer = null;
+// Set by stop, cleared by start. A check that was already waiting for its probe when shutdown() stopped the watchdog must
+// not go on to SIGTERM MediaMTX in the middle of the awaited stops (code review of #479): clearInterval ends FUTURE ticks only.
+let stopRequested = false;
 
 // Test seam ONLY, like resetRetryStateForTest in timelapse.js.
 export function resetMediamtxApiWatchdogForTest() {
@@ -46,6 +49,7 @@ export function resetMediamtxApiWatchdogForTest() {
   healthySince = null;
   consecutiveRestarts = 0;
   running = false;
+  stopRequested = false;
 }
 
 export function currentWindowMs() {
@@ -58,13 +62,14 @@ const minutes = (ms) => Math.max(1, Math.round(ms / 60000));
  * One check. Exported with its dependencies injectable so the decision is testable without a timer, a child or
  * index.js. `restart()` returns whether it signalled a process; `onRestart({ silentMs })` is the caller's reaction
  * (Camera history, a path reconcile) and may throw. `now` is a MONOTONIC clock: never pass Date.now.
- * Resolves what happened: 'busy' | 'unknown' | 'restarted' | 'not-signalled' | 'ok'.
+ * Resolves what happened: 'busy' | 'stopped' | 'unknown' | 'restarted' | 'not-signalled' | 'ok'.
  */
 export async function checkMediamtxApi({ probe = probeMediamtxApi, restart, onRestart = () => {}, now = () => performance.now() } = {}) {
   if (running) return 'busy'; // a probe can take its whole 5 s deadline; ticks never overlap
   running = true;
   try {
     const result = await probe();
+    if (stopRequested) return 'stopped'; // shutdown began while the probe was waiting: take no action
     const t = now();
     if (result === 'timeout') {
       healthySince = null;
@@ -82,7 +87,7 @@ export async function checkMediamtxApi({ probe = probeMediamtxApi, restart, onRe
       logger.error(
         `[mediamtx] API unanswered for ${minutes(silentMs)} min: restarting the MediaMTX process ` +
           `(restart ${consecutiveRestarts} without sustained recovery; if it stays silent the next one waits ${minutes(currentWindowMs())} min). ` +
-          'Every camera reconnects in about a minute.'
+          'Cameras reconnect on their own.'
       );
       try {
         onRestart({ silentMs });
@@ -107,19 +112,23 @@ export async function checkMediamtxApi({ probe = probeMediamtxApi, restart, onRe
 }
 
 /** Start the periodic check. Idempotent. Returns the timer, or null when MEDIAMTX_API is not on this machine. */
-export function startMediamtxApiWatchdog({ restart, onRestart } = {}) {
+export function startMediamtxApiWatchdog({ restart, onRestart, probe, now, api } = {}) {
   if (timer) return timer;
-  if (!mediamtxApiIsLocal()) {
+  if (!mediamtxApiIsLocal(api)) {
     logger.info('[mediamtx] MEDIAMTX_API is not on this machine: not watching it for a hung API (the local MediaMTX is not the server being asked).');
     return null;
   }
-  timer = safeInterval('mediamtx-api-watchdog', CHECK_INTERVAL_MS, () => checkMediamtxApi({ restart, onRestart }));
+  stopRequested = false;
+  // `probe` and `now` are passed through only when given, so the defaults of checkMediamtxApi apply in production.
+  timer = safeInterval('mediamtx-api-watchdog', CHECK_INTERVAL_MS, () =>
+    checkMediamtxApi({ restart, onRestart, ...(probe ? { probe } : {}), ...(now ? { now } : {}) }));
   timer.unref?.();
   return timer;
 }
 
 /** Stop the periodic check. Idempotent, and safe when it was never started (shutdown, tests). */
 export function stopMediamtxApiWatchdog() {
+  stopRequested = true;
   clearInterval(timer);
   // Nulled, not merely cleared: start guards on `if (timer) return`, so a stale handle would make a restart a no-op.
   timer = null;

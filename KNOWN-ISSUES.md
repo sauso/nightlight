@@ -177,14 +177,15 @@ docker exec nightlight wget -qO- http://127.0.0.1:9997/v3/paths/list
 If that hangs too, MediaMTX is wedged. Since issue #479 Nightlight restarts it for you: every 30 seconds
 it asks MediaMTX's API one question, and when **nothing** has answered for **3 minutes in a row** it stops
 the MediaMTX process and starts a fresh one, the same as after a crash. All your cameras drop together and
-come back in about a minute (the 5-minute check is brought forward so the stream paths are re-created at
-once). The log says `[mediamtx] API unanswered for N min: restarting the MediaMTX process`, and each camera
+come back by themselves, usually within a minute or so (not measured; the stream paths are re-created a few
+seconds after the new MediaMTX starts, without waiting for the 5-minute check). The log says `[mediamtx] API unanswered for N min: restarting the MediaMTX process`, and each camera
 that was on gets a **restart** row in Camera history reading "Video server (MediaMTX) restarted". If it
 stays silent after a restart, the next one waits **6 minutes**, then 12, 24 and 30, and the wait goes back
 to 3 minutes only after the API has answered for 5 minutes straight. You can still restart the container
 yourself at any time.
 
-- **A timeout alone never restarts anything.** Only the whole API being silent for 3 minutes does; a MediaMTX
+- **A timeout alone never restarts anything.** Only the API staying silent for 3 minutes does (the check is one
+  request for the list of streams, so a fault that leaves that request answering is not detected); a MediaMTX
   that is slow but answers inside the 5-second limit is never restarted, and neither is one that refuses
   connections (that is a crash, which was already restarted).
 - **The 3 minutes, the 30 seconds and the backoff are unmeasured guesses.** No wedge has been seen in

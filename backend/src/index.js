@@ -89,17 +89,18 @@ const mediamtxConfigPath = writeMediamtxConfig(mediamtxBasePath, stun.urls, { lo
 startMediaMTX(mediamtxConfigPath);
 // #479: restart a MediaMTX that is alive but has stopped answering its API for minutes (lib/mediamtxApiWatchdog.js). Its
 // restart drops every camera's streams and the process comes back with NO paths (mediamtx.yml has `paths: {}`), so
-// afterwards each enabled camera gets one Camera-history row saying why they all blipped together, and the camera
-// paths are reconciled straight away (its own 10 x 3 s retry covers the relaunch gap) instead of waiting for the next
-// 5-minute pass, which would leave the main streams down for up to that long.
+// each enabled camera gets one Camera-history row saying why they all blipped together, and the camera paths are
+// reconciled as soon as the NEW MediaMTX is up (restartMediaMTX's onRelaunched, ~1.5 s after the relaunch; a reconcile
+// started at the SIGTERM would ask the old process) instead of waiting for the next 5-minute pass, which would leave the
+// main streams down for up to that long. Written as an arrow so the text `reconcileCameraPaths();` stays unique to the
+// boot reconcile that recordings-shutdown.test.js orders after the stale-recordings sweep.
 startMediamtxApiWatchdog({
-  restart: restartMediaMTX,
+  restart: () => restartMediaMTX({ onRelaunched: () => reconcileCameraPaths() }),
   onRestart: ({ silentMs }) => {
     const detail = `Video server (MediaMTX) restarted: its API had not answered for ${Math.max(1, Math.round(silentMs / 60000))} min`;
     for (const cam of db.prepare('SELECT id, name FROM cameras WHERE disabled = 0').all()) {
       recordCameraEvent(cam.id, cam.name, EVENT.RESTART, detail);
     }
-    reconcileCameraPaths();
   },
 });
 refreshMqttConnection(); // no-ops if no broker is configured

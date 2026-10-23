@@ -137,6 +137,14 @@ export async function startMediaMTX(configPath) {
     // through our own logger - this is what makes MediaMTX's output show up in both
     // `docker logs` and the in-app log viewer, rather than being silently discarded.
     proc = spawnChild('mediamtx', [configPath], { stdio: ['ignore', 'pipe', 'pipe'] }, { mediamtx: true, extra });
+    if (relaunchHook) {
+      // #479: the recovery work of the restart that caused THIS launch (see restartMediaMTX). Once, and only if we are
+      // still running when it fires.
+      const hook = relaunchHook;
+      relaunchHook = null;
+      const t = setTimeout(() => { if (!stopped) hook(); }, AFTER_RELAUNCH_MS);
+      t.unref?.();
+    }
 
     // A spawn that never started. Node emits 'error' INSTEAD OF 'exit', so the restart below never
     // runs — and an EventEmitter 'error' with no listener THROWS, taking the whole backend down before
@@ -196,19 +204,31 @@ export async function startMediaMTX(configPath) {
 // because this one stops a server that is holding every camera's streams; still short enough that a wedged one is gone
 // within seconds. Unmeasured: no wedge has been seen in production.
 const RESTART_FORCE_KILL_MS = 5000;
+// How long after the relaunched MediaMTX is spawned its `onRelaunched` hook runs: time for it to open its API. A hook
+// that asks too early gets a refusal, which the reconcile pass retries every 3 s for 30 s.
+const AFTER_RELAUNCH_MS = 1500;
+let relaunchHook = null;
 
 // ★ #479: restart a MediaMTX that is alive but not serving its API (lib/mediamtxApiWatchdog.js decides). Signals the
 // child; the exit handler in launch() does the rest exactly as for a crash (log the exit, relaunch after
 // RESTART_DELAY_MS, recompute the advertised hosts and WebRTC port). Returns whether anything was signalled:
 // false during the relaunch gap (the child is already gone), for a launch that never really spawned, and after
 // stopMediaMTX().
-// ⚠️ The SIGKILL fallback is aimed at THE CHILD SIGNALLED, captured here, never at `proc`: with a 3 s relaunch delay
-// and a 5 s fallback, a child that obeys SIGTERM is replaced before the timer fires, and `proc` is then the NEW
-// MediaMTX. Cleared on that child's exit, the pattern of killStalledDetector (processGuards.js).
-export function restartMediaMTX() {
+// The SIGKILL fallback is aimed at THE CHILD SIGNALLED, captured here, and cleared on that child's exit (the pattern of
+// killStalledDetector, processGuards.js). With a 3 s relaunch delay and a 5 s fallback, a child that obeys SIGTERM is
+// replaced before the timer would fire, and `proc` is then the NEW MediaMTX: the two guards (target the child, clear on
+// its exit) each prevent that on their own, which is why the tests can only pin them together (mediamtx-restart.test.js r1).
+//
+// `onRelaunched` (optional) runs once, AFTER the relaunched MediaMTX has been spawned (see AFTER_RELAUNCH_MS), and not at
+// all if MediaMTX is stopped meanwhile. It exists for the caller's recovery work: a restarted MediaMTX has NO paths
+// (mediamtx.yml has `paths: {}`), and a reconcile started right after the SIGTERM would ask the OLD process, which can live
+// for another 5 s and answer "unknown" or "configured", so it would write nothing and not retry (found in the code review
+// of #479).
+export function restartMediaMTX({ onRelaunched } = {}) {
   const child = proc;
   if (stopped || !child) return false;
   if (!killIfSpawned(child, 'SIGTERM')) return false;
+  relaunchHook = onRelaunched ?? null;
   const force = setTimeout(() => killIfSpawned(child, 'SIGKILL'), RESTART_FORCE_KILL_MS);
   force.unref?.();
   child.once('exit', () => clearTimeout(force));
@@ -217,6 +237,7 @@ export function restartMediaMTX() {
 
 export function stopMediaMTX() {
   stopped = true;
+  relaunchHook = null;
   // `proc` is non-null even for a launch that never spawned (it is assigned from spawn()'s return
   // value), and killing one of those is unsafe — but ONLY in the window between spawn() and the
   // 'error' event, while the child still holds a libuv handle with no OS process behind it; after

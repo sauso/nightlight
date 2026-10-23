@@ -18,7 +18,7 @@ export const MEDIAMTX_API = process.env.MEDIAMTX_API || 'http://127.0.0.1:9997';
 // is wrong, not slow. ⚠️ That is the assumption: an install that points MEDIAMTX_API at a MediaMTX
 // across a network would need more headroom. Not configurable on purpose, because nobody has needed to
 // tune it and a setting would need its own docs and range; the known limit is in KNOWN-ISSUES.md. Sustained silence of
-// the WHOLE API is acted on separately, by lib/mediamtxApiWatchdog.js (#479): it restarts the local MediaMTX process,
+// the API (one `GET /v3/paths/list` every 30 s) is acted on separately, by lib/mediamtxApiWatchdog.js (#479): it restarts the local MediaMTX process,
 // which is why that watchdog does nothing when MEDIAMTX_API is not on this machine (mediamtxApiIsLocal).
 export const MEDIAMTX_API_TIMEOUT_MS = 5000;
 let apiTimeoutMs = MEDIAMTX_API_TIMEOUT_MS;
@@ -110,7 +110,7 @@ export async function probeMediamtxApi() {
 export function mediamtxApiIsLocal(api = MEDIAMTX_API) {
   try {
     const host = new URL(api).hostname;
-    return host === '127.0.0.1' || host === 'localhost' || host === '[::1]' || host === '::1';
+    return host === '127.0.0.1' || host === 'localhost' || host === '[::1]'; // a URL keeps the brackets of an IPv6 host
   } catch {
     return false;
   }

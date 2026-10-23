@@ -23006,15 +23006,6 @@
     "namePattern": "^w5b:"
   },
   {
-    "label": "#479 M8: the SIGKILL fallback is aimed at whatever MediaMTX is running when it fires (the new one after a relaunch)",
-    "file": "backend/src/lib/mediamtxProcess.js",
-    "find": "  const force = setTimeout(() => killIfSpawned(child, 'SIGKILL'), RESTART_FORCE_KILL_MS);",
-    "replace": "  const force = setTimeout(() => killIfSpawned(proc, 'SIGKILL'), RESTART_FORCE_KILL_MS);",
-    "expect": "killed",
-    "tests": ["mediamtx-restart.test.js"],
-    "namePattern": "^r1:"
-  },
-  {
     "label": "#479 M9: the fallback is not cleared when the child exits on SIGTERM (an exited child is SIGKILLed)",
     "file": "backend/src/lib/mediamtxProcess.js",
     "find": "  child.once('exit', () => clearTimeout(force));",
@@ -23040,6 +23031,51 @@
     "expect": "killed",
     "tests": ["mediamtx-restart.test.js"],
     "namePattern": "^r4:"
+  },
+  {
+    "label": "#479 M12: a restart's recovery hook runs at the SIGTERM instead of after the relaunch (it asks the old MediaMTX)",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "  relaunchHook = onRelaunched ?? null;",
+    "replace": "  onRelaunched?.();",
+    "expect": "killed",
+    "tests": ["mediamtx-restart.test.js"],
+    "namePattern": "^r1:"
+  },
+  {
+    "label": "#479 M13: a tick already waiting for its probe when shutdown stops the watchdog still restarts MediaMTX",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "    if (stopRequested) return 'stopped'; // shutdown began while the probe was waiting: take no action",
+    "replace": "    // mutant: no stop check after the probe",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w12:"
+  },
+  {
+    "label": "#479 M14: the started watchdog's tick drops the Camera-history reaction (onRestart)",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "    checkMediamtxApi({ restart, onRestart, ...(probe ? { probe } : {}), ...(now ? { now } : {}) }));",
+    "replace": "    checkMediamtxApi({ restart, ...(probe ? { probe } : {}), ...(now ? { now } : {}) }));",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w13:"
+  },
+  {
+    "label": "#479 M15: a remote MEDIAMTX_API is supervised (the local MediaMTX would be killed for a silent remote server)",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "  if (!mediamtxApiIsLocal(api)) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w10:"
+  },
+  {
+    "label": "#479 M16: a timeout does not break the run of healthy answers (a flapping server gets its backoff reset)",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "    if (result === 'timeout') {\r\n      healthySince = null;",
+    "replace": "    if (result === 'timeout') {",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w5b:"
   },
   {
     "label": "#450 M7: the nightly job's tick never starts the retry",

@@ -180,6 +180,28 @@ describe('checkMediamtxApi: when silence becomes a restart', () => {
     await r.tick(base + 90_000, 'answered');
     await r.tick(base + 90_000 + RECOVERED_MS - 1, 'answered');
     assert.equal(currentWindowMs(), 2 * HUNG_MS, 'a broken run of answers still counted');
+    // The same for a TIMEOUT in the middle of the run: a flapping server must not get its backoff reset 5 minutes after its first answer.
+    const r2 = rig();
+    resetMediamtxApiWatchdogForTest();
+    await r2.tick(0, 'timeout');
+    await r2.tick(HUNG_MS, 'timeout'); // restart 1
+    const b2 = HUNG_MS + 30_000;
+    await r2.tick(b2, 'answered');
+    await r2.tick(b2 + 60_000, 'timeout'); // breaks the run
+    await r2.tick(b2 + 90_000, 'answered');
+    await r2.tick(b2 + RECOVERED_MS, 'answered'); // 5 min after the FIRST answer, but only 3.5 min into the unbroken run
+    assert.equal(currentWindowMs(), 2 * HUNG_MS, 'a timeout did not break the run of healthy answers');
+  });
+
+  test('w6b: the state is committed BEFORE the restart is attempted (a restart that throws is not repeated on the next tick)', async () => {
+    let calls = 0;
+    const tick = (at, result, restart) => checkMediamtxApi({ probe: async () => result, now: () => at, restart });
+    await tick(0, 'timeout', () => true);
+    await assert.rejects(() => tick(HUNG_MS, 'timeout', () => { calls += 1; throw new Error('kill failed'); }), /kill failed/);
+    assert.equal(calls, 1);
+    // Committed: the stamp was cleared before the throw, so the next tick starts a fresh window instead of restarting again.
+    assert.equal(await tick(HUNG_MS + 30_000, 'timeout', () => { calls += 1; return true; }), 'unknown');
+    assert.equal(calls, 1, 'the throwing restart was repeated on the very next tick');
   });
 
   test('w6: a restart that signalled nothing (the child is already gone) claims nothing and does not back off', async () => {
@@ -238,6 +260,7 @@ describe('the whole chain', () => {
   });
 
   test('w10: start is idempotent, stop nulls the handle (a restart of the module is not a silent no-op), and a remote API is not supervised', () => {
+    assert.equal(watchdog.startMediamtxApiWatchdog({ restart: () => true, api: 'http://10.0.0.5:9997' }), null, 'a remote API was supervised');
     const a = watchdog.startMediamtxApiWatchdog({ restart: () => true });
     const b = watchdog.startMediamtxApiWatchdog({ restart: () => true });
     assert.ok(a);
@@ -246,5 +269,59 @@ describe('the whole chain', () => {
     watchdog.stopMediamtxApiWatchdog(); // safe twice
     const c = watchdog.startMediamtxApiWatchdog({ restart: () => true });
     assert.ok(c && c !== a, 'start after stop did not create a timer');
+  });
+
+  test('w12: a check already waiting for its probe when the watchdog is stopped takes no action (shutdown must not SIGTERM MediaMTX mid-stop)', async () => {
+    let release;
+    let restarts = 0;
+    let t = 0;
+    // First tick stamps the streak; the second waits on a probe that will say "timeout" past the window.
+    await checkMediamtxApi({ probe: async () => 'timeout', now: () => t, restart: () => { restarts += 1; return true; } });
+    t = HUNG_MS;
+    const waiting = checkMediamtxApi({
+      probe: () => new Promise((resolve) => { release = () => resolve('timeout'); }),
+      now: () => t,
+      restart: () => { restarts += 1; return true; },
+    });
+    watchdog.stopMediamtxApiWatchdog();
+    release();
+    assert.equal(await waiting, 'stopped');
+    assert.equal(restarts, 0, 'a stopped watchdog restarted MediaMTX');
+  });
+
+  test('w13: the STARTED watchdog runs a check every 30 s and reaches onRestart (Camera history) when it restarts', async (t) => {
+    t.mock.timers.enable({ apis: ['setInterval'] });
+    let clock = 0;
+    const events = [];
+    let restarts = 0;
+    watchdog.startMediamtxApiWatchdog({
+      probe: async () => 'timeout',
+      now: () => clock,
+      restart: () => { restarts += 1; return true; },
+      onRestart: (info) => events.push(info),
+    });
+    // Six 30 s ticks: the streak is stamped at tick 1 and is 150 s old at tick 6.
+    for (let i = 1; i <= 6; i++) {
+      clock = (i - 1) * watchdog.CHECK_INTERVAL_MS;
+      t.mock.timers.tick(watchdog.CHECK_INTERVAL_MS);
+      for (let k = 0; k < 5; k++) await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(restarts, 0, 'restarted inside the window');
+    clock = HUNG_MS;
+    t.mock.timers.tick(watchdog.CHECK_INTERVAL_MS);
+    for (let k = 0; k < 5; k++) await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(restarts, 1, 'the started watchdog never restarted (is the interval 30 s? does it run the check?)');
+    assert.equal(events.length, 1, 'onRestart never ran: Camera history would not be written');
+    assert.equal(events[0].silentMs, HUNG_MS);
+  });
+
+  test('w11: shutdown() stops the watchdog FIRST, before its first await (a tick during the awaited stops could SIGTERM MediaMTX)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+    const body = src.slice(src.indexOf('async function shutdown()'));
+    const stop = body.indexOf('stopMediamtxApiWatchdog()');
+    assert.ok(stop > 0, 'shutdown() does not stop the watchdog');
+    assert.ok(stop < body.indexOf('await '), 'shutdown() awaits something before it stops the watchdog');
+    assert.ok(stop < body.indexOf('stopMediaMTX()'), 'the watchdog is stopped after MediaMTX');
   });
 });

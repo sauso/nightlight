@@ -36,6 +36,7 @@ const { startMediaMTX, stopMediaMTX, restartMediaMTX } = await import('../src/li
 
 const RESTART_DELAY_MS = 3000;
 const FORCE_KILL_MS = 5000;
+const AFTER_RELAUNCH_MS = 1500;
 const settle = () => new Promise((resolve) => setImmediate(resolve)); // real setImmediate: only setTimeout is mocked
 
 let started = false;
@@ -77,15 +78,25 @@ describe('restartMediaMTX', () => {
     assert.equal(spawned.length, 1, 'launch() never reached spawn');
     const old = spawned[0];
     mock.timers.enable({ apis: ['setTimeout'] });
+    const hooked = [];
 
-    assert.equal(restartMediaMTX(), true);
+    assert.equal(restartMediaMTX({ onRelaunched: () => hooked.push('recovery') }), true);
     assert.deepEqual(old.signals, ['SIGTERM']);
     assert.equal(old.ended, true, 'precondition: the fake child exited on SIGTERM');
+    assert.deepEqual(hooked, [], 'the recovery ran at the SIGTERM, when it would ask the OLD MediaMTX');
     await settle();
     mock.timers.tick(RESTART_DELAY_MS);
     assert.equal(spawned.length, 2, 'the exit handler did not relaunch MediaMTX');
     const fresh = spawned[1];
+    // The recovery waits for the NEW MediaMTX to open its API, not just to be spawned.
+    mock.timers.tick(AFTER_RELAUNCH_MS - 1);
+    assert.deepEqual(hooked, [], 'the recovery ran before the new MediaMTX had time to open its API');
+    mock.timers.tick(1);
+    assert.deepEqual(hooked, ['recovery']);
     mock.timers.tick(FORCE_KILL_MS + 1000);
+    assert.deepEqual(hooked, ['recovery'], 'the recovery ran twice');
+    // (Two guards stop the old child's SIGKILL reaching the new one: the timer targets the child it signalled, and it is
+    // cleared when that child exits. Either alone suffices, so this pins them together.)
     assert.deepEqual(fresh.signals, [], 'the SIGKILL fallback of the OLD child killed the new MediaMTX');
     assert.deepEqual(old.signals, ['SIGTERM'], 'the old child, already gone, was signalled again');
   });
@@ -135,11 +146,13 @@ describe('restartMediaMTX', () => {
     mock.timers.enable({ apis: ['setTimeout'] });
     const wedged = await relaunchAs(WedgedFfmpeg);
     const before = spawned.length;
-    restartMediaMTX(); // SIGTERM ignored, fallback armed
+    const hooked = [];
+    restartMediaMTX({ onRelaunched: () => hooked.push('recovery') }); // SIGTERM ignored, fallback armed
     wedged.finish(null, 'SIGTERM'); // it dies on its own before the fallback
     await settle();
     stopMediaMTX(); // `stopped` latches: nothing relaunches from here on
-    mock.timers.tick(FORCE_KILL_MS + RESTART_DELAY_MS + 1000);
+    mock.timers.tick(FORCE_KILL_MS + RESTART_DELAY_MS + AFTER_RELAUNCH_MS + 1000);
+    assert.deepEqual(hooked, [], 'the recovery of a restart that never relaunched still ran');
     assert.ok(!wedged.signals.includes('SIGKILL'), 'the cleared fallback still fired');
     assert.equal(spawned.length, before, 'MediaMTX was relaunched after stopMediaMTX()');
     assert.equal(restartMediaMTX(), false, 'a restart was signalled after stopMediaMTX()');
