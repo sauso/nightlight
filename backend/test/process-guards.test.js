@@ -7,7 +7,7 @@
 // ⚠️ WHAT ACTUALLY THROWS — corrected after adversarial review of PR #275. The PR first claimed the
 // crash was reachable from every watchdog through `upsertPath`. That was wrong: `startTranscoder`
 // already catches it (transcoder.js, the `-hls` path's `upsertPath`) and everything else it awaits swallows its own errors, so the
-// audio watchdog has no demonstrated rejection path at all. The two real triggers are `subStream.js:38`
+// audio watchdog has no demonstrated rejection path at all. The two real triggers are `subStream.js` (ensureSubPath; line 38 before #806)
 // (the one genuinely bare `upsertPath`) and `db.prepare(...)` at the top of EVERY tick, which
 // better-sqlite3 throws synchronously on SQLITE_BUSY. See lib/processGuards.js.
 //

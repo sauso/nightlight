@@ -1237,6 +1237,15 @@ router.put('/:id/enabled', requireAdmin, asyncHandler(async (req, res) => {
     const cam = { ...existing, disabled: 0 };
     await startCameraLegs(cam);
   } else {
+    // #806: RECORD THE DISABLE BEFORE THE FIRST AWAIT, and again at the bottom (unchanged). The stops below take seconds
+    // (three detector stops, then two MediaMTX removals), and every other route decides "may I start this camera?" by
+    // reading `disabled` (the edit's saved-row checks, DELETE, restart). With the flag written only at the bottom, an
+    // edit that read the row after stopSubStream finished still saw 0 and queued a start behind the stop: nothing was
+    // pending for #478's stop generation to cancel, so a sub transcoder launched for a disabled camera that nothing
+    // stops (reconcile and the watchdogs skip disabled cameras). Written first, "read 0, then queue with no await" is
+    // always covered by the generation the stops below bump. The bottom write stays so the outcome against a
+    // concurrent enable (whichever route writes last) is exactly what it was.
+    db.prepare('UPDATE cameras SET disabled = 1 WHERE id = ?').run(req.params.id);
     await stopTranscoder(req.params.id);
     await stopSubStream(existing).catch(() => {});
     await stopMotionDetector(req.params.id).catch(() => {});
@@ -1253,6 +1262,32 @@ router.put('/:id/enabled', requireAdmin, asyncHandler(async (req, res) => {
     }
   }
   db.prepare('UPDATE cameras SET disabled = ? WHERE id = ?').run(enabled ? 0 : 1, req.params.id);
+  if (enabled) {
+    // #806: AN EDIT THAT SAVED A NEW ADDRESS WHILE THIS ENABLE WAS STARTING THE CAMERA. The legs above started from
+    // `existing`, read before any await, and `disabled` was still 1 until the UPDATE just above, so that edit skipped
+    // its own start (it only restarts an enabled camera) and the old address kept running until the 5-minute reconcile.
+    // Read the row again with NO await between the UPDATE and this read (SQLite is synchronous): an edit either saved
+    // before the flag write, and is seen here, or saw 0 and applies its own start. Compared with `existing`, the
+    // snapshot the legs were started from, so an A -> B -> A double edit starts nothing. BOTH starts are queued in this
+    // one synchronous block (startSubStream reaches startTranscoder before its first await), so a later edit's
+    // start queues behind them and a disable's stop generation covers both; awaiting the main start first would let
+    // a stale sub address land after a newer edit's. Starts are serialised per camera (#478). A failure is logged and
+    // never fails the enable. Not covered, by design: the other columns the legs read at start (detection settings,
+    // child) come from the same early snapshot; the 5-minute reconcile corrects those.
+    const fresh = db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id);
+    if (fresh) {
+      const reapply = [];
+      if (fresh.rtsp_url !== existing.rtsp_url) {
+        reapply.push(startTranscoder(fresh.id, fresh.rtsp_url, fresh.mediamtx_path, fresh.name)
+          .catch((e) => logger.error(`[enable] applying the address saved during the enable failed: ${e.message}`)));
+      }
+      if (fresh.sub_rtsp_url !== existing.sub_rtsp_url) {
+        reapply.push((subConfigured(fresh) ? startSubStream(fresh) : stopSubStream(fresh))
+          .catch((e) => logger.error(`[enable] applying the sub-stream address saved during the enable failed: ${e.message}`)));
+      }
+      await Promise.all(reapply);
+    }
+  }
   res.json(publicCamera(db.prepare('SELECT * FROM cameras WHERE id = ?').get(req.params.id), true));
 }));
 
