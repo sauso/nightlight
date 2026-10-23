@@ -9,8 +9,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- **Native Windows installer.** The Windows setup executable bundles Node.js, FFmpeg and MediaMTX, installs an automatic background service and adds a Start menu shortcut to the web app. Docker is not required. A desktop tray icon offers Open Nightlight and Settings, with optional startup at sign-in; exiting the tray keeps monitoring running. The tray, setup, uninstaller and shortcuts use Nightlight's website artwork. The service runs as LocalService, keeps data under ProgramData, and allows time to finish recordings when stopped. Upgrades and uninstall preserve cameras, accounts and recordings. The Windows workflow checks the tray, native streaming, recording, service shutdown and data preservation with a synthetic camera. See [Windows installation](docs/windows.md).
+
 ### Fixed
 
+- **The media server no longer opens unused RTP and MoQ listeners.** Nightlight's internal stream connections use TCP, and low-latency viewing uses its WebRTC UDP port. Disabling the unused transports avoids extra listeners and port conflicts on the host.
 - **A camera that lists a profile without video no longer loses its Low-quality stream option (#824).** When a separate video profile is available, Nightlight now uses it for that option. Found in tests; not seen on a real camera.
 
 ## [0.42.1] - 2026-10-21

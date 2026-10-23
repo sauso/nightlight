@@ -4,12 +4,14 @@ Nightlight is made for your home network first: add your cameras, watch them fro
 
 ## Networking modes
 
-Nightlight needs its own routable IP on your LAN so WebRTC has no NAT/ICE trouble: MediaMTX advertises that IP to browsers. There are two supported ways to provide one:
+Low-latency video needs a reachable LAN address and UDP port: MediaMTX advertises them to browsers. On Linux there are two ways to provide them:
 
 - **Host networking (the default, and the simplest).** The container shares the host's IP (`--network host`, or `<Network>host</Network>` in the Unraid template). There's nothing to configure; it's what the quick start and the template use. The trade-off is that it binds its ports (4000, plus MediaMTX's) directly on the host, which clashes if something else there already uses them.
 - **A dedicated LAN IP (ipvlan / macvlan).** Put the container on a Docker `ipvlan` or `macvlan` network so it gets its **own** address on your LAN, separate from the host. Nightlight detects the container's IP and has MediaMTX advertise it, so WebRTC works on the LAN with **no extra configuration** (no `PUBLIC_HOST` needed for local viewing). Use this to avoid host-mode port conflicts, or just to keep the app on a tidy fixed IP of its own.
   - **On Unraid:** create a custom Docker network on your NIC (for example `br0`, or a VLAN like `br0.10`), then set the container template's **Network Type** to that network and give it a fixed IP.
   - **macvlan caveat:** with plain `macvlan`, the **host itself usually can't reach the container** (a Linux kernel limitation). That matters if your reverse proxy (for example SWAG) runs on the same host. Use **`ipvlan`**, or add a macvlan shim interface, so the host can reach it.
+
+**Native Windows installation:** the [Windows installer](windows.md) runs directly on the PC and MediaMTX advertises its LAN interfaces plus loopback. The installer can add Windows Firewall rules for the web port (TCP 4000 by default) and UDP 8189, restricted to the Private network profile and local subnet. Only these two ports need inbound access; internal MediaMTX services remain on loopback.
 
 | | Host networking | ipvlan | macvlan |
 |---|---|---|---|

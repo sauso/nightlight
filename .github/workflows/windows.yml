@@ -1,0 +1,73 @@
+name: Windows installer
+
+on:
+  push:
+    branches: [dev, main]
+    paths: ['windows/**', 'backend/**', 'frontend/**', 'mediamtx/**', '.github/workflows/windows.yml']
+  pull_request:
+    paths: ['windows/**', 'backend/**', 'frontend/**', 'mediamtx/**', '.github/workflows/windows.yml']
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - name: Test launcher and child-process environment
+        run: node --experimental-test-module-mocks --test backend/test/windows-launcher.test.js backend/test/child-env.test.js
+      - name: Ensure Inno Setup is available
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Could not install Inno Setup' }
+          }
+      - name: Build the self-contained Windows installer
+        run: ./windows/build.ps1
+      - name: Install, stream, record, upgrade and uninstall on Windows
+        run: |
+          $installer = (Get-ChildItem windows/dist/*-setup.exe).FullName
+          ./windows/test/smoke.ps1 -Installer $installer
+      - name: Upload tested Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nightlight-Windows-x64
+          path: |
+            windows/dist/*-setup.exe
+            windows/dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Collect native test logs
+        if: always()
+        run: |
+          $logs = "$env:RUNNER_TEMP\nightlight-logs"
+          New-Item -ItemType Directory -Path $logs -Force | Out-Null
+          Get-ChildItem "$env:RUNNER_TEMP\nightlight-*.log" -ErrorAction SilentlyContinue | Copy-Item -Destination $logs
+          Get-ChildItem "$env:RUNNER_TEMP\nightlight-icon-*.png" -ErrorAction SilentlyContinue | Copy-Item -Destination $logs
+          if (Test-Path "$env:ProgramData\Nightlight\logs") {
+            Copy-Item "$env:ProgramData\Nightlight\logs" "$logs\service" -Recurse -Force
+          }
+      - name: Upload native test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nightlight-Windows-logs
+          path: ${{ runner.temp }}/nightlight-logs/
+          if-no-files-found: ignore

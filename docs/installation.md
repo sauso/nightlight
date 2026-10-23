@@ -2,6 +2,8 @@
 
 Nightlight runs as a single Docker container on a Linux host that can reach your cameras. It supports `amd64` and `arm64`. Host networking is the simple default; there is a dedicated-IP option if you'd rather avoid port clashes (see [networking](networking.md)).
 
+**Windows:** the [native Windows installer](windows.md) bundles Node.js, FFmpeg and MediaMTX, runs Nightlight as an automatic Windows service, and adds a Start menu shortcut. Docker is not required.
+
 ## What you need
 
 - **An always-on Linux box on the same network as your cameras.** A Raspberry Pi, an Unraid server, anything running Docker.

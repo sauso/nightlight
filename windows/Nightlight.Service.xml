@@ -1,0 +1,23 @@
+<service>
+  <id>Nightlight</id>
+  <name>Nightlight</name>
+  <description>Nightlight camera monitoring server. Open http://localhost:4000.</description>
+  <executable>%BASE%\node.exe</executable>
+  <arguments>"%BASE%\launch.mjs"</arguments>
+  <workingdirectory>%BASE%</workingdirectory>
+  <startmode>Automatic</startmode>
+  <serviceaccount>
+    <domain>NT AUTHORITY</domain>
+    <user>LocalService</user>
+  </serviceaccount>
+  <!-- Node handles Ctrl+C (SIGINT) and finishes recordings before its children.
+       WinSW sends Ctrl+C first; only force-kill after the app's shutdown budget. -->
+  <stoptimeout>30 sec</stoptimeout>
+  <stopparentprocessfirst>true</stopparentprocessfirst>
+  <onfailure action="restart" delay="5 sec" />
+  <logpath>%ProgramData%\Nightlight\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>3</keepFiles>
+  </log>
+</service>

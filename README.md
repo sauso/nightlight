@@ -22,7 +22,7 @@ Built for parents. Friendly to self-hosters. Open source.
 
 - **Use your existing cameras.** Connect compatible RTSP cameras. On supported ONVIF cameras, Nightlight can fill in the stream details from the camera's IP address.
 - **Watch with less delay.** WebRTC provides low-latency live video, with an HLS compatibility option.
-- **Keep things in your hands.** Nightlight runs on your own Docker host and stores its settings and recordings locally.
+- **Keep things in your hands.** Nightlight runs on your own hardware and stores its settings and recordings locally.
 - **One place for the nursery.** Group cameras by child and manage access for caregivers.
 - **More than a live feed.** Explore sleep tracking, camera controls, recording and optional notifications.
 
@@ -30,7 +30,9 @@ Nightlight is designed for local-network use first. Remote viewing is possible, 
 
 ## Quick start
 
-You'll need an always-on Linux host running Docker (such as Unraid or an arm64 Raspberry Pi) and a camera that exposes an RTSP stream. ONVIF is useful but optional. Performance depends on your hardware, camera count and enabled analysis features; there isn't a published minimum-hardware benchmark.
+**On Windows?** Use the [Windows installer](docs/windows.md) to run Nightlight as a background service, with a tray icon for opening the app and settings. It includes the runtime and video tools; Docker is not required.
+
+For the Docker instructions below, you'll need an always-on Linux host running Docker (such as Unraid or an arm64 Raspberry Pi) and a camera that exposes an RTSP stream. ONVIF is useful but optional. Performance depends on your hardware, camera count and enabled analysis features; there isn't a published minimum-hardware benchmark.
 
 On Unraid? Jump to [Running on Unraid](#running-on-unraid). Anywhere else, run Nightlight on a trusted home network:
 
