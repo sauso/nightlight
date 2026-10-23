@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- **Account now says its notifications switch applies at once (#384).** In the app, the "Send motion alerts to this device" switch is a setting for the device and takes effect when you change it, while the name and password forms on the same page wait for their own buttons. The page now says so, and the design guide names this as a declared exception to "a Save-button page does not mix". No behaviour changed.
+
 ### Fixed
 
 - **A night's memories timelapse that failed to assemble is now tried again (#450).** Before, one failed encode (a busy disk, an encoder error, a restart in the middle, or a first try right after a start, before clip storage was ready) left that night without a video for good, even though its frames were still on disk. Every 30 minutes the nightly job now looks for a night that is scored as someone sleeping in the bed, has at least 30 kept frames and no video, and assembles it, newest first and one at a time, at most 3 times per night each time Nightlight starts (an unmeasured guess; a restart or an update gives a night three more). Two assemblies of the same night can no longer run at once. A night that fails all 3 keeps its frames, and the log says `giving up on` and where they are. Known limits: nothing deletes those frames automatically (only removing the child does), and there is no retry button. See "A night with frames but no video is tried again" in [docs/recording.md](docs/recording.md).
