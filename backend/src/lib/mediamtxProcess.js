@@ -191,6 +191,30 @@ export async function startMediaMTX(configPath) {
   launch();
 }
 
+// How long a MediaMTX that was sent SIGTERM by restartMediaMTX() gets before SIGKILL. A deadlocked process may
+// ignore SIGTERM, and then nothing would ever relaunch it. Longer than the 3 s the transcoder and detector kills use,
+// because this one stops a server that is holding every camera's streams; still short enough that a wedged one is gone
+// within seconds. Unmeasured: no wedge has been seen in production.
+const RESTART_FORCE_KILL_MS = 5000;
+
+// ★ #479: restart a MediaMTX that is alive but not serving its API (lib/mediamtxApiWatchdog.js decides). Signals the
+// child; the exit handler in launch() does the rest exactly as for a crash (log the exit, relaunch after
+// RESTART_DELAY_MS, recompute the advertised hosts and WebRTC port). Returns whether anything was signalled:
+// false during the relaunch gap (the child is already gone), for a launch that never really spawned, and after
+// stopMediaMTX().
+// ⚠️ The SIGKILL fallback is aimed at THE CHILD SIGNALLED, captured here, never at `proc`: with a 3 s relaunch delay
+// and a 5 s fallback, a child that obeys SIGTERM is replaced before the timer fires, and `proc` is then the NEW
+// MediaMTX. Cleared on that child's exit, the pattern of killStalledDetector (processGuards.js).
+export function restartMediaMTX() {
+  const child = proc;
+  if (stopped || !child) return false;
+  if (!killIfSpawned(child, 'SIGTERM')) return false;
+  const force = setTimeout(() => killIfSpawned(child, 'SIGKILL'), RESTART_FORCE_KILL_MS);
+  force.unref?.();
+  child.once('exit', () => clearTimeout(force));
+  return true;
+}
+
 export function stopMediaMTX() {
   stopped = true;
   // `proc` is non-null even for a launch that never spawned (it is assigned from spawn()'s return

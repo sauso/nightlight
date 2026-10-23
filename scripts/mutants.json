@@ -22943,6 +22943,105 @@
     "namePattern": "^f7:"
   },
   {
+    "label": "#479 M1: an answer or a refusal does not clear the silence stamp (a server that answers now and then is restarted)",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "    unknownSince = null;\r\n    if (result === 'answered') {",
+    "replace": "    if (result === 'answered') {",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w[34]:"
+  },
+  {
+    "label": "#479 M2: the restart window never doubles (a restart that did not help is repeated every 3 minutes)",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "  return Math.min(MAX_WINDOW_MS, HUNG_MS * 2 ** consecutiveRestarts);",
+    "replace": "  return HUNG_MS;",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w2"
+  },
+  {
+    "label": "#479 M3: the watchdog restarts at the first unanswered probe, with no window",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "      if (silentMs < currentWindowMs()) return 'unknown';",
+    "replace": "      if (silentMs < 0) return 'unknown';",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w2:"
+  },
+  {
+    "label": "#479 M4: the backoff is cleared by the first answer after a restart, not by sustained answers",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "      if (consecutiveRestarts > 0 && t - healthySince >= RECOVERED_MS) consecutiveRestarts = 0;",
+    "replace": "      if (consecutiveRestarts > 0) consecutiveRestarts = 0;",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w5:"
+  },
+  {
+    "label": "#479 M5: a restart that signalled nothing is still logged, recorded in Camera history and counted",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "      if (!restart()) return 'not-signalled';",
+    "replace": "      restart();",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w6:"
+  },
+  {
+    "label": "#479 M6: checks may overlap (a second probe starts while one is still waiting for its deadline)",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "  if (running) return 'busy'; // a probe can take its whole 5 s deadline; ticks never overlap",
+    "replace": "  // mutant: no overlap guard",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w8:"
+  },
+  {
+    "label": "#479 M7: a refused connection counts toward the run of healthy answers",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "      healthySince = null; // refused: down or restarting, not healthy yet",
+    "replace": "      healthySince ??= t;",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w5b:"
+  },
+  {
+    "label": "#479 M8: the SIGKILL fallback is aimed at whatever MediaMTX is running when it fires (the new one after a relaunch)",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "  const force = setTimeout(() => killIfSpawned(child, 'SIGKILL'), RESTART_FORCE_KILL_MS);",
+    "replace": "  const force = setTimeout(() => killIfSpawned(proc, 'SIGKILL'), RESTART_FORCE_KILL_MS);",
+    "expect": "killed",
+    "tests": ["mediamtx-restart.test.js"],
+    "namePattern": "^r1:"
+  },
+  {
+    "label": "#479 M9: the fallback is not cleared when the child exits on SIGTERM (an exited child is SIGKILLed)",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "  child.once('exit', () => clearTimeout(force));",
+    "replace": "  // mutant: fallback never cleared",
+    "expect": "killed",
+    "tests": ["mediamtx-restart.test.js"],
+    "namePattern": "^r[14]:"
+  },
+  {
+    "label": "#479 M10: a refused or reset connection is read as a hang",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "    return e instanceof MediamtxTimeoutError ? 'timeout' : 'refused';",
+    "replace": "    return 'timeout';",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w1b:"
+  },
+  {
+    "label": "#479 M11: a restart is signalled after stopMediaMTX()",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "  if (stopped || !child) return false;",
+    "replace": "  if (!child) return false;",
+    "expect": "killed",
+    "tests": ["mediamtx-restart.test.js"],
+    "namePattern": "^r4:"
+  },
+  {
     "label": "#450 M7: the nightly job's tick never starts the retry",
     "file": "backend/src/lib/sleepAnalysis.js",
     "find": ".then((m) => m.retryStrandedTimelapses())",

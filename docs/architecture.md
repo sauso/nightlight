@@ -114,6 +114,10 @@ reconciliation. Three independent mechanisms keep the pipeline alive without man
 - A watchdog (15s interval) tracks how long each camera's MediaMTX path has been "not ready"
   and force-restarts that camera's transcoder past a 30s threshold — a second, independent
   layer of defense beyond FFmpeg's own stream error handling.
+- A MediaMTX that stays alive but stops answering its API is restarted too, after 3 minutes of silence
+  (`lib/mediamtxApiWatchdog.js`, #479: a probe every 30 s, a doubling backoff of 3, 6, 12, 24, then 30
+  minutes, back to 3 after 5 minutes of answers; local MediaMTX only; Camera history gets one row per
+  camera and the camera paths are reconciled at once).
 - FFmpeg and MediaMTX processes both auto-restart on unexpected exit (`transcoder.js`,
   `mediamtxProcess.js`), and `transcoder.js` also watches for a specific known bad-camera
   symptom ("DTS discontinuity") and proactively restarts rather than let a session run poisoned.

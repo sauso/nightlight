@@ -17,7 +17,9 @@ export const MEDIAMTX_API = process.env.MEDIAMTX_API || 'http://127.0.0.1:9997';
 // loopback in the same container and answers in milliseconds, so 5s without an answer means something
 // is wrong, not slow. ⚠️ That is the assumption: an install that points MEDIAMTX_API at a MediaMTX
 // across a network would need more headroom. Not configurable on purpose, because nobody has needed to
-// tune it and a setting would need its own docs and range; the known limit is in KNOWN-ISSUES.md.
+// tune it and a setting would need its own docs and range; the known limit is in KNOWN-ISSUES.md. Sustained silence of
+// the WHOLE API is acted on separately, by lib/mediamtxApiWatchdog.js (#479): it restarts the local MediaMTX process,
+// which is why that watchdog does nothing when MEDIAMTX_API is not on this machine (mediamtxApiIsLocal).
 export const MEDIAMTX_API_TIMEOUT_MS = 5000;
 let apiTimeoutMs = MEDIAMTX_API_TIMEOUT_MS;
 
@@ -80,6 +82,37 @@ async function mtxRequest(method, apiPath, body) {
       throw err;
     }
     throw e;
+  }
+}
+
+// ★ #479: ONE QUESTION FOR THE API-HUNG WATCHDOG (lib/mediamtxApiWatchdog.js), asked on its own timer so the answer
+// does not depend on camera traffic. `GET /v3/paths/list` through the same deadline as every other call. Never throws:
+//   'answered' - an HTTP response of any status: the process is serving.
+//   'timeout'  - no answer within the deadline (accepted the connection and said nothing, a full backlog, a stopped
+//                process all end here): UNKNOWN, the only outcome the watchdog counts.
+//   'refused'  - the connection failed outright (nothing listening, reset, closed): not a hang. MediaMTX is down or
+//                restarting, which mediamtxProcess.js already handles through the process exit.
+// The watchdog keeps its own stamp from THIS probe alone and does not share state with the other callers on purpose
+// (plan review): a slow path write or a path-manager-only deadlock could otherwise be masked by another endpoint
+// that still answers, or a concurrent answer could clear the stamp between a timeout and the comparison.
+export async function probeMediamtxApi() {
+  try {
+    await mtxRequest('GET', '/v3/paths/list');
+    return 'answered';
+  } catch (e) {
+    return e instanceof MediamtxTimeoutError ? 'timeout' : 'refused';
+  }
+}
+
+// Whether MEDIAMTX_API points at this machine. The watchdog restarts the LOCAL MediaMTX child, so an API on another
+// host that stops answering (the network, not our child) must not make it kill a healthy local process. The published
+// image always runs MediaMTX inside the container, on loopback.
+export function mediamtxApiIsLocal(api = MEDIAMTX_API) {
+  try {
+    const host = new URL(api).hostname;
+    return host === '127.0.0.1' || host === 'localhost' || host === '[::1]' || host === '::1';
+  } catch {
+    return false;
   }
 }
 
