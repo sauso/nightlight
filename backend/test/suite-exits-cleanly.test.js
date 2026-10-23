@@ -221,6 +221,9 @@ const PERIODIC = [
   { module: 'src/lib/timelapse.js', start: 'startTimelapseSampler', stop: 'stopTimelapseSampler', pinsLoop: false },
   // #373: the 15-minute `[obs]` line. Unref'd from the start, so like the three above it never pinned the loop.
   { module: 'src/lib/observationClock.js', start: 'startObservationLog', stop: 'stopObservationLog', pinsLoop: false },
+  // #479: the 30 s check that restarts a MediaMTX whose API stopped answering. Created through `safeInterval` and unref'd,
+  // so it never pinned the loop; listed so that shutdown() is asserted to stop it (the first call in shutdown()).
+  { module: 'src/lib/mediamtxApiWatchdog.js', start: 'startMediamtxApiWatchdog', stop: 'stopMediamtxApiWatchdog', pinsLoop: false },
 ];
 
 describe('shutdown() actually stops the tracker', () => {

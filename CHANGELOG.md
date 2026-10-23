@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- **A MediaMTX that is still running but has stopped answering is now restarted (#479).** Nightlight asks MediaMTX's API one question every 30 seconds; when nothing has answered for 3 minutes in a row it stops the MediaMTX process and starts a fresh one, as it already did after a crash. Before, a deadlocked MediaMTX stayed that way until you restarted the container: only a `[guard:mediamtx-api]` log line and, if enabled, the camera-offline notification told you. All cameras drop together and come back by themselves, usually within a minute or so (not measured); each enabled camera gets a "Video server (MediaMTX) restarted" row in Camera history, and the camera paths are re-created a few seconds after the new MediaMTX starts. If it stays silent the next restart waits 6, then 12, 24 and 30 minutes, and the wait returns to 3 minutes after 5 minutes of answers. A slow MediaMTX that answers inside 5 seconds, or one that refuses connections, is never restarted by this, and an API on another machine is not watched. Known limits: the 3 minutes, the 30 seconds and the backoff are unmeasured guesses (no wedge has been seen in production); a restart also interrupts a recording being cut at that moment. See "Cameras show connecting/offline and the log has `[guard:mediamtx-api]` lines" in [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
+
 ### Changed
 
 - **Account now says its notifications switch applies at once (#384).** In the app, the "Send motion alerts to this device" switch is a setting for the device and takes effect when you change it, while the name and password forms on the same page wait for their own buttons. The page now says so, and the design guide names this as a declared exception to "a Save-button page does not mix". No behaviour changed.

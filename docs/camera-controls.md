@@ -34,10 +34,11 @@ The threshold is measured from the first check (every 15 seconds) that couldn't 
 camera was delivering video, and only a confirmed picture stops it. A check where the streaming
 server inside Nightlight (MediaMTX) isn't answering at all counts as one that couldn't confirm it,
 so that time counts toward the threshold too. This is different from the
-automatic restart, which never fires while the streaming server isn't answering, because it only
-acts on a confirmed "no video" (see [KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "Cameras show
+automatic restart of a *camera*, which never fires while the streaming server isn't answering, because
+it only acts on a confirmed "no video" (see [KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "Cameras show
 connecting/offline and the log has `[guard:mediamtx-api]` lines"). So if the streaming server gets
-stuck, you still get this notification, even though nothing was restarted.
+stuck, you still get this notification, and nothing is restarted for the first few minutes. If it stays
+silent for 3 minutes, Nightlight restarts the streaming server itself (same entry).
 
 This is a global on/off with one global threshold: it applies to every camera the same way,
 there's no per-camera override.
