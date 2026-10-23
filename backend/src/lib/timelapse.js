@@ -6,7 +6,9 @@ import { safeInterval } from './processGuards.js';
 import { CLIPS_DIR, PROBE_DEADLINE_MS, runFfmpeg } from './clipRecorder.js';
 import { clipStorageReady, hasMinFreeSpace } from './clipStorage.js';
 import { captureSnapshot, fetchHttpSnapshot } from './snapshot.js';
-import { childTracksSleep, childWindowActiveNow, currentNightDate } from './sleepAnalysis.js';
+import {
+  childTracksSleep, childWindowActiveNow, currentNightDate, isEvidenceFinal, lastCompletedNightDate,
+} from './sleepAnalysis.js';
 import { primaryCameraRowFor } from './primaryCamera.js';
 
 // Nightly "memories" timelapse (shipped in 0.24.0). While a child's sleep
@@ -208,7 +210,8 @@ function pruneChild(childId) {
 // Throw away a night's collected frames without building anything. Used when the night turns out to
 // have had nobody in the bed: the frames are of an empty room, so a "memory" of it is just wasted disk
 // and a pointless card on the child's page. Sampling can't know this in advance — occupancy is only
-// decided once the night is scored — so the frames are collected and then discarded here.
+// decided once the night is scored — so the frames are collected and then discarded here, by the sweep
+// at the end of this file once that verdict is final (#419), never on the first pass that says `empty`.
 export function discardTimelapseFrames(childId, nightDate) {
   const dir = frameDir(childId, nightDate);
   const frames = safeReaddir(dir).filter((f) => /^f-\d+\.jpg$/.test(f));
@@ -420,4 +423,73 @@ export async function retryStrandedTimelapses() {
     retrying = false;
   }
   return attempted;
+}
+
+// ★ #419: AN EMPTY NIGHT'S FRAMES ARE DISCARDED ONLY ONCE THE VERDICT IS FINAL, by this sweep, never on the first
+// pass that says `empty`. The nightly job re-scores a night every 30 minutes for ~3 hours after its window closes
+// (#351), and a later pass can find the child after all (`empty` -> `ok`: some of the window's activity rows had not
+// been read yet). The job used to delete the frames on the FIRST pass that scored `empty`, so a night that then turned
+// `ok` had nothing left to make its timelapse from. Deleting frames cannot be undone, so it now waits for the
+// classification to stop changing; an `empty` that turns `ok` in the meantime is assembled by the job like any first
+// `ok` (runNightlySleepJob). Found by adversarial review of PR #418; no real night is known to have flipped.
+//
+// A frame folder is discarded only when ALL of these hold (each re-read here, from the stored row and the clock, so a
+// night the job no longer recomputes is still cleaned up):
+//   - the child exists (a deleted child's frames are lib/entityPurge.js's to delete, with the child);
+//   - the STORED row says `empty`: the detector's own verdict. A parent's "no one was in the bed" mark lives in
+//     sleep_reviews, not here, so a flagged night that the detector scored `ok` keeps its frames and its timelapse
+//     (docs/recording.md: the mark is reversible and must never destroy what taking it back could not restore);
+//   - its evidence is final NOW (isEvidenceFinal: WAKE_LOOKAHEAD_MS, 3 h, past window_end);
+//   - AND no recompute is still owed: the row was itself computed at or after that horizon (judged on its OWN
+//     computed_at, as the job's #351 gate is), OR it is no longer the child's last completed night (the job never
+//     visits any other). `now` alone is not enough (plan review, Opus): a night a parent corrected is locked and skipped
+//     with an early computed_at, and taking the correction back makes the job owe it one more pass, hours after the
+//     horizon; a pass refused as `would_downgrade`, or one that threw, leaves it owed the same way. Any of those can
+//     still turn `ok`;
+//   - it is not the child's open night (the sampler may be writing there, after a sleep-window edit reopened it);
+//   - nothing is assembling it (an admin Recompute can re-score a night `empty` while the retry is encoding it).
+//
+// ⚠️ THE COST, stated: an empty night's frames (one every 2 minutes, a JPEG each) now stay on disk for about 3 hours
+// after the window closes instead of being deleted at the first pass, and up to about a day (until the next night's
+// window closes) for a night that is locked, refused or threw. Bounded: one night per child at a time. Candidates come
+// from the FRAME FOLDERS, not from rows (the #450 lesson), so a folder left by a restart between the row write and the
+// old fire-and-forget delete is found too, and the first start after this change deletes every such leftover at once.
+//
+// Deliberately NOT inside retryStrandedTimelapses: that pass is skipped while the disk is nearly full
+// (hasMinFreeSpace) or another pass is still encoding (`retrying`), and neither may stop a delete, which frees space.
+// No clip-storage check either, as the old delete had none: removing an empty room's frames needs nothing written.
+// Synchronous (no await), so a pass cannot overlap itself. Returns how many nights it discarded; never throws.
+const storedEmptyStmt = db.prepare(
+  "SELECT window_end, computed_at FROM sleep_nights WHERE child_id = ? AND night_date = ? AND status = 'empty'"
+);
+const sqlUtcMs = (s) => new Date(`${s.replace(' ', 'T')}Z`).getTime();
+
+function discardable(childId, nightDate, nowMs) {
+  if (inFlight.has(nightKey(childId, nightDate))) return false;
+  if (!childExistsStmt.get(childId)) return false;
+  const row = storedEmptyStmt.get(childId, nightDate);
+  if (!row) return false;
+  if (!isEvidenceFinal(row.window_end, nowMs)) return false;
+  if (nightDate === currentNightDate(childId)) return false; // (operands this way round: #450 M8 anchors on the retry's line)
+  return isEvidenceFinal(row.window_end, sqlUtcMs(row.computed_at)) || nightDate !== lastCompletedNightDate(childId);
+}
+
+export function discardFinalEmptyNightFrames() {
+  const nowMs = Date.now();
+  let discarded = 0;
+  // frameNights() cannot throw (safeReaddir swallows a missing or unreadable folder), so the per-night catch below is
+  // the only one needed for "never throws".
+  for (const { childId, nightDate } of frameNights()) {
+    try {
+      // The folder names come off the disk: anything that is not a plain segment is skipped, not trusted (as the retry).
+      if (!/^[A-Za-z0-9._-]+$/.test(childId) || !/^\d{4}-\d{2}-\d{2}$/.test(nightDate)) continue;
+      if (!discardable(childId, nightDate, nowMs)) continue;
+      discardTimelapseFrames(childId, nightDate);
+      discarded += 1;
+    } catch (e) {
+      // One bad row (a malformed stored time, say) must not keep every other night's frames on disk.
+      logger.error(`[timelapse] empty-night sweep of ${childId} ${nightDate} failed: ${e.message}`);
+    }
+  }
+  return discarded;
 }

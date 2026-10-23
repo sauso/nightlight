@@ -456,7 +456,15 @@ Each kind ages out differently — this is the part most worth reading twice:
   recent**, and older ones are deleted automatically (not configurable). ⚠️ Two kinds of "nobody was in
   the bed" night are treated **differently**:
   - A night the **detector** scores as *no one in the bed* gets no timelapse. The frames sampled
-    overnight show an empty room, so they are thrown away when the night is first scored.
+    overnight show an empty room, so they are thrown away, but only once that answer is final:
+    **about 3 hours after the sleep window closes**. Until then the nightly update keeps looking at the
+    night, and if it finds your child after all (some of the night's readings arrived late), the night
+    gets its timelapse like any other. The cost is disk space: one night's frames per child stay for
+    those 3 hours. If the nightly update could not take its last look at the night (it leaves a night
+    you have corrected alone, see the next points, and an update can fail), the frames stay until the
+    next night's window closes, about a day, so taking a correction back can still bring the
+    timelapse back. The first start after updating to this version deletes, at once, any frames left
+    on disk from earlier *no one in the bed* nights (a restart at the wrong moment could leave them).
   - A night **you** mark *No one was in the bed* in the morning review keeps its timelapse. It is made
     and kept like any other night's, and marking the night deletes nothing. This is deliberate: the mark
     can be taken back, and a tap in a review should never destroy video that taking it back could not
@@ -478,7 +486,8 @@ with clip cutting (#773), and the `[timelapse] assemble` log line records the lo
 calibrate them. A child that keeps reporting progress forever is not stopped by this stall rule.
 
 **A night with frames but no video is tried again.** The nightly job starts one assembly when it first
-scores the night. Every 30 minutes it also looks for a night whose frames are still on disk and that has no
+scores the night as someone sleeping in the bed (including a night it first scored as *no one in the bed*
+and then, within those 3 hours, found your child in). Every 30 minutes it also looks for a night whose frames are still on disk and that has no
 video: one whose assembly failed or was stopped by a restart, or whose first try ran before storage was
 ready (right after a start). It tries the newest first, one at a time, **at most 3 times per night each time
 Nightlight starts** (about an hour and a half for a transient failure; a restart or an update gives it three
@@ -486,7 +495,10 @@ more). It skips a night that is not scored as someone sleeping in the bed, a chi
 a night with fewer than 30 frames, the night still being recorded, a night older than the 30 newest videos
 (it would be deleted at once), and any pass while storage is not ready or the disk is nearly full. After the
 third failure the log says `giving up on …` and names the folder; the frames stay there. There is no retry
-button, and no automatic deletion of those frames. The 3 tries are an unmeasured guess, not based on a
+button, and no automatic deletion of those frames, unless the night is later re-scored as *no one in the
+bed* (then they go like that night's, above). The frames of a night scored as no data, or with no clear
+sleep, also stay on disk until the child is removed: nothing assembles or deletes them yet (a known limit).
+The 3 tries are an unmeasured guess, not based on a
 failure seen so far. As with the first try, the conditions above are checked when the video starts, not
 again when it ends: a night re-scored as empty, or a video deleted, while it is being made is not noticed
 until it is done, and a frame saved in those minutes (only possible if you edit the sleep window to reopen
