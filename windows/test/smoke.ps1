@@ -78,10 +78,10 @@ function Uninstall-Native {
 }
 function Start-Tray {
     $script:TrayProcess = Start-Process "$installDir\Nightlight.Tray.exe" -PassThru
-    Wait-Until {
-        $script:TrayProcess.Refresh()
-        $script:TrayProcess.HasExited -or $script:TrayProcess.MainWindowHandle -ne [IntPtr]::Zero
-    } 'tray initialization' -Seconds 15
+    # A tray application's window is owned/hidden, so MainWindowHandle is zero.
+    # Its GUI thread becomes input-idle after creating the tray and message loop.
+    Assert-True ($script:TrayProcess.WaitForInputIdle(15000)) 'Tray did not initialize its GUI message loop'
+    $script:TrayProcess.Refresh()
     Assert-True (-not $script:TrayProcess.HasExited) 'Tray exited before initializing'
 }
 function Assert-TrayExited {

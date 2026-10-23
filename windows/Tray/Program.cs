@@ -5,7 +5,9 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -99,7 +101,10 @@ namespace Nightlight.Desktop
                         // Scope shutdown to this installation, including other
                         // signed-in users. Leave unrelated executables alone.
                         if (!String.Equals(process.MainModule.FileName, executable, StringComparison.OrdinalIgnoreCase)) continue;
-                        process.CloseMainWindow();
+                        // ShowInTaskbar=false gives the tray window an owner,
+                        // so Process.MainWindowHandle/CloseMainWindow miss it.
+                        IntPtr window = FindTrayWindow(process);
+                        if (window != IntPtr.Zero) PostMessage(window, 0x0010, IntPtr.Zero, IntPtr.Zero); // WM_CLOSE
                         if (!process.WaitForExit(5000))
                         {
                             process.Kill(); // Only the stateless desktop icon.
@@ -111,6 +116,36 @@ namespace Nightlight.Desktop
                 }
             }
             return 0;
+        }
+
+        private delegate bool WindowCallback(IntPtr window, IntPtr parameter);
+        [DllImport("user32.dll")]
+        private static extern bool EnumThreadWindows(uint threadId, WindowCallback callback, IntPtr parameter);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetWindowText(IntPtr window, StringBuilder text, int count);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr window, StringBuilder text, int count);
+        [DllImport("user32.dll")]
+        private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+
+        private static IntPtr FindTrayWindow(Process process)
+        {
+            IntPtr found = IntPtr.Zero;
+            foreach (ProcessThread thread in process.Threads)
+            {
+                EnumThreadWindows((uint)thread.Id, delegate(IntPtr window, IntPtr parameter)
+                {
+                    var title = new StringBuilder(256);
+                    var type = new StringBuilder(256);
+                    GetWindowText(window, title, title.Capacity);
+                    GetClassName(window, type, type.Capacity);
+                    if (title.ToString() != "Nightlight" || !type.ToString().StartsWith("WindowsForms10.Window", StringComparison.Ordinal)) return true;
+                    found = window;
+                    return false;
+                }, IntPtr.Zero);
+                if (found != IntPtr.Zero) break;
+            }
+            return found;
         }
     }
 
