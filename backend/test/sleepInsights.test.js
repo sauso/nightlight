@@ -562,10 +562,15 @@ test('no duplicate timelapse/notification pass while a night is still provisiona
   // module could not be intercepted this late — see codex-as-second-reviewer memory on mock.module's
   // timing requirements). A real occupied night (not the no-camera default) so the first pass is
   // genuinely SCORED and actually reaches the timelapse decision at all.
+  // Every export the job calls is stubbed (#419 added discardFinalEmptyNightFrames): a missing one makes the
+  // job's call throw inside its own catch, so the tick would quietly stop short of what it does in production.
   layNight3([[at3(19, 0), at3(19, 10)], [at3(23, 0), at3(23, 6)], [at3(1, 0, 1), at3(1, 9, 1)]], at3(7, 0, 1));
   const assembleCalls = t.mock.fn();
   t.mock.module('../src/lib/timelapse.js', {
-    namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: t.mock.fn(), retryStrandedTimelapses: async () => 0 },
+    namedExports: {
+      assembleTimelapse: assembleCalls, discardTimelapseFrames: t.mock.fn(), retryStrandedTimelapses: async () => 0,
+      discardFinalEmptyNightFrames: t.mock.fn(),
+    },
   });
   const flush = () => new Promise((r) => setImmediate(r));
 
@@ -587,13 +592,16 @@ test('★ a no_data first pass must not waste a timelapse assembly — it waits 
   // above exercises) would immediately call assembleTimelapse for a night with no real evidence yet, and
   // — the more serious direction — a night that looked `empty` on an early pass would have its frames
   // irreversibly destroyed by discardTimelapseFrames before a later pass could ever discover it was
-  // really occupied. Waiting for the first SCORED (ok/empty) pass fixes the demonstrated no_data case
-  // directly; see the comment above the gate in runNightlySleepJob for the narrower empty->ok case this
-  // does NOT cover (filed as a separate follow-up).
+  // really occupied. Waiting for the first SCORED (ok/empty) pass fixed the demonstrated no_data case
+  // directly; the narrower empty->ok case is #419 (the job no longer discards frames itself, see
+  // timelapse-empty-night.test.js), which is why discardCalls must stay 0 on every pass here.
   const assembleCalls = t.mock.fn();
   const discardCalls = t.mock.fn();
   t.mock.module('../src/lib/timelapse.js', {
-    namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls, retryStrandedTimelapses: async () => 0 },
+    namedExports: {
+      assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls, retryStrandedTimelapses: async () => 0,
+      discardFinalEmptyNightFrames: t.mock.fn(),
+    },
   });
   const flush = () => new Promise((r) => setImmediate(r));
 
@@ -623,13 +631,19 @@ test('a night a parent marked "no one was in the bed" still gets its timelapse �
   // a parent-flagged night's are not, because the mark is reversible and a tap should never destroy
   // video that taking it back could not restore. The job never reads sleep_reviews for this decision
   // today, so this pins that against a future change that "helpfully" treats the flag as empty here.
-  // Flagged BEFORE the job's first scored pass, which is the only moment the flag could possibly matter:
-  // after that pass the timelapse decision has already been made.
+  // Flagged BEFORE the job's first scored pass, which is the only moment the flag could matter to the
+  // assembly: after that pass the timelapse decision has already been made. Since #419 the frame DISCARD
+  // is no longer the job's: it is timelapse.js's sweep, keyed on the stored detector status, and its
+  // real-filesystem twin of this test (flagged `ok` night, final, frames kept) is in
+  // timelapse-empty-night.test.js. Here the job must still never discard directly.
   layNight3([[at3(19, 0), at3(19, 10)], [at3(23, 0), at3(23, 6)], [at3(1, 0, 1), at3(1, 9, 1)]], at3(7, 0, 1));
   const assembleCalls = t.mock.fn();
   const discardCalls = t.mock.fn();
   t.mock.module('../src/lib/timelapse.js', {
-    namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls, retryStrandedTimelapses: async () => 0 },
+    namedExports: {
+      assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls, retryStrandedTimelapses: async () => 0,
+      discardFinalEmptyNightFrames: t.mock.fn(),
+    },
   });
   t.after(() => db.prepare('DELETE FROM sleep_reviews WHERE child_id = ?').run(KID));
   const flush = () => new Promise((r) => setImmediate(r));
@@ -646,15 +660,19 @@ test('a night a parent marked "no one was in the bed" still gets its timelapse �
 
 test('a night corrected while its stored row was still no_data is not frozen there: its first SCORED pass still gets its timelapse, then the lock holds', async (t) => {
   // The lock (2026-09-30) holds only on a SCORED stored row. A correction saved while the row is still
-  // `no_data` (the samples had not arrived) must neither freeze the night unscored nor take away the one
-  // pass that assembles its timelapse: that happens on the FIRST scored pass, and nothing else ever
-  // cleans a night's raw frames up. Saved through saveNightReview, the real save path, so its store-first
-  // step (storeNightBeforeCorrection) is exercised too: it must leave a no_data row to the job.
+  // `no_data` (the samples had not arrived) must neither freeze the night unscored nor take away the
+  // pass that first assembles its timelapse: that happens on the first pass that stores it `ok` (the #450
+  // retry and the #419 empty-night sweep came later and do not replace it). Saved through saveNightReview,
+  // the real save path, so its store-first step (storeNightBeforeCorrection) is exercised too: it must
+  // leave a no_data row to the job.
   const { saveNightReview } = await import('../src/lib/sleepReviews.js');
   const assembleCalls = t.mock.fn();
   const discardCalls = t.mock.fn();
   t.mock.module('../src/lib/timelapse.js', {
-    namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls, retryStrandedTimelapses: async () => 0 },
+    namedExports: {
+      assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls, retryStrandedTimelapses: async () => 0,
+      discardFinalEmptyNightFrames: t.mock.fn(),
+    },
   });
   t.after(() => db.prepare('DELETE FROM sleep_reviews WHERE child_id = ?').run(KID));
   const flush = () => new Promise((r) => setImmediate(r));

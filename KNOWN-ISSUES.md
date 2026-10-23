@@ -673,13 +673,15 @@ noise nobody saw cannot be told apart from a sibling next door. The cost, stated
 video stall is not shown as awake from the noise alone. Sound **alerts** are a separate path and still fire.
 
 **Why "no one was in the bed" needs 90%:** that answer sends the "no one was in the bed" report and
-**deletes the night's timelapse frames**. Before #508 a night watched for exactly half the window, quiet in
+**deletes the night's timelapse frames** (once the answer is final, about 3 hours after the window closes,
+#419). Before #508 a night watched for exactly half the window, quiet in
 that half, could read empty. 90% is a first estimate chosen so the ~1-minute daily camera reboot and
 scattered dropped minutes can never block a genuinely empty night, while missing more than about an hour of
 a 12-hour window does. It was not measured against stored nights when chosen. On a night still in progress
 ("Tonight") it applies to the part of the window elapsed so far, so the live card can say "no one in the
-bed" early in the evening; that is only a display. The report and the frame deletion come only from the
-nightly job, which only ever scores a night whose window has closed, against the whole window.
+bed" early in the evening; that is only a display. The report comes only from the nightly job, which only
+ever scores a night whose window has closed, against the whole window, and the frames are deleted only for a
+saved "no one was in the bed" night whose answer is final, never for a night still in progress.
 
 **Nights already stored** change only when recomputed (the nightly job's own passes in the ~3 hours after
 the window closes, or **Recompute this night**). Recompute never turns a scored night into "no data", so a

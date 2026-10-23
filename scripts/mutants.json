@@ -6595,13 +6595,13 @@
     "namePattern": "an existing review gains the column"
   },
   {
-    "label": "nobody-in-bed item 7: a flagged night's timelapse frames are discarded like a detector-empty one",
-    "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "          if (summary.status === 'empty') emptyNights.push({ childId: kid.id, nightDate });",
-    "replace": "          if (summary.status === 'empty' || db.prepare('SELECT 1 FROM sleep_reviews WHERE child_id = ? AND night_date = ? AND nobody_in_bed = 1').get(kid.id, nightDate)) emptyNights.push({ childId: kid.id, nightDate });",
+    "label": "nobody-in-bed item 7 (re-anchored by #419 onto the empty-night sweep): a flagged night's timelapse frames are discarded like a detector-empty one",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  \"SELECT window_end, computed_at FROM sleep_nights WHERE child_id = ? AND night_date = ? AND status = 'empty'\"",
+    "replace": "  \"SELECT window_end, computed_at FROM sleep_nights n WHERE child_id = ? AND night_date = ? AND (status = 'empty' OR EXISTS (SELECT 1 FROM sleep_reviews r WHERE r.child_id = n.child_id AND r.night_date = n.night_date AND r.nobody_in_bed = 1))\"",
     "expect": "killed",
-    "tests": ["sleepInsights.test.js"],
-    "namePattern": "still gets its timelapse"
+    "tests": ["timelapse-empty-night.test.js"],
+    "namePattern": "^s5:"
   },
   {
     "label": "nobody-in-bed frontend R4: the receipt gate drops the flag, back to times-only",
@@ -23085,5 +23085,50 @@
     "expect": "killed",
     "tests": ["timelapse-retry.test.js"],
     "namePattern": "^g1:"
+  },
+  {
+    "label": "#419 M1: the sweep ignores finality, so an empty night's frames go on its first scored pass (the behaviour before #419)",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  if (!isEvidenceFinal(row.window_end, nowMs)) return false;",
+    "replace": "  return true;",
+    "expect": "killed",
+    "tests": ["timelapse-empty-night.test.js"],
+    "namePattern": "^s2:"
+  },
+  {
+    "label": "#419 M2: the sweep discards an empty night that is still owed a pass (locked by a correction, or refused) while it is the last completed night",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  return isEvidenceFinal(row.window_end, sqlUtcMs(row.computed_at)) || nightDate !== lastCompletedNightDate(childId);",
+    "replace": "  return true;",
+    "expect": "killed",
+    "tests": ["timelapse-empty-night.test.js"],
+    "namePattern": "^s3:"
+  },
+  {
+    "label": "#419 M3: the sweep deletes the frames of a night that is being assembled",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "function discardable(childId, nightDate, nowMs) {\n  if (inFlight.has(nightKey(childId, nightDate))) return false;",
+    "replace": "function discardable(childId, nightDate, nowMs) {",
+    "expect": "killed",
+    "tests": ["timelapse-empty-night.test.js"],
+    "namePattern": "^s7:"
+  },
+  {
+    "label": "#419 M4: the nightly job's tick never runs the empty-night sweep",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": ".then((m) => m.discardFinalEmptyNightFrames())",
+    "replace": ".then(() => 0)",
+    "expect": "killed",
+    "tests": ["timelapse-empty-night.test.js"],
+    "namePattern": "^j4:"
+  },
+  {
+    "label": "#419 M5: an empty -> ok pass does not start the night's timelapse (it is left to the retry, which may be busy)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (summary.status === 'ok' && (!existing || !SCORED.has(existing.status) || existing.status === 'empty')) {",
+    "replace": "if (summary.status === 'ok' && (!existing || !SCORED.has(existing.status))) {",
+    "expect": "killed",
+    "tests": ["timelapse-empty-night.test.js"],
+    "namePattern": "^j1:"
   }
 ]
