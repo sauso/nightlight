@@ -36,7 +36,7 @@ const { CLIPS_DIR } = await import('../src/lib/clipRecorder.js');
 const { checkClipStorage } = await import('../src/lib/clipStorage.js');
 const { logger } = await import('../src/lib/logger.js');
 const { assembleTimelapse, retryStrandedTimelapses, resetRetryStateForTest, frameDir } = await import('../src/lib/timelapse.js');
-const { runNightlySleepJob } = await import('../src/lib/sleepAnalysis.js');
+const { runNightlySleepJob, currentNightDate } = await import('../src/lib/sleepAnalysis.js');
 
 // track=0: the nightly job's own loop skips this child, so the hook test (g1) sees only the retry pass.
 const CHILD = 'child-450';
@@ -269,6 +269,60 @@ test('f6: a pass is not re-entered: a second call while one is running starts no
   olderProcs()[0].finish(1);
   await until(() => first.value !== 'pending', 'the first pass to finish');
   assert.equal(first.value, 2);
+});
+
+test('e3: after a success the night\'s count starts from zero (a later stranding still gets its full tries)', async () => {
+  for (let i = 0; i < 2; i++) {
+    const pass = track(retryStrandedTimelapses());
+    await fail(i);
+    await until(() => pass.value !== 'pending', `retry pass ${i + 1} to finish`);
+  }
+  const ok = track(retryStrandedTimelapses());
+  await succeed(2);
+  await until(() => ok.value !== 'pending', 'the successful pass to finish');
+  // The same night is stranded again (the video deleted by an admin, frames present again). Without the reset its count
+  // would already be 3 and it would be skipped.
+  db.prepare('DELETE FROM timelapses').run();
+  putFrames();
+  const again = track(retryStrandedTimelapses());
+  await fail(3);
+  await until(() => again.value !== 'pending', 'the later pass to finish');
+  assert.equal(again.value, 1, 'a night that had succeeded was treated as already given up on');
+});
+
+test('f7: newest night first ACROSS children, not child by child', async () => {
+  makeChild(db, { id: 'aaa-450', track: 0 });
+  const older = frameDir('aaa-450', '2026-10-17');
+  putFrames(30, older);
+  scoreNight('ok', 'aaa-450', '2026-10-17');
+  const pass = track(retryStrandedTimelapses());
+  await until(() => spawned.length > 0, 'the first assembly to start');
+  // 'aaa-450' sorts before CHILD, so a child-by-child scan would start its older night first.
+  assert.ok(String(spawned[0].args.at(-1)).includes(CHILD), `the first night started was ${spawned[0].args.at(-1)}, not the newest night`);
+  spawned[0].finish(1);
+  await until(() => spawned.length > 1, 'the second assembly to start');
+  spawned[1].finish(1);
+  await until(() => pass.value !== 'pending', 'the pass to finish');
+  assert.equal(pass.value, 2);
+});
+
+test('f8: the child\'s open night is left alone: the sampler is still writing its frames', async () => {
+  // A tracked child whose sleep window contains now (UTC is the default timezone), so currentNightDate is that night.
+  const pad = (n) => String(n).padStart(2, '0');
+  const hhmm = (ms) => `${pad(new Date(ms).getUTCHours())}:${pad(new Date(ms).getUTCMinutes())}`;
+  makeChild(db, { id: 'open-450', track: 1, start: hhmm(Date.now() - 6 * 3_600_000), end: hhmm(Date.now() + 6 * 3_600_000) });
+  try {
+    const open = currentNightDate('open-450');
+    assert.ok(open, 'precondition: the child has an open night');
+    putFrames(30, frameDir('open-450', open));
+    scoreNight('ok', 'open-450', open);
+    fs.rmSync(dir, { recursive: true, force: true }); // only the open night's frames are candidates
+    assert.equal(await retryStrandedTimelapses(), 0);
+    assert.equal(spawned.length, 0);
+  } finally {
+    // A tracked child left behind would be scored by g1's real nightly job.
+    db.prepare('DELETE FROM children WHERE id = ?').run('open-450');
+  }
 });
 
 test('g1: the nightly job\'s tick starts the retry, with or without a night to score', async () => {

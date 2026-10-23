@@ -22916,6 +22916,33 @@
     "namePattern": "^f5:"
   },
   {
+    "label": "#450 M8: the retry assembles the child's open night while the sampler is still writing its frames",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  if (currentNightDate(childId) === nightDate) return false;",
+    "replace": "  // mutant: no open-night check",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^f8:"
+  },
+  {
+    "label": "#450 M9: a successful retry leaves the night's attempt count in place (a later stranding is skipped as given up on)",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "        if (id) retryAttempts.delete(key);",
+    "replace": "        if (id) { /* mutant: count kept */ }",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^e3:"
+  },
+  {
+    "label": "#450 M10: the retry scans child by child, so an older night of one child starts before a newer night of another",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  return out.sort((a, b) => b.nightDate.localeCompare(a.nightDate) || a.childId.localeCompare(b.childId));",
+    "replace": "  return out;",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^f7:"
+  },
+  {
     "label": "#450 M7: the nightly job's tick never starts the retry",
     "file": "backend/src/lib/sleepAnalysis.js",
     "find": ".then((m) => m.retryStrandedTimelapses())",

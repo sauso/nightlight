@@ -372,9 +372,11 @@ const newerReadyStmt = db.prepare("SELECT COUNT(*) AS n FROM timelapses WHERE ch
 function frameNights() {
   const out = [];
   for (const childId of safeReaddir(FRAMES_ROOT)) {
-    for (const nightDate of safeReaddir(path.join(FRAMES_ROOT, childId)).sort().reverse()) out.push({ childId, nightDate });
+    for (const nightDate of safeReaddir(path.join(FRAMES_ROOT, childId))) out.push({ childId, nightDate });
   }
-  return out;
+  // Newest night first ACROSS children (code review, Codex: sorting only within a child started an older night of one
+  // child before a newer night of another), ties by child id so the order is the same on every run.
+  return out.sort((a, b) => b.nightDate.localeCompare(a.nightDate) || a.childId.localeCompare(b.childId));
 }
 
 function retryable(childId, nightDate) {

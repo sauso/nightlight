@@ -487,7 +487,10 @@ a night with fewer than 30 frames, the night still being recorded, a night older
 (it would be deleted at once), and any pass while storage is not ready or the disk is nearly full. After the
 third failure the log says `giving up on …` and names the folder; the frames stay there. There is no retry
 button, and no automatic deletion of those frames. The 3 tries are an unmeasured guess, not based on a
-failure seen so far.
+failure seen so far. As with the first try, the conditions above are checked when the video starts, not
+again when it ends: a night re-scored as empty, or a video deleted, while it is being made is not noticed
+until it is done, and a frame saved in those minutes (only possible if you edit the sleep window to reopen
+that night) is deleted with the rest.
 
 There is also a **minimum-free-space guard** across all three: if the volume is nearly full, new video
 is skipped, so recording can never be the thing that fills your disk.
