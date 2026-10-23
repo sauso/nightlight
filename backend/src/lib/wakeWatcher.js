@@ -185,15 +185,22 @@ export function wakeClipAnchor({ at, frameMs, oldestStartMs, leadMs }) {
   return Math.min(at, Math.max(frameMs, oldestStartMs + leadMs));
 }
 
+// Only tracked children, only inside their own sleep window. Outside it there is no "wake" to speak
+// of, and bedtime settling must never be recorded — which is also why nothing is armed until the
+// child has actually gone to sleep (see the onset gate in handleMinute).
+// #589: ONE gate for the two callers that decide "does this camera still belong to the watcher": handleMinute (when a
+// payload arrives) and sweepStaleRuns (when none does), so the two cannot drift apart. `camera` is the cameras row,
+// or undefined for one that was deleted.
+function watchedNow(camera) {
+  return !!camera && !camera.disabled && !!camera.child_id && childTracksSleep(camera.child_id) && childWindowActiveNow(camera.child_id);
+}
+
 export function handleMinute(payload) {
   const { cameraId, bucketStart, motionPeak, soundPeak } = payload;
   const st = slot(cameraId);
   const camera = cameraQ.get(cameraId);
 
-  // Only tracked children, only inside their own sleep window. Outside it there is no "wake" to speak
-  // of, and bedtime settling must never be recorded — which is also why nothing is armed until the
-  // child has actually gone to sleep (see the onset gate below).
-  if (!camera || camera.disabled || !camera.child_id || !childTracksSleep(camera.child_id) || !childWindowActiveNow(camera.child_id)) {
+  if (!watchedNow(camera)) {
     reset(cameraId, st);
     return null;
   }
@@ -546,6 +553,20 @@ export function sweepStaleRuns(now = Date.now()) {
       endRun(cameraId, st, 'camera stopped reporting');
       swept++;
     }
+    // ★ #589: A SILENT CAMERA IS DISARMED WHEN ITS WINDOW CLOSES. handleMinute clears a camera's state only when a
+    // payload arrives outside the window (its gate above), and a camera that sends nothing from before the window closes
+    // until the next evening never triggers that: it kept `asleep`, so the next bedtime's settling was not gated and
+    // five active minutes could record a wake clip before the child had settled (a wasted clip, never an alert; it
+    // needs a day-long silence, an unplugged camera or an outage). This timer runs whether or not payloads do, so it
+    // applies the same gate (watchedNow, with childWindowActiveNow's own 5-minute margin) and resets. It reads the
+    // wall clock, not `now`: `now` is only the stale-run age, and the window is a wall-clock notion everywhere else.
+    // Not counted in the return value, which stays "runs abandoned as stale". Deliberately NOT "disarm after a hole of
+    // N minutes": an armed watcher still stays armed across a hole INSIDE the window (a reconnect must not drop a real
+    // wake, see the bridge rule in handleMinute) and a new N would have no data behind it. Known limit: a silent camera
+    // is disarmed up to about 6 minutes after its window closes (the 5-minute margin plus up to one sweep interval).
+    // No "is the slot dirty" pre-check: reset() on a clean slot is a no-op, and any state worth clearing implies
+    // lastAt != null (code review, Codex, mutated each term of such a check: all survived, as it is equivalent).
+    if (!watchedNow(cameraQ.get(cameraId))) reset(cameraId, st);
   }
   return swept;
 }

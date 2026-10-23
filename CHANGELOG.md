@@ -11,6 +11,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **A camera that was silent when its child's sleep window closed no longer carries "asleep" into the next evening (#589).** The wake-clip watcher used to be disarmed only by a reading from outside the window, so a camera unplugged or offline from before the window closed until the next evening could record that evening's settling as a wake clip (a wasted clip, never an alert). The one-minute sweep now disarms a camera that is no longer in its window, turned off, or whose child stopped tracking sleep. Known limit: that happens up to about 6 minutes after the window closes (its 5-minute margin plus one sweep), and a silence inside the window still leaves the watcher armed, on purpose, so a wake after a reconnect is recorded. See "An armed watcher stays armed through a silence" in [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
 - **A camera that lists a profile without video no longer loses its Low-quality stream option (#824).** When a separate video profile is available, Nightlight now uses it for that option. Found in tests; not seen on a real camera.
 
 ## [0.42.1] - 2026-10-21

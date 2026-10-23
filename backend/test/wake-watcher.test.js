@@ -25,7 +25,7 @@ const emptyBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-nobin-'));
 process.env.PATH = emptyBinDir;
 
 const { default: db } = await import('../src/db.js');
-const { SLEEP_THRESHOLDS } = await import('../src/lib/sleepAnalysis.js');
+const { SLEEP_THRESHOLDS, childWindowActiveNow } = await import('../src/lib/sleepAnalysis.js');
 const { startSegmenter, stopAllSegmenters, isSegmenterRunning, ringDepthMs, setRingDepth, extractClip, clipCoverStartMs, ringOldestStartMs } =
   await import('../src/lib/clipRecorder.js');
 const { holdOwners, effectiveHold, RING_OWNER } = await import('../src/lib/ringHolds.js');
@@ -283,6 +283,92 @@ describe('a camera that stops reporting mid-wake', () => {
     settle(); // armed, but nothing active — so there is no run to sweep
     assert.equal(_state().get(CAM).run, null);
     assert.equal(sweepStaleRuns(Date.now() + 60 * 60 * 1000), 0);
+  });
+});
+
+describe('#589 — a camera that goes silent past its window close is disarmed by the sweep', () => {
+  // handleMinute resets a camera only when a payload arrives OUTSIDE the window, and a silent camera sends none: before
+  // #589 it kept `asleep` through the day and the next evening's settling was recorded as a wake. The sweep timer runs
+  // regardless, so it applies the same gate. The window is the REAL clock's (the label clock is backdated), so the tests
+  // move the child's window away from now, as R588-W8 does.
+  const setWindow = (w) =>
+    db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(w.start, w.end, CHILD);
+  const windowAwayFromNow = () => {
+    const pad = (n) => String(n).padStart(2, '0');
+    const hhmm = (d) => `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    const now = Date.now();
+    return { start: hhmm(new Date(now + 7 * 3_600_000)), end: hhmm(new Date(now + 8 * 3_600_000)) };
+  };
+  // Runs `fn` with the window closed and the gate asserted closed, then puts the window back.
+  function withWindowClosed(fn) {
+    const inside = windowAroundNow();
+    setWindow(windowAwayFromNow());
+    try {
+      assert.equal(childWindowActiveNow(CHILD), false, 'precondition: the window is closed');
+      fn();
+    } finally {
+      setWindow(inside);
+    }
+    assert.equal(childWindowActiveNow(CHILD), true, 'precondition: the window is open again');
+  }
+
+  test('#589: an armed watcher with a run open is disarmed when its window closes and no payload arrives; the next bedtime is not recorded', () => {
+    settle();
+    moving();
+    moving();
+    const run = stateOf().run;
+    assert.ok(run, 'precondition: armed, with a run in progress');
+    assert.equal(stateOf().asleep, true);
+    withWindowClosed(() => {
+      // `now` anchored on the run's own last minute: the backdated labels would otherwise look stale to the sweep,
+      // and it must be the window, not staleness, that clears this state.
+      assert.equal(sweepStaleRuns(run.lastActiveMs + 1000), 0, 'not a stale-run sweep: nothing is counted');
+    });
+    const st = stateOf();
+    assert.equal(st.asleep, false, 'the silent camera stayed armed past its window');
+    assert.equal(st.run, null);
+    assert.equal(st.quietRun, 0);
+    assert.equal(st.lastAt, null);
+    const results = [];
+    for (let i = 0; i < WAKE_ACTIVE_MIN; i++) results.push(moving());
+    assert.deepEqual(results.filter((r) => r?.captured), [], 'bedtime activity was recorded as a wake: the watcher had stayed armed');
+    assert.equal(stateOf().asleep, false, 'still settling: 15 quiet minutes have not passed');
+  });
+
+  test('#589: inside the window the sweep leaves an armed watcher alone (a hole inside the window still keeps it armed)', () => {
+    settle();
+    moving();
+    const before = { ...stateOf() };
+    assert.equal(sweepStaleRuns(before.run.lastActiveMs + 1000), 0);
+    const st = stateOf();
+    assert.equal(st.asleep, true, 'an armed watcher was disarmed while its window is open');
+    assert.equal(st.lastAt, before.lastAt);
+    assert.ok(st.run, 'the open run was dropped while its window is open');
+  });
+
+  test('#589: a camera that is turned off, whose child stops tracking sleep, or that was deleted is cleared too, and none of it throws', () => {
+    const arm = (cameraId) => {
+      for (let i = 0; i < ONSET_QUIET_MIN; i++) {
+        handleMinute({ cameraId, bucketStart: labelFor(i), motionPeak: 0, soundPeak: 0 });
+      }
+      assert.equal(_state().get(cameraId).asleep, true, `precondition: ${cameraId} is armed`);
+    };
+    // disabled
+    arm(CAM);
+    db.prepare('UPDATE cameras SET disabled = 1 WHERE id = ?').run(CAM);
+    try { sweepStaleRuns(); } finally { db.prepare('UPDATE cameras SET disabled = 0 WHERE id = ?').run(CAM); }
+    assert.equal(stateOf().asleep, false, 'a disabled camera stayed armed');
+    // sleep tracking switched off
+    arm(CAM);
+    db.prepare('UPDATE children SET track_sleep = 0 WHERE id = ?').run(CHILD);
+    try { sweepStaleRuns(); } finally { db.prepare('UPDATE children SET track_sleep = 1 WHERE id = ?').run(CHILD); }
+    assert.equal(stateOf().asleep, false, 'a camera whose child stopped tracking sleep stayed armed');
+    // deleted: cameraQ.get returns undefined
+    makeCamera(db, { id: 'cam-589-gone', name: 'Gone', childId: CHILD });
+    arm('cam-589-gone');
+    db.prepare('DELETE FROM cameras WHERE id = ?').run('cam-589-gone');
+    assert.doesNotThrow(() => sweepStaleRuns());
+    assert.equal(_state().get('cam-589-gone').asleep, false, 'a deleted camera stayed armed');
   });
 });
 

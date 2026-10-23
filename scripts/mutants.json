@@ -12751,8 +12751,8 @@
   {
     "label": "#588 M-588-19: the unobserved check runs ABOVE the window gate (emulated: an unobserved minute skips the gate)",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "  if (!camera || camera.disabled || !camera.child_id || !childTracksSleep(camera.child_id) || !childWindowActiveNow(camera.child_id)) {",
-    "replace": "  if (payload.videoUnobserved !== true && (!camera || camera.disabled || !camera.child_id || !childTracksSleep(camera.child_id) || !childWindowActiveNow(camera.child_id))) {",
+    "find": "  if (!watchedNow(camera)) {",
+    "replace": "  if (payload.videoUnobserved !== true && !watchedNow(camera)) {",
     "expect": "killed",
     "tests": [
       "wake-watcher.test.js"
@@ -22743,5 +22743,23 @@
     "expect": "killed",
     "tests": ["MorningReview.test.jsx"],
     "namePattern": "judged in that zone"
+  },
+  {
+    "label": "#589 M1: the sweep never disarms a silent camera whose window closed",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "    if (!watchedNow(cameraQ.get(cameraId))) reset(cameraId, st);",
+    "replace": "    if (false) reset(cameraId, st);",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#589:"
+  },
+  {
+    "label": "#589 M2: the sweep disarms every camera, window open or not",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "    if (!watchedNow(cameraQ.get(cameraId))) reset(cameraId, st);",
+    "replace": "    if (true) reset(cameraId, st);",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#589:"
   }
 ]
