@@ -3039,8 +3039,8 @@
   {
     "label": "#451 M20a: startSubStream writes the sub path on an unknown config read",
     "file": "backend/src/lib/subStream.js",
-    "find": "if ((await isPathConfiguredCorrectly(path)) === false) await upsertPath(path);",
-    "replace": "if (!(await isPathConfiguredCorrectly(path))) await upsertPath(path);",
+    "find": "if ((await isPathConfiguredCorrectly(path)) === false) {",
+    "replace": "if (!(await isPathConfiguredCorrectly(path))) {",
     "expect": "killed",
     "tests": ["mediamtx-api-deadline.test.js"],
     "namePattern": "^T3b:"
