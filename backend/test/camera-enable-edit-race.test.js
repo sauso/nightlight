@@ -17,7 +17,7 @@
 // Which cases FAIL on the code before #806: e1, e2, e3 (the enable never re-reads), e6 (nothing is re-applied at all)
 // and d1 (the flag is written last). Guards that pass there too: e4 (A -> B -> A starts nothing), e5 (nothing changed),
 // e7 (a refused enable leaves the camera disabled).
-import { test, mock, after, beforeEach } from 'node:test';
+import { test, mock, after, afterEach, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, makeCamera, signToken, mountRouter, call } from './helpers/harness.js';
@@ -27,10 +27,13 @@ const ops = [];
 let db;
 // One entry per startTranscoder call to hold, consumed in call order: the test pushes a deferred, the call awaits it.
 const gates = [];
+const made = [];
 const deferred = () => {
   let resolve;
   const promise = new Promise((r) => { resolve = r; });
-  return { promise, resolve };
+  const d = { promise, resolve };
+  made.push(d);
+  return d;
 };
 // Same shape as the real one, which only checks the string.
 const subConfiguredFake = (camera) => !!(camera.sub_rtsp_url && camera.sub_rtsp_url.trim());
@@ -84,6 +87,12 @@ async function until(cond, what) {
   }
   assert.fail(`timed out waiting for ${what}`);
 }
+
+// Whatever a case left parked is released, so a case that FAILS (or a mutant that breaks it) fails cleanly instead of
+// leaving an enable request waiting on a held start forever, which the mutation runner would report as a HANG.
+afterEach(() => {
+  for (const d of made.splice(0)) d.resolve();
+});
 
 beforeEach(() => {
   ops.length = 0;
