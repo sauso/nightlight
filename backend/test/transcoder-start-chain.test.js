@@ -74,12 +74,18 @@ class Step {
 const probe = new Step(null);
 const configCheck = new Step(true);
 const upserts = [];
+const removals = [];
+// #806: a caller's own pre-launch step (startTranscoder's `prepare`), held the same way.
+const prepareStep = new Step(undefined);
 mock.module('../src/lib/rtspProbe.js', {
   exports: { ffprobeAudioCodec: (url) => probe.call(url) },
 });
 mock.module('../src/lib/mediamtx.js', {
   exports: {
     hlsPathName: (p) => `${p}-hls`,
+    // subPathName / removePath: subStream.js (the real one, used by the #806 cases) imports them too.
+    subPathName: (p) => `${p}-sub`,
+    removePath: async (p) => { removals.push(p); },
     upsertPath: async (p) => { upserts.push(p); },
     isPathConfiguredCorrectly: (p) => configCheck.call(p),
   },
@@ -94,6 +100,7 @@ process.on('unhandledRejection', (reason) => unhandled.push(reason));
 
 const transcoder = await import('../src/lib/transcoder.js');
 const { startTranscoder, stopTranscoder, stopAllTranscoders, isRunning } = transcoder;
+const { startSubStream, stopSubStream } = await import('../src/lib/subStream.js');
 
 const URL1 = 'rtsp://192.0.2.10:554/first';
 const URL2 = 'rtsp://192.0.2.10:554/second';
@@ -142,15 +149,18 @@ afterEach(async () => {
   // Release anything a failed case left parked, then stop everything, so no case inherits a live process.
   probe.holding = false;
   configCheck.holding = false;
-  for (const step of [probe, configCheck]) for (const h of step.held.splice(0)) h.release();
+  prepareStep.holding = false;
+  for (const step of [probe, configCheck, prepareStep]) for (const h of step.held.splice(0)) h.release();
   await flush();
   await stopAllTranscoders();
   await flush();
   probe.reset();
   configCheck.reset();
+  prepareStep.reset();
   SpawnAs = FakeFfmpeg;
   spawned.length = 0;
   upserts.length = 0;
+  removals.length = 0;
   unhandled.length = 0;
 });
 
@@ -456,5 +466,83 @@ describe('#478: isRunning and the dedupe of queued requests', () => {
 
     assert.equal(live().length, 1, `${live().length} ffmpeg alive after disable then enable (0 = enabled with no transcoder)`);
     assert.equal(spawned.length, 1);
+  });
+});
+
+// #806: the stop generation covers the work a caller does BEFORE it can launch, if that work runs inside the start.
+// startSubStream used to await its MediaMTX path check first and call startTranscoder afterwards: during that
+// round trip no start was queued, so a disable's stopSubStream bumped nothing and the start that followed
+// launched a sub transcoder for a camera that was already disabled. Now the check is startTranscoder's `prepare`.
+// Which of these FAIL on the code before #806: p1, p2 (no `prepare` option: the held step is never called), r1 and
+// r2 (the real startSubStream awaits first). Guards that pass there too: p3 (a rejection only reaches its own caller).
+const SUB_CAM = { id: 'cam-r', name: 'R', mediamtx_path: 'path_r', sub_rtsp_url: URL2 };
+const SUB_PATH = 'path_r-sub';
+
+describe('#806: a pending sub-stream start is covered by the stop generation', () => {
+  test('p1: a stop while a start\'s `prepare` is running abandons the start before it probes or launches', async () => {
+    prepareStep.hold();
+    const raw = startTranscoder('cam-p1', URL1, 'path_p1', 'P1', { prepare: (stopped) => prepareStep.call(stopped) });
+    const a = track(raw);
+    await untilHeld(prepareStep, 1, 'the start never reached its prepare step');
+    assert.equal(typeof prepareStep.held[0].arg, 'function', 'prepare is handed stopped()');
+    assert.equal(prepareStep.held[0].arg(), false, 'stopped() reported a stop that has not happened');
+    await stopTranscoder('cam-p1');
+    assert.equal(prepareStep.held[0].arg(), true, 'stopped() did not see the stop');
+    await releaseUntilSettled([a], { steps: [probe, configCheck, prepareStep] });
+
+    assert.equal(spawned.length, 0, 'a start stopped during its prepare step launched ffmpeg');
+    assert.equal(probe.calls.length, 0, 'the stopped start went on to probe the camera');
+    await assert.doesNotReject(raw);
+  });
+
+  test('p2: without a stop the start waits for its prepare step, then launches once', async () => {
+    prepareStep.hold();
+    const a = track(startTranscoder('cam-p2', URL1, 'path_p2', 'P2', { prepare: (stopped) => prepareStep.call(stopped) }));
+    await untilHeld(prepareStep, 1, 'the start never reached its prepare step');
+    await flush();
+    assert.equal(spawned.length, 0, 'the start launched before its prepare step finished');
+    await releaseUntilSettled([a], { steps: [probe, configCheck, prepareStep] });
+    assert.equal(live().length, 1);
+    assert.equal(urlOf(live()[0]), URL1);
+  });
+
+  test('p3: a prepare step that rejects rejects for its own caller only; the next start still launches', async () => {
+    const marker = new Error('marker-806-prepare-threw');
+    const a = track(startTranscoder('cam-p3', URL1, 'path_p3', 'P3', { prepare: async () => { throw marker; } }));
+    const b = track(startTranscoder('cam-p3', URL2, 'path_p3', 'P3'));
+    await releaseUntilSettled([a, b]);
+    await flush();
+
+    assert.equal(a.ok, false);
+    assert.equal(a.error, marker);
+    assert.equal(b.ok, true, `the start queued behind a failed prepare rejected too: ${b.error?.message}`);
+    assert.equal(urlOf(live()[0]), URL2);
+    assert.deepEqual(unhandled, []);
+  });
+
+  test('r1: startSubStream, then the stop a disable issues while its path check is in flight: no sub ffmpeg, no path written', async () => {
+    configCheck.hold();
+    const start = track(startSubStream(SUB_CAM));
+    await untilHeld(configCheck, 1, 'startSubStream never reached its path check');
+    assert.equal(configCheck.held[0].arg, SUB_PATH, 'the held check is the sub path\'s');
+    const stop = track(stopSubStream(SUB_CAM)); // what PUT /:id/enabled { enabled: false } does
+    configCheck.held.splice(0).forEach((h) => h.release(false)); // "missing": the start would write it
+    await releaseUntilSettled([start, stop]);
+
+    assert.equal(live().length, 0, 'a sub transcoder launched for a camera that was disabled meanwhile');
+    assert.deepEqual(upserts, [], 'the sub path was written back after the stop removed it');
+    assert.equal(probe.calls.length, 0, 'the stopped start went on to probe the camera');
+  });
+
+  test('r2: control, no stop: the same start writes the missing sub path and launches exactly one sub ffmpeg', async () => {
+    configCheck.hold();
+    const start = track(startSubStream(SUB_CAM));
+    await untilHeld(configCheck, 1, 'startSubStream never reached its path check');
+    configCheck.held.splice(0).forEach((h) => h.release(false));
+    await releaseUntilSettled([start]);
+
+    assert.deepEqual(upserts.filter((p) => p === SUB_PATH), [SUB_PATH], 'the missing sub path was not written exactly once');
+    assert.equal(live().length, 1);
+    assert.equal(urlOf(live()[0]), URL2);
   });
 });

@@ -171,7 +171,17 @@ export function stopsInProgressCountForTest() {
   return stopsInProgress.size;
 }
 
-export function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraName = mediamtxPath) {
+// ★ `options.prepare` (#806): an optional async step run INSIDE the start, after the old process has stopped and
+// before the probe, handed `stopped()` (see doStart). It exists for work that must happen before the launch but that
+// the caller used to await BEFORE calling this function: startSubStream checked and re-created the sub path first, and
+// during that MediaMTX round trip nothing was queued, so a disable's stopTranscoder found no chain record to bump and the
+// start, queued afterwards with a fresh generation, launched a disabled camera. Done inside, the stop generation
+// (captured below, when the request is QUEUED) already covers it.
+// Rules for a `prepare`: it must be BOUNDED (it holds this camera's chain; MediaMTX calls are capped by their own API
+// deadline), it must not start a transcoder of the same camera (the deadlock doStart warns about), and it must check
+// `stopped()` before any write that a stop would have undone. Requests are deduped on the four arguments only, so every
+// caller of one leg must pass an equivalent `prepare`.
+export function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraName = mediamtxPath, { prepare } = {}) {
   let chain = startChains.get(cameraId);
   if (!chain) {
     chain = { tail: Promise.resolve(), epoch: 0, pending: 0, last: null };
@@ -206,7 +216,7 @@ export function startTranscoder(cameraId, rtspUrl, mediamtxPath, cameraName = me
     try {
       await previous; // never rejects: see `tail` above
       request.started = true;
-      await doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped);
+      await doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped, prepare);
     } finally {
       // In the run's OWN finally, so it is done before the caller's `await` resumes: isRunning() must not still
       // say true straight after a start that launched nothing. Never `run.finally(cleanup)` instead: that is a
@@ -240,7 +250,7 @@ function abandon(mediamtxPath, when) {
 // camera's chain, and every later start of that camera, forever. The 5 s relaunch timer inside launch() calls
 // launch() directly, never startTranscoder, for the same reason, and because a relaunch is not a new start: it
 // is this lineage replacing its own exited process.
-async function doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped) {
+async function doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped, prepare) {
   if (stopped()) return abandon(mediamtxPath, 'while it waited its turn');
   // Wait for any previous process for this camera to actually be gone before
   // starting a new one - previously this fired stop and start back-to-back, which
@@ -255,6 +265,13 @@ async function doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped) {
   // survives SIGKILL is not waited for (see stopProcess).
   await stopProcess(cameraId);
   if (stopped()) return abandon(mediamtxPath, 'while the old ffmpeg stopped');
+
+  // #806: the caller's own pre-launch step (the sub path check and re-create), inside the stop cover. After it, like
+  // after every await here, a stop that landed meanwhile abandons the start.
+  if (prepare) {
+    await prepare(stopped);
+    if (stopped()) return abandon(mediamtxPath, 'while its MediaMTX path was prepared');
+  }
 
   // Probe the source audio codec once (cached) so we can build the right WebRTC audio track. A probe
   // failure/timeout returns false → the current passthrough-copy behaviour, so nothing regresses.

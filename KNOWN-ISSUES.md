@@ -1568,6 +1568,25 @@ loosens the old ones automatically. Better still, give the other reader the same
 and keep the default. See
 [Who can read the data directory](docs/operations.md#who-can-read-the-data-directory).
 
+## A camera turned off and on again in quick succession, or edited while it is being turned on or off, can briefly run the wrong thing
+
+**What you see:** You turn a camera off and straight back on (or change its settings while the switch is still
+working), and the camera runs with a setting it had a moment ago, or a stream that should be off is on. Nothing in
+the log is wrong.
+
+**Why:** Turning a camera on or off, and saving an edit, are separate requests that can overlap. Since issue #806
+a sub-stream start is cancelled by a switch-off that arrives while it is starting, an address saved while a switch-on
+is starting is applied when that switch-on finishes, and a switch-off records "off" before it begins stopping
+things. Three overlaps are left as they were:
+- An "on" and an "off" sent together end in whichever finishes last.
+- A delete or a manual restart that races a switch-off can still start a stream for the camera that stays on until
+  you switch the camera off again (the five-minute check skips cameras that are off).
+- A switch-on starts motion, sound and recording from the camera's settings as they were when it began, so a
+  detection setting saved during those few seconds is picked up at the next five-minute check.
+
+**What to do:** For a stream still running after you switched a camera off, switch it off again. For a setting that
+did not take, wait five minutes or save it again.
+
 ## The `[entrypoint]` line reports the same number of entries "with group/other access found" on every start
 
 **What you see:** At the default `UMASK=077`, every start logs the same non-zero count, e.g.

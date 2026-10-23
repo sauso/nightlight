@@ -3039,8 +3039,8 @@
   {
     "label": "#451 M20a: startSubStream writes the sub path on an unknown config read",
     "file": "backend/src/lib/subStream.js",
-    "find": "if ((await isPathConfiguredCorrectly(path)) === false) await upsertPath(path);",
-    "replace": "if (!(await isPathConfiguredCorrectly(path))) await upsertPath(path);",
+    "find": "if ((await isPathConfiguredCorrectly(path)) === false) {",
+    "replace": "if (!(await isPathConfiguredCorrectly(path))) {",
     "expect": "killed",
     "tests": ["mediamtx-api-deadline.test.js"],
     "namePattern": "^T3b:"
@@ -22797,5 +22797,68 @@
     "expect": "killed",
     "tests": ["settingsForms.test.jsx"],
     "namePattern": "#392:"
+  },
+  {
+    "label": "#806 M1: a start is not re-checked for a stop after its prepare step (it goes on to probe a camera that was stopped)",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "    if (stopped()) return abandon(mediamtxPath, 'while its MediaMTX path was prepared');",
+    "replace": "    // mutant: no stop check after prepare",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^p1:"
+  },
+  {
+    "label": "#806 M2: the sub path is written back after a stop removed it (no stopped() check between the path check and the write)",
+    "file": "backend/src/lib/subStream.js",
+    "find": "      if (stopped()) return;",
+    "replace": "      // mutant: no stop check before the write",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^r1:"
+  },
+  {
+    "label": "#806 M3: startSubStream does not hand its path check to the start as `prepare` (no check at all)",
+    "file": "backend/src/lib/subStream.js",
+    "find": ", { prepare: ensureSubPath });",
+    "replace": ");",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^r[12]:"
+  },
+  {
+    "label": "#806 M4: the enable never re-reads the row after its starts (an address saved meanwhile is not applied)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    if (fresh) {",
+    "replace": "    if (false) {",
+    "expect": "killed",
+    "tests": ["camera-enable-edit-race.test.js"],
+    "namePattern": "^e[123]:"
+  },
+  {
+    "label": "#806 M5: the enable ignores a main address saved meanwhile",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (fresh.rtsp_url !== existing.rtsp_url) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["camera-enable-edit-race.test.js"],
+    "namePattern": "^e1:"
+  },
+  {
+    "label": "#806 M6: the enable waits for the re-applied main start before it issues the sub start (a later edit or disable can land between)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "        reapply.push(startTranscoder(",
+    "replace": "        await (startTranscoder(",
+    "expect": "killed",
+    "tests": ["camera-enable-edit-race.test.js"],
+    "namePattern": "^e6:"
+  },
+  {
+    "label": "#806 M7: the disable records disabled = 1 only after its stops (an edit reading the row mid-stop sees an enabled camera)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    db.prepare('UPDATE cameras SET disabled = 1 WHERE id = ?').run(req.params.id);",
+    "replace": "    // mutant: no early disable write",
+    "expect": "killed",
+    "tests": ["camera-enable-edit-race.test.js"],
+    "namePattern": "^d1:"
   }
 ]
