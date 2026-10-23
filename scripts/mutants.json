@@ -22747,17 +22747,17 @@
   {
     "label": "#589 M1: the sweep never disarms a silent camera whose window closed",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": " && !watchedNow(cameraQ.get(cameraId))) {",
-    "replace": " && false) {",
+    "find": "    if (!watchedNow(cameraQ.get(cameraId))) reset(cameraId, st);",
+    "replace": "    if (false) reset(cameraId, st);",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "#589:"
   },
   {
-    "label": "#589 M2: the sweep disarms every dirty camera, window open or not",
+    "label": "#589 M2: the sweep disarms every camera, window open or not",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "    if ((st.asleep || st.quietRun || st.run || st.lastAt != null) && !watchedNow(cameraQ.get(cameraId))) {",
-    "replace": "    if (st.asleep || st.quietRun || st.run || st.lastAt != null) {",
+    "find": "    if (!watchedNow(cameraQ.get(cameraId))) reset(cameraId, st);",
+    "replace": "    if (true) reset(cameraId, st);",
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "#589:"

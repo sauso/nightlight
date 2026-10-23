@@ -564,9 +564,9 @@ export function sweepStaleRuns(now = Date.now()) {
     // N minutes": an armed watcher still stays armed across a hole INSIDE the window (a reconnect must not drop a real
     // wake, see the bridge rule in handleMinute) and a new N would have no data behind it. Known limit: a silent camera
     // is disarmed up to about 6 minutes after its window closes (the 5-minute margin plus up to one sweep interval).
-    if ((st.asleep || st.quietRun || st.run || st.lastAt != null) && !watchedNow(cameraQ.get(cameraId))) {
-      reset(cameraId, st);
-    }
+    // No "is the slot dirty" pre-check: reset() on a clean slot is a no-op, and any state worth clearing implies
+    // lastAt != null (code review, Codex, mutated each term of such a check: all survived, as it is equivalent).
+    if (!watchedNow(cameraQ.get(cameraId))) reset(cameraId, st);
   }
   return swept;
 }
