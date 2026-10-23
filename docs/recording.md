@@ -430,8 +430,13 @@ volume. If it resolves to an unmapped path (the container's ephemeral layer), re
 and a clear error is logged — video is never written somewhere it would vanish on recreate or bloat the
 image.
 
-**Settings → Recording → Storage** shows where video is being written, how much space it's using, and
-the split between alert clips, wake clips and recordings.
+**Settings → Recording → Storage** shows where video is being written and how much space it is using, in
+three lines that never overlap — **Alert clips**, **Manual recordings** and **Wake clips** — plus the total
+of those three and the free space. The *Storage cap (GB)* and *Keep clips for* limits apply to alert clips
+only: manual recordings are kept until you delete them, and wake clips follow *Keep wake clips for*. The
+total leaves out timelapses, pictures and the live recording buffer, so it is lower than what the volume
+itself reports as used. If the figures cannot be loaded the card says "Storage details unavailable" and
+offers a Retry button.
 
 ---
 

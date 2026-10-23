@@ -152,9 +152,18 @@ export function clipStorageStats() {
   const rec = db
     .prepare("SELECT COUNT(*) n, COALESCE(SUM(bytes),0) b FROM recordings WHERE status='ready'")
     .get() || { n: 0, b: 0 };
+  // #392: the MANUAL recordings alone. recordingCount/Bytes above stay "every ready recording" (wake clips included)
+  // because an older client reads them that way; the Settings card needs the categories to be mutually exclusive, so
+  // it adds alert clips + this + wakeClips (routes/settings.js) without counting a wake clip twice. `kind = 'manual'`
+  // exactly, the definition the child's Recordings list uses (recordings.js): a kind that does not exist today would
+  // be in neither figure rather than mislabelled as a manual recording.
+  const manual = db
+    .prepare("SELECT COUNT(*) n, COALESCE(SUM(bytes),0) b FROM recordings WHERE status='ready' AND kind='manual'")
+    .get() || { n: 0, b: 0 };
   return {
     recordingCount: rec.n,
     recordingBytes: rec.b,
+    manualRecordings: { count: manual.n, bytes: manual.b },
     path: status.path,
     onMount: status.onMount,
     writable: status.writable,
