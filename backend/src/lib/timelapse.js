@@ -205,8 +205,6 @@ function pruneChild(childId) {
   }
 }
 
-// Assemble the sampled frames for one child-night into an MP4. Best-effort and idempotent: safe to
-// re-run (upserts the row, overwrites the file); cleans up the frame dir on success or a hard skip.
 // Throw away a night's collected frames without building anything. Used when the night turns out to
 // have had nobody in the bed: the frames are of an empty room, so a "memory" of it is just wasted disk
 // and a pointless card on the child's page. Sampling can't know this in advance — occupancy is only
@@ -239,7 +237,31 @@ export function deleteTimelapse(id) {
   return true;
 }
 
+// Assemble the sampled frames for one child-night into an MP4. Best-effort and idempotent: safe to
+// re-run (upserts the row, overwrites the file); cleans up the frame dir on success or a hard skip.
+//
+// ★ #450: ONE ASSEMBLY PER CHILD-NIGHT AT A TIME. The first attempt (the nightly job, on the night's first scored
+// pass) and the retry below can otherwise both reach this function for one night: two ffmpeg passes writing the same
+// .mp4 and the second one's rmrf of the `.seq` dir under the first. A call that finds its night already in flight
+// returns null at once (no caller uses the value: the job ignores it, the retry only reads success as "an id").
+// Registered SYNCHRONOUSLY, before the first await, so a retry started in the same tick sees it; released in a
+// `finally` around the WHOLE body, because assembleOnce can return or throw before its own try (storage not ready,
+// too few frames, an unsafe path segment, the upsert): a key left behind would make this night return null until the
+// process restarts.
+const inFlight = new Set();
+const nightKey = (childId, nightDate) => `${childId}|${nightDate}`; // safeSeg allows no `|`, so keys cannot collide
 export async function assembleTimelapse(childId, nightDate) {
+  const key = nightKey(childId, nightDate);
+  if (inFlight.has(key)) return null;
+  inFlight.add(key);
+  try {
+    return await assembleOnce(childId, nightDate);
+  } finally {
+    inFlight.delete(key);
+  }
+}
+
+async function assembleOnce(childId, nightDate) {
   if (!clipStorageReady()) return null;
   const dir = frameDir(childId, nightDate);
   const frames = safeReaddir(dir).filter((f) => /^f-\d+\.jpg$/.test(f)).sort();
@@ -307,4 +329,93 @@ export async function assembleTimelapse(childId, nightDate) {
     if (seqDir) rmrf(seqDir); // leave the frames on a failure so a later retry can still assemble
     return null;
   }
+}
+
+// ★ #450: RETRY A NIGHT THAT HAS FRAMES BUT NO VIDEO. The nightly job starts an assembly once, on a night's first
+// scored pass, and nothing started another: a failed assembly kept its frames "so a later retry can still assemble",
+// and no later retry existed (the sleep row is scored by then, so the job never put the night in its list again).
+// The same dead end held for a night whose assembly was interrupted by a restart (row left `pending`) and, found by the
+// plan review, for a night with NO row at all: a boot-time first pass runs before clip storage is probed (index.js
+// starts the sleep job before startClipStorage), so assembleOnce returns at its storage check before it writes a row,
+// and an admin Recompute can score a night outside the job. So candidates come from the FRAME FOLDERS, not from rows.
+//
+// A frame folder is retried only when all of these hold (re-read right before each attempt, since an earlier one in
+// the same pass can take minutes): the child exists; the night is scored 'ok' (an 'empty' or unscored night must not
+// get a video of an empty room, and a deleted child's sleep rows are gone); no ready timelapse exists; it is not the
+// child's open night (the sampler is still writing there); nothing is assembling it; it has at least MIN_FRAMES
+// frames; and it would not be pruned the moment it is ready (a child already holding KEEP_PER_CHILD newer ready ones:
+// the encode would be wasted, and deleting a night's frames that way is not what a retry is for).
+// Newest nights first, one at a time (each can run to its stall deadline, so a pass is not bounded by the job's
+// 30-minute cadence: the `retrying` flag stops a second pass starting beside it, the way `sampling` does for the sampler).
+// Not run while clip storage is not ready or the disk is nearly full (hasMinFreeSpace, as the sampler): neither
+// spends an attempt.
+//
+// LIMITS, deliberately: at most MAX_RETRIES attempts per night per PROCESS, spaced by the job's own 30-minute tick
+// (about 1.5 hours for a transient encoder or storage failure). The count is in memory, not stored (a stored count
+// would be a schema change), so a restart or deploy gives a night that was given up on three more tries. The numbers are
+// unmeasured guesses, not calibrated on any failure we have seen. A night that exhausts them keeps its frames (the only
+// copy; frame deletion is irreversible and an age for it needs data) and logs where they are.
+const MAX_RETRIES = 3;
+const retryAttempts = new Map(); // nightKey -> attempts made by this process
+let retrying = false;
+// Test seam ONLY (timelapse-retry.test.js), like startChainCountForTest in transcoder.js: the attempt counts live as
+// long as the process, so one test giving a night up would otherwise leave every later test with a night already
+// "given up on". Nothing in src/ uses it.
+export function resetRetryStateForTest() {
+  retryAttempts.clear();
+}
+const childExistsStmt = db.prepare('SELECT 1 FROM children WHERE id = ?');
+const scoredOkStmt = db.prepare("SELECT 1 FROM sleep_nights WHERE child_id = ? AND night_date = ? AND status = 'ok'");
+const readyRowStmt = db.prepare("SELECT 1 FROM timelapses WHERE child_id = ? AND night_date = ? AND status = 'ready'");
+const newerReadyStmt = db.prepare("SELECT COUNT(*) AS n FROM timelapses WHERE child_id = ? AND status = 'ready' AND night_date > ?");
+
+function frameNights() {
+  const out = [];
+  for (const childId of safeReaddir(FRAMES_ROOT)) {
+    for (const nightDate of safeReaddir(path.join(FRAMES_ROOT, childId)).sort().reverse()) out.push({ childId, nightDate });
+  }
+  return out;
+}
+
+function retryable(childId, nightDate) {
+  if (inFlight.has(nightKey(childId, nightDate))) return false;
+  if (!childExistsStmt.get(childId)) return false;
+  if (!scoredOkStmt.get(childId, nightDate)) return false;
+  if (readyRowStmt.get(childId, nightDate)) return false;
+  if (currentNightDate(childId) === nightDate) return false;
+  if (newerReadyStmt.get(childId, nightDate).n >= KEEP_PER_CHILD) return false;
+  const frames = safeReaddir(path.join(FRAMES_ROOT, childId, nightDate)).filter((f) => /^f-\d+\.jpg$/.test(f));
+  return frames.length >= MIN_FRAMES;
+}
+
+// Returns how many assemblies it started. Never throws.
+export async function retryStrandedTimelapses() {
+  if (retrying) return 0;
+  if (!clipStorageReady() || !hasMinFreeSpace()) return 0;
+  retrying = true;
+  let attempted = 0;
+  try {
+    for (const { childId, nightDate } of frameNights()) {
+      try {
+        const key = nightKey(childId, nightDate);
+        const tried = retryAttempts.get(key) || 0;
+        // The folder names come off the disk: anything that is not a plain segment is skipped, not trusted.
+        if (tried >= MAX_RETRIES || !/^[A-Za-z0-9._-]+$/.test(childId) || !/^\d{4}-\d{2}-\d{2}$/.test(nightDate)) continue;
+        if (!retryable(childId, nightDate)) continue;
+        retryAttempts.set(key, tried + 1);
+        attempted += 1;
+        logger.info(`[timelapse] retrying ${childId} ${nightDate}: no video yet, frames kept (attempt ${tried + 1} of ${MAX_RETRIES})`);
+        const id = await assembleTimelapse(childId, nightDate);
+        if (id) retryAttempts.delete(key);
+        else if (tried + 1 >= MAX_RETRIES) {
+          logger.warn(`[timelapse] giving up on ${childId} ${nightDate} after ${MAX_RETRIES} tries; its frames stay in ${frameDir(childId, nightDate)} (a restart tries again)`);
+        }
+      } catch (e) {
+        logger.error(`[timelapse] retry of ${childId} ${nightDate} failed: ${e.message}`);
+      }
+    }
+  } finally {
+    retrying = false;
+  }
+  return attempted;
 }
