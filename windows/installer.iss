@@ -28,11 +28,13 @@ OutputBaseFilename=Nightlight-{#AppVersion}-windows-x64-setup
 Compression=lzma2/fast
 SolidCompression=yes
 WizardStyle=modern
-UninstallDisplayIcon={app}\node.exe
+SetupIconFile={#PayloadDir}\Nightlight.ico
+UninstallDisplayIcon={app}\Nightlight.ico
 CloseApplications=no
 
 [Tasks]
 Name: lan; Description: "Allow devices on my private home network to connect"; GroupDescription: "Network access:"
+Name: tray; Description: "Start the Nightlight tray icon when I sign in"; GroupDescription: "Desktop:"
 
 [Dirs]
 Name: "{commonappdata}\Nightlight"; Flags: uninsneveruninstall
@@ -51,14 +53,22 @@ Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 [INI]
 Filename: "{app}\Nightlight.url"; Section: "InternetShortcut"; Key: "URL"; String: "http://localhost:{code:GetHttpPort}"
+Filename: "{app}\Nightlight.url"; Section: "InternetShortcut"; Key: "IconFile"; String: "{app}\Nightlight.ico"
+Filename: "{app}\Nightlight.url"; Section: "InternetShortcut"; Key: "IconIndex"; String: "0"
+
+[Registry]
+; Starts in each user's desktop with their normal permissions, never Session 0.
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Nightlight"; ValueData: """{app}\Nightlight.Tray.exe"""; Flags: uninsdeletevalue; Tasks: tray
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "Nightlight"; Flags: deletevalue; Tasks: not tray
 
 [UninstallDelete]
 Type: files; Name: "{app}\Nightlight.url"
 Type: dirifempty; Name: "{app}"
 
 [Icons]
-Name: "{group}\Nightlight"; Filename: "{app}\Nightlight.url"
-Name: "{group}\Uninstall Nightlight"; Filename: "{uninstallexe}"
+Name: "{group}\Nightlight"; Filename: "{app}\Nightlight.Tray.exe"; Parameters: "--open"; IconFilename: "{app}\Nightlight.ico"
+Name: "{group}\Nightlight Settings"; Filename: "{app}\Nightlight.Tray.exe"; Parameters: "--settings"; IconFilename: "{app}\Nightlight.ico"
+Name: "{group}\Uninstall Nightlight"; Filename: "{uninstallexe}"; IconFilename: "{app}\Nightlight.ico"
 
 [Run]
 ; The Microsoft installer repairs/updates the shared C++ runtime if needed. It
@@ -66,9 +76,11 @@ Name: "{group}\Uninstall Nightlight"; Filename: "{uninstallexe}"
 Filename: "{app}\redist\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Checking the Microsoft Visual C++ runtime..."; Flags: runhidden waituntilterminated
 Filename: "{app}\Nightlight.Service.exe"; Parameters: "install"; Flags: runhidden waituntilterminated; Check: NeedsServiceInstall
 Filename: "{app}\Nightlight.Service.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
-Filename: "{app}\Nightlight.url"; Description: "Open Nightlight"; Flags: postinstall shellexec nowait skipifsilent
+Filename: "{app}\Nightlight.Tray.exe"; Flags: nowait skipifsilent runasoriginaluser; Tasks: tray
+Filename: "{app}\Nightlight.Tray.exe"; Parameters: "--open"; Description: "Open Nightlight"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [UninstallRun]
+Filename: "{app}\Nightlight.Tray.exe"; Parameters: "--exit"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "StopNightlightTray"
 Filename: "{app}\Nightlight.Service.exe"; Parameters: "stop"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "StopNightlight"
 Filename: "{app}\Nightlight.Service.exe"; Parameters: "uninstall"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "UninstallNightlightService"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Nightlight Web"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveNightlightWebRule"
@@ -122,8 +134,14 @@ begin
       Result := 'A different Nightlight service already exists. Remove it or choose its original installation directory.';
       Exit;
     end;
-    if not Exec(ExpandConstant('{app}\Nightlight.Service.exe'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
+    if not Exec(ExpandConstant('{app}\Nightlight.Service.exe'), 'stop', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then begin
       Result := 'Could not stop the existing Nightlight service. Stop it in Windows Services, then retry. Application files and data have been kept.';
+      Exit;
+    end;
+  end;
+  if FileExists(ExpandConstant('{app}\Nightlight.Tray.exe')) then begin
+    if not Exec(ExpandConstant('{app}\Nightlight.Tray.exe'), '--exit', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
+      Result := 'Could not close the Nightlight tray icon. Exit it in each signed-in desktop, then retry.';
   end;
 end;
 

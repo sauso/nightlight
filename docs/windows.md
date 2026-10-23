@@ -9,8 +9,8 @@ WSL or a separate runtime download.
 
 1. Download `Nightlight-<version>-windows-x64-setup.exe` from a successful [Windows installer build](https://github.com/sauso/nightlight/actions/workflows/windows.yml). Open the run and download **Nightlight-Windows-x64**, then extract the installer. GitHub sign-in is required for workflow artifact downloads.
 2. Run the installer and approve the Windows administrator prompt.
-3. Choose an installation folder and web port (default **4000**). Leave **Allow devices on my private home network to connect** selected if you want to use phones or other computers at home.
-4. Open **Nightlight** from the Start menu, or visit **http://localhost:4000**. Create your administrator account, then add a child and your cameras.
+3. Choose an installation folder and web port (default **4000**). Leave **Allow devices on my private home network to connect** selected if you want to use phones or other computers at home. **Start the Nightlight tray icon when I sign in** enables the desktop companion at login.
+4. Open **Nightlight** from the Start menu or tray menu, or visit **http://localhost:4000**. Create your administrator account, then add a child and your cameras.
 
 The target is 64-bit Windows 10 version 22H2 or later and Windows 11. The build
 and installation checks run on GitHub's current Windows runner; older Windows
@@ -19,6 +19,23 @@ versions have not been separately verified. The installer is currently unsigned.
 Nightlight starts automatically at boot as the **Nightlight** Windows service,
 including before anyone signs in. Its account is **NT AUTHORITY\LocalService**.
 Keep the PC powered on and prevent Windows from sleeping while monitoring.
+
+## Tray icon and settings
+
+The tray icon uses the Nightlight artwork from the website, as do the setup
+executable, uninstaller and Start menu shortcuts. Windows may initially put the
+tray icon under **Show hidden icons**.
+
+- Double-click the icon, or right-click and choose **Open Nightlight**, to open the web app.
+- Right-click and choose **Settings** to open Nightlight's settings in your browser. The **Nightlight Settings** Start menu shortcut opens the same page. Your usual sign-in and account permissions apply.
+- **Exit tray (monitoring continues)** closes only the desktop icon. The service keeps monitoring and recording. Open **Nightlight** from the Start menu to restore the icon.
+
+The tray runs with the signed-in user's normal permissions. The service starts
+at boot even before anyone signs in; the tray starts when a user signs in if its
+setup option is selected. Run setup again to enable or disable login startup.
+Silent installation configures startup without opening a tray or browser in the
+installer's session. The desktop companion uses the .NET Framework included in
+supported Windows versions; no additional runtime download is needed.
 
 ## Watch from another device
 
@@ -52,8 +69,8 @@ including an in-flight recording. Avoid ending its Node process from Task
 Manager when you can stop the service instead.
 
 To update, back up your data, download the newer installer and run it over the
-existing installation. The installer stops the service before replacing the app
-files and starts it again afterward. It keeps your cameras, accounts, recordings
+existing installation. The installer closes its tray companions and stops the
+service before replacing the app files, then starts the service again. It keeps your cameras, accounts, recordings
 and selected web port. Updates are installed manually; no updater runs in the
 background.
 
@@ -64,10 +81,10 @@ The web port is saved in `%ProgramData%\Nightlight\server.ini`:
 Port=4000
 ```
 
-The allowed range is 1 to 65535. To change it together with the Start menu link
+The allowed range is 1 to 65535. To change it together with the tray links, Start menu link
 and firewall rule, run the installer again and choose the new port. Directly
 editing the file and restarting the service changes the server port but does not
-rewrite the shortcut or firewall rule.
+rewrite the shortcut, tray links or firewall rule.
 
 ## Data, logs and backups
 
@@ -94,8 +111,8 @@ restore the complete directory and its permissions, then restart it. See
 ## Uninstall
 
 Remove **Nightlight** from Windows **Installed apps**, or use **Uninstall
-Nightlight** in its Start menu group. This removes the service, application,
-shortcuts and installer-created firewall rules.
+Nightlight** in its Start menu group. This closes the tray companions and removes
+the service, application, shortcuts, tray login startup and installer-created firewall rules.
 
 Microsoft's shared Visual C++ runtime is kept because other applications may use it.
 
@@ -119,7 +136,8 @@ advertised host for local viewing. Keep a copy of a customized service XML befor
 upgrading, because setup replaces that application file.
 
 The Windows workflow installs the actual setup executable and checks its service
-account, boot startup mode, frontend, synthetic RTSP input, snapshot, HLS,
+account, boot startup mode, tray menu destinations, embedded icons, login startup,
+single tray instance, independent tray exit, frontend, synthetic RTSP input, snapshot, HLS,
 recording, graceful stop, upgrade, uninstall and reinstall. It uses generated
 video, not household footage. Physical camera compatibility and playback from
 other devices on a real home network still need a manual check.
@@ -127,7 +145,8 @@ other devices on a real home network still need a manual check.
 ## Build from source
 
 On a Windows build machine with Node.js 24 and Inno Setup 6 installed, run
-`windows/build.ps1` from PowerShell. It installs the committed npm lockfiles,
+`windows/build.ps1` from PowerShell. It generates native icon sizes, compiles and
+tests the tray companion with Windows' .NET Framework compiler, installs the committed npm lockfiles,
 builds the frontend, downloads pinned Windows runtimes, and writes the installer
 and SHA-256 checksum to `windows/dist`. Bundled licenses and runtime hashes are
 installed alongside the application. The FFmpeg and MediaMTX version/checksum

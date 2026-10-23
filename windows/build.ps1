@@ -19,9 +19,18 @@ foreach ($dir in @($payload, "$payload\bin", "$payload\app", "$payload\licenses"
 # spending time building the frontend and downloading the large video runtimes.
 $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
 if (-not (Test-Path $compiler)) { throw 'Install Inno Setup 6 to build the Windows installer.' }
+$csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+if (-not (Test-Path $csc)) { throw 'The Windows .NET Framework compiler is required to build the tray companion.' }
+# Reuse the website's Nightlight artwork at eight Windows icon sizes. Embed the same
+# icon in the desktop executable, setup and uninstaller; ship it for shortcuts.
+& "$PSScriptRoot\build-icon.ps1" -Source "$PSScriptRoot\assets\Nightlight.png" -Destination "$payload\Nightlight.ico"
+& $csc '/nologo' '/target:winexe' '/platform:x64' '/optimize+' "/out:$payload\Nightlight.Tray.exe" "/win32icon:$payload\Nightlight.ico" "/win32manifest:$PSScriptRoot\Tray\app.manifest" '/reference:System.Windows.Forms.dll' '/reference:System.Drawing.dll' "$PSScriptRoot\Tray\Program.cs"
+if ($LASTEXITCODE -ne 0) { throw 'Could not compile the Nightlight tray companion.' }
+& "$PSScriptRoot\test\tray.ps1" -PayloadDirectory $payload
 $syntaxPayload = Join-Path $build 'syntax-payload'
 $null = New-Item -ItemType Directory -Path $syntaxPayload -Force
 Set-Content "$syntaxPayload\placeholder.txt" -Value 'Installer compiler check' -Encoding ASCII
+Copy-Item "$payload\Nightlight.ico" "$syntaxPayload\Nightlight.ico" -Force
 & $compiler '/Qp' "/DPayloadDir=$syntaxPayload" "/DOutputDir=$build\syntax-output" "$PSScriptRoot\installer.iss"
 if ($LASTEXITCODE -ne 0) { throw 'Installer script compilation failed' }
 
@@ -111,7 +120,7 @@ Microsoft Visual C++ Redistributable: https://learn.microsoft.com/cpp/windows/la
 License texts are in this directory. FFmpeg is invoked as a separate process.
 "@ | Set-Content "$payload\licenses\THIRD-PARTY-NOTICES.txt" -Encoding UTF8
 
-$hashes = @('node.exe', 'Nightlight.Service.exe', 'bin\ffmpeg.exe', 'bin\ffprobe.exe', 'bin\mediamtx.exe', 'redist\vc_redist.x64.exe') | ForEach-Object {
+$hashes = @('node.exe', 'Nightlight.Service.exe', 'Nightlight.Tray.exe', 'Nightlight.ico', 'bin\ffmpeg.exe', 'bin\ffprobe.exe', 'bin\mediamtx.exe', 'redist\vc_redist.x64.exe') | ForEach-Object {
     $file = Join-Path $payload $_
     [pscustomobject]@{ file = $_; sha256 = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() }
 }

@@ -11,6 +11,7 @@ $base = 'http://127.0.0.1:4000'
 $script:Headers = @{}
 $source = $null
 $publisher = $null
+$script:TrayProcess = $null
 
 function Assert-True {
     param([bool] $Condition, [string] $Message)
@@ -35,9 +36,11 @@ function Api {
     Write-Output -InputObject $response
 }
 function Install-Native {
+    param([bool] $StartTrayAtLogon = $true)
+    $tasks = if ($StartTrayAtLogon) { 'lan,tray' } else { 'lan' }
     $process = Start-Process $Installer -Wait -PassThru -ArgumentList @(
         '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$installDir`"",
-        '/TASKS="lan"', "/LOG=`"$env:RUNNER_TEMP\nightlight-install.log`""
+        "/TASKS=`"$tasks`"", "/LOG=`"$env:RUNNER_TEMP\nightlight-install.log`""
     )
     Assert-True ($process.ExitCode -eq 0) "Installer exited $($process.ExitCode)"
     Wait-Until { (Invoke-WebRequest -UseBasicParsing "$base/api/health" -TimeoutSec 2).StatusCode -eq 200 } 'Nightlight health'
@@ -45,6 +48,12 @@ function Install-Native {
     Assert-True ($service.State -eq 'Running') 'Service is not running'
     Assert-True ($service.StartMode -eq 'Auto') 'Service will not start at boot'
     Assert-True ($service.StartName -match 'LocalService$') 'Service is running with an unexpected account'
+    $startup = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name Nightlight -ErrorAction SilentlyContinue).Nightlight
+    if ($StartTrayAtLogon) {
+        Assert-True ($startup -eq "`"$installDir\Nightlight.Tray.exe`"") 'Tray login startup is missing or incorrectly quoted'
+    } else {
+        Assert-True ($null -eq $startup) 'Upgrade did not disable tray login startup'
+    }
     # Exercise the real media-server defaults, not just the template text. A new
     # upstream protocol must not silently add public listeners to this bundle.
     $script:MediaProcess = $null
@@ -63,11 +72,45 @@ function Uninstall-Native {
         $process = Start-Process $uninstaller -Wait -PassThru -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
         Assert-True ($process.ExitCode -eq 0) 'Uninstaller failed'
         Wait-Until { -not (Get-Service Nightlight -ErrorAction SilentlyContinue) } 'service removal' -Seconds 30
+        Assert-True ($null -eq (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name Nightlight -ErrorAction SilentlyContinue).Nightlight) 'Uninstall left the tray startup entry'
+        Assert-True (-not (Test-Path "$installDir\Nightlight.Tray.exe")) 'Uninstall left the tray executable'
     }
+}
+function Start-Tray {
+    $script:TrayProcess = Start-Process "$installDir\Nightlight.Tray.exe" -PassThru
+    Wait-Until {
+        $script:TrayProcess.Refresh()
+        $script:TrayProcess.HasExited -or $script:TrayProcess.MainWindowHandle -ne [IntPtr]::Zero
+    } 'tray initialization' -Seconds 15
+    Assert-True (-not $script:TrayProcess.HasExited) 'Tray exited before initializing'
+}
+function Assert-TrayExited {
+    Wait-Until {
+        $script:TrayProcess.Refresh()
+        $script:TrayProcess.HasExited
+    } 'tray shutdown' -Seconds 15
+    $script:TrayProcess = $null
 }
 
 try {
     Install-Native
+    & "$PSScriptRoot\tray.ps1" -PayloadDirectory $installDir -IconExecutables @($Installer, "$installDir\unins000.exe")
+    $shell = New-Object -ComObject WScript.Shell
+    $group = Join-Path ([Environment]::GetFolderPath('CommonPrograms')) 'Nightlight'
+    foreach ($entry in @(@('Nightlight', '--open'), @('Nightlight Settings', '--settings'))) {
+        $shortcut = $shell.CreateShortcut((Join-Path $group "$($entry[0]).lnk"))
+        Assert-True ($shortcut.TargetPath -eq "$installDir\Nightlight.Tray.exe" -and $shortcut.Arguments -eq $entry[1]) 'A Start menu shortcut has the wrong target'
+        Assert-True ($shortcut.IconLocation.StartsWith("$installDir\Nightlight.ico", [StringComparison]::OrdinalIgnoreCase)) 'Start menu shortcut does not use Nightlight artwork'
+    }
+    Start-Tray
+    $second = Start-Process "$installDir\Nightlight.Tray.exe" -PassThru
+    Assert-True ($second.WaitForExit(5000) -and $second.ExitCode -eq 0) 'A second invocation did not reuse the running tray'
+    $closeTray = Start-Process "$installDir\Nightlight.Tray.exe" -ArgumentList '--exit' -PassThru
+    Assert-True ($closeTray.WaitForExit(10000) -and $closeTray.ExitCode -eq 0) 'Tray close command failed'
+    Assert-TrayExited
+    Assert-True ((Get-Service Nightlight).Status -eq 'Running') 'Closing the tray stopped monitoring'
+    Start-Tray
+    Write-Host 'PASS: branded tray/setup/uninstaller/shortcuts, Settings menu, single instance and independent tray exit'
     Assert-True ((Invoke-WebRequest -UseBasicParsing $base).Content -match 'id="root"') 'Built frontend was not served'
     $account = Api '/api/auth/setup' 'POST' @{ username = 'native-test-admin'; password = [Guid]::NewGuid().ToString() }
     $script:Headers = @{ Authorization = "Bearer $($account.token)" }
@@ -140,6 +183,8 @@ paths:
     Start-Sleep -Seconds 7
     Stop-Service Nightlight
     Wait-Until { (Get-Service Nightlight).Status -eq 'Stopped' } 'graceful service stop' -Seconds 40
+    $script:TrayProcess.Refresh()
+    Assert-True (-not $script:TrayProcess.HasExited) 'Stopping the service closed the desktop tray'
     Start-Service Nightlight
     Wait-Until { (Invoke-WebRequest -UseBasicParsing "$base/api/health" -TimeoutSec 2).StatusCode -eq 200 } 'service restart'
     $recordings = @(Api "/api/recordings/child/$($child.id)")
@@ -152,11 +197,14 @@ paths:
     Stop-Process -Id $publisher.Id, $source.Id -Force -ErrorAction SilentlyContinue
     $publisher = $null
     $source = $null
-    Install-Native
+    Install-Native -StartTrayAtLogon $false
+    Assert-TrayExited
     Assert-True (@(Api '/api/cameras').Count -eq 1) 'Upgrade lost camera settings'
     Assert-True (@(Api "/api/recordings/child/$($child.id)").Count -ge 2) 'Upgrade lost recordings'
     Write-Host 'PASS: upgrade preserves authentication, cameras and recordings'
+    Start-Tray
     Uninstall-Native
+    Assert-TrayExited
     Assert-True (Test-Path "$dataDir\babymonitor.db") 'Uninstall deleted the database'
     Assert-True (@(Get-ChildItem "$dataDir\clips" -Filter '*.mp4' -Recurse).Count -ge 2) 'Uninstall deleted recordings'
     Install-Native
@@ -167,4 +215,5 @@ paths:
         if ($process) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
     }
     Uninstall-Native
+    if ($script:TrayProcess) { Stop-Process -Id $script:TrayProcess.Id -Force -ErrorAction SilentlyContinue }
 }

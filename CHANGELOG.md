@@ -11,7 +11,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
-- **Native Windows installer.** The Windows setup executable bundles Node.js, FFmpeg and MediaMTX, installs an automatic background service and adds a Start menu shortcut to the web app. Docker is not required. The service runs as LocalService, keeps data under ProgramData, and allows time to finish recordings when stopped. Upgrades and uninstall preserve cameras, accounts and recordings. The Windows workflow builds the installer and checks native streaming, recording, service shutdown and data preservation with a synthetic camera. See [Windows installation](docs/windows.md).
+- **Native Windows installer.** The Windows setup executable bundles Node.js, FFmpeg and MediaMTX, installs an automatic background service and adds a Start menu shortcut to the web app. Docker is not required. A desktop tray icon offers Open Nightlight and Settings, with optional startup at sign-in; exiting the tray keeps monitoring running. The tray, setup, uninstaller and shortcuts use Nightlight's website artwork. The service runs as LocalService, keeps data under ProgramData, and allows time to finish recordings when stopped. Upgrades and uninstall preserve cameras, accounts and recordings. The Windows workflow checks the tray, native streaming, recording, service shutdown and data preservation with a synthetic camera. See [Windows installation](docs/windows.md).
 
 ### Fixed
 
