@@ -818,10 +818,13 @@ one moves both. They are constants, not settings, so there is no default to chan
   server's clock interrupted. Since issue #588 the step also ends the run when the first minute that shows it is
   a minute with sound but no video (a stall), with the same log line (`run ended (the clock went back)`); the
   settling count is restarted by the next minute that was actually read, as before.
-- **An armed watcher whose camera sends nothing between two nights stays armed.** It is reset by the first
-  reading outside the sleep window, so the next evening's settling can be recorded as a wake if the camera
-  was silent for the whole day.
-- **The 20-minute sweep is only a backstop.** A camera that goes silent in the middle of a run keeps its ring
+- **An armed watcher stays armed through a silence inside the sleep window, but not past its close.** A camera that
+  sends nothing for a while mid-night keeps its armed state, so a wake after it reconnects is still recorded. A camera
+  that sends nothing when the window closes is disarmed by the one-minute sweep, up to about 6 minutes after the close
+  (the window's 5-minute margin plus one sweep), so the next evening's settling is not recorded as a wake (issue #589;
+  before it, only a reading outside the window disarmed the watcher, and a camera silent for the whole day never
+  sent one).
+- **The 20-minute sweep is only a backstop for runs.** (It also disarms a silent camera at its window's close, above.) A camera that goes silent in the middle of a run keeps its ring
   hold until the sweep ends the run, up to about 20 minutes after its last active minute. A run that keeps
   receiving readings is ended by the rule above, not by the sweep. Since issue #588 that includes a camera whose
   video stalled while its sound kept arriving: each such minute still applies the rule, so the run and its ring
