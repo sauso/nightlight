@@ -440,37 +440,44 @@ describe('Settings → Recording', () => {
     expect(screen.getByLabelText('Clip length (seconds)')).toBeInTheDocument();
   });
 
+  // #392: one storage line, found by its label. Only the line itself matches (a div with no div inside it), not the
+  // card around it, whose text starts with the same words. The alert-clip line and the total can show the same figure,
+  // so a test about the alert-clip figure reads THIS line rather than searching the whole card.
+  const rowOf = (label) => screen.getByText(
+    (_, el) => el?.tagName === 'DIV' && el.textContent.startsWith(label) && !el.querySelector('div'),
+  );
+  const alertRow = async () => { await screen.findByText(/Alert clips:/); return rowOf('Alert clips:'); };
+
   test('storage is shown in human units, and an unknown size reads as a dash', async () => {
     withStorage(2 * 1024 ** 3);
     const { unmount } = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
-    // (#392: the alert-clip row and the total both read 2.00 GB here, so more than one element matches.)
-    expect((await screen.findAllByText(/2\.00 GB/)).length).toBeGreaterThan(0);
+    expect((await alertRow()).textContent).toContain('2.00 GB');
     unmount();
 
     withStorage(5 * 1024 ** 2);
     const mb = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
-    expect((await screen.findAllByText(/5 MB/)).length).toBeGreaterThan(0);
+    expect((await alertRow()).textContent).toContain('5 MB');
     mb.unmount();
 
     // ⚠️ 2048 rather than 512: 512 bytes formats as "1 KB" after rounding, which is also what a
     // broken formatter that ignored the divisor would produce — a fixture that cannot discriminate.
     withStorage(2048);
     const kb = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
-    expect((await screen.findAllByText(/2 KB/)).length).toBeGreaterThan(0);
+    expect((await alertRow()).textContent).toContain('2 KB');
     kb.unmount();
 
     // ⚠️ `null` and `Infinity` both land on the dash — but only when the CARD renders at all. A
     // failed fetch leaves `storage` null: that is a different behaviour (#392: a card that says it is
     // unavailable, with a Retry), tested below. Here: a card that says it doesn't know the size.
-    // (The alert-clip row and the total both show the dash, so more than one element matches.)
     withStorage(null);
     const dash = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
-    expect((await screen.findAllByText('—')).length).toBeGreaterThan(0);
+    expect((await alertRow()).textContent).toContain('—');
+    expect(rowOf('Total of the three:').textContent).toContain('—'); // an unknown part makes the total unknown
     dash.unmount();
 
     vi.spyOn(api, 'get').mockResolvedValue({ usedBytes: Infinity, path: '/x', ok: true });
     const inf = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
-    expect((await screen.findAllByText('—')).length).toBeGreaterThan(0);
+    expect((await alertRow()).textContent).toContain('—');
     inf.unmount();
   });
 
@@ -484,8 +491,6 @@ describe('Settings → Recording', () => {
     manualRecordings: { count: 1, bytes: 5 * MB },
     wakeClips: { count: 3, bytes: 7 * MB },
   };
-  const rowOf = (label) => screen.getByText((_, el) => el?.tagName === 'DIV' && el.textContent.startsWith(label));
-
   test('#392: the storage card shows alert clips, manual recordings and wake clips apart, and a total that counts each once', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(FULL);
     renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
@@ -516,6 +521,16 @@ describe('Settings → Recording', () => {
     expect(rowOf('Manual recordings:').textContent).toContain('5 MB');
     expect(rowOf('Manual recordings:').textContent).toContain('1 recording');
     expect(rowOf('Total of the three:').textContent).toContain('15 MB');
+  });
+
+  test('#392: the older-server fallback never shows a negative manual figure', async () => {
+    // No manualRecordings and no recordingBytes, but wake bytes: subtracting would give minus 7 MB (Codex review).
+    vi.spyOn(api, 'get').mockResolvedValue({ usedBytes: 3 * MB, path: '/x', ok: true, wakeClips: { count: 1, bytes: 7 * MB } });
+    renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
+    await screen.findByText(/Alert clips:/);
+    expect(rowOf('Manual recordings:').textContent).not.toContain('-');
+    expect(rowOf('Manual recordings:').textContent).toContain('0 KB');
+    expect(rowOf('Total of the three:').textContent).toContain('10 MB');
   });
 
   test('#392: a storage refresh that fails after a save keeps the last readout instead of replacing it with an error', async () => {

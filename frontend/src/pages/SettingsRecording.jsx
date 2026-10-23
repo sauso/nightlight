@@ -33,8 +33,9 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 // split. The Storage cap and Keep-clips-for limits delete ALERT clips only, hence the closing sentence.
 function StorageCard({ storage }) {
   const wake = storage.wakeClips || { count: 0, bytes: 0 };
+  // Never negative: an old server that answered without recordingBytes must read as "none", not as minus the wake bytes.
   const manual = storage.manualRecordings
-    || { count: (storage.recordingCount || 0) - (wake.count || 0), bytes: (storage.recordingBytes || 0) - (wake.bytes || 0) };
+    || { count: Math.max(0, (storage.recordingCount || 0) - (wake.count || 0)), bytes: Math.max(0, (storage.recordingBytes || 0) - (wake.bytes || 0)) };
   const alertKnown = typeof storage.usedBytes === 'number' && isFinite(storage.usedBytes);
   const total = alertKnown ? storage.usedBytes + (manual.bytes || 0) + (wake.bytes || 0) : null;
   return (
