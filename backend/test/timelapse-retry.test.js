@@ -86,6 +86,18 @@ async function fail(n) {
   assembleProcs()[n].finish(1);
 }
 
+// A retry pass that should start NOTHING. Awaited blindly, a broken retry would start an assembly whose fake ffmpeg nobody
+// finishes, and the test would hang (the mutation runner reports a hang as HANG, a weaker kill than a failed assertion):
+// so look for a new process first, and fail there.
+async function passStartingNothing() {
+  const before = spawned.length;
+  const pass = track(retryStrandedTimelapses());
+  for (let i = 0; i < 5; i++) await flush();
+  assert.equal(spawned.length, before, 'the pass started an assembly it should not have');
+  await until(() => pass.value !== 'pending', 'the pass to finish');
+  return pass.value;
+}
+
 before(() => {
   makeChild(db, { id: CHILD, track: 0 });
   checkClipStorage({ mounts: null });
@@ -137,7 +149,7 @@ test('b1: a night with NO row (the first attempt ran before storage was probed) 
   assert.equal(row(), undefined, 'precondition: the first attempt left no row');
   assert.equal(frameCount(), 30);
   // More not-ready passes than there are retries: each must be free, or the night would be given up on before it ever ran.
-  for (let i = 0; i < 5; i++) assert.equal(await retryStrandedTimelapses(), 0);
+  for (let i = 0; i < 5; i++) assert.equal(await passStartingNothing(), 0);
   assert.equal(spawned.length, 0);
 
   checkClipStorage({ mounts: null });
@@ -176,7 +188,7 @@ test('d1: two overlapping assemblies of one night run ONE ffmpeg pass; the secon
 test('d2: a retry pass leaves a night alone while its first attempt is still in flight', async () => {
   const first = track(assembleTimelapse(CHILD, NIGHT));
   await until(() => assembleProcs().length > 0, 'the assembly to start');
-  assert.equal(await retryStrandedTimelapses(), 0, 'the retry started a second pass beside the first');
+  assert.equal(await passStartingNothing(), 0, 'the retry started a second pass beside the first');
   assert.equal(assembleProcs().length, 1);
   assembleProcs()[0].finish(1);
   await until(() => first.value !== 'pending', 'the first attempt to settle');
@@ -194,7 +206,7 @@ test('e1: a night that keeps failing is attempted MAX_RETRIES (3) times in this 
     await until(() => pass.value !== 'pending', `retry pass ${i + 1} to finish`);
     assert.equal(pass.value, 1);
   }
-  assert.equal(await retryStrandedTimelapses(), 0, 'a fourth attempt was made');
+  assert.equal(await passStartingNothing(), 0, 'a fourth attempt was made');
   assert.equal(assembleProcs().length, 3);
   assert.equal(frameCount(), 30, 'the frames of a night we gave up on were deleted');
   const lines = logger.getRecent().filter((l) => l.includes('giving up on'));
@@ -217,23 +229,23 @@ test('e2: a success clears the count, so the night is not "given up on" by earli
 test('f1: fewer than 30 frames are not retried and are left on disk', async () => {
   fs.rmSync(dir, { recursive: true, force: true });
   putFrames(29);
-  assert.equal(await retryStrandedTimelapses(), 0);
+  assert.equal(await passStartingNothing(), 0);
   assert.equal(spawned.length, 0);
   assert.equal(frameCount(), 29);
 });
 
 test('f2: a night that is not scored "ok" (empty, or not scored at all) is not retried', async () => {
   scoreNight('empty');
-  assert.equal(await retryStrandedTimelapses(), 0);
+  assert.equal(await passStartingNothing(), 0);
   db.prepare('DELETE FROM sleep_nights').run();
-  assert.equal(await retryStrandedTimelapses(), 0);
+  assert.equal(await passStartingNothing(), 0);
   assert.equal(spawned.length, 0);
   assert.equal(frameCount(), 30);
 });
 
 test('f3: a night that already has a ready video is not assembled again', async () => {
   db.prepare("INSERT INTO timelapses (child_id, night_date, status, path) VALUES (?, ?, 'ready', 'x.mp4')").run(CHILD, NIGHT);
-  assert.equal(await retryStrandedTimelapses(), 0);
+  assert.equal(await passStartingNothing(), 0);
   assert.equal(spawned.length, 0);
 });
 
@@ -242,7 +254,7 @@ test('f4: frames of a child that no longer exists are not assembled', async () =
   putFrames(30, ghost);
   scoreNight('ok', 'child-gone-450');
   fs.rmSync(dir, { recursive: true, force: true }); // only the ghost's frames are candidates
-  assert.equal(await retryStrandedTimelapses(), 0);
+  assert.equal(await passStartingNothing(), 0);
   assert.equal(spawned.length, 0);
   assert.equal(fs.existsSync(ghost), true, 'a retry deleted frames it did not assemble');
 });
@@ -250,7 +262,7 @@ test('f4: frames of a child that no longer exists are not assembled', async () =
 test('f5: a night the child\'s 30 newest ready videos already outrank is not encoded just to be pruned at once', async () => {
   const insert = db.prepare("INSERT INTO timelapses (child_id, night_date, status, path) VALUES (?, ?, 'ready', ?)");
   for (let i = 0; i < 30; i++) insert.run(CHILD, `2026-11-${String(i + 1).padStart(2, '0')}`, `n${i}.mp4`);
-  assert.equal(await retryStrandedTimelapses(), 0);
+  assert.equal(await passStartingNothing(), 0);
   assert.equal(spawned.length, 0);
   assert.equal(frameCount(), 30);
 });
@@ -261,7 +273,7 @@ test('f6: a pass is not re-entered: a second call while one is running starts no
   scoreNight('ok', CHILD, '2026-10-17');
   const first = track(retryStrandedTimelapses());
   await until(() => assembleProcs().length > 0, 'the first pass to start encoding');
-  assert.equal(await retryStrandedTimelapses(), 0, 'a second pass started beside the first');
+  assert.equal(await passStartingNothing(), 0, 'a second pass started beside the first');
   assembleProcs()[0].finish(1);
   // The older night's output file has its own name, so it is found by that, not by assembleProcs().
   const olderProcs = () => spawned.filter((p) => String(p.args.at(-1)).endsWith('2026-10-17.mp4'));
@@ -317,7 +329,7 @@ test('f8: the child\'s open night is left alone: the sampler is still writing it
     putFrames(30, frameDir('open-450', open));
     scoreNight('ok', 'open-450', open);
     fs.rmSync(dir, { recursive: true, force: true }); // only the open night's frames are candidates
-    assert.equal(await retryStrandedTimelapses(), 0);
+    assert.equal(await passStartingNothing(), 0);
     assert.equal(spawned.length, 0);
   } finally {
     // A tracked child left behind would be scored by g1's real nightly job.
