@@ -91,6 +91,12 @@ namespace Nightlight.Desktop
                             }
                         double meanDifference = difference / (4.0 * actualImage.Width * actualImage.Height);
                         Console.WriteLine("Icon render difference {0:F2}/255: {1}", meanDifference, executable);
+                        if (meanDifference >= 4)
+                        {
+                            string diagnostics = Environment.GetEnvironmentVariable("RUNNER_TEMP") ?? Path.GetTempPath();
+                            actualImage.Save(Path.Combine(diagnostics, "nightlight-icon-actual.png"));
+                            expectedImage.Save(Path.Combine(diagnostics, "nightlight-icon-expected.png"));
+                        }
                         Assert(meanDifference < 4, "Executable does not contain the Nightlight icon: " + executable);
                     }
                 }

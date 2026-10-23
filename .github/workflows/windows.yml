@@ -60,6 +60,7 @@ jobs:
           $logs = "$env:RUNNER_TEMP\nightlight-logs"
           New-Item -ItemType Directory -Path $logs -Force | Out-Null
           Get-ChildItem "$env:RUNNER_TEMP\nightlight-*.log" -ErrorAction SilentlyContinue | Copy-Item -Destination $logs
+          Get-ChildItem "$env:RUNNER_TEMP\nightlight-icon-*.png" -ErrorAction SilentlyContinue | Copy-Item -Destination $logs
           if (Test-Path "$env:ProgramData\Nightlight\logs") {
             Copy-Item "$env:ProgramData\Nightlight\logs" "$logs\service" -Recurse -Force
           }

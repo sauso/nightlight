@@ -1,5 +1,6 @@
 # Convert the website's Nightlight artwork to a Windows icon with native sizes.
-# PNG frames preserve alpha and are supported by Windows 10/11 and Inno Setup.
+# Use conventional BGRA bitmap frames at small sizes for Windows shell/csc
+# compatibility, with a PNG-compressed 256px frame for large Explorer icons.
 [CmdletBinding()]
 param([Parameter(Mandatory)] [string] $Source, [Parameter(Mandatory)] [string] $Destination)
 $ErrorActionPreference = 'Stop'
@@ -18,7 +19,35 @@ try {
             $graphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
             $graphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::HighQuality
             $graphics.DrawImage($image, 0, 0, $size, $size)
-            $bitmap.Save($stream, [Drawing.Imaging.ImageFormat]::Png)
+            if ($size -eq 256) {
+                $bitmap.Save($stream, [Drawing.Imaging.ImageFormat]::Png)
+            } else {
+                $pixels = New-Object IO.BinaryWriter($stream)
+                # ICON bitmap height includes the XOR image and AND mask.
+                $pixels.Write([int]40)
+                $pixels.Write([int]$size)
+                $pixels.Write([int]($size * 2))
+                $pixels.Write([uint16]1)
+                $pixels.Write([uint16]32)
+                foreach ($field in 1..6) { $pixels.Write([int]0) }
+                $maskStride = [int]([Math]::Ceiling($size / 32.0) * 4)
+                $mask = New-Object byte[] ($maskStride * $size)
+                for ($row = 0; $row -lt $size; $row++) {
+                    for ($x = 0; $x -lt $size; $x++) {
+                        $color = $bitmap.GetPixel($x, $size - 1 - $row)
+                        $pixels.Write([byte]$color.B)
+                        $pixels.Write([byte]$color.G)
+                        $pixels.Write([byte]$color.R)
+                        $pixels.Write([byte]$color.A)
+                        if ($color.A -eq 0) {
+                            $index = $row * $maskStride + [int][Math]::Floor($x / 8.0)
+                            $mask[$index] = $mask[$index] -bor (128 -shr ($x % 8))
+                        }
+                    }
+                }
+                $pixels.Write([byte[]]$mask)
+                $pixels.Flush()
+            }
             $frames.Add($stream.ToArray())
         } finally {
             $stream.Dispose()
