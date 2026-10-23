@@ -76,9 +76,22 @@ namespace Nightlight.Desktop
                     using (var expectedImage = expected.ToBitmap())
                     {
                         Assert(actualImage.Size == expectedImage.Size, "Executable icon dimensions differ: " + executable);
+                        long difference = 0;
                         for (int y = 0; y < actualImage.Height; y++)
                             for (int x = 0; x < actualImage.Width; x++)
-                                Assert(actualImage.GetPixel(x, y) == expectedImage.GetPixel(x, y), "Executable does not contain the Nightlight icon: " + executable);
+                            {
+                                // Shell extraction can round alpha and premultiply
+                                // colors. Compare visible pixels, not hidden RGB
+                                // values in transparent corners or exact bytes.
+                                Color a = actualImage.GetPixel(x, y), b = expectedImage.GetPixel(x, y);
+                                difference += Math.Abs(a.A - b.A);
+                                difference += Math.Abs(a.R * a.A / 255 - b.R * b.A / 255);
+                                difference += Math.Abs(a.G * a.A / 255 - b.G * b.A / 255);
+                                difference += Math.Abs(a.B * a.A / 255 - b.B * b.A / 255);
+                            }
+                        double meanDifference = difference / (4.0 * actualImage.Width * actualImage.Height);
+                        Console.WriteLine("Icon render difference {0:F2}/255: {1}", meanDifference, executable);
+                        Assert(meanDifference < 4, "Executable does not contain the Nightlight icon: " + executable);
                     }
                 }
                 Console.WriteLine("PASS: eight native icon sizes and embedded executable branding");
