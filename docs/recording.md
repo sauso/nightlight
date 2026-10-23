@@ -462,21 +462,35 @@ Each kind ages out differently — this is the part most worth reading twice:
     can be taken back, and a tap in a review should never destroy video that taking it back could not
     restore. If you don't want that night's timelapse, an admin can delete it from the child's page.
   - Correcting a night's times, or the **lock** that a correction puts on the night's summary (README,
-    "A night you have corrected is locked"), changes nothing here either. A timelapse is made once, the
-    first time the nightly update scores the night, and a correction never takes that pass away: a night
+    "A night you have corrected is locked"), changes nothing here either. A timelapse is first attempted
+    the first time the nightly update scores the night (and retried if that fails, see below), and a correction never takes that pass away: a night
     corrected before it was first scored still gets its timelapse when it is.
 
 **A stuck timelapse is given up on.** If the assembly's frames, time and bytes written stop moving for
 **2 minutes plus 1 second per 2 MB already written**, Nightlight stops it and marks that night failed.
 The sampled frames and any partial video file stay on disk, while the temporary numbered sequence is
-removed. Nothing sweeps these files or retries assembly, so repeated failures use disk space until the
-child is removed. A slow server can keep assembling for longer while progress continues. The thumbnail
+removed. The nightly job then tries again (next paragraph); a night it gives up on keeps its frames and
+any partial video file, which use disk space until the child is removed. A slow server can keep assembling
+for longer while progress continues. The thumbnail
 step has its own **2-minute** limit;
 if it fails, the video is still ready without a thumbnail. These numbers are unmeasured guesses shared
 with clip cutting (#773), and the `[timelapse] assemble` log line records the longest wait to help
-calibrate them. There is no automatic retry or retry button after a failed assembly: the nightly job
-starts one when the night is first scored. The kept frames allow a future retry to be added.
-A child that keeps reporting progress forever is not stopped by this stall rule.
+calibrate them. A child that keeps reporting progress forever is not stopped by this stall rule.
+
+**A night with frames but no video is tried again.** The nightly job starts one assembly when it first
+scores the night. Every 30 minutes it also looks for a night whose frames are still on disk and that has no
+video: one whose assembly failed or was stopped by a restart, or whose first try ran before storage was
+ready (right after a start). It tries the newest first, one at a time, **at most 3 times per night each time
+Nightlight starts** (about an hour and a half for a transient failure; a restart or an update gives it three
+more). It skips a night that is not scored as someone sleeping in the bed, a child that no longer exists,
+a night with fewer than 30 frames, the night still being recorded, a night older than the 30 newest videos
+(it would be deleted at once), and any pass while storage is not ready or the disk is nearly full. After the
+third failure the log says `giving up on …` and names the folder; the frames stay there. There is no retry
+button, and no automatic deletion of those frames. The 3 tries are an unmeasured guess, not based on a
+failure seen so far. As with the first try, the conditions above are checked when the video starts, not
+again when it ends: a night re-scored as empty, or a video deleted, while it is being made is not noticed
+until it is done, and a frame saved in those minutes (only possible if you edit the sleep window to reopen
+that night) is deleted with the rest.
 
 There is also a **minimum-free-space guard** across all three: if the volume is nearly full, new video
 is skipped, so recording can never be the thing that fills your disk.

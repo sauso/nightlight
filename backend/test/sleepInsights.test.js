@@ -565,7 +565,7 @@ test('no duplicate timelapse/notification pass while a night is still provisiona
   layNight3([[at3(19, 0), at3(19, 10)], [at3(23, 0), at3(23, 6)], [at3(1, 0, 1), at3(1, 9, 1)]], at3(7, 0, 1));
   const assembleCalls = t.mock.fn();
   t.mock.module('../src/lib/timelapse.js', {
-    namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: t.mock.fn() },
+    namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: t.mock.fn(), retryStrandedTimelapses: async () => 0 },
   });
   const flush = () => new Promise((r) => setImmediate(r));
 
@@ -593,7 +593,7 @@ test('★ a no_data first pass must not waste a timelapse assembly — it waits 
   const assembleCalls = t.mock.fn();
   const discardCalls = t.mock.fn();
   t.mock.module('../src/lib/timelapse.js', {
-    namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls },
+    namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls, retryStrandedTimelapses: async () => 0 },
   });
   const flush = () => new Promise((r) => setImmediate(r));
 
@@ -629,7 +629,7 @@ test('a night a parent marked "no one was in the bed" still gets its timelapse �
   const assembleCalls = t.mock.fn();
   const discardCalls = t.mock.fn();
   t.mock.module('../src/lib/timelapse.js', {
-    namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls },
+    namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls, retryStrandedTimelapses: async () => 0 },
   });
   t.after(() => db.prepare('DELETE FROM sleep_reviews WHERE child_id = ?').run(KID));
   const flush = () => new Promise((r) => setImmediate(r));
@@ -654,7 +654,7 @@ test('a night corrected while its stored row was still no_data is not frozen the
   const assembleCalls = t.mock.fn();
   const discardCalls = t.mock.fn();
   t.mock.module('../src/lib/timelapse.js', {
-    namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls },
+    namedExports: { assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls, retryStrandedTimelapses: async () => 0 },
   });
   t.after(() => db.prepare('DELETE FROM sleep_reviews WHERE child_id = ?').run(KID));
   const flush = () => new Promise((r) => setImmediate(r));

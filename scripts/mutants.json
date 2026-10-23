@@ -22860,5 +22860,95 @@
     "expect": "killed",
     "tests": ["camera-enable-edit-race.test.js"],
     "namePattern": "^d1:"
+  },
+  {
+    "label": "#450 M1: two assemblies of one night may run at once (no in-flight guard)",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  if (inFlight.has(key)) return null;",
+    "replace": "  // mutant: no in-flight guard",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^d[12]:"
+  },
+  {
+    "label": "#450 M2: the retry assembles a night that is not scored ok (an empty room gets a video; a deleted child's frames are used)",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  if (!scoredOkStmt.get(childId, nightDate)) return false;",
+    "replace": "  // mutant: no scored-ok check",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^f[24]:"
+  },
+  {
+    "label": "#450 M3: a night that keeps failing is retried without limit",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "if (tried >= MAX_RETRIES || ",
+    "replace": "if (",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^e1:"
+  },
+  {
+    "label": "#450 M4: a pass runs (and spends an attempt) while clip storage is not ready or the disk is nearly full",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  if (!clipStorageReady() || !hasMinFreeSpace()) return 0;",
+    "replace": "  // mutant: no storage / free-space gate",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^b1:"
+  },
+  {
+    "label": "#450 M5: a retry pass may start while another is still encoding",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  if (retrying) return 0;",
+    "replace": "  // mutant: passes may overlap",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^f6:"
+  },
+  {
+    "label": "#450 M6: the retry encodes a night its child's newest ready videos already outrank (pruned the moment it is ready)",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  if (newerReadyStmt.get(childId, nightDate).n >= KEEP_PER_CHILD) return false;",
+    "replace": "  // mutant: no prune-age check",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^f5:"
+  },
+  {
+    "label": "#450 M8: the retry assembles the child's open night while the sampler is still writing its frames",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  if (currentNightDate(childId) === nightDate) return false;",
+    "replace": "  // mutant: no open-night check",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^f8:"
+  },
+  {
+    "label": "#450 M9: a successful retry leaves the night's attempt count in place (a later stranding is skipped as given up on)",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "        if (id) retryAttempts.delete(key);",
+    "replace": "        if (id) { /* mutant: count kept */ }",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^e3:"
+  },
+  {
+    "label": "#450 M10: the retry scans child by child, so an older night of one child starts before a newer night of another",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  return out.sort((a, b) => b.nightDate.localeCompare(a.nightDate) || a.childId.localeCompare(b.childId));",
+    "replace": "  return out;",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^f7:"
+  },
+  {
+    "label": "#450 M7: the nightly job's tick never starts the retry",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": ".then((m) => m.retryStrandedTimelapses())",
+    "replace": ".then(() => 0)",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^g1:"
   }
 ]

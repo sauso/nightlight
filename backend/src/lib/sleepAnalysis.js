@@ -3220,8 +3220,9 @@ export function runNightlySleepJob() {
     if (followups.length > 0) notifySleepReportUpdates(followups);
     // Assemble each freshly-closed night's memories timelapse from the frames the sampler collected
     // overnight. Fire-and-forget (one FFmpeg pass each) and dynamically imported to avoid a static
-    // import cycle (timelapse.js imports the window helpers from this module). Runs once per night —
-    // the `existing` guard above means a night is only in this list the first time it's computed.
+    // import cycle (timelapse.js imports the window helpers from this module). This FIRST attempt runs once per
+    // night — the `existing` guard above means a night is only in this list the first time it's computed. A night
+    // whose assembly then failed, was interrupted, or never started is picked up by the retry just below (#450).
     if (toTimelapse.length || emptyNights.length) {
       import('./timelapse.js')
         .then((m) => {
@@ -3230,6 +3231,13 @@ export function runNightlySleepJob() {
         })
         .catch((e) => logger.error(`[timelapse] assembly trigger import failed: ${e.message}`));
     }
+    // #450: EVERY tick, whether or not this one scored anything, look for a night that has frames but no video (one query
+    // and a directory listing when there is none). Registered after the first-attempt block on purpose: both wait on the
+    // same module import, so the first attempt's assemblies are already marked in flight when this pass looks, and it
+    // skips them. Fire-and-forget, like the first attempt: it can run for as long as an encode and must not hold the job.
+    import('./timelapse.js')
+      .then((m) => m.retryStrandedTimelapses())
+      .catch((e) => logger.error(`[timelapse] retry pass failed: ${e.message}`));
   } catch (err) {
     logger.error('[sleep] Nightly job failed:', err.message);
   }
