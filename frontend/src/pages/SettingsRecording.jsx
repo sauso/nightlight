@@ -24,6 +24,44 @@ function fmtBytes(b) {
   return `${(b / 1024).toFixed(0)} KB`;
 }
 
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// #392: the Storage card. Three MUTUALLY EXCLUSIVE categories and a total made of exactly those three. The old readout
+// printed "recordings" (which already contained the wake clips) and then "wake clips" again, and a "used" headline that
+// was alert clips only, so it read 0 beside non-zero recordings. Manual recordings come from the server's own subtotal;
+// a server that predates it (an older image behind a newer UI) is derived as all-recordings minus wake clips, the same
+// split. The Storage cap and Keep-clips-for limits delete ALERT clips only, hence the closing sentence.
+function StorageCard({ storage }) {
+  const wake = storage.wakeClips || { count: 0, bytes: 0 };
+  // Never negative: an old server that answered without recordingBytes must read as "none", not as minus the wake bytes.
+  const manual = storage.manualRecordings
+    || { count: Math.max(0, (storage.recordingCount || 0) - (wake.count || 0)), bytes: Math.max(0, (storage.recordingBytes || 0) - (wake.bytes || 0)) };
+  const alertKnown = typeof storage.usedBytes === 'number' && isFinite(storage.usedBytes);
+  const total = alertKnown ? storage.usedBytes + (manual.bytes || 0) + (wake.bytes || 0) : null;
+  return (
+    <div className="card">
+      <div className="card-title">Storage</div>
+      <div className="storage-readout">
+        <div>Alert clips: <strong>{fmtBytes(storage.usedBytes)}</strong>
+          {typeof storage.clipCount === 'number' ? ` · ${plural(storage.clipCount, 'clip')}` : ''}</div>
+        <div>Manual recordings: <strong>{fmtBytes(manual.bytes)}</strong> · {plural(manual.count || 0, 'recording')}</div>
+        <div>Wake clips: <strong>{fmtBytes(wake.bytes)}</strong> · {plural(wake.count || 0, 'clip')}</div>
+        <div>Total of the three: <strong>{fmtBytes(total)}</strong>
+          {typeof storage.freeBytes === 'number' && isFinite(storage.freeBytes) ? ` · ${fmtBytes(storage.freeBytes)} free` : ''}</div>
+        <div className="camera-tile__sub">
+          The Storage cap and Keep clips for limits apply to alert clips only. Manual recordings are kept until you
+          delete them, and wake clips follow their own retention. The total does not include timelapses, pictures or
+          the live recording buffer.
+        </div>
+        <div className="camera-tile__sub" style={{ wordBreak: 'break-all' }}>
+          Saving to <code>{storage.path}</code>
+          {storage.ok ? '' : ' — ⚠ not a mapped volume; recording is disabled until this path is mounted'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ONE save model for the whole page (#391): every control here, switches included, is a draft until
 // "Save changes" is pressed, and an "Unsaved changes" notice says so while any of them differs from what is
 // stored. The "Show a Record button" switch used to write the moment it was flipped while the wake-clip
@@ -88,7 +126,13 @@ export default function SettingsRecording() {
   const [deletePrompt, setDeletePrompt] = useState(null);
   const [confirmError, setConfirmError] = useState('');
 
-  const loadStorage = () => api.get('/settings/clip-storage').then(setStorage).catch(() => {});
+  // #392: a failed request used to vanish silently (the card was simply absent). The flag is cleared by the next success,
+  // and the card shows the last good readout whenever there is one, so a failed refresh after a save never replaces
+  // numbers with an error.
+  const [storageFailed, setStorageFailed] = useState(false);
+  const loadStorage = () => api.get('/settings/clip-storage')
+    .then((s) => { setStorage(s); setStorageFailed(false); })
+    .catch(() => setStorageFailed(true));
   useEffect(() => { loadStorage(); }, []);
 
   const shown = valuesOf(form);
@@ -354,21 +398,15 @@ export default function SettingsRecording() {
             )}
           </div>
 
-          {storage && (
+          {storage && <StorageCard storage={storage} />}
+          {!storage && storageFailed && (
             <div className="card">
               <div className="card-title">Storage</div>
               <div className="storage-readout">
-                <div>
-                  <strong>{fmtBytes(storage.usedBytes)}</strong> used
-                  {typeof storage.clipCount === 'number' ? ` · ${storage.clipCount} clip${storage.clipCount === 1 ? '' : 's'}` : ''}
-                  {typeof storage.recordingCount === 'number' ? ` · ${storage.recordingCount} recording${storage.recordingCount === 1 ? '' : 's'} (${fmtBytes(storage.recordingBytes)})` : ''}
-                  {storage.wakeClips?.count ? ` · ${storage.wakeClips.count} wake clip${storage.wakeClips.count === 1 ? '' : 's'} (${fmtBytes(storage.wakeClips.bytes)})` : ''}
-                  {typeof storage.freeBytes === 'number' && isFinite(storage.freeBytes) ? ` · ${fmtBytes(storage.freeBytes)} free` : ''}
-                </div>
-                <div className="camera-tile__sub" style={{ wordBreak: 'break-all' }}>
-                  Saving to <code>{storage.path}</code>
-                  {storage.ok ? '' : ' — ⚠ not a mapped volume; recording is disabled until this path is mounted'}
-                </div>
+                <div>Storage details unavailable.</div>
+                <button type="button" className="btn btn-secondary" style={{ marginTop: 8 }} onClick={loadStorage}>
+                  Retry
+                </button>
               </div>
             </div>
           )}

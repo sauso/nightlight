@@ -440,41 +440,140 @@ describe('Settings → Recording', () => {
     expect(screen.getByLabelText('Clip length (seconds)')).toBeInTheDocument();
   });
 
+  // #392: one storage line, found by its label. Only the line itself matches (a div with no div inside it), not the
+  // card around it, whose text starts with the same words. The alert-clip line and the total can show the same figure,
+  // so a test about the alert-clip figure reads THIS line rather than searching the whole card.
+  const rowOf = (label) => screen.getByText(
+    (_, el) => el?.tagName === 'DIV' && el.textContent.startsWith(label) && !el.querySelector('div'),
+  );
+  const alertRow = async () => { await screen.findByText(/Alert clips:/); return rowOf('Alert clips:'); };
+
   test('storage is shown in human units, and an unknown size reads as a dash', async () => {
     withStorage(2 * 1024 ** 3);
     const { unmount } = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
-    expect(await screen.findByText(/2\.00 GB/)).toBeInTheDocument();
+    expect((await alertRow()).textContent).toContain('2.00 GB');
     unmount();
 
     withStorage(5 * 1024 ** 2);
     const mb = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
-    expect(await screen.findByText(/5 MB/)).toBeInTheDocument();
+    expect((await alertRow()).textContent).toContain('5 MB');
     mb.unmount();
 
     // ⚠️ 2048 rather than 512: 512 bytes formats as "1 KB" after rounding, which is also what a
     // broken formatter that ignored the divisor would produce — a fixture that cannot discriminate.
     withStorage(2048);
     const kb = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
-    expect(await screen.findByText(/2 KB/)).toBeInTheDocument();
+    expect((await alertRow()).textContent).toContain('2 KB');
     kb.unmount();
 
     // ⚠️ `null` and `Infinity` both land on the dash — but only when the CARD renders at all. A
-    // failed fetch leaves `storage` null and the whole card is omitted, which is a different
-    // behaviour and worth separating: no card at all vs a card that says it doesn't know.
+    // failed fetch leaves `storage` null: that is a different behaviour (#392: a card that says it is
+    // unavailable, with a Retry), tested below. Here: a card that says it doesn't know the size.
     withStorage(null);
     const dash = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
-    expect(await screen.findByText('—')).toBeInTheDocument();
+    expect((await alertRow()).textContent).toContain('—');
+    expect(rowOf('Total of the three:').textContent).toContain('—'); // an unknown part makes the total unknown
     dash.unmount();
 
     vi.spyOn(api, 'get').mockResolvedValue({ usedBytes: Infinity, path: '/x', ok: true });
     const inf = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
-    expect(await screen.findByText('—')).toBeInTheDocument();
+    expect((await alertRow()).textContent).toContain('—');
     inf.unmount();
+  });
 
-    vi.spyOn(api, 'get').mockRejectedValue(new Error('nope'));
+  // #392: the three categories are mutually exclusive and the total is exactly their sum. Byte values are chosen so the
+  // wrong readings are distinguishable on screen: 3 MB alert, 5 MB manual, 7 MB wake; the old readout printed the
+  // "recordings" figure (manual + wake = 12 MB) and then the wake figure again.
+  const MB = 1024 ** 2;
+  const FULL = {
+    usedBytes: 3 * MB, clipCount: 2, path: '/app/data/clips', ok: true, freeBytes: 20 * 1024 ** 3,
+    recordingCount: 4, recordingBytes: 12 * MB,
+    manualRecordings: { count: 1, bytes: 5 * MB },
+    wakeClips: { count: 3, bytes: 7 * MB },
+  };
+  test('#392: the storage card shows alert clips, manual recordings and wake clips apart, and a total that counts each once', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(FULL);
     renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
-    await waitFor(() => expect(screen.getByLabelText('Clip length (seconds)')).toBeInTheDocument());
-    expect(screen.queryByText('Storage')).not.toBeInTheDocument();
+    await screen.findByText(/Alert clips:/);
+    expect(rowOf('Alert clips:').textContent).toContain('3 MB');
+    expect(rowOf('Alert clips:').textContent).toContain('2 clips');
+    expect(rowOf('Manual recordings:').textContent).toContain('5 MB');
+    expect(rowOf('Manual recordings:').textContent).toContain('1 recording');
+    expect(rowOf('Wake clips:').textContent).toContain('7 MB');
+    expect(rowOf('Wake clips:').textContent).toContain('3 clips');
+    expect(rowOf('Total of the three:').textContent).toContain('15 MB'); // 3 + 5 + 7, not 3 + 12 + 7
+    expect(rowOf('Total of the three:').textContent).toContain('20.00 GB free');
+    expect(screen.getByText(/apply to alert clips only/)).toBeInTheDocument();
+  });
+
+  test('#392: with no alert clips the total is still the sum of what is stored, not zero', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({ ...FULL, usedBytes: 0, clipCount: 0 });
+    renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
+    await screen.findByText(/Alert clips:/);
+    expect(rowOf('Total of the three:').textContent).toContain('12 MB');
+  });
+
+  test('#392: a server without the manual subtotal is read as all recordings minus wake clips', async () => {
+    const { manualRecordings, ...old } = FULL;
+    vi.spyOn(api, 'get').mockResolvedValue(old);
+    renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
+    await screen.findByText(/Alert clips:/);
+    expect(rowOf('Manual recordings:').textContent).toContain('5 MB');
+    expect(rowOf('Manual recordings:').textContent).toContain('1 recording');
+    expect(rowOf('Total of the three:').textContent).toContain('15 MB');
+  });
+
+  test('#392: the older-server fallback never shows a negative manual figure', async () => {
+    // No manualRecordings and no recordingBytes, but wake bytes: subtracting would give minus 7 MB (Codex review).
+    vi.spyOn(api, 'get').mockResolvedValue({ usedBytes: 3 * MB, path: '/x', ok: true, wakeClips: { count: 1, bytes: 7 * MB } });
+    renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
+    await screen.findByText(/Alert clips:/);
+    expect(rowOf('Manual recordings:').textContent).not.toContain('-');
+    expect(rowOf('Manual recordings:').textContent).toContain('0 KB');
+    expect(rowOf('Total of the three:').textContent).toContain('10 MB');
+  });
+
+  test('#392: a storage refresh that fails after a save keeps the last readout instead of replacing it with an error', async () => {
+    let storageCalls = 0;
+    let fail = false;
+    vi.spyOn(api, 'get').mockImplementation((url) => {
+      if (url !== '/settings/clip-storage') return Promise.resolve({});
+      storageCalls++;
+      return fail ? Promise.reject(new Error('nope')) : Promise.resolve(FULL);
+    });
+    vi.spyOn(api, 'put').mockResolvedValue({});
+    const { user } = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
+    await screen.findByText(/Alert clips:/);
+    expect(storageCalls).toBe(1);
+
+    fail = true;
+    await user.clear(screen.getByLabelText('Clip length (seconds)'));
+    await user.type(screen.getByLabelText('Clip length (seconds)'), '45');
+    await user.click(screen.getByRole('button', { name: /Save/ }));
+    await screen.findAllByText('Saved ✓');
+    await waitFor(() => expect(storageCalls).toBe(2)); // the post-save refresh ran, and failed
+    expect(screen.getByText(/Alert clips:/)).toBeInTheDocument();
+    expect(screen.queryByText('Storage details unavailable.')).not.toBeInTheDocument();
+  });
+
+  test('#392: a failed storage request says so and Retry loads it', async () => {
+    let fail = true;
+    let storageCalls = 0;
+    vi.spyOn(api, 'get').mockImplementation((url) => {
+      if (url !== '/settings/clip-storage') return Promise.resolve({});
+      storageCalls++;
+      return fail ? Promise.reject(new Error('nope')) : Promise.resolve(FULL);
+    });
+    const { user } = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
+    expect(await screen.findByText('Storage details unavailable.')).toBeInTheDocument();
+    expect(storageCalls).toBe(1);
+
+    fail = false;
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await screen.findByText(/Alert clips:/);
+    expect(storageCalls).toBe(2);
+    expect(screen.queryByText('Storage details unavailable.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
   });
 
   test('a failed save shows the reason and leaves the form usable', async () => {

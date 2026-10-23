@@ -22761,5 +22761,41 @@
     "expect": "killed",
     "tests": ["wake-watcher.test.js"],
     "namePattern": "#589:"
+  },
+  {
+    "label": "#392 M1: the manual-recordings subtotal counts every ready recording (wake clips and other kinds included)",
+    "file": "backend/src/lib/clipStorage.js",
+    "find": "WHERE status='ready' AND kind='manual'\")",
+    "replace": "WHERE status='ready'\")",
+    "expect": "killed",
+    "tests": ["clip-storage.test.js"],
+    "namePattern": "#392:"
+  },
+  {
+    "label": "#392 M2: the storage total adds the all-recordings figure, so wake clips are counted twice",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "storage.usedBytes + (manual.bytes || 0) + (wake.bytes || 0)",
+    "replace": "storage.usedBytes + (storage.recordingBytes || 0) + (wake.bytes || 0)",
+    "expect": "killed",
+    "tests": ["settingsForms.test.jsx"],
+    "namePattern": "#392:"
+  },
+  {
+    "label": "#392 M3: a failed storage request is swallowed again (no unavailable card, no Retry)",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": ".catch(() => setStorageFailed(true));",
+    "replace": ".catch(() => {});",
+    "expect": "killed",
+    "tests": ["settingsForms.test.jsx"],
+    "namePattern": "#392:"
+  },
+  {
+    "label": "#392 M4: the unavailable card shows even when a last good readout exists (a failed refresh after a save)",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "{!storage && storageFailed && (",
+    "replace": "{storageFailed && (",
+    "expect": "killed",
+    "tests": ["settingsForms.test.jsx"],
+    "namePattern": "#392:"
   }
 ]
