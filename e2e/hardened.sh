@@ -320,6 +320,11 @@ check_processes() {
     # A short-lived child (an ffprobe the app started) may be gone by now: skip it.
     st=$(cat "/proc/$pid/status" 2>/dev/null) || continue
     name=$(status_field "$st" Name)
+    # Node renames its main thread, so /proc/<pid>/status says "MainThread" rather than "node" (seen in the first CI
+    # run of this script). The command line is the reliable name for it: node is the process running src/index.js.
+    if [ "$name" = MainThread ] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qE '(^| |/)node( |$)'; then
+      name=node
+    fi
     uid=$(status_field "$st" Uid)
     gid=$(status_field "$st" Gid)
     groups=$(status_field "$st" Groups)
