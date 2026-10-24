@@ -105,3 +105,34 @@ into your data dir (e.g. `/mnt/user/appdata/nightlight`, keep the key `chmod 600
 under **Settings → Push notifications**. Each phone opts in under **Account → Notifications**.
 
 Full walkthrough for both, with troubleshooting: **[docs/notifications.md](notifications.md)**.
+
+### Tapping an alert from another server
+
+If you run more than one Nightlight server (say, a test copy next to your main one), an alert or link can
+come from a server other than the one the app is showing. The app asks before it switches, and it only
+offers servers it already knows:
+
+- **A server saved in the app** (one you've connected to before): the app asks **Switch server?** and
+  shows that server's address. **Stay** is selected first and leaves you exactly where you were. **Switch**
+  stops anything playing, including background listening, and opens that server. If the server doesn't
+  answer, the app says so and stays where it is.
+- **A server the app hasn't been connected to**: the app tells you, with the address, and changes nothing.
+  There is no button to add it from there. If it's yours, add it yourself from **Settings → Change server**.
+- **The server you're on**: it opens as before, with no question. That includes the address the server
+  puts in its own alert links, so a phone that knows your server by its home address isn't asked about its
+  internet address. That last check needs you to be signed in on the phone.
+
+Good to know:
+
+- **"Saved in the app" means every server this app has connected to**, not a list you approved one by one,
+  and older versions of the app could add a server to it on their own. Look through it now and then:
+  **Settings → Change server** opens the setup screen, which lists your saved servers; the ✕ next to one
+  forgets it, and tapping your own server takes you back to it.
+- **The Nightlight app's own alerts (Firebase) ask from this version of the server on.** Alerts from
+  Pushover, ntfy and Gotify open the app through a link the Android app handles itself, so for those the
+  question needs the next Android app release; until you update the app, those taps work as they did before.
+- **A server you reach at two addresses (say, one at home and one over the internet):** an alert's link
+  carries only the one address your server knows from the last admin phone. If you saved your other server
+  under a different address than that, the app treats the link as a server it hasn't been connected to.
+  Save the address the alert uses once (**Settings → Change server**) and either works.
+- On iPhone the app never switches server from an alert, so there is nothing to ask.

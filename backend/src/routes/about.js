@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { requireAuth } from '../middleware/auth.js';
 import { parseStunServers } from '../lib/stunServers.js';
+import { getPublicBaseUrl } from '../lib/push.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,7 +35,10 @@ router.get('/', requireAuth, (req, res) => {
   // stunServers (#558): the ICE servers the live-view player must use, from the STUN_SERVERS setting. Here
   // (signed-in, and already fetched by the app) rather than baked into the frontend build, so the browser
   // follows the operator's setting. Read per request, not at load, so a test can change the environment.
-  res.json({ version, ...build, stunServers: parseStunServers(process.env.STUN_SERVERS).urls });
+  // publicBaseUrl (#559): the address this server stamps into its own alert links (getPublicBaseUrl), or null.
+  // The app compares an alert's address with it, so a household that reaches the server by two addresses is
+  // not asked to "switch" to the server it is already on. Read per request: an admin's phone can change it.
+  res.json({ version, ...build, stunServers: parseStunServers(process.env.STUN_SERVERS).urls, publicBaseUrl: getPublicBaseUrl() });
 });
 
 export default router;

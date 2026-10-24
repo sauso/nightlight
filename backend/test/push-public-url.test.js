@@ -35,6 +35,7 @@ const dataDir = useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const { registerToken, getPublicBaseUrl, normalizeBaseUrl, sendToAll, initPush } = await import('../src/lib/push.js');
 const { default: pushRouter } = await import('../src/routes/push.js');
+const { default: aboutRouter } = await import('../src/routes/about.js');
 
 const GOOD = 'https://nightlight.example';
 const EVIL = 'https://evil.example';
@@ -500,6 +501,58 @@ describe("★ sendToAll: each device is sent ITS OWN address, never another devi
         assert.ok(url.startsWith(own[m.token]), `${m.token}: a URL in its message belongs to another device: ${url}`);
       }
     }
+  });
+});
+
+// #559: GET /api/about reports the address the server's own links carry, so the app can tell "an alert from
+// the server I am on, by its other address" from "an alert from another server". It must be exactly what
+// getPublicBaseUrl gives the links: the stored value re-validated on read, then the admin-device fallback.
+// Asserted against FIXED expected values in each state, not only against getPublicBaseUrl(), so a route that
+// returned the raw column (or always null) fails here even though it would agree with itself.
+describe('★ #559 GET /api/about reports the address the alert links carry', () => {
+  let server;
+  let cgToken;
+  before(async () => {
+    server = await mountRouter('/api/about', aboutRouter);
+  });
+  after(async () => {
+    await server.close();
+  });
+  beforeEach(() => {
+    // A caregiver on purpose: every signed-in user reads /about (the app asks on any phone), not only admins.
+    cgToken = signToken({ id: 'u-cg', username: 'caregiver', role: 'caregiver', sid: makeSession(db, 'u-cg') });
+  });
+  const about = async () => {
+    const res = await call(`${server.url}/api/about`, { token: cgToken });
+    assert.equal(res.status, 200);
+    return res.body;
+  };
+
+  test('the stored address is reported, canonical', async () => {
+    setGlobal(GOOD);
+    assert.equal((await about()).publicBaseUrl, GOOD);
+  });
+
+  test('nothing learned yet: null, not a missing field (the app treats both as "no address")', async () => {
+    const body = await about();
+    assert.ok(Object.hasOwn(body, 'publicBaseUrl'));
+    assert.equal(body.publicBaseUrl, null);
+  });
+
+  test('a malformed stored value is not passed on (re-validated on read, as for the links)', async () => {
+    setGlobal('https://nightlight.example/some/path');
+    assert.equal((await about()).publicBaseUrl, null);
+  });
+
+  test('with nothing stored, the admin-device fallback the links use is reported too', async () => {
+    registerToken('tok-a', 'android', 'u-admin', GOOD, makeSession(db, 'u-admin'));
+    setGlobal(null);
+    assert.equal((await about()).publicBaseUrl, GOOD);
+  });
+
+  test('still needs a sign-in, like the rest of /about', async () => {
+    const res = await call(`${server.url}/api/about`);
+    assert.equal(res.status, 401);
   });
 });
 

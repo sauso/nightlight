@@ -9,6 +9,18 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- **An alert or link from another server now asks before the app switches, and only offers servers the app
+  already knows (#559).** Tapping an alert that names a different server used to switch the Android app to it
+  straight away. Now a server saved in the app gets a **Switch server?** question (with **Stay** selected
+  first), and a server the app has never connected to is refused with an explanation and nothing changes; add
+  it from **Settings → Change server** if it is yours. An alert from the server you are on, including the
+  address it uses in its own links, opens as before. This covers the app's own (Firebase) alerts from this
+  version of the server on; Pushover, ntfy and Gotify alert links also need the next Android app release.
+  GET `/api/about` now also reports `publicBaseUrl`, the address the server puts in its alert links (or
+  `null`). See [docs/mobile.md](docs/mobile.md#tapping-an-alert-from-another-server).
+
 ### Fixed
 
 - **The "Photo saved" tick no longer leaves a timer running after you leave the page (#855).** On a child's page and on
