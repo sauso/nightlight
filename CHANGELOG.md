@@ -9,6 +9,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **The "Photo saved" tick no longer leaves a timer running after you leave the page (#855).** On a child's page and on
+  Account, saving a photo shows a tick for two seconds; its timer kept running if you left the page first. You would
+  not have seen it, but it could raise a stray error, and it made one automated check fail at random. The timer is now
+  cancelled when the page closes, and is not started at all if the photo finishes saving after you have left.
+
 ## [0.43.0] - 2026-10-24
 
 ### Added

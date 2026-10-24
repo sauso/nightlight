@@ -67,6 +67,12 @@ export default function ChildSettings() {
   const [removeError, setRemoveError] = useState('');
   const [photoStatus, setPhotoStatus] = useState(''); // '' | 'saving' | 'saved'
   const initedRef = useRef(false);
+  const photoTimerRef = useRef(null); // the "Photo saved" tick's 2 s timer (#855), cancelled on unmount
+  const mountedRef = useRef(true); // false once the page is gone: a save still in flight must not start the timer then
+  useEffect(() => {
+    mountedRef.current = true; // set again, not just initialised: StrictMode runs cleanup and mount once in dev
+    return () => { mountedRef.current = false; clearTimeout(photoTimerRef.current); };
+  }, []);
 
   const back = location.state?.from || { to: '/children', label: 'Children' };
 
@@ -129,7 +135,14 @@ export default function ChildSettings() {
       await api.put(`/children/${id}`, { photo }, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       await refresh();
       setPhotoStatus('saved');
-      setTimeout(() => setPhotoStatus(''), 2000);
+      // #855: the timer id is kept so the page can cancel it. Left running, it fired after the page was gone (and,
+      // in the test run that showed it, after jsdom was torn down: "window is not defined", an unhandled error that
+      // failed CI although every test passed). A second save inside the 2 s restarts it instead of letting the
+      // first timer blank the second tick early. And no timer at all if the page closed while the save was still
+      // in flight: the unmount cleanup has already run, so nothing would ever cancel this one (Codex review of #858).
+      if (!mountedRef.current) return;
+      clearTimeout(photoTimerRef.current);
+      photoTimerRef.current = setTimeout(() => setPhotoStatus(''), 2000);
     } catch (err) {
       setError(err.message);
       setPhotoStatus('');

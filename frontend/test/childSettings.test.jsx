@@ -230,6 +230,37 @@ describe('★★ the immediate photo write', () => {
     await waitFor(() => expect(camerasValue.refresh).toHaveBeenCalled());
   });
 
+  // #855: the 2 s timer that blanks "Photo saved" used to run on after the page had gone, and in CI it fired after jsdom
+  // was torn down ("window is not defined", an unhandled error that failed the run although every test passed).
+  test('★ #855: leaving the page cancels the "Photo saved" timer', async () => {
+    const setSpy = vi.spyOn(globalThis, 'setTimeout');
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const { user, unmount } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Remove' }));
+    await screen.findByText('Photo saved ✓');
+    // The 2 s timers this screen started (other libraries use other delays).
+    const ids = setSpy.mock.calls.flatMap((c, i) => (c[1] === 2000 ? [setSpy.mock.results[i].value] : []));
+    expect(ids).toHaveLength(1);
+    expect(clearSpy).not.toHaveBeenCalledWith(ids[0]);
+    unmount();
+    expect(clearSpy).toHaveBeenCalledWith(ids[0]);
+  });
+
+  // The other way in (Codex review of #858): the page closes while the save is still in flight, so the cleanup has
+  // already run when the save finishes. It must not start a timer nothing would ever cancel.
+  test('★ #855: a save that finishes after the page is gone starts no "Photo saved" timer', async () => {
+    const setSpy = vi.spyOn(globalThis, 'setTimeout');
+    let finish;
+    putSpy.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const { user, unmount } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    unmount();
+    finish({});
+    await new Promise((resolve) => setTimeout(resolve, 20)); // let the save's continuation run
+    expect(setSpy.mock.calls.filter((c) => c[1] === 2000)).toHaveLength(0);
+  });
+
   test('a failed photo write says why and does not claim success', async () => {
     putSpy = vi.spyOn(api, 'put').mockRejectedValue(new Error('Image is too large'));
     const { user } = mount();
