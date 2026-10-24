@@ -39,6 +39,8 @@ for i in $(seq 1 60); do
 done
 
 say "First-run: create admin + log in"
+# ⚠️ .github/workflows/weekly-rebuild.yml runs `prove.sh --keep`, then signs in with THIS account to check
+# the AAC audio track (#566). Change the username or password here and that check fails: change both.
 SETUP=$(curl -fsS -X POST "$BASE/api/auth/setup" \
   -H 'Content-Type: application/json' \
   -d '{"username":"e2e","password":"e2e-admin-pw","first_name":"E2E"}')

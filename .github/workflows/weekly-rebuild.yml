@@ -2,19 +2,43 @@ name: Weekly image rebuild
 
 # Rebuilds the published images from UNCHANGED source with a freshly-pulled base and
 # re-resolved apk layers, so Alpine/OS security fixes (e.g. ffmpeg/codec CVEs) land in the
-# running image as they ship — without waiting for a code push. The app code, version, and
-# CHANGELOG are untouched; only the base/OS layers move. Because it's a rebuild of the same
-# code, it does NOT get a changelog entry — the About page's build time (baked below) is the
-# record that the image was re-patched, and the version tag stays put.
+# image as they ship, without waiting for a code push. The app code, version and CHANGELOG
+# are untouched; only the base/OS layers move. A rebuild of the same code gets no changelog
+# entry: the About page's build time (baked below) is the record that the image was re-patched,
+# and the version tag stays put.
 #
-# Refreshes only the MOVING tags — :latest (prod) and :dev (staging). The immutable vX.Y.Z
+# Refreshes only the MOVING tags: :latest (prod) and :dev (staging). The immutable vX.Y.Z
 # release tags are never re-pointed, so a pinned version keeps pulling the exact artifact it
-# always did. Publishing only: deploy is still manual (pull the refreshed tag on Unraid via
-# the guard script to actually apply the patches).
+# always did.
+#
+# BUILD ONCE, TEST THOSE BYTES, PROMOTE THOSE BYTES (#566). Each branch is built once and pushed
+# WITHOUT a tag (by digest). That one digest is smoke-tested: the e2e pipeline prove-out
+# (e2e/prove.sh) plus an AAC audio check on amd64, and a start check of the arm64 variant. Only when
+# all of them pass is :latest / :dev pointed at that same digest. A failure anywhere leaves the tag
+# exactly where it was and turns the run red. Until #566 the rebuild pushed :latest / :dev directly,
+# untested. Deploy is still manual: nothing here touches a running container (pull the refreshed tag
+# on Unraid via the guard script to apply the patches). docs/operations.md, "The weekly rebuild".
+#
+# ⚠️ A SCHEDULED run uses this file as it is on the DEFAULT branch (main), so a change here is live
+# on Mondays only after it is released to main. A dispatch uses the file on the ref it is dispatched
+# from, so a change is tried BEFORE merging with
+#   gh workflow run weekly-rebuild.yml --ref <branch> -f dry_run=true
+# (that still builds and pushes the untagged candidates, which is harmless: nothing pulls them).
+# The matrix always checks out main and dev, so the e2e harness (prove.sh, the compose file, the fake
+# camera) comes from the branch whose image is being tested: harness and app stay the same version.
 on:
   schedule:
     - cron: '0 16 * * 1' # Mondays 16:00 UTC (after the 15:00 nightly e2e, so it doesn't overlap)
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build and test, but do not move :latest / :dev (the log says "would promote <digest>" instead)'
+        type: boolean
+        default: false
+      force_smoke_failure:
+        description: 'For testing this workflow: point the smoke test at an image that does not exist, so it fails and nothing is promoted'
+        type: boolean
+        default: false
 
 # Least privilege (#566 bullet 5): this workflow only reads the repository (the Docker Hub push uses its own secrets, not this token), so the token it is handed is
 # limited to that instead of the repository default (which may include write).
@@ -28,6 +52,11 @@ concurrency:
 jobs:
   rebuild:
     runs-on: ubuntu-latest
+    # The rebuild took 2.5-3 minutes before #566 (the last four scheduled runs) and the smoke adds a
+    # few (e2e.yml's prove-out passes in under a minute once its images are pulled). 45 is generous on
+    # purpose: a slow emulated arm64 build must not be cut off, but a hung step must not hold the
+    # runner for GitHub's 6-hour default either.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       # main -> :latest (prod), dev -> :dev (staging). Each rebuilt from its own branch tip.
@@ -62,23 +91,266 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # pull: always re-pull the base image; no-cache: re-run every RUN (notably `apk add`) so
-      # OS packages resolve to the latest available — that's the whole point of this job, and it's
-      # why it deliberately doesn't use the gha build cache the push workflow relies on.
-      - name: Rebuild and push :${{ matrix.tag }} (fresh base, no cache)
+      # OS packages resolve to the latest available. That is the whole point of this job, and it's
+      # why it deliberately doesn't use the gha build cache the push workflow relies on. Both stay:
+      # the smoke below tests what this produces, it does not replace the fresh build.
+      #
+      # PUSHED BY DIGEST, WITH NO TAG (#566 plan review): `push-by-digest=true` uploads the
+      # multi-arch index and its attestations but sets no tag, so nothing that pulls :latest / :dev
+      # can see this image until the promotion step below points a tag at it. A public "candidate"
+      # tag was rejected because anyone can pull a tag, and a mutable one would show an untested
+      # image under a name that looks official. `name=` (not `tags:`) names only the repository;
+      # there is no `push: true` either, which would add a second, tagged export. An image that is
+      # never promoted stays in the registry untagged; nothing refers to it by name.
+      # ⚠️ Expected to work with multi-arch + attestations (it is Docker's documented pattern for
+      # merging per-platform builds) but first confirmed by this workflow's dry run. The next step
+      # FAILS the run if the build moved the tag anyway. If push-by-digest ever cannot be used, the
+      # fallback is a per-run tag, `wk-<tag>-<run id>`, never a shared `candidate-*` tag.
+      - name: Build and push the candidate by digest (fresh base, no cache, no tag)
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: true
           pull: true
           no-cache: true
-          tags: sauso/nightlight:${{ matrix.tag }}
+          outputs: type=image,name=sauso/nightlight,push-by-digest=true,name-canonical=true,push=true
           # Same attestations as docker-publish.yml, or this rebuild would silently replace an attested
-          # :latest/:dev with an unattested one (#566 bullet 4).
+          # :latest/:dev with an unattested one (#566 bullet 4). They are part of the pushed index, so
+          # promoting the index by digest carries them along (the promotion step checks the digest).
           sbom: true
           provenance: mode=max
           build-args: |
             GIT_SHA=${{ steps.bmeta.outputs.sha }}
             GIT_REF=${{ matrix.ref }}
             BUILD_TIME=${{ steps.bmeta.outputs.date }}
+
+      # Three things before anything is tested:
+      # 1. The digest is well formed. Every later step addresses the image ONLY by this digest, never by
+      #    a tag, so the smoke tests exactly the bytes that get promoted (a tag can move between the test
+      #    and the promotion; a digest cannot).
+      # 2. The tag still points somewhere else. If it already equals the candidate, the build published
+      #    the tag itself (push-by-digest did not hold) and an untested image is live: fail loudly. Each
+      #    build has a fresh BUILD_TIME, so a candidate can never legitimately equal last week's image.
+      # 3. The current target digest is recorded: the summary prints it, so a rollback is one command.
+      # An unreadable registry also fails here: if the tag cannot be read, it cannot be promoted safely.
+      - name: Check the candidate and record where :${{ matrix.tag }} points now
+        id: cand
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAG: ${{ matrix.tag }}
+          # Only a dispatch can carry inputs; a scheduled run has none, so this is false on Mondays.
+          FORCE_SMOKE_FAILURE: ${{ github.event_name == 'workflow_dispatch' && inputs.force_smoke_failure == true }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::the build reported no usable digest ('$DIGEST'); nothing to test or promote"
+            exit 1
+          fi
+          CURRENT=$(docker buildx imagetools inspect "sauso/nightlight:$TAG" --format '{{json .Manifest.Digest}}' | tr -d '"') || CURRENT=""
+          if ! [[ "$CURRENT" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::could not read the digest of sauso/nightlight:$TAG ('$CURRENT'); not testing an image that could not be promoted safely"
+            exit 1
+          fi
+          if [ "$CURRENT" = "$DIGEST" ]; then
+            echo "::error::sauso/nightlight:$TAG already points at the untested candidate $DIGEST: the build step published the tag itself. Roll back to the previous digest by hand."
+            exit 1
+          fi
+          echo "sauso/nightlight:$TAG points at $CURRENT (the rollback target); candidate is $DIGEST"
+          SMOKE_IMAGE="sauso/nightlight@$DIGEST"
+          # The negative-path test (force_smoke_failure): a digest that cannot exist, so `docker compose
+          # up` cannot pull it and the smoke fails. It can only make the smoke FAIL: the promotion below
+          # always uses the BUILT digest, and only after the smoke passed.
+          if [ "$FORCE_SMOKE_FAILURE" = "true" ]; then
+            SMOKE_IMAGE="sauso/nightlight@sha256:$(printf '%064d' 0)"
+            echo "::warning::force_smoke_failure is set: the smoke test runs against $SMOKE_IMAGE and will fail"
+          fi
+          echo "previous=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "smoke_image=$SMOKE_IMAGE" >> "$GITHUB_OUTPUT"
+
+      # The same Phase 1 prove-out e2e.yml runs (first-run admin, camera add through the real API,
+      # live HLS video from a synthetic camera), but against the candidate digest from the registry
+      # instead of a local build. The runner is amd64, so Docker pulls the amd64 half of the index.
+      # `--keep` leaves the stack up for the audio check; the tear-down step below removes it.
+      - name: Smoke test, amd64 — e2e pipeline prove-out against the candidate
+        id: smoke
+        timeout-minutes: 15
+        working-directory: e2e
+        env:
+          NIGHTLIGHT_IMAGE: ${{ steps.cand.outputs.smoke_image }}
+        run: bash prove.sh --keep
+
+      # prove.sh only checks for VIDEO, and on the camera's main path, which carries the camera's own
+      # G711 audio that MediaMTX's HLS cannot mux (the e2e run of 2026-10-24 logged "streams:
+      # video,,video": no audio at all). The player
+      # asks for `<path>-hls` (CameraTile.jsx), where transcoder.js publishes video + AAC, so that is
+      # where a rebuilt base with a broken ffmpeg AAC encode would show. Checked here, not in prove.sh,
+      # because the matrix checks out main and dev: a new prove.sh option would be missing on both
+      # until this change is merged AND released, so a dry run could not exercise it and the check
+      # would silently not run. This step needs only what prove.sh has always done: the admin
+      # account it creates (e2e / e2e-admin-pw; keep the two in step) and `--keep`.
+      - name: Smoke test, amd64 — the player's HLS path carries AAC audio
+        id: audio
+        timeout-minutes: 5
+        working-directory: e2e
+        env:
+          NIGHTLIGHT_IMAGE: ${{ steps.cand.outputs.smoke_image }}
+        run: |
+          set -euo pipefail
+          BASE=http://localhost:4000
+          TOKEN=$(curl -fsS -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+            -d '{"username":"e2e","password":"e2e-admin-pw"}' | jq -r '.token // empty')
+          [ -n "$TOKEN" ] || { echo "::error::could not sign in to the smoke stack as the admin prove.sh created"; exit 1; }
+          MEDIA_TOKEN=$(curl -fsS -X POST "$BASE/api/auth/media-token" -H "Authorization: Bearer $TOKEN" | jq -r '.token // empty')
+          CAM_PATH=$(curl -fsS "$BASE/api/cameras" -H "Authorization: Bearer $TOKEN" | jq -r '.[0].mediamtx_path // empty')
+          if [ -z "$MEDIA_TOKEN" ] || [ -z "$CAM_PATH" ]; then
+            echo "::error::could not get a media token and the synthetic camera's path from the smoke stack"
+            exit 1
+          fi
+          # 30 tries, 2 s apart, like prove.sh: the -hls muxer starts on the first request (hlsAlwaysRemux: no).
+          for i in $(seq 1 30); do
+            CODECS=$(docker compose -f docker-compose.e2e.yml -p nightlight-e2e exec -T nightlight \
+                       ffprobe -v error -i "http://127.0.0.1:4000/hls/${CAM_PATH}-hls/index.m3u8?token=$MEDIA_TOKEN" \
+                       -select_streams a -show_entries stream=codec_name -of csv=p=0 2>/dev/null | tr '\n' ' ' || true)
+            if grep -qw aac <<<"$CODECS"; then
+              echo "OK: ${CAM_PATH}-hls carries AAC audio (audio streams: $CODECS)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::${CAM_PATH}-hls never carried an AAC audio stream (last answer: '${CODECS:-nothing}')"
+          exit 1
+
+      - name: Tear down the smoke stack
+        if: always()
+        working-directory: e2e
+        run: docker compose -f docker-compose.e2e.yml -p nightlight-e2e down -v || true
+
+      # The arm64 half is built but cannot be streamed here (no arm64 runner, and the whole e2e stack
+      # under emulation would be slow and flaky), so it gets a ~30 s start check instead: the binaries the
+      # app spawns run, and the database driver's NATIVE addon loads. `require()` alone would not prove
+      # the last part (the driver can defer loading the addon until a database is opened), so it opens
+      # an in-memory database. `uname -m` proves the arm64 variant really ran, not the amd64 one.
+      # Pulled explicitly with --platform: the amd64 variant of the same digest is already local.
+      - name: Start check, arm64 — ffmpeg, MediaMTX and the database driver load
+        id: arm64
+        timeout-minutes: 10
+        env:
+          IMAGE: ${{ steps.cand.outputs.smoke_image }}
+        run: |
+          set -euo pipefail
+          docker pull --platform linux/arm64 "$IMAGE"
+          docker run --rm --platform linux/arm64 --entrypoint sh "$IMAGE" -c '
+            set -e
+            arch=$(uname -m)
+            [ "$arch" = aarch64 ] || { echo "expected aarch64, got $arch"; exit 1; }
+            ffmpeg -hide_banner -version
+            mediamtx --version
+            node -e "const Database = require(\"better-sqlite3\"); const db = new Database(\":memory:\"); if (db.prepare(\"select 1 as ok\").get().ok !== 1) process.exit(1); console.log(\"better-sqlite3 opened a database\")"
+          '
+
+      # THE GATE, and the ONE step that either promotes or says what it would promote (#566 plan review).
+      # The step runs only when every smoke step SUCCEEDED (and, implicitly, everything before it: an
+      # `if:` with no status function gets `success() &&`). A red smoke therefore skips it entirely, so
+      # a dry run with a red smoke shows no "would promote" line: that absence is the negative proof.
+      #
+      # PROMOTE is a POSITIVE test: only the exact string "true" moves the tag; anything else (false, an
+      # empty or unexpected value) falls through to the dry-run branch. Fail-safe, by construction:
+      # - `inputs.dry_run` is a real boolean (`type: boolean`). The tempting `inputs.dry_run != 'true'`
+      #   FAILS OPEN: Actions compares a boolean with a string by converting both to numbers, true -> 1
+      #   and 'true' -> NaN, so 1 != NaN is true and a dry run would promote.
+      # - `== false` is guarded by the event name, because a missing input is null and null == false is
+      #   ALSO true under the same number conversion (both 0). Only a dispatch has inputs; a scheduled
+      #   run has none and always promotes.
+      #
+      # RACE with docker-publish.yml: a push to main/dev while this runs publishes a NEWER commit to the
+      # same tag. Promoting afterwards would put an older commit back on :latest / :dev. So the branch tip
+      # is re-read just before promoting, and if it moved, this run skips with a warning (the newer
+      # commit's own publish run sets the tag; its base layers catch up next Monday). A push that lands
+      # after this check is still safe: its publish run builds for minutes and finishes after this.
+      #
+      # Promotion is BY DIGEST: `imagetools create` from `@<digest>` points the tag at the tested index,
+      # attestations included, without rebuilding anything. The tag is then read back and must equal
+      # the built digest, or the run FAILS: that proves on every run that the bytes and attestations the
+      # smoke tested are what the tag now serves (that a single-source `imagetools create` copies the
+      # index unchanged is expected buildx behaviour, not something this repo has measured).
+      - name: Promote the tested digest to :${{ matrix.tag }} (on a dry run, say what would be promoted)
+        id: promote
+        if: steps.smoke.outcome == 'success' && steps.audio.outcome == 'success' && steps.arm64.outcome == 'success'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAG: ${{ matrix.tag }}
+          REF: ${{ matrix.ref }}
+          SHA: ${{ steps.bmeta.outputs.sha }}
+          PROMOTE: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false) }}
+        run: |
+          set -euo pipefail
+          REMOTE=$(git ls-remote origin "refs/heads/$REF" | cut -f1)
+          if [ "$REMOTE" != "$SHA" ]; then
+            echo "::warning::$REF moved from $SHA to ${REMOTE:-<nothing>} during this run; not promoting, so an older commit cannot replace the newer one on :$TAG"
+            echo "result=not promoted: $REF moved during the run" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$PROMOTE" = "true" ]; then
+            PREV=$(docker buildx imagetools inspect "sauso/nightlight:$TAG" --format '{{json .Manifest.Digest}}' | tr -d '"')
+            echo "previous=$PREV" >> "$GITHUB_OUTPUT"
+            docker buildx imagetools create -t "sauso/nightlight:$TAG" "sauso/nightlight@$DIGEST"
+            NOW=$(docker buildx imagetools inspect "sauso/nightlight:$TAG" --format '{{json .Manifest.Digest}}' | tr -d '"')
+            if [ "$NOW" != "$DIGEST" ]; then
+              echo "::error::sauso/nightlight:$TAG now points at $NOW, not the tested $DIGEST. Point it back with: docker buildx imagetools create -t sauso/nightlight:$TAG sauso/nightlight@$PREV"
+              exit 1
+            fi
+            echo "promoted $DIGEST to sauso/nightlight:$TAG (was $PREV)"
+            echo "result=promoted" >> "$GITHUB_OUTPUT"
+          else
+            echo "would promote $DIGEST to sauso/nightlight:$TAG (dry run; the tag was not changed)"
+            echo "result=dry run: would promote" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Written for EVERY outcome (green, red, dry run, race), so the run page always says what :tag
+      # serves now and what it served before, and a rollback is one copy-paste.
+      - name: Summary
+        if: always()
+        env:
+          TAG: ${{ matrix.tag }}
+          REF: ${{ matrix.ref }}
+          SHA: ${{ steps.bmeta.outputs.sha }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SMOKE_IMAGE: ${{ steps.cand.outputs.smoke_image }}
+          SMOKE: ${{ steps.smoke.outcome }}
+          AUDIO: ${{ steps.audio.outcome }}
+          ARM64: ${{ steps.arm64.outcome }}
+          PROMOTE_OUTCOME: ${{ steps.promote.outcome }}
+          RESULT: ${{ steps.promote.outputs.result }}
+          PREV_AT_PROMOTE: ${{ steps.promote.outputs.previous }}
+          PREV_AT_START: ${{ steps.cand.outputs.previous }}
+        run: |
+          PREV="${PREV_AT_PROMOTE:-$PREV_AT_START}"
+          if [ -z "$RESULT" ]; then
+            if [ "$PROMOTE_OUTCOME" = "failure" ]; then
+              RESULT="promotion step FAILED: check where the tag points (rollback below)"
+            else
+              RESULT="not promoted: a build or test step did not pass, so the tag was left as it was"
+            fi
+          fi
+          {
+            echo "### sauso/nightlight:$TAG, rebuilt from $REF"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Commit | \`${SHA:-unknown}\` |"
+            echo "| Candidate digest | \`${DIGEST:-none: the build did not finish}\` |"
+            echo "| Image the tests ran | \`${SMOKE_IMAGE:-none}\` |"
+            echo "| amd64: e2e pipeline prove-out | ${SMOKE:-not run} |"
+            echo "| amd64: AAC audio on the player's HLS path | ${AUDIO:-not run} |"
+            echo "| arm64: start check | ${ARM64:-not run} |"
+            echo "| Result | $RESULT |"
+            echo "| :$TAG before this run | \`${PREV:-unknown}\` |"
+            if [ -n "$PREV_AT_PROMOTE" ]; then
+              echo
+              echo "To point :$TAG back at the image it had before this run:"
+              echo
+              echo "\`docker buildx imagetools create -t sauso/nightlight:$TAG sauso/nightlight@$PREV_AT_PROMOTE\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

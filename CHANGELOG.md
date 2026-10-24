@@ -20,6 +20,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   version of the server on; Pushover, ntfy and Gotify alert links also need the next Android app release.
   GET `/api/about` now also reports `publicBaseUrl`, the address the server puts in its alert links (or
   `null`). See [docs/mobile.md](docs/mobile.md#tapping-an-alert-from-another-server).
+- **The weekly image rebuild now tests the rebuilt image before `:latest` or `:dev` moves to it (#566).** Every
+  Monday those two tags are rebuilt with fresh base images to pick up security fixes, and until now the rebuild
+  replaced them straight away, untested. Now each image is built once, started with a synthetic camera that has to
+  deliver live video and AAC audio (on arm64 it only has to start), and only then is the tag pointed at that same
+  image. If a check fails, the tag keeps the image it had. Release tags (`vX.Y.Z`) are still never rebuilt. See
+  [docs/operations.md](docs/operations.md#the-weekly-rebuild).
 
 ### Fixed
 
