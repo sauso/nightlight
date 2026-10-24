@@ -76,12 +76,13 @@ ALREADY_OWNED_LINE="data directory already owned by $EXPECT_DATA_OWNER"
 DB_MODE_TOKEN='babymonitor.db=600'
 # docs/mfa.md, "Recovery": the console failsafe. The run creates an admin without two-factor.
 MFA_LIST_OK='No users have two-factor enabled.'
-# Control D, the SECOND start without DAC_OVERRIDE. Reasoned, not yet seen in a run (settle with the first CI
-# run, then narrow it to the one that appears):
-#   - a NEW container: shadow's `usermod -u` re-owns its home (/app, owned by the build-time uid) with a walk
-#     that cannot open the owner-only /app/data, and exits 12 with the first alternative;
-#   - the plan review predicted the entrypoint's own ownership check failing instead (the second alternative).
-D_SIGNATURE_RE='usermod: Failed to change ownership of the home directory|ownership of /app/data/[^ ]* is not'
+# Control D, the SECOND start without DAC_OVERRIDE. Seen in CI (runs of 2026-10-24): a NEW container's
+# `usermod -u` re-owns its home (/app, owned by the build-time uid) with a walk that cannot open the owner-only
+# /app/data, and exits 12 with exactly this line, before the entrypoint's own ownership check can matter. The plan
+# review had predicted the entrypoint's ownership line instead, which does not happen (without search permission the
+# directory simply is not found), so only this one signature is accepted: a loose pattern would let an unrelated
+# start-up failure pass the control (Codex review).
+D_SIGNATURE_RE='usermod: Failed to change ownership of the home directory'
 # Bounded waits, in seconds. The image's HEALTHCHECK first runs 30 s after start (120 s start period).
 HEALTHY_TIMEOUT=200
 READY_TIMEOUT=120
