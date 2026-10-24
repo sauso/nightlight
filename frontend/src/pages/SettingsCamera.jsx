@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import { useLater } from '../lib/useLater.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
@@ -16,6 +17,7 @@ export default function SettingsCamera() {
   const [form, setForm] = useState(settings);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  const later = useLater(); // blanks the "Saved" tick; cancelled when the page goes away (#855)
   const [busy, setBusy] = useState(false);
 
   useEffect(() => setForm((f) => ({ ...f, ...settings })), [settings]);
@@ -38,7 +40,7 @@ export default function SettingsCamera() {
       });
       await refresh();
       setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      later(() => setSaved(false), 2500);
     } catch (err) {
       setError(err.message);
     } finally {

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '../lib/api.js';
 import { isNativeApp, saveBlobToDownloads } from '../lib/nativeBridge.js';
 import Modal from './Modal.jsx';
+import { useLater } from '../lib/useLater.js';
 
 // The shared in-app video player: a modal <video> with a meta line and a Download button. Used by BOTH
 // the alert clip player (ClipPlayerModal) and the nightly timelapse, so a recording and a keepsake look
@@ -23,6 +24,7 @@ export default function MediaPlayerModal({
   footer,
 }) {
   const [dl, setDl] = useState(''); // '' | 'saving' | 'saved' | 'error'
+  const later = useLater(); // blanks the download tick; cancelled if the player closes first (#855)
 
   // Download the open video. In the Android/iOS shell a browser-style <a download> silently does
   // nothing (WebView limitation), so fetch the bytes and hand them to the native Download plugin
@@ -49,7 +51,7 @@ export default function MediaPlayerModal({
     } catch {
       setDl('error');
     }
-    setTimeout(() => setDl(''), 3000);
+    later(() => setDl(''), 3000);
   }
 
   return (

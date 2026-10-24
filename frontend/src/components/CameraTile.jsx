@@ -9,6 +9,7 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { isNativeApp, isIOS, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused, setBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
 import { queuePatch, minToHHMM } from '../lib/detectionSaves.js';
+import { useLater } from '../lib/useLater.js';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
@@ -67,6 +68,9 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   const { refresh: refreshCameras } = useCameras();
   const isAdmin = user?.role === 'admin';
   const navigate = useNavigate();
+  // The record-error, restarting and rebooting messages blank themselves after a delay; `later` cancels them if the tile
+  // goes away first (#855). The talk and single-tap timers below keep their own refs.
+  const later = useLater();
   // Per-device, not synced through the backend - deliberately so a phone sitting next
   // to you can stay muted while a tablet mounted in the nursery stays unmuted, rather
   // than muting on one device silently muting it everywhere.
@@ -190,7 +194,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
       // The server refuses with a clear reason (feature off, camera not buffering, disk full).
       setRecError(err.message || 'Recording failed');
       setRecording(false);
-      setTimeout(() => setRecError(''), 4000);
+      later(() => setRecError(''), 4000);
     } finally {
       setRecBusy(false);
     }
@@ -281,7 +285,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
     if (restarting) return;
     setRestarting(true);
     try { await api.post(`/cameras/${camera.id}/restart`, {}); } catch { /* ignore — best effort */ }
-    setTimeout(() => setRestarting(false), 5000);
+    later(() => setRestarting(false), 5000);
   }
   // Power-cycle the whole camera over ONVIF (only offered when camera.reboot_capable). Heavier than a
   // stream restart — the camera is fully offline ~30-60s — but it recovers a wedged on-camera encoder.
@@ -294,10 +298,10 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
       await api.post(`/cameras/${camera.id}/reboot`, {});
     } catch (e) {
       setRebootMsg(e?.message || 'Reboot failed');
-      setTimeout(() => setRebootMsg(''), 5000);
+      later(() => setRebootMsg(''), 5000);
     }
     // Keep the button disabled while the camera is away and reconnecting.
-    setTimeout(() => setRebooting(false), 45000);
+    later(() => setRebooting(false), 45000);
   }
 
   // Quick-silence: temporarily mute ALL of this camera's alerts (for when you're still up as the alert

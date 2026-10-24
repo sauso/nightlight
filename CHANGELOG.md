@@ -15,6 +15,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   Account, saving a photo shows a tick for two seconds; its timer kept running if you left the page first. You would
   not have seen it, but it could raise a stray error, and it made one automated check fail at random. The timer is now
   cancelled when the page closes, and is not started at all if the photo finishes saving after you have left.
+- **The other "Saved ✓" and "Copied" ticks, and the camera restart and reboot messages, no longer leave a timer running
+  after you leave the page (#855).** The same flaw as the photo tick was in the settings screens (General, Camera,
+  Recording, MQTT and the push services), Account's name and password ticks, the two-factor "Copied" tick, the
+  download tick in the video player, the camera report button and the camera tile (recording error, restarting,
+  rebooting). Nothing you would have seen; it could raise a stray error and make an automated check fail at random.
+  Each of those timers is now cancelled when you leave the screen.
 
 ## [0.43.0] - 2026-10-24
 

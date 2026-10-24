@@ -9,6 +9,7 @@ import Switch from '../components/Switch.jsx';
 import Avatar from '../components/Avatar.jsx';
 import TwoFactorSection from '../components/TwoFactorSection.jsx';
 import { fileToAvatarDataUrl } from '../lib/imageResize.js';
+import { useLater } from '../lib/useLater.js';
 
 const THEME_OPTIONS = [
   { value: 'light', label: 'Light', Icon: Sun },
@@ -41,6 +42,7 @@ export default function Account() {
   const [error, setError] = useState('');
   const [photoStatus, setPhotoStatus] = useState(''); // '' | 'saving' | 'saved'
   const [theme, setThemeState] = useState(getTheme());
+  const later = useLater(); // the name and password "saved" ticks: cancelled when the page goes away (#855)
   const photoTimerRef = useRef(null); // the "Photo saved" tick's 2 s timer (#855), cancelled on unmount
   const mountedRef = useRef(true); // false once the page is gone: a save still in flight must not start the timer then
   useEffect(() => {
@@ -99,7 +101,7 @@ export default function Account() {
       await api.put('/auth/me', { first_name: nameForm.first_name, last_name: nameForm.last_name });
       await refresh();
       setNameSaved(true);
-      setTimeout(() => setNameSaved(false), 2000);
+      later(() => setNameSaved(false), 2000);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -162,7 +164,7 @@ export default function Account() {
       setChangingPassword(false);
       setPasswordForm(BLANK_PASSWORD_FORM);
       setPasswordSaved(true);
-      setTimeout(() => setPasswordSaved(false), 2500);
+      later(() => setPasswordSaved(false), 2500);
     } catch (err) {
       setPasswordError(err.message);
     } finally {

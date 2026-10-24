@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import { useLater } from '../lib/useLater.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
@@ -34,6 +35,7 @@ export default function SettingsMqtt() {
   const [status, setStatus] = useState(null);
   const loadStatus = () => api.get('/settings/mqtt/status').then((r) => setStatus(r || null)).catch(() => setStatus(null));
   const [saved, setSaved] = useState(false);
+  const later = useLater(); // the "Saved" tick and the delayed status re-check; cancelled when the page goes away (#855)
   const [busy, setBusy] = useState(false);
 
   // True while anything on screen differs from what is stored, INCLUDING a typed password and an edited certificate,
@@ -105,10 +107,10 @@ export default function SettingsMqtt() {
       setForm((f) => ({ ...f, mqtt_password: '' }));
       if (form.mqtt_password) setPasswordSet(true);
       setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      later(() => setSaved(false), 2500);
       // The broker is dialled right after the save; give the handshake a moment, then say how it went.
       loadStatus();
-      setTimeout(loadStatus, 2500);
+      later(loadStatus, 2500);
     } catch (err) {
       // Beside the CA box only while that box is on screen; otherwise in the banner, so a refusal is never invisible.
       if (err.data?.field === 'mqtt_tls_ca' && form.mqtt_tls) setCaError(err.message);

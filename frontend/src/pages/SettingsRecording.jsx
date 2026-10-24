@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import { useLater } from '../lib/useLater.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { useSettingsDraft } from '../lib/useSettingsDraft.js';
 import AppHeader from '../components/AppHeader.jsx';
@@ -117,6 +118,7 @@ export default function SettingsRecording() {
   const [storage, setStorage] = useState(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const later = useLater(); // blanks the "Saved" tick; cancelled when the page goes away (#855)
   const [error, setError] = useState('');
   // The "this will delete clips" confirmation (#395): null when closed, else { preview, payload } where preview is
   // the server's dry run (or null when it could not be fetched) and payload is the EXACT set of values that was
@@ -232,7 +234,7 @@ export default function SettingsRecording() {
       loadStorage();
       setDeletePrompt(null);
       setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      later(() => setSaved(false), 2500);
     } catch (err) {
       // From the confirmation dialog the failure is shown inside it; otherwise on the page.
       if (deletePrompt) setConfirmError(err.message || 'Could not save');
