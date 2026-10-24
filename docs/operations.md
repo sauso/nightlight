@@ -290,6 +290,114 @@ next open. If you only have the bare `.db` file and it won't open, there is no s
 — restore an earlier backup instead. This is exactly why the online-backup method in step 3 is
 recommended: it never produces a partial file in the first place.
 
+## Hardening the container (optional)
+
+You can run Nightlight with fewer privileges than Docker gives a container by default. This is optional,
+and nothing changes unless you add it: the Compose file has the lines commented out, and the Unraid
+template does not include them.
+
+**How far it is tested:** an automated test (the `hardened` job in `.github/workflows/e2e.yml`) runs it on
+**bridge networking only**. Host networking, the Unraid default, is not tested automatically; it is being
+checked on the maintainer's staging install before this becomes a recommendation. If you turn it on, run
+the checks in [Checking it works](#checking-it-works).
+
+### What it changes, and what it does not
+
+The container starts as root just long enough to set up the data directory, then hands over to `PUID`.
+The app, FFmpeg and MediaMTX already run as that user, with no special privileges. The hardening limits
+what stays root: the container's init process, the start-up script, `docker exec` commands and the health
+check keep only the six capabilities listed below, and nothing in the container can gain privileges again
+(`no-new-privileges`). Raw network access (`NET_RAW`) is among the capabilities removed, which matters most
+on host networking.
+
+It does **not**:
+
+- keep FFmpeg away from the database. They run as the same user, so a compromised FFmpeg could still read it.
+- hold the app itself back if you set `PUID=0`. The app then runs as root and keeps all six capabilities.
+- replace keeping the data directory private (see [Who can read the data directory](#who-can-read-the-data-directory)).
+
+A `PORT` below 1024 behaves as it does today.
+
+### Turning it on
+
+**Unraid:** edit the container, switch to **Advanced View**, and replace the whole **Extra Parameters**
+field with:
+
+```
+--log-opt max-size=10m --log-opt max-file=3 --stop-timeout 30 --cap-drop=ALL --cap-add=CHOWN --cap-add=DAC_OVERRIDE --cap-add=FOWNER --cap-add=KILL --cap-add=SETUID --cap-add=SETGID --security-opt=no-new-privileges=true
+```
+
+⚠️ Keep the first three flags. They are the log rotation and the 30-second stop grace. Pasting only the
+new flags removes them, and without the grace a restart can cut a recording off mid-save.
+
+**Compose:** uncomment these lines in `docker-compose.yml` (under `stop_grace_period`), then run
+`docker compose up -d`:
+
+```yaml
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
+      - KILL
+    security_opt:
+      - no-new-privileges=true
+```
+
+**Your own `docker run` command:** add the same flags as the Unraid field, keeping `--stop-timeout 30`.
+
+### If a capability is missing
+
+Each of the six has one job. If one is left out, this is what you see, in the order you would notice it:
+
+- **CHOWN, SETUID, SETGID** re-own the data directory to `PUID`:`PGID` and hand the app over to that user.
+  Without one of them the container stops at every start, and the log shows `Operation not permitted` or
+  `usermod: Failed to change ownership of the home directory`.
+- **DAC_OVERRIDE** lets root into the owner-only (`700`) data directory. Without it the first start works,
+  but once the container is re-created (an update, or **Apply** on Unraid) it stops at start with
+  `usermod: Failed to change ownership of the home directory`. That message points at ownership; the cause
+  is the missing capability. The `docker exec` commands in these guides (the
+  [online backup](#3-backing-up), the [two-factor reset](mfa.md#recovery)) also fail, because they run as
+  root and cannot open the database.
+- **FOWNER** lets the start-up script take group/other access off files the app owns. Without it the
+  container runs, but logs `could not tighten every entry`, and the data directory keeps whatever access
+  it had.
+- **KILL** lets the container's init process pass Docker's stop signal on to the app. **This is the silent
+  one:** everything works until the container stops. Then the app is killed instead of stopping cleanly, so
+  a recording in progress is lost on every stop, restart and update. The log shows a
+  `[FATAL tini (1)] Unexpected error when forwarding signal` line and no `Shutting down` line, and the exit
+  code is 1.
+
+The automated test checks the KILL, DAC_OVERRIDE and FOWNER cases. The CHOWN, SETUID and SETGID messages
+are worked out from the start-up script, not tested.
+
+### Checking it works
+
+Run these after turning it on. The pass is the log line and the exit code in step 5, **not** how quickly
+the container restarts: without KILL it also stops quickly, because it is killed.
+
+1. The flags applied:
+   `docker inspect -f '{{.HostConfig.CapDrop}} {{.HostConfig.CapAdd}} {{.HostConfig.SecurityOpt}}' nightlight`
+   shows `ALL`, the six capabilities (Docker may write them as `CAP_CHOWN` and so on) and
+   `no-new-privileges=true`.
+2. The start-up log (`docker logs nightlight`) has no `could not tighten` line.
+3. Every camera streams.
+4. Start a manual recording and, while it is recording, stop the container: `docker stop nightlight`.
+5. `docker inspect -f '{{.State.ExitCode}}' nightlight` prints `0`, and the end of `docker logs nightlight`
+   shows `Shutting down - stopping transcoders and MediaMTX.`
+6. Start the container again (`docker start nightlight`) and check that the recording was saved.
+
+On Unraid, run the commands in the Unraid terminal; the template names the container `nightlight`.
+
+### Turning it off
+
+On Unraid, set **Extra Parameters** back to `--log-opt max-size=10m --log-opt max-file=3 --stop-timeout 30`
+and apply. With Compose, comment the lines out again and run `docker compose up -d`. Nothing in the data
+directory depends on the hardening, so you can turn it off at any time.
+
 ## Logs
 
 Use Docker's logs to check what the app and MediaMTX are doing. Both log to stdout, which Docker captures:

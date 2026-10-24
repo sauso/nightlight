@@ -9,6 +9,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- **Optional container hardening, documented and tested (#553).** You can now run the container with only the six
+  Linux capabilities it needs (`--cap-drop=ALL` plus CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETUID and SETGID) and
+  `no-new-privileges`. Nothing changes unless you add it: the Compose file has the lines commented out, and the Unraid
+  template is unchanged. A new CI job starts the image that way and checks that it streams, stops cleanly and starts
+  again on the same data, and that leaving out KILL, DAC_OVERRIDE or FOWNER fails the way the docs describe. It is
+  tested on bridge networking only; host networking, the Unraid default, is not yet. It does not separate FFmpeg from
+  the database. See [docs/operations.md](docs/operations.md#hardening-the-container-optional), including the exact
+  Unraid **Extra Parameters** (keep the existing log and stop-timeout flags) and how to check it worked.
+
 ### Changed
 
 - **An alert or link from another server now asks before the app switches, and only offers servers the app
