@@ -15,6 +15,7 @@ import LiveMonitor from './components/LiveMonitor.jsx';
 import ServerUnreachable from './components/ServerUnreachable.jsx';
 import InstallPrompt from './components/InstallPrompt.jsx';
 import PushBanner from './components/PushBanner.jsx';
+import ServerSwitchPrompt from './components/ServerSwitchPrompt.jsx';
 import Login from './pages/Login.jsx';
 import Children from './pages/Children.jsx';
 import Cameras from './pages/Cameras.jsx';
@@ -225,6 +226,11 @@ export default function App() {
           <Shell />
         </SettingsProvider>
       </AuthProvider>
+      {/* #559: asks before an alert or link moves the app to another server. Outside AuthProvider and Shell on
+          purpose: Shell renders nothing while sign-in is resolving and only the "can't reach the server" page
+          when that fails, and the dialog must still appear then; it needs no sign-in (the saved-server list is
+          the phone's own). */}
+      <ServerSwitchPrompt />
     </ErrorBoundary>
   );
 }

@@ -3,6 +3,7 @@
 // Safe to import everywhere: in a normal browser every function is a no-op,
 // so the web app behaves exactly as before. Only inside the Capacitor
 // WebView does isNativeApp() return true and the plugin calls do anything.
+import { api, getToken } from './api.js';
 
 // Tracks which cameras are currently in Background listening mode across the
 // whole app. The foreground service is a single app-wide thing, so we start
@@ -187,18 +188,179 @@ export function currentServerOrigin() {
   }
 }
 
-// Switch the native shell to a DIFFERENT already-known-good server and reboot into it (used when a
-// push/deep link from another Nightlight server than the one on screen is tapped — e.g. a prod alert
-// while the app is showing dev). Like changeServer, tears down all playback + the background-audio
-// service first so the old server's audio doesn't survive the switch. save() re-validates the
-// address (/api/health) and rejects if unreachable, in which case we stay put. Returns whether the
-// switch was initiated (false if not native, no URL, same server, or validation failed).
+// --- Switching server from an alert or link (#559) ---
+// An alert or link can name the server it came from, so tapping a prod alert while the app shows a staging
+// copy opens prod. That name arrives from OUTSIDE the app, so it is only ever a REQUEST: the app switches
+// only to a server already in this phone's saved list (ServerConfig.list(), the same list the setup screen
+// shows), and only after the person taps Switch. An address that is not on the list is refused, with no
+// offer to add it from here: adding a server stays a deliberate step on the setup screen.
+//
+// ⚠️ The saved list is a FILTER, not a list of servers someone vetted: older app versions added a server to it
+// whenever one answered its health check. So every switch still asks, and the docs tell people to review
+// their saved servers (the setup screen has a ✕ to forget one).
+
+// The one shape of address accepted from a request: scheme, host and optional port, at most one trailing
+// slash. Mirrors the server's normalizeBaseUrl (backend/src/lib/push.js), which builds the address the
+// server's own links carry, and for the same reason it checks the RAW string BEFORE `new URL()`: the WHATWG
+// parser quietly turns `https:\\host`, `https://host?`, `https://user@host` or a tab inside the host into a
+// clean origin, so validating only what it returns would accept all of them. No `@`, `/`, `?`, `#`, `\` or
+// whitespace can get through the host part, which rules out credentials, paths, queries and fragments in one
+// place. A non-ASCII host is refused (its punycode `xn--` form is accepted): window.location.origin and the
+// server's links are always the punycode form, so nothing legitimate is lost.
+const REQUEST_ORIGIN_SHAPE = /^https?:\/\/(?:[a-z0-9._-]+|\[[0-9a-f:.]+\])(?::\d{1,5})?\/?$/i;
+// The server's bound too: a maximum-length DNS name is 253 characters, so this only bounds hostile input.
+const MAX_ORIGIN_LENGTH = 255;
+
+// The canonical form of an address, or null when it is not a plain http(s) origin. Canonical = what
+// `new URL().origin` gives: lower-case scheme and host, default port dropped (`:443` on https), no trailing
+// slash. A trailing dot is NOT stripped and http and https are different origins, so `https://host.` and
+// `http://host` never equal `https://host`. Compare the results with ===, nothing looser.
+export function canonicalOrigin(value) {
+  if (typeof value !== 'string') return null;
+  const s = value.trim();
+  if (!s || s.length > MAX_ORIGIN_LENGTH) return null;
+  if (!REQUEST_ORIGIN_SHAPE.test(s)) return null;
+  try {
+    // `new URL` still rejects what the pattern cannot: a port above 65535, an impossible IPv6 literal.
+    return new URL(s).origin;
+  } catch {
+    return null;
+  }
+}
+
+// The entry in this phone's saved-server list that IS `target` (already canonical), or null. Returns the
+// stored string itself, exactly as the app saved it, so a switch hands the native side its own value and
+// never a string that came from the request. An entry that is not a plain origin (or a list that cannot be
+// read: an old app, iOS without the method) matches nothing, which refuses rather than guesses.
+async function savedServerFor(target) {
+  const p = window.Capacitor?.Plugins?.ServerConfig;
+  if (!p || !target) return null;
+  try {
+    const res = await p.list();
+    const servers = Array.isArray(res?.servers) ? res.servers : [];
+    return servers.find((s) => typeof s === 'string' && canonicalOrigin(s) === target) || null;
+  } catch {
+    return null;
+  }
+}
+
+// The address the server on screen gives out in its own links (GET /api/about `publicBaseUrl`, learned from an
+// admin's phone; docs/notifications.md "Where tapping an alert opens"). A household can reach one server by two
+// addresses (one at home, one over the internet), and those links carry only the one the server learned last,
+// so a phone that saved the other address would otherwise be asked to "switch" to the server it is already on.
+// Asked of the TRUSTED server already loaded, never of the address in the request. Only with a sign-in token
+// (the route needs one, and a request without it would only fail); any failure means "no advertised address".
+async function advertisedOrigin() {
+  try {
+    if (!getToken()) return null;
+    const about = await api.get('/about');
+    return canonicalOrigin(about?.publicBaseUrl);
+  } catch {
+    return null;
+  }
+}
+
+// What is showing: null, or { id, kind: 'confirm' | 'refused', origin, entry }. `origin` is the canonical
+// origin (all the dialog ever shows, never a full URL); `entry` is the saved-list string a confirm would switch
+// to. Read through useSyncExternalStore by components/ServerSwitchPrompt.jsx, mounted once at the app root.
+let serverPrompt = null;
+const serverPromptSubs = new Set();
+// Each request takes a number; only the newest may still change what shows. The checks below wait on two
+// lookups, so without this an older request whose lookups finished last would replace the newer one's dialog.
+let serverRequestSeq = 0;
+
+function setServerPrompt(next) {
+  serverPrompt = next;
+  serverPromptSubs.forEach((cb) => { try { cb(); } catch { /* one bad subscriber must not stop the rest */ } });
+}
+
+export function getServerSwitchPrompt() {
+  return serverPrompt;
+}
+
+export function subscribeServerSwitchPrompt(callback) {
+  serverPromptSubs.add(callback);
+  return () => serverPromptSubs.delete(callback);
+}
+
+// Stay, OK, ✕, Escape or a tap outside: close the dialog and change nothing. Only the dialog with this id, so
+// a late close from a dialog that a newer request has already replaced cannot close the new one.
+export function dismissServerSwitchPrompt(id) {
+  if (serverPrompt && serverPrompt.id === id) setServerPrompt(null);
+}
+
+// Switch, from the confirm dialog with this id. switchServer checks the saved list again itself, so a server
+// forgotten while the dialog was open is refused here too. Returns switchServer's answer.
+export async function confirmServerSwitch(id) {
+  const prompt = serverPrompt;
+  if (!prompt || prompt.id !== id || prompt.kind !== 'confirm') return false;
+  return switchServer(prompt.entry);
+}
+
+// Handle a request to open another server, from a tapped alert or link. Returns what happened, so the caller
+// knows whether a dialog is now in charge:
+//   'same'        - it names the server on screen (or the address that server gives out): nothing to ask, the
+//                   caller opens the screen in place, as before.
+//   'invalid'     - not a plain http(s) origin: ignored, nothing switches, the caller opens in place.
+//   'unavailable' - not in the native app: there is no other server to switch to.
+//   'asked'       - the server is in the saved list: the confirm dialog is showing; only Switch changes server.
+//   'refused'     - it is not: the refusal dialog is showing, with a single OK.
+//   'superseded'  - a newer request arrived while this one was being checked; that one decides.
+// Nothing here contacts the requested address. The only lookups are the phone's own saved list and the server
+// already on screen; the native save() that tests the new server's health runs only after Switch.
+// The newest request wins, so it also replaces (or, when it needs no dialog, closes) any dialog still open.
+export async function requestServerSwitch(raw) {
+  const seq = ++serverRequestSeq;
+  const target = canonicalOrigin(raw);
+  if (!target) { setServerPrompt(null); return 'invalid'; }
+  if (target === canonicalOrigin(currentServerOrigin())) { setServerPrompt(null); return 'same'; }
+  if (!window.Capacitor?.Plugins?.ServerConfig) { setServerPrompt(null); return 'unavailable'; }
+  const [advertised, entry] = await Promise.all([advertisedOrigin(), savedServerFor(target)]);
+  if (seq !== serverRequestSeq) return 'superseded';
+  if (advertised && advertised === target) { setServerPrompt(null); return 'same'; }
+  setServerPrompt(entry ? { id: seq, kind: 'confirm', origin: target, entry } : { id: seq, kind: 'refused', origin: target });
+  return entry ? 'asked' : 'refused';
+}
+
+// The window event the native shell fires when it is holding a server request from a tapped link, for an app
+// that is already open. A cold start fires nothing (the page was not loaded yet), so the app also asks once on
+// load; components/ServerSwitchPrompt.jsx does both.
+export const SERVER_REQUEST_EVENT = 'nightlightServerRequest';
+
+// Collect the request the native shell is holding, if any (ServerConfig.takePending() -> { server | null },
+// which also clears it, so a request is handled once), and handle it like any other. iOS and app versions from
+// before this change have no takePending and reject: that is "nothing pending", never an error on screen.
+// A link opens the app where it already was, so 'same' needs nothing further here.
+export async function takePendingServerRequest() {
+  const p = window.Capacitor?.Plugins?.ServerConfig;
+  if (!p) return null;
+  let server = null;
+  try {
+    const res = await p.takePending();
+    server = typeof res?.server === 'string' ? res.server : null;
+  } catch {
+    return null;
+  }
+  if (!server) return null;
+  return requestServerSwitch(server);
+}
+
+// Switch the native shell to a DIFFERENT server that is ALREADY in this phone's saved list, and reboot into
+// it. Called only from the confirm dialog's Switch (confirmServerSwitch). The saved-list check is HERE, inside
+// the one function that switches, so no caller, present or future, can switch to an address the phone does
+// not know, and it hands save() the saved entry's own string, never the caller's. Like changeServer, tears
+// down all playback + the background-audio service first so the old server's audio doesn't survive the
+// switch. save() re-validates the address (/api/health) and rejects if unreachable, in which case we stay
+// put. Returns whether the switch was initiated (false if not native, not a plain origin, same server, not in
+// the saved list, or validation failed).
 export async function switchServer(rawUrl) {
   const p = window.Capacitor?.Plugins?.ServerConfig;
   if (!p || !rawUrl) return false;
-  const target = String(rawUrl).replace(/\/+$/, '');
-  if (!/^https?:\/\//i.test(target)) return false; // only absolute http(s) origins
-  if (target === currentServerOrigin()) return false; // already here — caller navigates in place
+  const target = canonicalOrigin(rawUrl);
+  if (!target) return false; // only plain http(s) origins
+  if (target === canonicalOrigin(currentServerOrigin())) return false; // already here — caller navigates in place
+  const entry = await savedServerFor(target);
+  if (!entry) return false; // not a server this phone has saved: refuse, before anything is torn down
   try {
     document.querySelectorAll('audio, video').forEach((el) => {
       try { el.pause(); } catch { /* ignore */ }
@@ -212,7 +374,7 @@ export async function switchServer(rawUrl) {
     await plugin()?.stop();
   } catch { /* ignore */ }
   try {
-    await p.save({ url: target }); // rejects if unreachable — leaves the active server untouched
+    await p.save({ url: entry }); // rejects if unreachable — leaves the active server untouched
     await p.restart();
     return true;
   } catch (err) {

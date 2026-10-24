@@ -6,7 +6,7 @@
 // at runtime via the native FirebaseInit plugin, then registers for FCM. So each server uses its own
 // Firebase project. Push is per-device opt-in (a Notifications toggle in Account).
 import { api } from './api.js';
-import { isNativeApp, switchServer, currentServerOrigin } from './nativeBridge.js';
+import { isNativeApp, requestServerSwitch } from './nativeBridge.js';
 
 // Must match the backend's ANDROID_CHANNEL (lib/push.js).
 const CHANNEL_ID = 'nightlight_alerts';
@@ -63,15 +63,17 @@ async function ensureListeners(PN) {
   });
   await PN.addListener('registrationError', () => {});
   // Tapping an alert opens the app to the nursery (the alerting camera's tile is there). If the
-  // alert came from a DIFFERENT server than the one on screen (data.server, stamped per-device by
-  // the backend), switch the app to it first — a prod alert tapped while the app is showing dev
-  // should open prod. switchServer reboots the shell into that server (nothing after it runs), so a
-  // same-server alert (or a non-native context) falls through to navigating in place.
+  // alert names a DIFFERENT server than the one on screen (data.server, stamped per-device by the
+  // backend; a prod alert tapped while the app is showing dev), it goes through the same check as any
+  // other request to change server (#559, requestServerSwitch): the app asks first, and only offers a
+  // server already saved on this phone. While that dialog is up the person decides there, so the app
+  // does NOT also move to the nursery underneath it: Stay leaves them exactly where they were. A
+  // same-server alert, one with no server, or one whose address is unusable opens in place, as before.
   await PN.addListener('pushNotificationActionPerformed', async (action) => {
     const server = action?.notification?.data?.server || null;
-    if (server && server.replace(/\/+$/, '') !== currentServerOrigin()) {
-      const switched = await switchServer(server);
-      if (switched) return; // shell is rebooting into the other server
+    if (server) {
+      const outcome = await requestServerSwitch(server);
+      if (outcome === 'asked' || outcome === 'refused' || outcome === 'superseded') return;
     }
     window.location.hash = '#/';
   });

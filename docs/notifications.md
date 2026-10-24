@@ -257,8 +257,10 @@ including the sleep report with a child's name (see
 
 ## Where tapping an alert opens (nothing to configure)
 
-Tapping an alert opens the app on *this* server, even if the app was last showing a different one (say
-a staging copy). How the alert knows which server that is depends on the channel:
+Tapping an alert can open the app on *this* server even if the app was last showing a different one (say
+a staging copy). The app asks before it switches, and only offers a server already saved in it; see
+[Tapping an alert from another server](mobile.md#tapping-an-alert-from-another-server). How the alert
+knows which server it came from depends on the channel:
 
 - **Firebase (the Android app's own notifications).** Each phone's alert carries the address *that
   phone* uses to reach the server, taken from its own registration — so a phone on your home network

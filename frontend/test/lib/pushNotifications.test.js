@@ -8,6 +8,8 @@ const apiGet = vi.fn();
 const apiPost = vi.fn();
 vi.mock('../../src/lib/api.js', () => ({
   api: { get: (...args) => apiGet(...args), post: (...args) => apiPost(...args) },
+  // nativeBridge's server-switch check (#559) reads it; null = signed out, so it never asks /about here.
+  getToken: () => null,
 }));
 
 const ENABLED_KEY = 'nightlight_notifications_enabled';
@@ -105,6 +107,69 @@ describe('a plain sign-out then sign-in, without restarting the app, still re-re
 
     await initPushNotifications();
     expect(PushNotifications.register).toHaveBeenCalledTimes(1);
+  });
+});
+
+// #559: tapping an alert that names another server used to switch the app to it straight away. It now goes
+// through requestServerSwitch, like any other request: a dialog, only for a server already saved on the phone,
+// and while that dialog is up the app does not also move to the nursery underneath it. The dialog's own rules
+// are in serverSwitch.test.js; this pins that the tap is wired to them and never switches by itself.
+describe('★ #559 tapping an alert from another server asks first', () => {
+  const GOOD = 'https://good.example';
+  let ServerConfig;
+  let nb;
+
+  async function tapWith(server, { servers = [] } = {}) {
+    const { PushNotifications } = stubCapacitorNative();
+    ServerConfig = {
+      list: vi.fn().mockResolvedValue({ servers, active: window.location.origin }),
+      save: vi.fn().mockResolvedValue({}),
+      restart: vi.fn().mockResolvedValue(undefined),
+    };
+    window.Capacitor.Plugins.ServerConfig = ServerConfig;
+    localStorage.setItem(ENABLED_KEY, '1');
+    await initPushNotifications();
+    // The same module instance pushNotifications.js imported (both loaded after this test's resetModules).
+    nb = await import('../../src/lib/nativeBridge.js');
+    const onTap = PushNotifications.addListener.mock.calls.find(([e]) => e === 'pushNotificationActionPerformed')[1];
+    window.location.hash = '#/children/kid-1'; // where the person was when the alert came in
+    await onTap({ notification: { data: server === undefined ? {} : { server } } });
+  }
+
+  // The switch assertions come first on purpose: run against the code before #559 they are what fails (it
+  // called save() at once), rather than the dialog lookup, which did not exist then.
+  test('★ an unsaved server: nothing switches, the app stays where it was, and the refusal shows', async () => {
+    await tapWith(GOOD, { servers: ['http://good.example', 'https://good.example.evil'] });
+    expect(ServerConfig.save).not.toHaveBeenCalled();
+    expect(ServerConfig.restart).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe('#/children/kid-1');
+    expect(nb.getServerSwitchPrompt()).toMatchObject({ kind: 'refused', origin: GOOD });
+  });
+
+  test('★ a saved server: nothing switches until Switch, the app stays where it was, and the dialog asks', async () => {
+    await tapWith(`${GOOD}/`, { servers: [GOOD] });
+    expect(ServerConfig.save).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe('#/children/kid-1');
+    expect(nb.getServerSwitchPrompt()).toMatchObject({ kind: 'confirm', origin: GOOD, entry: GOOD });
+  });
+
+  // Opening the nursery (#/) is itself the proof that no dialog took over: the tap returns early when one does.
+  test('an unusable address switches nothing and opens in place, as an alert with no server does', async () => {
+    await tapWith('https://good.example/path', { servers: ['https://good.example/path'] });
+    expect(ServerConfig.save).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe('#/');
+  });
+
+  test('control: an alert from the server on screen, or with no server, opens the nursery with no dialog', async () => {
+    await tapWith(window.location.origin, { servers: [GOOD] });
+    expect(window.location.hash).toBe('#/');
+
+    window.location.hash = '#/children/kid-1';
+    const onTap = window.Capacitor.Plugins.PushNotifications.addListener.mock.calls
+      .find(([e]) => e === 'pushNotificationActionPerformed')[1];
+    await onTap({ notification: { data: {} } });
+    expect(window.location.hash).toBe('#/');
+    expect(ServerConfig.list).not.toHaveBeenCalled();
   });
 });
 
