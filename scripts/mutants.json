@@ -23148,5 +23148,41 @@
     "expect": "killed",
     "tests": ["timelapse-routes.test.js"],
     "namePattern": "hostile neighbours"
+  },
+  {
+    "label": "#851 M1: old frames go after 31 days, before a night at UTC-12 can no longer be re-scored",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "const FRAME_EXPIRE_DAYS = 32;",
+    "replace": "const FRAME_EXPIRE_DAYS = 31;",
+    "expect": "killed",
+    "tests": ["timelapse-expire-frames.test.js"],
+    "namePattern": "^m1:"
+  },
+  {
+    "label": "#851 M2: the old-frames sweep deletes the frames of a night that is being assembled",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "      if (inFlight.has(nightKey(childId, nightDate))) continue; // an encoder is reading these frames",
+    "replace": "      // mutant: no in-flight skip",
+    "expect": "killed",
+    "tests": ["timelapse-expire-frames.test.js"],
+    "namePattern": "^i1:"
+  },
+  {
+    "label": "#851 M3: the old-frames sweep follows a linked child folder and deletes what it points at",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  try { return fs.lstatSync(p).isDirectory(); } catch { return false; }",
+    "replace": "  try { return fs.statSync(p).isDirectory(); } catch { return false; }",
+    "expect": "killed",
+    "tests": ["timelapse-expire-frames.test.js"],
+    "namePattern": "^l1:"
+  },
+  {
+    "label": "#851 M4: the nightly job's tick never runs the old-frames sweep",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": ".then((m) => m.discardExpiredFrames())",
+    "replace": ".then(() => 0)",
+    "expect": "killed",
+    "tests": ["timelapse-expire-frames.test.js"],
+    "namePattern": "^j1:"
   }
 ]

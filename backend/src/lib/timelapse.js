@@ -227,11 +227,22 @@ function pruneChild(childId) {
 // and a pointless card on the child's page. Sampling can't know this in advance — occupancy is only
 // decided once the night is scored — so the frames are collected and then discarded here, by the sweep
 // at the end of this file once that verdict is final (#419), never on the first pass that says `empty`.
-export function discardTimelapseFrames(childId, nightDate) {
+//
+// #851 reuses it for frames that have simply grown too old (discardExpiredFrames, below): `reason` ends the log line,
+// and its default is the original wording, so the empty-night sweep's success line is byte-for-byte what it was.
+// Returns how many frames it discarded, or -1 when the folder is STILL THERE afterwards (#851 plan review): rmrf
+// swallows every error, so a folder that cannot be removed (a permissions problem) used to be reported as discarded,
+// and a sweep that runs every 30 minutes would log that false success on every tick. It says so as a warning instead,
+// for both callers (the empty-night sweep ignores the return value, as before; the old-frames sweep counts on it).
+export function discardTimelapseFrames(childId, nightDate, reason = 'no one in the bed') {
   const dir = frameDir(childId, nightDate);
   const frames = safeReaddir(dir).filter((f) => /^f-\d+\.jpg$/.test(f));
   rmrf(dir);
-  if (frames.length) logger.info(`[timelapse] child ${childId} ${nightDate}: discarded ${frames.length} frame(s) — no one in the bed`);
+  if (fs.existsSync(dir)) {
+    logger.warn(`[timelapse] child ${childId} ${nightDate}: could not delete ${dir} (${reason}); tried again on the next pass`);
+    return -1;
+  }
+  if (frames.length) logger.info(`[timelapse] child ${childId} ${nightDate}: discarded ${frames.length} frame(s) — ${reason}`);
   return frames.length;
 }
 
@@ -371,8 +382,10 @@ async function assembleOnce(childId, nightDate) {
 // LIMITS, deliberately: at most MAX_RETRIES attempts per night per PROCESS, spaced by the job's own 30-minute tick
 // (about 1.5 hours for a transient encoder or storage failure). The count is in memory, not stored (a stored count
 // would be a schema change), so a restart or deploy gives a night that was given up on three more tries. The numbers are
-// unmeasured guesses, not calibrated on any failure we have seen. A night that exhausts them keeps its frames (the only
-// copy; frame deletion is irreversible and an age for it needs data) and logs where they are.
+// unmeasured guesses, not calibrated on any failure we have seen. A night that exhausts them keeps its frames and logs
+// where they are, until it is FRAME_EXPIRE_DAYS (32) days old: then discardExpiredFrames (#851, the frames half of
+// #846) deletes them, so restarts can no longer keep a night's frames, or its retries, going for ever. The in-memory
+// count itself still resets on a restart (#846 stays open for that half).
 const MAX_RETRIES = 3;
 const retryAttempts = new Map(); // nightKey -> attempts made by this process
 let retrying = false;
@@ -428,7 +441,7 @@ export async function retryStrandedTimelapses() {
         const id = await assembleTimelapse(childId, nightDate);
         if (id) retryAttempts.delete(key);
         else if (tried + 1 >= MAX_RETRIES) {
-          logger.warn(`[timelapse] giving up on ${childId} ${nightDate} after ${MAX_RETRIES} tries; its frames stay in ${frameDir(childId, nightDate)} (a restart tries again)`);
+          logger.warn(`[timelapse] giving up on ${childId} ${nightDate} after ${MAX_RETRIES} tries; its frames stay in ${frameDir(childId, nightDate)} until the night is ${FRAME_EXPIRE_DAYS} days old (a restart tries again)`);
         }
       } catch (e) {
         logger.error(`[timelapse] retry of ${childId} ${nightDate} failed: ${e.message}`);
@@ -504,6 +517,103 @@ export function discardFinalEmptyNightFrames() {
     } catch (e) {
       // One bad row (a malformed stored time, say) must not keep every other night's frames on disk.
       logger.error(`[timelapse] empty-night sweep of ${childId} ${nightDate} failed: ${e.message}`);
+    }
+  }
+  return discarded;
+}
+
+// ★ #851 (and the frames half of #846): NO FRAME FOLDER OUTLIVES ITS NIGHT BY MORE THAN ABOUT A MONTH. Frames (about
+// 30 MB a night) were deleted only when the night was assembled, or (#419, above) once its stored verdict was a final
+// `empty`. Everything else kept them until the child was removed: nights stored `no_data`, `no_sleep`, `insufficient`
+// or `off`, nights with no row at all, and an `ok` night whose assembly the retry gave up on (3 tries per process,
+// reset by every restart, #846). Owner decision (2026-10-24): delete them after 30 days.
+//
+// ONE AGE RULE, keyed on the folder's NIGHT DATE only, not on the stored row. A rule per status needs a case for each
+// status and still misses "no row" and "ok but given up"; the age rule covers all of them, and is the one sentence the
+// docs can say: no frame folder stays longer than that.
+//
+// WHY 30 DAYS IS SAFE, and why the comparison is 32 (plan review of #851, Opus, verified by reading): past a certain
+// age nothing can turn a frame folder into a timelapse any more, because no later score can make the night `ok`.
+//   - activity_samples are deleted at created_at < now - 30 days (activityTracker.js RETENTION_DAYS, not configurable)
+//     by a prune that runs once a day, so a minute's sample lives at most about 31 days;
+//   - a night scores only while at least half its window (MIN_COVERAGE_FRAC) has samples, so it can be re-scored until
+//     about 31 days after the MIDDLE of its window (Recompute's `aged_out` is not a date limit: it only refuses a
+//     scored -> unscored downgrade);
+//   - night dates are LOCAL calendar dates (the date the window starts on, in the app timezone) but this rule reads no
+//     timezone: it compares against the UTC calendar. The latest a window's middle can fall, relative to its own date,
+//     is a 24-hour window starting at 23:59 in UTC-12: night D starts at D+1 11:59 UTC, so its middle is D+1 23:59 UTC
+//     and it can be re-scored until about D+32 23:59 UTC;
+//   - this rule deletes night D from D+33 00:00 UTC (`nightDate < UTC date of (now - 32 days)`), after that worst case
+//     (by about a minute in the very worst case: a full-length window, at UTC-12, with a prune that only just missed);
+//     every real setup has more margin. At 31 days even a 19:00-07:00 night in UTC (middle D+1 01:00, re-scorable until
+//     about D+32 01:00) could still be re-scored after its frames had gone, and a US-West or Hawaii night by hours.
+//     Pinned by timelapse-expire-frames.test.js m1 (Etc/GMT+12 and Pacific/Kiritimati, 24-hour window).
+// Before that age nothing is deleted by this rule, so a Recompute inside the window still finds its frames. Users are
+// told "about 32 days" (docs/recording.md), which is what they see.
+//
+// What this leaves, stated (docs/recording.md and the CHANGELOG say the same):
+//   - a night first scored MORE than 32 days after it ended (a server that was off for a month) cannot get a timelapse
+//     any more: its frames are gone first. The first start after updating deletes every such old folder (capped per
+//     pass, below), as #419's first start did for empty nights;
+//   - a forward clock jump (a wrong RTC at boot) makes every folder look old and deletes it, the same exposure as the
+//     activity prune, which would delete the samples too;
+//   - the partial MP4 a failed assembly can leave under timelapse/<child>/ is not touched (out of scope, #850 review D7);
+//   - a child that no longer exists still has its old folders deleted: they are scratch nobody can assemble (the retry
+//     needs the child) or see, and lib/entityPurge.js leaves the folders of a non-UUID id behind on purpose.
+//
+// HOW, and why each guard:
+//   - candidates come from the FRAME FOLDERS (frameNights, the #450 lesson), and a name that is not a plain child-id
+//     segment and a real calendar date is skipped, not trusted (the names come off the disk);
+//   - never through a link (lstat, not stat), at the child folder AND the night folder: rmSync on
+//     `.timelapse-frames/<link>/<night>` would delete whatever the link points at (lib/entityPurge.js refuses links
+//     for the same reason). `.timelapse-frames` itself is used as every other frame path here uses it;
+//   - a night that is being assembled is skipped (in flight: an encoder is reading its frames); the job registers this
+//     pass AFTER the retry, so a night the retry has just started is already marked;
+//   - no clip-storage or free-space gate, and not inside the retry: both would let a full disk stop a delete, which is
+//     what frees space (the #419 reasoning);
+//   - OLDEST FIRST, at most EXPIRE_MAX_PER_PASS folders and about EXPIRE_BUDGET_MS per pass (plan review): rmSync is
+//     synchronous and blocks the server while it runs, and the first start after this change can face months of
+//     folders at a few hundred frames each on a slow array. The rest go on the next 30-minute tick. Both numbers are
+//     unmeasured guesses; the budget is checked between folders, so one folder always goes whole;
+//   - each delete is checked (discardTimelapseFrames returns -1 when the folder is still there), so a folder that
+//     cannot be removed is logged as a warning, never counted or logged as discarded;
+//   - synchronous (no await), so a pass cannot overlap itself; per-night try/catch; never throws; returns the count.
+const FRAME_EXPIRE_DAYS = 32;
+const EXPIRE_MAX_PER_PASS = 20;
+const EXPIRE_BUDGET_MS = 250;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// A real date, not just the shape of one: `2026-02-30` would compare as a date but is no night the sampler named.
+function isCalendarDate(s) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const t = Date.parse(`${s}T00:00:00Z`);
+  return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === s;
+}
+// lstat describes a link itself, so a link (or a stray file) is never a directory here and is left alone.
+function isRealDir(p) {
+  try { return fs.lstatSync(p).isDirectory(); } catch { return false; }
+}
+
+export function discardExpiredFrames() {
+  const nowMs = Date.now();
+  // Strictly-before this UTC date = expired. YYYY-MM-DD strings compare as dates once both are real dates.
+  const cutoff = new Date(nowMs - FRAME_EXPIRE_DAYS * DAY_MS).toISOString().slice(0, 10);
+  const expired = frameNights()
+    .filter(({ childId, nightDate }) => /^[A-Za-z0-9._-]+$/.test(childId) && isCalendarDate(nightDate) && nightDate < cutoff)
+    .sort((a, b) => a.nightDate.localeCompare(b.nightDate) || a.childId.localeCompare(b.childId));
+  let discarded = 0;
+  let attempted = 0;
+  for (const { childId, nightDate } of expired) {
+    // Counted per ATTEMPT, so a folder that keeps failing cannot make one pass try (and warn about) every old folder.
+    // The budget only applies after the first attempt: a slow listing alone must never leave a pass deleting nothing.
+    if (attempted >= EXPIRE_MAX_PER_PASS || (attempted > 0 && Date.now() - nowMs >= EXPIRE_BUDGET_MS)) break;
+    try {
+      if (inFlight.has(nightKey(childId, nightDate))) continue; // an encoder is reading these frames
+      if (!isRealDir(path.join(FRAMES_ROOT, childId)) || !isRealDir(path.join(FRAMES_ROOT, childId, nightDate))) continue;
+      attempted += 1;
+      if (discardTimelapseFrames(childId, nightDate, `the night is more than ${FRAME_EXPIRE_DAYS} days old`) >= 0) discarded += 1;
+    } catch (e) {
+      logger.error(`[timelapse] old-frames sweep of ${childId} ${nightDate} failed: ${e.message}`);
     }
   }
   return discarded;

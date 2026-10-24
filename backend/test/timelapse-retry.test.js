@@ -338,6 +338,11 @@ test('f8: the child\'s open night is left alone: the sampler is still writing it
 });
 
 test('g1: the nightly job\'s tick starts the retry, with or without a night to score', async () => {
+  // The clock is frozen the morning after NIGHT. On the real clock this test would depend on today's date: since #851
+  // the same tick also deletes the frames of any night more than 32 days old, so from late November 2026 NIGHT's frames
+  // would be kept only because that sweep is registered after the retry and skips a night in flight.
+  mock.timers.reset();
+  mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.UTC(2026, 9, 19, 12, 0) });
   runNightlySleepJob();
   await succeed(0);
   await until(() => row()?.status === 'ready', 'the night to become ready');

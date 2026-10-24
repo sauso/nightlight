@@ -562,14 +562,14 @@ test('no duplicate timelapse/notification pass while a night is still provisiona
   // module could not be intercepted this late — see codex-as-second-reviewer memory on mock.module's
   // timing requirements). A real occupied night (not the no-camera default) so the first pass is
   // genuinely SCORED and actually reaches the timelapse decision at all.
-  // Every export the job calls is stubbed (#419 added discardFinalEmptyNightFrames): a missing one makes the
+  // Every export the job calls is stubbed (#419 added discardFinalEmptyNightFrames, #851 discardExpiredFrames): a missing one makes the
   // job's call throw inside its own catch, so the tick would quietly stop short of what it does in production.
   layNight3([[at3(19, 0), at3(19, 10)], [at3(23, 0), at3(23, 6)], [at3(1, 0, 1), at3(1, 9, 1)]], at3(7, 0, 1));
   const assembleCalls = t.mock.fn();
   t.mock.module('../src/lib/timelapse.js', {
     namedExports: {
       assembleTimelapse: assembleCalls, discardTimelapseFrames: t.mock.fn(), retryStrandedTimelapses: async () => 0,
-      discardFinalEmptyNightFrames: t.mock.fn(),
+      discardFinalEmptyNightFrames: t.mock.fn(), discardExpiredFrames: t.mock.fn(),
     },
   });
   const flush = () => new Promise((r) => setImmediate(r));
@@ -600,7 +600,7 @@ test('★ a no_data first pass must not waste a timelapse assembly — it waits 
   t.mock.module('../src/lib/timelapse.js', {
     namedExports: {
       assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls, retryStrandedTimelapses: async () => 0,
-      discardFinalEmptyNightFrames: t.mock.fn(),
+      discardFinalEmptyNightFrames: t.mock.fn(), discardExpiredFrames: t.mock.fn(),
     },
   });
   const flush = () => new Promise((r) => setImmediate(r));
@@ -642,7 +642,7 @@ test('a night a parent marked "no one was in the bed" still gets its timelapse �
   t.mock.module('../src/lib/timelapse.js', {
     namedExports: {
       assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls, retryStrandedTimelapses: async () => 0,
-      discardFinalEmptyNightFrames: t.mock.fn(),
+      discardFinalEmptyNightFrames: t.mock.fn(), discardExpiredFrames: t.mock.fn(),
     },
   });
   t.after(() => db.prepare('DELETE FROM sleep_reviews WHERE child_id = ?').run(KID));
@@ -671,7 +671,7 @@ test('a night corrected while its stored row was still no_data is not frozen the
   t.mock.module('../src/lib/timelapse.js', {
     namedExports: {
       assembleTimelapse: assembleCalls, discardTimelapseFrames: discardCalls, retryStrandedTimelapses: async () => 0,
-      discardFinalEmptyNightFrames: t.mock.fn(),
+      discardFinalEmptyNightFrames: t.mock.fn(), discardExpiredFrames: t.mock.fn(),
     },
   });
   t.after(() => db.prepare('DELETE FROM sleep_reviews WHERE child_id = ?').run(KID));
