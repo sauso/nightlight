@@ -20,9 +20,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   Recording, MQTT and the push services), Account's name and password ticks, the two-factor "Copied" tick, the
   download tick in the video player, the camera report button and the camera tile (recording error, restarting,
   rebooting). Nothing you would have seen; it could raise a stray error and make an automated check fail at random.
-- **The pull-to-refresh spinner on the live view no longer leaves a timer running if you leave the screen (#855).** After
-  a pull-down refresh the spinner is held for a moment before it resets; that timer is now cancelled when the live view
-  closes, and is not started if the refresh finishes after you have gone.
+- **The pull-to-refresh spinner on the live view no longer leaves a timer running when the live view is torn down (#855).**
+  After a pull-down refresh the spinner is held for a moment before it resets; that timer is now cancelled when the live
+  view is removed from the page (for example on signing out), and is not started if the refresh finishes after that.
+  While the live view stays on the page the spinner resets as before, even if you move to another screen.
   Each of those timers is now cancelled when you leave the screen.
 
 ## [0.43.0] - 2026-10-24
