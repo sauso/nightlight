@@ -150,7 +150,10 @@ A rebuilt image is tested before the tag moves to it (#566). Each image is built
 without a tag. That exact image is started with a synthetic camera and has to deliver live video and
 AAC audio over HLS, and its arm64 version has to start ffmpeg, MediaMTX and the database driver. Only
 then is `:latest` or `:dev` pointed at it, by digest, so the tag serves the bytes that were tested,
-SBOM and provenance included. If any check fails, the tag stays on the image it had and the run fails.
+SBOM and provenance included. If the build or any check fails, the tag stays on the image it had and the
+run fails. After the tag moves, the run reads it back and checks it points at the tested image; if that
+check ever fails the run is red, the tag may already have moved, and the run summary prints the command
+that points it back. If `main` or `dev` gets a newer commit while the rebuild runs, that run leaves the tag alone.
 
 What the test does not cover:
 

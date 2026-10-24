@@ -14,8 +14,10 @@ name: Weekly image rebuild
 # BUILD ONCE, TEST THOSE BYTES, PROMOTE THOSE BYTES (#566). Each branch is built once and pushed
 # WITHOUT a tag (by digest). That one digest is smoke-tested: the e2e pipeline prove-out
 # (e2e/prove.sh) plus an AAC audio check on amd64, and a start check of the arm64 variant. Only when
-# all of them pass is :latest / :dev pointed at that same digest. A failure anywhere leaves the tag
-# exactly where it was and turns the run red. Until #566 the rebuild pushed :latest / :dev directly,
+# all of them pass is :latest / :dev pointed at that same digest. A failure in the build or any test
+# leaves the tag exactly where it was and turns the run red. (The one failure AFTER the tag moves is
+# the read-back below: the run is red, the summary prints the one-line rollback, and the tag may
+# already have moved. Codex review of #566.) Until #566 the rebuild pushed :latest / :dev directly,
 # untested. Deploy is still manual: nothing here touches a running container (pull the refreshed tag
 # on Unraid via the guard script to apply the patches). docs/operations.md, "The weekly rebuild".
 #
