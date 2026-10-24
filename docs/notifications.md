@@ -258,7 +258,8 @@ including the sleep report with a child's name (see
 ## Where tapping an alert opens (nothing to configure)
 
 Tapping an alert can open the app on *this* server even if the app was last showing a different one (say
-a staging copy). The app asks before it switches, and only offers a server already saved in it; see
+a staging copy). The app asks before it switches, and only offers a server already saved in it (for the
+app's own alerts today; for Pushover, ntfy and Gotify links, once the Android app is updated); see
 [Tapping an alert from another server](mobile.md#tapping-an-alert-from-another-server). How the alert
 knows which server it came from depends on the channel:
 

@@ -277,11 +277,59 @@ describe('★ switchServer checks the saved list itself', () => {
     expect(SC.save).not.toHaveBeenCalled();
   });
 
-  test('a saved server that does not answer: no restart, and false', async () => {
+  test('★ a saved server that does not answer: no restart, false, and NOTHING torn down (listening and players kept)', async () => {
     const SC = stubNative({ servers: [GOOD] });
     SC.save.mockRejectedValue(new Error('unreachable'));
+    const video = document.createElement('video');
+    video.setAttribute('src', 'blob:keep-me');
+    document.body.appendChild(video);
     expect(await nb.switchServer(GOOD)).toBe(false);
     expect(SC.restart).not.toHaveBeenCalled();
+    // save() is tried FIRST: a failed Switch must leave the app as it was (Opus review of #862).
+    expect(window.Capacitor.Plugins.BackgroundAudio.stop).not.toHaveBeenCalled();
+    expect(video.getAttribute('src')).toBe('blob:keep-me');
+    video.remove();
+  });
+
+  test('a switch that goes ahead: save first, then the teardown, then restart', async () => {
+    const SC = stubNative({ servers: [GOOD] });
+    expect(await nb.switchServer(GOOD)).toBe(true);
+    const stop = window.Capacitor.Plugins.BackgroundAudio.stop;
+    expect(SC.save.mock.invocationCallOrder[0]).toBeLessThan(stop.mock.invocationCallOrder[0]);
+    expect(stop.mock.invocationCallOrder[0]).toBeLessThan(SC.restart.mock.invocationCallOrder[0]);
+  });
+});
+
+describe('★ confirmServerSwitch: one Switch at a time', () => {
+  test('★ two taps in flight at once save and restart ONCE', async () => {
+    const SC = stubNative({ servers: [GOOD] });
+    let release;
+    SC.save.mockImplementation(() => new Promise((resolve) => { release = () => resolve({}); }));
+    await nb.requestServerSwitch(GOOD);
+    const { id } = nb.getServerSwitchPrompt();
+    const first = nb.confirmServerSwitch(id);
+    const second = nb.confirmServerSwitch(id);
+    expect(await second).toBe(false); // refused at once: the first is still running
+    await vi.waitFor(() => expect(typeof release).toBe('function')); // the first reaches save() after its list lookup
+    release();
+    expect(await first).toBe(true);
+    expect(SC.save).toHaveBeenCalledTimes(1);
+    expect(SC.restart).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('★ the dialog does not wait on a server that is not answering', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  test('★ with the server on screen silent, the request is judged on the saved list after 3 s, not 30 s', async () => {
+    localStorage.setItem('nightlight_token', 't');
+    vi.useFakeTimers();
+    fetchSpy.mockImplementation(() => new Promise(() => {})); // /api/about never answers
+    stubNative({ servers: [GOOD] });
+    const pending = nb.requestServerSwitch(GOOD);
+    await vi.advanceTimersByTimeAsync(3100);
+    expect(await pending).toBe('asked');
+    expect(nb.getServerSwitchPrompt()).toMatchObject({ kind: 'confirm', origin: GOOD });
   });
 });
 

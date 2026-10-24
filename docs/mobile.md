@@ -131,4 +131,8 @@ Good to know:
 - **The Nightlight app's own alerts (Firebase) ask from this version of the server on.** Alerts from
   Pushover, ntfy and Gotify open the app through a link the Android app handles itself, so for those the
   question needs the next Android app release; until you update the app, those taps work as they did before.
+- **A server you reach at two addresses (say, one at home and one over the internet):** an alert's link
+  carries only the one address your server knows from the last admin phone. If you saved your other server
+  under a different address than that, the app treats the link as a server it hasn't been connected to.
+  Save the address the alert uses once (**Settings → Change server**) and either works.
 - On iPhone the app never switches server from an alert, so there is nothing to ask.

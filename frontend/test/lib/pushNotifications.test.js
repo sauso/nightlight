@@ -171,6 +171,16 @@ describe('★ #559 tapping an alert from another server asks first', () => {
     expect(window.location.hash).toBe('#/');
     expect(ServerConfig.list).not.toHaveBeenCalled();
   });
+
+  test('★ a later alert that names no other server closes the dialog an earlier one left open', async () => {
+    await tapWith(GOOD, { servers: [GOOD] });
+    expect(nb.getServerSwitchPrompt()).toMatchObject({ kind: 'confirm' });
+    const onTap = window.Capacitor.Plugins.PushNotifications.addListener.mock.calls
+      .find(([e]) => e === 'pushNotificationActionPerformed')[1];
+    await onTap({ notification: { data: {} } }); // the newest tap carries on in place
+    expect(window.location.hash).toBe('#/');
+    expect(nb.getServerSwitchPrompt()).toBeNull(); // so Stay never has to undo it from under a stale question
+  });
 });
 
 describe('disableNotifications (the pre-existing toggle-off path)', () => {

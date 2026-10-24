@@ -6,7 +6,7 @@
 // at runtime via the native FirebaseInit plugin, then registers for FCM. So each server uses its own
 // Firebase project. Push is per-device opt-in (a Notifications toggle in Account).
 import { api } from './api.js';
-import { isNativeApp, requestServerSwitch } from './nativeBridge.js';
+import { isNativeApp, requestServerSwitch, closeServerSwitchPrompt } from './nativeBridge.js';
 
 // Must match the backend's ANDROID_CHANNEL (lib/push.js).
 const CHANNEL_ID = 'nightlight_alerts';
@@ -75,6 +75,9 @@ async function ensureListeners(PN) {
       const outcome = await requestServerSwitch(server);
       if (outcome === 'asked' || outcome === 'refused' || outcome === 'superseded') return;
     }
+    // Carrying on in place is the newest tap, so it also closes a dialog an older tap left open: otherwise Stay would
+    // leave the person on the nursery this tap moved them to, under a question about a tap they have moved past.
+    closeServerSwitchPrompt();
     window.location.hash = '#/';
   });
   // A push that arrives while the app is in the FOREGROUND is not shown in the system tray by

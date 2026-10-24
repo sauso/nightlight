@@ -253,7 +253,10 @@ async function savedServerFor(target) {
 async function advertisedOrigin() {
   try {
     if (!getToken()) return null;
-    const about = await api.get('/about');
+    // A short deadline (Opus review of #862): when the server on screen is not answering (a phone off home Wi-Fi still
+    // pointed at a LAN address), this is the lookup the dialog waits on, and the default 30 s made it appear half a
+    // minute late. No answer in 3 s just means "no advertised address", and the request is judged on the saved list.
+    const about = await api.get('/about', { timeoutMs: 3000 });
     return canonicalOrigin(about?.publicBaseUrl);
   } catch {
     return null;
@@ -291,10 +294,27 @@ export function dismissServerSwitchPrompt(id) {
 
 // Switch, from the confirm dialog with this id. switchServer checks the saved list again itself, so a server
 // forgotten while the dialog was open is refused here too. Returns switchServer's answer.
+//
+// One Switch at a time (Codex review of #862): two calls in flight both passed the checks and each ran save() and
+// restart(). The dialog's button is disabled while it is busy, but the guarantee belongs here, with the function that
+// acts, not in a button.
+let confirming = false;
 export async function confirmServerSwitch(id) {
   const prompt = serverPrompt;
-  if (!prompt || prompt.id !== id || prompt.kind !== 'confirm') return false;
-  return switchServer(prompt.entry);
+  if (confirming || !prompt || prompt.id !== id || prompt.kind !== 'confirm') return false;
+  confirming = true;
+  try {
+    return await switchServer(prompt.entry);
+  } finally {
+    confirming = false;
+  }
+}
+
+// Close whatever dialog is showing, whichever it is. For a caller that is about to carry on in place and so
+// supersedes it (a tapped alert that names no other server): newest wins, and Stay must then leave the person where
+// that newest tap put them, not under a dialog about an older one.
+export function closeServerSwitchPrompt() {
+  setServerPrompt(null);
 }
 
 // Handle a request to open another server, from a tapped alert or link. Returns what happened, so the caller
@@ -361,6 +381,17 @@ export async function switchServer(rawUrl) {
   if (target === canonicalOrigin(currentServerOrigin())) return false; // already here — caller navigates in place
   const entry = await savedServerFor(target);
   if (!entry) return false; // not a server this phone has saved: refuse, before anything is torn down
+  // save() BEFORE the teardown (Opus review of #862): it tests the new server and rejects when it is unreachable, and a
+  // person who taps Switch and gets "could not reach it" must still have the app exactly as it was, listening
+  // included. With the teardown first, a failed save had already stopped background listening and blanked the
+  // players while the camera tiles still said it was on. save() only stores the address; restart() below is what
+  // actually changes server, so tearing down between the two still runs before anything is reloaded.
+  try {
+    await p.save({ url: entry }); // rejects if unreachable — leaves the active server untouched
+  } catch (err) {
+    console.warn('switchServer failed', err);
+    return false;
+  }
   try {
     document.querySelectorAll('audio, video').forEach((el) => {
       try { el.pause(); } catch { /* ignore */ }
@@ -374,7 +405,6 @@ export async function switchServer(rawUrl) {
     await plugin()?.stop();
   } catch { /* ignore */ }
   try {
-    await p.save({ url: entry }); // rejects if unreachable — leaves the active server untouched
     await p.restart();
     return true;
   } catch (err) {
