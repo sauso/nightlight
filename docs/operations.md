@@ -138,6 +138,37 @@ than fixed digests (#555 item 5). This picks up compatible base updates on rebui
 same Nightlight commit later may produce different image contents. The revision label identifies the
 app commit, not identical image bytes; use the published image digest when you need that exact image.
 
+### The weekly rebuild
+
+Every Monday, `:latest` (from `main`) and `:dev` (from `dev`) are rebuilt with freshly pulled base
+images and packages, so operating-system security fixes reach those tags without waiting for a
+release. The code and the version number stay the same; **Settings → About** shows the new build
+date. Release tags (`vX.Y.Z`) are never rebuilt. Nothing is deployed for you: pull the tag to get the
+update.
+
+A rebuilt image is tested before the tag moves to it (#566). Each image is built once and uploaded
+without a tag. That exact image is started with a synthetic camera and has to deliver live video and
+AAC audio over HLS, and its arm64 version has to start ffmpeg, MediaMTX and the database driver. Only
+then is `:latest` or `:dev` pointed at it, by digest, so the tag serves the bytes that were tested,
+SBOM and provenance included. If the build or any check fails, the tag stays on the image it had and the
+run fails. After the tag moves, the run reads it back and checks it points at the tested image; if that
+check ever fails the run is red, the tag may already have moved, and the run summary prints the command
+that points it back. If `main` or `dev` gets a newer commit while the rebuild runs, that run leaves the tag alone.
+
+What the test does not cover:
+
+- Only the amd64 image streams in the test. The arm64 image is only checked for starting.
+- The synthetic camera (`bluenviron/mediamtx:latest-ffmpeg`) and the test's HTTPS proxy
+  (`caddy:2-alpine`) are not pinned, so a change in either can fail a rebuild that is fine. The tag
+  then stays on the previous image until the cause is fixed.
+- A rebuilt image has no `org.opencontainers.image.revision` label (only `docker-publish.yml` sets
+  it), so the command above prints nothing for it. **Settings → About** still shows the commit.
+
+Each run's summary on the repository's Actions page lists the digest the tag had before. To go back
+to that image, pull it by digest (`docker pull sauso/nightlight@sha256:<digest>`) or pin a release
+tag. The maintainer can point the tag itself back with
+`docker buildx imagetools create -t sauso/nightlight:latest sauso/nightlight@sha256:<previous digest>`.
+
 ## 2. Stopping cleanly
 
 `docker stop` (or `docker compose down` / `docker compose stop`) sends `SIGTERM` and waits up to

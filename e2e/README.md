@@ -40,6 +40,11 @@ full of other images) can run out of space pulling it.
 CI (`.github/workflows/e2e.yml`) runs both phases on `ubuntu-latest`, on a
 dev → main PR, nightly on dev, and on manual dispatch.
 
+The weekly image rebuild (`.github/workflows/weekly-rebuild.yml`) also runs
+`prove.sh --keep` against each rebuilt image before it moves `:latest` or `:dev`,
+then signs in with the admin account `prove.sh` creates to check the AAC audio
+track. If you change that account or the `--keep` option, update the workflow too.
+
 ## Upgrading Playwright
 
 Move the exact `@playwright/test` version in `playwright/package.json` and the
