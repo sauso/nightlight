@@ -15,6 +15,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- **The detector and recording screens now say what they really do (#374, part of #394).** The Sound screen explains that
+  a confirm of 0 still needs about 0.6 seconds of sound and that the detector spends its first 5 seconds or so learning
+  the room's usual noise; a camera using ONVIF or MQTT motion is told that confirm and sensitivity do not apply to it.
+  The Schedule, **Save a clip when triggered** and **Settings → Recording** screens say that a silenced camera or the
+  alert schedule stops the alert and its clip too, and Recording points to **Cameras → edit → Recording and alerts**.
+  The settings table in [docs/notifications.md](docs/notifications.md) now states that the form's upper limits
+  (confirm 30 s, cooldown 3600 s) are only a suggestion: the server enforces just the lower ends. Nothing about how
+  alerts, clips or limits behave changes; the editable per-camera scope in #394 is still not built.
 - **Account now says its notifications switch applies at once (#384).** In the app, the "Send motion alerts to this device" switch is a setting for the device and takes effect when you change it, while the name and password forms on the same page wait for their own buttons. The page now says so, and the design guide names this as a declared exception to "a Save-button page does not mix". No behaviour changed.
 
 ### Fixed
