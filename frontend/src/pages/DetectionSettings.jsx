@@ -350,8 +350,8 @@ function SoundForm({ d, apply, cameraId }) {
             Sound must persist for the confirm delay before it counts (filters a door slam or cough); cooldown is the
             minimum gap between alerts. Longer than motion by default. Even a confirm of 0 needs about 0.6 seconds of
             sound, and for about 5 seconds after the detector starts it is still learning the room&apos;s usual noise.
-            The form stops at 30 seconds and 3600 seconds, but the server only enforces the lower ends (confirm
-            0, cooldown 1).
+            The form suggests up to 30 seconds and 3600 seconds, but the server only enforces the lower ends (confirm
+            0, cooldown 1); a larger number is kept, rounded to a whole second.
           </div>
           <RecordClipsToggle d={d} apply={apply} />
           <SoundLimits cooldownS={d.sound_cooldown_s} />

@@ -21,7 +21,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   The Schedule, **Save a clip when triggered** and **Settings → Recording** screens say that a silenced camera or the
   alert schedule stops the alert and its clip too, and Recording points to **Cameras → edit → Recording and alerts**.
   The settings table in [docs/notifications.md](docs/notifications.md) now states that the form's upper limits
-  (confirm 30 s, cooldown 3600 s) are the form's only: the server enforces just the lower ends. Nothing about how
+  (confirm 30 s, cooldown 3600 s) are only a suggestion: the server enforces just the lower ends. Nothing about how
   alerts, clips or limits behave changes; the editable per-camera scope in #394 is still not built.
 - **Account now says its notifications switch applies at once (#384).** In the app, the "Send motion alerts to this device" switch is a setting for the device and takes effect when you change it, while the name and password forms on the same page wait for their own buttons. The page now says so, and the design guide names this as a declared exception to "a Save-button page does not mix". No behaviour changed.
 
