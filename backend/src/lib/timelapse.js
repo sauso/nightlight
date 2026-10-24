@@ -71,7 +71,8 @@ const setFailedStmt = db.prepare("UPDATE timelapses SET status='failed' WHERE id
 // last 30 days at any time, with no finality check, and `empty -> ok` is not a downgrade, so a night whose zone was
 // fixed after the delete would be `ok` again with its only video and its frames gone for good. Hiding reads the
 // stored row at list time instead, so that Recompute simply brings the video back. Cost: the file stays on disk
-// until the child's 30 newest ready videos (KEEP_PER_CHILD) age it out, or an admin deletes it. Only the DETECTOR's
+// until the child's 30 newest ready videos (KEEP_PER_CHILD) age it out (the page's Delete button works from this
+// list, so a hidden video has none; the DELETE route by id still works). Only the DETECTOR's
 // verdict (sleep_nights.status) counts: a night a parent marked "No one was in the bed" lives in sleep_reviews and
 // keeps its listed video (docs/recording.md). The video is still served by id; only the listing leaves it out.
 // The anti-join sits inside the LIMIT, so hidden nights never use up the caller's page.
