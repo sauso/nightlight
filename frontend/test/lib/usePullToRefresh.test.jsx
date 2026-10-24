@@ -103,3 +103,46 @@ describe('#562 viewport pull-to-refresh: pinch-zoomed in, a drag is a pan', () =
     expect(onRefresh).not.toHaveBeenCalled();
   });
 });
+
+// #855 follow-up (Codex review of #858): after a refresh the hook holds the spinner for up to MIN_SPIN_MS (600 ms) before it
+// resets; that timer used to be a bare setTimeout, so leaving the dashboard inside that time (or while onRefresh was still
+// running) left a state update for an unmounted component. The spinner timer is the only timer started here with a delay in 1..600.
+describe('#855 follow-up: the spinner-hold timer goes away with the dashboard', () => {
+  const spinnerTimerIds = (setSpy, from) =>
+    setSpy.mock.calls.flatMap((c, i) => (i >= from && c[1] >= 1 && c[1] <= 600 ? [setSpy.mock.results[i].value] : []));
+
+  test('★ unmounting inside the minimum spin time cancels it', async () => {
+    setVisualViewport(undefined);
+    const setSpy = vi.spyOn(globalThis, 'setTimeout');
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+    const { unmount } = render(<Harness onRefresh={onRefresh} />);
+    const el = screen.getByTestId('ptr');
+    touch(el, 'touchstart', 100);
+    touch(el, 'touchmove', 300);
+    const before = setSpy.mock.calls.length;
+    await release(el);
+    const ids = spinnerTimerIds(setSpy, before);
+    expect(ids).toHaveLength(1);
+    expect(clearSpy).not.toHaveBeenCalledWith(ids[0]);
+    unmount();
+    expect(clearSpy).toHaveBeenCalledWith(ids[0]);
+  });
+
+  test('★ a refresh that finishes after the dashboard is gone starts no timer', async () => {
+    setVisualViewport(undefined);
+    const setSpy = vi.spyOn(globalThis, 'setTimeout');
+    let finish;
+    const onRefresh = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    const { unmount } = render(<Harness onRefresh={onRefresh} />);
+    const el = screen.getByTestId('ptr');
+    touch(el, 'touchstart', 100);
+    touch(el, 'touchmove', 300);
+    const before = setSpy.mock.calls.length;
+    await release(el);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    unmount();
+    await act(async () => { finish(); }); // lets the hook's finally block run
+    expect(spinnerTimerIds(setSpy, before)).toHaveLength(0);
+  });
+});
