@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLater } from './useLater.js';
 
 // Custom pull-to-refresh for the camera dashboard. The native browser pull-to-refresh
 // gesture doesn't exist inside the Capacitor WebView (the mobile apps), so "just pull
@@ -33,6 +34,7 @@ function pinchZoomedIn() {
  * @returns {{ containerRef, pull:number, refreshing:boolean, armed:boolean }}
  */
 export function usePullToRefresh({ enabled, onRefresh }) {
+  const later = useLater();
   const containerRef = useRef(null);
   const [pull, setPull] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -113,7 +115,10 @@ export function usePullToRefresh({ enabled, onRefresh }) {
         await onRefreshRef.current?.();
       } finally {
         const remaining = Math.max(0, MIN_SPIN_MS - (Date.now() - startedAt));
-        setTimeout(() => {
+        // `later`, not setTimeout (#855 follow-up): leaving the dashboard inside the spinner's minimum time (or while
+        // onRefresh was still running) must not leave a state update behind for an unmounted component. `later` is
+        // stable, so using it inside this effect's closure does not change when the effect re-runs.
+        later(() => {
           setRefreshingBoth(false);
           setPullBoth(0);
         }, remaining);
