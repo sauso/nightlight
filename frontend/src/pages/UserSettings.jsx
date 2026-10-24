@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
+import { useLater } from '../lib/useLater.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
@@ -57,6 +58,7 @@ function UserSettingsForm() {
   const [removeError, setRemoveError] = useState('');
   const [resetError, setResetError] = useState('');
   const [photoStatus, setPhotoStatus] = useState(''); // '' | 'saving' | 'saved'
+  const later = useLater(); // blanks the "Photo saved" tick; cancelled when the page goes away (#855)
   // #441: true only when this account IS an admin AND is the only one. The backend enforces the
   // invariant either way (routes/auth.js's keepingAnAdmin) - this just explains it before a demotion
   // is even attempted, instead of the caregiver-list screen only learning about it from a 409.
@@ -71,7 +73,7 @@ function UserSettingsForm() {
       await api.put(`/auth/users/${id}`, { photo }, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       if (id === me?.id) await refreshMe();
       setPhotoStatus('saved');
-      setTimeout(() => setPhotoStatus(''), 2000);
+      later(() => setPhotoStatus(''), 2000);
     } catch (err) {
       setError(err.message);
       setPhotoStatus('');

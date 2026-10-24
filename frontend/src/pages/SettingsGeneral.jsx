@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../lib/api.js';
+import { useLater } from '../lib/useLater.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { getCommonTimezones } from '../lib/greeting.js';
 import { FONT_PRESETS } from '../lib/fonts.js';
@@ -34,6 +35,7 @@ export default function SettingsGeneral() {
   const [restored, setRestored] = useState(!!restoredDraft);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  const later = useLater(); // blanks the "Saved" tick; cancelled when the page goes away (#855)
   const [busy, setBusy] = useState(false);
   const [timezones] = useState(getCommonTimezones);
 
@@ -77,7 +79,7 @@ export default function SettingsGeneral() {
         await refresh();
       }
       setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      later(() => setSaved(false), 2500);
     } catch (err) {
       setError(err.message);
     } finally {

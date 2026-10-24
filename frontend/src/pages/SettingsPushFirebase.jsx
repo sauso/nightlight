@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import { useLater } from '../lib/useLater.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 
@@ -11,6 +12,7 @@ export default function SettingsPushFirebase() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  const later = useLater(); // blanks the "Saved" tick; cancelled when the page goes away (#855)
 
   useEffect(() => {
     // ⚠️ On failure the page stays disabled ON PURPOSE, and that is the half worth protecting.
@@ -30,7 +32,7 @@ export default function SettingsPushFirebase() {
     try {
       const next = await api.put('/push/enable', { enabled: fbEnabled });
       setPushStatus(next); setFbEnabled(!!next.push_enabled);
-      setSaved(true); setTimeout(() => setSaved(false), 2500);
+      setSaved(true); later(() => setSaved(false), 2500);
     } catch (err) {
       setError(err.message); setFbEnabled(!!pushStatus?.push_enabled);
     } finally { setBusy(false); }

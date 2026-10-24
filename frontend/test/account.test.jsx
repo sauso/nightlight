@@ -127,6 +127,21 @@ describe('your display name', () => {
     await waitFor(() => expect(auth.refresh).toHaveBeenCalled());
   });
 
+  // #855: the name's "Saved ✓" blanked itself with a bare setTimeout that nothing cancelled (now useLater).
+  test('★ #855: leaving the page cancels the name "Saved" timer', async () => {
+    const setSpy = vi.spyOn(globalThis, 'setTimeout');
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const { user, unmount } = mountAccount();
+    await user.click(await screen.findByRole('button', { name: /Save/ }));
+    await screen.findByText('Saved ✓');
+    // The 2 s timers this screen started (no photo is saved here, so the name's is the only one).
+    const ids = setSpy.mock.calls.flatMap((c, i) => (c[1] === 2000 ? [setSpy.mock.results[i].value] : []));
+    expect(ids).toHaveLength(1);
+    expect(clearSpy).not.toHaveBeenCalledWith(ids[0]);
+    unmount();
+    expect(clearSpy).toHaveBeenCalledWith(ids[0]);
+  });
+
   test('a failed save says why', async () => {
     putSpy = vi.spyOn(api, 'put').mockRejectedValue(new Error('Name is too long'));
     const { user } = mountAccount();

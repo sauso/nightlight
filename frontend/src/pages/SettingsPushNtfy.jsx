@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import { useLater } from '../lib/useLater.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 import SecretField from '../components/SecretField.jsx';
@@ -37,6 +38,7 @@ export default function SettingsPushNtfy() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  const later = useLater(); // blanks the "Saved" tick; cancelled when the page goes away (#855)
   const [testMsg, setTestMsg] = useState(null);
 
   useEffect(() => {
@@ -53,7 +55,7 @@ export default function SettingsPushNtfy() {
       const payload = { enabled: form.enabled, server_url: form.server_url, topic: form.topic, token, username: form.username };
       if (password) payload.password = password;
       const next = await api.put('/ntfy/config', payload);
-      setForm(next); setLastSaved(next); setConfigLoaded(true); setToken(''); setPassword(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
+      setForm(next); setLastSaved(next); setConfigLoaded(true); setToken(''); setPassword(''); setSaved(true); later(() => setSaved(false), 2500);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 

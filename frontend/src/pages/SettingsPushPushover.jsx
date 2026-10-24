@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import { useLater } from '../lib/useLater.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 import SecretField from '../components/SecretField.jsx';
@@ -37,6 +38,7 @@ export default function SettingsPushPushover() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  const later = useLater(); // blanks the "Saved" tick; cancelled when the page goes away (#855)
   const [testMsg, setTestMsg] = useState(null);
 
   useEffect(() => {
@@ -53,7 +55,7 @@ export default function SettingsPushPushover() {
       // Server validates the tokens with Pushover when enabling and 400s if they don't check out.
       // Blank fields keep the saved secrets.
       const next = await api.put('/pushover/config', { enabled: po.enabled, app_token: appToken, user_key: userKey, device: po.device || '' });
-      setPo(next); setLastSaved(next); setConfigLoaded(true); setAppToken(''); setUserKey(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
+      setPo(next); setLastSaved(next); setConfigLoaded(true); setAppToken(''); setUserKey(''); setSaved(true); later(() => setSaved(false), 2500);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 
