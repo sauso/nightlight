@@ -1,6 +1,6 @@
 {
   "name": "babymonitor-backend",
-  "version": "0.42.1",
+  "version": "0.43.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -23,7 +23,7 @@
     "helmet": "^8.0.0",
     "http-proxy-middleware": "^3.0.3",
     "jsonwebtoken": "^9.0.2",
-    "mqtt": "^5.16.0",
+    "mqtt": "^5.16.1",
     "onvif": "^0.8.3",
     "otplib": "^13.5.0",
     "qrcode": "^1.5.4",

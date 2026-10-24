@@ -21,7 +21,8 @@ import { logger } from './logger.js';
 // either. The issue's original framing — one bare call site — was closer to right than the rebuttal to it.
 //
 // What IS demonstrated:
-//   1. `subStream.js:38` — the one genuinely bare `await upsertPath(path)`. Reached only from the
+//   1. `subStream.js` (ensureSubPath, #806: it was line 38 before it moved into startTranscoder's `prepare`, so a
+//      rejection now surfaces as the sub's startTranscoder rejecting) — the one genuinely bare `await upsertPath(path)`. Reached only from the
 //      camera watchdog, and self-correlated: MediaMTX being down is exactly what leaves a sub path
 //      unready for 30s, which is the ONLY condition that reaches it.
 //   2. `db.prepare('SELECT * FROM cameras').all()` at the top of EVERY tick. better-sqlite3 throws

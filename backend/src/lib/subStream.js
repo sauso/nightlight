@@ -35,10 +35,24 @@ export function isSubRunning(cameraId) {
 export async function startSubStream(camera) {
   if (!subConfigured(camera)) return;
   const path = subPathName(camera.mediamtx_path);
-  // `=== false`, never `!`: null means MediaMTX did not answer, and a write we give up on can still land
-  // and drop a live publisher (#451; see isPathConfiguredCorrectly). Skipped now, retried by reconcile.
-  if ((await isPathConfiguredCorrectly(path)) === false) await upsertPath(path);
-  await startTranscoder(subCameraId(camera.id), camera.sub_rtsp_url, path, `${camera.name} (low)`);
+  // #806: the path check and re-create run as the start's own `prepare`, INSIDE the stop generation the queued start
+  // holds (lib/transcoder.js). Awaited here first, as they used to be, nothing was queued during that MediaMTX round
+  // trip, so a disable's stopSubStream (stopTranscoder of `<id>-sub`) bumped nothing and the start queued afterwards
+  // launched a sub transcoder for a disabled camera. This function must still reach startTranscoder with no await before
+  // it: the enable route queues this and the main start in one synchronous block (routes/cameras.js).
+  // Costs, stated: the check now runs after the old sub process has stopped, and a rejected upsertPath leaves the sub
+  // down (the sub watchdog restarts it) where it used to leave the old one running.
+  const ensureSubPath = async (stopped) => {
+    // `=== false`, never `!`: null means MediaMTX did not answer, and a write we give up on can still land
+    // and drop a live publisher (#451; see isPathConfiguredCorrectly). Skipped now, retried by reconcile.
+    if ((await isPathConfiguredCorrectly(path)) === false) {
+      // A stop that landed during the check also removed the sub path: writing it back would re-create what the
+      // disable or delete just took down (the same guard doStart has for the `-hls` path).
+      if (stopped()) return;
+      await upsertPath(path);
+    }
+  };
+  await startTranscoder(subCameraId(camera.id), camera.sub_rtsp_url, path, `${camera.name} (low)`, { prepare: ensureSubPath });
 }
 
 // Tear down the sub-stream transcoder + path. Safe to call even if none is running.

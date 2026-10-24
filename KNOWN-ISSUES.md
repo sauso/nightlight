@@ -147,8 +147,9 @@ doing, and restart the container if cameras are not recovering.
 **What you see:** camera tiles go to "connecting" and then "offline", and the log shows a line like
 `[guard:mediamtx-api] background task failed (continuing): MediamtxTimeoutError: MediaMTX API did not
 answer GET /v3/paths/get/cam_… within 5s`, about once a minute however many cameras are affected.
-There is **no** watchdog restart and **nothing** in Camera history. If you turned on camera-offline
-alerts, you still get the "No video from … for N+ minutes" notification after N minutes.
+There is **no** camera restart and **nothing** in Camera history for the first few minutes. If you turned
+on camera-offline alerts, you still get the "No video from … for N+ minutes" notification after N minutes.
+If the streaming server stays silent, Nightlight restarts it itself (below).
 
 **Why:** Nightlight asks the streaming server (MediaMTX) whether each camera is delivering video
 through MediaMTX's local API, and every one of those requests has a fixed **5-second** deadline. It
@@ -173,10 +174,30 @@ the [troubleshooting guide](docs/troubleshooting.md)):
 ```bash
 docker exec nightlight wget -qO- http://127.0.0.1:9997/v3/paths/list
 ```
-If that hangs too, MediaMTX is wedged: restart the container. **Known limit:** Nightlight restarts
-MediaMTX when its process exits, but not when the process stays alive with an API that has stopped
-answering. If the check answers, the stall was temporary: everything recovers on its own at the next
-check, and nothing needs restarting.
+If that hangs too, MediaMTX is wedged. Since issue #479 Nightlight restarts it for you: every 30 seconds
+it asks MediaMTX's API one question, and when **nothing** has answered for **3 minutes in a row** it stops
+the MediaMTX process and starts a fresh one, the same as after a crash. All your cameras drop together and
+come back by themselves, usually within a minute or so (not measured; the stream paths are re-created a few
+seconds after the new MediaMTX starts, without waiting for the 5-minute check). The log says `[mediamtx] API unanswered for N min: restarting the MediaMTX process`, and each camera
+that was on gets a **restart** row in Camera history reading "Video server (MediaMTX) restarted". If it
+stays silent after a restart, the next one waits **6 minutes**, then 12, 24 and 30, and the wait goes back
+to 3 minutes only after the API has answered for 5 minutes straight. You can still restart the container
+yourself at any time.
+
+- **A timeout alone never restarts anything.** Only the API staying silent for 3 minutes does (the check is one
+  request for the list of streams, so a fault that leaves that request answering is not detected); a MediaMTX
+  that is slow but answers inside the 5-second limit is never restarted, and neither is one that refuses
+  connections (that is a crash, which was already restarted).
+- **The 3 minutes, the 30 seconds and the backoff are unmeasured guesses.** No wedge has been seen in
+  production, so there was nothing to calibrate on. A busy host where MediaMTX takes more than 5 seconds to
+  answer every call for 3 minutes would be restarted too.
+- **A restart interrupts everything MediaMTX carries**, including a recording being cut from its streams. It
+  only happens when the API has been silent for minutes, when those streams were already not working.
+- **Only a MediaMTX on the same machine is watched.** If `MEDIAMTX_API` points at another host, Nightlight
+  does not restart its own MediaMTX because of a silent remote one.
+
+If the check above answers, the stall was temporary: everything recovers on its own at the next check, and
+nothing needs restarting.
 
 ## Video comes back before Record does, after a restart
 
@@ -652,13 +673,15 @@ noise nobody saw cannot be told apart from a sibling next door. The cost, stated
 video stall is not shown as awake from the noise alone. Sound **alerts** are a separate path and still fire.
 
 **Why "no one was in the bed" needs 90%:** that answer sends the "no one was in the bed" report and
-**deletes the night's timelapse frames**. Before #508 a night watched for exactly half the window, quiet in
+**deletes the night's timelapse frames** (once the answer is final, about 3 hours after the window closes,
+#419). Before #508 a night watched for exactly half the window, quiet in
 that half, could read empty. 90% is a first estimate chosen so the ~1-minute daily camera reboot and
 scattered dropped minutes can never block a genuinely empty night, while missing more than about an hour of
 a 12-hour window does. It was not measured against stored nights when chosen. On a night still in progress
 ("Tonight") it applies to the part of the window elapsed so far, so the live card can say "no one in the
-bed" early in the evening; that is only a display. The report and the frame deletion come only from the
-nightly job, which only ever scores a night whose window has closed, against the whole window.
+bed" early in the evening; that is only a display. The report comes only from the nightly job, which only
+ever scores a night whose window has closed, against the whole window, and the frames are deleted only for a
+saved "no one was in the bed" night whose answer is final, never for a night still in progress.
 
 **Nights already stored** change only when recomputed (the nightly job's own passes in the ~3 hours after
 the window closes, or **Recompute this night**). Recompute never turns a scored night into "no data", so a
@@ -818,10 +841,13 @@ one moves both. They are constants, not settings, so there is no default to chan
   server's clock interrupted. Since issue #588 the step also ends the run when the first minute that shows it is
   a minute with sound but no video (a stall), with the same log line (`run ended (the clock went back)`); the
   settling count is restarted by the next minute that was actually read, as before.
-- **An armed watcher whose camera sends nothing between two nights stays armed.** It is reset by the first
-  reading outside the sleep window, so the next evening's settling can be recorded as a wake if the camera
-  was silent for the whole day.
-- **The 20-minute sweep is only a backstop.** A camera that goes silent in the middle of a run keeps its ring
+- **An armed watcher stays armed through a silence inside the sleep window, but not past its close.** A camera that
+  sends nothing for a while mid-night keeps its armed state, so a wake after it reconnects is still recorded. A camera
+  that sends nothing when the window closes is disarmed by the one-minute sweep, up to about 6 minutes after the close
+  (the window's 5-minute margin plus one sweep), so the next evening's settling is not recorded as a wake (issue #589;
+  before it, only a reading outside the window disarmed the watcher, and a camera silent for the whole day never
+  sent one).
+- **The 20-minute sweep is only a backstop for runs.** (It also disarms a silent camera at its window's close, above.) A camera that goes silent in the middle of a run keeps its ring
   hold until the sweep ends the run, up to about 20 minutes after its last active minute. A run that keeps
   receiving readings is ended by the rule above, not by the sweep. Since issue #588 that includes a camera whose
   video stalled while its sound kept arriving: each such minute still applies the rule, so the run and its ring
@@ -1564,6 +1590,25 @@ The app itself, and anything running as root, are not affected.
 loosens the old ones automatically. Better still, give the other reader the same `PUID`, or run it as root,
 and keep the default. See
 [Who can read the data directory](docs/operations.md#who-can-read-the-data-directory).
+
+## A camera turned off and on again in quick succession, or edited while it is being turned on or off, can briefly run the wrong thing
+
+**What you see:** You turn a camera off and straight back on (or change its settings while the switch is still
+working), and the camera runs with a setting it had a moment ago, or a stream that should be off is on. Nothing in
+the log is wrong.
+
+**Why:** Turning a camera on or off, and saving an edit, are separate requests that can overlap. Since issue #806
+a sub-stream start is cancelled by a switch-off that arrives while it is starting, an address saved while a switch-on
+is starting is applied when that switch-on finishes, and a switch-off records "off" before it begins stopping
+things. Three overlaps are left as they were:
+- An "on" and an "off" sent together end in whichever finishes last.
+- A delete or a manual restart that races a switch-off can still start a stream for the camera that stays on until
+  you switch the camera off again (the five-minute check skips cameras that are off).
+- A switch-on starts motion, sound and recording from the camera's settings as they were when it began, so a
+  detection setting saved during those few seconds is picked up at the next five-minute check.
+
+**What to do:** For a stream still running after you switched a camera off, switch it off again. For a setting that
+did not take, wait five minutes or save it again.
 
 ## The `[entrypoint]` line reports the same number of entries "with group/other access found" on every start
 

@@ -3039,8 +3039,8 @@
   {
     "label": "#451 M20a: startSubStream writes the sub path on an unknown config read",
     "file": "backend/src/lib/subStream.js",
-    "find": "if ((await isPathConfiguredCorrectly(path)) === false) await upsertPath(path);",
-    "replace": "if (!(await isPathConfiguredCorrectly(path))) await upsertPath(path);",
+    "find": "if ((await isPathConfiguredCorrectly(path)) === false) {",
+    "replace": "if (!(await isPathConfiguredCorrectly(path))) {",
     "expect": "killed",
     "tests": ["mediamtx-api-deadline.test.js"],
     "namePattern": "^T3b:"
@@ -3174,7 +3174,7 @@
   {
     "label": "#455 M2: Playwright browser image falls behind the package",
     "file": "e2e/docker-compose.e2e.yml",
-    "find": "    image: mcr.microsoft.com/playwright:v1.64.0-jammy",
+    "find": "    image: mcr.microsoft.com/playwright:v1.64.1-jammy",
     "replace": "    image: mcr.microsoft.com/playwright:v1.62.1-jammy",
     "expect": "killed",
     "tests": ["dependency-hygiene.test.js"],
@@ -3183,8 +3183,8 @@
   {
     "label": "#455 M3: Playwright pin becomes a range",
     "file": "e2e/playwright/package.json",
-    "find": "\"@playwright/test\": \"1.64.0\"",
-    "replace": "\"@playwright/test\": \"^1.64.0\"",
+    "find": "\"@playwright/test\": \"1.64.1\"",
+    "replace": "\"@playwright/test\": \"^1.64.1\"",
     "expect": "killed",
     "tests": ["dependency-hygiene.test.js"],
     "namePattern": "^T2:"
@@ -3219,7 +3219,7 @@
   {
     "label": "#455 M6: Playwright pin regresses below its advisory floor",
     "file": "e2e/playwright/package.json",
-    "find": "\"@playwright/test\": \"1.64.0\"",
+    "find": "\"@playwright/test\": \"1.64.1\"",
     "replace": "\"@playwright/test\": \"1.49.0\"",
     "expect": "killed",
     "tests": ["dependency-hygiene.test.js"],
@@ -6595,13 +6595,13 @@
     "namePattern": "an existing review gains the column"
   },
   {
-    "label": "nobody-in-bed item 7: a flagged night's timelapse frames are discarded like a detector-empty one",
-    "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "          if (summary.status === 'empty') emptyNights.push({ childId: kid.id, nightDate });",
-    "replace": "          if (summary.status === 'empty' || db.prepare('SELECT 1 FROM sleep_reviews WHERE child_id = ? AND night_date = ? AND nobody_in_bed = 1').get(kid.id, nightDate)) emptyNights.push({ childId: kid.id, nightDate });",
+    "label": "nobody-in-bed item 7 (re-anchored by #419 onto the empty-night sweep): a flagged night's timelapse frames are discarded like a detector-empty one",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  \"SELECT window_end, computed_at FROM sleep_nights WHERE child_id = ? AND night_date = ? AND status = 'empty'\"",
+    "replace": "  \"SELECT window_end, computed_at FROM sleep_nights n WHERE child_id = ? AND night_date = ? AND (status = 'empty' OR EXISTS (SELECT 1 FROM sleep_reviews r WHERE r.child_id = n.child_id AND r.night_date = n.night_date AND r.nobody_in_bed = 1))\"",
     "expect": "killed",
-    "tests": ["sleepInsights.test.js"],
-    "namePattern": "still gets its timelapse"
+    "tests": ["timelapse-empty-night.test.js"],
+    "namePattern": "^s5:"
   },
   {
     "label": "nobody-in-bed frontend R4: the receipt gate drops the flag, back to times-only",
@@ -12751,8 +12751,8 @@
   {
     "label": "#588 M-588-19: the unobserved check runs ABOVE the window gate (emulated: an unobserved minute skips the gate)",
     "file": "backend/src/lib/wakeWatcher.js",
-    "find": "  if (!camera || camera.disabled || !camera.child_id || !childTracksSleep(camera.child_id) || !childWindowActiveNow(camera.child_id)) {",
-    "replace": "  if (payload.videoUnobserved !== true && (!camera || camera.disabled || !camera.child_id || !childTracksSleep(camera.child_id) || !childWindowActiveNow(camera.child_id))) {",
+    "find": "  if (!watchedNow(camera)) {",
+    "replace": "  if (payload.videoUnobserved !== true && !watchedNow(camera)) {",
     "expect": "killed",
     "tests": [
       "wake-watcher.test.js"
@@ -22743,5 +22743,446 @@
     "expect": "killed",
     "tests": ["MorningReview.test.jsx"],
     "namePattern": "judged in that zone"
+  },
+  {
+    "label": "#589 M1: the sweep never disarms a silent camera whose window closed",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "    if (!watchedNow(cameraQ.get(cameraId))) reset(cameraId, st);",
+    "replace": "    if (false) reset(cameraId, st);",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#589:"
+  },
+  {
+    "label": "#589 M2: the sweep disarms every camera, window open or not",
+    "file": "backend/src/lib/wakeWatcher.js",
+    "find": "    if (!watchedNow(cameraQ.get(cameraId))) reset(cameraId, st);",
+    "replace": "    if (true) reset(cameraId, st);",
+    "expect": "killed",
+    "tests": ["wake-watcher.test.js"],
+    "namePattern": "#589:"
+  },
+  {
+    "label": "#392 M1: the manual-recordings subtotal counts every ready recording (wake clips and other kinds included)",
+    "file": "backend/src/lib/clipStorage.js",
+    "find": "WHERE status='ready' AND kind='manual'\")",
+    "replace": "WHERE status='ready'\")",
+    "expect": "killed",
+    "tests": ["clip-storage.test.js"],
+    "namePattern": "#392:"
+  },
+  {
+    "label": "#392 M2: the storage total adds the all-recordings figure, so wake clips are counted twice",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "storage.usedBytes + (manual.bytes || 0) + (wake.bytes || 0)",
+    "replace": "storage.usedBytes + (storage.recordingBytes || 0) + (wake.bytes || 0)",
+    "expect": "killed",
+    "tests": ["settingsForms.test.jsx"],
+    "namePattern": "#392:"
+  },
+  {
+    "label": "#392 M3: a failed storage request is swallowed again (no unavailable card, no Retry)",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": ".catch(() => setStorageFailed(true));",
+    "replace": ".catch(() => {});",
+    "expect": "killed",
+    "tests": ["settingsForms.test.jsx"],
+    "namePattern": "#392:"
+  },
+  {
+    "label": "#392 M4: the unavailable card shows even when a last good readout exists (a failed refresh after a save)",
+    "file": "frontend/src/pages/SettingsRecording.jsx",
+    "find": "{!storage && storageFailed && (",
+    "replace": "{storageFailed && (",
+    "expect": "killed",
+    "tests": ["settingsForms.test.jsx"],
+    "namePattern": "#392:"
+  },
+  {
+    "label": "#806 M1: a start is not re-checked for a stop after its prepare step (it goes on to probe a camera that was stopped)",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "    if (stopped()) return abandon(mediamtxPath, 'while its MediaMTX path was prepared');",
+    "replace": "    // mutant: no stop check after prepare",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^p1:"
+  },
+  {
+    "label": "#806 M2: the sub path is written back after a stop removed it (no stopped() check between the path check and the write)",
+    "file": "backend/src/lib/subStream.js",
+    "find": "      if (stopped()) return;",
+    "replace": "      // mutant: no stop check before the write",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^r1:"
+  },
+  {
+    "label": "#806 M3: startSubStream does not hand its path check to the start as `prepare` (no check at all)",
+    "file": "backend/src/lib/subStream.js",
+    "find": ", { prepare: ensureSubPath });",
+    "replace": ");",
+    "expect": "killed",
+    "tests": ["transcoder-start-chain.test.js"],
+    "namePattern": "^r[12]:"
+  },
+  {
+    "label": "#806 M4: the enable never re-reads the row after its starts (an address saved meanwhile is not applied)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    if (fresh) {",
+    "replace": "    if (false) {",
+    "expect": "killed",
+    "tests": ["camera-enable-edit-race.test.js"],
+    "namePattern": "^e[123]:"
+  },
+  {
+    "label": "#806 M5: the enable ignores a main address saved meanwhile",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (fresh.rtsp_url !== existing.rtsp_url) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["camera-enable-edit-race.test.js"],
+    "namePattern": "^e1:"
+  },
+  {
+    "label": "#806 M6: the enable waits for the re-applied main start before it issues the sub start (a later edit or disable can land between)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "        reapply.push(startTranscoder(",
+    "replace": "        await (startTranscoder(",
+    "expect": "killed",
+    "tests": ["camera-enable-edit-race.test.js"],
+    "namePattern": "^e6:"
+  },
+  {
+    "label": "#806 M7: the disable records disabled = 1 only after its stops (an edit reading the row mid-stop sees an enabled camera)",
+    "file": "backend/src/routes/cameras.js",
+    "find": "    db.prepare('UPDATE cameras SET disabled = 1 WHERE id = ?').run(req.params.id);",
+    "replace": "    // mutant: no early disable write",
+    "expect": "killed",
+    "tests": ["camera-enable-edit-race.test.js"],
+    "namePattern": "^d1:"
+  },
+  {
+    "label": "#450 M1: two assemblies of one night may run at once (no in-flight guard)",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  if (inFlight.has(key)) return null;",
+    "replace": "  // mutant: no in-flight guard",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^d[12]:"
+  },
+  {
+    "label": "#450 M2: the retry assembles a night that is not scored ok (an empty room gets a video; a deleted child's frames are used)",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  if (!scoredOkStmt.get(childId, nightDate)) return false;",
+    "replace": "  // mutant: no scored-ok check",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^f[24]:"
+  },
+  {
+    "label": "#450 M3: a night that keeps failing is retried without limit",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "if (tried >= MAX_RETRIES || ",
+    "replace": "if (",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^e1:"
+  },
+  {
+    "label": "#450 M4: a pass runs (and spends an attempt) while clip storage is not ready or the disk is nearly full",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  if (!clipStorageReady() || !hasMinFreeSpace()) return 0;",
+    "replace": "  // mutant: no storage / free-space gate",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^b1:"
+  },
+  {
+    "label": "#450 M5: a retry pass may start while another is still encoding",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  if (retrying) return 0;",
+    "replace": "  // mutant: passes may overlap",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^f6:"
+  },
+  {
+    "label": "#450 M6: the retry encodes a night its child's newest ready videos already outrank (pruned the moment it is ready)",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  if (newerReadyStmt.get(childId, nightDate).n >= KEEP_PER_CHILD) return false;",
+    "replace": "  // mutant: no prune-age check",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^f5:"
+  },
+  {
+    "label": "#450 M8: the retry assembles the child's open night while the sampler is still writing its frames",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  if (currentNightDate(childId) === nightDate) return false;",
+    "replace": "  // mutant: no open-night check",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^f8:"
+  },
+  {
+    "label": "#450 M9: a successful retry leaves the night's attempt count in place (a later stranding is skipped as given up on)",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "        if (id) retryAttempts.delete(key);",
+    "replace": "        if (id) { /* mutant: count kept */ }",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^e3:"
+  },
+  {
+    "label": "#450 M10: the retry scans child by child, so an older night of one child starts before a newer night of another",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  return out.sort((a, b) => b.nightDate.localeCompare(a.nightDate) || a.childId.localeCompare(b.childId));",
+    "replace": "  return out;",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^f7:"
+  },
+  {
+    "label": "#479 M1: an answer or a refusal does not clear the silence stamp (a server that answers now and then is restarted)",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "    unknownSince = null;\r\n    if (result === 'answered') {",
+    "replace": "    if (result === 'answered') {",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w[34]:"
+  },
+  {
+    "label": "#479 M2: the restart window never doubles (a restart that did not help is repeated every 3 minutes)",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "  return Math.min(MAX_WINDOW_MS, HUNG_MS * 2 ** consecutiveRestarts);",
+    "replace": "  return HUNG_MS;",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w2"
+  },
+  {
+    "label": "#479 M3: the watchdog restarts at the first unanswered probe, with no window",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "      if (silentMs < currentWindowMs()) return 'unknown';",
+    "replace": "      if (silentMs < 0) return 'unknown';",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w2:"
+  },
+  {
+    "label": "#479 M4: the backoff is cleared by the first answer after a restart, not by sustained answers",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "      if (consecutiveRestarts > 0 && t - healthySince >= RECOVERED_MS) consecutiveRestarts = 0;",
+    "replace": "      if (consecutiveRestarts > 0) consecutiveRestarts = 0;",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w5:"
+  },
+  {
+    "label": "#479 M5: a restart that signalled nothing is still logged, recorded in Camera history and counted",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "      if (!restart()) return 'not-signalled';",
+    "replace": "      restart();",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w6:"
+  },
+  {
+    "label": "#479 M6: checks may overlap (a second probe starts while one is still waiting for its deadline)",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "  if (running) return 'busy'; // a probe can take its whole 5 s deadline; ticks never overlap",
+    "replace": "  // mutant: no overlap guard",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w8:"
+  },
+  {
+    "label": "#479 M7: a refused connection counts toward the run of healthy answers",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "      healthySince = null; // refused: down or restarting, not healthy yet",
+    "replace": "      healthySince ??= t;",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w5b:"
+  },
+  {
+    "label": "#479 M9: the fallback is not cleared when the child exits on SIGTERM (an exited child is SIGKILLed)",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "  child.once('exit', () => clearTimeout(force));",
+    "replace": "  // mutant: fallback never cleared",
+    "expect": "killed",
+    "tests": ["mediamtx-restart.test.js"],
+    "namePattern": "^r[14]:"
+  },
+  {
+    "label": "#479 M10: a refused or reset connection is read as a hang",
+    "file": "backend/src/lib/mediamtx.js",
+    "find": "    return e instanceof MediamtxTimeoutError ? 'timeout' : 'refused';",
+    "replace": "    return 'timeout';",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w1b:"
+  },
+  {
+    "label": "#479 M11: a restart is signalled after stopMediaMTX()",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "  if (stopped || !child) return false;",
+    "replace": "  if (!child) return false;",
+    "expect": "killed",
+    "tests": ["mediamtx-restart.test.js"],
+    "namePattern": "^r4:"
+  },
+  {
+    "label": "#479 M12: a restart's recovery hook runs at the SIGTERM instead of after the relaunch (it asks the old MediaMTX)",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "  relaunchHook = onRelaunched ?? null;",
+    "replace": "  onRelaunched?.();",
+    "expect": "killed",
+    "tests": ["mediamtx-restart.test.js"],
+    "namePattern": "^r1:"
+  },
+  {
+    "label": "#479 M13: a tick already waiting for its probe when shutdown stops the watchdog still restarts MediaMTX",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "    if (stopRequested) return 'stopped'; // shutdown began while the probe was waiting: take no action",
+    "replace": "    // mutant: no stop check after the probe",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w12:"
+  },
+  {
+    "label": "#479 M14: the started watchdog's tick drops the Camera-history reaction (onRestart)",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "    checkMediamtxApi({ restart, onRestart, ...(probe ? { probe } : {}), ...(now ? { now } : {}) }));",
+    "replace": "    checkMediamtxApi({ restart, ...(probe ? { probe } : {}), ...(now ? { now } : {}) }));",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w13:"
+  },
+  {
+    "label": "#479 M15: a remote MEDIAMTX_API is supervised (the local MediaMTX would be killed for a silent remote server)",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "  if (!mediamtxApiIsLocal(api)) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w10:"
+  },
+  {
+    "label": "#479 M16: a timeout does not break the run of healthy answers (a flapping server gets its backoff reset)",
+    "file": "backend/src/lib/mediamtxApiWatchdog.js",
+    "find": "    if (result === 'timeout') {\r\n      healthySince = null;",
+    "replace": "    if (result === 'timeout') {",
+    "expect": "killed",
+    "tests": ["mediamtx-api-watchdog.test.js"],
+    "namePattern": "^w5b:"
+  },
+  {
+    "label": "#450 M7: the nightly job's tick never starts the retry",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": ".then((m) => m.retryStrandedTimelapses())",
+    "replace": ".then(() => 0)",
+    "expect": "killed",
+    "tests": ["timelapse-retry.test.js"],
+    "namePattern": "^g1:"
+  },
+  {
+    "label": "#419 M1: the sweep ignores finality, so an empty night's frames go on its first scored pass (the behaviour before #419)",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  if (!isEvidenceFinal(row.window_end, nowMs)) return false;",
+    "replace": "  return true;",
+    "expect": "killed",
+    "tests": ["timelapse-empty-night.test.js"],
+    "namePattern": "^s2:"
+  },
+  {
+    "label": "#419 M2: the sweep discards an empty night that is still owed a pass (locked by a correction, or refused) while it is the last completed night",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  return isEvidenceFinal(row.window_end, sqlUtcMs(row.computed_at)) || nightDate !== lastCompletedNightDate(childId);",
+    "replace": "  return true;",
+    "expect": "killed",
+    "tests": ["timelapse-empty-night.test.js"],
+    "namePattern": "^s3:"
+  },
+  {
+    "label": "#419 M3: the sweep deletes the frames of a night that is being assembled",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "function discardable(childId, nightDate, nowMs) {\n  if (inFlight.has(nightKey(childId, nightDate))) return false;",
+    "replace": "function discardable(childId, nightDate, nowMs) {",
+    "expect": "killed",
+    "tests": ["timelapse-empty-night.test.js"],
+    "namePattern": "^s7:"
+  },
+  {
+    "label": "#419 M4: the nightly job's tick never runs the empty-night sweep",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": ".then((m) => m.discardFinalEmptyNightFrames())",
+    "replace": ".then(() => 0)",
+    "expect": "killed",
+    "tests": ["timelapse-empty-night.test.js"],
+    "namePattern": "^j4:"
+  },
+  {
+    "label": "#419 M5: an empty -> ok pass does not start the night's timelapse (it is left to the retry, which may be busy)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (summary.status === 'ok' && (!existing || !SCORED.has(existing.status) || existing.status === 'empty')) {",
+    "replace": "if (summary.status === 'ok' && (!existing || !SCORED.has(existing.status))) {",
+    "expect": "killed",
+    "tests": ["timelapse-empty-night.test.js"],
+    "namePattern": "^j1:"
+  },
+  {
+    "label": "#850 M1: the list hides a night stored ok instead of one stored empty",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "s.night_date = t.night_date AND s.status = 'empty')",
+    "replace": "s.night_date = t.night_date AND s.status = 'ok')",
+    "expect": "killed",
+    "tests": ["timelapse-routes.test.js"],
+    "namePattern": "a night stored `empty` is left out of the list"
+  },
+  {
+    "label": "#850 M2: another child's empty row for the same date hides this child's video",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "WHERE s.child_id = t.child_id AND s.night_date = t.night_date",
+    "replace": "WHERE s.night_date = t.night_date",
+    "expect": "killed",
+    "tests": ["timelapse-routes.test.js"],
+    "namePattern": "hostile neighbours"
+  },
+  {
+    "label": "#851 M1: old frames go after 31 days, before a night at UTC-12 can no longer be re-scored",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "const FRAME_EXPIRE_DAYS = 32;",
+    "replace": "const FRAME_EXPIRE_DAYS = 31;",
+    "expect": "killed",
+    "tests": ["timelapse-expire-frames.test.js"],
+    "namePattern": "^m1:"
+  },
+  {
+    "label": "#851 M2: the old-frames sweep deletes the frames of a night that is being assembled",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "      if (inFlight.has(nightKey(childId, nightDate))) continue; // an encoder is reading these frames",
+    "replace": "      // mutant: no in-flight skip",
+    "expect": "killed",
+    "tests": ["timelapse-expire-frames.test.js"],
+    "namePattern": "^i1:"
+  },
+  {
+    "label": "#851 M3: the old-frames sweep follows a linked child folder and deletes what it points at",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "  try { return fs.lstatSync(p).isDirectory(); } catch { return false; }",
+    "replace": "  try { return fs.statSync(p).isDirectory(); } catch { return false; }",
+    "expect": "killed",
+    "tests": ["timelapse-expire-frames.test.js"],
+    "namePattern": "^l1:"
+  },
+  {
+    "label": "#851 M4: the nightly job's tick never runs the old-frames sweep",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": ".then((m) => m.discardExpiredFrames())",
+    "replace": ".then(() => 0)",
+    "expect": "killed",
+    "tests": ["timelapse-expire-frames.test.js"],
+    "namePattern": "^j1:"
   }
 ]

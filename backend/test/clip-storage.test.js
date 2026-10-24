@@ -273,6 +273,35 @@ describe('clipStorageStats', () => {
     assert.equal(s.recordingBytes, 9999);
   });
 
+  test('#392: manual recordings are their own subtotal, so alert + manual + wake add up with no overlap', () => {
+    const insertKind = (kind, status, bytes) =>
+      db.prepare("INSERT INTO recordings (camera_id, status, started_at, bytes, kind) VALUES ('cam-1', ?, datetime('now'), ?, ?)")
+        .run(status, bytes, kind);
+    makeClip('a.mp4', { bytes: 1000 });
+    makeRecording('ready', 2000); // kind defaults to 'manual'
+    insertKind('wake', 'ready', 400);
+    // Positive bytes on every row that must NOT count, so a missing filter shows as a wrong number rather than a zero:
+    // an unfinished or failed recording, and a ready row of a kind that is neither manual nor wake (none is written
+    // today; it must not be labelled a manual recording).
+    makeRecording('recording', 70000);
+    makeRecording('failed', 80000);
+    insertKind('wake', 'recording', 90000);
+    insertKind('other', 'ready', 5000);
+    const s = clipStorageStats();
+    assert.deepEqual(s.manualRecordings, { count: 1, bytes: 2000 });
+    assert.equal(s.usedBytes, 1000);
+    // The old fields keep meaning "every ready recording" for an older client.
+    assert.equal(s.recordingCount, 3);
+    assert.equal(s.recordingBytes, 2000 + 400 + 5000);
+  });
+
+  test('#392: with no alert clips, a manual recording is still reported (usedBytes 0 is the alert-clip figure only)', () => {
+    makeRecording('ready', 3000);
+    const s = clipStorageStats();
+    assert.equal(s.usedBytes, 0);
+    assert.deepEqual(s.manualRecordings, { count: 1, bytes: 3000 });
+  });
+
   test('an unfinished recording is not counted as used storage', () => {
     makeRecording('recording', 5);
     const s = clipStorageStats();

@@ -367,7 +367,11 @@ A screen with a **Save changes** button commits **only** when it is pressed, and
 switches. A page must not mix a switch that writes at once with controls that wait: Recording did, and
 someone could turn a feature off, leave, and believe it had stopped. The exceptions are screens that
 declare the opposite for the whole page and have no Save button (the camera Motion / Sound / Schedule
-screens, which save themselves and say **Saving… / Saved ✓**).
+screens, which save themselves and say **Saving… / Saved ✓**). The other exception is a photo, which saves
+on its own the moment it is chosen (the child, caregiver and Account forms; owner decision on #384), and
+Account has one more: its "Send motion alerts to this device" switch (app only) is a setting for the device,
+not for the account, so it applies at once and the card says so, while the name and password forms beside it
+wait for their own Save buttons.
 
 While the screen differs from what is stored it shows `components/UnsavedNotice.jsx` ("Unsaved changes",
 with **Discard changes**). The notice is derived from the data, so putting a value back removes it. What

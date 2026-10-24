@@ -566,7 +566,9 @@ Either:
     correction has both an asleep and a wake-up time, the card and the detail page show it as a slept
     night anyway (see the #355 point on correcting such a night in [Known limits, all documented rather than fixed](#known-limits-all-documented-rather-than-fixed)); with only one of
     them it stays "no one in the bed". Remove your correction (while it is still last night) to let the
-    nightly update look again. In the same way, if that
+    nightly update look again. The night's timelapse frames are kept until then (until the next
+    night's window closes), so if that look finds your child, the night still gets its timelapse
+    ([recording.md](recording.md#retention-and-what-deleting-removes)). In the same way, if that
     first summary has no wake-up time yet (the morning's departure was still being confirmed when it
     was saved), the night keeps showing no wake-up time until you add one to your review.
   - The sleep detail page always works the night out fresh and lays your times over it, so its

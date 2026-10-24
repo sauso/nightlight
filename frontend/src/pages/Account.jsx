@@ -278,6 +278,9 @@ export default function Account() {
                   <div className="camera-tile__sub" style={{ padding: '0 12px 12px' }}>
                     Get a push notification when a camera with motion detection sees movement, even
                     when the app is closed. Turning this on asks for notification permission.
+                    {/* #384: this switch applies at once; the name and password forms on this page wait for their own Save. */}
+                    {' '}It applies to this device only, as soon as you change it. The name and password
+                    forms on this page are saved with their own buttons.
                   </div>
                 </>
               )}

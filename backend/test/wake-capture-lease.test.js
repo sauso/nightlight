@@ -191,6 +191,13 @@ const TRIGGERS = [
     quiet();
     assert.equal(stateOf().run, null);
   }],
+  // #589: the window closes while the camera sends nothing, so only the sweep timer can notice. It releases the run's
+  // WAKE hold through reset(); the capture's own lease must still protect the footage being cut.
+  ['the sleep window closes while the camera is silent (the sweep, #589)', ({ run }) => {
+    windowExcludingNow();
+    assert.equal(sweepStaleRuns(run.lastActiveMs + 1000), 0, 'not stale: the window close is what ends the run');
+    assert.equal(stateOf().run, null);
+  }],
   [`a quiet gap longer than ${WAKE_GAP_MIN} minutes (endRun on the bridge)`, () => {
     for (let g = 0; g <= WAKE_GAP_MIN; g++) quiet();
     assert.equal(stateOf().run, null);

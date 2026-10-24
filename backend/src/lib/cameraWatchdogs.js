@@ -15,7 +15,8 @@
 //   * RESTART decisions (main path 30s, sub path 30s, audio 2 consecutive stalls) need an UNBROKEN run of
 //     CONFIRMED observations. An unknown BREAKS the run: its timer or count is cleared, and nothing is
 //     restarted and no OFFLINE/ONLINE history event is recorded on it. A working stream must not be
-//     restarted because the API in front of it stopped answering.
+//     restarted because the API in front of it stopped answering. (Minutes of silence from the WHOLE API are
+//     answered one level down, by restarting MediaMTX itself: lib/mediamtxApiWatchdog.js, #479. Never a camera.)
 //   * The OFFLINE PUSH clock starts at the first check that could not CONFIRM the camera was up, and only
 //     a confirmed ready stops it. An unknown is such a check, exactly like a confirmed not-ready, so a
 //     wedged MediaMTX still reaches the parent if they turned the alert on. docs/camera-controls.md and

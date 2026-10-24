@@ -82,8 +82,8 @@ export const SLEEP_THRESHOLDS = Object.freeze({
 export const MIN_COVERAGE_FRAC = 0.5; // need WATCHED minutes (see motionSeen) for at least this fraction of the window, else no_data
 // `empty` ("no one was in the bed") needs MORE of the window watched than `no_data` does, and the gap
 // between the two matters because `empty` is not a harmless label: it sends the "no one was in the bed"
-// report and QUEUES THE NIGHT'S RAW TIMELAPSE FRAMES FOR DELETION (runNightlySleepJob -> emptyNights ->
-// discardTimelapseFrames), irreversibly. At MIN_COVERAGE_FRAC alone, a night exactly half watched (quiet)
+// report and, once the stored verdict is final, DELETES THE NIGHT'S RAW TIMELAPSE FRAMES (timelapse.js
+// discardFinalEmptyNightFrames, #419), irreversibly. At MIN_COVERAGE_FRAC alone, a night exactly half watched (quiet)
 // and half unwatched passed the no_data gate and could read `empty` from the quiet half — "we saw nobody"
 // said about a night we could not see half of (found by plan review of issue #508, Codex; reachable before
 // #508 too, from a plain row gap). Below this fraction the night is `no_data`, never `empty`; an `ok` night
@@ -2050,14 +2050,16 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     // `coverage` counts WINDOW minutes only (never the lookbehind, see above), and `winMin` is the ELAPSED
     // part of the window: the whole window once it has closed, "so far" on a night in progress. That is
     // the same basis as the no_data gate, kept deliberately after a trace (#508 fix round 1): nothing ACTS
-    // on an in-progress `empty`. Only runNightlySleepJob sends the "no one was in the bed" report or
-    // discards frames, and it only ever computes lastCompletedNightDate, a closed window; RecomputeNight
-    // hides itself while `in_progress`. An in-progress `empty` is DISPLAYED ("Tonight"), and it is
-    // re-decided against the full window once the night closes. The only paths that STORE an open night
-    // are the demo seed and a hand-made admin `?store=1` API call (the UI never makes it); neither sends
-    // a report or discards frames. (A stored open night of ANY status can then be protected by the
-    // downgrade guard when it closes: pre-existing, not specific to `empty` or to #508.) Pinned by the
-    // #508 tests T6g/T6h.
+    // on an in-progress `empty`. Only runNightlySleepJob sends the "no one was in the bed" report, and it
+    // only ever computes lastCompletedNightDate, a closed window; frames are discarded only for a STORED
+    // `empty` row whose evidence is final (3 h past its window end) and never for the child's open night
+    // (timelapse.js discardFinalEmptyNightFrames, #419); RecomputeNight hides itself while `in_progress`.
+    // An in-progress `empty` is DISPLAYED ("Tonight"), and it is re-decided against the full window once
+    // the night closes. The only paths that STORE an open night are the demo seed and a hand-made admin
+    // `?store=1` API call (the UI never makes it); neither sends a report, and the frame sweep waits for
+    // that night to close and go final like any other. (A stored open night of ANY status can then be
+    // protected by the downgrade guard when it closes: pre-existing, not specific to `empty` or to #508.)
+    // Pinned by the #508 tests T6g/T6h.
     if (coverage < winMin * EMPTY_MIN_COVERAGE_FRAC) return { ...result, status: 'no_data' };
     return {
       ...result,
@@ -2706,12 +2708,15 @@ const parentCorrectedNight = db.prepare(
 // Locked = the correction above AND a stored row that is SCORED (ok/empty) AND was computed at or after
 // its own window closed. Each extra condition is there for a reason:
 //   - SCORED: a correction on a `no_data` (or missing) row must not freeze it unscored. The job keeps
-//     refining such a night until it scores, which also keeps its timelapse (made on the first SCORED
-//     pass, see the gate at the end of runNightlySleepJob), and the lock takes hold from that pass on.
+//     refining such a night until it scores, which also keeps its timelapse (started on the first pass
+//     that stores it `ok`, see the gate at the end of runNightlySleepJob), and the lock takes hold from
+//     the first SCORED pass on.
 //     ⚠️ KNOWN LIMIT (documented in the README): that first scored pass is what locks. If it scores
 //     `empty` where a later pass would have found the child (`ok`, the empty->ok case of #419), the night
 //     stays `empty` under the parent's times, because the later pass never runs. Removing the correction
-//     unlocks it while it is still the last completed night.
+//     unlocks it while it is still the last completed night, and its frames are still there then: the
+//     #419 sweep keeps a locked `empty` night's frames until the next night closes (its computed_at is
+//     before the horizon), so the owed pass can still make its timelapse.
 //   - `computed_at >= window_end`: a row written while its window was still open is a snapshot of a night
 //     in progress (only an admin `?store=1` for tonight, or the demo seed, writes one). It is never "the
 //     night as the parent judged it", so it must not freeze. This is plan review R9 ("a nobody flag on an
@@ -2878,15 +2883,18 @@ export function computeAndStoreNight(childId, nightDate, { allowDowngrade = true
 //     (both reviewers, fix round 2026-09-30). Checked first, before anything else is read.
 //   - no row, or an unscored one (`no_data`/`no_sleep`/`off`): the lock does not hold on those anyway,
 //     and creating or upgrading the row here would take the night's FIRST scored pass away from the job.
-//     That pass is the only one that assembles the night's timelapse (or discards an empty night's
-//     frames), and it sends the first sleep report. The frames directory has no other sweep, so a night
-//     scored here would keep its raw frames on disk forever with no timelapse. The job scores such a
+//     That pass sends the first sleep report and starts the night's timelapse. When this was decided, it
+//     was also the only thing that ever assembled a night's frames or discarded an empty night's, so a
+//     night scored here kept its raw frames on disk forever with no timelapse; since then the #450 retry
+//     assembles an `ok` night that has frames and no video, and the #419 sweep discards a final `empty`
+//     night's frames, so what storing here would still cost is the first report. The job scores such a
 //     night on its next tick (with its report and timelapse as usual) and the lock takes hold from then.
 //     ⚠️ OWNER DECISION (2026-09-30, fix round 2, raised by both code reviewers): kept this way knowing
 //     its cost. The lock then holds whatever that first scored pass stored, so a corrected night whose
 //     first pass has no wake yet (a departure still being confirmed) keeps that blank wake until the parent
 //     adds one to the review, or removes the correction while it is still the last night. Storing here
-//     instead would cost the timelapse and the first report, which is worse. README, "Known limits".
+//     instead would cost the first report (and, when this was decided, the timelapse), which is worse.
+//     README, "Known limits".
 //   - not the child's LAST COMPLETED night: the job only ever visits that one night, so it owes no other
 //     night anything. ⚠️ The finality check below cannot stand in for this (found in fix-round review,
 //     2026-09-30): rows written before #351 (0.31.0) were written once and never finalised, and a locked
@@ -3053,8 +3061,9 @@ export function runNightlySleepJob() {
     let computed = 0;
     const fresh = []; // freshly-closed nights to notify about ({ name, summary, childId, nightDate })
     const followups = []; // ROADMAP §1.6: nights whose wake time just resolved null -> real, same shape
-    const toTimelapse = []; // freshly-closed nights to assemble a memories timelapse for
-    const emptyNights = []; // ...and those with nobody in the bed, whose frames get thrown away
+    // Nights to assemble a memories timelapse for. There is no list of empty nights any more: their frames are
+    // discarded by their own sweep, once the verdict is final (#419, see the gate near the end of the loop).
+    const toTimelapse = [];
     const now = Date.now();
     // ROADMAP §1.6: a report switched ON does not mean a notification can actually go out — it defaults ON
     // even on a fresh install with no push credential and every other provider off. Without this second
@@ -3194,21 +3203,27 @@ export function runNightlySleepJob() {
             logger.error(`[sleep] failed to record follow-up state for ${kid.name}: ${e.message}`);
           }
         }
-        // ⚠️ Timelapse/frame decisions wait for the FIRST *scored* pass, not merely the first pass ever
-        // (found by adversarial review). Both actions are DESTRUCTIVE and irreversible — assembleTimelapse
-        // deletes the raw frame directory on success (or on a hard "too few frames" skip of its own), and
-        // discardTimelapseFrames does the same by design — so firing on a `no_data` first pass, before this
-        // PR's own provisional-refresh mechanism (issue #351) has had a chance to see the night's real
-        // classification, could destroy a real night's frames on the strength of a look that was always
-        // going to be superseded 30 minutes later. `SCORED` (ok/empty) is the same set `allowDowngrade`
-        // already treats as trustworthy elsewhere in this file. One narrower case is NOT covered here and
-        // is a deliberately separate follow-up (issue #419): a night scored `empty` on one pass that a
-        // LATER pass upgrades to `ok` still has its frames destroyed by the FIRST pass's
-        // discardTimelapseFrames call, with nothing to rebuild them from — reconciling that needs deleting
-        // an already-assembled timelapse mid-flight, a materially bigger change than this fix.
-        if (!existing || !SCORED.has(existing.status)) {
-          if (summary.status === 'empty') emptyNights.push({ childId: kid.id, nightDate });
-          else if (SCORED.has(summary.status)) toTimelapse.push({ childId: kid.id, nightDate });
+        // ⚠️ The timelapse starts on the first pass that stores the night `ok`, not merely the first pass ever
+        // (found by adversarial review of #351). assembleTimelapse deletes the raw frame directory on success
+        // (or on a hard "too few frames" skip of its own), irreversibly, so firing on a `no_data` first pass,
+        // before the provisional refresh (issue #351) has had a chance to see the night's real classification,
+        // could destroy a real night's frames on the strength of a look that was always going to be superseded
+        // 30 minutes later.
+        //
+        // ★ #419: an `empty` night is no longer acted on here at all. This gate used to send a night's FIRST
+        // scored pass that said `empty` straight to discardTimelapseFrames, and a LATER pass can still turn it
+        // `ok` (activity rows the first pass had not read yet), which left that night nothing to make its
+        // timelapse from. Its frames are now discarded by timelapse.js discardFinalEmptyNightFrames (run every
+        // tick, below) once the stored verdict is final, so the `empty -> ok` pass finds them still on disk
+        // and starts the assembly HERE, like any first `ok`. The #450 retry would also pick that night up,
+        // but not while it is busy encoding another night; starting it here does not depend on that, and the
+        // in-flight guard in assembleTimelapse makes the two harmless together.
+        // The issue's own suggestion (delete a stale video on `empty -> ok`) is not needed: an `empty` night
+        // never had a video made. `ok` (video made, frames gone) -> `empty`, and `empty -> ok -> empty`, leave
+        // that video on disk; it is hidden from the child's list while the stored row says `empty` and shown
+        // again if a Recompute makes it `ok` (listChildTimelapses, #850: deleting it was found unsafe there).
+        if (summary.status === 'ok' && (!existing || !SCORED.has(existing.status) || existing.status === 'empty')) {
+          toTimelapse.push({ childId: kid.id, nightDate });
         }
       } catch (e) {
         logger.error(`[sleep] failed to process ${kid.name}: ${e.message}`);
@@ -3220,16 +3235,40 @@ export function runNightlySleepJob() {
     if (followups.length > 0) notifySleepReportUpdates(followups);
     // Assemble each freshly-closed night's memories timelapse from the frames the sampler collected
     // overnight. Fire-and-forget (one FFmpeg pass each) and dynamically imported to avoid a static
-    // import cycle (timelapse.js imports the window helpers from this module). Runs once per night —
-    // the `existing` guard above means a night is only in this list the first time it's computed.
-    if (toTimelapse.length || emptyNights.length) {
+    // import cycle (timelapse.js imports the window helpers from this module). This FIRST attempt runs once per
+    // night: the gate above lists a night only on the pass that first stores it `ok` (from nothing, an unscored
+    // row, or an `empty` one, #419). A night whose assembly then failed, was interrupted, or never started is
+    // picked up by the retry just below (#450).
+    if (toTimelapse.length) {
       import('./timelapse.js')
         .then((m) => {
           for (const t of toTimelapse) m.assembleTimelapse(t.childId, t.nightDate).catch(() => {});
-          for (const t of emptyNights) { try { m.discardTimelapseFrames(t.childId, t.nightDate); } catch { /* best effort */ } }
         })
         .catch((e) => logger.error(`[timelapse] assembly trigger import failed: ${e.message}`));
     }
+    // #450: EVERY tick, whether or not this one scored anything, look for a night that has frames but no video (one query
+    // and a directory listing when there is none). Registered after the first-attempt block on purpose: both wait on the
+    // same module import, so the first attempt's assemblies are already marked in flight when this pass looks, and it
+    // skips them. Fire-and-forget, like the first attempt: it can run for as long as an encode and must not hold the job.
+    import('./timelapse.js')
+      .then((m) => m.retryStrandedTimelapses())
+      .catch((e) => logger.error(`[timelapse] retry pass failed: ${e.message}`));
+    // #419: EVERY tick, discard the frames of a night whose STORED verdict is a final `empty` (see
+    // discardFinalEmptyNightFrames for the exact rule and its disk cost). Keyed on the stored row and the clock,
+    // not on this tick's passes, so a night the loop above skipped (locked, already final, or a child whose
+    // tracking was switched off) is still cleaned up. After the loop, so a night this tick turned `ok` is already
+    // stored `ok` and is left alone. Its own call, not part of the retry: see there for why.
+    import('./timelapse.js')
+      .then((m) => m.discardFinalEmptyNightFrames())
+      .catch((e) => logger.error(`[timelapse] empty-night sweep failed: ${e.message}`));
+    // #851: EVERY tick, delete the frame folders of nights more than 32 days old, whatever their stored status or none
+    // (see discardExpiredFrames for the rule, the margin's derivation and the per-pass cap). Registered LAST on purpose:
+    // all of these wait on the same module import and run in the order registered, so an assembly the retry has just
+    // started is already marked in flight when this pass looks, and is skipped. Its own call, not part of the retry,
+    // for the same reason as the empty-night sweep: a nearly full disk must not stop a delete.
+    import('./timelapse.js')
+      .then((m) => m.discardExpiredFrames())
+      .catch((e) => logger.error(`[timelapse] old-frames sweep failed: ${e.message}`));
   } catch (err) {
     logger.error('[sleep] Nightly job failed:', err.message);
   }

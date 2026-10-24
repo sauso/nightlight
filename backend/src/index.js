@@ -40,7 +40,9 @@ import { reconcileClipRing, stopAllClipCapture } from './lib/clipCapture.js';
 import { stopAllRecordingsForShutdown, reconcileStaleRecordings } from './lib/recordings.js';
 import { startClipStorage, stopClipStorage } from './lib/clipStorage.js';
 import { initPush } from './lib/push.js';
-import { startMediaMTX, stopMediaMTX } from './lib/mediamtxProcess.js';
+import { startMediaMTX, stopMediaMTX, restartMediaMTX } from './lib/mediamtxProcess.js';
+import { startMediamtxApiWatchdog, stopMediamtxApiWatchdog } from './lib/mediamtxApiWatchdog.js';
+import { recordCameraEvent, EVENT } from './lib/cameraEvents.js';
 import { parseStunServers, writeMediamtxConfig } from './lib/stunServers.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
 import { startSensorSampler, stopSensorSampler } from './lib/sensorSampler.js';
@@ -85,6 +87,22 @@ if (stun.warning) logger.warn(`[stun] ${stun.warning}`);
 logger.info(stun.urls.length ? `[stun] STUN servers: ${stun.urls.join(', ')}` : '[stun] STUN is off (STUN_SERVERS is blank)');
 const mediamtxConfigPath = writeMediamtxConfig(mediamtxBasePath, stun.urls, { log: logger });
 startMediaMTX(mediamtxConfigPath);
+// #479: restart a MediaMTX that is alive but has stopped answering its API for minutes (lib/mediamtxApiWatchdog.js). Its
+// restart drops every camera's streams and the process comes back with NO paths (mediamtx.yml has `paths: {}`), so
+// each enabled camera gets one Camera-history row saying why they all blipped together, and the camera paths are
+// reconciled as soon as the NEW MediaMTX is up (restartMediaMTX's onRelaunched, ~1.5 s after the relaunch; a reconcile
+// started at the SIGTERM would ask the old process) instead of waiting for the next 5-minute pass, which would leave the
+// main streams down for up to that long. Written as an arrow so the text `reconcileCameraPaths();` stays unique to the
+// boot reconcile that recordings-shutdown.test.js orders after the stale-recordings sweep.
+startMediamtxApiWatchdog({
+  restart: () => restartMediaMTX({ onRelaunched: () => reconcileCameraPaths() }),
+  onRestart: ({ silentMs }) => {
+    const detail = `Video server (MediaMTX) restarted: its API had not answered for ${Math.max(1, Math.round(silentMs / 60000))} min`;
+    for (const cam of db.prepare('SELECT id, name FROM cameras WHERE disabled = 0').all()) {
+      recordCameraEvent(cam.id, cam.name, EVENT.RESTART, detail);
+    }
+  },
+});
 refreshMqttConnection(); // no-ops if no broker is configured
 startSensorSampler(); // persist MQTT temp/humidity over time (Stage-2 sleep-tracking groundwork)
 startActivityTracker(); // bucket motion/sound activity per minute (Stage-2 sleep-tracking timeline)
@@ -503,6 +521,9 @@ async function reconcileCameraPaths(attempt = 1) {
 // rather than letting `docker stop` just kill the whole process tree indiscriminately.
 async function shutdown() {
   logger.info('Shutting down - stopping transcoders and MediaMTX.');
+  // FIRST, before the seconds of awaited stops below: a tick that fired in the middle of them could SIGTERM MediaMTX
+  // while a recording is still being cut from it (#479).
+  stopMediamtxApiWatchdog();
   // Started HERE, awaited below. The only ordering that actually matters is that an in-flight
   // recording finishes cutting BEFORE stopAllClipCapture takes the ring away; the detector stops are
   // unrelated to it and can overlap.
