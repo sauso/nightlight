@@ -469,6 +469,21 @@ describe('the motion screen', () => {
     expect(screen.getByLabelText('Cooldown (seconds)'), 'the gap between alerts is still ours to set').toBeTruthy();
   });
 
+  // #374: the screen says which settings a source ignores and what the server really enforces. Matched on tokens,
+  // not whole sentences, so rewording the hint does not break the test.
+  test('★ #374: an ONVIF camera is told that confirm and sensitivity do not apply to it', async () => {
+    mount('motion', { ...CAM, onvif_motion_capable: 1, detect_source: 'onvif' });
+    await screen.findByRole('button', { name: 'Camera via ONVIF' });
+    expect(screen.getByText(/confirm and sensitivity do not apply/i)).toBeTruthy();
+  });
+
+  test('★ #374: the sound screen explains the 0.6 s minimum, the calibration and the lower-ends-only limits', async () => {
+    mount('sound');
+    const hint = await screen.findByText(/0\.6 seconds/);
+    expect(hint.textContent).toMatch(/learning/i);
+    expect(hint.textContent).toMatch(/only enforces the lower ends/i);
+  });
+
   test('switching source writes it', async () => {
     mount('motion');
     fireEvent.click(await screen.findByRole('button', { name: 'Camera via MQTT' }));

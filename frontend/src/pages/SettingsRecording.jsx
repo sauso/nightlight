@@ -261,7 +261,9 @@ export default function SettingsRecording() {
             <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
               Recorded for you when motion or sound is detected, for cameras with “Save a clip when
               triggered” on (set per camera under its Motion/Sound settings). Each clip is shown on the
-              alert it belongs to.
+              alert it belongs to. A silenced camera or the alert schedule stops the alert and its clip too.
+              To see what one camera is set up to record, and whether it is ready, open Cameras → edit →
+              Recording and alerts.
             </div>
             <div className="field-row">
               <div className="field">

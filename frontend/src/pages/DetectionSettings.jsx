@@ -69,7 +69,7 @@ function RecordClipsToggle({ d, apply }) {
       <div className="section-title">Recording</div>
       <EnableToggle checked={d.record_clips} onChange={(v) => apply({ record_clips: v })}
         label="Save a clip when triggered"
-        sub="Records a short video around each alert (uses the pre/post-roll in Settings → Recording). Off by default." />
+        sub="Records a short video around each alert (uses the pre/post-roll in Settings → Recording). Off by default. A silenced camera or the alert schedule stops the alert, and so its clip." />
     </>
   );
 }
@@ -273,7 +273,7 @@ function MotionForm({ d, apply, cameraId, cam }) {
           <div className="camera-tile__sub">
             {d.source === 'framediff'
               ? 'Movement must persist for the confirm delay before it alerts, then won\'t alert again until the cooldown passes.'
-              : 'Cooldown is the minimum gap between alerts (the camera has already confirmed the motion).'}
+              : 'Cooldown is the minimum gap between alerts (the camera has already confirmed the motion). Confirm and sensitivity do not apply to this source.'}
           </div>
 
           <div className="field" style={{ marginTop: 14 }}>
@@ -348,7 +348,10 @@ function SoundForm({ d, apply, cameraId }) {
           </div>
           <div className="camera-tile__sub">
             Sound must persist for the confirm delay before it counts (filters a door slam or cough); cooldown is the
-            minimum gap between alerts. Longer than motion by default.
+            minimum gap between alerts. Longer than motion by default. Even a confirm of 0 needs about 0.6 seconds of
+            sound, and for about 5 seconds after the detector starts it is still learning the room&apos;s usual noise.
+            The form stops at 30 seconds and 3600 seconds, but the server only enforces the lower ends (confirm
+            0, cooldown 1).
           </div>
           <RecordClipsToggle d={d} apply={apply} />
           <SoundLimits cooldownS={d.sound_cooldown_s} />
@@ -560,7 +563,8 @@ function ScheduleForm({ d, apply }) {
             </div>
           </div>
           <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-            Overnight windows work. No push and no in-app alert outside these hours. Shared by motion and sound.
+            Overnight windows work. No push and no in-app alert outside these hours, and no alert clip either: a
+            clip is only saved for an alert that fires. Shared by motion and sound.
             Uses the app timezone from Settings → General.
           </div>
         </>
