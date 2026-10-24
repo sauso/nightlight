@@ -60,6 +60,23 @@ const mountAccount = (user = USER) => renderAs(user, <Account />, { route: '/acc
 afterEach(() => vi.restoreAllMocks());
 
 // ---------------------------------------------------------------------------------------------
+describe('your photo', () => {
+  // #855: the 2 s timer that blanks "Saved ✓" used to run on after the page had gone (see childSettings.test.jsx).
+  test('★ #855: leaving the page cancels the "Saved" timer', async () => {
+    mockAccount();
+    const setSpy = vi.spyOn(globalThis, 'setTimeout');
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const { user, unmount } = mountAccount({ ...USER, photo: 'data:image/png;base64,AAA' });
+    await user.click(await screen.findByRole('button', { name: 'Remove' }));
+    await screen.findByText('Saved ✓');
+    const ids = setSpy.mock.calls.flatMap((c, i) => (c[1] === 2000 ? [setSpy.mock.results[i].value] : []));
+    expect(ids).toHaveLength(1);
+    expect(clearSpy).not.toHaveBeenCalledWith(ids[0]);
+    unmount();
+    expect(clearSpy).toHaveBeenCalledWith(ids[0]);
+  });
+});
+
 describe('your display name', () => {
   beforeEach(() => mockAccount());
 

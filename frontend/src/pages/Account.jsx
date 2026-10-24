@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Sun, Moon, Monitor } from 'lucide-react';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -41,6 +41,8 @@ export default function Account() {
   const [error, setError] = useState('');
   const [photoStatus, setPhotoStatus] = useState(''); // '' | 'saving' | 'saved'
   const [theme, setThemeState] = useState(getTheme());
+  const photoTimerRef = useRef(null); // the "Photo saved" tick's 2 s timer (#855), cancelled on unmount
+  useEffect(() => () => clearTimeout(photoTimerRef.current), []);
 
   async function savePhoto(photo) {
     setError('');
@@ -49,7 +51,10 @@ export default function Account() {
       await api.put('/auth/me', { photo }, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS });
       await refresh();
       setPhotoStatus('saved');
-      setTimeout(() => setPhotoStatus(''), 2000);
+      // #855: same as ChildSettings. Keep the timer id so leaving the page cancels it, and a second save inside the
+      // 2 s restarts it rather than being blanked early by the first.
+      clearTimeout(photoTimerRef.current);
+      photoTimerRef.current = setTimeout(() => setPhotoStatus(''), 2000);
     } catch (err) {
       setError(err.message);
       setPhotoStatus('');

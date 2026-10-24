@@ -230,6 +230,22 @@ describe('★★ the immediate photo write', () => {
     await waitFor(() => expect(camerasValue.refresh).toHaveBeenCalled());
   });
 
+  // #855: the 2 s timer that blanks "Photo saved" used to run on after the page had gone, and in CI it fired after jsdom
+  // was torn down ("window is not defined", an unhandled error that failed the run although every test passed).
+  test('★ #855: leaving the page cancels the "Photo saved" timer', async () => {
+    const setSpy = vi.spyOn(globalThis, 'setTimeout');
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const { user, unmount } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Remove' }));
+    await screen.findByText('Photo saved ✓');
+    // The 2 s timers this screen started (other libraries use other delays).
+    const ids = setSpy.mock.calls.flatMap((c, i) => (c[1] === 2000 ? [setSpy.mock.results[i].value] : []));
+    expect(ids).toHaveLength(1);
+    expect(clearSpy).not.toHaveBeenCalledWith(ids[0]);
+    unmount();
+    expect(clearSpy).toHaveBeenCalledWith(ids[0]);
+  });
+
   test('a failed photo write says why and does not claim success', async () => {
     putSpy = vi.spyOn(api, 'put').mockRejectedValue(new Error('Image is too large'));
     const { user } = mount();
