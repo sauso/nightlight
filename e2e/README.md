@@ -22,6 +22,8 @@ MediaMTX → WHEP/HLS) is exercised with no camera hardware. See
   The report + traces land in `playwright/playwright-report` and
   `playwright/test-results`.
 - `soak/` — a separate, continuously-running third environment for catching runtime-plumbing bugs a single clean e2e run can't reach; see `soak/README.md`.
+- `hardened.sh` — the optional container hardening, checked against the real
+  image; see [Hardened container check](#hardened-container-check) below.
 
 ## Run (needs a Docker host)
 
@@ -38,12 +40,52 @@ the intended venue; a small Docker vdisk (e.g. Unraid's default 40 GB, already
 full of other images) can run out of space pulling it.
 
 CI (`.github/workflows/e2e.yml`) runs both phases on `ubuntu-latest`, on a
-dev → main PR, nightly on dev, and on manual dispatch.
+dev → main PR, nightly on dev, and on manual dispatch. A separate `hardened`
+job in the same workflow runs `hardened.sh`.
 
 The weekly image rebuild (`.github/workflows/weekly-rebuild.yml`) also runs
 `prove.sh --keep` against each rebuilt image before it moves `:latest` or `:dev`,
 then signs in with the admin account `prove.sh` creates to check the AAC audio
 track. If you change that account or the `--keep` option, update the workflow too.
+
+## Hardened container check
+
+`hardened.sh` starts the image the way
+[docs/operations.md](../docs/operations.md#hardening-the-container-optional)
+describes: every Linux capability dropped except CHOWN, DAC_OVERRIDE, FOWNER,
+KILL, SETUID and SETGID, plus `no-new-privileges`. It runs with `PUID=99` and
+`PGID=100`, so the hand-over from root to the app user really happens (the
+stack above runs as `PUID=0`), and on a data volume that survives between
+starts.
+
+It needs a **Linux** Docker host, because it reads the container's processes
+from the host's `/proc` (Docker Desktop keeps them inside its VM). It uses its
+own containers, network, volumes and host port (`E2E_HARDENED_PORT`, default
+4100), so it can run next to the stack above. Build the image first, or it
+tests the last published `:dev`:
+
+```bash
+docker build -t sauso/nightlight:dev .
+bash e2e/hardened.sh            # everything: green, then K, D and F
+bash e2e/hardened.sh green      # one part: green, k, d or f
+bash e2e/hardened.sh teardown   # remove whatever a killed run left behind
+```
+
+`NIGHTLIGHT_IMAGE` picks another image; `HARDENED_LOG_DIR` keeps every
+container's log in that folder (CI uploads it as the `hardened-logs` artifact).
+
+| Part | Run with | Passes when | What that proves |
+|---|---|---|---|
+| green | all six | Healthy; the synthetic camera streams over HLS; tini and every process under it have the six-capability bounding set (`CapBnd 00000000000000eb`) and `NoNewPrivs 1`; node, MediaMTX and FFmpeg run as 99:100 with no group 0; `docker inspect` shows the flags; the two-factor recovery command works; `docker stop` gives exit code 0 and the app's `Shutting down` line; the data directory ends `700` and 99:100 with no `could not tighten`; a second container on the same data starts healthy | The hardened container starts, streams, stops cleanly and restarts on the same data (it does not make a recording; that is on the owner's staging checklist) |
+| K | KILL left out | `docker stop` gives a non-zero exit code, a `FATAL tini` line and no `Shutting down` line | Without KILL the stop signal never reaches the app, and the green stop check can tell |
+| D | DAC_OVERRIDE left out | The first start works but the two-factor recovery command fails; a second container on the same data exits non-zero with the expected line (`D_SIGNATURE_RE`) | Root needs DAC_OVERRIDE to get into the owner-only data directory, and the green recovery check and second start can tell |
+| F | FOWNER left out | A `could not tighten` warning, and the data directory does not end `700` | Without FOWNER existing files keep their group/other access, and the green mode check can tell |
+
+A part fails the script when its expectation does not show, including a
+control whose failure does not appear. Every expectation (the capability
+list, the bounding-set value, the log lines, the timeouts) is a variable at the
+top of the script. The capability list also appears in `docker-compose.yml`
+and `docs/operations.md`: change all three together.
 
 ## Upgrading Playwright
 
