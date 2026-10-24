@@ -23130,5 +23130,23 @@
     "expect": "killed",
     "tests": ["timelapse-empty-night.test.js"],
     "namePattern": "^j1:"
+  },
+  {
+    "label": "#850 M1: the list hides a night stored ok instead of one stored empty",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "s.night_date = t.night_date AND s.status = 'empty')",
+    "replace": "s.night_date = t.night_date AND s.status = 'ok')",
+    "expect": "killed",
+    "tests": ["timelapse-routes.test.js"],
+    "namePattern": "a night stored `empty` is left out of the list"
+  },
+  {
+    "label": "#850 M2: another child's empty row for the same date hides this child's video",
+    "file": "backend/src/lib/timelapse.js",
+    "find": "WHERE s.child_id = t.child_id AND s.night_date = t.night_date",
+    "replace": "WHERE s.night_date = t.night_date",
+    "expect": "killed",
+    "tests": ["timelapse-routes.test.js"],
+    "namePattern": "hostile neighbours"
   }
 ]

@@ -465,6 +465,11 @@ Each kind ages out differently — this is the part most worth reading twice:
     next night's window closes, about a day, so taking a correction back can still bring the
     timelapse back. The first start after updating to this version deletes, at once, any frames left
     on disk from earlier *no one in the bed* nights (a restart at the wrong moment could leave them).
+  - A night whose timelapse was **already made** and which the detector then re-scores as *no one in the
+    bed* (it needs a camera, bed-area or window change within those 3 hours) **stops showing** that
+    timelapse on the child's page. The video is hidden, not deleted: a **Recompute** can score the night
+    again at any time, and if it comes back as the child in bed, the timelapse is listed again. The file
+    stays on disk until it ages out (the 30 newest) or an admin deletes it from the child's page.
   - A night **you** mark *No one was in the bed* in the morning review keeps its timelapse. It is made
     and kept like any other night's, and marking the night deletes nothing. This is deliberate: the mark
     can be taken back, and a tap in a review should never destroy video that taking it back could not

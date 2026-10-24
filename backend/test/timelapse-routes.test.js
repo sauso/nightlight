@@ -17,6 +17,7 @@ const DATA_DIR = useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const { default: timelapseRouter } = await import('../src/routes/timelapses.js');
 const { CLIPS_DIR } = await import('../src/lib/clipRecorder.js');
+const { listChildTimelapses } = await import('../src/lib/timelapse.js');
 
 let server;
 let admin;
@@ -53,6 +54,8 @@ after(async () => {
 
 beforeEach(() => {
   db.prepare('DELETE FROM timelapses').run();
+  db.prepare('DELETE FROM sleep_nights').run();
+  db.prepare('DELETE FROM sleep_reviews').run();
   db.prepare('DELETE FROM sessions').run();
   db.prepare('DELETE FROM users').run();
   db.prepare('DELETE FROM children').run();
@@ -91,6 +94,59 @@ test('a caregiver CAN list timelapses (viewing is not admin-only)', async () => 
   const r = await call(`${server.url}/api/timelapses/child/${child.id}`, { token: caregiverToken });
   assert.equal(r.status, 200);
   assert.equal(r.body.length, 1);
+});
+
+// --- #850: a night the detector now stores as `empty` is not listed (and not deleted) -----------------
+// A night first stored `ok` has its video made; a later provisional pass can store it `empty`. The listing leaves it
+// out while the stored row says so, and a Recompute that makes it `ok` again brings it back, which is why the video
+// is hidden rather than deleted (plan review: Recompute can re-store any night of the last 30 days).
+
+function storeNight(childId, nightDate, status) {
+  db.prepare(
+    `INSERT INTO sleep_nights (child_id, night_date, window_start, window_end, status, computed_at)
+     VALUES (?, ?, '2026-07-01 09:00:00', '2026-07-01 21:00:00', ?, '2026-07-02 00:00:00')
+     ON CONFLICT(child_id, night_date) DO UPDATE SET status = excluded.status`
+  ).run(childId, nightDate, status);
+}
+const listedNights = async () =>
+  (await call(`${server.url}/api/timelapses/child/${child.id}`, { token: adminToken })).body.map((t) => t.night_date);
+
+test('#850: a night stored `empty` is left out of the list; `ok`, and a night with no stored row, are listed', async () => {
+  makeTimelapse({ id: 1, nightDate: '2026-07-01' }); // stored ok
+  makeTimelapse({ id: 2, nightDate: '2026-07-02' }); // stored empty
+  makeTimelapse({ id: 3, nightDate: '2026-07-03' }); // no sleep_nights row at all (demo / pre-sleep-tracking nights)
+  storeNight(child.id, '2026-07-01', 'ok');
+  storeNight(child.id, '2026-07-02', 'empty');
+  assert.deepEqual(await listedNights(), ['2026-07-03', '2026-07-01']);
+});
+
+test('#850: the hidden video is not deleted, and a Recompute that stores the night `ok` lists it again', async () => {
+  const { rel, relThumb } = makeTimelapse({ id: 4, nightDate: '2026-07-02' });
+  storeNight(child.id, '2026-07-02', 'empty');
+  assert.deepEqual(await listedNights(), []);
+  assert.ok(fs.existsSync(path.join(CLIPS_DIR, rel)) && fs.existsSync(path.join(CLIPS_DIR, relThumb)), 'files are untouched');
+  assert.ok(db.prepare('SELECT 1 FROM timelapses WHERE id = 4').get(), 'the row is untouched');
+  storeNight(child.id, '2026-07-02', 'ok'); // what an admin's Recompute does once the zone is fixed
+  assert.deepEqual(await listedNights(), ['2026-07-02']);
+});
+
+test('#850: hostile neighbours: another child\'s `empty` row for the same date, and a night that is only a parent\'s "nobody in the bed" mark, do not hide this one', async () => {
+  makeChild(db, { id: 'kid-2', name: 'Other' });
+  makeTimelapse({ id: 5, nightDate: '2026-07-02' });
+  makeTimelapse({ id: 6, nightDate: '2026-07-03' });
+  storeNight('kid-2', '2026-07-02', 'empty'); // same night_date, different child
+  storeNight(child.id, '2026-07-03', 'ok'); // the detector saw the child...
+  db.prepare('INSERT INTO sleep_reviews (child_id, night_date, nobody_in_bed) VALUES (?, ?, 1)').run(child.id, '2026-07-03'); // ...the parent said nobody
+  assert.deepEqual(await listedNights(), ['2026-07-03', '2026-07-02']);
+});
+
+test('#850: hidden nights do not use up the page limit', () => {
+  for (const [i, d] of ['2026-07-01', '2026-07-02', '2026-07-03', '2026-07-04'].entries()) {
+    makeTimelapse({ id: 10 + i, nightDate: d });
+  }
+  storeNight(child.id, '2026-07-04', 'empty');
+  storeNight(child.id, '2026-07-03', 'empty');
+  assert.deepEqual(listChildTimelapses(child.id, 2).map((t) => t.night_date), ['2026-07-02', '2026-07-01']);
 });
 
 // --- deletion ---------------------------------------------------------------------------------

@@ -64,12 +64,26 @@ const setReadyStmt = db.prepare(
 );
 const setFailedStmt = db.prepare("UPDATE timelapses SET status='failed' WHERE id=?");
 
+// ★ #850: A NIGHT THE DETECTOR NOW STORES AS `empty` IS NOT LISTED, but its video is NOT deleted. A night first stored
+// `ok` has its video made and its frames thrown away; a later pass (#351) can store it `empty`, and the page would
+// keep showing a "memory" of a night recorded as "no one was in the bed". Deleting that MP4 was the first plan and
+// the plan review (Opus, 2026-10-24) found it unsafe: an admin's Recompute (?store=1) can re-store ANY night of the
+// last 30 days at any time, with no finality check, and `empty -> ok` is not a downgrade, so a night whose zone was
+// fixed after the delete would be `ok` again with its only video and its frames gone for good. Hiding reads the
+// stored row at list time instead, so that Recompute simply brings the video back. Cost: the file stays on disk
+// until the child's 30 newest ready videos (KEEP_PER_CHILD) age it out, or an admin deletes it. Only the DETECTOR's
+// verdict (sleep_nights.status) counts: a night a parent marked "No one was in the bed" lives in sleep_reviews and
+// keeps its listed video (docs/recording.md). The video is still served by id; only the listing leaves it out.
+// The anti-join sits inside the LIMIT, so hidden nights never use up the caller's page.
 export function listChildTimelapses(childId, limit = 30) {
   return db
     .prepare(
-      `SELECT id, child_id, night_date, status, frame_count, duration_s, bytes, created_at
-         FROM timelapses WHERE child_id = ? AND status = 'ready'
-         ORDER BY night_date DESC LIMIT ?`
+      `SELECT t.id, t.child_id, t.night_date, t.status, t.frame_count, t.duration_s, t.bytes, t.created_at
+         FROM timelapses t
+        WHERE t.child_id = ? AND t.status = 'ready'
+          AND NOT EXISTS (SELECT 1 FROM sleep_nights s
+                           WHERE s.child_id = t.child_id AND s.night_date = t.night_date AND s.status = 'empty')
+        ORDER BY t.night_date DESC LIMIT ?`
     )
     .all(childId, Math.min(90, Math.max(1, limit)));
 }

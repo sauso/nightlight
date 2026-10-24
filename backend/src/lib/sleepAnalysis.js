@@ -3219,8 +3219,9 @@ export function runNightlySleepJob() {
         // but not while it is busy encoding another night; starting it here does not depend on that, and the
         // in-flight guard in assembleTimelapse makes the two harmless together.
         // The issue's own suggestion (delete a stale video on `empty -> ok`) is not needed: an `empty` night
-        // never had a video made. ⚠️ KNOWN LIMIT, not handled here: `ok` (video made, frames gone) ->
-        // `empty` leaves that video in place, and `empty -> ok -> empty` now can too; a separate issue.
+        // never had a video made. `ok` (video made, frames gone) -> `empty`, and `empty -> ok -> empty`, leave
+        // that video on disk; it is hidden from the child's list while the stored row says `empty` and shown
+        // again if a Recompute makes it `ok` (listChildTimelapses, #850: deleting it was found unsafe there).
         if (summary.status === 'ok' && (!existing || !SCORED.has(existing.status) || existing.status === 'empty')) {
           toTimelapse.push({ childId: kid.id, nightDate });
         }
