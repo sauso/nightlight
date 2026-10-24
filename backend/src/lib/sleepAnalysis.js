@@ -3261,6 +3261,14 @@ export function runNightlySleepJob() {
     import('./timelapse.js')
       .then((m) => m.discardFinalEmptyNightFrames())
       .catch((e) => logger.error(`[timelapse] empty-night sweep failed: ${e.message}`));
+    // #851: EVERY tick, delete the frame folders of nights more than 32 days old, whatever their stored status or none
+    // (see discardExpiredFrames for the rule, the margin's derivation and the per-pass cap). Registered LAST on purpose:
+    // all of these wait on the same module import and run in the order registered, so an assembly the retry has just
+    // started is already marked in flight when this pass looks, and is skipped. Its own call, not part of the retry,
+    // for the same reason as the empty-night sweep: a nearly full disk must not stop a delete.
+    import('./timelapse.js')
+      .then((m) => m.discardExpiredFrames())
+      .catch((e) => logger.error(`[timelapse] old-frames sweep failed: ${e.message}`));
   } catch (err) {
     logger.error('[sleep] Nightly job failed:', err.message);
   }

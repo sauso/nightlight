@@ -479,12 +479,28 @@ Each kind ages out differently — this is the part most worth reading twice:
     "A night you have corrected is locked"), changes nothing here either. A timelapse is first attempted
     the first time the nightly update scores the night (and retried if that fails, see below), and a correction never takes that pass away: a night
     corrected before it was first scored still gets its timelapse when it is.
+- **Timelapse frames** (the still taken every 2 minutes while a sleep window is open, about 30 MB a night)
+  are deleted once the night's timelapse is made. **Any frames still on disk when the night is about
+  32 days old are deleted**, whatever happened to it: scored as no data or no clear sleep, sleep tracking
+  turned off, never scored at all, or a timelapse that failed every try. Not configurable. Why 32: after
+  30 days the night's activity history is deleted, so no later Recompute can turn it into a timelapse any
+  more; the extra days are a safety margin. The age is counted on the UTC calendar, so the exact hour
+  depends on your timezone (it is never earlier than 32 days after the night's date). Frames left behind
+  by a child that no longer exists go the same way.
+  - After updating to this version, every frame folder that is already that old is deleted, oldest first,
+    at most 20 folders every 30 minutes (fewer on a slow disk), so a server that has been running for a
+    long time takes a while to catch up.
+  - Known limits: a night first scored more than 32 days after it ended (a server that was off for a
+    month) cannot get a timelapse any more, because its frames are gone first. A clock set far into the
+    future makes every folder look old and deletes it, as it would the activity history. A partial video
+    left by a failed timelapse is not deleted by this rule; it stays until the child is removed.
 
 **A stuck timelapse is given up on.** If the assembly's frames, time and bytes written stop moving for
 **2 minutes plus 1 second per 2 MB already written**, Nightlight stops it and marks that night failed.
 The sampled frames and any partial video file stay on disk, while the temporary numbered sequence is
-removed. The nightly job then tries again (next paragraph); a night it gives up on keeps its frames and
-any partial video file, which use disk space until the child is removed. A slow server can keep assembling
+removed. The nightly job then tries again (next paragraph); a night it gives up on keeps its frames until
+the night is about 32 days old (see "Timelapse frames" above), and any partial video file until the child
+is removed. A slow server can keep assembling
 for longer while progress continues. The thumbnail
 step has its own **2-minute** limit;
 if it fails, the video is still ready without a thumbnail. These numbers are unmeasured guesses shared
@@ -500,10 +516,11 @@ Nightlight starts** (about an hour and a half for a transient failure; a restart
 more). It skips a night that is not scored as someone sleeping in the bed, a child that no longer exists,
 a night with fewer than 30 frames, the night still being recorded, a night older than the 30 newest videos
 (it would be deleted at once), and any pass while storage is not ready or the disk is nearly full. After the
-third failure the log says `giving up on …` and names the folder; the frames stay there. There is no retry
-button, and no automatic deletion of those frames, unless the night is later re-scored as *no one in the
-bed* (then they go like that night's, above). The frames of a night scored as no data, or with no clear
-sleep, also stay on disk until the child is removed: nothing assembles or deletes them yet (a known limit).
+third failure the log says `giving up on …` and names the folder; the frames stay there until the night is
+about 32 days old, or until it is re-scored as *no one in the bed* (then they go like that night's, above).
+Until then a restart gives the night 3 more tries; after that there is nothing left to try. There is no
+retry button. The frames of a night that stays scored as no data, or with no clear sleep, are not made
+into a timelapse; they too are deleted at about 32 days.
 The 3 tries are an unmeasured guess, not based on a
 failure seen so far. As with the first try, the conditions above are checked when the video starts, not
 again when it ends: a night re-scored as empty, or a video deleted, while it is being made is not noticed
@@ -561,7 +578,9 @@ Things that behave in ways you might not expect:
 - **Folders are swept only for ids Nightlight made.** Every child and camera gets a random id (a UUID), and
   its folders in the clips folder are named after it. A child or camera with any other id (from an edited
   or imported database) still has its entries, and every file they name, deleted; files nothing names in
-  its folders are left. Known limit: this is what stops an id like `timelapse` emptying a shared folder.
+  its folders are left, except timelapse frames, which are still deleted once their night is about 32 days
+  old (see "Timelapse frames" under Retention). Known limit: this is what stops an id like `timelapse`
+  emptying a shared folder.
 
 ### Who can delete
 
