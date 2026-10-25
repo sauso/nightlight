@@ -16,7 +16,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   `no-new-privileges`. Nothing changes unless you add it: the Compose file has the lines commented out, and the Unraid
   template is unchanged. A new CI job starts the image that way and checks that it streams, stops cleanly and starts
   again on the same data, and that leaving out KILL, DAC_OVERRIDE or FOWNER fails the way the docs describe. It is
-  tested on bridge networking only; host networking, the Unraid default, is not yet. It does not separate FFmpeg from
+  tested on bridge networking; it has also been tried by hand on one Unraid install, with host networking and with a
+  dedicated LAN address, which is not an automated check. It does not separate FFmpeg from
   the database. See [docs/operations.md](docs/operations.md#hardening-the-container-optional), including the exact
   Unraid **Extra Parameters** (keep the existing log and stop-timeout flags) and how to check it worked.
 

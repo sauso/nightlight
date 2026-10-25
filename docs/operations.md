@@ -297,8 +297,8 @@ and nothing changes unless you add it: the Compose file has the lines commented 
 template does not include them.
 
 **How far it is tested:** an automated test (the `hardened` job in `.github/workflows/e2e.yml`) runs it on
-**bridge networking only**. Host networking, the Unraid default, is not tested automatically; it is being
-checked on the maintainer's staging install before this becomes a recommendation. If you turn it on, run
+**bridge networking only**. It has also been tried by hand on one Unraid install, with host networking and with a
+dedicated LAN address (clean start, clean stop, recordings saved, WebRTC and HLS playing); those hand checks are not automated. If you turn it on, run
 the checks in [Checking it works](#checking-it-works).
 
 ### What it changes, and what it does not
