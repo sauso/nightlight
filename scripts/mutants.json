@@ -23500,7 +23500,7 @@
   {
     "label": "#553 phase 2a move: the snapshot folders go ahead of a database that stayed at the top level",
     "file": "backend/src/scripts/migrate-private-layout.js",
-    "find": "  if (resolveLayout(ctx.dataDir) !== 'private') return;",
+    "find": "  if (present(path.join(ctx.dataDir, DB_FILE))) return;",
     "replace": "  if (false) return;",
     "expect": "killed",
     "tests": ["migrate-private-layout.test.js"],

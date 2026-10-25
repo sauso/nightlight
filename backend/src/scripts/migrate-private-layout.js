@@ -57,7 +57,6 @@ import {
   ensurePrivateDir,
   present,
   privateDirOf,
-  resolveLayout,
   timestampForName,
 } from '../lib/dataPaths.js';
 
@@ -406,10 +405,10 @@ function moveFile(ctx, name) {
 
 // ── 4. The snapshot folders ─────────────────────────────────────────────────────────────────────────────────────
 function moveSnapshotDirs(ctx) {
-  // With the database still at the top level, its pictures stay with it: the app serves them from there.
-  if (resolveLayout(ctx.dataDir) !== 'private') return;
-  // Two databases still (setting the top-level one aside failed this start): its pictures stay with it, so the next
-  // start can set both aside together. Never into private/, where they would pass for the private database's.
+  // With a database still at the top level, its pictures stay with it. That covers both cases: the move of the database
+  // did not happen this start (the app serves the pictures from there), and two databases (setting the top-level one
+  // aside failed: the next start sets both aside together; never into private/, where they would pass for the private
+  // database's). The mutation run on PR #870 showed a separate layout check had become the same test as this one.
   if (present(path.join(ctx.dataDir, DB_FILE))) return;
   for (const name of SNAPSHOT_DIRS) {
     pass(ctx, name, () => moveSnapshotDir(ctx, name));
