@@ -7,7 +7,7 @@ import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordSound } from './activityTracker.js';
 import { createSoundAnalyser, marginDb } from './soundBaseline.js';
-import { killIfSpawned, detectorHealthOf, killStalledDetector } from './processGuards.js';
+import { killIfSpawned, detectorHealthOf, killStalledDetector, isKillError } from './processGuards.js';
 import { buildSoundTaps, createStderrRouter, SIDE_CHANNEL_LOG_ARGS } from './ffmpegSideChannel.js';
 import { openObservation } from './observationClock.js';
 
@@ -158,6 +158,12 @@ export async function startSoundDetector(camera) {
     const obs = openObservation(camera.id, 'sound', { label: camera.name, path, windowSeconds: WIN_SAMPLES / WIN_RATE });
 
     proc.on('error', (err) => {
+      // #553: a SIGNAL that could not be delivered (EPERM), not a failed spawn (isKillError, processGuards.js): the
+      // process is alive, and dropping the entry would let reconcile start a second one. Keep it; 'exit' does the rest.
+      if (isKillError(err)) {
+        logger.error(`[sound:${path}] could not signal ffmpeg (pid ${proc.pid}): ${err.code || err.message}. It is still running.`);
+        return;
+      }
       // A spawn that never started. Node emits 'error' INSTEAD OF 'exit' here, so nothing downstream
       // runs — and with no listener on it an EventEmitter 'error' THROWS, taking the whole backend down.
       // On a baby monitor that is an outage. ENOENT (no ffmpeg on PATH — a broken image layer, a bad
@@ -339,9 +345,10 @@ export function stopSoundDetector(cameraId) {
     // See stopTranscoder for the full reasoning: a process that never spawned must not be killed
     // directly (on Linux that signals the whole process group — see killIfSpawned in processGuards.js),
     // and it emits 'error'/'close' but never 'exit', so waiting on 'exit' alone stalls for the whole timeout.
+    // #553: an undelivered SIGTERM (EPERM) arrives on 'error' too and is NOT "gone": only 'exit' or the fallback end it.
     const kill = (sig) => killIfSpawned(entry.proc, sig);
     entry.proc.once('exit', done);
-    entry.proc.once('error', done);
+    entry.proc.once('error', (err) => { if (!isKillError(err)) done(); });
     kill('SIGTERM');
     setTimeout(() => {
       if (!resolved) {

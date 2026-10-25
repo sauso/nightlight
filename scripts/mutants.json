@@ -18678,8 +18678,8 @@
   {
     "label": "#553 spawnChild: the allowlisted env is not applied (full environment inherited)",
     "file": "backend/src/lib/childEnv.js",
-    "find": "{ ...rest, env: childEnv({ mediamtx, extra }) }",
-    "replace": "{ ...rest }",
+    "find": "return spawn(command, args, { ...rest, env: childEnv({ mediamtx, extra }) });",
+    "replace": "return spawn(command, args, { ...rest });",
     "expect": "killed",
     "tests": [
       "child-env.test.js"
@@ -18689,8 +18689,8 @@
   {
     "label": "#553 spawnChild: a caller-supplied env wins over the allowlist",
     "file": "backend/src/lib/childEnv.js",
-    "find": "{ ...rest, env: childEnv({ mediamtx, extra }) }",
-    "replace": "{ ...rest, env: options.env ?? childEnv({ mediamtx, extra }) }",
+    "find": "return spawn(command, args, { ...rest, env: childEnv({ mediamtx, extra }) });",
+    "replace": "return spawn(command, args, { ...rest, env: options.env ?? childEnv({ mediamtx, extra }) });",
     "expect": "killed",
     "tests": [
       "child-env.test.js"
@@ -23184,5 +23184,194 @@
     "expect": "killed",
     "tests": ["timelapse-expire-frames.test.js"],
     "namePattern": "^j1:"
+  },
+  {
+    "label": "#553 phase 1 spawnChild: isolation on is ignored (the program is spawned unwrapped)",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "  if (mediaIsolationOn()) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["media-exec.test.js"],
+    "namePattern": "on: the wrapper is spawned"
+  },
+  {
+    "label": "#553 phase 1 spawnChild: the wrapped child gets the full environment (the switch and secrets leak)",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "return spawn(MEDIA_EXEC_PATH, [command, ...(args ?? [])], { ...rest, env: childEnv({ mediamtx, extra }) });",
+    "replace": "return spawn(MEDIA_EXEC_PATH, [command, ...(args ?? [])], { ...rest });",
+    "expect": "killed",
+    "tests": ["media-exec.test.js"],
+    "namePattern": "setpriv gets exactly the media drop"
+  },
+  {
+    "label": "#553 phase 1 mediaIsolationOn: any value turns it on",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "return env.MEDIA_ISOLATION === 'on';",
+    "replace": "return Boolean(env.MEDIA_ISOLATION);",
+    "expect": "killed",
+    "tests": ["media-exec.test.js"],
+    "namePattern": "^off: unset"
+  },
+  {
+    "label": "#553 phase 1 About: mediaIsolation is always reported off",
+    "file": "backend/src/routes/about.js",
+    "find": "mediaIsolation: mediaIsolationOn() ? 'on' : 'off',",
+    "replace": "mediaIsolation: 'off',",
+    "expect": "killed",
+    "tests": ["about-media-isolation.test.js"],
+    "namePattern": "MEDIA_ISOLATION=on"
+  },
+  {
+    "label": "#553 phase 1 processGuards: a 127 at once is treated like any exit (no back-off)",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "if (code !== EXEC_FAILED_EXIT_CODE || !atOnce) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": ["exec-failure-backoff.test.js"],
+    "namePattern": "127 at once, again and again"
+  },
+  {
+    "label": "#553 phase 1 processGuards: the back-off never grows",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "delayMs: Math.min(maxDelayMs, baseDelayMs * 2 ** (streak - 1)),",
+    "replace": "delayMs: baseDelayMs,",
+    "expect": "killed",
+    "tests": ["exec-failure-backoff.test.js"],
+    "namePattern": "127 at once, again and again"
+  },
+  {
+    "label": "#553 phase 1 processGuards: a 127 after a real run also backs off",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "const atOnce = launchedAt != null && now() - launchedAt < withinMs;",
+    "replace": "const atOnce = launchedAt != null;",
+    "expect": "killed",
+    "tests": ["exec-failure-backoff.test.js"],
+    "namePattern": "a 127 after a real run"
+  },
+  {
+    "label": "#553 phase 1 processGuards: every exec failure is logged (the flood is back)",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "log: streak === 1 || streak % EXEC_FAILED_RELOG_EVERY === 0,",
+    "replace": "log: true,",
+    "expect": "killed",
+    "tests": ["exec-failure-backoff.test.js"],
+    "namePattern": "127 at once, again and again"
+  },
+  {
+    "label": "#553 phase 1 processGuards: isKillError never recognises a kill error",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "return err?.syscall === 'kill';",
+    "replace": "return false;",
+    "expect": "killed",
+    "tests": ["exec-failure-backoff.test.js"],
+    "namePattern": "a kill error is one"
+  },
+  {
+    "label": "#553 phase 1 MediaMTX: the back-off delay is not used (relaunch every 3 s)",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "}, next.delayMs);",
+    "replace": "}, RESTART_DELAY_MS);",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^m1:"
+  },
+  {
+    "label": "#553 phase 1 MediaMTX: a refused SIGTERM is read as a failed spawn (a second MediaMTX)",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "      if (isKillError(err)) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^m2:"
+  },
+  {
+    "label": "#553 phase 1 transcoder: the back-off delay is not used (relaunch every 5 s)",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "}, next.delayMs));",
+    "replace": "}, RESTART_DELAY_MS));",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^t1:"
+  },
+  {
+    "label": "#553 phase 1 transcoder: a refused kill drops the live camera from the map",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "      if (isKillError(err)) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^t2:"
+  },
+  {
+    "label": "#553 phase 1 transcoder: a stop whose SIGTERM is refused resolves at once",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "entry.proc.once('error', (err) => { if (!isKillError(err)) done(); });",
+    "replace": "entry.proc.once('error', done);",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^t2:"
+  },
+  {
+    "label": "#553 phase 1 segmenter: the back-off delay is not used (relaunch every 5 s)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "}, next.delayMs);",
+    "replace": "}, RESTART_DELAY_MS);",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^s1:"
+  },
+  {
+    "label": "#553 phase 1 runFfmpeg: a refused kill settles as \"could not run\" instead of the deadline",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "      if (isKillError(e)) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^r1:"
+  },
+  {
+    "label": "#553 phase 1 motion detector: a refused kill drops the live detector from the map",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "      if (isKillError(err)) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["detector-kill-eperm.test.js"],
+    "namePattern": "^motion:"
+  },
+  {
+    "label": "#553 phase 1 motion detector: a stop whose SIGTERM is refused resolves at once",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "entry.proc.once('error', (err) => { if (!isKillError(err)) done(); });",
+    "replace": "entry.proc.once('error', done);",
+    "expect": "killed",
+    "tests": ["detector-kill-eperm.test.js"],
+    "namePattern": "^motion:"
+  },
+  {
+    "label": "#553 phase 1 sound detector: a refused kill drops the live detector from the map",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      if (isKillError(err)) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["detector-kill-eperm.test.js"],
+    "namePattern": "^sound:"
+  },
+  {
+    "label": "#553 phase 1 sound detector: a stop whose SIGTERM is refused resolves at once",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "entry.proc.once('error', (err) => { if (!isKillError(err)) done(); });",
+    "replace": "entry.proc.once('error', done);",
+    "expect": "killed",
+    "tests": ["detector-kill-eperm.test.js"],
+    "namePattern": "^sound:"
+  },
+  {
+    "label": "#553 phase 1 MediaMTX config: with isolation on it is still written to the fixed shared name",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "    if (mediaGid == null) {",
+    "replace": "    if (true) {",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "#553 media isolation: the copy goes into a FRESH folder"
   }
 ]

@@ -179,4 +179,99 @@ for f in babymonitor.db babymonitor.db-wal babymonitor.db-shm .jwt_secret; do
 done
 printf '[entrypoint] umask %s; %s; modes:%s\n' "$UMASK" "$DONE" "$MODES"
 
+# --- Media isolation (#553) ---------------------------------------------------------------------
+# Camera streams are untrusted input, and ffmpeg, ffprobe and MediaMTX parse them. With isolation ON they run as a
+# second user, the media user (uid:gid 1700:1700, created in the Dockerfile as nlmedia), with no capabilities, so a
+# parser bug a camera exploits cannot read what the app's uid can. The app itself then starts through `setpriv`
+# instead of `su-exec`, keeping exactly three capabilities as AMBIENT ones: SETUID and SETGID (to start each child as
+# the media user, through media-exec.sh) and KILL (to signal those children, which belong to another uid now).
+#
+# NIGHTLIGHT_MEDIA_ISOLATION is an INTERNAL switch, read only here: 1 asks for isolation, anything else (unset, 0,
+# blank, any other text) means off, silently. Off by default ON PURPOSE while #553 is built in phases: until the
+# shared-folder layout lands (phase 2), the media user cannot write recordings, clips or timelapses, so only
+# streaming works with it on. Not documented for users yet; a later phase flips the default and documents it.
+#
+# THE RULES (plan review of #553):
+#   - Decided HERE, as root, never in the app: Node cannot drop capabilities, so an app-side fallback would hand
+#     SETUID/SETGID/KILL to every child. MEDIA_ISOLATION is exported as `on` or `off` on EVERY start, so a value an
+#     operator put in the environment never reaches the app.
+#   - Before switching it on, a DRY RUN of the whole chain, with the SAME launcher (`setpriv $APP_DROP`, below) and
+#     the SAME media-exec.sh the app will use: media-probe.sh, started as the app, starts a media process through
+#     media-exec.sh and checks what the kernel actually gave it. Only if every check passes is it on.
+#   - Never refuse to start: any failure is `off` plus ONE warning line naming the reason, then the usual su-exec
+#     start, exactly as before #553. A failing step cannot abort the script: media_dry_run guards every status itself
+#     and is called as an `if` condition (where `set -e` does not apply), and the dry run has a time limit.
+#   - PUID=0 keeps isolation off: the app is root there and the PUID=0 setups (the e2e and demo stacks) rely on it.
+#   - PUID or PGID equal to the media id (compared numerically, canonical_id) keeps it off: the app would BE the media
+#     user, or share its group, and the separation would be nothing.
+#   - No bounding-set trimming anywhere: it needs CAP_SETPCAP, which the documented six-capability hardening lacks
+#     (#553 spike, run 1). --no-new-privs is set on the app and on every child instead.
+MEDIA_ID=1700
+# Next to this script: /app/media-exec.sh in the image, backend/media-exec.sh in a checkout (the tests). Node finds the
+# same file the same way (MEDIA_EXEC_PATH in src/lib/childEnv.js), so the dry run tests what the app will run.
+MEDIA_EXEC="$(dirname "$0")/media-exec.sh"
+MEDIA_PROBE="$(dirname "$0")/media-probe.sh"
+# Normally well under a second; the limit exists so a hung step can never stop the container starting (phase 2 will
+# probe the media folders, and a stalled network share is the realistic hang).
+MEDIA_DRY_RUN_TIMEOUT=30
+APP_UID=$(canonical_id "$PUID")
+APP_GID=$(canonical_id "$PGID")
+
+# The app's start with isolation on: `setpriv $APP_DROP -- <command>`. ONE definition, used by both the dry run and
+# the real start, so the dry run cannot pass with an argv the real start does not use. Expanded unquoted ON PURPOSE
+# (sh has no arrays): every word is a fixed token or a number checked by is_id before this is ever expanded, so
+# splitting on spaces is exact and there is nothing for pathname expansion to match.
+APP_DROP="--reuid=$APP_UID --regid=$APP_GID --groups=$APP_GID,$MEDIA_ID --inh-caps=+setuid,+setgid,+kill --ambient-caps=+setuid,+setgid,+kill --no-new-privs"
+
+is_id() { case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+
+# Sets MEDIA_REASON and returns 1 on any failure; returns 0 only on the probe's own success line AND status 0.
+media_dry_run() {
+  if _out=$(timeout "$MEDIA_DRY_RUN_TIMEOUT" setpriv $APP_DROP -- /bin/sh "$MEDIA_PROBE" app "$MEDIA_EXEC" "$MEDIA_ID" "$APP_UID" 2>&1); then
+    _rc=0
+  else
+    _rc=$?
+  fi
+  # PHASE 2 HOOK (#553): the shared-folder check goes here, as more arguments to media-probe.sh (one per media mount:
+  # the clip ring, the clips folder, the timelapse folder), so that the media user's write, the app's read and the
+  # app's unlink are proven on the real mounts before isolation is switched on.
+  if [ "$_rc" = 0 ] && [ "$(printf '%s\n' "$_out" | tail -n 1)" = MEDIA-PROBE-OK ]; then
+    return 0
+  fi
+  MEDIA_REASON=$(printf '%s\n' "$_out" | sed -n 's/^MEDIA-PROBE-FAIL //p' | head -n 1)
+  if [ -z "$MEDIA_REASON" ]; then
+    # The probe never ran or never finished: the drop to the app user itself failed (a missing capability makes
+    # setpriv exit 127, #553 spike run 3), setpriv is not util-linux's, or the time limit hit. Its last line says which.
+    MEDIA_REASON="the dry run could not start the app as uid $APP_UID with CAP_SETUID, CAP_SETGID and CAP_KILL (exit $_rc: $(printf '%s\n' "$_out" | sed '/^$/d' | tail -n 1))"
+  fi
+  return 1
+}
+
+MEDIA_ISOLATION=off
+MEDIA_REASON=
+if [ "${NIGHTLIGHT_MEDIA_ISOLATION:-}" = 1 ]; then
+  if ! is_id "$APP_UID" || ! is_id "$APP_GID"; then
+    MEDIA_REASON="PUID=$PUID PGID=$PGID are not both numbers"
+  elif [ "$APP_UID" = 0 ]; then
+    MEDIA_REASON="PUID=0 runs the app as root, and isolation needs a non-root app"
+  elif [ "$APP_UID" = "$MEDIA_ID" ] || [ "$APP_GID" = "$MEDIA_ID" ]; then
+    MEDIA_REASON="PUID or PGID is $MEDIA_ID, the media user's id, so the app and the media processes would not be separate"
+  elif media_dry_run; then
+    MEDIA_ISOLATION=on
+  fi
+fi
+export MEDIA_ISOLATION
+
+if [ "$MEDIA_ISOLATION" = on ]; then
+  printf '[entrypoint] media isolation on: ffmpeg, ffprobe and MediaMTX run as uid %s, the app as %s:%s\n' "$MEDIA_ID" "$APP_UID" "$APP_GID"
+  # su-exec sets HOME to the user's home (/app); setpriv leaves root's. Same value as the su-exec start, so nothing
+  # that reads HOME behaves differently with isolation on. "/" is su-exec's own fallback for a user it cannot find.
+  HOME=$(awk -F: '$1 == "nightlight" { print $6; exit }' /etc/passwd 2>/dev/null) || HOME=
+  export HOME="${HOME:-/}"
+  exec setpriv $APP_DROP -- "$@"
+fi
+if [ -n "$MEDIA_REASON" ]; then
+  printf '[entrypoint] warning: media isolation is off: %s; starting the usual way\n' "$MEDIA_REASON" >&2
+fi
+
 exec su-exec nightlight "$@"

@@ -14,7 +14,7 @@ import {
 } from './bedTransitionTracker.js';
 import { childSamplingActiveNow } from './sleepAnalysis.js';
 import { isDemoModeActive } from '../middleware/demoMode.js';
-import { killIfSpawned, detectorHealthOf, killStalledDetector, safeInterval } from './processGuards.js';
+import { killIfSpawned, detectorHealthOf, killStalledDetector, safeInterval, isKillError } from './processGuards.js';
 import { buildMotionTaps, createStderrRouter, SIDE_CHANNEL_LOG_ARGS } from './ffmpegSideChannel.js';
 import { openObservation } from './observationClock.js';
 
@@ -584,6 +584,13 @@ export async function startMotionDetector(camera) {
     let frameSeq = 0;
 
     proc.on('error', (err) => {
+      // #553: a SIGNAL that could not be delivered (EPERM: the watchdog's kill, the return to the sub, a stop), not a
+      // failed spawn (isKillError, processGuards.js). The process is alive; dropping the entry would let reconcile
+      // start a second detector for the camera. Keep it; its 'exit' still does the rest.
+      if (isKillError(err)) {
+        logger.error(`[detect:${path}] could not signal ffmpeg (pid ${proc.pid}): ${err.code || err.message}. It is still running.`);
+        return;
+      }
       // A spawn that never started. Node emits 'error' INSTEAD OF 'exit' here, so nothing downstream
       // runs — and with no listener on it an EventEmitter 'error' THROWS, taking the whole backend down.
       // On a baby monitor that is an outage. ENOENT (no ffmpeg on PATH — a broken image layer, a bad
@@ -998,9 +1005,10 @@ export function stopMotionDetector(cameraId) {
     // See stopTranscoder for the full reasoning: a process that never spawned must not be killed
     // directly (on Linux that signals the whole process group — see killIfSpawned in processGuards.js),
     // and it emits 'error'/'close' but never 'exit', so waiting on 'exit' alone stalls for the whole timeout.
+    // #553: an undelivered SIGTERM (EPERM) arrives on 'error' too and is NOT "gone": only 'exit' or the fallback end it.
     const kill = (sig) => killIfSpawned(entry.proc, sig);
     entry.proc.once('exit', done);
-    entry.proc.once('error', done);
+    entry.proc.once('error', (err) => { if (!isKillError(err)) done(); });
     kill('SIGTERM');
     setTimeout(() => {
       if (!resolved) {

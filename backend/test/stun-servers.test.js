@@ -183,6 +183,64 @@ describe('#558 MediaMTX config', () => {
     assert.equal(logged.length, 1);
     assert.match(logged[0], /no STUN servers/);
   });
+
+  // #553 phase 1: with media isolation on, MediaMTX runs as the media user and must be able to READ the copy, and the
+  // fixed name in the shared temp folder (where the media user can plant a symlink) must not be written through.
+  // `mediaGid` is this test user's own group, so the chown works unprivileged; the app's is 1700 (childEnv.js).
+  test('#553 media isolation: the copy goes into a FRESH folder per start, group media, 0750 / 0640, not the fixed name', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nl-stun-553-'));
+    try {
+      const gid = process.getgid?.() ?? 0;
+      const a = writeMediamtxConfig(BASE_YML, [GOOGLE], { tmpDir: tmp, mediaGid: gid });
+      const b = writeMediamtxConfig(BASE_YML, [GOOGLE], { tmpDir: tmp, mediaGid: gid });
+      assert.notEqual(a, BASE_YML, 'it fell back to the base file');
+      assert.notEqual(path.dirname(a), path.dirname(b), 'the same folder twice: a planted file in it would be reused');
+      assert.equal(path.dirname(path.dirname(a)), tmp);
+      assert.match(path.basename(path.dirname(a)), /^nightlight-mediamtx-/);
+      assert.equal(fs.existsSync(path.join(tmp, 'nightlight-mediamtx.yml')), false, 'the shared fixed name was used');
+      assert.ok(fs.readFileSync(a, 'utf8').includes(`- url: ${GOOGLE}`), 'not the filled-in config');
+      if (process.platform === 'linux') {
+        assert.equal((fs.statSync(path.dirname(a)).mode & 0o7777).toString(8), '750');
+        assert.equal((fs.statSync(a).mode & 0o7777).toString(8), '640');
+        assert.equal(fs.statSync(a).gid, gid);
+        assert.equal(fs.statSync(path.dirname(a)).gid, gid);
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test('#553 media isolation: a symlink planted at the fixed name is never written through', { skip: process.platform === 'linux' ? false : 'symlinks: Linux only' }, () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nl-stun-553-'));
+    try {
+      const victim = path.join(tmp, 'victim.db');
+      fs.writeFileSync(victim, 'SECRET');
+      fs.symlinkSync(victim, path.join(tmp, 'nightlight-mediamtx.yml'));
+      writeMediamtxConfig(BASE_YML, [GOOGLE], { tmpDir: tmp, mediaGid: process.getgid() });
+      assert.equal(fs.readFileSync(victim, 'utf8'), 'SECRET', 'the config was written through the planted link');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  test('#553 the default follows MEDIA_ISOLATION: on means the media variant, unset means the fixed name as before', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nl-stun-553-'));
+    const saved = process.env.MEDIA_ISOLATION;
+    try {
+      delete process.env.MEDIA_ISOLATION;
+      assert.equal(writeMediamtxConfig(BASE_YML, [GOOGLE], { tmpDir: tmp }), path.join(tmp, 'nightlight-mediamtx.yml'));
+      fs.rmSync(path.join(tmp, 'nightlight-mediamtx.yml'));
+      process.env.MEDIA_ISOLATION = 'on';
+      // Group 1700 here: a test user outside that group cannot give the folder to it, so the result is the base file;
+      // where it can (root, or Windows, where chown does nothing) it is a fresh folder. Never the fixed name.
+      const out = writeMediamtxConfig(BASE_YML, [GOOGLE], { tmpDir: tmp });
+      assert.notEqual(out, path.join(tmp, 'nightlight-mediamtx.yml'));
+      assert.equal(fs.existsSync(path.join(tmp, 'nightlight-mediamtx.yml')), false);
+    } finally {
+      if (saved === undefined) delete process.env.MEDIA_ISOLATION; else process.env.MEDIA_ISOLATION = saved;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('#558 the CSP follows the setting', () => {

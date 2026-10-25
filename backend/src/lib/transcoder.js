@@ -3,7 +3,7 @@ import { logger, isNoisyMediaLine } from './logger.js';
 import { recordCameraEvent, EVENT } from './cameraEvents.js';
 import { ffprobeAudioCodec } from './rtspProbe.js';
 import { hlsPathName, upsertPath, isPathConfiguredCorrectly } from './mediamtx.js';
-import { killIfSpawned } from './processGuards.js';
+import { killIfSpawned, isKillError, execFailureBackoff, describeExecFailure } from './processGuards.js';
 import { forwardProcessLines } from './processOutput.js';
 
 // camera_id -> { proc, stopped }
@@ -294,12 +294,27 @@ async function doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped, pre
     await upsertPath(hlsPath).catch((e) => logger.error(`[hls-path:${hlsPath}] ${e.message}`));
   }
 
+  // #553: this lineage's relaunch delay. A 127 at once (the program, or the switch to the media user, could not run)
+  // backs off from RESTART_DELAY_MS to a minute, logged once and then every 10th; every other exit relaunches after
+  // RESTART_DELAY_MS exactly as before. Per lineage (one doStart), like its relaunches: a later startTranscoder (the
+  // watchdog's force-restart, reconcile) begins a fresh run, and logs its first failure again. Known limit, accepted:
+  // with a permanently broken binary that is roughly one line per watchdog restart, which logs its own line anyway.
+  const execBackoff = execFailureBackoff(RESTART_DELAY_MS);
+
   function launch() {
     const proc = spawnChild('ffmpeg', buildArgs(rtspUrl, mediamtxPath, aacSource), { stdio: ['ignore', 'ignore', 'pipe'] });
+    execBackoff.launched();
     const entry = { proc, stopped: false };
     processes.set(cameraId, entry);
 
     proc.on('error', (err) => {
+      // #553: a SIGNAL that could not be delivered (EPERM), not a failed spawn: the process is alive (isKillError). Dropping
+      // the entry here would make isRunning() false while it still publishes, and reconcile would start a second
+      // publisher on the same path. Keep the entry; its 'exit' still does the rest.
+      if (isKillError(err)) {
+        logger.error(`[ffmpeg:${mediamtxPath}] could not signal ffmpeg (pid ${proc.pid}): ${err.code || err.message}. It is still running.`);
+        return;
+      }
       // A spawn that never started. Node emits 'error' INSTEAD OF 'exit' here, so nothing downstream
       // runs — and with no listener on it an EventEmitter 'error' THROWS, taking the whole backend down.
       // On a baby monitor that is an outage. ENOENT (no ffmpeg on PATH — a broken image layer, a bad
@@ -351,9 +366,14 @@ async function doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped, pre
       const wasTracked = processes.get(cameraId) === entry;
       if (wasTracked) processes.delete(cameraId);
       if (!entry.stopped && wasTracked) {
-        logger.error(
-          `[ffmpeg:${mediamtxPath}] exited (code ${code}), restarting in 5s. Last output: ${lastLine}`
-        );
+        const next = execBackoff.exited(code);
+        if (!next.execFailed) {
+          logger.error(
+            `[ffmpeg:${mediamtxPath}] exited (code ${code}), restarting in 5s. Last output: ${lastLine}`
+          );
+        } else if (next.log) {
+          logger.error(`[ffmpeg:${mediamtxPath}] ${describeExecFailure('ffmpeg', next)} Last output: ${lastLine}`);
+        }
         // The DTS-discontinuity path already recorded its own, more specific event just
         // before killing the process - don't double-log that same restart here.
         if (!restarting) {
@@ -368,7 +388,7 @@ async function doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped, pre
           // start queued from here would wait behind whatever start is in flight (see doStart's header). Any
           // start that does run cancels this timer first, through its own stop.
           if (!entry.stopped && !processes.has(cameraId)) launch();
-        }, RESTART_DELAY_MS));
+        }, next.delayMs));
       }
     });
   }
@@ -450,9 +470,13 @@ function killAndWait(entry) {
     //      claiming it did is why nobody looked again. Measured 2026-09-06, in #263.
     //   2. It emits 'error' then 'close' but NEVER 'exit', so waiting on 'exit' alone would stall
     //      every such stop for the full force-kill timeout before resolving.
+    //   3. (#553) A SIGTERM that could not be DELIVERED (EPERM) is reported on that same 'error' event, synchronously
+    //      inside kill(), and used to resolve this stop at once while the process kept running: a start waiting on
+    //      it then launched a second publisher beside it. A kill error is not "gone", so only the fallback below
+    //      (or a real 'exit') ends the wait.
     const kill = (sig) => killIfSpawned(entry.proc, sig);
     entry.proc.once('exit', done);
-    entry.proc.once('error', done);
+    entry.proc.once('error', (err) => { if (!isKillError(err)) done(); });
     kill('SIGTERM');
     // Belt-and-suspenders: don't let a stuck process block a restart indefinitely.
     setTimeout(() => {

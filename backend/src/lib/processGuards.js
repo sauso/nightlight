@@ -94,6 +94,81 @@ export function killIfSpawned(proc, signal = 'SIGTERM') {
   }
 }
 
+// #553: was this child 'error' a SIGNAL that could not be delivered, rather than a spawn that failed?
+//
+// Node's ChildProcess.kill() does not throw for EPERM: it EMITS 'error' on the child (lib/internal/child_process.js:
+// any kill error other than ESRCH, EINVAL or ENOSYS), the very event a failed spawn uses. Every 'error' handler in the
+// supervisors used to read it as "the binary never started" and drop the camera's entry, while the process was still
+// running. The case that matters is MediaMTX: its handler relaunched, i.e. started a SECOND MediaMTX on the same ports
+// next to the one that refused the signal. With media isolation (#553) the children run as another uid, so a kill can
+// fail with EPERM whenever the app lacks CAP_KILL (the entrypoint's dry run is meant to make that impossible; this is
+// what keeps a mistake there from turning into two MediaMTX processes).
+// Node sets `syscall` to 'kill' on these and to 'spawn <file>' on a failed spawn, so that field tells them apart.
+export function isKillError(err) {
+  return err?.syscall === 'kill';
+}
+
+// #553: the exit status of a launch that could not even run the program.
+//
+// A wrapped child (media isolation: media-exec.sh, then setpriv) is spawned successfully every time, because the
+// wrapper itself starts; when the PROGRAM then cannot be executed (missing, not executable) or setpriv cannot drop to
+// the media user, setpriv exits 127 (measured in the #553 spike: "exit status for a missing binary: 127"). Node reports
+// that as an ordinary 'exit', not an 'error', so the supervisors' "do not relaunch a binary that cannot run" rule
+// (the 'error' handlers, #257) never sees it, and MediaMTX, the transcoder and the clip segmenter would relaunch
+// every 3-5 s forever, one log line each time.
+export const EXEC_FAILED_EXIT_CODE = 127;
+// "At once": a 127 within this long of the spawn. setpriv fails in milliseconds; 5 s is generous so a loaded machine
+// still counts it, and a real program that exits 127 later (none of ours does) is treated as an ordinary exit.
+export const EXEC_FAILED_WITHIN_MS = 5_000;
+// The back-off doubles from the supervisor's own relaunch delay up to this. A judgment, not a measurement: a minute
+// is short enough that a fixed image or mount is picked up quickly, and long enough that a broken one costs ~60
+// launches an hour instead of ~700-1200.
+export const EXEC_FAILED_MAX_DELAY_MS = 60_000;
+// Logged on the first failure of a run and then every Nth, so a permanent failure stays visible in logger.js's
+// 1000-line ring (at the 60 s cap: one line about every 10 minutes) without flooding it.
+export const EXEC_FAILED_RELOG_EVERY = 10;
+
+// One supervisor lineage's relaunch delay. Call `launched()` right after each spawn and `exited(code)` from its 'exit'
+// handler; the result says how long to wait before relaunching and whether to log.
+//   - exit 127 within EXEC_FAILED_WITHIN_MS of the spawn: the run of such exits grows by one, the delay doubles from
+//     `baseDelayMs` up to `maxDelayMs`, and `log` is true only for the first of the run and every
+//     EXEC_FAILED_RELOG_EVERY-th after it;
+//   - anything else (another code, a signal, a 127 after a real run): the run ends, and the delay is exactly
+//     `baseDelayMs`, so every supervisor's normal relaunch is what it was.
+// The clock is monotonic (performance.now), like the detector watchdog's (#369): a wall-clock step must not make a
+// long run look instant. `now` is injectable for the tests.
+export function execFailureBackoff(baseDelayMs, { maxDelayMs = EXEC_FAILED_MAX_DELAY_MS, withinMs = EXEC_FAILED_WITHIN_MS, now = () => performance.now() } = {}) {
+  let launchedAt = null;
+  let streak = 0;
+  return {
+    launched() {
+      launchedAt = now();
+    },
+    exited(code) {
+      const atOnce = launchedAt != null && now() - launchedAt < withinMs;
+      if (code !== EXEC_FAILED_EXIT_CODE || !atOnce) {
+        streak = 0;
+        return { execFailed: false, delayMs: baseDelayMs, streak, log: true };
+      }
+      streak += 1;
+      return {
+        execFailed: true,
+        delayMs: Math.min(maxDelayMs, baseDelayMs * 2 ** (streak - 1)),
+        streak,
+        log: streak === 1 || streak % EXEC_FAILED_RELOG_EVERY === 0,
+      };
+    },
+  };
+}
+
+// The one log text for it, so the three supervisors say the same thing. `what` names the program.
+export function describeExecFailure(what, { streak, delayMs }) {
+  const times = streak > 1 ? ` (${streak} times in a row)` : '';
+  return `${what} could not be run: it exited ${EXEC_FAILED_EXIT_CODE} at once${times}. The program is missing or not ` +
+    `executable, or the switch to the media user failed (media isolation). Retrying in ${Math.round(delayMs / 1000)}s, ` +
+    `backing off to ${Math.round(EXEC_FAILED_MAX_DELAY_MS / 1000)}s.`;
+}
+
 // #369: the youngest a detector process may be before the detector watchdog (lib/cameraWatchdogs.js) is
 // allowed to kill it, measured on the MONOTONIC clock from its spawn. It lives here, beside killIfSpawned,
 // because BOTH detectors' restart levers enforce it and cameraWatchdogs.js reads it for its own ordering pin

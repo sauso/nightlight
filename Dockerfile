@@ -57,15 +57,30 @@ WORKDIR /app
 # tzdata: Alpine doesn't ship timezone data by default - without it, setting TZ has no
 #   effect at all (both MediaMTX and Node silently fall back to UTC instead of erroring),
 #   since there's no zone database for either to actually look up "Australia/Melbourne" in.
+# setpriv (#553, media isolation): util-linux's setpriv, which the entrypoint starts the app with and
+#   media-exec.sh starts every ffmpeg/ffprobe/MediaMTX with. BusyBox has a setpriv applet too, but it has no
+#   --groups (#553 spike), so the package is required; the check below fails the build if the setpriv on PATH
+#   is ever the applet again.
 # NOTE: no python3/make/g++ here - the backend-deps stage already produced node_modules,
 # and better-sqlite3's addon is a prebuilt binary that loads without any toolchain.
-RUN apk add --no-cache ffmpeg tini shadow su-exec tzdata
+RUN apk add --no-cache ffmpeg tini shadow su-exec tzdata setpriv
+RUN setpriv --version | grep -q util-linux
 
 # Placeholder UID/GID - entrypoint.sh remaps this to PUID/PGID (default 99/100) on
 # every container start, so the exact values baked in here don't matter, as long as
 # they don't collide with anything already in the base image. (The official node:alpine
 # images ship their own pre-existing "node" user/group at 1000/1000, which is what this avoided.)
 RUN addgroup -g 1500 nightlight && adduser -D -u 1500 -G nightlight -h /app nightlight
+
+# The media user (#553): ffmpeg, ffprobe and MediaMTX run as it when media isolation is on (media-exec.sh).
+# FIXED ids, 1700:1700, never remapped: the container's own business, unlike PUID/PGID. Nothing on the host needs to
+# know them; files the media user writes on the data volume show up there with these numbers. The entrypoint
+# refuses isolation (and starts as before) if PUID or PGID is 1700. No password, no home, no login shell: nothing
+# ever logs in as it. The app user is a member of its group, so the app can read and remove what the media
+# processes write (media-exec.sh sets umask 007 for that).
+RUN addgroup -g 1700 nlmedia \
+  && adduser -D -H -h /nonexistent -s /sbin/nologin -u 1700 -G nlmedia nlmedia \
+  && addgroup nightlight nlmedia
 
 COPY --from=mediamtx-binary /mediamtx /usr/local/bin/mediamtx
 RUN chmod +x /usr/local/bin/mediamtx
@@ -93,6 +108,13 @@ COPY mediamtx/mediamtx.yml ./mediamtx.yml
 
 COPY backend/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
+# #553: next to the entrypoint ON PURPOSE. The entrypoint finds both beside itself, and src/lib/childEnv.js finds
+# media-exec.sh at ../../media-exec.sh from its own location, so the dry run and the app use this one file. Root-owned
+# and 0755: the media user can run them and cannot change them. (The app user owns /app itself, its home, so it could
+# replace them; an app that holds CAP_SETUID gains nothing by that. Root-owned code the app cannot replace is a later
+# phase of #553.)
+COPY backend/media-exec.sh backend/media-probe.sh ./
+RUN chmod 755 ./media-exec.sh ./media-probe.sh
 
 ENV DATA_DIR=/app/data
 # Express behaves differently outside production mode - most importantly, its default
