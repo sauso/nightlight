@@ -97,6 +97,8 @@ export function ensureClipsFolder(parts, { leaf = false } = {}) {
 export function ensureAppOnlyFolder(name) {
   const dir = path.join(CLIPS_DIR, name);
   fs.mkdirSync(dir, { recursive: true, mode: APP_ONLY_MODE });
+  // Windows (a dev machine only) has no POSIX modes: fchmod on a folder there is EPERM, and the folder is the user's own.
+  if (process.platform === 'win32') return dir;
   // The umask cuts a mkdir mode (UMASK=022 would give 0755), so say it again, on the open folder.
   const fd = fs.openSync(dir, fs.constants.O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
   try {

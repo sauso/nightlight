@@ -123,7 +123,7 @@ function armSegmenter() {
 
 // Settle, then WAKE_ACTIVE_MIN active minutes: the 5th one captures. Returns the capture's run, its anchor, its
 // recordings row and the planted footage the cut needs.
-function wakeThatCaptures(segName = 'seg-1.mkv') {
+function wakeThatCaptures(segName = 'seg-20260101-000001.mkv') {
   for (let i = 0; i < ONSET_QUIET_MIN; i++) quiet();
   assert.equal(stateOf().asleep, true, 'precondition: the watcher armed');
   let fired = null;
@@ -289,7 +289,7 @@ describe('#471: a wake clip being cut keeps its ring footage when its run ends',
 
   test('two captures in flight on one camera keep two independent leases; each release frees only its own', async () => {
     armSegmenter();
-    const first = wakeThatCaptures('seg-1.mkv');
+    const first = wakeThatCaptures('seg-20260101-000001.mkv');
     // An active label an hour ahead ends the first run and starts a second, which captures in its turn.
     skip(60);
     let fired = null;
@@ -298,7 +298,7 @@ describe('#471: a wake clip being cut keeps its ring footage when its run ends',
     const secondRun = stateOf().run;
     const secondId = wakeRowIds().at(-1);
     assert.notEqual(secondId, first.id);
-    const secondSeg = plantSegment(fired.startMs + 2000, 'seg-2.mkv');
+    const secondSeg = plantSegment(fired.startMs + 2000, 'seg-20260101-000002.mkv');
     assert.equal(leases().length, 2, `two leases expected, owners: ${JSON.stringify(holdOwners(CAM))}`);
 
     mock.timers.tick(5000);

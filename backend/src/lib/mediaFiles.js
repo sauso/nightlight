@@ -218,25 +218,34 @@ function requestIsFresh(headers, etag, lastModified) {
   return true;
 }
 
-// A single `bytes=` range against `size`: { start, end } (inclusive), 'unsatisfiable', or null for "serve it all"
-// (no Range header, a header that is not a single valid range, or several ranges: res.sendFile does the same for those).
-function parseSingleRange(header, size) {
-  const m = /^bytes=(\d*)-(\d*)$/.exec(String(header || '').trim());
-  if (!m || (m[1] === '' && m[2] === '')) return null;
-  let start;
-  let end;
-  if (m[1] === '') {
-    // a suffix: the last N bytes
-    const n = Number(m[2]);
-    start = Math.max(0, size - n);
-    end = size - 1;
-  } else {
-    start = Number(m[1]);
-    end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1);
+// The Range header against `size`, by the rules res.sendFile used (the `range-parser` package under `send`, which this mirrors so
+// that a browser's <video> seeks exactly as before; backend/test/media-files.test.js compares the two request by request):
+//   null           serve the whole file: no Range, not `bytes=`, or several separate ranges (send serves only one)
+//   'unsatisfiable' answer 416: a `bytes=` header none of whose ranges can be met (also a malformed one, as send does)
+//   { start, end }  answer 206 with these bytes (inclusive)
+const BYTES_RANGE_RE = /^ *bytes=/;
+function parseRange(header, size) {
+  if (!BYTES_RANGE_RE.test(header)) return null;
+  const ranges = [];
+  for (const part of header.slice(header.indexOf('=') + 1).split(',')) {
+    const [a, b] = part.split('-');
+    let start = parseInt(a, 10);
+    let end = parseInt(b, 10);
+    if (Number.isNaN(start)) { start = size - end; end = size - 1; } // -nnn: the last nnn bytes
+    else if (Number.isNaN(end)) end = size - 1; // nnn-
+    if (end > size - 1) end = size - 1;
+    if (Number.isNaN(start) || Number.isNaN(end) || start > end || start < 0) continue; // invalid or unsatisfiable
+    ranges.push({ start, end });
   }
-  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return null;
-  if (start > end || start >= size) return 'unsatisfiable';
-  return { start, end };
+  if (ranges.length < 1) return 'unsatisfiable';
+  ranges.sort((x, y) => x.start - y.start);
+  const merged = [{ ...ranges[0] }];
+  for (const r of ranges.slice(1)) {
+    const last = merged[merged.length - 1];
+    if (r.start <= last.end + 1) last.end = Math.max(last.end, r.end);
+    else merged.push({ ...r });
+  }
+  return merged.length === 1 ? merged[0] : null;
 }
 
 /**
@@ -245,7 +254,8 @@ function parseSingleRange(header, size) {
  * and read from that same descriptor: it is never opened again by path, so nothing swapped in after the checks can be
  * what is sent. The descriptor is closed on every path (finished, error, client gone, HEAD, 304, 416).
  * Returns true if it started a response from the file, false after answering 404 (no usable file) itself.
- * Not done, because no browser asks for it: If-Match / If-Unmodified-Since (412) and multi-range replies.
+ * Not done, because no browser asks for it: If-Match / If-Unmodified-Since (412) and multi-range replies (the whole file is
+ * sent, as send does). A 416 has an EMPTY body (send's has a small HTML error page); nothing reads it.
  */
 export function serveMediaFile(req, res, abs, { contentType, root = CLIPS_DIR } = {}) {
   const f = openMediaFile(abs, { root });
@@ -281,7 +291,7 @@ export function serveMediaFile(req, res, abs, { contentType, root = CLIPS_DIR } 
       const rangeStale = ifRange
         ? ifRange.includes('"') ? !ifRange.includes(etag) : !(httpDate(lastModified) <= httpDate(ifRange))
         : false;
-      const range = rangeStale ? null : parseSingleRange(rangeHeader, f.size);
+      const range = rangeStale ? null : parseRange(rangeHeader, f.size);
       if (range === 'unsatisfiable') {
         res.statusCode = 416;
         res.setHeader('Content-Range', `bytes */${f.size}`);
