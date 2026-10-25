@@ -4,7 +4,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createAccountThrottle, FREE_FAILURES, BASE_DELAY_MS, MAX_DELAY_MS, DECAY_MS,
+  createAccountThrottle, FREE_FAILURES, BASE_DELAY_MS, MAX_DELAY_MS, LEAK_MS,
 } from '../src/lib/accountThrottle.js';
 
 function clock(start = 1_000_000) {
@@ -36,7 +36,7 @@ describe('the free guesses', () => {
     assert.equal(FREE_FAILURES, 30);
     assert.equal(BASE_DELAY_MS, 60_000);
     assert.equal(MAX_DELAY_MS, 15 * 60_000);
-    assert.equal(DECAY_MS, 60 * 60_000);
+    assert.equal(LEAK_MS, 15 * 60_000);
   });
 
   test('one account failing does not slow another', () => {
@@ -85,7 +85,7 @@ describe('the delay', () => {
 
   test('★ a huge failure count cannot overflow past the cap', () => {
     const c = clock();
-    const throttle = createAccountThrottle({ now: c.now, freeFailures: 1, decayMs: Infinity });
+    const throttle = createAccountThrottle({ now: c.now, freeFailures: 1, leakMs: Infinity });
     for (let i = 0; i < 80; i++) {
       c.advance(MAX_DELAY_MS + 1);
       const slot = throttle.acquire('alice');
@@ -118,52 +118,65 @@ describe('what ends or forgives a run of failures', () => {
     assert.equal(throttle.size(), 1, 'the account should be tracked only while a guess is in flight');
   });
 
-  test('★ an hour without a failure forgets the account, so old typos never add up', () => {
+  test('★ one wrong guess is forgiven for every LEAK_MS of quiet (a leaky bucket)', () => {
     const c = clock();
     const throttle = createAccountThrottle({ now: c.now });
-    failTimes(throttle, 'alice', FREE_FAILURES - 1);
-    c.advance(DECAY_MS + 1);
-    failTimes(throttle, 'alice', FREE_FAILURES - 1);
-    assert.equal(throttle.acquire('alice').allowed, true, 'failures older than the decay still counted');
+    failTimes(throttle, 'alice', FREE_FAILURES - 1); // 29 on record
+    c.advance(3 * LEAK_MS + 1000); // three steps pass, with a remainder that must be kept
+    // 29 - 3 = 26 on record, so four more guesses are free and the fifth is refused.
+    failTimes(throttle, 'alice', 4);
+    assert.equal(throttle.acquire('alice').allowed, false, 'more than three guesses were forgiven');
   });
 
-  test('just inside the decay window the failures still count', () => {
+  test('just inside one step nothing is forgiven', () => {
     const c = clock();
     const throttle = createAccountThrottle({ now: c.now });
     failTimes(throttle, 'alice', FREE_FAILURES - 1);
-    c.advance(DECAY_MS - 1000);
+    c.advance(LEAK_MS - 1000);
     failTimes(throttle, 'alice', 1);
     assert.equal(throttle.acquire('alice').allowed, false);
   });
 
-  test('★ an account that reached its delay is eased by an hour of quiet to ONE guess short of the limit, not to zero', () => {
+  test('★ enough quiet forgets the account completely, and an idle account leaves no entry', () => {
     const c = clock();
     const throttle = createAccountThrottle({ now: c.now });
-    failTimes(throttle, 'alice', FREE_FAILURES);
-    c.advance(DECAY_MS + 1);
-    const guess = throttle.acquire('alice');
-    assert.equal(guess.allowed, true, 'an hour of quiet should allow a guess');
-    guess.fail();
-    const next = throttle.acquire('alice');
-    assert.equal(next.allowed, false, 'the whole free allowance came back after an hour');
-    assert.equal(next.retryAfterSec, BASE_DELAY_MS / 1000, 'the account should be straight back at the base delay');
+    failTimes(throttle, 'alice', FREE_FAILURES - 1);
+    c.advance((FREE_FAILURES - 1) * LEAK_MS + 1);
+    const slot = throttle.acquire('alice');
+    assert.equal(slot.allowed, true);
+    slot.release();
+    assert.equal(throttle.size(), 0, 'a fully forgiven account kept an entry');
+    failTimes(throttle, 'alice', FREE_FAILURES); // a whole fresh allowance
+    assert.equal(throttle.acquire('alice').allowed, false);
   });
 
-  test('★ waiting out the decay again and again does NOT give 30 fresh guesses an hour (Opus review: 720 a day)', () => {
-    // 30 quickly, then repeat "wait just over an hour, guess until refused". With a full reset that is 30 a cycle.
+  test('★ the remainder of a step is kept, so forgiving never gives back more time than passed', () => {
+    const c = clock();
+    const throttle = createAccountThrottle({ now: c.now });
+    failTimes(throttle, 'alice', FREE_FAILURES - 1); // 29
+    c.advance(LEAK_MS + LEAK_MS / 2); // 1.5 steps: one forgiven now
+    throttle.acquire('alice').release(); // looks at the account: 28 left, half a step banked
+    c.advance(LEAK_MS / 2); // the banked half plus this half is a second step
+    failTimes(throttle, 'alice', 3); // 27 + 3 = 30 reached only if exactly two were forgiven
+    assert.equal(throttle.acquire('alice').allowed, false, 'the half step was lost or counted twice');
+  });
+
+  test('★ stopping short of the limit and waiting does NOT refill the allowance (Astra review: ~696 a day)', () => {
+    // The pattern that beat "forget after an hour": 29 wrong guesses, wait just over an hour, repeat. With a leak an
+    // hour forgives four, however close to the limit the guesser stops. Greedy guesser: guess whenever allowed.
     const c = clock();
     const throttle = createAccountThrottle({ now: c.now });
     let guesses = 0;
     for (let cycle = 0; cycle < 24; cycle++) {
-      c.advance(DECAY_MS + 1000);
       for (;;) {
         const slot = throttle.acquire('alice');
         if (!slot.allowed) break;
         guesses += 1;
         slot.fail();
       }
+      c.advance(60 * 60 * 1000 + 1000);
     }
-    assert.ok(guesses <= 30 + 24 * 2, `${guesses} guesses in about a day; the documented bound is about 100`);
+    assert.ok(guesses <= 30 + 24 * 4 + 4, `${guesses} guesses in about a day; the bound is 30 plus 4 an hour`);
   });
 
   test('★ the best a guesser can do in a day is about 100 guesses (waiting out each delay exactly)', () => {
@@ -264,11 +277,24 @@ describe('reservations (the concurrency rule)', () => {
 });
 
 describe('memory is bounded', () => {
-  test('★ keys are cut to a fixed length, so a huge username cannot make a huge entry', () => {
+  test('★ keys of INVENTED names are cut to a fixed length, so a huge made-up username cannot make a huge entry', () => {
     const throttle = createAccountThrottle({ now: clock().now });
-    failTimes(throttle, 'x'.repeat(5000), FREE_FAILURES);
-    // The same first 256 characters share an entry; a different tail past that is the same account to the throttle.
-    assert.equal(throttle.acquire('x'.repeat(5000) + 'different tail').allowed, false);
+    failTimes(throttle, 'x'.repeat(5000), FREE_FAILURES, { known: false });
+    // The same first 256 characters share an entry; a different tail past that is the same name to the throttle.
+    assert.equal(throttle.acquire('x'.repeat(5000) + 'different tail', { known: false }).allowed, false);
+  });
+
+  test('★ keys of REAL accounts are NOT cut: two long names that share a 256-character prefix are two accounts', () => {
+    // Astra review of #868: POST /users has no length limit, so cutting a real key let one account's good sign-in
+    // reset another's count.
+    const throttle = createAccountThrottle({ now: clock().now });
+    const prefix = 'x'.repeat(300);
+    failTimes(throttle, `${prefix}a`, FREE_FAILURES);
+    assert.equal(throttle.acquire(`${prefix}a`).allowed, false);
+    const other = throttle.acquire(`${prefix}b`);
+    assert.equal(other.allowed, true, 'a different long name shared the first account\'s count');
+    other.succeed();
+    assert.equal(throttle.acquire(`${prefix}a`).allowed, false, 'a good sign-in on one name reset the other');
   });
 
   const INVENTED = { known: false };
@@ -286,11 +312,11 @@ describe('memory is bounded', () => {
     assert.equal(throttle.acquire('delayed', INVENTED).allowed, false, 'the delayed entry was evicted to make room');
   });
 
-  test('entries that decayed are dropped before anything live is', () => {
+  test('entries that have leaked away are dropped before anything live is', () => {
     const c = clock();
     const throttle = createAccountThrottle({ now: c.now, maxEntries: 2 });
     failTimes(throttle, 'old-typo', 1, INVENTED);
-    c.advance(DECAY_MS + 1);
+    c.advance(LEAK_MS + 1); // one forgiven guess: the single typo is gone
     failTimes(throttle, 'recent-typo', 1, INVENTED);
     failTimes(throttle, 'newcomer', 1, INVENTED); // table full: the decayed one goes, the recent one stays
     assert.equal(throttle.size(), 2);
@@ -299,15 +325,15 @@ describe('memory is bounded', () => {
     assert.equal(throttle.acquire('recent-typo', INVENTED).allowed, false, 'the recent entry lost its failures');
   });
 
-  test('★ a delayed entry that has aged out is eased and then evictable, so the table cannot stay full of them', () => {
-    // Opus review of #868: with delayed entries protected for good, a full table never freed. Aged-out delayed entries
-    // are eased to one short of the limit, which is evictable, so room comes back an hour after the fill stops.
+  test('★ a delayed entry that has leaked below the limit is evictable, so the table cannot stay full of them', () => {
+    // Opus review of #868: with delayed entries protected for good, a full table never freed. An entry that has
+    // leaked one step is below the limit, which is evictable, so room comes back once the fill has stopped.
     const c = clock();
     const throttle = createAccountThrottle({ now: c.now, maxEntries: 2 });
     failTimes(throttle, 'a', FREE_FAILURES, INVENTED);
     failTimes(throttle, 'b', FREE_FAILURES, INVENTED);
     assert.equal(throttle.size(), 2);
-    c.advance(DECAY_MS + 1);
+    c.advance(LEAK_MS + 1);
     const slot = throttle.acquire('c', INVENTED);
     assert.equal(slot.allowed, true);
     slot.fail();
@@ -364,6 +390,27 @@ describe('memory is bounded', () => {
     // 'a' kept its entry, so its failure is on record: FREE_FAILURES - 1 more bring it to the limit.
     failTimes(throttle, 'a', FREE_FAILURES - 1, INVENTED);
     assert.equal(throttle.acquire('a', INVENTED).allowed, false, 'the failure of an in-flight guess was lost');
+  });
+
+  test('KNOWN LIMIT (pinned so it is never silently worse): a flood of fresh invented names can tell a real name from an invented one', () => {
+    // Astra review of #868, verified by reading. Bounded memory cannot make the two perfectly alike: filling the invented
+    // table evicts an invented candidate's count but never a real account's. Documented in docs/mfa.md with its cost
+    // (about MAX_ENTRIES requests per probe). If this ever stops being true, update the docs; if it gets WORSE (fewer
+    // requests, or a real count lost), this fails.
+    const cap = 5;
+    const probe = (known) => {
+      const throttle = createAccountThrottle({ now: clock().now, maxEntries: cap });
+      failTimes(throttle, 'candidate', FREE_FAILURES - 1, { known }); // 29 on record
+      for (let i = 0; i < cap; i++) failTimes(throttle, `fresh-${i}`, 1, INVENTED); // the flood: `cap` fresh names
+      let allowed = 0;
+      for (let i = 0; i < 3; i++) {
+        const slot = throttle.acquire('candidate', { known });
+        if (slot.allowed) { allowed += 1; slot.fail(); }
+      }
+      return allowed;
+    };
+    assert.equal(probe(true), 1, 'a real account lost or gained guesses because of the flood');
+    assert.equal(probe(false), 3, 'the invented candidate was expected to be evicted by a flood of `cap` fresh names');
   });
 
   test('a name is tracked in one table: reset() clears it whichever table it was in', () => {

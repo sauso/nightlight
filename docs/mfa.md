@@ -253,7 +253,7 @@ without limit.
 | What | Default | Counted per | What happens |
 |---|---|---|---|
 | Wrong passwords | **30**, then a growing wait | the account alone, whatever the source address | After 30 wrong passwords, the next guess has to wait **1 minute**. Each further wrong guess doubles the wait, up to **15 minutes**. While a wait runs, every attempt on that account, **even with the right password**, is refused (HTTP 429, "Too many attempts - please wait a few minutes and try again.", with a `Retry-After` header). A refused attempt counts as nothing, so trying again does not lengthen the wait. |
-| Eased after | **1 hour** | the account | An hour without a wrong password forgets a count below 30, so old typos never add up. An account that had reached its wait is eased back to **one guess short of 30**, not to zero, so waiting an hour does not buy 30 fresh guesses: the most anyone can get is about 100 a day. A correct password resets it at once. |
+| Forgiven | **one wrong password per 15 minutes** | the account | Each 15 minutes without a wrong password forgives one, so old typos fade and there is no moment to wait for that hands back a whole fresh 30. Whatever the pacing, a guesser gets the first 30 and then at most **one guess per 15 minutes**: about 126 in the first day, about 96 a day after. A correct password resets the count at once. An account with 30 on record is back to none after about 7½ hours. |
 
 30 sits above the per-address limit (20 per 15 minutes), so one device mistyping meets its own limit first. To
 reach 30 you would need a long run of wrong passwords (more than one 15-minute window, or two devices at once),
@@ -283,11 +283,13 @@ as they keep at it. They cannot guess any faster. Ways out:
 **Known limits:**
 
 - Real accounts always have their own count, and nothing sent to the sign-in page can refuse, evict or reset it.
-  Made-up usernames (which match no account) are tracked in a separate table of at most 10,000, only so that a
-  made-up name is slowed exactly like a real one and the answer never says which names exist. If an attacker
-  fills that table (hundreds of thousands of requests), further made-up names are simply not tracked, and from
-  then on a name that is **never** slowed is not a real one. That is a hint about which names exist, and it costs
-  the attacker the hundreds of thousands of requests.
+  Made-up usernames (which match no account) are tracked in a separate table of at most 10,000, so that a
+  made-up name is slowed like a real one and the answer does not say which names exist. That cannot be perfect
+  at a fixed amount of memory: an attacker who sends about **10,000 requests with fresh made-up names** can push
+  a made-up name's count out of that table (a real account's count stays), and so test whether one name is real.
+  Usernames are not treated as secret here, and each such test costs the attacker those 10,000 requests.
+- Sign-in is looked up by the exact name, so two accounts whose names differ only by capital letters are two
+  accounts with separate counts.
 
 ## Notes for operators
 

@@ -11,7 +11,9 @@
 // WHAT IT IS. A counter of FAILED guesses per account, whatever the source address. Up to FREE_FAILURES wrong
 // guesses are free; from then on each further wrong guess is only allowed after a DELAY that doubles, up to
 // MAX_DELAY_MS. A correct password resets the account. While a delay runs the answer is 429 + Retry-After, and a
-// refused request counts as nothing, so hammering cannot lengthen the delay.
+// refused request counts as nothing, so hammering cannot lengthen the delay. The count LEAKS: one wrong guess is
+// forgiven for every LEAK_MS without a new one (a leaky bucket), so old typos fade and a guesser can never get more
+// than a burst of FREE_FAILURES plus one guess per LEAK_MS, however they pace themselves.
 //
 // ⚠️ THE TRADE, stated plainly because #248 rejected an account-only key for it and the owner has now accepted it
 // (for this one control): anyone who can reach the login form can use up an account's free guesses and so slow
@@ -20,30 +22,38 @@
 // MAX_DELAY_MS), change the password (empties the account at once), or restart the container (the store is in
 // memory).
 //
-// TWO TABLES, because of what a flood of invented usernames can do (Codex and Opus review of #868, each verified by
-// running). The caller says whether the name is a real account (`known`):
-//   * REAL accounts live in a table with NO cap. It is bounded by the users table, so an attacker cannot grow it, and
-//     NOTHING an attacker sends can refuse, evict or reset a real account's entry. The first design had one capped
-//     table: a flood of invented names pushed real accounts' entries out (a fresh 30 guesses), and then "fail closed"
-//     for a full table refused EVERY account without an entry, household-wide, with only a restart as a way out.
+// TWO TABLES, because of what a flood of invented usernames can do (Codex, Opus and Astra reviews of #868, each
+// verified by running). The caller says whether the name is a real account (`known`):
+//   * REAL accounts live in a table with NO cap. Only an admin creates accounts, so it is bounded by the accounts that
+//     exist or have existed since the container started (a deleted or renamed account's entry is dropped by the leak
+//     when it is next looked at, or on restart). NOTHING an attacker sends can refuse, evict or reset a real
+//     account's entry. The first design had one capped table: a flood of invented names pushed real accounts' entries
+//     out (a fresh 30 guesses), and then "fail closed" for a full table refused EVERY account without an entry,
+//     household-wide, with only a restart as a way out. Real keys are not truncated (two long real names that share a
+//     prefix must not share a counter).
 //   * INVENTED names (they match no account, so a guess at one is a guess at nothing) live in a table capped at
-//     MAX_ENTRIES. They are tracked only so that an invented name is throttled exactly like a real one (an
-//     unknown name must not be told apart by its answer). When that table is full of protected entries a new invented
-//     name is simply NOT tracked: the guess reaches no account, so letting it through costs nothing. Known limit: an
-//     attacker who has made hundreds of thousands of requests to fill it can then tell real names from invented
-//     ones, because only a real name is ever slowed.
+//     MAX_ENTRIES, with keys cut to MAX_KEY_LENGTH. They are tracked only so that an invented name is throttled like a
+//     real one (an unknown name should not be told apart by its answer). When that table is full of protected
+//     entries a new invented name is simply NOT tracked: the guess reaches no account, so letting it through costs
+//     nothing. ⚠️ KNOWN LIMIT: this cannot be perfectly indistinguishable at bounded memory. An attacker who sends
+//     about MAX_ENTRIES requests with fresh invented names can evict an invented candidate's count, whereas a real
+//     account keeps its own, and so learn whether a name is real (Astra review of #868, verified by reading).
+//     Usernames are not secrets in this app and the probe costs ~10,000 requests per batch; it is documented in
+//     docs/mfa.md and not hidden.
 //
 // NUMBERS. A hypothesis for one household's use, not a measurement:
 //   * FREE_FAILURES = 30: the same figure as PER_USER_MFA_LIMIT, and above the per-source 20 in routes/auth.js, so
 //     one device mistyping meets its own per-source limit first and this only engages for a guesser spread over many
 //     (or forged) addresses, or a long run of wrong passwords over more than one 15-minute window.
 //   * BASE_DELAY_MS = 60 s, doubling to MAX_DELAY_MS = 15 min: once past the free guesses an attacker is held to at
-//     most one guess a minute, then (from the 5th delayed guess) one every 15 minutes, 96 a day, which is no use
-//     against a password of any real length. 15 min is also the window every other limiter here uses.
-//   * DECAY_MS = 1 h without a failure eases the account. Below the free limit it is forgotten, so old typos never
-//     accumulate into a delay. An account that HAD reached its delay is only eased back to one guess short of the
-//     limit, not to zero: a full reset let an attacker wait an hour and get 30 fresh guesses, about 720 a day
-//     instead of about 100 (Opus review of #868, verified by running).
+//     most one guess a minute, then (from the 5th delayed guess) one every 15 minutes. 15 min is also the window
+//     every other limiter here uses.
+//   * LEAK_MS = 15 min per forgiven guess. The bound for ANY pacing is FREE_FAILURES + (elapsed / LEAK_MS): 30 plus
+//     96 a day, about 126 in the first day and 96 a day after. Two earlier designs got this wrong, each verified by
+//     running: forgetting an account after an hour of quiet gave a fresh 30 every hour (~720 a day), and easing only
+//     accounts that had reached the limit let a guesser stop at 29 and still refill (~696 a day). A leak has no
+//     all-at-once reset to wait out. A person with 30 failures is back to none after 7.5 hours; a correct password
+//     resets at once.
 //   * MAX_ENTRIES = 10,000 invented names tracked (see above).
 //
 // CONCURRENCY. Hashing a password yields (a worker thread, see passwordHash), so N parallel requests could all
@@ -55,9 +65,9 @@
 export const FREE_FAILURES = 30;
 export const BASE_DELAY_MS = 60 * 1000;
 export const MAX_DELAY_MS = 15 * 60 * 1000;
-export const DECAY_MS = 60 * 60 * 1000;
+export const LEAK_MS = 15 * 60 * 1000;
 export const MAX_ENTRIES = 10_000;
-// A submitted username can be any length; the key is what is stored, so it is bounded.
+// A made-up username can be any length; its key is what is stored, so it is bounded. (Real names are not cut.)
 const MAX_KEY_LENGTH = 256;
 
 const UNTRACKED = Object.freeze({
@@ -73,7 +83,7 @@ export function createAccountThrottle({
   freeFailures = FREE_FAILURES,
   baseDelayMs = BASE_DELAY_MS,
   maxDelayMs = MAX_DELAY_MS,
-  decayMs = DECAY_MS,
+  leakMs = LEAK_MS,
   maxEntries = MAX_ENTRIES,
 } = {}) {
   // key -> { fails, lastFailAt, blockedUntil, inflight }
@@ -87,27 +97,27 @@ export function createAccountThrottle({
     return Math.min(maxDelayMs, baseDelayMs * 2 ** exponent);
   }
 
-  const decayed = (entry, t) => entry.inflight === 0 && entry.fails > 0 && t - entry.lastFailAt > decayMs;
   const idle = (entry) => entry.inflight === 0 && entry.fails === 0;
 
-  // An entry that has been quiet for DECAY_MS: forget it, unless it had reached its delay, in which case it is eased
-  // to one guess short of the limit (its next wrong guess puts it straight back at the base delay).
-  function ease(map, key, entry, t) {
-    if (entry.fails >= freeFailures) {
-      entry.fails = freeFailures - 1;
-      entry.blockedUntil = 0;
-      entry.lastFailAt = t;
-    } else {
-      map.delete(key);
-    }
+  // Forgive one wrong guess per leakMs since the last one, keeping the remainder of the time (so forgiving never
+  // gives back more than the time that passed). An entry with a request in flight is left alone: that request will
+  // settle against the count it was admitted under.
+  function leak(entry, t) {
+    if (entry.inflight > 0 || entry.fails === 0) return;
+    const steps = Math.floor((t - entry.lastFailAt) / leakMs);
+    if (steps <= 0) return;
+    entry.fails = Math.max(0, entry.fails - steps);
+    entry.lastFailAt += steps * leakMs;
+    // The delay is never longer than one leak step, so once a step has passed the delay has too.
+    if (entry.fails < freeFailures) entry.blockedUntil = 0;
   }
 
-  // Make room in the invented-names table without helping an attacker: ease what has gone quiet, then evict the oldest
-  // entry that has NOT reached its delay. Never one in its delay, never one with a request in flight.
+  // Make room in the invented-names table without helping an attacker: leak what has gone quiet, then evict the
+  // oldest entry that has NOT reached its delay. Never one in its delay, never one with a request in flight.
   function makeRoom(map, t) {
     for (const [key, entry] of map) {
+      leak(entry, t);
       if (idle(entry)) map.delete(key);
-      else if (decayed(entry, t)) ease(map, key, entry, t);
     }
     if (map.size < maxEntries) return true;
     for (const [key, entry] of map) {
@@ -125,12 +135,16 @@ export function createAccountThrottle({
 
   function acquire(rawKey, { known = true } = {}) {
     const t = now();
-    const key = String(rawKey ?? '').slice(0, MAX_KEY_LENGTH);
+    const full = String(rawKey ?? '');
+    const key = known ? full : full.slice(0, MAX_KEY_LENGTH);
     const map = known ? knownEntries : unknownEntries;
     let entry = map.get(key);
-    if (entry && decayed(entry, t)) {
-      ease(map, key, entry, t);
-      entry = map.get(key);
+    if (entry) {
+      leak(entry, t);
+      if (idle(entry)) {
+        map.delete(key);
+        entry = undefined;
+      }
     }
     if (entry) {
       if (entry.fails >= freeFailures) {
@@ -186,9 +200,9 @@ export function createAccountThrottle({
     acquire,
     // A password change empties the account: the person has a new secret and the old guesses mean nothing.
     reset(rawKey) {
-      const key = String(rawKey ?? '').slice(0, MAX_KEY_LENGTH);
-      knownEntries.delete(key);
-      unknownEntries.delete(key);
+      const full = String(rawKey ?? '');
+      knownEntries.delete(full);
+      unknownEntries.delete(full.slice(0, MAX_KEY_LENGTH));
     },
     clear() {
       knownEntries.clear();
