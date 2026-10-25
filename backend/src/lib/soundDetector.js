@@ -7,7 +7,9 @@ import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordSound } from './activityTracker.js';
 import { createSoundAnalyser, marginDb } from './soundBaseline.js';
-import { killIfSpawned, detectorHealthOf, killStalledDetector } from './processGuards.js';
+import {
+  killIfSpawned, detectorHealthOf, killStalledDetector, isKillError, execFailureBackoff, describeExecFailure,
+} from './processGuards.js';
 import { buildSoundTaps, createStderrRouter, SIDE_CHANNEL_LOG_ARGS } from './ffmpegSideChannel.js';
 import { openObservation } from './observationClock.js';
 
@@ -110,6 +112,10 @@ export async function startSoundDetector(camera) {
   const READING_MS = (WIN_SAMPLES / WIN_RATE) * 1000;
   const trailN = Math.max(3, Math.round(confirmMs / READING_MS));
   let noAudioStrikes = 0;
+  // #553 (review of PR #869): a 126/127 at once (ffmpeg, or the switch to the media user, could not run) relaunches with
+  // a back-off from RESTART_DELAY_MS to a minute and one log line per run (processGuards.js, execFailureBackoff). Next
+  // to noAudioStrikes because it spans relaunches the same way. See the exit handler for why it is not a strike.
+  const execBackoff = execFailureBackoff(RESTART_DELAY_MS);
 
   // ⚠️ DELIBERATELY OUTSIDE `launch()`: the analyser (and with it the learned ambient floor) must
   // OUTLIVE an ffmpeg relaunch. It used to be re-created per launch, so every restart — and the
@@ -150,6 +156,7 @@ export async function startSoundDetector(camera) {
       '-f', 's16le', '-', // raw 16-bit PCM to stdout — streamed promptly, RMS computed below
     ];
     const proc = spawnChild('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    execBackoff.launched();
     entry.proc = proc;
     // #369: freshness stamps for the detector watchdog, monotonic and per process; see motionDetector.js.
     entry.path = path;
@@ -158,6 +165,12 @@ export async function startSoundDetector(camera) {
     const obs = openObservation(camera.id, 'sound', { label: camera.name, path, windowSeconds: WIN_SAMPLES / WIN_RATE });
 
     proc.on('error', (err) => {
+      // #553: a SIGNAL that could not be delivered (EPERM), not a failed spawn (isKillError, processGuards.js): the
+      // process is alive, and dropping the entry would let reconcile start a second one. Keep it; 'exit' does the rest.
+      if (isKillError(err)) {
+        logger.error(`[sound:${path}] could not signal ffmpeg (pid ${proc.pid}): ${err.code || err.message}. It is still running.`);
+        return;
+      }
       // A spawn that never started. Node emits 'error' INSTEAD OF 'exit' here, so nothing downstream
       // runs — and with no listener on it an EventEmitter 'error' THROWS, taking the whole backend down.
       // On a baby monitor that is an outage. ENOENT (no ffmpeg on PATH — a broken image layer, a bad
@@ -285,6 +298,20 @@ export async function startSoundDetector(camera) {
       const wasTracked = detectors.get(camera.id) === entry;
       if (wasTracked) detectors.delete(camera.id);
       if (entry.stopped || !wasTracked) return;
+      // #553: checked FIRST, and NOT a no-microphone strike. A 126/127 at once means ffmpeg (or the switch to the
+      // media user) could not run at all; counting it as a strike would stop sound detection after 3 tries with "does
+      // this camera have a microphone?", the wrong diagnosis, and it would not come back when the program is fixed.
+      // It neither adds a strike nor resets them. A real ffmpeg on a camera with no audio track exits 1, not 126/127,
+      // so the no-microphone rule below sees exactly the exits it saw before.
+      const next = execBackoff.exited(code);
+      if (next.execFailed) {
+        if (next.log) logger.error(`[sound:${path}] ${describeExecFailure('ffmpeg', next)}`);
+        pendingRestarts.set(camera.id, setTimeout(() => {
+          pendingRestarts.delete(camera.id);
+          if (!entry.stopped && !detectors.has(camera.id)) launch().catch(() => {});
+        }, next.delayMs));
+        return;
+      }
       if (entry.watchdogKill) {
         // #369: a kill by the detector watchdog is NEVER a no-microphone strike, and it resets the count the way
         // any exit of a long-lived process does: the lever only kills an entry at least MIN_KILL_AGE_MS old on
@@ -339,9 +366,10 @@ export function stopSoundDetector(cameraId) {
     // See stopTranscoder for the full reasoning: a process that never spawned must not be killed
     // directly (on Linux that signals the whole process group — see killIfSpawned in processGuards.js),
     // and it emits 'error'/'close' but never 'exit', so waiting on 'exit' alone stalls for the whole timeout.
+    // #553: an undelivered SIGTERM (EPERM) arrives on 'error' too and is NOT "gone": only 'exit' or the fallback end it.
     const kill = (sig) => killIfSpawned(entry.proc, sig);
     entry.proc.once('exit', done);
-    entry.proc.once('error', done);
+    entry.proc.once('error', (err) => { if (!isKillError(err)) done(); });
     kill('SIGTERM');
     setTimeout(() => {
       if (!resolved) {

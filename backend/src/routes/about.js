@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { requireAuth } from '../middleware/auth.js';
 import { parseStunServers } from '../lib/stunServers.js';
 import { getPublicBaseUrl } from '../lib/push.js';
+import { mediaIsolationOn } from '../lib/childEnv.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,7 +39,17 @@ router.get('/', requireAuth, (req, res) => {
   // publicBaseUrl (#559): the address this server stamps into its own alert links (getPublicBaseUrl), or null.
   // The app compares an alert's address with it, so a household that reaches the server by two addresses is
   // not asked to "switch" to the server it is already on. Read per request: an admin's phone can change it.
-  res.json({ version, ...build, stunServers: parseStunServers(process.env.STUN_SERVERS).urls, publicBaseUrl: getPublicBaseUrl() });
+  // mediaIsolation (#553): 'on' when ffmpeg, ffprobe and MediaMTX run as the separate media user, 'off' otherwise. It
+  // is what backend/entrypoint.sh decided and exported at start (lib/childEnv.js, mediaIsolationOn), never guessed
+  // here. Added to the response, nothing else changed (an older app reading it ignores the field). Not shown on the
+  // About page yet: the switch is internal until the later phases of #553, which add the page line with its docs.
+  res.json({
+    version,
+    ...build,
+    stunServers: parseStunServers(process.env.STUN_SERVERS).urls,
+    publicBaseUrl: getPublicBaseUrl(),
+    mediaIsolation: mediaIsolationOn() ? 'on' : 'off',
+  });
 });
 
 export default router;

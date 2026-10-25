@@ -4,7 +4,7 @@ import path from 'path';
 import { logger, isNoisyMediaLine } from './logger.js';
 import { forwardProcessLines, createLineBuffer } from './processOutput.js';
 import { addHold, removeHold, effectiveHold, clearHolds } from './ringHolds.js';
-import { killIfSpawned } from './processGuards.js';
+import { killIfSpawned, isKillError, execFailureBackoff, describeExecFailure } from './processGuards.js';
 
 // Event-recording capture core (Stage 1, "Option A"; shipped in 0.17.0).
 //
@@ -214,15 +214,27 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
   // recovery when it comes back — see the exit handler.
   const entry = { proc: null, stopped: false, ringDir, ringDepthMs, janitor: null, fastFails: 0 };
   segmenters.set(cameraId, entry);
+  // #553: a 126/127 at once (the program, or the switch to the media user, could not run) backs off from RESTART_DELAY_MS
+  // to a minute with its own line (processGuards.js, execFailureBackoff). Every other exit keeps the fast-fail logging
+  // below and the 5 s relaunch. Per segmenter entry, like fastFails.
+  const execBackoff = execFailureBackoff(RESTART_DELAY_MS);
 
   function launch() {
     const launchedAt = Date.now();
     const proc = spawnChild('ffmpeg', segmenterArgs(pathName, ringDir), {
       stdio: ['ignore', 'ignore', 'pipe'],
     });
+    execBackoff.launched();
     entry.proc = proc;
 
     proc.on('error', (err) => {
+      // #553: a SIGNAL that could not be delivered (EPERM), not a failed spawn (isKillError): the segmenter is still
+      // running and writing the ring. Deregistering it here would let startClipCapture start a second one into the same
+      // folder. Keep the entry; its 'exit' still does the rest.
+      if (isKillError(err)) {
+        logger.error(`[clipseg:${pathName}] could not signal the segmenter (pid ${proc.pid}): ${err.code || err.message}. It is still running.`);
+        return;
+      }
       // A spawn that never started. Node emits 'error' INSTEAD OF 'exit', so the exit handler below
       // never runs — and an EventEmitter 'error' with no listener THROWS, taking the backend down. The
       // sibling extractClip spawn already handles this; the segmenter did not. See issue #257.
@@ -257,6 +269,15 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
       // Only the tracked entry owns this camera; a superseded process must not resurrect itself
       // (same reasoning as transcoder.js).
       if (entry.stopped || segmenters.get(cameraId) !== entry) return;
+
+      const next = execBackoff.exited(code);
+      if (next.execFailed) {
+        if (next.log) logger.error(`[clipseg:${pathName}] ${describeExecFailure('the segmenter (ffmpeg)', next)} Last output: ${lastLine}`);
+        setTimeout(() => {
+          if (!entry.stopped && segmenters.get(cameraId) === entry) launch();
+        }, next.delayMs);
+        return;
+      }
 
       // A segmenter that ran a good while and then died is a real event — log it, and reset the
       // fast-fail run so a later blip starts its own fresh (loud-then-quiet) cycle. One that dies
@@ -563,7 +584,16 @@ export function runFfmpeg(args, { tool = 'ffmpeg', deadlineMs = null, stallLabel
     // Stays attached for the child's whole life, settled or not: an 'error' emitted with no listener THROWS and
     // takes the backend down (the #257 class). So nothing here ever removes a listener.
     // A spawn that fails emits 'error' and may never emit 'close'; this settles it either way.
-    proc.on('error', (e) => settle(false, e, `could not run (${e.code || e.message})`));
+    // #553: but a SIGNAL that could not be delivered (EPERM, isKillError) is not "could not run": it is reported on this
+    // same event, synchronously inside the deadline's kill, and used to settle first with that wrong outcome. The
+    // deadline settles it with its own reason right after; only say that the kill failed.
+    proc.on('error', (e) => {
+      if (isKillError(e)) {
+        logger.error(`[${tool}] could not signal ${tool} (pid ${proc.pid}): ${e.code || e.message}. It may still be running.`);
+        return;
+      }
+      settle(false, e, `could not run (${e.code || e.message})`);
+    });
     proc.on('exit', (code) => {
       exited = true;
       exitCode = code;

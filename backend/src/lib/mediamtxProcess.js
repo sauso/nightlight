@@ -1,7 +1,7 @@
 import { spawnChild } from './childEnv.js';
 import { networkInterfaces } from 'os';
 import { logger } from './logger.js';
-import { killIfSpawned } from './processGuards.js';
+import { killIfSpawned, isKillError, execFailureBackoff, describeExecFailure } from './processGuards.js';
 import { forwardProcessLines } from './processOutput.js';
 
 let proc = null;
@@ -12,6 +12,10 @@ let spawnFailures = 0;
 let lastAdvertised = null;
 
 const RESTART_DELAY_MS = 3000;
+// #553: a launch that exits 126/127 at once (the program, or the switch to the media user, could not run) backs off from
+// RESTART_DELAY_MS to a minute instead of relaunching every 3 s; any other exit relaunches after RESTART_DELAY_MS as
+// before. One for the module: there is one MediaMTX. See execFailureBackoff in processGuards.js.
+const execBackoff = execFailureBackoff(RESTART_DELAY_MS);
 // At container start the host network may not have surfaced a routable address yet; wait up to
 // TRIES × INTERVAL (5 s) for one before the first launch, so MediaMTX is unlikely to advertise only
 // loopback for WebRTC. A BUDGET, NOT A GUARANTEE — see the header comment on detectHostIPv4s.
@@ -137,6 +141,7 @@ export async function startMediaMTX(configPath) {
     // through our own logger - this is what makes MediaMTX's output show up in both
     // `docker logs` and the in-app log viewer, rather than being silently discarded.
     proc = spawnChild('mediamtx', [configPath], { stdio: ['ignore', 'pipe', 'pipe'] }, { mediamtx: true, extra });
+    execBackoff.launched();
     if (relaunchHook) {
       // #479: the recovery work of the restart that caused THIS launch (see restartMediaMTX). Once, and only if we are
       // still running when it fires.
@@ -154,7 +159,15 @@ export async function startMediaMTX(configPath) {
     // Unlike the camera legs this DOES keep retrying: there is no reconcile pass for MediaMTX itself,
     // so nothing else would ever bring it back, and the same backoff the exit path uses is the only
     // route to recovery if the binary appears (a fixed mount, a corrected image).
+    const child = proc;
     proc.on('error', (err) => {
+      // #553: NOT a failed spawn. The process exists and only a signal to it failed (EPERM: Node reports that on this
+      // same event, see isKillError). Relaunching here started a SECOND MediaMTX on the same ports next to the one
+      // that refused the signal. So: say so, and leave it running; its own 'exit' (if it ever comes) relaunches.
+      if (isKillError(err)) {
+        logger.error(`[mediamtx] could not signal MediaMTX (pid ${child.pid}): ${err.code || err.message}. It is still running; not starting another.`);
+        return;
+      }
       // Loud, then quiet — the same pattern as clipRecorder's fast-fail exit path, and for a sharper
       // reason here. A missing binary retries every 3s forever, which is ~1200 lines/hour into
       // logger.js's 1000-line ring: within the hour it would have evicted EVERY other line, including
@@ -186,12 +199,17 @@ export async function startMediaMTX(configPath) {
       // own fresh loud-then-quiet cycle rather than inheriting an old run's count.
       spawnFailures = 0;
       if (!stopped) {
-        logger.error(
-          `[mediamtx] exited (code ${code}), restarting in ${RESTART_DELAY_MS / 1000}s. Last output: ${lastLine}`
-        );
+        const next = execBackoff.exited(code);
+        if (!next.execFailed) {
+          logger.error(
+            `[mediamtx] exited (code ${code}), restarting in ${RESTART_DELAY_MS / 1000}s. Last output: ${lastLine}`
+          );
+        } else if (next.log) {
+          logger.error(`[mediamtx] ${describeExecFailure('MediaMTX', next)} Last output: ${lastLine}`);
+        }
         setTimeout(() => {
           if (!stopped) launch();
-        }, RESTART_DELAY_MS);
+        }, next.delayMs);
       }
     });
   }

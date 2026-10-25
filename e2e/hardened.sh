@@ -25,9 +25,13 @@
 #
 # Own containers, network, volumes and host port, all labelled with the project name, so it never collides
 # with the Playwright stack (nightlight-e2e, port 4000) and a teardown removes exactly what it made.
+#
+# #553: e2e/media-isolation.sh SOURCES this file for its helpers (the waits, the /proc reads, the camera and HLS
+# check), with its own HARDENED_PROJECT and E2E_HARDENED_PORT, so both scripts check a container the same way.
+# Sourced, nothing below runs: the main part at the bottom only runs when this file is executed.
 set -euo pipefail
 
-E2E_DIR=$(cd "$(dirname "$0")" && pwd)
+E2E_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # ── Settings ─────────────────────────────────────────────────────────────────────────────────────
 IMAGE=${NIGHTLIGHT_IMAGE:-sauso/nightlight:dev}     # same default and override as docker-compose.e2e.yml
@@ -62,6 +66,8 @@ NO_NEW_PRIVS='no-new-privileges=true'
 EXPECT_CAPBND=00000000000000eb
 EXPECT_DATA_MODE=700
 EXPECT_DATA_OWNER="$APP_PUID:$APP_PGID"
+# #553: the media group (the Dockerfile's nlmedia), which no process of the default start may have.
+MEDIA_GROUP_ID=1700
 # The preseeded folder and file (new_volume) have group/other bits, so the first start's mode walk must find
 # them: a 0 would mean the walk checked nothing.
 MIN_FOUND_FIRST_BOOT=1
@@ -340,12 +346,15 @@ check_processes() {
     if [ "$uid" != "$APP_PUID $APP_PUID $APP_PUID $APP_PUID" ]; then bad=1; info "^ Uid is '$uid', expected $APP_PUID everywhere"; fi
     if [ "$gid" != "$APP_PGID $APP_PGID $APP_PGID $APP_PGID" ]; then bad=1; info "^ Gid is '$gid', expected $APP_PGID everywhere"; fi
     case " $groups " in *" 0 "*) bad=1; info "^ group 0 is among its groups" ;; esac
+    # #553: the media group (1700) is given to the app only by the isolated start; the default start (this one, the
+    # switch unset) must not have it (review of PR #869: an image-level membership once did).
+    case " $groups " in *" $MEDIA_GROUP_ID "*) bad=1; info "^ the media group $MEDIA_GROUP_ID is among its groups" ;; esac
   done < <(process_tree "$root")
   for want in node mediamtx ffmpeg; do
     case "$names" in *" $want "*) ;; *) bad=1; info "no $want process under tini" ;; esac
   done
   [ "$bad" = 0 ] || die "process check failed (above)"
-  ok "$n processes: CapBnd $EXPECT_CAPBND and NoNewPrivs 1 on all; node, mediamtx and ffmpeg run as $APP_PUID:$APP_PGID with no group 0"
+  ok "$n processes: CapBnd $EXPECT_CAPBND and NoNewPrivs 1 on all; node, mediamtx and ffmpeg run as $APP_PUID:$APP_PGID with no group 0 and no group $MEDIA_GROUP_ID"
 }
 
 # The documented console failsafe (docs/mfa.md, "Recovery") must still work: it runs as root through
@@ -373,6 +382,7 @@ camera_and_hls() {
     -d '{"username":"e2e","password":"e2e-admin-pw","first_name":"E2E"}') || die "first-run setup request failed"
   token=$(printf '%s' "$setup" | field token)
   [ -n "$token" ] || die "no token from /auth/setup: $setup"
+  AUTH_TOKEN=$token   # for check_media_isolation_reported, after this function
   ok "first-run admin created"
 
   for i in $(seq 1 20); do
@@ -401,6 +411,18 @@ camera_and_hls() {
   done
 }
 
+# #553: what GET /api/about says about media isolation must be what the start-up script decided. Here, with
+# NIGHTLIGHT_MEDIA_ISOLATION not set, that is "off" (its default); e2e/media-isolation.sh checks "on" and the fallbacks.
+AUTH_TOKEN=
+check_media_isolation_reported() { # expected value (on|off)
+  local about got
+  [ -n "$AUTH_TOKEN" ] || die "no token yet: call camera_and_hls (or sign in) first"
+  about=$(curl -fsS -m 15 "$BASE/api/about" -H "Authorization: Bearer $AUTH_TOKEN") || die "GET /api/about failed"
+  got=$(printf '%s' "$about" | field mediaIsolation)
+  [ "$got" = "$1" ] || die "GET /api/about reports mediaIsolation '$got', expected '$1': $about"
+  ok "GET /api/about reports mediaIsolation $got"
+}
+
 found_count() { # log -> the count on the start-up script's "found: N" line
   grep -o 'existing entries with group/other access found: *[0-9]*' "$1" | head -n 1 | grep -o '[0-9]*$' || true
 }
@@ -426,6 +448,7 @@ phase_green() {
   healthy_or_die "$c1" "first start"
   camera_and_hls "$c1"
   check_processes "$c1"
+  check_media_isolation_reported off
   check_mfa_recovery "$c1"
 
   stop_app "$c1"
@@ -552,6 +575,10 @@ phase_f() {
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────────────────────────
+# Sourced (by e2e/media-isolation.sh, #553): stop here, with every helper above defined and nothing run.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
 MODE=${1:-all}
 MODE=${MODE,,}
 case "$MODE" in

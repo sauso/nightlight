@@ -141,3 +141,45 @@ jobs:
       - name: Tear down (safety net)
         if: always()
         run: bash e2e/hardened.sh teardown || true
+
+  # #553 phase 1: media isolation (ffmpeg, ffprobe and MediaMTX as a separate user), behind the internal switch
+  # NIGHTLIGHT_MEDIA_ISOLATION=1, proven against an image built from this commit. e2e/media-isolation.sh checks the
+  # "on" start under the six-capability hardening and under Docker's defaults, and two fallbacks that must start the
+  # usual way and report "off" (KILL missing, PUID=1700), each failing the job if its signature does not show. A job of
+  # its own, like `hardened`: its own containers, network, volumes and host port (4200), and it reads the containers'
+  # processes from this runner's /proc, which needs a Linux host.
+  media-isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # Same rule as the e2e job: a nightly run covers dev.
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+
+      # Same reason as the e2e job's Phase 4 step: test this commit, never a published tag.
+      - name: Build the app image from this commit
+        run: docker build -t sauso/nightlight:dev .
+
+      - name: Record which image the run uses
+        run: |
+          echo "commit: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          docker image inspect sauso/nightlight:dev --format 'image id: {{.Id}}' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Media isolation (on under the hardening and the defaults, then the KILL and PUID fallbacks)
+        env:
+          MEDIA_ISO_LOG_DIR: ${{ runner.temp }}/media-isolation-logs
+        run: bash e2e/media-isolation.sh all
+
+      - name: Upload the media isolation run's container logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: media-isolation-logs
+          path: ${{ runner.temp }}/media-isolation-logs
+          if-no-files-found: ignore
+
+      - name: Tear down (safety net)
+        if: always()
+        run: bash e2e/media-isolation.sh teardown || true
