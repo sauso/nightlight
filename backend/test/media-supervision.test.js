@@ -63,7 +63,7 @@ mock.module('../src/lib/cameraEvents.js', { exports: { recordCameraEvent: () => 
 const { logger } = await import('../src/lib/logger.js');
 const { startMediaMTX, stopMediaMTX, restartMediaMTX } = await import('../src/lib/mediamtxProcess.js');
 const { startTranscoder, stopTranscoder, isRunning, stopAllTranscoders } = await import('../src/lib/transcoder.js');
-const { startSegmenter, stopSegmenter, runFfmpeg } = await import('../src/lib/clipRecorder.js');
+const { startSegmenter, stopSegmenter, stopAllSegmenters, runFfmpeg } = await import('../src/lib/clipRecorder.js');
 
 const settle = () => new Promise((resolve) => setImmediate(resolve)); // real setImmediate: only setTimeout is mocked
 const lines = (needle) => logger.getRecent().filter((l) => l.includes(needle));
@@ -81,6 +81,9 @@ afterEach(async () => {
 after(async () => {
   stopMediaMTX();
   await stopAllTranscoders();
+  // Also on a failed case: a segmenter's janitor is a REAL interval, and one left running keeps this file's process
+  // alive, so a failing assertion turned into a 5-minute HANG instead of a failure (seen in the first mutation run).
+  stopAllSegmenters();
   cleanupTempDataDirs();
 });
 

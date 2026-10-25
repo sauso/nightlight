@@ -134,9 +134,6 @@ check_iso_processes() { # container on|off app_uid app_gid
   fi
 }
 
-# The start-up script's media isolation lines, for the CI log.
-show_iso_lines() { grep -E 'media isolation' "$1" | head -n 5 | sed 's/^/      | /' || true; }
-
 # The dry run's mktemp -d folder must be gone (media-probe.sh removes it on every exit path).
 check_no_probe_leftovers() { # container
   local left
@@ -159,8 +156,7 @@ iso_on_case() { # part name, kind (six|default)
   check_no_probe_leftovers "$c"
   stop_app "$c"
   log=$(save_log "$c")
-  show_startup "$log"
-  show_iso_lines "$log"
+  show_startup "$log"   # every [entrypoint] line, the media isolation ones included
   grep -qF "$ON_LINE" "$log" || die_log "$log" "$part: no '$ON_LINE' line"
   if grep -qF "$OFF_LINE" "$log"; then die_log "$log" "$part: the start-up script also said isolation is off"; fi
   check_clean_stop "$c" "$log" "$part"
@@ -192,7 +188,6 @@ iso_off_case() { # part name, kind, puid, expected reason, app uid
   check_media_isolation_reported off
   log=$(save_log "$c")
   show_startup "$log"
-  show_iso_lines "$log"
   if grep -qF "$ON_LINE" "$log"; then die_log "$log" "$part: the start-up script switched isolation ON"; fi
   [ "$(grep -cF "$OFF_LINE" "$log")" = 1 ] || die_log "$log" "$part: expected exactly ONE '$OFF_LINE' line"
   warn=$(grep -F "$OFF_LINE" "$log")
