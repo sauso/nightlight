@@ -18,6 +18,7 @@ import {
 } from '../lib/mfa.js';
 import { normalizePhoto } from '../lib/photo.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { createAccountThrottle } from '../lib/accountThrottle.js';
 
 const router = Router();
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
@@ -94,8 +95,11 @@ const clientKey = (req) => ipKeyGenerator(req.ip);
 
 // /login has no verified identity yet, so the submitted username is the account being attempted.
 // Lower-casing keeps `Admin` and `admin` from becoming two budgets against one account.
+function accountKeyFor(username) {
+  return typeof username === 'string' ? username.trim().toLowerCase() : '';
+}
 function usernameKey(req) {
-  return typeof req.body?.username === 'string' ? req.body.username.trim().toLowerCase() : '';
+  return accountKeyFor(req.body?.username);
 }
 
 // /login/mfa only: the account is inside its short-lived MFA token. DECODED, not verified — this
@@ -298,6 +302,56 @@ const sessionAccountLimiter = makeAccountLimiter(sessionKey);
 const loginLimiter = [loginAccountLimiter, perClientLimiter];
 const mfaLimiter = [mfaAccountLimiter, mfaUserLimiter, perClientLimiter];
 const sessionActionLimiter = [sessionAccountLimiter, perClientLimiter];
+
+// Per ACCOUNT, whatever the source address, for every route that CHECKS A PASSWORD (#553). Every limiter above
+// includes the caller's IP, and `X-Forwarded-For` is trusted from loopback by default, so a process on 127.0.0.1
+// could name a fresh address per guess and never meet a limit. lib/accountThrottle.js carries the why, the numbers
+// and the trade (an account-only key lets someone slow a person's own sign-in on purpose, which #248 refused; the
+// owner accepted it here, for the password step only, with a delay that grows to 15 minutes and never a hard
+// lock-out). It engages at 30 failures, above the 20 a single source is held to, so one honest device never gets
+// there: it only meets a guesser spread over many (or forged) addresses.
+//   * loginThrottle: keyed by the submitted username, normalised like usernameKey, and the SAME for a name that
+//     does not exist (an unknown name is counted and answered exactly like a known one: no way to tell them apart).
+//   * sessionThrottle: keyed by the signed-in user's id, ONE budget for the three routes that ask for the current
+//     password (/me/password, /me/mfa/setup, /me/mfa/disable), as their per-source limiter already is.
+// Separate stores on purpose: a correct sign-in resets only the login counter, so someone who holds a session cannot
+// refill their budget for guessing the password by signing in again, and the two secrets' keys never collide.
+// The MFA second step has its own per-user bound (mfaUserLimiter, #550) and is not repeated here.
+const loginThrottle = createAccountThrottle();
+const sessionThrottle = createAccountThrottle();
+
+// One guess at a password under a throttle. `verify` runs the compare and says whether it matched. The attempt is
+// RESERVED before the first await (the compare yields to a worker thread), so parallel requests cannot all pass the
+// gate before any failure is recorded, and the outcome is recorded right after the compare. A throw is a server
+// fault, not a guess: it gives the reservation back and counts as nothing.
+export async function throttledPasswordCheck(throttle, key, verify) {
+  const slot = throttle.acquire(key);
+  if (!slot.allowed) return { throttled: true, retryAfterSec: slot.retryAfterSec };
+  let ok = false;
+  try {
+    ok = !!(await verify());
+  } catch (err) {
+    slot.release();
+    throw err;
+  }
+  if (ok) slot.succeed();
+  else slot.fail();
+  return { throttled: false, ok };
+}
+
+// The same status and body as every other limiter here (the app already shows it), plus Retry-After.
+function answerThrottled(res, retryAfterSec) {
+  res.set('Retry-After', String(retryAfterSec));
+  return res.status(429).json(limiterMessage);
+}
+
+// A new password empties the account's guesses: the old ones mean nothing against a new secret, and it is how a
+// person who was slowed by someone else's attempts gets back in at once (docs/mfa.md). Exported for tests, which
+// share the store across cases the way they share the limiters.
+export function resetPasswordThrottles(userId, username) {
+  sessionThrottle.reset(userId);
+  loginThrottle.reset(accountKeyFor(username));
+}
 
 // First-run only, and it 400s once any user exists — so it cannot be used for guessing and does not
 // belong on the login budget. Sharing it meant an install's very first action spent part of the
@@ -578,7 +632,15 @@ router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   const user =
     typeof username === 'string' ? db.prepare('SELECT * FROM users WHERE username = ?').get(username) : null;
   const hashToCheck = user ? user.password_hash : DUMMY_HASH;
-  if (!(await passwordHash.compare(String(password || ''), hashToCheck)) || !user) {
+  // The compare runs for an unknown name too (against DUMMY_HASH), and a miss on an unknown name is counted exactly
+  // like a miss on a real one: neither the status, the body nor the timing says which names exist.
+  const attempt = await throttledPasswordCheck(
+    loginThrottle,
+    usernameKey(req),
+    async () => (await passwordHash.compare(String(password || ''), hashToCheck)) && !!user
+  );
+  if (attempt.throttled) return answerThrottled(res, attempt.retryAfterSec);
+  if (!attempt.ok) {
     return res.status(401).json({ error: 'Incorrect username or password' });
   }
   // The compare yields, long enough for the row to change under it, so everything below decides from the
@@ -817,7 +879,12 @@ router.put('/users/:id', requireAuth, requireAdmin, asyncHandler(async (req, res
   }
   // After the transaction, so a refused (rolled-back) change leaves it alone: a new password also empties the
   // confirmation route's budget, as on PUT /me/password (see resetMfaEnableLimit).
-  if (password) resetMfaEnableLimit(req.params.id);
+  if (password) {
+    resetMfaEnableLimit(req.params.id);
+    // And the password guesses against the account, under the old and the new name (#553; see resetPasswordThrottles).
+    resetPasswordThrottles(req.params.id, existing.username);
+    resetPasswordThrottles(req.params.id, username?.trim() || existing.username);
+  }
   res.json(toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)));
 }));
 
@@ -846,7 +913,13 @@ router.put('/me/password', requireAuth, sessionActionLimiter, asyncHandler(async
     return res.status(400).json({ error: 'New password must be at least 8 characters' });
   }
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-  if (!user || !(await passwordHash.compare(current_password || '', user.password_hash))) {
+  const attempt = await throttledPasswordCheck(
+    sessionThrottle,
+    req.user.id,
+    async () => !!user && (await passwordHash.compare(current_password || '', user.password_hash))
+  );
+  if (attempt.throttled) return answerThrottled(res, attempt.retryAfterSec);
+  if (!attempt.ok) {
     // 400, NOT 401 (#697). frontend/src/lib/api.js treats ANY 401 as "this sign-in is over": it clears the
     // token and sends the person to the sign-in form. Here the sign-in is fine (requireAuth just passed) and
     // only the typed confirmation is wrong, so a typo must show a message next to the field, not sign them out.
@@ -879,6 +952,9 @@ router.put('/me/password', requireAuth, sessionActionLimiter, asyncHandler(async
   discardPendingSetup.run(req.user.id);
   // And the confirmation route's budget: a device that used it up is signed out just above (see resetMfaEnableLimit).
   resetMfaEnableLimit(req.user.id);
+  // And the account's password guesses (#553): the new password makes them moot, and a person who had been slowed by
+  // someone else's failed sign-ins gets back in at once.
+  resetPasswordThrottles(req.user.id, user.username);
   res.json({ ok: true });
 }));
 
@@ -947,8 +1023,14 @@ const WRONG_CONFIRMATION_PASSWORD = 'Password is incorrect';
 router.post('/me/mfa/setup', requireAuth, sessionActionLimiter, asyncHandler(async (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (user.mfa_enabled) return res.status(400).json({ error: 'Two-factor is already on. Turn it off first to re-enrol.' });
-  // The same compare /me/mfa/disable uses (the worker-thread bcrypt of #548).
-  if (!(await passwordHash.compare(String(req.body?.password || ''), user.password_hash))) {
+  // The same compare /me/mfa/disable uses (the worker-thread bcrypt of #548), under the same per-account throttle.
+  const attempt = await throttledPasswordCheck(
+    sessionThrottle,
+    req.user.id,
+    () => passwordHash.compare(String(req.body?.password || ''), user.password_hash)
+  );
+  if (attempt.throttled) return answerThrottled(res, attempt.retryAfterSec);
+  if (!attempt.ok) {
     return res.status(400).json({ error: WRONG_CONFIRMATION_PASSWORD });
   }
   // After the await and before the write below (see signInEnded).
@@ -1085,7 +1167,13 @@ router.post('/me/mfa/enable', requireAuth, mfaEnableUserLimiter, asyncHandler(as
 router.post('/me/mfa/disable', requireAuth, sessionActionLimiter, asyncHandler(async (req, res) => {
   const { password } = req.body || {};
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-  if (!user || !(await passwordHash.compare(String(password || ''), user.password_hash))) {
+  const attempt = await throttledPasswordCheck(
+    sessionThrottle,
+    req.user.id,
+    async () => !!user && (await passwordHash.compare(String(password || ''), user.password_hash))
+  );
+  if (attempt.throttled) return answerThrottled(res, attempt.retryAfterSec);
+  if (!attempt.ok) {
     // 400 not 401, same reason as /me/password above (#697): a mistyped confirmation must not sign the person out.
     return res.status(400).json({ error: 'Password is incorrect' });
   }

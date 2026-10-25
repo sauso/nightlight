@@ -25,7 +25,7 @@ import {
 useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
-const { default: authRouter, resetMfaUserLimit } = await import('../src/routes/auth.js');
+const { default: authRouter, resetMfaUserLimit, resetPasswordThrottles } = await import('../src/routes/auth.js');
 const { generateSecret, verifyToken } = await import('../src/lib/mfa.js');
 
 let server;
@@ -50,9 +50,14 @@ beforeEach(() => {
   // mfa-replay-and-async-bcrypt.test.js.
   resetMfaUserLimit('u-a');
   resetMfaUserLimit('u-b');
+  // #553: the per-ACCOUNT password throttle ignores the source address too, and these cases burn alice's per-source
+  // budget from many addresses; without a reset their failures would add up across the file and 429 unrelated cases.
+  // The throttle itself is pinned in login-account-throttle.test.js.
+  resetPasswordThrottles('u-a', 'alice');
+  resetPasswordThrottles('u-b', 'bob');
 });
 
-const login = (username, password = 'wrong-password') =>
+const login =(username, password = 'wrong-password') =>
   call(`${server.url}/api/auth/login`, { method: 'POST', body: { username, password } });
 
 // Burn a whole per-account budget with failed attempts.

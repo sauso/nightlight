@@ -220,7 +220,7 @@ How this differs from the routes beside it:
 |---|---|---|---|
 | What counts | wrong codes only | every attempt | every attempt, except the per-user limit, which counts failed attempts only |
 | Per source address | **no limit** | 20 per 15 minutes per source and account (one budget shared by the three), and 100 per source | 20 per 15 minutes per source and account, and 100 per source |
-| Per account, any source | 30 wrong codes per 15 minutes | none | 30 failed attempts per 15 minutes |
+| Per account, any source | 30 wrong codes per 15 minutes | 30 wrong passwords, then a growing wait ([Password guesses](#password-guesses-553)) | 30 failed attempts per 15 minutes |
 | A key that gets too many wrong codes | the set-up is cancelled at 10 | not applicable | nothing is cancelled |
 
 The per-account count here is **separate** from the sign-in second step's: wrong codes while setting up never count
@@ -241,6 +241,44 @@ numbers.
   arrives among them a 429 for that moment; it clears as soon as they have been answered.
 - The counts are kept in memory, so a **restart of the container resets them** (as it resets every limit on this
   page). An admin resetting two-factor for the account also empties them, as it discards the pending set-up.
+
+## Password guesses (#553)
+
+Signing in, changing your password, and turning two-factor on or off all ask for a password. As well as the
+per-address limits above, each of them is now limited **per account**, whatever address a request claims to
+come from. Without that, a program running inside the container that can reach Nightlight on `127.0.0.1` could
+name a different address in every request (see `TRUST_PROXY` in [remote access](remote-access.md)) and guess
+without limit.
+
+| What | Default | Counted per | What happens |
+|---|---|---|---|
+| Wrong passwords | **30**, then a growing wait | the account alone, whatever the source address | After 30 wrong passwords, the next guess has to wait **1 minute**. Each further wrong guess doubles the wait, up to **15 minutes**. While a wait runs, every attempt on that account, **even with the right password**, is refused (HTTP 429, "Too many attempts - please wait a few minutes and try again.", with a `Retry-After` header). A refused attempt counts as nothing, so trying again does not lengthen the wait. |
+| Forgotten after | **1 hour** | the account | An hour without a wrong password forgets the count, so old typos never add up. A correct password resets it at once. |
+
+30 sits above the per-address limit (20 per 15 minutes), so one device always meets its own limit first: you
+will not reach this by mistyping. It only stops a guesser who spreads attempts over many, or invented, addresses.
+
+- **Sign-in** is counted by username. Capital letters and spaces around the name are ignored, and a name that
+  does not exist is counted and answered exactly like one that does.
+- **Signed in, asked for your current password** (change password, set up two-factor, turn two-factor off):
+  one count for the three together, per account. It is separate from the sign-in count, and signing in does
+  **not** reset it, so a signed-in device cannot refill its own guesses by signing in again.
+- **The sign-in second step** (the 6-digit code) has its own per-account limit, described above.
+- There are no settings for these numbers. They are judgements for a household, not measurements.
+
+**The trade-off, on purpose:** anyone who can reach your sign-in page can use up an account's 30 guesses and so
+**slow that person's own sign-in**, and can do it again each time the wait ends, so the slowdown lasts as long
+as they keep at it. They cannot guess any faster. Ways out:
+
+- Wait. The wait never exceeds 15 minutes.
+- **Change the password** from a device that is still signed in (**Account**), or ask an admin
+  (**Settings → Caregivers**). That empties the count at once.
+- Restart the container. The counts are kept in memory, so a restart resets them (as it resets every limit on
+  this page).
+
+**Known limit:** the app keeps at most 10,000 accounts' counts. Someone who invents thousands of usernames could
+push an account that has not yet been slowed out of the table and so give it a fresh 30 guesses; each fresh set
+costs them thousands of requests, each of which costs the server a password check.
 
 ## Notes for operators
 
