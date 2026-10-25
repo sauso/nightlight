@@ -38,6 +38,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   - ⚠️ **`UMASK=022` no longer lets another user read the database or the secrets.** Run such a backup job as root.
   - A restore goes into `private/`. A database restored to the top level of a moved install is set aside in
     `private/legacy-<date>-<time>/`, not used ([Two copies of the database](docs/operations.md#two-copies-of-the-database)).
+    A `-wal` or pictures left in `private/` by a database deleted from there are set aside before another moves in.
+  - Two containers on one data directory are not supported.
   - Firebase files are still dropped at the top level, and moved at the next start; to replace them later, replace
     them inside `private/`.
   `GET /api/about` and the diagnostics bundle report the layout and any set-aside copy (`dataLayout`,

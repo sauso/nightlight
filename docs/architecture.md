@@ -300,7 +300,8 @@ check runs, so a retry timer that comes due in the same moment cannot open a sec
 
 ## Data layer (`backend/src/db.js`)
 
-better-sqlite3, single file in `DATA_DIR` (default `/app/data`). Schema is created with
+better-sqlite3, WAL mode, `DATA_DIR/private/babymonitor.db` (default `/app/data/private/`; the top-level
+`DATA_DIR/babymonitor.db` on an install the start-up move has not reached: see "Where the data lives" below). Schema is created with
 `CREATE TABLE IF NOT EXISTS`, and columns added after initial release are migrated by hand at
 the bottom of `db.js` (`PRAGMA table_info` + conditional `ALTER TABLE`) — there is no migration
 framework. Follow this same pattern for new columns: check `table_info`, `ALTER TABLE` if
@@ -535,13 +536,17 @@ the app can enter protects even a file inside it whose own mode is too open.
   `entrypoint.sh` runs on every start in the FOREGROUND, as the app user (`su-exec`), after its ownership and mode
   steps and before either `exec` of the app (so nothing else has the database open). Independent passes, each
   deciding from lstat: the database (open with `fileMustExist`, `PRAGMA journal_mode=DELETE`, which fails while
-  another connection holds it, then require that no `-wal`/`-shm`/`-journal` is left, then ONE rename of the `.db`;
-  a 30 s budget applies before the rename only), `.jwt_secret` (only without `JWT_SECRET`), the Firebase files (only
-  when their `FIREBASE_*` variable is unset), the snapshot folders (only once the database is in `private/`; an
-  empty private one is removed first), and leftovers (`backup-*.db`, companions with no database). A symbolic link is
-  never moved. `private/` always wins: a top-level copy is moved into `private/legacy-<date>-<time>/`, never deleted
-  or merged. Exit codes 0 / 10 (something left at the top level) / 11 (something set aside) become one
-  `[entrypoint] private layout:` line; no exit code stops the container.
+  another connection holds it, then `BEGIN EXCLUSIVE` held until after the rename, then require that no
+  `-wal`/`-shm`/`-journal` is beside it, set aside any companion already in `private/` with no private database (it
+  would be replayed over the one moving in), then ONE rename of the `.db`; a 30 s budget applies before the rename
+  only), `.jwt_secret` (only without `JWT_SECRET`), the Firebase files (only when their `FIREBASE_*` variable is
+  unset), the snapshot folders (only once the database is in `private/`; an empty private one is removed first), and
+  leftovers (`backup-*.db`, companions with no database). A symbolic link is never moved. `private/` always wins: a
+  top-level copy is moved into `private/legacy-<date>-<time>/` as a unit (the `.db` first, then its companions and its
+  snapshot folders into the same folder; an orphaned companion joins the newest such folder whose database lacks it),
+  never deleted or merged. Exit codes 0 / 10 (something left at the top level) / 11 (something set aside) become one
+  `[entrypoint] private layout:` line; no exit code stops the container. Two containers on one data directory are not
+  supported.
 - **The entrypoint's preflight** (guarded under `set -e`): creates `private/`, gives it to `PUID:PGID` only when it is
   not theirs, chmods it `700` every start, and re-owns by name the top-level items the move takes when one has the
   wrong owner (never the clip tree, #567; skipped when the full walk ran). The ownership sentinels and the modes line

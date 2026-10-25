@@ -23563,8 +23563,8 @@
   {
     "label": "#553 phase 2a move: a -wal with no database is deleted instead of set aside",
     "file": "backend/src/scripts/migrate-private-layout.js",
-    "find": "      if (src) setAside(ctx, src, `there is no ${DB_FILE} next to it`);",
-    "replace": "      if (src) fs.rmSync(src);",
+    "find": "      if (!src) continue;",
+    "replace": "      if (!src) continue;\n      fs.rmSync(src);\n      continue;",
     "expect": "killed",
     "tests": ["migrate-private-layout.test.js"],
     "namePattern": "a -wal with no database next to it"
@@ -23635,8 +23635,8 @@
   {
     "label": "#553 phase 2a auth: a secret that cannot be saved is silent again (C9)",
     "file": "backend/src/middleware/auth.js",
-    "find": "    logger.error(",
-    "replace": "    void (",
+    "find": "    logger.error(\n      `[auth] could not save the session signing secret",
+    "replace": "    void (\n      `[auth] could not save the session signing secret",
     "expect": "killed",
     "tests": ["jwt-secret.test.js"],
     "namePattern": "is said LOUDLY"
@@ -23694,5 +23694,122 @@
     "expect": "killed",
     "tests": ["demo-seed.test.js"],
     "namePattern": "demo seed is deterministic"
+  },
+  {
+    "label": "#553 phase 2a review HIGH 1: a stale -wal/-shm/-journal in private/ is left for SQLite to replay over the database moving in",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "    for (const name of DB_SIDECARS) {\n      const stale = path.join(priv, name);",
+    "replace": "    for (const name of []) {\n      const stale = path.join(priv, name);",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "a stale -wal in private/ with no private database"
+  },
+  {
+    "label": "#553 phase 2a review HIGH 1: a private snapshot folder of a database that is gone is kept as the moved database's",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  if (dst && ctx.dbMovedIn) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "snapshot folder of that gone database"
+  },
+  {
+    "label": "#553 phase 2a review HIGH 2: the companions are set aside even when their .db could not be (the trio splits)",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "    if (!setAside(ctx, src, 'private/ already has a database, and the copy in private/ always wins')) return;",
+    "replace": "    setAside(ctx, src, 'private/ already has a database, and the copy in private/ always wins');",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "if the .db cannot be set aside, NOTHING of it moves"
+  },
+  {
+    "label": "#553 phase 2a review HIGH 2: an orphan companion gets a new legacy folder instead of joining its set-aside database",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      const awaiting = legacyDirAwaiting(ctx, name);",
+    "replace": "      const awaiting = null;",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "a run cut off between the .db and its -wal"
+  },
+  {
+    "label": "#553 phase 2a review HIGH 3: a symbolic-link private/ keeps its target's mode (an old 0644 database goes into a 0755 folder)",
+    "file": "backend/src/lib/dataPaths.js",
+    "find": "    st = fsImpl.statSync(dir);\n  } catch (err) {",
+    "replace": "    st = fsImpl.lstatSync(dir);\n    if (st.isSymbolicLink()) return dir;\n  } catch (err) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "HIGH 3"
+  },
+  {
+    "label": "#553 phase 2a review MEDIUM 4: the set-aside database's pictures are moved into private/ as the winner's",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  if (ctx.dbSetAside) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "pictures go aside with it, never into private"
+  },
+  {
+    "label": "#553 phase 2a review MEDIUM 4: with two databases the app serves the top-level (other) database's pictures",
+    "file": "backend/src/lib/dataPaths.js",
+    "find": "  if (first === inPrivate && present(path.join(dataDir, DB_FILE))) return first;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "two databases still there"
+  },
+  {
+    "label": "#553 phase 2a review MEDIUM 5: a secret that exists but cannot be read is written over",
+    "file": "backend/src/middleware/auth.js",
+    "find": "      return crypto.randomBytes(48).toString('hex');",
+    "replace": "      void 0;",
+    "expect": "killed",
+    "tests": ["jwt-secret.test.js"],
+    "namePattern": "exists but cannot be read is NEVER written over"
+  },
+  {
+    "label": "#553 phase 2a review 6: no exclusive lock between the proof and the rename",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      conn.exec('BEGIN EXCLUSIVE');",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "the exclusive lock is refused"
+  },
+  {
+    "label": "#553 phase 2a review M10: the journal_mode answer is not checked",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      if (mode !== 'delete') return skip(",
+    "replace": "      if (false) return skip(",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "answers with the old mode"
+  },
+  {
+    "label": "#553 phase 2a review M11: a private database that appeared before the rename is replaced by it",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "    if (present(privDb)) return skip('private/babymonitor.db appeared while it was being prepared');\n    for (const name of DB_SIDECARS) {",
+    "replace": "    for (const name of DB_SIDECARS) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "is never replaced"
+  },
+  {
+    "label": "#553 phase 2a review M14: the time limit also undoes a rename already done",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  ctx.dbMovedIn = true;",
+    "replace": "  ctx.dbMovedIn = true;\n  if (overBudget()) { ctx.rename(privDb, src); ctx.moved.pop(); ctx.left.push(DB_FILE); return; }",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "running out AFTER the rename"
+  },
+  {
+    "label": "#553 phase 2a review: a rename refused while the file is open (EBUSY) is not retried after the lock is let go",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      if (!RENAME_REFUSED_WHILE_OPEN.has(err.code)) {",
+    "replace": "      if (true) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "refuses to rename an OPEN file"
   }
 ]

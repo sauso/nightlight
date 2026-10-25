@@ -4,7 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import db from '../db.js';
 import { logger } from '../lib/logger.js';
-import { dataDirFrom, ensurePrivateDir, JWT_SECRET_FILE, privateDirOf, resolveSecretFile } from '../lib/dataPaths.js';
+import { dataDirFrom, ensurePrivateDir, JWT_SECRET_FILE, present, privateDirOf, resolveSecretFile } from '../lib/dataPaths.js';
 
 const DATA_DIR = dataDirFrom();
 // #553 phase 2a: private/.jwt_secret, or the top-level one on an install the start-up move has not reached; a new
@@ -110,12 +110,20 @@ export function sessionAgeCondition(alias = '') {
 // would mean every default install shares the same, publicly-known signing key.
 function loadOrCreateSecret() {
   if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
-  try {
-    if (fs.existsSync(SECRET_FILE)) {
+  if (present(SECRET_FILE)) {
+    try {
       return fs.readFileSync(SECRET_FILE, 'utf8').trim();
+    } catch (err) {
+      // It EXISTS but cannot be read (a restore that left it owner-writable but not readable, say). Never write over
+      // it: that would destroy the real secret and sign everyone out for good, which a fresh secret written over it
+      // used to do without a word (Codex review of PR #870). This run signs with a temporary secret instead, and says so.
+      logger.error(
+        `[auth] the session signing secret at ${SECRET_FILE} exists but cannot be read (${err.code || err.message}). It ` +
+          'was left as it is, and this run uses a temporary secret, so every sign-in ends at the next restart. Give the ' +
+          'file to PUID:PGID with mode 600 on the host (or set JWT_SECRET), then restart.'
+      );
+      return crypto.randomBytes(48).toString('hex');
     }
-  } catch {
-    // Fall through to generating a fresh one.
   }
   const secret = crypto.randomBytes(48).toString('hex');
   try {

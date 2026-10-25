@@ -140,7 +140,12 @@ fi
 # user; this part only prepares, as root:
 #   - private/ itself: created if missing, given to PUID:PGID only if it is not already theirs, and chmod 700 on every
 #     start (the umask must not decide it: UMASK=022 is a supported opt-out, and private/ stays 700 under it too). A
-#     private/ that is a symbolic link, or not a folder, is left exactly as it is, with a warning.
+#     private/ that is not a folder is left exactly as it is, with a warning. A private/ that is a symbolic link to a
+#     folder (the owner's own arrangement: another disk, say) is used: what it points to is made 700 THROUGH the link
+#     (chmod follows it), because left alone a 0755 target let an old 0644 database be renamed into a folder others
+#     can read under UMASK=022 (Codex review of PR #870). It is never chown-ed through the link: a root chown through a
+#     link the app user could have planted is the classic way to hand root's files to that user; a chmod to 700 can
+#     only take access away. A target with the wrong owner gets a warning instead.
 #   - the top-level items the tool moves that are not sentinels above, when one has the wrong owner (a restore or a
 #     hand-copy as root; most often a Firebase file dropped in as root): the tool runs as the app user and could not
 #     move it (a folder's rename into another needs write access to the folder itself). Only these few names, never
@@ -151,18 +156,24 @@ fi
 # without DAC_OVERRIDE (the optional hardening keeps it; e2e/hardened.sh's control D takes it away).
 PRIVATE_DIR="$DATA_DIR/private"
 private_warn() { printf '[entrypoint] warning: %s; starting anyway\n' "$1" >&2; }
-if [ -L "$PRIVATE_DIR" ]; then
-  private_warn "$PRIVATE_DIR is a symbolic link, so it is left as it is (what it points to must be owned by $WANT_OWNER and mode 700)"
+if [ -L "$PRIVATE_DIR" ] && [ ! -d "$PRIVATE_DIR" ]; then
+  private_warn "$PRIVATE_DIR is a symbolic link that does not point to a folder, so nothing can be moved into it"
 elif [ -e "$PRIVATE_DIR" ] && [ ! -d "$PRIVATE_DIR" ]; then
   private_warn "$PRIVATE_DIR exists and is not a folder, so nothing can be moved into it; move it out of the way"
 else
   if [ ! -d "$PRIVATE_DIR" ]; then
     mkdir "$PRIVATE_DIR" || private_warn "could not create $PRIVATE_DIR"
   fi
-  if [ -d "$PRIVATE_DIR" ]; then
+  if [ -L "$PRIVATE_DIR" ]; then
+    if [ "$(stat -L -c %u:%g "$PRIVATE_DIR" 2>/dev/null)" != "$WANT_OWNER" ]; then
+      private_warn "$PRIVATE_DIR is a symbolic link whose target is not owned by $WANT_OWNER; re-own the target on the host (it is not done through a link)"
+    fi
+  elif [ -d "$PRIVATE_DIR" ]; then
     if [ "$(stat -c %u:%g "$PRIVATE_DIR" 2>/dev/null)" != "$WANT_OWNER" ]; then
       chown nightlight:nightlight "$PRIVATE_DIR" || private_warn "could not give $PRIVATE_DIR to $WANT_OWNER"
     fi
+  fi
+  if [ -d "$PRIVATE_DIR" ]; then
     chmod 700 "$PRIVATE_DIR" || private_warn "could not make $PRIVATE_DIR owner-only (700)"
     if ! stat "$PRIVATE_DIR/." >/dev/null 2>&1; then
       private_warn "root cannot look inside $PRIVATE_DIR (is DAC_OVERRIDE missing?), so the owners of the files in it were not checked"

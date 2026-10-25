@@ -15,7 +15,9 @@
 #            data directory is a no-op. Then the documented ROLLBACK statement is shown true: the old image on the
 #            moved data directory starts EMPTY (first-run setup). And starting the new image again after that is the
 #            "two copies" case: the private/ copy wins, the old image's empty one is set aside, About says so, and the
-#            old session still works.
+#            old session still works. Last, the documented move-back commands are run as root (docs/operations.md,
+#            "Rolling back"): the old image then has the real data and the old session, and the next start of the new
+#            image moves everything in again.
 #   puid0    the same upgrade with PUID=0 (as the e2e and demo stacks run): moved, signs in.
 #   empty    `docker exec` on a volume that never started (root, no start-up script) creates nothing, private/ least
 #            of all: a root-owned private/ would lock the app out of its own folder.
@@ -199,7 +201,8 @@ check_console_scripts() { # container what
 
 # ── The parts ────────────────────────────────────────────────────────────────────────────────────────
 phase_upgrade() {
-  local vol="$PROJECT-upgrade-data" c1="$PROJECT-new-1" c2="$PROJECT-new-2" c3="$PROJECT-rollback" c4="$PROJECT-new-3" log status
+  local vol="$PROJECT-upgrade-data" c1="$PROJECT-new-1" c2="$PROJECT-new-2" c3="$PROJECT-rollback" c4="$PROJECT-new-3"
+  local c5="$PROJECT-moved-back" c6="$PROJECT-new-4" log status
   say "UPGRADE: $OLD_IMAGE install -> this image (six capabilities), twice; then the rollback, then two copies"
   cleanup_apps
   make_old_install "$vol" "$APP_PUID"
@@ -265,6 +268,33 @@ phase_upgrade() {
   on_volume "$vol" "$IMAGE" root sh -c 'ls /app/data/private/legacy-*/babymonitor.db >/dev/null' \
     || die "after the rollback: the set-aside database is not in private/legacy-*/"
   check_top_level_clean "$vol" "after the rollback"
+
+  # The DOCUMENTED rollback (docs/operations.md, "Rolling back"), run as root the way the owner would on the host: move
+  # the files back to the top level, then the old image must find the real data and the old session.
+  on_volume "$vol" "$IMAGE" root sh -c 'cd /app/data && mv private/babymonitor.db* private/.jwt_secret . \
+    && mv private/detection-snapshots private/transition-snapshots . && mv private/google-services.json .' \
+    || die "the documented move-back commands failed"
+  start_layout_app "$c5" "$vol" "$OLD_IMAGE" default "$APP_PUID"
+  ready_or_die "$c5" "old image after the documented move-back"
+  status=$(curl -fsS -m 15 "$BASE/api/auth/status") || die "move-back: GET /api/auth/status failed"
+  case "$status" in *'"needsSetup":false'*) ;; *) die "move-back: the old image does not see the moved-back data: $status" ;; esac
+  about "$OLD_TOKEN" >/dev/null || die "move-back: the old image refused the session made before the upgrade"
+  ok "documented rollback: after the move-back commands the old image has the real data and the old session"
+  stop_app "$c5"
+  docker rm "$c5" >/dev/null
+
+  # ...and coming forward again moves them in again (private/ has no database now, only the earlier legacy-* folder).
+  start_layout_app "$c6" "$vol" "$IMAGE" six "$APP_PUID"
+  ready_or_die "$c6" "new image after the documented move-back"
+  check_about "$OLD_TOKEN" private true "forward again"
+  stop_app "$c6"
+  log=$(save_log "$c6")
+  check_clean_stop "$c6" "$log" "forward again"
+  grep -qF '[private-layout] moved babymonitor.db into private/' "$log" || die_log "$log" "forward again: the database was not moved in again"
+  grep -qF "$LAYOUT_OK" "$log" || die_log "$log" "forward again: no '$LAYOUT_OK' line"
+  docker rm "$c6" >/dev/null
+  check_top_level_clean "$vol" "forward again"
+  check_secret_kept "$vol" "forward again"
   say "UPGRADE PASSED"
 }
 

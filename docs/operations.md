@@ -45,13 +45,18 @@ says so in one line of `docker logs nightlight`:
 What the move does, and what it never does:
 
 - The database moves only when nothing else has it open. It is first merged into one self-contained
-  file (no `-wal` beside it), then moved by a single rename. If that cannot be proven, or the rename
-  fails (for example because `private/` is a separate mount or a symbolic link to another disk), it
-  stays where it is, the app uses it there, the line above becomes a **warning**, and the next start
-  tries again.
+  file (no `-wal` beside it) and locked, then moved by a single rename. If that cannot be proven, or
+  the rename fails (for example because `private/` is a separate mount on another disk), it stays
+  where it is, the app uses it there, the line above becomes a **warning**, and the next start tries
+  again.
+- A `-wal`, `-shm` or `-journal` already in `private/` with no database beside it (left by a database
+  that was deleted from there) is set aside before the database moves in, so SQLite cannot replay it
+  over the one moving in. Pictures in `private/` from that database are set aside the same way.
 - The snapshot folders move with the database, never ahead of it.
 - A **symbolic link** is never moved, since moving it can break it. It stays at the top level, and the
-  warning says so on every start.
+  warning says so on every start. A `private/` that is itself a symbolic link to a folder is used, and
+  the folder it points to is made `700`; it is never re-owned through the link (the start-up warns if
+  its owner is wrong).
 - **Nothing is deleted, and nothing is written over.** If `private/` already has a file and the top
   level has another copy, the one in `private/` is used and the other is set aside. See
   [Two copies of the database](#two-copies-of-the-database).
@@ -61,6 +66,8 @@ What the move does, and what it never does:
   backup that lands at the top level later is moved at the next start.
 - It waits up to 30 seconds for the database checks before it gives up for that start. A network share
   that stops answering altogether holds the start-up while it waits, exactly as it would hold the app.
+- **Known limit:** two containers on the same data directory are not supported (they never were: each
+  would open the same database). The move cannot tell another container's database from its own.
 
 The move is **one way**: an older version does not look in `private/`. Read
 [Rolling back](#6-rolling-back) before you go back to one.
@@ -340,7 +347,11 @@ opt-out (`UMASK=022`) has to be set before that first start to keep the old mode
 database and secrets into `private/` ([The private folder](#the-private-folder)), and it is one way.
 Before you upgrade: make a backup, read [Rolling back](#6-rolling-back), and change any scheduled
 backup job to the new [backup command](#3-backing-up). Afterwards, check the start-up log for the
-`private layout:` line: a warning there means something stayed at the top level, and says why.
+`private layout:` line: a warning there means something stayed at the top level, and says why. Then,
+a day or so later, **check that your newest backup is dated after the upgrade**: a scheduled job still
+using the old command fails without anyone seeing it. A job on the host that copies `backup-*.db` from
+the top of the data directory now copies nothing, because backups are written into `private/`: point it
+at `private/backup-*.db` (and run it as root).
 
 After upgrading:
 
@@ -381,7 +392,16 @@ already started the older image on the moved data directory, it made a new, empt
 (and `.jwt_secret`) at the top level: move those aside first (`mkdir empty-copy && mv babymonitor.db*
 .jwt_secret empty-copy/`), then move yours back as above.
 
-Coming forward again later, the next start of this version moves them into `private/` again.
+**Coming forward again later:**
+
+- If you rolled back by **moving the files back** as above, `private/` has no database, and the next
+  start of this version moves them in again.
+- If you rolled back by **restoring a backup to the top level** instead, `private/` still holds the
+  copy from before the rollback. Coming forward as it is would keep using THAT copy, and set your
+  rolled-back weeks aside as the "other" copy ([Two copies](#two-copies-of-the-database)). So before you
+  start this version again, move the old private copy out of the way, as root on the host:
+  `cd private && mkdir before-rollback && mv babymonitor.db* detection-snapshots transition-snapshots before-rollback/`
+  (leave out anything that is not there).
 
 ## 7. Recovering from a corrupt or partial backup
 
@@ -399,15 +419,18 @@ The start-up script sets a copy aside when `private/` already has a file and the
 directory has another one by the same name. That happens after a restore put at the top level of a
 moved install, or after an older version ran on it (see [Rolling back](#6-rolling-back)). The copy in
 `private/` is always the one used: nothing is chosen by size or date, and nothing is deleted or
-overwritten. The other copy, with its `-wal`/`-shm`, is moved to `private/legacy-<date>-<time>/`, and
-the start-up log has one warning:
+overwritten. The other copy is moved to `private/legacy-<date>-<time>/` as one unit: the database
+first, then its `-wal`/`-shm` and its snapshot folders into the same folder (if the database itself
+cannot be moved, none of it is, and the next start tries again). The start-up log has one warning:
 
 ```
 [entrypoint] warning: private layout: a copy at the top of /app/data was set aside in /app/data/private/legacy-*/ because /app/data/private already had one, which is the one used (docs/operations.md, "Two copies of the database"); starting anyway
 ```
 
 The same rule applies to `.jwt_secret` (so nobody is signed out), the Firebase files, a backup with
-the same name, and a snapshot folder when both hold pictures (it is set aside whole, never merged).
+the same name, and a snapshot folder when both hold pictures (it is set aside whole, never merged). The
+pictures of a set-aside database never go into `private/`: they are named by its own row ids, and would
+show up against the wrong alerts there.
 While any `legacy-*` folder exists, `GET /api/about` reports `"layoutConflict": true` (and so does the
 diagnostics bundle, as `layout_conflict`). The About page itself does not show it yet.
 
@@ -420,12 +443,14 @@ Then decide:
 
   ```bash
   cd /mnt/user/appdata/nightlight/private                # your Data Directory / APPDATA_DIR
-  mkdir replaced && mv babymonitor.db* replaced/          # the copy that was in use
-  mv legacy-<date>-<time>/babymonitor.db* .               # the one you want
+  mkdir replaced
+  mv babymonitor.db* detection-snapshots transition-snapshots replaced/                # the copy in use
+  mv legacy-<date>-<time>/babymonitor.db* legacy-<date>-<time>/*-snapshots .          # the one you want
   ```
 
-  Move `.jwt_secret` the same way if you want that copy's sign-ins too. Keep `replaced/` until you
-  are sure; it is not used.
+  (Leave out a snapshot folder that is not there.) The database and its pictures go together, both
+  ways: pictures are named by their database's row ids. Move `.jwt_secret` the same way if you want
+  that copy's sign-ins too. Keep `replaced/` until you are sure; it is not used.
 
 ## Hardening the container (optional)
 

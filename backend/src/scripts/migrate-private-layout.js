@@ -70,9 +70,12 @@ export const EXIT = Object.freeze({ DONE: 0, LEFT: 10, SET_ASIDE: 11, FAILED: 1 
 // only the independent passes. A blocking filesystem call that never returns hangs this exactly as it would hang the
 // app on the same mount: that is accepted and documented, not a new failure (plan review C1).
 export const DB_PASS_BUDGET_MS = 30_000;
-// SQLite's busy wait for the journal-mode change. Another connection makes it fail, and waiting longer would not help:
-// nothing should have the file open at all.
+// SQLite's busy wait for the journal-mode change and the exclusive lock. Another connection makes them fail, and waiting
+// longer would not help: nothing should have the file open at all.
 const BUSY_TIMEOUT_MS = 2_000;
+// A rename the filesystem refuses while the file is OPEN (Windows says EBUSY, measured; some network shares do the
+// same). There the lock is let go and the rename tried once more at once; see moveDatabase.
+const RENAME_REFUSED_WHILE_OPEN = new Set(['EBUSY', 'EPERM']);
 
 const TAG = '[private-layout]';
 
@@ -95,7 +98,9 @@ function isEmptyDir(p) {
 /**
  * Run every pass once. Returns { code, left, setAside, moved } (the lists name what happened, for the log and tests).
  * Options are seams for the tests: `rename` (to make a rename fail as EXDEV would on a separate mount), `now` (a clock,
- * to run out the time budget), `stamp` (the legacy-* folder's name), `log`.
+ * to run out the time budget), `stamp` (the legacy-* folder's name), `log`, `busyTimeoutMs`, `openDatabase` (to make
+ * SQLite answer what no real fixture makes it answer), and `hooks.beforeLock` (called between the journal-mode proof and
+ * the exclusive lock: the window a second opener or a new private database would have to hit).
  */
 export function migratePrivateLayout({
   dataDir = dataDirFrom(),
@@ -104,10 +109,22 @@ export function migratePrivateLayout({
   now = Date.now,
   stamp = () => timestampForName(new Date()),
   rename = fs.renameSync,
+  busyTimeoutMs = BUSY_TIMEOUT_MS,
+  openDatabase = (file, opts) => new Database(file, opts),
+  hooks = {},
   log = { info: (m) => logger.info(`${TAG} ${m}`), warn: (m) => logger.warn(`${TAG} ${m}`) },
 } = {}) {
   const priv = privateDirOf(dataDir);
-  const ctx = { dataDir, priv, env, log, rename, stamp, left: [], setAside: [], moved: [], quarantineDir: null };
+  const ctx = {
+    dataDir, priv, env, log, rename, stamp, busyTimeoutMs, openDatabase, hooks,
+    left: [], setAside: [], moved: [], quarantineDir: null,
+    // Set when this run set the TOP-LEVEL database aside (two copies): its pictures then follow it into the same
+    // legacy-* folder, never into private/ (Opus review of PR #870, P1).
+    dbSetAside: false,
+    // Set when this run moved the top-level database INTO private/: a private/ snapshot folder that already holds
+    // pictures then belongs to a database that is gone (see moveSnapshotDir).
+    dbMovedIn: false,
+  };
 
   if (!fs.existsSync(dataDir)) return finish(ctx);
   try {
@@ -182,19 +199,42 @@ function quarantineDir(ctx) {
   }
 }
 
-// Move a top-level entry into this run's legacy-* folder, under its own name. Never overwrites (the folder is new).
-function setAside(ctx, src, why) {
-  const dest = path.join(quarantineDir(ctx), path.basename(src));
+// Move an entry into this run's legacy-* folder (or into `intoDir`, an existing one), under its own name. Never
+// overwrites: the run's folder is new, and the caller checks an existing one does not have the name.
+function setAside(ctx, src, why, intoDir = null) {
+  const dest = path.join(intoDir || quarantineDir(ctx), path.basename(src));
   try {
     ctx.rename(src, dest);
   } catch (err) {
     ctx.left.push(path.basename(src));
     ctx.log.warn(`${rel(ctx, src)} could not be set aside (${err.code || err.message}); left where it is`);
+    // A folder this run made for nothing would read as a copy waiting for a decision (layoutConflict): remove it.
+    if (!intoDir && isEmptyDir(ctx.quarantineDir)) {
+      try { fs.rmdirSync(ctx.quarantineDir); ctx.quarantineDir = null; } catch { /* stays; empty, harmless */ }
+    }
     return false;
   }
   ctx.setAside.push(path.basename(src));
   ctx.log.warn(`${rel(ctx, src)} was set aside as ${rel(ctx, dest)}: ${why}. Nothing was deleted.`);
   return true;
+}
+
+// The newest private/legacy-* folder that holds a set-aside database but not yet a file called `name`: where a companion
+// left behind by an interrupted set-aside belongs (review of PR #870: the database goes aside first, so a crash between
+// it and its -wal leaves the -wal at the top with no database; it must join the database it came with, not a new
+// folder, or "move legacy-X/babymonitor.db* back" would promote a database without its WAL). Folder names sort by time.
+function legacyDirAwaiting(ctx, name) {
+  let names;
+  try {
+    names = fs.readdirSync(ctx.priv).filter((n) => n.startsWith(QUARANTINE_PREFIX)).sort().reverse();
+  } catch {
+    return null;
+  }
+  for (const n of names) {
+    const dir = path.join(ctx.priv, n);
+    if (present(path.join(dir, DB_FILE)) && !present(path.join(dir, name))) return dir;
+  }
+  return null;
 }
 
 // lstat a top-level entry; a symbolic link, or the wrong kind of entry, is left where it is and said.
@@ -229,9 +269,18 @@ function topLevelEntry(ctx, name, kind) {
 //     opened the file and read nothing yet holds no lock and does not stop it; nothing is in that state at start-up.)
 //     A WAL checkpoint is not enough: with another reader open it leaves a 0-byte -wal that a size check cannot tell
 //     from a clean one (Opus review);
-//   - close, then require that NONE of -wal, -shm, -journal exists. Anything still there means another process, or a
+//   - keep the connection OPEN and take an EXCLUSIVE lock (BEGIN EXCLUSIVE, busy => nothing moves), so nobody can open
+//     the file between the proof and the rename (Codex + Opus review of PR #870: closing first left that window). It
+//     creates no -journal (measured): nothing is written;
+//   - require that NONE of -wal, -shm, -journal exists next to it. Anything still there means another process, or a
 //     companion this connection did not own: nothing is moved;
-//   - rename the .db alone. The app opens it and switches it back to WAL itself (db.js).
+//   - set aside any -wal, -shm or -journal ALREADY IN private/ (with no private/babymonitor.db, else this is the
+//     two-copies case). The app never closes its database, so after any stop private/ keeps a -wal; if only
+//     private/babymonitor.db is then deleted and an old copy restored at the top level, moving that copy next to the old
+//     -wal makes SQLite replay the OLD frames over it (Opus review of PR #870, P6: verified by running);
+//   - rename the .db alone, still holding the lock (Linux can rename an open file; where the filesystem refuses, EBUSY
+//     on Windows, the lock is let go and the rename tried once more at once). The app opens it and switches it back to
+//     WAL itself (db.js).
 // The quick_check afterwards is LOGGED only: it never gates the move, and the file has already moved by then.
 function moveDatabase(ctx, overBudget) {
   const { dataDir, priv, log } = ctx;
@@ -239,16 +288,18 @@ function moveDatabase(ctx, overBudget) {
   const src = topLevelEntry(ctx, DB_FILE, 'file');
   if (!src) return;
   if (present(privDb)) {
-    // Both exist: private/ wins. The top-level copy goes aside WITH its companions, so a hot WAL stays next to its
-    // database (moved one by one; a crash between two of these renames can leave the -wal in a second legacy-*
-    // folder, which the docs say how to put back together; nothing is lost either way).
+    // Both exist: private/ wins. The top-level copy goes aside as a UNIT: the .db FIRST, then its companions into the
+    // SAME folder. If the .db cannot go, nothing does, and all of them stay together at the top level; if a run is cut
+    // off between the two, the next run's leftovers pass carries the companions after it (legacyDirAwaiting). The
+    // other order once left a .db in one legacy-* folder and its -wal in another (Codex + Opus review of PR #870, P4).
     log.warn(`${DB_FILE} exists both in private/ and at the top level; the one in private/ is the one used`);
+    if (!setAside(ctx, src, 'private/ already has a database, and the copy in private/ always wins')) return;
+    ctx.dbSetAside = true;
     for (const name of DB_SIDECARS) {
       const s = path.join(dataDir, name);
       const st = lstatOrNull(s);
-      if (st && !st.isSymbolicLink()) setAside(ctx, s, 'it belongs to the top-level copy of the database');
+      if (st && !st.isSymbolicLink()) setAside(ctx, s, 'it belongs to the top-level copy of the database', ctx.quarantineDir);
     }
-    setAside(ctx, src, 'private/ already has a database, and the copy in private/ always wins');
     return;
   }
   const skip = (why) => {
@@ -257,28 +308,59 @@ function moveDatabase(ctx, overBudget) {
   };
   if (overBudget()) return skip('the time limit for the move ran out before it started');
   let conn = null;
-  let mode;
+  const release = () => {
+    if (!conn) return;
+    try { if (conn.inTransaction) conn.exec('ROLLBACK'); } catch { /* nothing was written in it */ }
+    try { conn.close(); } catch { /* a close that fails leaves a companion file, which the next start sees */ }
+    conn = null;
+  };
   try {
-    conn = new Database(src, { fileMustExist: true, timeout: BUSY_TIMEOUT_MS });
-    if (overBudget()) return skip('the time limit for the move ran out while opening it');
-    mode = String(conn.pragma('journal_mode = DELETE', { simple: true })).toLowerCase();
-  } catch (err) {
-    return skip(`it could not be prepared for the move (${err.message})`);
+    try {
+      conn = ctx.openDatabase(src, { fileMustExist: true, timeout: ctx.busyTimeoutMs });
+      if (overBudget()) return skip('the time limit for the move ran out while opening it');
+      const mode = String(conn.pragma('journal_mode = DELETE', { simple: true })).toLowerCase();
+      if (mode !== 'delete') return skip(`another process seems to have it open (its journal mode stayed "${mode}")`);
+      ctx.hooks.beforeLock?.();
+      conn.exec('BEGIN EXCLUSIVE');
+    } catch (err) {
+      return skip(`it could not be prepared for the move (${err.message})`);
+    }
+    const leftover = DB_SIDECARS.filter((name) => present(path.join(dataDir, name)));
+    if (leftover.length) return skip(`${leftover.join(', ')} still exists next to it, so another process may have it open`);
+    if (overBudget()) return skip('the time limit for the move ran out');
+    // rename(2) REPLACES a destination that exists, and private/ always wins: never let it. Checked now, under the lock
+    // and before anything in private/ is touched (companions of a private database that appeared would be ITS own).
+    if (present(privDb)) return skip('private/babymonitor.db appeared while it was being prepared');
+    for (const name of DB_SIDECARS) {
+      const stale = path.join(priv, name);
+      const st = lstatOrNull(stale);
+      if (!st) continue;
+      if (st.isSymbolicLink()) return skip(`private/${name} is a symbolic link, and it would be taken for the moved database's own`);
+      log.warn(`private/${name} has no private/${DB_FILE} beside it: it belongs to a database that is gone, and SQLite would replay it over the one moving in`);
+      if (!setAside(ctx, stale, `it would otherwise be taken for the moved database's own ${name.slice(DB_FILE.length)}`)) {
+        return skip(`private/${name} could not be set aside`);
+      }
+    }
+    try {
+      ctx.rename(src, privDb);
+    } catch (err) {
+      if (!RENAME_REFUSED_WHILE_OPEN.has(err.code)) {
+        return skip(`it could not be moved into private/ (${err.code || err.message}), so nothing was moved`);
+      }
+      release();
+      if (present(privDb)) return skip('private/babymonitor.db appeared while it was being prepared');
+      try {
+        ctx.rename(src, privDb);
+      } catch (again) {
+        return skip(`it could not be moved into private/ (${again.code || again.message}), so nothing was moved`);
+      }
+    }
   } finally {
-    try { conn?.close(); } catch { /* a close that fails leaves a companion file, caught just below */ }
-  }
-  if (mode !== 'delete') return skip(`another process seems to have it open (its journal mode stayed "${mode}")`);
-  const leftover = DB_SIDECARS.filter((name) => present(path.join(dataDir, name)));
-  if (leftover.length) return skip(`${leftover.join(', ')} still exists after closing it, so another process may have it open`);
-  if (overBudget()) return skip('the time limit for the move ran out');
-  if (present(privDb)) return skip('private/babymonitor.db appeared while it was being prepared');
-  try {
-    ctx.rename(src, privDb);
-  } catch (err) {
-    return skip(`it could not be moved into private/ (${err.code || err.message}), so nothing was moved`);
+    release();
   }
   // ── point of no return: the database is in private/ ──
   ctx.moved.push(DB_FILE);
+  ctx.dbMovedIn = true;
   log.info(`moved ${DB_FILE} into private/ (${rel(ctx, src)} -> ${rel(ctx, privDb)})`);
   let check = null;
   try {
@@ -326,6 +408,9 @@ function moveFile(ctx, name) {
 function moveSnapshotDirs(ctx) {
   // With the database still at the top level, its pictures stay with it: the app serves them from there.
   if (resolveLayout(ctx.dataDir) !== 'private') return;
+  // Two databases still (setting the top-level one aside failed this start): its pictures stay with it, so the next
+  // start can set both aside together. Never into private/, where they would pass for the private database's.
+  if (present(path.join(ctx.dataDir, DB_FILE))) return;
   for (const name of SNAPSHOT_DIRS) {
     pass(ctx, name, () => moveSnapshotDir(ctx, name));
   }
@@ -334,6 +419,15 @@ function moveSnapshotDirs(ctx) {
 function moveSnapshotDir(ctx, name) {
   const src = topLevelEntry(ctx, name, 'dir');
   if (!src) return;
+  if (ctx.dbSetAside) {
+    // This start set the top-level database aside: these are ITS pictures (named by its row ids). They go into the same
+    // legacy-* folder, even when private/ has no such folder or an empty one, never into private/, where the private
+    // database's alerts would show them and its next saves and prunes would overwrite or delete them (Opus review of
+    // PR #870, P1: verified by running).
+    if (isEmptyDir(src)) fs.rmdirSync(src);
+    else setAside(ctx, src, 'it belongs to the top-level database set aside with it', ctx.quarantineDir);
+    return;
+  }
   const dest = path.join(ctx.priv, name);
   let dst = lstatOrNull(dest);
   if (dst && (dst.isSymbolicLink() || !dst.isDirectory())) {
@@ -345,6 +439,12 @@ function moveSnapshotDir(ctx, name) {
   // leave an EMPTY private/ folder. It holds nothing, so it must not block the move for ever.
   if (dst && isEmptyDir(dest)) {
     fs.rmdirSync(dest);
+    dst = null;
+  }
+  // This start moved the top-level database in, so a private/ folder with pictures belongs to a private database that
+  // is gone (the P6 case of the review of PR #870, for pictures): it is set aside, and this database's pictures move in.
+  if (dst && ctx.dbMovedIn) {
+    if (!setAside(ctx, dest, `it belongs to a database that is no longer in private/, not to the ${DB_FILE} moved in now`)) return;
     dst = null;
   }
   if (!dst) {
@@ -395,13 +495,23 @@ function moveLeftovers(ctx) {
       try { fs.chmodSync(dest, SECRET_FILE_MODE); } catch { /* still inside 0700 private/ */ }
     });
   }
-  // A -wal, -shm or -journal with no database next to it (a database moved by hand without them, say). A -wal can hold
-  // committed rows, so it is set aside, never deleted. With the database still there they are ITS companions and stay.
+  // A -wal, -shm or -journal with no database next to it. A -wal can hold committed rows, so it is set aside, never
+  // deleted. The usual cause is a run cut off between setting a top-level database aside and its companions: it then
+  // joins THAT database, in the newest legacy-* folder that holds a database without one (legacyDirAwaiting), so the
+  // trio can be promoted together. Otherwise (a database moved by hand without them, say) it gets this run's folder.
+  // With the database still there they are ITS companions and stay.
   if (!present(path.join(dataDir, DB_FILE))) {
     for (const name of DB_SIDECARS) {
       if (!names.includes(name)) continue;
       const src = topLevelEntry(ctx, name, 'file');
-      if (src) setAside(ctx, src, `there is no ${DB_FILE} next to it`);
+      if (!src) continue;
+      const awaiting = legacyDirAwaiting(ctx, name);
+      setAside(
+        ctx,
+        src,
+        awaiting ? `it belongs to the ${DB_FILE} set aside there, whose set-aside was cut off` : `there is no ${DB_FILE} next to it`,
+        awaiting
+      );
     }
   }
 }

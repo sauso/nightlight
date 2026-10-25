@@ -19,7 +19,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { migratePrivateLayout, EXIT } from '../src/scripts/migrate-private-layout.js';
-import { resolveDbPath, resolveSecretFile, resolveDropInFile, layoutConflict } from '../src/lib/dataPaths.js';
+import { resolveDbPath, resolveSecretFile, resolveDropInFile, resolveSnapshotDir, layoutConflict } from '../src/lib/dataPaths.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TOOL = path.join(HERE, '..', 'src', 'scripts', 'migrate-private-layout.js');
@@ -176,7 +176,7 @@ describe('#553 move: fresh installs and the database', () => {
     assert.equal(r.code, EXIT.LEFT, r.lines.join('\n'));
     assert.equal(fs.existsSync(P(d, 'babymonitor.db')), false);
     assert.ok(fs.existsSync(T(d, 'babymonitor.db-wal')), 'the stray file was removed');
-    assert.ok(r.lines.some((l) => l.includes('babymonitor.db-wal still exists after closing it')), r.lines.join('\n'));
+    assert.ok(r.lines.some((l) => l.includes('babymonitor.db-wal still exists next to it')), r.lines.join('\n'));
   });
 
   test('a 0-byte -wal left by a crash, with nobody holding the database: SQLite clears it, and the database moves', () => {
@@ -528,6 +528,235 @@ describe('#553 move: the other items, each its own pass on every start', () => {
     assert.equal(r.code, EXIT.LEFT);
     assert.deepEqual(r.left, ['babymonitor.db']);
     assert.equal(resolveDbPath(d), T(d, 'babymonitor.db'));
+  });
+});
+
+// ── The review of PR #870 (Codex sol + Opus): one regression test per finding, each failing without its fix ─────────
+// What the app does with the database: open it, switch it to WAL, read (db.js). Used to check what the app would SEE.
+function appSees(file) {
+  const c = new Database(file);
+  try {
+    c.pragma('journal_mode = WAL');
+    return c.prepare('SELECT x FROM t ORDER BY rowid').all().map((r) => r.x);
+  } finally {
+    c.close();
+  }
+}
+const legacyDirs = (d) => fs.readdirSync(P(d)).filter((f) => f.startsWith('legacy-')).sort();
+
+describe('#553 move, review of PR #870: what is already in private/ when the database moves in', () => {
+  test('HIGH 1 (P6): a stale -wal in private/ with no private database is set aside, so the restored rows are what the app sees', () => {
+    // A moved install was stopped (the app never closes its database, so private/ keeps a -wal), then only
+    // private/babymonitor.db was deleted and an old-layout copy restored at the top level. Before the fix the copy was
+    // moved in next to the old -wal and SQLite replayed the OLD frames over it (Opus, verified by running).
+    const d = dataDir();
+    seedWalDatabase(P(d, 'babymonitor.db'), { committed: ['live-1'], walOnly: ['live-wal-1', 'live-wal-2'] });
+    fs.rmSync(P(d, 'babymonitor.db'));
+    seedPlainDatabase(T(d, 'babymonitor.db'), 'restored-1');
+    const r = run(d);
+    assert.equal(r.code, EXIT.SET_ASIDE, r.lines.join('\n'));
+    assert.deepEqual(r.moved, ['babymonitor.db']);
+    assert.deepEqual(appSees(resolveDbPath(d)), ['restored-1'], 'the app sees the OLD database\'s rows replayed over the restore');
+    const [aside] = legacyDirs(d);
+    assert.ok(fs.statSync(P(d, aside, 'babymonitor.db-wal')).size > 0, 'the stale -wal was not kept (it can hold rows): never delete');
+    assert.ok(r.lines.some((l) => l.includes('private/babymonitor.db-wal has no private/babymonitor.db beside it')), r.lines.join('\n'));
+  });
+
+  test('...and a private/ snapshot folder of that gone database is set aside too; the moved database\'s pictures move in', () => {
+    const d = dataDir();
+    write(P(d, 'detection-snapshots', '1.jpg'), 'STALE-picture-of-a-gone-database');
+    seedPlainDatabase(T(d, 'babymonitor.db'), 'restored');
+    write(T(d, 'detection-snapshots', '1.jpg'), 'picture-of-the-restored-database');
+    const r = run(d);
+    assert.equal(r.code, EXIT.SET_ASIDE, r.lines.join('\n'));
+    assert.equal(fs.readFileSync(P(d, 'detection-snapshots', '1.jpg'), 'utf8'), 'picture-of-the-restored-database');
+    assert.equal(fs.readFileSync(P(d, legacyDirs(d)[0], 'detection-snapshots', '1.jpg'), 'utf8'), 'STALE-picture-of-a-gone-database');
+  });
+});
+
+describe('#553 move, review of PR #870: two copies are set aside as a unit', () => {
+  // Two copies with the top-level one in WAL mode, its newest rows only in its -wal.
+  function twoCopies() {
+    const d = dataDir();
+    seedPlainDatabase(P(d, 'babymonitor.db'), 'winner');
+    seedWalDatabase(T(d, 'babymonitor.db'), { committed: ['l1'], walOnly: ['l2-only-in-wal'] });
+    return d;
+  }
+
+  test('HIGH 2 (P4): if the .db cannot be set aside, NOTHING of it moves: the trio stays together at the top', () => {
+    const d = twoCopies();
+    const busyDb = (a, b) => {
+      if (path.basename(a) === 'babymonitor.db') throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+      return fs.renameSync(a, b);
+    };
+    const r1 = run(d, { rename: busyDb });
+    assert.equal(r1.code, EXIT.LEFT, r1.lines.join('\n'));
+    assert.ok(fs.existsSync(T(d, 'babymonitor.db')) && fs.existsSync(T(d, 'babymonitor.db-wal')), 'the -wal left without its database');
+    for (const dir of legacyDirs(d)) assert.equal(fs.existsSync(P(d, dir, 'babymonitor.db-wal')), false, `a -wal went aside alone into ${dir}`);
+    assert.deepEqual(legacyDirs(d), [], 'an empty legacy-* folder was left, which About reports as a copy waiting');
+    // The next start sets all of it aside, into ONE folder, and it still opens with every row.
+    const r2 = run(d, { stamp: () => '20261026-101600' });
+    assert.equal(r2.code, EXIT.SET_ASIDE, r2.lines.join('\n'));
+    const withDb = legacyDirs(d).filter((dir) => fs.existsSync(P(d, dir, 'babymonitor.db')));
+    assert.equal(withDb.length, 1);
+    assert.ok(fs.existsSync(P(d, withDb[0], 'babymonitor.db-wal')), 'the database and its -wal were set aside apart');
+    assert.deepEqual(rows(P(d, withDb[0], 'babymonitor.db')), ['l1', 'l2-only-in-wal']);
+  });
+
+  test('HIGH 2: a run cut off between the .db and its -wal: the next start carries the -wal into the SAME folder', () => {
+    const d = twoCopies();
+    // The .db goes aside, then the "crash": every later rename of this run fails.
+    let dbAside = false;
+    const crashAfterDb = (a, b) => {
+      if (dbAside) throw Object.assign(new Error('killed'), { code: 'EIO' });
+      fs.renameSync(a, b);
+      if (path.basename(a) === 'babymonitor.db') dbAside = true;
+    };
+    run(d, { rename: crashAfterDb });
+    const [first] = legacyDirs(d);
+    assert.ok(fs.existsSync(P(d, first, 'babymonitor.db')) && fs.existsSync(T(d, 'babymonitor.db-wal')), 'precondition: split');
+    const r2 = run(d, { stamp: () => '20261026-101600' });
+    assert.deepEqual(legacyDirs(d), [first], 'a second legacy-* folder was made for the -wal');
+    assert.ok(fs.existsSync(P(d, first, 'babymonitor.db-wal')), r2.lines.join('\n'));
+    // The documented promotion (mv legacy-X/babymonitor.db* .) then brings back every row.
+    assert.deepEqual(rows(P(d, first, 'babymonitor.db')), ['l1', 'l2-only-in-wal']);
+  });
+
+  for (const variant of ['absent', 'empty (the app makes it at start)']) {
+    test(`MEDIUM 4 (P1): the losing database's pictures go aside with it, never into private/ (private folder ${variant})`, () => {
+      const d = dataDir();
+      seedPlainDatabase(P(d, 'babymonitor.db'), 'winner');
+      if (variant !== 'absent') fs.mkdirSync(P(d, 'detection-snapshots'));
+      seedPlainDatabase(T(d, 'babymonitor.db'), 'loser');
+      write(T(d, 'detection-snapshots', '1.jpg'), 'LOSER-PICTURE-FOR-ITS-EVENT-1');
+      const r = run(d);
+      assert.equal(r.code, EXIT.SET_ASIDE, r.lines.join('\n'));
+      const served = resolveSnapshotDir('detection-snapshots', d);
+      assert.equal(fs.existsSync(path.join(served, '1.jpg')), false, 'the winner would show the loser\'s picture as its event 1');
+      const [aside] = legacyDirs(d);
+      assert.equal(fs.readFileSync(P(d, aside, 'detection-snapshots', '1.jpg'), 'utf8'), 'LOSER-PICTURE-FOR-ITS-EVENT-1');
+      assert.ok(fs.existsSync(P(d, aside, 'babymonitor.db')), 'not in the same folder as its database');
+    });
+  }
+
+  test('MEDIUM 4: two databases still there (the set-aside failed): the top-level pictures stay with theirs, and are not served', () => {
+    const d = dataDir();
+    seedPlainDatabase(P(d, 'babymonitor.db'), 'winner');
+    seedPlainDatabase(T(d, 'babymonitor.db'), 'loser');
+    write(T(d, 'detection-snapshots', '1.jpg'), 'LOSER');
+    const busyDb = (a, b) => {
+      if (path.basename(a) === 'babymonitor.db') throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+      return fs.renameSync(a, b);
+    };
+    run(d, { rename: busyDb });
+    assert.ok(fs.existsSync(T(d, 'detection-snapshots', '1.jpg')), 'moved away from its database');
+    assert.equal(resolveSnapshotDir('detection-snapshots', d), P(d, 'detection-snapshots'), 'the app would serve the loser\'s pictures');
+  });
+});
+
+describe('#553 move, review of PR #870: the lock, and the checks around the rename', () => {
+  test('HIGH 3: a private/ that is a symbolic link: what it points to is made 0700 before anything moves into it', { skip: linuxOnly }, (t) => {
+    const d = dataDir();
+    const target = path.join(ROOT, `elsewhere-private-${n}`);
+    fs.mkdirSync(target, { mode: 0o755 });
+    fs.chmodSync(target, 0o755);
+    if (!linkOrSkip(t, target, P(d), 'dir')) return;
+    seedPlainDatabase(T(d, 'babymonitor.db'));
+    fs.chmodSync(T(d, 'babymonitor.db'), 0o644);
+    const r = run(d);
+    assert.equal(r.code, EXIT.DONE, r.lines.join('\n'));
+    assert.equal(mode(target), '700', 'the 0644 database was moved into a folder others can enter');
+    assert.ok(fs.existsSync(path.join(target, 'babymonitor.db')));
+    assert.ok(fs.lstatSync(P(d)).isSymbolicLink(), 'the link itself was replaced');
+  });
+
+  test('HARDENING 6: the exclusive lock is refused (another connection reads between the proof and the lock): nothing moves, exit 10', () => {
+    const d = dataDir();
+    seedWalDatabase(T(d, 'babymonitor.db'));
+    let other = null;
+    const r = run(d, {
+      busyTimeoutMs: 200,
+      hooks: {
+        beforeLock() {
+          other = new Database(T(d, 'babymonitor.db'));
+          other.exec('BEGIN');
+          other.prepare('SELECT COUNT(*) FROM t').get();
+        },
+      },
+    });
+    try {
+      assert.equal(r.code, EXIT.LEFT, r.lines.join('\n'));
+      assert.equal(fs.existsSync(P(d, 'babymonitor.db')), false, 'it moved while another connection was reading it');
+      assert.ok(r.lines.some((l) => l.includes('could not be prepared for the move (database is locked)')), r.lines.join('\n'));
+    } finally {
+      other?.exec('COMMIT');
+      other?.close();
+    }
+    assert.deepEqual(rows(T(d, 'babymonitor.db')), ['a', 'b', 'wal-only-1', 'wal-only-2']);
+  });
+
+  test('M10: a journal-mode change SQLite answers with the old mode (instead of an error) moves nothing', () => {
+    // SQLite documents that answer; no real fixture produces it (a second connection makes it throw), so the
+    // connection here is the real one with only that answer changed.
+    const d = dataDir();
+    seedPlainDatabase(T(d, 'babymonitor.db'));
+    const openDatabase = (file, opts) => {
+      const real = new Database(file, opts);
+      return new Proxy(real, {
+        get(target, prop) {
+          if (prop === 'pragma') return (sql, o) => (/^journal_mode/.test(sql) ? 'wal' : target.pragma(sql, o));
+          const v = target[prop];
+          return typeof v === 'function' ? v.bind(target) : v;
+        },
+      });
+    };
+    const r = run(d, { openDatabase });
+    assert.equal(r.code, EXIT.LEFT);
+    assert.equal(fs.existsSync(P(d, 'babymonitor.db')), false);
+    assert.ok(r.lines.some((l) => l.includes('its journal mode stayed "wal"')), r.lines.join('\n'));
+  });
+
+  test('M11: a private/babymonitor.db that appears before the rename is never replaced (rename(2) would)', () => {
+    const d = dataDir();
+    seedPlainDatabase(T(d, 'babymonitor.db'), 'top');
+    // Any rename ONTO an existing private database counts, even one the filesystem then refuses (Windows refuses to
+    // rename an open file, which would otherwise hide a missing check there).
+    let ontoExisting = false;
+    const watch = (a, b) => { if (path.basename(b) === 'babymonitor.db' && fs.existsSync(b)) ontoExisting = true; return fs.renameSync(a, b); };
+    const r = run(d, { rename: watch, hooks: { beforeLock() { seedPlainDatabase(P(d, 'babymonitor.db'), 'appeared'); } } });
+    assert.equal(ontoExisting, false, 'a rename onto the private database was attempted');
+    assert.equal(r.code, EXIT.LEFT, r.lines.join('\n'));
+    assert.deepEqual(rows(P(d, 'babymonitor.db')), ['appeared'], 'the private database was replaced');
+    assert.deepEqual(rows(T(d, 'babymonitor.db')), ['top']);
+  });
+
+  test('M14: the time limit running out AFTER the rename changes nothing (it applies before the rename only)', () => {
+    const d = dataDir();
+    seedPlainDatabase(T(d, 'babymonitor.db'), 'moved');
+    write(T(d, '.jwt_secret'), 'S');
+    let renamed = false;
+    const r = run(d, {
+      now: () => (renamed ? 1e12 : 0),
+      rename: (a, b) => { fs.renameSync(a, b); if (path.basename(a) === 'babymonitor.db') renamed = true; },
+    });
+    assert.equal(r.code, EXIT.DONE, r.lines.join('\n'));
+    assert.deepEqual(rows(P(d, 'babymonitor.db')), ['moved']);
+    assert.equal(fs.existsSync(T(d, 'babymonitor.db')), false, 'renamed back, or copied');
+    assert.ok(fs.existsSync(P(d, '.jwt_secret')), 'the passes after the database stopped');
+  });
+
+  test('a filesystem that refuses to rename an OPEN file (EBUSY): the lock is let go and the rename tried once more', () => {
+    // What Windows does (measured) and some network shares: without the retry the database would never move there.
+    const d = dataDir();
+    seedPlainDatabase(T(d, 'babymonitor.db'), 'moved');
+    let first = true;
+    const refusesOnce = (a, b) => {
+      if (first && path.basename(a) === 'babymonitor.db') { first = false; throw Object.assign(new Error('busy'), { code: 'EBUSY' }); }
+      return fs.renameSync(a, b);
+    };
+    const r = run(d, { rename: refusesOnce });
+    assert.equal(r.code, EXIT.DONE, r.lines.join('\n'));
+    assert.deepEqual(rows(P(d, 'babymonitor.db')), ['moved']);
   });
 });
 

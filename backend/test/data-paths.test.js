@@ -193,12 +193,21 @@ describe('#553 dataPaths: ensurePrivateDir (the writers\' one way to make privat
     assert.throws(() => ensurePrivateDir(d), /exists and is not a folder/);
   });
 
-  test('a private/ that is a symbolic link is used as it is', (t) => {
+  test('a private/ that is a symbolic link is used, and what it points to is made 0700 (review of PR #870)', (t) => {
     const d = dir();
     const elsewhere = path.join(d, 'elsewhere');
-    fs.mkdirSync(elsewhere);
-    if (!linkOrSkip(t, elsewhere, P(d))) return;
+    fs.mkdirSync(elsewhere, { mode: 0o755 });
+    fs.chmodSync(elsewhere, 0o755);
+    if (!linkOrSkip(t, elsewhere, P(d), 'dir')) return;
     assert.equal(ensurePrivateDir(d), P(d));
     assert.equal(fs.lstatSync(P(d)).isSymbolicLink(), true, 'the link was replaced');
+    if (ON_LINUX) assert.equal((fs.statSync(elsewhere).mode & 0o777).toString(8), '700', 'the target kept its 0755');
+  });
+
+  test('a private/ that is a symbolic link pointing nowhere is an error, not a folder made through it', (t) => {
+    const d = dir();
+    if (!linkOrSkip(t, path.join(d, 'gone'), P(d), 'dir')) return;
+    assert.throws(() => ensurePrivateDir(d), /symbolic link to something that does not exist/);
+    assert.equal(fs.existsSync(path.join(d, 'gone')), false);
   });
 });

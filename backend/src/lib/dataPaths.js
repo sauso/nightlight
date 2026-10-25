@@ -117,6 +117,9 @@ export function resolveSnapshotDir(name, dataDir) {
   const atTop = path.join(dataDir, name);
   const [first, second] = resolveLayout(dataDir) === 'private' ? [inPrivate, atTop] : [atTop, inPrivate];
   if (present(first)) return first;
+  // With a database in private/ AND one at the top level (two copies not set aside yet), the top-level pictures are
+  // the OTHER database's: never fall back to them (review of PR #870, P1).
+  if (first === inPrivate && present(path.join(dataDir, DB_FILE))) return first;
   if (present(second)) return second;
   return first;
 }
@@ -139,22 +142,27 @@ export function layoutConflict(dataDir) {
 /**
  * Create DATA_DIR/private if it is missing and make it 0700, by an explicit chmod (a mkdir mode is cut by the umask).
  * For the writers only (db.js on a fresh install, middleware/auth.js before it writes a new secret, the move tool).
- * A private/ that is a symbolic link is the owner's own arrangement (another disk, say): it is used, and its target's
- * mode is not changed from here. Throws when private/ cannot be made a folder: the caller decides how loudly to fail.
+ * A private/ that is a symbolic link is the owner's own arrangement (another disk, say): it is used, and what it points
+ * to is made 0700 too (stat and chmod follow the link). Leaving the target's mode alone let an old 0644 database be
+ * renamed into a 0755 folder under UMASK=022, where nothing tightens it (Codex review of PR #870). Throws when private/
+ * is not a folder or cannot be made 0700 (a target owned by someone else): the caller decides how loudly to fail.
  */
 export function ensurePrivateDir(dataDir, { fsImpl = fs } = {}) {
   const dir = privateDirOf(dataDir);
   let st = null;
   try {
-    st = fsImpl.lstatSync(dir);
+    st = fsImpl.statSync(dir);
   } catch (err) {
     if (err.code !== 'ENOENT') throw err;
+    // statSync follows a link: ENOENT is either nothing there, or a link that points nowhere.
+    let link = null;
+    try { link = fsImpl.lstatSync(dir); } catch { /* nothing there at all */ }
+    if (link) throw new Error(`${dir} is a symbolic link to something that does not exist`);
   }
-  if (st && st.isSymbolicLink()) return dir;
   if (st && !st.isDirectory()) throw new Error(`${dir} exists and is not a folder`);
   if (!st) {
     fsImpl.mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
-    st = fsImpl.lstatSync(dir);
+    st = fsImpl.statSync(dir);
   }
   if ((st.mode & 0o777) !== PRIVATE_DIR_MODE) fsImpl.chmodSync(dir, PRIVATE_DIR_MODE);
   return dir;

@@ -41,7 +41,7 @@ baseline() {  # baseline <test file> <minimum number of tests>
 }
 baseline "$TEST" 22
 baseline "$ISO_TEST" 11
-baseline "$PRIV_TEST" 14
+baseline "$PRIV_TEST" 16
 
 mutant() {  # mutant <name> <perl -pe expression> [test file, default the umask test]
   local name="$1" expr="$2" test="${3:-$TEST}" f="$T/entrypoint.sh"
@@ -124,7 +124,8 @@ mutant "exit 11 (a copy set aside) says nothing"                           's/^ 
 mutant "a failed move tool says nothing"                                   's/^  \*\) private_warn "private layout: the move .*$/  *) ;;/' "$P"
 mutant "private/ is left to the umask (no chmod 700)"                      's/^    chmod 700 "\$PRIVATE_DIR" \|\| .*$/    :/' "$P"
 mutant "private/ is chowned on every start, even when it is right"         's/^    if \[ "\$\(stat -c %u:%g "\$PRIVATE_DIR" 2>\/dev\/null\)" != "\$WANT_OWNER" \]; then$/    if true; then/' "$P"
-mutant "a symbolic-link private/ is chmod-ed through the link"             's/^if \[ -L "\$PRIVATE_DIR" \]; then$/if false; then/' "$P"
+mutant "a symbolic-link private/'s target is not made 700 (review of #870)" 's/^  if \[ -d "\$PRIVATE_DIR" \]; then$/  if [ -d "\$PRIVATE_DIR" ] && [ ! -L "\$PRIVATE_DIR" ]; then/' "$P"
+mutant "a symbolic-link private/ is chown-ed through the link"             's/^  if \[ -L "\$PRIVATE_DIR" \]; then$/  if false; then/' "$P"
 mutant "no warning when root cannot look inside private/"                  's/^    if ! stat "\$PRIVATE_DIR\/\." >\/dev\/null 2>&1; then$/    if false; then/' "$P"
 mutant "a top-level item owned by root is never re-owned before the move"  's/^if \[ -z "\$NEEDS_CHOWN" \]; then$/if false; then/' "$P"
 mutant "the re-own runs even after the full walk"                          's/^if \[ -z "\$NEEDS_CHOWN" \]; then$/if true; then/' "$P"

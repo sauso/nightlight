@@ -178,18 +178,42 @@ describe('#553 phase 2a entrypoint: the private folder and the move', { skip }, 
     assert.ok(r.chowns.includes(`STUB chown nightlight:nightlight ${d}/private`), r.ctx);
   });
 
-  test('a private/ that is a symbolic link is left exactly as it is, with a warning; the app still starts', () => {
+  test('a private/ that is a symbolic link to a folder: what it points to is made 700 THROUGH the link (review of PR #870)', () => {
+    // Left at 0755, an old 0644 database could be renamed into a folder others can enter, under UMASK=022, where the
+    // tighten walk is off. The link itself stays; the target is owned by this user, so there is no warning.
     const d = data();
     const target = path.join(path.dirname(d), 'elsewhere');
     fs.mkdirSync(target, { mode: 0o755 });
     fs.chmodSync(target, 0o755);
     fs.symlinkSync(target, path.join(d, 'private'));
+    const r = run(d, { env: { UMASK: '022' } });
+    assert.equal(r.status, 0, r.ctx);
+    assert.ok(r.app, r.ctx);
+    assert.equal(modeOf(target), '700', `the link's target was left ${modeOf(target)}${r.ctx}`);
+    assert.ok(fs.lstatSync(path.join(d, 'private')).isSymbolicLink(), 'the link was replaced');
+    assert.deepEqual(r.warnings, [], r.ctx);
+  });
+
+  test('...but it is never chown-ed through the link: a target with the wrong owner gets a warning instead', () => {
+    // A root chown through a link the app user could have planted would hand root's files to that user.
+    const d = data();
+    const target = path.join(path.dirname(d), 'elsewhere');
+    fs.mkdirSync(target, { mode: 0o755 });
+    fs.symlinkSync(target, path.join(d, 'private'));
+    const r = run(d, { stat: { suffix: 'private', owner: '0:0' } });
+    assert.equal(r.status, 0, r.ctx);
+    assert.ok(r.app, r.ctx);
+    assert.ok(r.warnings.some((l) => l.includes('is a symbolic link whose target is not owned by')), r.ctx);
+    assert.equal(r.chowns.includes(`STUB chown nightlight:nightlight ${d}/private`), false, `chown went through the link${r.ctx}`);
+  });
+
+  test('a private/ that is a symbolic link pointing nowhere: a warning, the app still starts', () => {
+    const d = data();
+    fs.symlinkSync(path.join(path.dirname(d), 'gone'), path.join(d, 'private'));
     const r = run(d);
     assert.equal(r.status, 0, r.ctx);
     assert.ok(r.app, r.ctx);
-    assert.ok(r.warnings.some((l) => l.includes('is a symbolic link, so it is left as it is')), r.ctx);
-    assert.equal(modeOf(target), '755', 'chmod went through the link');
-    assert.ok(fs.lstatSync(path.join(d, 'private')).isSymbolicLink());
+    assert.ok(r.warnings.some((l) => l.includes('is a symbolic link that does not point to a folder')), r.ctx);
   });
 
   test('a FILE called private: a warning, nothing done to it, the app still starts', () => {
