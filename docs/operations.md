@@ -561,6 +561,71 @@ On Unraid, set **Extra Parameters** back to `--log-opt max-size=10m --log-opt ma
 and apply. With Compose, comment the lines out again and run `docker compose up -d`. Nothing in the data
 directory depends on the hardening, so you can turn it off at any time.
 
+## Media isolation (not on by default)
+
+**Status:** this is built but **off**, and nothing in a normal install turns it on. It is controlled by an internal
+setting, `NIGHTLIGHT_MEDIA_ISOLATION`, which is read only when the container starts: the value `1` asks for it, and
+anything else (not set, `0`, blank, any other text) leaves it off. That is the default. A later release is expected to
+switch it on by default, after it has run on a real install for a while; this page describes what the switch does today.
+
+**What it does.** FFmpeg, ffprobe and MediaMTX read video from your cameras, so they handle data that the camera (or
+whoever has taken over the camera) controls. With isolation on, they run as a separate user inside the container (id
+`1700`, with no extra privileges), so a fault in one of them cannot read the database or the secrets. Off, they run as
+the same user as the app, which is how Nightlight has always worked.
+
+**What it needs, and what it checks.** The container checks this at every start and, if anything is wrong, starts the
+usual way with one `[entrypoint] warning: media isolation is off: <reason>` line. It never refuses to start. It stays off when:
+
+- `PUID` or `PGID` is `0` or `1700`, or not a number;
+- the database, a backup, a snapshot folder, `.jwt_secret` or a Firebase file is still at the top level of the data
+  directory instead of in [`private/`](#the-private-folder). Isolation opens the data directory to the media group, so a
+  file left at the top would be protected only by its own permissions. A `.jwt_secret` is exempt if you set
+  `JWT_SECRET`, and a Firebase file is exempt if you named it with `FIREBASE_CREDENTIALS` or `FIREBASE_CLIENT_CONFIG`.
+  `.demo-ready` and the clips folder are not checked;
+- the clips folder (or its parent folders inside the data directory) belongs to a user other than `PUID`. The start-up
+  script gives the folders to the media group; it does not take over a folder somebody else owns, because the app could
+  no longer write there. Fix the owner on the host (`chown PUID:PGID`);
+- the container lacks the three capabilities the app keeps (`SETUID`, `SETGID`, `KILL`), or a media program cannot run
+  as the media user;
+- a trial run of the folders fails or takes longer than 30 seconds (a network share that has stalled, say). The trial
+  is a dry run: nothing it does changes your data.
+
+**Who can read what, with isolation on.**
+
+| Folder | Owner and group | Mode | The media user can |
+| --- | --- | --- | --- |
+| Data directory | `PUID`, group `1700` | `710` | pass through to the clips folder; not list it, not read anything in it |
+| `private/` (database, secrets, backups, snapshots) | `PUID`:`PGID` | `700` | nothing, not even see that it is there |
+| Clips folder, and the folders above it inside the data directory | `PUID`, group `1700` | `750` | enter and list; not create, rename or delete |
+| `.ring/<camera>`, `<camera>/`, `timelapse/<child>/` | `PUID`, group `1700` | `1770` (sticky) | write its own files; not delete or replace the app's |
+| Lists and pictures the app writes for FFmpeg to read (`.concat/`, `.timelapse-frames/`) | `PUID`, group `1700` | `750` folders, `640` files | read; not change |
+
+The three write folders are made when the app first needs them, so a running install gets them on its first recording.
+There is no `setgid` bit anywhere: the kernel on at least one common NAS drops it, so nothing relies on it. Clips and
+recordings that already exist keep their owner and mode (`600`), and only the app reads them.
+
+**What the app does with what the media user writes.** It treats the files in the three write folders as untrusted: it
+opens them without following a symbolic link, serves only a regular file with a single name (a second hard link to
+the database would otherwise pass), and deletes one file at a time rather than walking the folder. It ignores any file
+in the ring folder that is not named like one of its own segments. A clip request returns what it always did (same status,
+headers, and seeking).
+
+**An external clips folder** (`CLIPS_DIR`, for example a `/recordings` mount): only its top folder is changed, to group
+`1700` and mode `750`, and nothing above it. The start-up script does not walk the clips, so a large mount costs
+nothing at start. The media user must be able to reach the mount: the folders above it need the execute permission for
+"other" (`755` is usual). If it cannot, the trial run fails and isolation stays off.
+
+**Start-up file modes.** With isolation asked for, the walk that removes group and other access from existing files
+(see [Who can read the data directory](#who-can-read-the-data-directory)) is limited to `private/` and the files at the top level,
+because it would otherwise remove the group access this layout depends on. If isolation then turns out to be off, the
+whole tree is walked as usual.
+
+**Known limits.** The app can still become any user in the container, because it keeps `SETUID` to start the media
+programs. This protects the database and secrets from a fault in FFmpeg or MediaMTX; it does not make the container a
+sandbox. The unauthenticated MediaMTX control API on `127.0.0.1:9997` and camera passwords in process arguments are not
+covered. Keep cameras on their own network, as [cameras.md](cameras.md) says. Real-device streaming has not been
+re-checked with isolation on; that is part of the plan before it becomes the default.
+
 ## Logs
 
 Use Docker's logs to check what the app and MediaMTX are doing. Both log to stdout, which Docker captures:

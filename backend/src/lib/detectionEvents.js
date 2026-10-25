@@ -87,7 +87,7 @@ const overCountWithClipStmt = db.prepare(
 
 function unlinkSnapshot(id) {
   const file = snapshotFile(id);
-  if (file) fs.rm(file, { force: true }, () => {});
+  if (file) fs.rm(file, { force: true }, () => {}); // app-only: snapshots live in private/
 }
 
 // Resolve+delete a clip MP4 (and its sibling thumbnail) from a stored relative clip_path. Guards
@@ -131,7 +131,7 @@ export function saveEventSnapshot(id, buffer) {
     // The alert row can be gone by now: the caller awaits the snapshot grab first, and removing the camera in
     // that window deletes the row (#719 review). A file no row names is an orphan nothing can reach to delete,
     // so remove it.
-    if (markSnapshotStmt.run(id).changes === 0) fs.rmSync(file, { force: true });
+    if (markSnapshotStmt.run(id).changes === 0) fs.rmSync(file, { force: true }); // app-only: snapshots live in private/
   } catch (err) {
     logger.error(`Failed to save detection snapshot for event ${id}:`, err.message);
   }
@@ -144,7 +144,7 @@ export function getEventSnapshotFile(id) {
   const n = Number(id);
   if (!Number.isInteger(n) || n <= 0) return null;
   const file = path.join(SNAPSHOT_DIR, `${n}.jpg`);
-  return fs.existsSync(file) ? { root: SNAPSHOT_DIR, path: `${n}.jpg` } : null;
+  return fs.existsSync(file) ? { root: SNAPSHOT_DIR, path: `${n}.jpg` } : null; // app-only: snapshots live in private/
 }
 
 // --- Clip status (Stage 1 recording). The clip lives on the same detection_events row; these just
@@ -262,7 +262,7 @@ export function clearDetectionEvents() {
   // Best-effort: remove every stored JPEG too, so a cleared history leaves no images behind.
   try {
     for (const name of fs.readdirSync(SNAPSHOT_DIR)) {
-      if (name.endsWith('.jpg')) fs.rm(path.join(SNAPSHOT_DIR, name), { force: true }, () => {});
+      if (name.endsWith('.jpg')) fs.rm(path.join(SNAPSHOT_DIR, name), { force: true }, () => {}); // app-only: snapshots live in private/
     }
   } catch {
     // Directory missing / unreadable — nothing to clean.

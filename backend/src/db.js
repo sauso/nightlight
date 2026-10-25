@@ -4,7 +4,7 @@ import fs from 'fs';
 import { dataDirFrom, ensurePrivateDir, present, privateDirOf, resolveDbPath } from './lib/dataPaths.js';
 
 const DATA_DIR = dataDirFrom();
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true }); // fence-ok: the data directory itself; CLIPS_DIR is named only in a SQL comment below
 
 // #553 phase 2a: the database lives in DATA_DIR/private/ (0700), or at the top level on an install the start-up
 // move has not reached (lib/dataPaths.js has the rule). This file only RESOLVES; it never moves anything, so a

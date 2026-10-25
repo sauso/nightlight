@@ -418,9 +418,12 @@ media_dry_run() {
   _dd=$(mktemp -d) || { MEDIA_REASON="could not create a temporary folder for the dry run"; return 1; }
   # stdin, stdout and stderr of the whole background job go to files or /dev/null, so an abandoned probe holds nothing of
   # this script's (not the container's log pipe either) open.
+  # (The `|| _r=$?` is not decoration: the subshell inherits `set -e`, and without it a probe that fails would end the
+  # subshell before the status is written, which the loop below would read as "never finished".)
   (
-    setpriv $APP_DROP -- /bin/sh "$MEDIA_PROBE" app "$MEDIA_EXEC" "$MEDIA_ID" "$APP_UID" "$CLIPS_ABS" "$DATA_DIR" > "$_dd/out" 2>&1
-    echo $? > "$_dd/rc"
+    _r=0
+    setpriv $APP_DROP -- /bin/sh "$MEDIA_PROBE" app "$MEDIA_EXEC" "$MEDIA_ID" "$APP_UID" "$CLIPS_ABS" "$DATA_DIR" > "$_dd/out" 2>&1 || _r=$?
+    echo "$_r" > "$_dd/rc"
   ) > /dev/null 2>&1 < /dev/null &
   _pid=$!
   _i=0

@@ -47,7 +47,7 @@ const inside = (root, abs) => abs.startsWith(root + path.sep);
 // stays (#719 review: the old catch-all was a surviving mutant).
 function realOrNull(p) {
   try {
-    return fs.realpathSync(p);
+    return fs.realpathSync(p); // fence-ok: resolves a folder to jail a delete under it; reads no file
   } catch (e) {
     if (e.code === 'ENOENT' || e.code === 'ENOTDIR') return null;
     throw e;

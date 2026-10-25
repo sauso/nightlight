@@ -71,7 +71,7 @@ router.get('/alerts/:id/snapshot', requireAuthQueryOrHeader, (req, res) => {
   }
   // { root, path } form: Express jails the send under root and rejects any `..`, on top of the
   // integer-only id validation upstream (belt-and-suspenders against path traversal).
-  res.sendFile(file.path, { root: file.root, dotfiles: 'deny' });
+  res.sendFile(file.path, { root: file.root, dotfiles: 'deny' }); // app-only: an alert snapshot, in private/
 });
 
 // The frame captured at one bed transition. Query-token auth like the alert snapshot above, for the
@@ -87,7 +87,7 @@ router.get('/bed-transitions/:id/snapshot', requireAuthQueryOrHeader, (req, res)
   }
   // transitionSnapshotPath coerces the id to a positive integer and builds the path itself, so nothing
   // user-supplied reaches the filesystem; sendFile's dotfile guard is the second layer.
-  res.sendFile(file, { dotfiles: 'deny' });
+  res.sendFile(file, { dotfiles: 'deny' }); // app-only: a bed-transition frame, in private/
 });
 
 // Recorded clip for an alert — same query-token auth as the snapshot above (a <video> element
