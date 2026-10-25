@@ -148,9 +148,12 @@ jobs:
   # usual way and report "off" (KILL missing, PUID=1700), each failing the job if its signature does not show. A job of
   # its own, like `hardened`: its own containers, network, volumes and host port (4200), and it reads the containers'
   # processes from this runner's /proc, which needs a Linux host.
+  # #553 phase 2b: the "on" cases also prove the folder layout as the media user (docker exec -u 1700) and serve real
+  # recordings with Range requests, and a negative control (the switch not set) runs in the same job; the time limit is
+  # longer for the recordings those make.
   media-isolation:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -167,7 +170,7 @@ jobs:
           echo "commit: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
           docker image inspect sauso/nightlight:dev --format 'image id: {{.Id}}' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Media isolation (on under the hardening and the defaults, then the KILL and PUID fallbacks)
+      - name: Media isolation (on under the hardening and the defaults, the negative control, then the KILL and PUID fallbacks)
         env:
           MEDIA_ISO_LOG_DIR: ${{ runner.temp }}/media-isolation-logs
         run: bash e2e/media-isolation.sh all

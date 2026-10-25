@@ -576,7 +576,7 @@ the same user as the app, which is how Nightlight has always worked.
 **What it needs, and what it checks.** The container checks this at every start and, if anything is wrong, starts the
 usual way with one `[entrypoint] warning: media isolation is off: <reason>` line. It never refuses to start. It stays off when:
 
-- `PUID` or `PGID` is `0` or `1700`, or not a number;
+- `PUID` is `0` (the app would run as root), `PUID` or `PGID` is `1700` (the media user's own id), or either is not a number;
 - the database, a backup, a snapshot folder, `.jwt_secret` or a Firebase file is still at the top level of the data
   directory instead of in [`private/`](#the-private-folder). Isolation opens the data directory to the media group, so a
   file left at the top would be protected only by its own permissions. A `.jwt_secret` is exempt if you set

@@ -81,6 +81,20 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   and sound detectors, and such a failure no longer counts towards "does this camera have a microphone?". A signal
   the app could not deliver to one of these processes is no longer mistaken for a process that failed to start,
   which could start a second MediaMTX beside the running one.
+- **Running FFmpeg and MediaMTX as a separate user now works end to end, still off by default (#553, second step).**
+  With the internal switch on, recordings, clips, thumbnails and the ring buffer are written by the media user into
+  folders only it can write in, and the app reads, serves and deletes what it wrote more carefully: it opens a file
+  without following a link, refuses one with a second name (a hard link to the database would otherwise pass), serves
+  from the file it checked, deletes one file at a time, and ignores any ring file that is not named like its own
+  segments. A clip request returns what it always did (status, headers, seeking). The start-up script prepares the
+  folders (data directory `710`, clips folder `750`, both in the media group), and keeps isolation off, with one
+  warning, if the database, a backup, a snapshot folder, `.jwt_secret` or a Firebase file is still at the top level of
+  the data directory, if a folder it would open to the media group belongs to another user, or if a trial of the folders
+  (run in the background, 30 seconds at most) fails. Nothing changes unless the internal switch is set: it is off, the
+  default is not changed here, and no setting was added. With the switch off, one thing differs from before: the temporary
+  file the clips-folder check writes (`.write-test`) now lives in `clips/.app/`, and the concat lists FFmpeg cuts from
+  moved from the ring folder to `clips/.concat/`; existing clips and files are left as they are. See
+  [Media isolation](docs/operations.md#media-isolation-not-on-by-default).
 
 ### Fixed
 

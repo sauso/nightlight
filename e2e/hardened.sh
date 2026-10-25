@@ -399,10 +399,12 @@ camera_and_hls() {
     -d '{"name":"E2E Synthetic","rtsp_host":"fakecam","rtsp_port":"8554","rtsp_path":"/test"}') || die "camera add request failed"
   cam=$(printf '%s' "$add" | field mediamtx_path)
   [ -n "$cam" ] || die "camera add failed: $add"
+  CAMERA_ID=$(printf '%s' "$add" | field id)   # for e2e/media-isolation.sh (the recording routes, the clip folders)
   ok "camera added (mediamtx path $cam)"
 
   media=$(curl -fsS -m 15 -X POST "$BASE/api/auth/media-token" -H "Authorization: Bearer $token" | field token) || true
   [ -n "$media" ] || die "could not mint a media token"
+  MEDIA_TOKEN=$media   # for e2e/media-isolation.sh (a <video> URL carries it)
   for i in $(seq 1 30); do
     out=$(docker exec "$c" ffprobe -v error -i "http://127.0.0.1:4000/hls/$cam/index.m3u8?token=$media" \
       -show_entries stream=codec_type -of csv=p=0 2>/dev/null | tr '\n' ',' || true)
@@ -415,6 +417,8 @@ camera_and_hls() {
 # #553: what GET /api/about says about media isolation must be what the start-up script decided. Here, with
 # NIGHTLIGHT_MEDIA_ISOLATION not set, that is "off" (its default); e2e/media-isolation.sh checks "on" and the fallbacks.
 AUTH_TOKEN=
+CAMERA_ID=
+MEDIA_TOKEN=
 check_media_isolation_reported() { # expected value (on|off)
   local about got
   [ -n "$AUTH_TOKEN" ] || die "no token yet: call camera_and_hls (or sign in) first"

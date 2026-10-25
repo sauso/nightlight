@@ -557,6 +557,54 @@ the app can enter protects even a file inside it whose own mode is too open.
   `entrypoint-private-layout-real.test.js`; the real-image upgrade from the last release, the rollback and the
   two-copies case are `e2e/private-layout.sh` (the `private-layout` job in `e2e.yml`).
 
+### Media isolation: the layout and the fence (#553 phase 2b; the switch is OFF by default)
+
+**State today.** `NIGHTLIGHT_MEDIA_ISOLATION=1` (internal, read only by `entrypoint.sh`) makes ffmpeg, ffprobe and MediaMTX run
+as uid:gid 1700:1700 through `media-exec.sh`; anything else leaves the start as it has always been. Everything below
+describes the switch-ON state; nothing here is on by default, and the earlier statements on this page that the children run as
+the same user describe the default, which is unchanged. User-facing summary: [operations.md](operations.md#media-isolation-not-on-by-default).
+
+**The rule:** a folder the app writes into is never one the media user can write into, and the media user can never rename
+a folder the app trusts. `src/lib/mediaLayout.js` makes the folders (`ensureClipsFolder`, lazily, by the code that needs
+them, each with an `fchmod`/`fchown` on a descriptor opened `O_NOFOLLOW|O_DIRECTORY`, because existing folders are `0700`):
+
+| Kind | Where | Owner:group, mode |
+| --- | --- | --- |
+| traverse | `CLIPS_DIR`, `.ring`, `timelapse`, `.concat`, `.timelapse-frames` and the folders below the last two | app:media, `0750` |
+| leaf (the only media-writable places) | `.ring/<camera>`, `<camera>`, `timelapse/<child>` | app:media, `1770` (sticky) |
+| input files | concat lists, timelapse frames (`writeInputFile`, `O_EXCL`, group set on the descriptor before any content) | app:media, `0640` |
+| app-only | `CLIPS_DIR/.app` (the writability probe), `private/` | app, `0700` |
+
+No setgid bit anywhere (the Unraid kernel drops it without `CAP_FSETID`, measured; the share does not inherit a group
+either): the media process has group 1700 as its primary group, so its files get it without inheritance, and the app sets
+the group of everything it makes. The sticky bit stops the media user deleting or replacing the app's files in a leaf; a leaf is
+app-owned so the app can always remove what is in it. Files that existed before stay app-owned `0600`.
+
+**Every read, serve and delete of a media-written file goes through `src/lib/mediaFiles.js`.** It opens with
+`O_NOFOLLOW|O_NONBLOCK`, `fstat`s the descriptor and requires a regular file with `nlink === 1` (hard-link defence:
+`fs.protected_hardlinks` is 0 on the owner's host, measured), and checks that the real path of the file's parent is the
+expected folder. `serveMediaFile` serves from that descriptor (Range, 206/416, 304, HEAD, ETag/Last-Modified as
+`res.sendFile` did; the tests compare the two request by request), never reopening by path. `unlinkMediaFile` is a flat
+`unlink`; `removeLeafDir` sweeps a leaf one name at a time and never recurses; `safeSegmentNames` accepts only
+`seg-YYYYMMDD-HHMMSS.mkv`, because a segment list becomes a concat list read with `-safe 0` where a newline in a name
+adds directives. `statMediaFile` is an `lstat`, so a link's target is never counted. `test/media-files-fence.test.js` reads the
+source and fails if a `sendFile`/`download` or a path-based read, stat or delete appears in a file that handles the clips
+folder without a `fence-ok`/`app-only` comment saying why.
+
+**What the entrypoint adds (ON path only; the OFF path is the old one):** it refuses isolation while the database, a backup,
+a snapshot folder, `.jwt_secret` (unless `JWT_SECRET`) or a Firebase file (unless named by its env var) is still at the
+top level; sets the data directory to group 1700 / `0710` and the clips folder (and the folders above it inside the data
+directory; only the top of an external mount, never a walk, #567) to `0750`, refusing a folder another uid owns; confines
+the tighten walk to `private/` and the top-level files while isolation is asked for (and runs the full walk after all if
+it ends off); and runs the dry run, folders included, in the BACKGROUND with a 30 s deadline (`BusyBox timeout` around
+`$(...)` cannot stop a probe stuck on a stalled mount). `media-probe.sh` is the probe: it builds a probe folder with
+every kind of folder above in each real mount and lets the media user try to misuse each.
+
+Tests: `media-files.test.js`, `media-layout.test.js`, `media-files-fence.test.js`, `entrypoint-media-isolation.test.js`
+(stubs, also on BusyBox), `entrypoint-media-isolation-real.test.js` (root, real `setpriv`, wrong layouts the probe must
+refuse), the shell mutants in `scripts/entrypoint-umask.mutants.sh`, and `e2e/media-isolation.sh` (the image, as uid 1700).
+Not covered: a real timelapse assembly (needs a child, a sleep window and a night of frames).
+
 ## Frontend structure (`frontend/src/`)
 
 React + react-router, no Redux/state library — three context providers (`AuthContext`,

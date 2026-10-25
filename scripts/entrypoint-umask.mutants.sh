@@ -40,7 +40,7 @@ baseline() {  # baseline <test file> <minimum number of tests>
   echo "  baseline ok ($PASS tests of $(basename "$1"), none skipped)"
 }
 baseline "$TEST" 22
-baseline "$ISO_TEST" 11
+baseline "$ISO_TEST" 41
 baseline "$PRIV_TEST" 16
 
 mutant() {  # mutant <name> <perl -pe expression> [test file, default the umask test]
@@ -72,9 +72,10 @@ mutant "a blank UMASK warns (a cleared Unraid field)"                      's/^ 
 mutant "an invalid UMASK is replaced silently (no warning)"                's/^    printf .\[entrypoint\] warning: UMASK=.*$/    :/'
 
 # --- the tighten: when ---
-mutant "the tighten runs at every mask (the opt-out is re-tightened)"      's/^if \[ "\$UMASK" = 077 \]; then$/if true; then/'
-mutant "the 077 guard is inverted"                                         's/^if \[ "\$UMASK" = 077 \]; then$/if [ "\$UMASK" != 077 ]; then/'
-mutant "the tighten never runs"                                            's/^if \[ "\$UMASK" = 077 \]; then$/if false; then/'
+# (the walk's own branch is an `elif` since #553 phase 2b: the branch before it is the confined walk for media isolation)
+mutant "the tighten runs at every mask (the opt-out is re-tightened)"      's/^elif \[ "\$UMASK" = 077 \]; then$/elif true; then/'
+mutant "the 077 guard is inverted"                                         's/^elif \[ "\$UMASK" = 077 \]; then$/elif [ "\$UMASK" != 077 ]; then/'
+mutant "the tighten never runs"                                            's/^elif \[ "\$UMASK" = 077 \]; then$/elif false; then/'
 
 # --- the tighten: what ---
 # (these are scoped to the FOUND= line, so the comments that mention the same words stay as they are)
@@ -104,13 +105,24 @@ mutant "the switch is never read (isolation can never be asked for)"       's/^i
 mutant "any non-empty switch value asks for isolation"                     's/^if \[ "\$\{NIGHTLIGHT_MEDIA_ISOLATION:-\}" = 1 \]; then$/if [ -n "\${NIGHTLIGHT_MEDIA_ISOLATION:-}" ]; then/' "$I"
 mutant "no dry run: on without proof"                                      's/^  elif media_dry_run; then$/  elif true; then/' "$I"
 mutant "the probe's OK line alone is enough (its status ignored)"          's/^  if \[ "\$_rc" = 0 \] && /  if /' "$I"
-mutant "the dry run has no time limit"                                     's/timeout "\$MEDIA_DRY_RUN_TIMEOUT" //' "$I"
+mutant "the dry run has no deadline (a stalled share would hold the container)" 's/"\$_i" -ge \$\(\(MEDIA_DRY_RUN_TIMEOUT \* 10\)\)/"\$_i" -ge 999999/' "$I"
 mutant "PUID=0 is not refused"                                             's/^  elif \[ "\$APP_UID" = 0 \]; then$/  elif false; then/' "$I"
 mutant "a PUID/PGID equal to the media id is not refused"                  's/^  elif \[ "\$APP_UID" = "\$MEDIA_ID" \] \|\| \[ "\$APP_GID" = "\$MEDIA_ID" \]; then$/  elif false; then/' "$I"
 mutant "ids compared and passed as text (01700, 099)"                      's/^APP_UID=\$\(canonical_id "\$PUID"\)$/APP_UID=\$PUID/' "$I"
 mutant "an operator's MEDIA_ISOLATION=on reaches the app"                  's/^MEDIA_ISOLATION=off$/:/' "$I"
 mutant "the app's drop loses --no-new-privs"                               's/ --no-new-privs"$/"/' "$I"
 mutant "a fallback says nothing"                                           's/^  printf .\[entrypoint\] warning: media isolation is off.*$/  :/' "$I"
+
+# --- #553 phase 2b: the layout steps (run against the same test) ---
+mutant "a database or secret left at the top level does not refuse isolation" 's/^  elif _left=\$\(media_toplevel_leftover\); then$/  elif false; then/' "$I"
+mutant "the folders are never prepared (data 0710, clips 0750, the media group)" 's/^  elif ! media_prepare_layout; then$/  elif false; then/' "$I"
+mutant "the confined tighten is never used (the walk strips the group bits back off)" 's/^if \[ "\$UMASK" = 077 \] && \[ "\$\{NIGHTLIGHT_MEDIA_ISOLATION:-\}" = 1 \]; then$/if false; then/' "$I"
+mutant "a refused isolation keeps the CONFINED walk (the clip tree is never tightened)" 's/^if \[ -n "\$TIGHTEN_CONFINED" \] && \[ "\$MEDIA_ISOLATION" = off \]; then$/if false; then/' "$I"
+mutant "the probe is not told which folders to try"                        's/ "\$CLIPS_ABS" "\$DATA_DIR" > "\$_dd\/out"/ > "\$_dd\/out"/' "$I"
+mutant "a folder another uid owns is taken over (no owner check)"          's/^  if \[ "\$\{3:-\}" != own \] && .*; then$/  if false; then/' "$I"
+mutant "the parents between the data directory and a nested CLIPS_DIR are not prepared" 's/^    "\$DATA_DIR"\/\*\) media_layout_up_to .*$/    "\$DATA_DIR"\/*) ;;/' "$I"
+mutant "the media group on the data directory reads as wrong ownership (a full walk every start)" 's/ && ! media_layout_ok "\$f"//' "$I"
+mutant "the dry run leaves its temporary folder behind"                    's/^  rmdir -- "\$_dd" 2>\/dev\/null \|\| :$/  :/' "$I"
 
 # --- #553 phase 2a: the private folder and the move into it (run against entrypoint-private-layout.test.js) ---
 P="$PRIV_TEST"
