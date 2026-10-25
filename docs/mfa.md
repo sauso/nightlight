@@ -253,10 +253,12 @@ without limit.
 | What | Default | Counted per | What happens |
 |---|---|---|---|
 | Wrong passwords | **30**, then a growing wait | the account alone, whatever the source address | After 30 wrong passwords, the next guess has to wait **1 minute**. Each further wrong guess doubles the wait, up to **15 minutes**. While a wait runs, every attempt on that account, **even with the right password**, is refused (HTTP 429, "Too many attempts - please wait a few minutes and try again.", with a `Retry-After` header). A refused attempt counts as nothing, so trying again does not lengthen the wait. |
-| Forgotten after | **1 hour** | the account | An hour without a wrong password forgets the count, so old typos never add up. A correct password resets it at once. |
+| Eased after | **1 hour** | the account | An hour without a wrong password forgets a count below 30, so old typos never add up. An account that had reached its wait is eased back to **one guess short of 30**, not to zero, so waiting an hour does not buy 30 fresh guesses: the most anyone can get is about 100 a day. A correct password resets it at once. |
 
-30 sits above the per-address limit (20 per 15 minutes), so one device always meets its own limit first: you
-will not reach this by mistyping. It only stops a guesser who spreads attempts over many, or invented, addresses.
+30 sits above the per-address limit (20 per 15 minutes), so one device mistyping meets its own limit first. To
+reach 30 you would need a long run of wrong passwords (more than one 15-minute window, or two devices at once),
+so an ordinary mistyped password does not get there. This is aimed at a guesser who spreads attempts over many, or
+made-up, addresses.
 
 - **Sign-in** is counted by the username exactly as typed, which is how the account is looked up (sign-in is
   case-sensitive). A name that does not exist is counted and answered exactly like one that does, so the
@@ -280,12 +282,12 @@ as they keep at it. They cannot guess any faster. Ways out:
 
 **Known limits:**
 
-- The app keeps at most 10,000 accounts' counts. Someone who invents thousands of usernames could push an
-  account that has not yet been slowed out of the table and so give it a fresh 30 guesses; each fresh set costs
-  them thousands of requests, each of which costs the server a password check.
-- If all 10,000 are slowed or being checked at the same moment, new sign-in attempts are refused for a second at
-  a time until room frees. It fails closed, never open: it can slow people during such a flood, but it never lets
-  guesses through unchecked.
+- Real accounts always have their own count, and nothing sent to the sign-in page can refuse, evict or reset it.
+  Made-up usernames (which match no account) are tracked in a separate table of at most 10,000, only so that a
+  made-up name is slowed exactly like a real one and the answer never says which names exist. If an attacker
+  fills that table (hundreds of thousands of requests), further made-up names are simply not tracked, and from
+  then on a name that is **never** slowed is not a real one. That is a hint about which names exist, and it costs
+  the attacker the hundreds of thousands of requests.
 
 ## Notes for operators
 

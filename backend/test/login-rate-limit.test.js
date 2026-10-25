@@ -57,7 +57,7 @@ beforeEach(() => {
   resetPasswordThrottles('u-b', 'bob');
 });
 
-const login =(username, password = 'wrong-password') =>
+const login = (username, password = 'wrong-password') =>
   call(`${server.url}/api/auth/login`, { method: 'POST', body: { username, password } });
 
 // Burn a whole per-account budget with failed attempts.

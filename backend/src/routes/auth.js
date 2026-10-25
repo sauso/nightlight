@@ -326,8 +326,10 @@ const sessionThrottle = createAccountThrottle();
 // RESERVED before the first await (the compare yields to a worker thread), so parallel requests cannot all pass the
 // gate before any failure is recorded, and the outcome is recorded right after the compare. A throw is a server
 // fault, not a guess: it gives the reservation back and counts as nothing.
-export async function throttledPasswordCheck(throttle, key, verify) {
-  const slot = throttle.acquire(key);
+// `known` says whether the name matches a real account: sign-in passes it (an invented name is tracked in a separate,
+// capped table, see lib/accountThrottle.js); the signed-in routes are always real accounts.
+export async function throttledPasswordCheck(throttle, key, verify, { known = true } = {}) {
+  const slot = throttle.acquire(key, { known });
   if (!slot.allowed) return { throttled: true, retryAfterSec: slot.retryAfterSec };
   let ok = false;
   try {
@@ -644,7 +646,8 @@ router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   const attempt = await throttledPasswordCheck(
     loginThrottle,
     loginAccountKey(username),
-    async () => (await passwordHash.compare(String(password || ''), hashToCheck)) && !!user
+    async () => (await passwordHash.compare(String(password || ''), hashToCheck)) && !!user,
+    { known: !!user }
   );
   if (attempt.throttled) return answerThrottled(res, attempt.retryAfterSec);
   if (!attempt.ok) {

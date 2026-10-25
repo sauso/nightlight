@@ -20,21 +20,31 @@
 // MAX_DELAY_MS), change the password (empties the account at once), or restart the container (the store is in
 // memory).
 //
+// TWO TABLES, because of what a flood of invented usernames can do (Codex and Opus review of #868, each verified by
+// running). The caller says whether the name is a real account (`known`):
+//   * REAL accounts live in a table with NO cap. It is bounded by the users table, so an attacker cannot grow it, and
+//     NOTHING an attacker sends can refuse, evict or reset a real account's entry. The first design had one capped
+//     table: a flood of invented names pushed real accounts' entries out (a fresh 30 guesses), and then "fail closed"
+//     for a full table refused EVERY account without an entry, household-wide, with only a restart as a way out.
+//   * INVENTED names (they match no account, so a guess at one is a guess at nothing) live in a table capped at
+//     MAX_ENTRIES. They are tracked only so that an invented name is throttled exactly like a real one (an
+//     unknown name must not be told apart by its answer). When that table is full of protected entries a new invented
+//     name is simply NOT tracked: the guess reaches no account, so letting it through costs nothing. Known limit: an
+//     attacker who has made hundreds of thousands of requests to fill it can then tell real names from invented
+//     ones, because only a real name is ever slowed.
+//
 // NUMBERS. A hypothesis for one household's use, not a measurement:
 //   * FREE_FAILURES = 30: the same figure as PER_USER_MFA_LIMIT, and above the per-source 20 in routes/auth.js, so
-//     a single honest device always meets its own per-source limit first and this only ever engages for a guesser
-//     spread over many (or forged) addresses. A person mistyping a password does not come near it.
+//     one device mistyping meets its own per-source limit first and this only engages for a guesser spread over many
+//     (or forged) addresses, or a long run of wrong passwords over more than one 15-minute window.
 //   * BASE_DELAY_MS = 60 s, doubling to MAX_DELAY_MS = 15 min: once past the free guesses an attacker is held to at
 //     most one guess a minute, then (from the 5th delayed guess) one every 15 minutes, 96 a day, which is no use
 //     against a password of any real length. 15 min is also the window every other limiter here uses.
-//   * DECAY_MS = 1 h without a failure forgets the account, so old typos never accumulate into a delay.
-//   * MAX_ENTRIES = 10,000 accounts tracked. Entries exist only for accounts with failures, are dropped when they
-//     decay or the person signs in, and a username the attacker invents costs one small entry. Known limits: an
-//     attacker who fills the table with invented names can push a not-yet-delayed account out and so give it a
-//     fresh set of free guesses (delayed accounts, and accounts with a guess being checked, are never evicted);
-//     doing that takes thousands of requests per fresh set of 30, each costing the server a password hash. And if
-//     every entry is protected at once (10,000 accounts delayed or being checked), new attempts are refused for a
-//     second at a time until room frees: the table fails closed, never open.
+//   * DECAY_MS = 1 h without a failure eases the account. Below the free limit it is forgotten, so old typos never
+//     accumulate into a delay. An account that HAD reached its delay is only eased back to one guess short of the
+//     limit, not to zero: a full reset let an attacker wait an hour and get 30 fresh guesses, about 720 a day
+//     instead of about 100 (Opus review of #868, verified by running).
+//   * MAX_ENTRIES = 10,000 invented names tracked (see above).
 //
 // CONCURRENCY. Hashing a password yields (a worker thread, see passwordHash), so N parallel requests could all
 // pass a check-then-record before any failure is recorded and so get N guesses through one gate. `acquire`
@@ -50,6 +60,13 @@ export const MAX_ENTRIES = 10_000;
 // A submitted username can be any length; the key is what is stored, so it is bounded.
 const MAX_KEY_LENGTH = 256;
 
+const UNTRACKED = Object.freeze({
+  allowed: true,
+  fail() {},
+  succeed() {},
+  release() {},
+});
+
 export function createAccountThrottle({
   // Read at call time, not captured: a caller (or a test) that replaces the clock after this is built is still obeyed.
   now = () => Date.now(),
@@ -60,7 +77,8 @@ export function createAccountThrottle({
   maxEntries = MAX_ENTRIES,
 } = {}) {
   // key -> { fails, lastFailAt, blockedUntil, inflight }
-  const entries = new Map();
+  const knownEntries = new Map(); // real accounts: no cap
+  const unknownEntries = new Map(); // invented names: capped at maxEntries
 
   // The delay that follows the failure that brought the account to `fails` wrong guesses (fails >= freeFailures).
   // The exponent is clamped so a huge count cannot overflow to Infinity before the cap applies.
@@ -72,16 +90,29 @@ export function createAccountThrottle({
   const decayed = (entry, t) => entry.inflight === 0 && entry.fails > 0 && t - entry.lastFailAt > decayMs;
   const idle = (entry) => entry.inflight === 0 && entry.fails === 0;
 
-  // Make room for one more entry without helping an attacker: forget what is already forgotten, then the oldest
-  // account that has NOT yet reached its delay. Never an account in its delay, never one with a request in flight.
-  function makeRoom(t) {
-    for (const [key, entry] of entries) {
-      if (idle(entry) || decayed(entry, t)) entries.delete(key);
+  // An entry that has been quiet for DECAY_MS: forget it, unless it had reached its delay, in which case it is eased
+  // to one guess short of the limit (its next wrong guess puts it straight back at the base delay).
+  function ease(map, key, entry, t) {
+    if (entry.fails >= freeFailures) {
+      entry.fails = freeFailures - 1;
+      entry.blockedUntil = 0;
+      entry.lastFailAt = t;
+    } else {
+      map.delete(key);
     }
-    if (entries.size < maxEntries) return true;
-    for (const [key, entry] of entries) {
+  }
+
+  // Make room in the invented-names table without helping an attacker: ease what has gone quiet, then evict the oldest
+  // entry that has NOT reached its delay. Never one in its delay, never one with a request in flight.
+  function makeRoom(map, t) {
+    for (const [key, entry] of map) {
+      if (idle(entry)) map.delete(key);
+      else if (decayed(entry, t)) ease(map, key, entry, t);
+    }
+    if (map.size < maxEntries) return true;
+    for (const [key, entry] of map) {
       if (entry.inflight === 0 && entry.fails < freeFailures) {
-        entries.delete(key);
+        map.delete(key);
         return true;
       }
     }
@@ -92,13 +123,14 @@ export function createAccountThrottle({
     return { allowed: false, retryAfterSec: Math.max(1, retryAfterSec) };
   }
 
-  function acquire(rawKey) {
+  function acquire(rawKey, { known = true } = {}) {
     const t = now();
     const key = String(rawKey ?? '').slice(0, MAX_KEY_LENGTH);
-    let entry = entries.get(key);
+    const map = known ? knownEntries : unknownEntries;
+    let entry = map.get(key);
     if (entry && decayed(entry, t)) {
-      entries.delete(key);
-      entry = undefined;
+      ease(map, key, entry, t);
+      entry = map.get(key);
     }
     if (entry) {
       if (entry.fails >= freeFailures) {
@@ -110,17 +142,11 @@ export function createAccountThrottle({
         return denied(1);
       }
     } else {
-      if (entries.size >= maxEntries && !makeRoom(t)) {
-        // Every entry is protected (in a delay, or a guess is being checked). FAIL CLOSED: refuse for a second rather
-        // than let the guess through untracked, which was the first design and was wrong (Codex review of #868,
-        // verified by running): checks queue behind one password-hash worker, so a flood of invented names can hold
-        // thousands of entries "in flight" for minutes, and an untracked fallback then gave any account unlimited
-        // guesses for as long as the flood lasted. Refusing costs real people a second's wait during such a flood,
-        // when sign-in is slow for everyone anyway.
-        return denied(1);
-      }
+      // Only the invented-names table has a cap. When it is full of protected entries the guess is not tracked: it
+      // reaches no account (see the header), so nothing is gained by it.
+      if (!known && map.size >= maxEntries && !makeRoom(map, t)) return UNTRACKED;
       entry = { fails: 0, lastFailAt: 0, blockedUntil: 0, inflight: 0 };
-      entries.set(key, entry);
+      map.set(key, entry);
     }
     entry.inflight += 1;
 
@@ -131,7 +157,7 @@ export function createAccountThrottle({
       entry.inflight -= 1;
       apply();
       // An entry nothing is waiting on and with no failures holds no information.
-      if (idle(entry) && entries.get(key) === entry) entries.delete(key);
+      if (idle(entry) && map.get(key) === entry) map.delete(key);
     };
     return {
       allowed: true,
@@ -160,11 +186,14 @@ export function createAccountThrottle({
     acquire,
     // A password change empties the account: the person has a new secret and the old guesses mean nothing.
     reset(rawKey) {
-      entries.delete(String(rawKey ?? '').slice(0, MAX_KEY_LENGTH));
+      const key = String(rawKey ?? '').slice(0, MAX_KEY_LENGTH);
+      knownEntries.delete(key);
+      unknownEntries.delete(key);
     },
     clear() {
-      entries.clear();
+      knownEntries.clear();
+      unknownEntries.clear();
     },
-    size: () => entries.size,
+    size: () => knownEntries.size + unknownEntries.size,
   };
 }

@@ -27,9 +27,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   "enter your current password" steps (change password, set up two-factor, turn two-factor off) already had
   per-address limits, which a program that can reach Nightlight on `127.0.0.1` could get around by naming a new
   address in every request. After **30** wrong passwords on an account, each further guess has to wait **1 minute**,
-  doubling to a maximum of **15 minutes**; a correct password resets it, an hour without a wrong one forgets it, and
+  doubling to a maximum of **15 minutes**; a correct password resets it, an hour without a wrong one forgets typos (an account that had reached the wait is only eased back to one guess short of it), and
   changing the password empties it at once. One device mistyping stops at the existing 20-per-15-minutes limit
-  first, so you will not meet this by accident. The trade-off, stated in
+  first, so an ordinary mistyped password does not get there. The trade-off, stated in
   [docs/mfa.md](docs/mfa.md#password-guesses-553): someone who can reach your sign-in page can slow that account's
   own sign-in, though never guess faster; the ways out are waiting, changing the password, or restarting the
   container. The counts are in memory. No setting.

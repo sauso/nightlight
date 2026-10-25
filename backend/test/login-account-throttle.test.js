@@ -43,6 +43,7 @@ beforeEach(() => {
   resetPasswordThrottles('u-a', 'alice');
   resetPasswordThrottles('u-b', 'bob');
   resetPasswordThrottles('', 'ghost');
+  resetPasswordThrottles('u-c', 'Carol');
 });
 
 let n = 0;
@@ -262,5 +263,40 @@ describe('the three routes that ask for the CURRENT password share one per-accou
       method: 'POST', body: { username: 'alice', password: 'a-brand-new-password' }, headers: { 'x-forwarded-for': nextIp() },
     });
     assert.equal(signedIn.status, 200, 'the account stayed slowed after its password was changed');
+  });
+
+  test('★ an admin setting a new password empties the account (the "ask an admin" way out)', async () => {
+    // Opus review of #868: this reset had no test; deleting it left every test green.
+    const admin = sessionFor('u-a', 'alice', 'admin');
+    await tally(FREE_FAILURES, () => login('bob'));
+    assert.equal((await login('bob', 'correct-horse')).status, 429, 'precondition: bob\'s sign-in is slowed');
+
+    const res = await call(`${server.url}/api/auth/users/u-b`, {
+      method: 'PUT', token: admin, body: { password: 'a-brand-new-password' }, headers: { 'x-forwarded-for': nextIp() },
+    });
+    assert.equal(res.status, 200);
+    assert.equal((await login('bob', 'a-brand-new-password')).status, 200, 'the account stayed slowed after an admin reset');
+  });
+
+  test('★ the reset uses the name EXACTLY as stored: a name with capitals is emptied by a password change', async () => {
+    // Opus review of #868: every fixture was lower-case, so a reset keyed on a lower-cased name (while the sign-in key
+    // is exact) silently stopped clearing the count for any account whose name has a capital.
+    makeUser(db, { id: 'u-c', username: 'Carol', role: 'caregiver', password: 'correct-horse' });
+    const token = sessionFor('u-c', 'Carol', 'caregiver');
+    await tally(FREE_FAILURES, () => login('Carol'));
+    assert.equal((await login('Carol', 'correct-horse')).status, 429, 'precondition: Carol\'s sign-in is slowed');
+
+    const changed = await call(`${server.url}/api/auth/me/password`, {
+      method: 'PUT', token, body: { current_password: 'correct-horse', new_password: 'a-brand-new-password' },
+      headers: { 'x-forwarded-for': nextIp() },
+    });
+    assert.equal(changed.status, 200);
+    assert.equal((await login('Carol', 'a-brand-new-password')).status, 200, 'the count for a capitalised name survived a password change');
+  });
+
+  test('★ a real account that nobody has mistyped still signs in while a flood of invented names is being checked', async () => {
+    // Route level: the real account is tracked in its own table, so invented names (tracked or not) cannot refuse it.
+    await tally(FREE_FAILURES + 5, (i) => login(`invented-${i}`));
+    assert.equal((await login('bob', 'correct-horse')).status, 200);
   });
 });

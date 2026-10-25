@@ -13,9 +13,10 @@ function clock(start = 1_000_000) {
 }
 
 // Fail `n` guesses one after another against `key`.
-function failTimes(throttle, key, n) {
+// `opts` is acquire's second argument: { known: false } is an invented name (the capped table).
+function failTimes(throttle, key, n, opts) {
   for (let i = 0; i < n; i++) {
-    const slot = throttle.acquire(key);
+    const slot = throttle.acquire(key, opts);
     assert.equal(slot.allowed, true, `guess ${i + 1} should have been allowed`);
     slot.fail();
   }
@@ -135,6 +136,56 @@ describe('what ends or forgives a run of failures', () => {
     assert.equal(throttle.acquire('alice').allowed, false);
   });
 
+  test('★ an account that reached its delay is eased by an hour of quiet to ONE guess short of the limit, not to zero', () => {
+    const c = clock();
+    const throttle = createAccountThrottle({ now: c.now });
+    failTimes(throttle, 'alice', FREE_FAILURES);
+    c.advance(DECAY_MS + 1);
+    const guess = throttle.acquire('alice');
+    assert.equal(guess.allowed, true, 'an hour of quiet should allow a guess');
+    guess.fail();
+    const next = throttle.acquire('alice');
+    assert.equal(next.allowed, false, 'the whole free allowance came back after an hour');
+    assert.equal(next.retryAfterSec, BASE_DELAY_MS / 1000, 'the account should be straight back at the base delay');
+  });
+
+  test('★ waiting out the decay again and again does NOT give 30 fresh guesses an hour (Opus review: 720 a day)', () => {
+    // 30 quickly, then repeat "wait just over an hour, guess until refused". With a full reset that is 30 a cycle.
+    const c = clock();
+    const throttle = createAccountThrottle({ now: c.now });
+    let guesses = 0;
+    for (let cycle = 0; cycle < 24; cycle++) {
+      c.advance(DECAY_MS + 1000);
+      for (;;) {
+        const slot = throttle.acquire('alice');
+        if (!slot.allowed) break;
+        guesses += 1;
+        slot.fail();
+      }
+    }
+    assert.ok(guesses <= 30 + 24 * 2, `${guesses} guesses in about a day; the documented bound is about 100`);
+  });
+
+  test('★ the best a guesser can do in a day is about 100 guesses (waiting out each delay exactly)', () => {
+    const c = clock();
+    const throttle = createAccountThrottle({ now: c.now });
+    let guesses = 0;
+    let elapsed = 0;
+    const DAY = 24 * 60 * 60 * 1000;
+    while (elapsed < DAY) {
+      const slot = throttle.acquire('alice');
+      if (slot.allowed) {
+        guesses += 1;
+        slot.fail();
+        continue;
+      }
+      const wait = slot.retryAfterSec * 1000;
+      c.advance(wait);
+      elapsed += wait;
+    }
+    assert.ok(guesses >= 30 + 90 && guesses <= 30 + 110, `${guesses} guesses in a day (30 free, then one per 15 minutes)`);
+  });
+
   test('reset() empties one account and leaves the others', () => {
     const throttle = createAccountThrottle({ now: clock().now });
     failTimes(throttle, 'alice', FREE_FAILURES);
@@ -220,67 +271,108 @@ describe('memory is bounded', () => {
     assert.equal(throttle.acquire('x'.repeat(5000) + 'different tail').allowed, false);
   });
 
-  test('★ the table never grows past its cap, and room is made from the least valuable entries', () => {
+  const INVENTED = { known: false };
+
+  test('★ the invented-names table never grows past its cap, and room is made from the least valuable entries', () => {
     const throttle = createAccountThrottle({ now: clock().now, maxEntries: 3 });
-    failTimes(throttle, 'delayed', FREE_FAILURES); // in its delay: must survive
-    failTimes(throttle, 'one-typo', 1);
-    failTimes(throttle, 'two-typos', 2);
+    failTimes(throttle, 'delayed', FREE_FAILURES, INVENTED); // in its delay: must survive
+    failTimes(throttle, 'one-typo', 1, INVENTED);
+    failTimes(throttle, 'two-typos', 2, INVENTED);
     assert.equal(throttle.size(), 3);
 
-    // A fourth name: the oldest account that is NOT delayed is forgotten, never the delayed one.
-    failTimes(throttle, 'newcomer', 1);
+    // A fourth name: the oldest entry that is NOT delayed is forgotten, never the delayed one.
+    failTimes(throttle, 'newcomer', 1, INVENTED);
     assert.equal(throttle.size(), 3);
-    assert.equal(throttle.acquire('delayed').allowed, false, 'the delayed account was evicted to make room');
+    assert.equal(throttle.acquire('delayed', INVENTED).allowed, false, 'the delayed entry was evicted to make room');
   });
 
   test('entries that decayed are dropped before anything live is', () => {
     const c = clock();
     const throttle = createAccountThrottle({ now: c.now, maxEntries: 2 });
-    failTimes(throttle, 'old-typo', 1);
+    failTimes(throttle, 'old-typo', 1, INVENTED);
     c.advance(DECAY_MS + 1);
-    failTimes(throttle, 'recent-typo', 1);
-    failTimes(throttle, 'newcomer', 1); // table full: the decayed one goes, the recent one stays
+    failTimes(throttle, 'recent-typo', 1, INVENTED);
+    failTimes(throttle, 'newcomer', 1, INVENTED); // table full: the decayed one goes, the recent one stays
     assert.equal(throttle.size(), 2);
     // It already has one failure; FREE_FAILURES - 1 more bring it to the free limit, so it is refused only if it kept it.
-    failTimes(throttle, 'recent-typo', FREE_FAILURES - 1);
-    assert.equal(throttle.acquire('recent-typo').allowed, false, 'the recent account lost its failures');
+    failTimes(throttle, 'recent-typo', FREE_FAILURES - 1, INVENTED);
+    assert.equal(throttle.acquire('recent-typo', INVENTED).allowed, false, 'the recent entry lost its failures');
   });
 
-  test('★ when every entry is protected a newcomer is REFUSED for a second (fail closed, never an unbounded table)', () => {
-    // The first design let such a newcomer through untracked, which gave any account unlimited guesses for as long as a
-    // flood of invented names held the table (Codex review of #868). Refusing is the safe direction.
+  test('★ a delayed entry that has aged out is eased and then evictable, so the table cannot stay full of them', () => {
+    // Opus review of #868: with delayed entries protected for good, a full table never freed. Aged-out delayed entries
+    // are eased to one short of the limit, which is evictable, so room comes back an hour after the fill stops.
+    const c = clock();
+    const throttle = createAccountThrottle({ now: c.now, maxEntries: 2 });
+    failTimes(throttle, 'a', FREE_FAILURES, INVENTED);
+    failTimes(throttle, 'b', FREE_FAILURES, INVENTED);
+    assert.equal(throttle.size(), 2);
+    c.advance(DECAY_MS + 1);
+    const slot = throttle.acquire('c', INVENTED);
+    assert.equal(slot.allowed, true);
+    slot.fail();
+    // 'c' is TRACKED (it took a place), not waved through: it has one failure on record.
+    failTimes(throttle, 'c', FREE_FAILURES - 1, INVENTED);
+    assert.equal(throttle.acquire('c', INVENTED).allowed, false, 'the newcomer was not tracked once room had freed');
+    assert.equal(throttle.size(), 2);
+  });
+
+  test('★ when the invented-names table is full of protected entries a newcomer is NOT tracked (it reaches no account)', () => {
     const throttle = createAccountThrottle({ now: clock().now, maxEntries: 2 });
-    failTimes(throttle, 'a', FREE_FAILURES);
-    failTimes(throttle, 'b', FREE_FAILURES);
-    const refused = throttle.acquire('c');
-    assert.equal(refused.allowed, false, 'a newcomer was let through untracked');
-    assert.equal(refused.retryAfterSec, 1);
+    failTimes(throttle, 'a', FREE_FAILURES, INVENTED);
+    failTimes(throttle, 'b', FREE_FAILURES, INVENTED);
+    const slot = throttle.acquire('c', INVENTED);
+    assert.equal(slot.allowed, true, 'a guess at an invented name was refused');
+    slot.fail();
     assert.equal(throttle.size(), 2, 'the table grew past its cap');
-    assert.equal(throttle.acquire('a').allowed, false);
-    assert.equal(throttle.acquire('b').allowed, false);
+    assert.equal(throttle.acquire('a', INVENTED).allowed, false);
+    assert.equal(throttle.acquire('b', INVENTED).allowed, false);
   });
 
-  test('★ with the table full of guesses being checked, a target account gets NO untracked guesses', () => {
-    // The attack: invented names fill the table while their hashes queue; the target's guesses must still be bounded.
+  test('★ REAL accounts are never refused, evicted or reset by a flood of invented names', () => {
+    // The shape of the Opus finding: 10,000 invented names (here 3) held "in flight" or delayed must not touch a real
+    // account in either direction. The target keeps its own 30 guesses; it is not refused (no household-wide lock-out)
+    // and not given more (no eviction), and the flood does not clear what it already has.
     const throttle = createAccountThrottle({ now: clock().now, maxEntries: 3 });
-    const flood = ['x1', 'x2', 'x3'].map((name) => throttle.acquire(name)); // all in flight
+    failTimes(throttle, 'target', 5); // a real account with 5 failures on record
+    const flood = ['x1', 'x2', 'x3'].map((name) => throttle.acquire(name, INVENTED)); // table full, all in flight
+    for (let i = 0; i < 50; i++) throttle.acquire(`more-${i}`, INVENTED).fail(); // untracked, allowed
     let through = 0;
-    for (let i = 0; i < 100; i++) if (throttle.acquire('target').allowed) through += 1;
-    assert.equal(through, 0, 'guesses at the target went through while the table was full');
+    for (let i = 0; i < 100; i++) {
+      const slot = throttle.acquire('target');
+      if (slot.allowed) { through += 1; slot.fail(); }
+    }
+    assert.equal(through, FREE_FAILURES - 5, 'the real account did not keep exactly its remaining free guesses');
     flood.forEach((slot) => slot.release());
-    assert.equal(throttle.acquire('target').allowed, true, 'the target stayed refused after room was freed');
+  });
+
+  test('★ a real account that nobody has mistyped is NOT refused while the invented table is full', () => {
+    const throttle = createAccountThrottle({ now: clock().now, maxEntries: 2 });
+    failTimes(throttle, 'a', FREE_FAILURES, INVENTED);
+    failTimes(throttle, 'b', FREE_FAILURES, INVENTED);
+    const slot = throttle.acquire('someone-real');
+    assert.equal(slot.allowed, true, 'a real account with a clean record was refused during the flood');
+    slot.succeed();
   });
 
   test('★ an entry with a guess in flight is never evicted, and its outcome still counts', () => {
     const throttle = createAccountThrottle({ now: clock().now, maxEntries: 1 });
-    const inFlight = throttle.acquire('a');
-    const other = throttle.acquire('b'); // table full and its only entry is in flight
-    assert.equal(other.allowed, false, 'the in-flight entry was evicted to make room');
-    assert.equal(throttle.size(), 1);
+    const inFlight = throttle.acquire('a', INVENTED);
+    throttle.acquire('b', INVENTED).fail(); // table full and its only entry is in flight: 'b' is untracked
+    assert.equal(throttle.size(), 1, 'the in-flight entry was evicted to make room');
     inFlight.fail();
     // 'a' kept its entry, so its failure is on record: FREE_FAILURES - 1 more bring it to the limit.
-    failTimes(throttle, 'a', FREE_FAILURES - 1);
-    assert.equal(throttle.acquire('a').allowed, false, 'the failure of an in-flight guess was lost');
+    failTimes(throttle, 'a', FREE_FAILURES - 1, INVENTED);
+    assert.equal(throttle.acquire('a', INVENTED).allowed, false, 'the failure of an in-flight guess was lost');
+  });
+
+  test('a name is tracked in one table: reset() clears it whichever table it was in', () => {
+    const throttle = createAccountThrottle({ now: clock().now });
+    failTimes(throttle, 'real', FREE_FAILURES);
+    failTimes(throttle, 'ghost', FREE_FAILURES, INVENTED);
+    throttle.reset('real');
+    throttle.reset('ghost');
+    assert.equal(throttle.size(), 0);
   });
 
   test('a missing key is the empty string, not a crash', () => {
