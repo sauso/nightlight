@@ -64,12 +64,15 @@ start_layout_app() { # name volume image six|default puid
 }
 
 # A throwaway container on the volume, with no start-up script: `as` is a uid:gid, or root.
+# --init: the command must not be PID 1. The kernel ignores a SIGKILL that PID 1 sends itself, which is how the
+# marker row below is left only in the -wal (seen in the first CI run: the "killed" process exited normally instead,
+# closed the database, and so merged and deleted the -wal).
 on_volume() { # volume image as command...
   local vol=$1 image=$2 as=$3
   shift 3
   local -a user=()
   [ "$as" = root ] || user=(--user "$as")
-  docker run --rm --network none --label "$LABEL" "${user[@]}" --entrypoint "$1" -v "$vol:/app/data" "$image" "${@:2}"
+  docker run --rm --init --network none --label "$LABEL" "${user[@]}" --entrypoint "$1" -v "$vol:/app/data" "$image" "${@:2}"
 }
 
 fresh_volume() {

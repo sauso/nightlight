@@ -221,9 +221,14 @@ function topLevelEntry(ctx, name, kind) {
 // So the .db is never moved with companions: it is first PROVEN to be the only connection and turned into a single
 // self-contained file, then moved by ONE rename (C2):
 //   - open with fileMustExist (never create a database here), which also recovers a WAL left by a crash;
-//   - PRAGMA journal_mode=DELETE: merges the WAL into the file and removes -wal and -shm, and it FAILS (or stays 'wal')
-//     unless this is the only connection. A WAL checkpoint is not enough: with another reader open it leaves a 0-byte
-//     -wal that a size check cannot tell from a clean one (Opus review);
+//   - PRAGMA journal_mode=DELETE: merges the WAL into the file and removes -wal and -shm, and it FAILS ("database is
+//     locked" after the busy wait; SQLite documents that a refused change can instead return the old mode, hence the
+//     check on the result too) while another connection has the database open and has read from it, as every app
+//     connection does from its first query. Measured, in this process and from another process, on Linux and Windows:
+//     migrate-private-layout.test.js, "another connection has it open" and "ANOTHER PROCESS". (A connection that has
+//     opened the file and read nothing yet holds no lock and does not stop it; nothing is in that state at start-up.)
+//     A WAL checkpoint is not enough: with another reader open it leaves a 0-byte -wal that a size check cannot tell
+//     from a clean one (Opus review);
 //   - close, then require that NONE of -wal, -shm, -journal exists. Anything still there means another process, or a
 //     companion this connection did not own: nothing is moved;
 //   - rename the .db alone. The app opens it and switches it back to WAL itself (db.js).

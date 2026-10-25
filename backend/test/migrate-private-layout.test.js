@@ -411,11 +411,13 @@ describe('#553 move: the other items, each its own pass on every start', () => {
 
   test('snapshot folders stay with a database that stayed at the top (legacy), and move once it has moved', () => {
     const d = dataDir();
-    seedPlainDatabase(T(d, 'babymonitor.db'));
+    seedWalDatabase(T(d, 'babymonitor.db'));
     write(T(d, 'detection-snapshots', '1.jpg'), 'one');
-    // The database cannot move this start (a live connection), so its pictures must not either.
+    // The database cannot move this start (a live connection that has READ it, as the app does from its first
+    // query), so its pictures must not either. (A connection that only switched the mode and read nothing does not
+    // hold the lock on Linux: the first CI run of this test used one and the database moved. The app is never that.)
     const live = new Database(T(d, 'babymonitor.db'));
-    live.pragma('journal_mode = WAL');
+    live.prepare('SELECT COUNT(*) AS n FROM t').get();
     try {
       const r = run(d);
       assert.equal(r.code, EXIT.LEFT);
