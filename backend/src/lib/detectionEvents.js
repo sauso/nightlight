@@ -3,6 +3,7 @@ import path from 'path';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { CLIPS_DIR } from './clipRecorder.js';
+import { jailedMediaFile, resolveUnder, unlinkMediaFile } from './mediaFiles.js';
 import { dataDirFrom, DETECTION_SNAPSHOTS_DIR, resolveSnapshotDir } from './dataPaths.js';
 
 // One JPEG per detection event, named <id>.jpg, kept next to the DB. Stored on disk (not as a
@@ -92,14 +93,14 @@ function unlinkSnapshot(id) {
 // Resolve+delete a clip MP4 (and its sibling thumbnail) from a stored relative clip_path. Guards
 // against path escape so a crafted row can't reach outside CLIPS_DIR.
 export function unlinkClip(relPath) {
-  if (!relPath) return;
-  const abs = path.resolve(CLIPS_DIR, relPath);
-  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return;
+  const abs = resolveUnder(relPath, CLIPS_DIR);
+  if (!abs) return;
   // Synchronous: a retention sweep must actually finish deleting before it moves on / the process
   // can exit, otherwise a crash right after would leave the file behind while its row is already
   // cleared (orphaned on disk, uncounted by the size cap). A handful of files per sweep — cheap.
-  try { fs.rmSync(abs, { force: true }); } catch { /* ignore */ }
-  try { fs.rmSync(abs.replace(/\.mp4$/i, '.jpg'), { force: true }); } catch { /* ignore */ }
+  // unlinkMediaFile: a flat unlink of one name inside a folder the media user writes into (#553 phase 2b).
+  try { unlinkMediaFile(abs); } catch { /* ignore */ }
+  try { unlinkMediaFile(abs.replace(/\.mp4$/i, '.jpg')); } catch { /* ignore */ }
 }
 
 function prune() {
@@ -172,13 +173,12 @@ export function setClipFailed(id) {
 
 // A jailed { root, path } for an event's ready clip MP4, or null (used by the serving route).
 // Validates the stored relative path stays under CLIPS_DIR, then returns CLIPS_DIR + that relative
-// path so the route can pass res.sendFile a `root` option and let Express re-enforce containment.
+// path; the route serves it with serveMediaFile (mediaFiles.js), which opens it once and re-checks it.
 export function getEventClipFile(id) {
   const row = db.prepare('SELECT clip_path, clip_status FROM detection_events WHERE id = ?').get(id);
   if (!row || row.clip_status !== 'ready' || !row.clip_path) return null;
-  const abs = path.resolve(CLIPS_DIR, row.clip_path);
-  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;
-  return fs.existsSync(abs) ? { root: CLIPS_DIR, path: path.relative(CLIPS_DIR, abs) } : null;
+  // Contained under CLIPS_DIR, and a plain one-name file (mediaFiles.js): the route serves it with serveMediaFile.
+  return jailedMediaFile(row.clip_path, CLIPS_DIR);
 }
 
 // --- Retention accounting (lib/clipStorage.js sweeps against these). Deleting a clip clears its

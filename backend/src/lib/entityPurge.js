@@ -3,6 +3,7 @@ import path from 'path';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { CLIPS_DIR } from './clipRecorder.js';
+import { removeLeafDir, unlinkMediaFile } from './mediaFiles.js';
 import { transitionSnapshotFile } from './bedTransitions.js';
 import { eventSnapshotFile } from './detectionEvents.js';
 
@@ -77,7 +78,7 @@ function removeFileUnder(root, rel) {
   const target = path.join(realParent, path.basename(abs));
   let st;
   try {
-    st = fs.lstatSync(target);
+    st = fs.lstatSync(target); // fence-ok: lstat only tells a file or link (removed) from a folder (skipped)
   } catch (e) {
     if (e.code === 'ENOENT') return false;
     throw e;
@@ -86,13 +87,9 @@ function removeFileUnder(root, rel) {
     logger.warn(`[purge] ignoring stored path that is not a file: ${JSON.stringify(rel)}`);
     return false;
   }
-  try {
-    fs.unlinkSync(target); // a symlink is unlinked itself, never followed
-  } catch (e) {
-    if (e.code === 'ENOENT') return false;
-    throw e;
-  }
-  return true;
+  // unlinkMediaFile (#553 phase 2b): a flat unlink that re-checks the folder chain and never follows a link, so a
+  // symlink is removed itself. It returns false for "already gone" and THROWS for anything else, as this did.
+  return unlinkMediaFile(target, { root: realRoot });
 }
 
 const removeClipFile = (rel) => removeFileUnder(CLIPS_DIR, rel);
@@ -104,7 +101,7 @@ const removeClipFile = (rel) => removeFileUnder(CLIPS_DIR, rel);
 // ENOENT / ENOTDIR mean "not there" (the same rule as realOrNull above); anything else stops the purge.
 function unlinkUnlessMissing(file) {
   try {
-    fs.unlinkSync(file);
+    fs.unlinkSync(file); // app-only: a snapshot JPEG in private/, which the media user cannot reach
   } catch (e) {
     if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR') throw e;
   }
@@ -121,7 +118,8 @@ function removeEventSnapshot(id) {
 // --- per-id folders ---------------------------------------------------------------------------------------
 //
 // A folder named by an entity id, swept whole: CLIPS_DIR/<cameraId> (alert clips, recordings),
-// CLIPS_DIR/.ring/<cameraId> (the segment ring), CLIPS_DIR/timelapse/<childId> (finished timelapses) and
+// CLIPS_DIR/.ring/<cameraId> (the segment ring), CLIPS_DIR/.concat/<cameraId> (concat lists a killed cut left),
+// CLIPS_DIR/timelapse/<childId> (finished timelapses) and
 // CLIPS_DIR/.timelapse-frames/<childId> (frames of a night not yet assembled, which have no row at all).
 //
 // ONLY FOR A UUID-SHAPED ID (#719 review). Every id the app mints is a v4 UUID (routes/cameras.js and
@@ -140,7 +138,7 @@ function idFolders(kind, id) {
     logger.warn(`[purge] ${kind} id ${JSON.stringify(id)} is not a UUID: its folders under the clips folder are not swept`);
     return [];
   }
-  return kind === 'camera' ? [[id], ['.ring', id]] : [['timelapse', id], ['.timelapse-frames', id]];
+  return kind === 'camera' ? [[id], ['.ring', id], ['.concat', id]] : [['timelapse', id], ['.timelapse-frames', id]];
 }
 
 // Where `parts` really is: the REAL path of its parent joined with its own name, or null when the parent does not
@@ -165,13 +163,22 @@ function jailedUnderClips(parts) {
 // folder that cannot be removed stops the purge before the entity's row goes (#719 review: the timelapse
 // helper used before swallowed every error, so with an unremovable frames folder the child was deleted, a photo
 // of the bed every 2 minutes stayed on disk, and the log said the frames were discarded).
+//
+// FLAT for a folder the media user writes into (#553 phase 2b): .ring/<camera>, <camera> and timelapse/<child> are
+// swept by removeLeafDir, one unlink per file, because a recursive walk of a folder another user can write into can be
+// raced into deleting something outside it. The frame and concat folders are the app's alone (the media user can read
+// them, not write them), so they keep the recursive removal.
+const APP_ONLY_ROOTS = new Set(['.timelapse-frames', '.concat']);
 function removeDirUnderClips(parts) {
   const dir = jailedUnderClips(parts);
   if (!dir) return;
   let st;
-  try { st = fs.lstatSync(dir); } catch (e) { if (e.code === 'ENOENT' || e.code === 'ENOTDIR') return; throw e; }
-  if (st.isSymbolicLink()) { fs.unlinkSync(dir); return; }
-  fs.rmSync(dir, { recursive: true, force: true });
+  try { st = fs.lstatSync(dir /* fence-ok: decides link, folder or absent */); } catch (e) { if (e.code === 'ENOENT' || e.code === 'ENOTDIR') return; throw e; }
+  if (st.isSymbolicLink()) { fs.unlinkSync(dir /* fence-ok: a link is removed itself */); return; }
+  if (APP_ONLY_ROOTS.has(parts[0])) fs.rmSync(dir, { recursive: true, force: true /* app-only */ });
+  else {
+    try { removeLeafDir(dir); } catch (e) { if (e.code !== 'ENOENT') throw e; } // gone since the lstat: nothing to sweep
+  }
 }
 
 // A purge that throws is answered 409 with this in the body (the Remove dialog shows it). Plain words, and the

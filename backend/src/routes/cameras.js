@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { readFileSync } from 'fs';
+import { join as joinPath } from 'path';
+import { serveMediaFile } from '../lib/mediaFiles.js';
 import { v4 as uuid } from 'uuid';
 import db from '../db.js';
 import { requireAuth, requireAdmin, requireAuthQueryOrHeader, isAdminRequest } from '../middleware/auth.js';
@@ -89,13 +91,14 @@ router.get('/bed-transitions/:id/snapshot', requireAuthQueryOrHeader, (req, res)
 });
 
 // Recorded clip for an alert — same query-token auth as the snapshot above (a <video> element
-// fetches the URL itself and can't attach an Authorization header). res.sendFile honours Range
-// requests, so seeking/scrubbing works out of the box. 404 until the clip is 'ready'.
+// fetches the URL itself and can't attach an Authorization header). serveMediaFile honours Range
+// requests, so seeking/scrubbing works. 404 until the clip is 'ready'.
 router.get('/alerts/:id/clip', requireAuthQueryOrHeader, (req, res) => {
   const file = getEventClipFile(req.params.id);
   if (!file) return res.status(404).json({ error: 'No clip for this alert' });
-  // { root, path } form (see snapshot route): Express re-enforces containment under CLIPS_DIR.
-  res.sendFile(file.path, { root: file.root, dotfiles: 'deny' });
+  // The clip was written by ffmpeg, which may run as another user (#553): it is opened once, checked (not a link, one
+  // name, a regular file) and served from that same descriptor, not by path (lib/mediaFiles.js).
+  serveMediaFile(req, res, joinPath(file.root, file.path), { contentType: 'video/mp4', root: file.root });
 });
 
 // Live still frame — the backdrop for the bed-zone picker. Query-token auth so an <img> can load it

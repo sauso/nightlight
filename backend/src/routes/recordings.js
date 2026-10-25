@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { join as joinPath } from 'path';
+import { serveMediaFile } from '../lib/mediaFiles.js';
 import db from '../db.js';
 import { requireAuth, requireAdmin, requireAuthQueryOrHeader } from '../middleware/auth.js';
 import {
@@ -18,18 +20,19 @@ router.get('/child/:childId', requireAuth, (req, res) => {
 });
 
 // Video + thumbnail use query-or-header auth so a plain <video>/<img> can load them (a browser can't
-// attach an Authorization header to those). res.sendFile honours Range so scrubbing works. The stored
-// path is re-jailed under CLIPS_DIR by the lib, and Express re-enforces containment via { root }.
+// attach an Authorization header to those). serveMediaFile honours Range so scrubbing works. The stored
+// path is re-jailed under CLIPS_DIR by the lib; the file itself is opened once, checked and served from that
+// descriptor (lib/mediaFiles.js, #553 phase 2b): ffmpeg wrote it, possibly as another user.
 router.get('/:id/video', requireAuthQueryOrHeader, (req, res) => {
   const file = getRecordingVideoFile(req.params.id);
   if (!file) return res.status(404).json({ error: 'No recording for this id' });
-  res.sendFile(file.path, { root: file.root, dotfiles: 'deny' });
+  serveMediaFile(req, res, joinPath(file.root, file.path), { contentType: 'video/mp4', root: file.root });
 });
 
 router.get('/:id/thumb', requireAuthQueryOrHeader, (req, res) => {
   const file = getRecordingThumbFile(req.params.id);
   if (!file) return res.status(404).json({ error: 'No thumbnail for this id' });
-  res.sendFile(file.path, { root: file.root, dotfiles: 'deny' });
+  serveMediaFile(req, res, joinPath(file.root, file.path), { contentType: 'image/jpeg', root: file.root });
 });
 
 // Deleting a recording (a manual one or a wake clip) is admin-only (owner decision 2026-10-10, #552): a
