@@ -14,7 +14,9 @@ import {
 } from './bedTransitionTracker.js';
 import { childSamplingActiveNow } from './sleepAnalysis.js';
 import { isDemoModeActive } from '../middleware/demoMode.js';
-import { killIfSpawned, detectorHealthOf, killStalledDetector, safeInterval, isKillError } from './processGuards.js';
+import {
+  killIfSpawned, detectorHealthOf, killStalledDetector, safeInterval, isKillError, execFailureBackoff, describeExecFailure,
+} from './processGuards.js';
 import { buildMotionTaps, createStderrRouter, SIDE_CHANNEL_LOG_ARGS } from './ffmpegSideChannel.js';
 import { openObservation } from './observationClock.js';
 
@@ -513,6 +515,13 @@ export async function startMotionDetector(camera) {
   // accepted hole in the 10-minute bound, documented in KNOWN-ISSUES.
   let lastSwitchMono = null;
 
+  // #553 (review of PR #869): a 126/127 at once (ffmpeg, or the switch to the media user, could not run) relaunches
+  // with a back-off from the usual delay to a minute and one log line per run (processGuards.js, execFailureBackoff),
+  // instead of every 5 s with a line each time (~720 lines an hour per camera into the 1000-line log ring). Outside
+  // launch(), like lastSwitchMono, so the run spans relaunches; a fresh startMotionDetector starts a fresh run. Every
+  // other exit (a watchdog kill, the return to the sub, code 0, an ordinary failure) keeps the usual delay.
+  const execBackoff = execFailureBackoff(timing.restartDelayMs);
+
   async function launch() {
     // Claim the slot before the async gap below, so a concurrent start/reconcile can't
     // double-run this camera's detector.
@@ -537,6 +546,7 @@ export async function startMotionDetector(camera) {
       '-',
     ];
     const proc = spawnChild('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    execBackoff.launched();
     entry.proc = proc;
     // #369: freshness stamps for the detector watchdog, all from performance.now() (monotonic: a wall-clock
     // step must never make a live leg look stale or a dead one fresh). Per ENTRY, i.e. per ffmpeg process, so a
@@ -966,14 +976,18 @@ export async function startMotionDetector(camera) {
         // #500: our own return to the sub is a deliberate kill too, and is tested BEFORE the code branches: an
         // ffmpeg that gets SIGTERM exits non-zero (or with a signal and a null code), so an unordered check
         // would log an ERROR for every switch. (The 5s in the text is the real RESTART_DELAY_MS in production.)
+        // #553: an exec failure (126/127 at once) is logged only once per run and relaunched after the back-off;
+        // a kill by the watchdog or the return to the sub ends with a signal, never 126/127, so they are unaffected.
+        const next = execBackoff.exited(code);
         if (entry.watchdogKill) logger.info(`[detect:${path}] stopped by the detector watchdog (no frames), restarting in 5s`);
         else if (entry.returning) logger.info(`[detect:${path}] returning to the sub stream, restarting in 5s`);
         else if (code === 0) logger.raw(`detect:${path}`, 'stream ended, reconnecting');
+        else if (next.execFailed) { if (next.log) logger.error(`[detect:${path}] ${describeExecFailure('ffmpeg', next)}`); }
         else logger.error(`[detect:${path}] exited (code ${code}), restarting in 5s`);
         pendingRestarts.set(camera.id, setTimeout(() => {
           pendingRestarts.delete(camera.id);
           if (!entry.stopped && !detectors.has(camera.id)) launch().catch(() => {});
-        }, timing.restartDelayMs));
+        }, next.delayMs));
       }
     });
   }

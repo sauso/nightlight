@@ -12,7 +12,7 @@ let spawnFailures = 0;
 let lastAdvertised = null;
 
 const RESTART_DELAY_MS = 3000;
-// #553: a launch that exits 127 at once (the program, or the switch to the media user, could not run) backs off from
+// #553: a launch that exits 126/127 at once (the program, or the switch to the media user, could not run) backs off from
 // RESTART_DELAY_MS to a minute instead of relaunching every 3 s; any other exit relaunches after RESTART_DELAY_MS as
 // before. One for the module: there is one MediaMTX. See execFailureBackoff in processGuards.js.
 const execBackoff = execFailureBackoff(RESTART_DELAY_MS);

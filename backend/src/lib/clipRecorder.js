@@ -214,7 +214,7 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
   // recovery when it comes back — see the exit handler.
   const entry = { proc: null, stopped: false, ringDir, ringDepthMs, janitor: null, fastFails: 0 };
   segmenters.set(cameraId, entry);
-  // #553: a 127 at once (the program, or the switch to the media user, could not run) backs off from RESTART_DELAY_MS
+  // #553: a 126/127 at once (the program, or the switch to the media user, could not run) backs off from RESTART_DELAY_MS
   // to a minute with its own line (processGuards.js, execFailureBackoff). Every other exit keeps the fast-fail logging
   // below and the 5 s relaunch. Per segmenter entry, like fastFails.
   const execBackoff = execFailureBackoff(RESTART_DELAY_MS);

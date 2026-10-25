@@ -294,7 +294,7 @@ async function doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped, pre
     await upsertPath(hlsPath).catch((e) => logger.error(`[hls-path:${hlsPath}] ${e.message}`));
   }
 
-  // #553: this lineage's relaunch delay. A 127 at once (the program, or the switch to the media user, could not run)
+  // #553: this lineage's relaunch delay. A 126/127 at once (the program, or the switch to the media user, could not run)
   // backs off from RESTART_DELAY_MS to a minute, logged once and then every 10th; every other exit relaunches after
   // RESTART_DELAY_MS exactly as before. Per lineage (one doStart), like its relaunches: a later startTranscoder (the
   // watchdog's force-restart, reconcile) begins a fresh run, and logs its first failure again. Known limit, accepted:
@@ -376,7 +376,10 @@ async function doStart(cameraId, rtspUrl, mediamtxPath, cameraName, stopped, pre
         }
         // The DTS-discontinuity path already recorded its own, more specific event just
         // before killing the process - don't double-log that same restart here.
-        if (!restarting) {
+        // #553 (review of PR #869): while the exec-failure back-off runs, a row only when its line is logged (the first
+        // failure of the run, then every 10th): one row per relaunch would fill the camera's history with a row a
+        // minute for a program that cannot run. Every ordinary exit still records one, exactly as before.
+        if (!restarting && next.log) {
           recordCameraEvent(cameraId, cameraName, EVENT.RESTART, `stream ended (exit code ${code})`);
         }
         pendingRestarts.set(cameraId, setTimeout(() => {

@@ -18,7 +18,7 @@
 // frontend/test/iceServers.test.jsx; that MediaMTX accepts the generated file (a `webrtcICEServers2` list of
 // `- url:` entries is the shape it had before this change) was not run, and no packet capture shows nothing
 // leaves the container.
-import { test, describe, before, after } from 'node:test';
+import { test, describe, before, after, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -206,6 +206,23 @@ describe('#558 MediaMTX config', () => {
         assert.equal(fs.statSync(path.dirname(a)).gid, gid);
       }
     } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  // Review of PR #869: the test above passes this user's OWN gid, which the folder and file already have, so dropping
+  // either chown went unnoticed. A spy (node:test's mock.method, calling through to the real chownSync) shows both
+  // calls and their arguments; the gid is the caller's, so the real call still succeeds unprivileged.
+  test('#553 media isolation: the folder AND the file are given to the media group (chownSync, uid unchanged)', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nl-stun-553-'));
+    const spy = mock.method(fs, 'chownSync');
+    try {
+      const gid = process.getgid?.() ?? 0;
+      const out = writeMediamtxConfig(BASE_YML, [GOOGLE], { tmpDir: tmp, mediaGid: gid });
+      assert.notEqual(out, BASE_YML, 'it fell back to the base file');
+      assert.deepEqual(spy.mock.calls.map((c) => c.arguments), [[path.dirname(out), -1, gid], [out, -1, gid]]);
+    } finally {
+      spy.mock.restore();
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });

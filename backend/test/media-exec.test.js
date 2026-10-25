@@ -72,6 +72,13 @@ describe('#553 spawnChild: which program is spawned', () => {
       const { proc } = await runChild('ffmpeg', ['-i', 'rtsp://x', 'two words']);
       assert.equal(proc.spawnfile, MEDIA_EXEC_PATH);
       assert.deepEqual(proc.spawnargs, [MEDIA_EXEC_PATH, 'ffmpeg', '-i', 'rtsp://x', 'two words']);
+      // EVERY program, not just ffmpeg (review of PR #869): a wrapper applied by name would leave the others running
+      // with the app's capabilities. These are the other names src/ spawns, plus two it never does.
+      for (const name of ['ffprobe', 'mediamtx', '/usr/bin/ffmpeg', 'anything-else']) {
+        const r = await runChild(name, ['-version']);
+        assert.equal(r.proc.spawnfile, MEDIA_EXEC_PATH, `${name} was not wrapped`);
+        assert.deepEqual(r.proc.spawnargs, [MEDIA_EXEC_PATH, name, '-version'], name);
+      }
     } finally {
       fs.rmSync(empty, { recursive: true, force: true });
     }

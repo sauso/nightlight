@@ -132,8 +132,9 @@ export function writeMediamtxConfig(basePath, urls, { tmpDir = os.tmpdir(), log 
     }
     const dir = fs.mkdtempSync(path.join(tmpDir, 'nightlight-mediamtx-'));
     // The group first, then the mode (chmod sets exactly these bits whatever the umask made). The app may give its
-    // own folder and file to the media group because it is a member of it (the Dockerfile and the entrypoint's
-    // --groups); no capability is involved.
+    // own folder and file to the media group because the PROCESS has that group: the entrypoint's isolated start
+    // passes --groups=PGID,1700 (the kernel checks the process's groups, not /etc/group, and the image does not make
+    // the app a member). No capability is involved.
     fs.chownSync(dir, -1, mediaGid);
     fs.chmodSync(dir, 0o750);
     const out = path.join(dir, 'mediamtx.yml');

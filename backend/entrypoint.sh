@@ -235,6 +235,11 @@ media_dry_run() {
   # PHASE 2 HOOK (#553): the shared-folder check goes here, as more arguments to media-probe.sh (one per media mount:
   # the clip ring, the clips folder, the timelapse folder), so that the media user's write, the app's read and the
   # app's unlink are proven on the real mounts before isolation is switched on.
+  # ⚠️ CAVEAT FOR THAT STEP (review of PR #869): `timeout` around a `$(...)` does not bound it. A probe stuck in
+  # uninterruptible sleep (a dead network share) ignores the signal, and a child that keeps the pipe open keeps the
+  # command substitution waiting after `timeout` has given up. Phase 1's steps cannot hang that way (nothing touches a
+  # mount). Phase 2 must run the probe in the BACKGROUND, writing its output to a file, and stop waiting at the
+  # deadline (then treat it as a failure: isolation off, one warning), whatever the probe is still doing.
   if [ "$_rc" = 0 ] && [ "$(printf '%s\n' "$_out" | tail -n 1)" = MEDIA-PROBE-OK ]; then
     return 0
   fi

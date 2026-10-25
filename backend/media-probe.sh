@@ -8,6 +8,9 @@
 #   - it cannot read a 0600 file the app just made (and CAN read a 0644 one beside it, the control that proves the
 #     folder was reachable, so the first check is not passing for the wrong reason);
 #   - it cannot setpriv back to the app's uid, or to root;
+#   - the programs the app really starts (ffmpeg, ffprobe, MediaMTX) run under the wrapper as the media user, so a
+#     binary the media user cannot execute switches isolation off here instead of failing every camera later
+#     (review of PR #869);
 #   - the wrapper keeps the pid it was started with (media-exec.sh `exec`s), and the app can kill that pid (CAP_KILL
 #     across uids: the app signals its media children on every stop).
 # Output: the LAST line is MEDIA-PROBE-OK (exit 0), or a line `MEDIA-PROBE-FAIL <reason>` (exit 1). The entrypoint
@@ -92,6 +95,16 @@ app_probe() {
     *MEDIA-CHILD-OK*) ;;
     *) fail "a media process could not be started through $media_exec ($(printf '%s\n' "$out" | sed '/^$/d' | tail -n 1))" ;;
   esac
+
+  # The real programs, under the wrapper, as the media user: the names the app's spawn sites use (spawnChild's
+  # callers), found on PATH as they will be. Each asked only for its version, which needs no camera and no file.
+  # Exit 127 (not found) or 126 (not executable) from setpriv, or anything else non-zero, is a failure.
+  for prog in ffmpeg:-version ffprobe:-version mediamtx:--version; do
+    name=${prog%%:*}
+    env -i PATH="$PATH" "$media_exec" "$name" "${prog#*:}" >/dev/null 2>&1
+    rc=$?
+    [ "$rc" = 0 ] || fail "the media user cannot run $name (exit $rc)"
+  done
 
   # PHASE 2 HOOK (#553): the shared-folder probe goes here. For each media mount the entrypoint passes: the media user
   # writes a file in its leaf folder, the app reads it, opens it without following links and unlinks it.

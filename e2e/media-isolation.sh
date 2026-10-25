@@ -39,7 +39,9 @@ ON_LINE='[entrypoint] media isolation on:'
 OFF_LINE='[entrypoint] warning: media isolation is off:'
 # What the start-up script says for each fallback (backend/entrypoint.sh, the MEDIA_REASON texts). Specific on
 # purpose: a loose pattern would let an unrelated failure pass the control.
-NOKILL_REASON='the dry run could not start the app as uid'
+# The exact failure of the app's drop without KILL (setpriv's own words, seen in CI run 40177805392), not merely "the
+# dry run failed": any other launch failure must not pass this control.
+NOKILL_REASON='with CAP_SETUID, CAP_SETGID and CAP_KILL (exit 127: setpriv: apply capabilities'
 PUID_REASON="PUID or PGID is $MEDIA_ID"
 
 # ── Start ────────────────────────────────────────────────────────────────────────────────────────
@@ -101,6 +103,8 @@ check_iso_processes() { # container on|off app_uid app_gid
     fi
     if [ "$mode" = off ]; then
       [ "$eff" = "$NO_CAPS" ] || { bad=1; info "^ CapEff is $eff, expected $NO_CAPS (su-exec keeps none)"; }
+      # Off must be the start as before #553: the media group only ever comes from the isolated start's --groups.
+      case " $groups " in *" $MEDIA_ID "*) bad=1; info "^ the media group $MEDIA_ID is among its groups with isolation off" ;; esac
     elif [ "$name" = node ]; then
       [ "$eff" = "$APP_CAPEFF" ] || { bad=1; info "^ CapEff is $eff, expected $APP_CAPEFF (setuid, setgid, kill)"; }
       [ "$nnp" = 1 ] || { bad=1; info "^ NoNewPrivs is '$nnp', expected 1"; }
@@ -130,7 +134,7 @@ check_iso_processes() { # container on|off app_uid app_gid
   if [ "$mode" = on ]; then
     ok "$n processes: node as $auid:$agid with CapEff $APP_CAPEFF and NoNewPrivs 1; every media process as $MEDIA_ID:$MEDIA_ID, group $MEDIA_ID only, no capabilities, NoNewPrivs 1"
   else
-    ok "$n processes: everything under tini runs as $auid:$agid with no capabilities (the usual start)"
+    ok "$n processes: everything under tini runs as $auid:$agid with no capabilities and no group $MEDIA_ID (the usual start)"
   fi
 }
 

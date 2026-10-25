@@ -76,11 +76,14 @@ RUN addgroup -g 1500 nightlight && adduser -D -u 1500 -G nightlight -h /app nigh
 # FIXED ids, 1700:1700, never remapped: the container's own business, unlike PUID/PGID. Nothing on the host needs to
 # know them; files the media user writes on the data volume show up there with these numbers. The entrypoint
 # refuses isolation (and starts as before) if PUID or PGID is 1700. No password, no home, no login shell: nothing
-# ever logs in as it. The app user is a member of its group, so the app can read and remove what the media
-# processes write (media-exec.sh sets umask 007 for that).
+# ever logs in as it.
+# The app user is deliberately NOT made a member of nlmedia here. With isolation on, the entrypoint gives the app
+# group 1700 explicitly (setpriv --groups=PGID,1700), so it can read and remove what the media processes write
+# (media-exec.sh sets umask 007 for that). With it off, the usual su-exec start takes its groups from /etc/group, and
+# a membership here would have given the app and every child group 1700 on every install (review of PR #869: CI showed
+# `100 100 1700`), which "off changes nothing" must not do.
 RUN addgroup -g 1700 nlmedia \
-  && adduser -D -H -h /nonexistent -s /sbin/nologin -u 1700 -G nlmedia nlmedia \
-  && addgroup nightlight nlmedia
+  && adduser -D -H -h /nonexistent -s /sbin/nologin -u 1700 -G nlmedia nlmedia
 
 COPY --from=mediamtx-binary /mediamtx /usr/local/bin/mediamtx
 RUN chmod +x /usr/local/bin/mediamtx

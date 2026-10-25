@@ -23224,7 +23224,7 @@
   {
     "label": "#553 phase 1 processGuards: a 127 at once is treated like any exit (no back-off)",
     "file": "backend/src/lib/processGuards.js",
-    "find": "if (code !== EXEC_FAILED_EXIT_CODE || !atOnce) {",
+    "find": "if (!EXEC_FAILED_EXIT_CODES.includes(code) || !atOnce) {",
     "replace": "if (true) {",
     "expect": "killed",
     "tests": ["exec-failure-backoff.test.js"],
@@ -23373,5 +23373,101 @@
     "expect": "killed",
     "tests": ["stun-servers.test.js"],
     "namePattern": "#553 media isolation: the copy goes into a FRESH folder"
+  },
+  {
+    "label": "#553 phase 1 processGuards: a 126 (found but not executable) is treated like any exit",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "Object.freeze([126, 127])",
+    "replace": "Object.freeze([127])",
+    "expect": "killed",
+    "tests": ["exec-failure-backoff.test.js"],
+    "namePattern": "126 at once"
+  },
+  {
+    "label": "#553 phase 1 motion detector: the back-off delay is not used (relaunch every 5 s)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "}, next.delayMs));",
+    "replace": "}, timing.restartDelayMs));",
+    "expect": "killed",
+    "tests": ["motion-exec-backoff.test.js"]
+  },
+  {
+    "label": "#553 phase 1 sound detector: the back-off delay is not used (relaunch every 5 s)",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "}, next.delayMs));",
+    "replace": "}, RESTART_DELAY_MS));",
+    "expect": "killed",
+    "tests": ["sound-exec-backoff.test.js"]
+  },
+  {
+    "label": "#553 phase 1 sound detector: an exec failure counts as a no-microphone strike (the leg stops)",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      if (next.execFailed) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["sound-exec-backoff.test.js"]
+  },
+  {
+    "label": "#553 phase 1 transcoder: a camera event row for every back-off relaunch",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "if (!restarting && next.log) {",
+    "replace": "if (!restarting) {",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^t1:"
+  },
+  {
+    "label": "#553 phase 1 media-exec.sh: the media process loses --no-new-privs",
+    "file": "backend/media-exec.sh",
+    "find": "--ambient-caps=-all --no-new-privs -- \"$@\"",
+    "replace": "--ambient-caps=-all -- \"$@\"",
+    "expect": "killed",
+    "tests": ["media-exec.test.js"],
+    "namePattern": "setpriv gets exactly the media drop"
+  },
+  {
+    "label": "#553 phase 1 media-exec.sh: the app's inheritable and ambient capabilities are not cleared",
+    "file": "backend/media-exec.sh",
+    "find": " --groups=1700 --inh-caps=-all --ambient-caps=-all --no-new-privs",
+    "replace": " --groups=1700 --no-new-privs",
+    "expect": "killed",
+    "tests": ["media-exec.test.js"],
+    "namePattern": "setpriv gets exactly the media drop"
+  },
+  {
+    "label": "#553 phase 1 media-exec.sh: no exec (the app's pid is the shell, not the program)",
+    "file": "backend/media-exec.sh",
+    "find": "exec setpriv --reuid=1700",
+    "replace": "setpriv --reuid=1700",
+    "expect": "killed",
+    "tests": ["media-exec.test.js"],
+    "namePattern": "setpriv gets exactly the media drop"
+  },
+  {
+    "label": "#553 phase 1 media-exec.sh: no umask 007 (media files would get the app's mask)",
+    "file": "backend/media-exec.sh",
+    "find": "umask 007\nexec setpriv",
+    "replace": "exec setpriv",
+    "expect": "killed",
+    "tests": ["media-exec.test.js"],
+    "namePattern": "setpriv gets exactly the media drop"
+  },
+  {
+    "label": "#553 phase 1 MediaMTX config: the folder is not given to the media group",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "fs.chownSync(dir, -1, mediaGid);",
+    "replace": "void 0;",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "the folder AND the file are given to the media group"
+  },
+  {
+    "label": "#553 phase 1 MediaMTX config: the file is not given to the media group",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "fs.chownSync(out, -1, mediaGid);",
+    "replace": "void 0;",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "the folder AND the file are given to the media group"
   }
 ]

@@ -58,7 +58,11 @@ mock.module('../src/lib/mediamtx.js', {
     isPathConfiguredCorrectly: async () => true,
   },
 });
-mock.module('../src/lib/cameraEvents.js', { exports: { recordCameraEvent: () => {}, EVENT: { RESTART: 'restart' } } });
+// The transcoder's RESTART rows (review of PR #869: one per back-off relaunch was unbounded), recorded per camera.
+const cameraEvents = [];
+mock.module('../src/lib/cameraEvents.js', {
+  exports: { recordCameraEvent: (id, _name, type, detail) => cameraEvents.push({ id, type, detail }), EVENT: { RESTART: 'restart' } },
+});
 
 const { logger } = await import('../src/lib/logger.js');
 const { startMediaMTX, stopMediaMTX, restartMediaMTX } = await import('../src/lib/mediamtxProcess.js');
@@ -173,12 +177,16 @@ describe('#553 the transcoder', () => {
     await settle();
     assert.equal(lines('[ffmpeg:path_t1] ffmpeg could not be run').length, 1, 'repeated');
     assert.equal(lines('[ffmpeg:path_t1] exited (code 127)').length, 0);
+    // Three exec failures, ONE camera event row (the first of the run), as for the log line.
+    const rows = () => cameraEvents.filter((e) => e.id === 'cam-t1');
+    assert.deepEqual(rows(), [{ id: 'cam-t1', type: 'restart', detail: 'stream ended (exit code 127)' }]);
     SpawnAs = FakeFfmpeg;
     mock.timers.tick(20_000);
     assert.equal(count(), 4);
     spawned.at(-1).finish(1);
     await settle();
     assert.equal(lines('[ffmpeg:path_t1] exited (code 1), restarting in 5s').length, 1);
+    assert.equal(rows().length, 2, 'an ordinary exit records its row, as before');
     mock.timers.tick(4_999);
     assert.equal(count(), 4);
     mock.timers.tick(1);

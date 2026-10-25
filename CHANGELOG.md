@@ -53,10 +53,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   off. The image now contains util-linux's `setpriv` and a second user for the media processes (`nlmedia`, uid and
   gid 1700, used only inside the container), and the start-up script can test whether that separation would work on
   your system and fall back to the usual start if not. Two things you might notice: GET `/api/about` now also
-  reports `mediaIsolation` (`"off"` for now), and if FFmpeg or MediaMTX cannot be run at all (exit status 127) the
-  app now retries with a growing pause, up to a minute, and logs it once and then every tenth time, instead of
-  restarting every few seconds with a line each time. A signal the app could not deliver to one of these processes is
-  no longer mistaken for a process that failed to start, which could start a second MediaMTX beside the running one.
+  reports `mediaIsolation` (`"off"` for now), and if FFmpeg or MediaMTX cannot be run at all (exit status 126 or
+  127) the app now retries with a growing pause, up to a minute, and logs it once and then every tenth time, instead
+  of restarting every few seconds with a line each time; this covers the stream, the recording ring and the motion
+  and sound detectors, and such a failure no longer counts towards "does this camera have a microphone?". A signal
+  the app could not deliver to one of these processes is no longer mistaken for a process that failed to start,
+  which could start a second MediaMTX beside the running one.
 
 ### Fixed
 

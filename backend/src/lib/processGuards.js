@@ -111,14 +111,19 @@ export function isKillError(err) {
 // #553: the exit status of a launch that could not even run the program.
 //
 // A wrapped child (media isolation: media-exec.sh, then setpriv) is spawned successfully every time, because the
-// wrapper itself starts; when the PROGRAM then cannot be executed (missing, not executable) or setpriv cannot drop to
-// the media user, setpriv exits 127 (measured in the #553 spike: "exit status for a missing binary: 127"). Node reports
-// that as an ordinary 'exit', not an 'error', so the supervisors' "do not relaunch a binary that cannot run" rule
-// (the 'error' handlers, #257) never sees it, and MediaMTX, the transcoder and the clip segmenter would relaunch
-// every 3-5 s forever, one log line each time.
-export const EXEC_FAILED_EXIT_CODE = 127;
-// "At once": a 127 within this long of the spawn. setpriv fails in milliseconds; 5 s is generous so a loaded machine
-// still counts it, and a real program that exits 127 later (none of ours does) is treated as an ordinary exit.
+// wrapper itself starts; when the PROGRAM then cannot be executed, setpriv exits with util-linux's exec-failure
+// statuses: 127 when it is not found (measured in the #553 spike: "exit status for a missing binary: 127") and 126 when
+// it is found but cannot be executed (EACCES, ENOEXEC: EX_EXEC_FAILED, review of PR #869). A failed switch to the
+// media user is 127 too (spike run 3), and the shell's own "not found" / "not executable" are 127 / 126. Node reports
+// all of them as an ordinary 'exit', not an 'error', so the supervisors' "do not relaunch a binary that cannot run"
+// rule (the 'error' handlers, #257) never sees it, and every supervisor would relaunch every 3-5 s forever, one log
+// line each time.
+// Could a program that really RAN exit 126 or 127 within 5 s? None of ffmpeg, ffprobe or MediaMTX uses those codes
+// (by convention they are the shell's), so it is vanishingly rare, and misreading one costs only a slower relaunch,
+// which the next ordinary exit resets.
+export const EXEC_FAILED_EXIT_CODES = Object.freeze([126, 127]);
+// "At once": such an exit within this long of the spawn. setpriv fails in milliseconds; 5 s is generous so a loaded
+// machine still counts it, and a 126/127 after a longer run is treated as an ordinary exit.
 export const EXEC_FAILED_WITHIN_MS = 5_000;
 // The back-off doubles from the supervisor's own relaunch delay up to this. A judgment, not a measurement: a minute
 // is short enough that a fixed image or mount is picked up quickly, and long enough that a broken one costs ~60
@@ -130,13 +135,13 @@ export const EXEC_FAILED_RELOG_EVERY = 10;
 
 // One supervisor lineage's relaunch delay. Call `launched()` right after each spawn and `exited(code)` from its 'exit'
 // handler; the result says how long to wait before relaunching and whether to log.
-//   - exit 127 within EXEC_FAILED_WITHIN_MS of the spawn: the run of such exits grows by one, the delay doubles from
-//     `baseDelayMs` up to `maxDelayMs`, and `log` is true only for the first of the run and every
+//   - exit 126 or 127 within EXEC_FAILED_WITHIN_MS of the spawn: the run of such exits grows by one, the delay
+//     doubles from `baseDelayMs` up to `maxDelayMs`, and `log` is true only for the first of the run and every
 //     EXEC_FAILED_RELOG_EVERY-th after it;
-//   - anything else (another code, a signal, a 127 after a real run): the run ends, and the delay is exactly
+//   - anything else (another code, a signal, a 126/127 after a real run): the run ends, and the delay is exactly
 //     `baseDelayMs`, so every supervisor's normal relaunch is what it was.
-// The clock is monotonic (performance.now), like the detector watchdog's (#369): a wall-clock step must not make a
-// long run look instant. `now` is injectable for the tests.
+// The result also carries the exit `code`, for the log line. The clock is monotonic (performance.now), like the
+// detector watchdog's (#369): a wall-clock step must not make a long run look instant. `now` is injectable for tests.
 export function execFailureBackoff(baseDelayMs, { maxDelayMs = EXEC_FAILED_MAX_DELAY_MS, withinMs = EXEC_FAILED_WITHIN_MS, now = () => performance.now() } = {}) {
   let launchedAt = null;
   let streak = 0;
@@ -146,9 +151,9 @@ export function execFailureBackoff(baseDelayMs, { maxDelayMs = EXEC_FAILED_MAX_D
     },
     exited(code) {
       const atOnce = launchedAt != null && now() - launchedAt < withinMs;
-      if (code !== EXEC_FAILED_EXIT_CODE || !atOnce) {
+      if (!EXEC_FAILED_EXIT_CODES.includes(code) || !atOnce) {
         streak = 0;
-        return { execFailed: false, delayMs: baseDelayMs, streak, log: true };
+        return { execFailed: false, delayMs: baseDelayMs, streak, log: true, code };
       }
       streak += 1;
       return {
@@ -156,16 +161,17 @@ export function execFailureBackoff(baseDelayMs, { maxDelayMs = EXEC_FAILED_MAX_D
         delayMs: Math.min(maxDelayMs, baseDelayMs * 2 ** (streak - 1)),
         streak,
         log: streak === 1 || streak % EXEC_FAILED_RELOG_EVERY === 0,
+        code,
       };
     },
   };
 }
 
-// The one log text for it, so the three supervisors say the same thing. `what` names the program.
-export function describeExecFailure(what, { streak, delayMs }) {
+// The one log text for it, so every supervisor says the same thing. `what` names the program.
+export function describeExecFailure(what, { streak, delayMs, code }) {
   const times = streak > 1 ? ` (${streak} times in a row)` : '';
-  return `${what} could not be run: it exited ${EXEC_FAILED_EXIT_CODE} at once${times}. The program is missing or not ` +
-    `executable, or the switch to the media user failed (media isolation). Retrying in ${Math.round(delayMs / 1000)}s, ` +
+  return `${what} could not be run: it exited ${code} at once${times}. The program is missing (127) or not ` +
+    `executable (126), or the switch to the media user failed (media isolation). Retrying in ${Math.round(delayMs / 1000)}s, ` +
     `backing off to ${Math.round(EXEC_FAILED_MAX_DELAY_MS / 1000)}s.`;
 }
 

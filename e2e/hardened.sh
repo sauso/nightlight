@@ -66,6 +66,8 @@ NO_NEW_PRIVS='no-new-privileges=true'
 EXPECT_CAPBND=00000000000000eb
 EXPECT_DATA_MODE=700
 EXPECT_DATA_OWNER="$APP_PUID:$APP_PGID"
+# #553: the media group (the Dockerfile's nlmedia), which no process of the default start may have.
+MEDIA_GROUP_ID=1700
 # The preseeded folder and file (new_volume) have group/other bits, so the first start's mode walk must find
 # them: a 0 would mean the walk checked nothing.
 MIN_FOUND_FIRST_BOOT=1
@@ -344,12 +346,15 @@ check_processes() {
     if [ "$uid" != "$APP_PUID $APP_PUID $APP_PUID $APP_PUID" ]; then bad=1; info "^ Uid is '$uid', expected $APP_PUID everywhere"; fi
     if [ "$gid" != "$APP_PGID $APP_PGID $APP_PGID $APP_PGID" ]; then bad=1; info "^ Gid is '$gid', expected $APP_PGID everywhere"; fi
     case " $groups " in *" 0 "*) bad=1; info "^ group 0 is among its groups" ;; esac
+    # #553: the media group (1700) is given to the app only by the isolated start; the default start (this one, the
+    # switch unset) must not have it (review of PR #869: an image-level membership once did).
+    case " $groups " in *" $MEDIA_GROUP_ID "*) bad=1; info "^ the media group $MEDIA_GROUP_ID is among its groups" ;; esac
   done < <(process_tree "$root")
   for want in node mediamtx ffmpeg; do
     case "$names" in *" $want "*) ;; *) bad=1; info "no $want process under tini" ;; esac
   done
   [ "$bad" = 0 ] || die "process check failed (above)"
-  ok "$n processes: CapBnd $EXPECT_CAPBND and NoNewPrivs 1 on all; node, mediamtx and ffmpeg run as $APP_PUID:$APP_PGID with no group 0"
+  ok "$n processes: CapBnd $EXPECT_CAPBND and NoNewPrivs 1 on all; node, mediamtx and ffmpeg run as $APP_PUID:$APP_PGID with no group 0 and no group $MEDIA_GROUP_ID"
 }
 
 # The documented console failsafe (docs/mfa.md, "Recovery") must still work: it runs as root through

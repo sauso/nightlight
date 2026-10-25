@@ -14,6 +14,8 @@
 //            process it starts through media-exec.sh really runs as 1700:1700 with nothing;
 //   nokill   KILL taken out of the bounding set before the entrypoint runs (what --cap-drop=KILL does): the app's own
 //            drop fails, isolation is off, the start goes on;
+//   program  a program the app starts (mediamtx) cannot be run by the media user: isolation is off (the programs are
+//            stand-ins on PATH here; the e2e runs the image's real ones);
 //   broken   three wrappers the probe must refuse: one that does not exec (the app would signal the wrong pid), one
 //            that keeps the app's capabilities, one that keeps the app's groups;
 // and every case leaves its temporary folder ($TMPDIR) empty.
@@ -40,6 +42,11 @@ const STUBS = {
   groupmod: '#!/bin/sh\nexit 0\n',
   chown: '#!/bin/sh\nexit 0\n',
   'su-exec': '#!/bin/sh\necho "STUB su-exec $1"\nshift\nexec "$@"\n',
+  // The programs the dry run makes the media user run (media-probe.sh): stand-ins that print a version line, so the
+  // check is about whether the MEDIA USER can execute them, which is the part that depends on the kernel.
+  ffmpeg: '#!/bin/sh\necho "ffmpeg version stub"\n',
+  ffprobe: '#!/bin/sh\necho "ffprobe version stub"\n',
+  mediamtx: '#!/bin/sh\necho "v1.0.0-stub"\n',
 };
 
 // The "app": reports its own identity and capabilities from /proc, then (role app) starts itself again through the
@@ -59,6 +66,7 @@ const APP_SH = [
 
 let ROOT;
 let STUB_DIR;
+let STUB_DIR_NO_MEDIAMTX; // the same stubs without mediamtx (node:24-alpine has none of its own)
 let n = 0;
 
 // A fresh copy of the three scripts (with `wrapper` as media-exec.sh when given) plus the app, readable by every uid.
@@ -76,14 +84,14 @@ function tree(wrapper) {
   return dir;
 }
 
-function run(dir, { prefix = [] } = {}) {
+function run(dir, { prefix = [], stubDir = STUB_DIR } = {}) {
   const tmp = path.join(ROOT, `tmp-${n}`);
   fs.mkdirSync(tmp);
   fs.chmodSync(tmp, 0o1777); // the probe runs as uid 99 and its media process as 1700: both must use it
   const argv = [...prefix, '/bin/sh', path.join(dir, 'entrypoint.sh'), '/bin/sh', path.join(dir, 'app.sh'), 'app', path.join(dir, 'media-exec.sh')];
   const r = spawnSync(argv[0], argv.slice(1), {
     env: {
-      PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: path.join(ROOT, `data-${n}`), TMPDIR: tmp,
+      PATH: `${stubDir}:${process.env.PATH}`, DATA_DIR: path.join(ROOT, `data-${n}`), TMPDIR: tmp,
       PUID: '99', PGID: '100', NIGHTLIGHT_MEDIA_ISOLATION: '1',
     },
     encoding: 'utf8',
@@ -113,9 +121,16 @@ describe('#553 media isolation, the real chain (root, util-linux setpriv)', { sk
     ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'nl-media-real-'));
     fs.chmodSync(ROOT, 0o755);
     STUB_DIR = path.join(ROOT, 'bin');
-    fs.mkdirSync(STUB_DIR);
-    for (const [name, body] of Object.entries(STUBS)) fs.writeFileSync(path.join(STUB_DIR, name), body, { mode: 0o755 });
-    fs.chmodSync(STUB_DIR, 0o755);
+    STUB_DIR_NO_MEDIAMTX = path.join(ROOT, 'bin-no-mediamtx');
+    for (const [dir, skipName] of [[STUB_DIR, null], [STUB_DIR_NO_MEDIAMTX, 'mediamtx']]) {
+      fs.mkdirSync(dir);
+      for (const [name, body] of Object.entries(STUBS)) {
+        if (name === skipName) continue;
+        fs.writeFileSync(path.join(dir, name), body, { mode: 0o755 });
+        fs.chmodSync(path.join(dir, name), 0o755);
+      }
+      fs.chmodSync(dir, 0o755);
+    }
   });
   after(() => { if (ROOT) fs.rmSync(ROOT, { recursive: true, force: true }); });
 
@@ -145,6 +160,19 @@ describe('#553 media isolation, the real chain (root, util-linux setpriv)', { sk
     assert.ok(r.suExec, r.ctx);
     assert.equal(r.app?.iso, 'off', r.ctx);
     assert.match(r.warning ?? '', /media isolation is off: the dry run could not start the app as uid 99 with CAP_SETUID, CAP_SETGID and CAP_KILL \(exit \d+: setpriv: /, r.ctx);
+    assert.deepEqual(r.leftovers, []);
+  });
+
+  // Review of PR #869: the dry run must prove the REAL programs run as the media user, not only /bin/sh and sleep.
+  // Here mediamtx is not on PATH at all (setpriv exits 127); every other step passes, so without the program check
+  // isolation would go on, and every launch of MediaMTX would then fail.
+  test('#553 a program the media user cannot run (mediamtx missing): off, with that reason, and the start goes on', () => {
+    const r = run(tree(), { stubDir: STUB_DIR_NO_MEDIAMTX });
+    assert.equal(r.status, 0, r.ctx);
+    assert.equal(r.onLine, false, `isolation went on although mediamtx cannot run${r.ctx}`);
+    assert.ok(r.suExec, r.ctx);
+    assert.equal(r.app?.iso, 'off', r.ctx);
+    assert.match(r.warning ?? '', /media isolation is off: the media user cannot run mediamtx \(exit 127\)/, r.ctx);
     assert.deepEqual(r.leftovers, []);
   });
 
