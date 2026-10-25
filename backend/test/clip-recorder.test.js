@@ -424,7 +424,8 @@ describe('★ #412 ringHasFootageFor: would extractClip find any footage for a c
   test('★ #553 a name that is not the segmenter\'s own is never footage (a newline or a quote cannot reach the concat list)', () => {
     startSegmenter(CAM, 'somepath');
     for (const hostile of [
-      "seg-20260101-000020.mkv\nfile 'x'",
+      // (a newline cannot be in a Windows file name; CI is Linux, where this is the case that matters)
+      ...(process.platform === 'win32' ? [] : ["seg-20260101-000020.mkv\nfile 'x'"]),
       "seg-20260101-000021.mkv'",
       'seg-1.mkv',
       'evil.mkv',
