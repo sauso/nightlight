@@ -93,7 +93,7 @@ media_folders() {
   if ( : > "$p/app-only/planted" ) 2>/dev/null; then fail "a media process could create a file in an app-only folder in $clips"; fi
   # ...it cannot rename a folder the app trusts, nor the leaf out from under it...
   if mv "$p/leaf" "$p/leaf-moved" 2>/dev/null; then fail "a media process could rename a leaf folder in $clips"; fi
-  if mv "$p" "$clips/.probe-moved-$$" 2>/dev/null; then fail "a media process could rename a folder the app trusts, in $clips"; fi
+  if mv "$p" "$p-moved" 2>/dev/null; then fail "a media process could rename a folder the app trusts, in $clips"; fi
   # ...and it cannot delete a file the app owns in a leaf (the sticky bit), even though the folder is group-writable.
   rm -f "$p/leaf/app-file" 2>/dev/null
   [ -e "$p/leaf/app-file" ] || fail "a media process could delete a file the app owns in a leaf folder in $clips (is the sticky bit missing?)"
@@ -113,7 +113,7 @@ media_data() {
 # to use them (media_folders), then check what it wrote and remove it all. Named files only, nothing recursive.
 folders_probe() {
   media_exec=$1 media_id=$2 clips=$3
-  p="$clips/.probe-$$"
+  p="$clips/.probe-$"
   PROBE_P=$p
   mkdir -m 750 "$p" 2>/dev/null || fail "the app could not create a folder in the clips folder $clips (is it writable by the app?)"
   # mkdir -m is not cut by the umask; the group is set explicitly (no setgid inheritance anywhere, see mediaLayout.js).
@@ -147,8 +147,12 @@ folders_probe() {
 # Everything folders_probe made, by name. Also on every failure path (the EXIT trap), so a refused probe leaves nothing.
 folders_cleanup() {
   [ -n "${PROBE_P:-}" ] || return 0
-  rm -f -- "$PROBE_P/in-0640" "$PROBE_P/in-0600" "$PROBE_P/leaf/app-file" "$PROBE_P/leaf/from-media" "$PROBE_P/planted" "$PROBE_P/app-only/planted"
-  rmdir -- "$PROBE_P/leaf" "$PROBE_P/app-only" "$PROBE_P" 2>/dev/null
+  # Also under the name the media user would have renamed it to: a clips folder it can write to is exactly the fault this
+  # probe exists to find, and a refusal must still leave nothing behind.
+  for _q in "$PROBE_P" "$PROBE_P-moved"; do
+    rm -f -- "$_q/in-0640" "$_q/in-0600" "$_q/leaf/app-file" "$_q/leaf/from-media" "$_q/planted" "$_q/app-only/planted"
+    rmdir -- "$_q/leaf" "$_q/app-only" "$_q" 2>/dev/null
+  done
   return 0
 }
 

@@ -19,6 +19,11 @@
 //   broken   three wrappers the probe must refuse: one that does not exec (the app would signal the wrong pid), one
 //            that keeps the app's capabilities, one that keeps the app's groups;
 // and every case leaves its temporary folder ($TMPDIR) empty.
+// #553 PHASE 2B: the dry run now also tries the MEDIA FOLDERS for real (media-probe.sh folders_probe / data_probe), so the
+// "on" case below proves the whole layout on a real kernel (the media user writes in a leaf and the app reads and removes it;
+// it reads a 0640 input and not a 0600 file; it cannot create in, rename or delete from the folders the app trusts; it
+// cannot list the data directory or enter private/), and the `layout` cases run the probe on purpose-built WRONG layouts and
+// need it to refuse each one, with the reason that fits.
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -90,6 +95,12 @@ function tree(wrapper) {
 function run(dir, { prefix = [], stubDir = STUB_DIR } = {}) {
   const tmp = path.join(ROOT, `tmp-${n}`);
   fs.mkdirSync(tmp);
+  // The data directory and the clips folder, owned by the app as they are on a real install (the stubbed chown here does
+  // nothing, and the layout step refuses a clips folder some other uid owns).
+  for (const d of [path.join(ROOT, `data-${n}`), path.join(ROOT, `data-${n}`, 'clips')]) {
+    fs.mkdirSync(d, { recursive: true });
+    fs.chownSync(d, 99, 100);
+  }
   fs.chmodSync(tmp, 0o1777); // the probe runs as uid 99 and its media process as 1700: both must use it
   const argv = [...prefix, '/bin/sh', path.join(dir, 'entrypoint.sh'), '/bin/sh', path.join(dir, 'app.sh'), 'app', path.join(dir, 'media-exec.sh')];
   const r = spawnSync(argv[0], argv.slice(1), {
@@ -154,6 +165,12 @@ describe('#553 media isolation, the real chain (root, util-linux setpriv)', { sk
       r.ctx,
     );
     assert.deepEqual(r.leftovers, [], 'the dry run left something in TMPDIR');
+    // The layout the dry run proved is what is left on disk, and the probe's own folder is gone from the clips folder.
+    const data = path.join(ROOT, `data-${n}`);
+    const st = (p) => { const x = fs.statSync(p); return `${(x.mode & 0o7777).toString(8)} ${x.uid}:${x.gid}`; };
+    assert.equal(st(data), '710 99:1700', 'the data directory: traverse only, the media group');
+    assert.equal(st(path.join(data, 'clips')), '750 99:1700', 'the clips folder: list, no write');
+    assert.deepEqual(fs.readdirSync(path.join(data, 'clips')), [], 'the probe left a folder behind in the clips folder');
   });
 
   test('#553 KILL not in the bounding set: the app\'s drop fails, isolation is off, the start goes on', () => {
@@ -203,4 +220,65 @@ describe('#553 media isolation, the real chain (root, util-linux setpriv)', { sk
       assert.deepEqual(r.leftovers, []);
     });
   }
+
+  // --- the folder probe on WRONG layouts: it must refuse each one -----------------------------------------------
+  // The probe is run as the entrypoint runs it (the app's launcher), but straight, on a layout built here, so a layout the
+  // entrypoint would have fixed first can be shown to the probe as it is.
+  const APP_DROP = ['--reuid=99', '--regid=100', '--groups=100,1700', '--inh-caps=+setuid,+setgid,+kill', '--ambient-caps=+setuid,+setgid,+kill', '--no-new-privs'];
+  function probeLayout({ clipsMode, dataMode, clipsOwner = [99, 1700], mutate }) {
+    n += 1;
+    const base = path.join(ROOT, `layout-${n}`);
+    const data = path.join(base, 'data');
+    const clips = path.join(data, 'clips');
+    for (const d of [base, data, clips, path.join(data, 'private')]) fs.mkdirSync(d, { recursive: true });
+    fs.chmodSync(base, 0o755);
+    fs.chownSync(data, 99, 1700); fs.chmodSync(data, dataMode ?? 0o710);
+    fs.chownSync(clips, ...clipsOwner); fs.chmodSync(clips, clipsMode ?? 0o750);
+    fs.chownSync(path.join(data, 'private'), 99, 100); fs.chmodSync(path.join(data, 'private'), 0o700);
+    const dir = tree();
+    if (mutate) mutate({ data, clips, dir });
+    const tmp = path.join(ROOT, `tmp-layout-${n}`);
+    fs.mkdirSync(tmp);
+    fs.chmodSync(tmp, 0o1777);
+    const r = spawnSync('setpriv', [...APP_DROP, '--', '/bin/sh', path.join(dir, 'media-probe.sh'), 'app', path.join(dir, 'media-exec.sh'), '1700', '99', clips, data], {
+      env: { PATH: `${STUB_DIR}:${process.env.PATH}`, TMPDIR: tmp }, encoding: 'utf8', timeout: 60_000,
+    });
+    return { out: `${r.stdout}${r.stderr}`.trim(), status: r.status, clipsLeft: fs.readdirSync(clips), tmpLeft: fs.readdirSync(tmp), last: r.stdout.trim().split(String.fromCharCode(10)).pop() };
+  }
+
+  test('#553 the folder probe passes on the intended layout, and leaves nothing behind in the clips folder or TMPDIR', () => {
+    const r = probeLayout({});
+    assert.equal(r.last, 'MEDIA-PROBE-OK', r.out);
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(r.clipsLeft, []);
+    assert.deepEqual(r.tmpLeft, []);
+  });
+
+  test('#553 the folder probe refuses a clips folder the media group can WRITE to (it could rename what the app trusts)', () => {
+    const r = probeLayout({ clipsMode: 0o770 });
+    assert.match(r.last, /^MEDIA-PROBE-FAIL a media process could rename a folder the app trusts/, r.out);
+    assert.notEqual(r.status, 0);
+    assert.deepEqual(r.clipsLeft, [], 'a refused probe leaves nothing');
+  });
+
+  test('#553 the folder probe refuses a data directory the media group can LIST', () => {
+    const r = probeLayout({ dataMode: 0o750 });
+    assert.match(r.last, /^MEDIA-PROBE-FAIL a media process could list the data directory/, r.out);
+  });
+
+  test('#553 the folder probe refuses a clips folder the media user cannot enter (0700): it could not read what the app wrote', () => {
+    const r = probeLayout({ clipsMode: 0o700 });
+    assert.match(r.last, /^MEDIA-PROBE-FAIL a media process could not read a 0640 file the app wrote for it/, r.out);
+  });
+
+  test('#553 the folder probe refuses a data directory with no private/ (nothing to keep the media user out of)', () => {
+    const r = probeLayout({ mutate: ({ data }) => fs.rmdirSync(path.join(data, 'private')) });
+    assert.match(r.last, /^MEDIA-PROBE-FAIL .*private does not exist/, r.out);
+  });
+
+  test('#553 the folder probe refuses a clips folder the app cannot write to', () => {
+    const r = probeLayout({ clipsOwner: [0, 1700], clipsMode: 0o750 });
+    assert.match(r.last, /^MEDIA-PROBE-FAIL the app could not create a folder in the clips folder/, r.out);
+  });
+
 });
