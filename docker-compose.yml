@@ -20,8 +20,8 @@ services:
     # (`docker ps`, Unraid's Docker tab); nothing restarts an unhealthy container. See docs/operations.md.
     # Optional hardening (#553): drop every Linux capability except the six the start-up script needs, and
     # stop anything in the container gaining privileges again. Off by default. Tested in CI on bridge
-    # networking only (e2e/hardened.sh), not yet with the host networking below: check your install as
-    # docs/operations.md, "Hardening the container (optional)", describes. To roll back, comment the lines
+    # networking only (e2e/hardened.sh); also tried by hand with the host networking below, on one install.
+    # Check yours as docs/operations.md, "Hardening the container (optional)", describes. To roll back, comment the lines
     # out again and run `docker compose up -d`. The same six are listed in e2e/hardened.sh and that docs
     # section: change all three together.
     # cap_drop:
