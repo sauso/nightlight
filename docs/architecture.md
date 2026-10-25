@@ -279,9 +279,10 @@ over its 100 KB default first. For colour, birthday and photo, a value identical
 unchecked, so a record saved before the rule can still be edited
 (`children-field-validation.test.js`, `input-validation.test.js`).
 
-The JWT signing secret is auto-generated and persisted to `DATA_DIR/.jwt_secret` if
+The JWT signing secret is auto-generated and persisted to `DATA_DIR/private/.jwt_secret` if
 `JWT_SECRET` isn't set — deliberately avoiding a hardcoded fallback, since this image is
-publicly distributed and a baked-in secret would be a shared key across every install.
+publicly distributed and a baked-in secret would be a shared key across every install. A secret that
+cannot be saved is logged as an error (every restart would otherwise sign everyone out, silently).
 
 
 **Client startup (#382).** The SPA decides "signed in" from `/auth/me` and "which form" from `/auth/status`.
@@ -512,6 +513,44 @@ alone, as `chown -R` leaves it) and logs one `[entrypoint] umask …` line with 
 the app logs `[data-dir] app umask …` once it is up (`lib/dataDirModes.js`). User-facing rules and limits: `docs/operations.md`, "Who can read the
 data directory". Tests: `entrypoint-umask.test.js` (Linux only) and
 `scripts/entrypoint-umask.mutants.sh`, both run in CI.
+
+### Where the data lives: `DATA_DIR/private/` (#553 phase 2a)
+
+The database (with `-wal`/`-shm`), `.jwt_secret`, the two Firebase files, the two snapshot folders and online
+backups live in `DATA_DIR/private/`, always `0700` and owned by `PUID:PGID` (explicit chmod: the umask never decides
+it). Why: a later phase opens `DATA_DIR` to a media group so that FFmpeg can run as a separate user, and a folder only
+the app can enter protects even a file inside it whose own mode is too open.
+
+- **`lib/dataPaths.js` owns every one of these paths, and only RESOLVES** (lstat and a folder listing, never a
+  write): the database is `private/babymonitor.db` if it exists, else the top-level one if THAT exists (an install the
+  move has not reached; a second, empty database is never created next to real data), else `private/` for a fresh
+  install. A secret file is looked up `private/` first; the Firebase files too, falling back to the top level where
+  the admin drops them (re-resolved on every call in `lib/push.js`, so a dropped file works without a restart); a
+  snapshot folder follows its database's place. `db.js`, `middleware/auth.js`, `lib/push.js`,
+  `lib/detectionEvents.js`, `lib/bedTransitions.js`, `lib/demoSeed.js`, `lib/dataDirModes.js` and the console
+  scripts (`src/scripts/consoleDb.js`: resolve, `fileMustExist`, never create) all go through it. The writers that
+  can make `private/` (`db.js` on a fresh install, `auth.js` before a new secret, the move tool) use its one
+  `ensurePrivateDir`.
+- **The app never moves anything.** The one-way move is `src/scripts/migrate-private-layout.js`, which
+  `entrypoint.sh` runs on every start in the FOREGROUND, as the app user (`su-exec`), after its ownership and mode
+  steps and before either `exec` of the app (so nothing else has the database open). Independent passes, each
+  deciding from lstat: the database (open with `fileMustExist`, `PRAGMA journal_mode=DELETE`, which fails while
+  another connection holds it, then require that no `-wal`/`-shm`/`-journal` is left, then ONE rename of the `.db`;
+  a 30 s budget applies before the rename only), `.jwt_secret` (only without `JWT_SECRET`), the Firebase files (only
+  when their `FIREBASE_*` variable is unset), the snapshot folders (only once the database is in `private/`; an
+  empty private one is removed first), and leftovers (`backup-*.db`, companions with no database). A symbolic link is
+  never moved. `private/` always wins: a top-level copy is moved into `private/legacy-<date>-<time>/`, never deleted
+  or merged. Exit codes 0 / 10 (something left at the top level) / 11 (something set aside) become one
+  `[entrypoint] private layout:` line; no exit code stops the container.
+- **The entrypoint's preflight** (guarded under `set -e`): creates `private/`, gives it to `PUID:PGID` only when it is
+  not theirs, chmods it `700` every start, and re-owns by name the top-level items the move takes when one has the
+  wrong owner (never the clip tree, #567; skipped when the full walk ran). The ownership sentinels and the modes line
+  cover both layouts.
+- **About and the diagnostics bundle** add `dataLayout` (as opened) and `layoutConflict` (any `private/legacy-*`, or
+  two databases). Tests: `data-paths.test.js`, `migrate-private-layout.test.js` (real better-sqlite3, temp dirs),
+  `console-scripts-layout.test.js`, `entrypoint-private-layout.test.js` (stubs, also on BusyBox) and
+  `entrypoint-private-layout-real.test.js`; the real-image upgrade from the last release, the rollback and the
+  two-copies case are `e2e/private-layout.sh` (the `private-layout` job in `e2e.yml`).
 
 ## Frontend structure (`frontend/src/`)
 

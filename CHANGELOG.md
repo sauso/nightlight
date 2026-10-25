@@ -23,6 +23,26 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- **The database and the app's secrets now live in a private folder in the data directory, moved there for you at
+  the first start (#553).** `babymonitor.db` (with its `-wal`/`-shm`), `.jwt_secret`, the Firebase files, the alert
+  and bed-change pictures and online backups move into `DATA_DIR/private/`, which is always `700` and owned by
+  `PUID:PGID`, whatever `UMASK` says. It is the groundwork for running FFmpeg as a separate user later. The move
+  runs before the app starts and says so in one `[entrypoint] private layout:` log line; nothing is deleted or
+  written over, a symbolic link is left where it is, and a database that cannot be moved safely stays where it is
+  (the line is then a warning saying why). Sign-ins, passwords and settings carry over. Before you upgrade:
+  - ⚠️ **It is one way.** An older version on the moved data directory starts empty and asks for first-run setup;
+    [Rolling back](docs/operations.md#6-rolling-back) has the commands to move the files back first.
+  - ⚠️ **A scheduled backup that runs the old `docker exec … node -e` command stops working** after the move (it
+    fails and writes nothing). Use `docker exec nightlight node src/scripts/backup-db.js`, which writes the copy into
+    `private/`.
+  - ⚠️ **`UMASK=022` no longer lets another user read the database or the secrets.** Run such a backup job as root.
+  - A restore goes into `private/`. A database restored to the top level of a moved install is set aside in
+    `private/legacy-<date>-<time>/`, not used ([Two copies of the database](docs/operations.md#two-copies-of-the-database)).
+  - Firebase files are still dropped at the top level, and moved at the next start; to replace them later, replace
+    them inside `private/`.
+  `GET /api/about` and the diagnostics bundle report the layout and any set-aside copy (`dataLayout`,
+  `layoutConflict`). Also corrected in the docs: the Firebase credentials are files, not stored in the database, and
+  the data volume holds no MediaMTX configuration or logs. See [The private folder](docs/operations.md#the-private-folder).
 - **Password guesses are now limited per account, whatever address a request claims (#553).** Sign-in and the three
   "enter your current password" steps (change password, set up two-factor, turn two-factor off) already had
   per-address limits, which a program that can reach Nightlight on `127.0.0.1` could get around by naming a new

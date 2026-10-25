@@ -101,8 +101,9 @@ Sonarr/Radarr use). No Firebase project, no Apple Developer account.
 
 **Firebase / FCM (Android app only).** Delivers straight to the Nightlight Android app via your own
 Firebase project: drop `google-services.json` + a `firebase-service-account.json` service-account key
-into your data dir (e.g. `/mnt/user/appdata/nightlight`, keep the key `chmod 600`), then enable it
-under **Settings → Push notifications**. Each phone opts in under **Account → Notifications**.
+into your data dir (e.g. `/mnt/user/appdata/nightlight`; the next start moves them into its owner-only
+`private/` folder), then enable it under **Settings → Push notifications**. Each phone opts in under
+**Account → Notifications**.
 
 Full walkthrough for both, with troubleshooting: **[docs/notifications.md](notifications.md)**.
 

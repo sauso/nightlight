@@ -229,8 +229,10 @@ They exist so that a sleep timeline which looks wrong can be *looked at* rather 
 - **Marking a night "No one was in the bed"** in the morning review changes nothing here. That night's
   frames age out, or are kept once judged, exactly like any other night's. The mark hides the
   detector's version of the night; it does not delete anything, so taking it back loses nothing.
-- **Stored in `transition-snapshots/` in your data directory**, named by the transition's id. Deleting
-  the folder is safe — the app recreates it and simply has no pictures for older transitions.
+- **Stored in `private/transition-snapshots/` in your data directory** (next to the database, and as
+  private as it: see [The private folder](operations.md#the-private-folder)), named by the transition's
+  id. Deleting the folder is safe — the app recreates it and simply has no pictures for older
+  transitions.
 
 **Why they are worth the disk.** The detector infers a transition from motion in two zones, and it gets
 it wrong often enough to matter: measured across 238 stored transitions, **147 of them (62%) were

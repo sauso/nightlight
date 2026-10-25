@@ -87,6 +87,33 @@ list, the bounding-set value, the log lines, the timeouts) is a variable at the
 top of the script. The capability list also appears in `docker-compose.yml`
 and `docs/operations.md`: change all three together.
 
+## Private folder upgrade check
+
+`private-layout.sh` (#553) proves the one-way move of the database and secrets
+into the data directory's `private/` folder
+([docs/operations.md](../docs/operations.md#the-private-folder)) on a real
+install. It makes that install with the **last release** (pulled from Docker
+Hub: `NIGHTLIGHT_OLD_IMAGE`, default `sauso/nightlight:0.43.0`), then starts the
+image under test on it. It sources `hardened.sh` for its helpers, with its own
+project name and host port (`E2E_PRIVATE_LAYOUT_PORT`, default 4300). Linux
+Docker host and network access needed.
+
+```bash
+docker build -t sauso/nightlight:dev .
+bash e2e/private-layout.sh            # everything: upgrade, puid0, empty
+bash e2e/private-layout.sh upgrade    # one part: upgrade, puid0 or empty
+bash e2e/private-layout.sh teardown
+```
+
+| Part | Passes when |
+|---|---|
+| upgrade | The old install (a database with a row only in its `-wal`, a `.jwt_secret`, a root-owned Firebase file and backup, alert and bed pictures) is moved into `private/` by the first start under the six-capability hardening: nothing left at the top level, `private/` `700`, secrets `600`, all 99:100, the `.jwt_secret` unchanged, the old session and password still work, the `-wal` row is there, the console scripts and `backup-db.js` work, one `private layout:` line and no warning. A second, new container is a no-op. The old image on the moved data starts empty (the documented rollback statement), and the next start of the new image sets its empty copy aside with one warning while the old session still works. |
+| puid0 | The same upgrade with `PUID=0`. |
+| empty | `reset-mfa.js`, `promote-admin.js` and `backup-db.js` run as root on a volume that never started fail and leave it empty. |
+
+`PRIVATE_LAYOUT_LOG_DIR` keeps every container's log (CI uploads it as the
+`private-layout-logs` artifact).
+
 ## Upgrading Playwright
 
 Move the exact `@playwright/test` version in `playwright/package.json` and the

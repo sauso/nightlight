@@ -58,6 +58,7 @@ Replace `/path/to/your/data` with a persistent folder on your host.
 **`UMASK`** (optional, default `077`) decides who else can read what the container writes to your data directory. The database holds every stored secret (camera passwords, notification tokens) in plaintext, so by default everything is **owner-only** (files `600`, folders `700`), and each start takes group and other access off anything that still has it.
 - Range: 3 or 4 octal digits with an owner digit of `0` (`000`-`077`, for example `022` for the old world-readable modes). Anything else is ignored with a warning, and `077` is used.
 - **If another user or container reads your data directory, set `UMASK=022` *before* upgrading.** After one start at `077`, the opt-out only affects new files.
+- Not affected by `UMASK`: the database, its secrets, the snapshots and the backups live in the data directory's `private/` folder, which is always `700` ([The private folder](operations.md#the-private-folder)). A backup job that reads the database has to run as root.
 - Known limits: a default ACL on the host folder overrides it; an external `CLIPS_DIR` mount's existing files are not tightened; and on a filesystem that ignores `chmod` (a Docker Desktop for Windows bind mount, a CIFS mount with a fixed `file_mode`) modes cannot change at all, so that filesystem's own access control is what protects the data.
 - Details, including what this may mean for SMB shares (not verified) and backups: [Who can read the data directory](operations.md#who-can-read-the-data-directory).
 

@@ -32,7 +32,7 @@ services:
     #   - CHOWN          # re-owns the data directory to PUID:PGID; without it the container never starts
     #   - SETUID         # hands the app over to PUID; without it the container never starts
     #   - SETGID         # ...and to PGID and its groups; without it the container never starts
-    #   - DAC_OVERRIDE   # lets root into the owner-only (700) data directory; without it the first start
+    #   - DAC_OVERRIDE   # lets root into the owner-only (700) data directory and its private/ folder; without it the first start
     #                    # works, then a re-created container (an update) never starts, and `docker exec`
     #                    # commands such as the backup and the two-factor reset fail
     #   - FOWNER         # takes group/other access off existing files; without it the log warns "could
@@ -44,7 +44,7 @@ services:
     network_mode: host
     environment:
       # Which host user/group owns files this container creates in the data volume
-      # (database, logs, MediaMTX config) - matters because Docker otherwise runs the
+      # (the database and secrets in its private/ folder, snapshots, clips) - matters because Docker otherwise runs the
       # app as root, leaving everything root-owned and awkward to manage from outside
       # the container. Defaults to 99/100 - Unraid's own "nobody"/"users" convention.
       # Find your own with `id your_username` if you want something else.
@@ -67,7 +67,8 @@ services:
       # stored secret in plaintext, and each start takes group/other access off existing files too.
       # Range 000-077 (3 or 4 octal digits, owner digit 0); an invalid value logs a warning and 077
       # is used. 022 = the old world-readable modes, for when another user/container reads the
-      # volume: set it BEFORE upgrading, it only affects new files after one start at 077.
+      # volume: set it BEFORE upgrading, it only affects new files after one start at 077. It never
+      # opens the volume's private/ folder (database, secrets, snapshots, backups): always 700.
       # See docs/operations.md, "Who can read the data directory".
       - UMASK=${UMASK:-077}
       # Your local timezone (e.g. Australia/Melbourne) - affects log timestamps and the names of the video
@@ -75,7 +76,7 @@ services:
       # Defaults to UTC if unset. Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
       - TZ=${TZ:-UTC}
       # Optional. A random, persistent secret is auto-generated and stored in the
-      # data volume on first run if this is left unset - only set this yourself if
+      # data volume (private/.jwt_secret) on first run if this is left unset - only set this yourself if
       # you specifically want a fixed value (e.g. shared across a migration).
       - JWT_SECRET=${JWT_SECRET:-}
       # Your public IP or DDNS hostname - only needed for Low Latency (WebRTC) mode
