@@ -258,8 +258,10 @@ without limit.
 30 sits above the per-address limit (20 per 15 minutes), so one device always meets its own limit first: you
 will not reach this by mistyping. It only stops a guesser who spreads attempts over many, or invented, addresses.
 
-- **Sign-in** is counted by username. Capital letters and spaces around the name are ignored, and a name that
-  does not exist is counted and answered exactly like one that does.
+- **Sign-in** is counted by the username exactly as typed, which is how the account is looked up (sign-in is
+  case-sensitive). A name that does not exist is counted and answered exactly like one that does, so the
+  answer never says which names are real. A retyped name such as `Alice` for `alice` reaches no account, so it
+  neither spends nor refills `alice`'s guesses.
 - **Signed in, asked for your current password** (change password, set up two-factor, turn two-factor off):
   one count for the three together, per account. It is separate from the sign-in count, and signing in does
   **not** reset it, so a signed-in device cannot refill its own guesses by signing in again.
@@ -276,9 +278,14 @@ as they keep at it. They cannot guess any faster. Ways out:
 - Restart the container. The counts are kept in memory, so a restart resets them (as it resets every limit on
   this page).
 
-**Known limit:** the app keeps at most 10,000 accounts' counts. Someone who invents thousands of usernames could
-push an account that has not yet been slowed out of the table and so give it a fresh 30 guesses; each fresh set
-costs them thousands of requests, each of which costs the server a password check.
+**Known limits:**
+
+- The app keeps at most 10,000 accounts' counts. Someone who invents thousands of usernames could push an
+  account that has not yet been slowed out of the table and so give it a fresh 30 guesses; each fresh set costs
+  them thousands of requests, each of which costs the server a password check.
+- If all 10,000 are slowed or being checked at the same moment, new sign-in attempts are refused for a second at
+  a time until room frees. It fails closed, never open: it can slow people during such a flood, but it never lets
+  guesses through unchecked.
 
 ## Notes for operators
 

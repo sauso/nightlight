@@ -246,25 +246,41 @@ describe('memory is bounded', () => {
     assert.equal(throttle.acquire('recent-typo').allowed, false, 'the recent account lost its failures');
   });
 
-  test('★ when every entry is protected a newcomer is simply not tracked (never an unbounded table)', () => {
+  test('★ when every entry is protected a newcomer is REFUSED for a second (fail closed, never an unbounded table)', () => {
+    // The first design let such a newcomer through untracked, which gave any account unlimited guesses for as long as a
+    // flood of invented names held the table (Codex review of #868). Refusing is the safe direction.
     const throttle = createAccountThrottle({ now: clock().now, maxEntries: 2 });
     failTimes(throttle, 'a', FREE_FAILURES);
     failTimes(throttle, 'b', FREE_FAILURES);
-    const slot = throttle.acquire('c');
-    assert.equal(slot.allowed, true);
-    slot.fail();
+    const refused = throttle.acquire('c');
+    assert.equal(refused.allowed, false, 'a newcomer was let through untracked');
+    assert.equal(refused.retryAfterSec, 1);
     assert.equal(throttle.size(), 2, 'the table grew past its cap');
     assert.equal(throttle.acquire('a').allowed, false);
     assert.equal(throttle.acquire('b').allowed, false);
   });
 
-  test('an entry with a guess in flight is never evicted', () => {
+  test('★ with the table full of guesses being checked, a target account gets NO untracked guesses', () => {
+    // The attack: invented names fill the table while their hashes queue; the target's guesses must still be bounded.
+    const throttle = createAccountThrottle({ now: clock().now, maxEntries: 3 });
+    const flood = ['x1', 'x2', 'x3'].map((name) => throttle.acquire(name)); // all in flight
+    let through = 0;
+    for (let i = 0; i < 100; i++) if (throttle.acquire('target').allowed) through += 1;
+    assert.equal(through, 0, 'guesses at the target went through while the table was full');
+    flood.forEach((slot) => slot.release());
+    assert.equal(throttle.acquire('target').allowed, true, 'the target stayed refused after room was freed');
+  });
+
+  test('★ an entry with a guess in flight is never evicted, and its outcome still counts', () => {
     const throttle = createAccountThrottle({ now: clock().now, maxEntries: 1 });
     const inFlight = throttle.acquire('a');
-    const other = throttle.acquire('b'); // table full and its only entry is in flight: untracked
-    assert.equal(other.allowed, true);
+    const other = throttle.acquire('b'); // table full and its only entry is in flight
+    assert.equal(other.allowed, false, 'the in-flight entry was evicted to make room');
     assert.equal(throttle.size(), 1);
-    inFlight.release();
+    inFlight.fail();
+    // 'a' kept its entry, so its failure is on record: FREE_FAILURES - 1 more bring it to the limit.
+    failTimes(throttle, 'a', FREE_FAILURES - 1);
+    assert.equal(throttle.acquire('a').allowed, false, 'the failure of an in-flight guess was lost');
   });
 
   test('a missing key is the empty string, not a crash', () => {

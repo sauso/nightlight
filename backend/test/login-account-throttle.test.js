@@ -113,9 +113,23 @@ describe('POST /login: a guesser who changes address on every request is held to
     assert.equal(res.status, 200);
   });
 
-  test('★ ALICE and alice are one account (casing cannot buy a second set of guesses)', async () => {
-    for (let i = 0; i < FREE_FAILURES; i++) await login(i % 2 ? 'ALICE' : 'alice');
-    assert.equal((await login('Alice ')).status, 429, 'a re-cased or padded name opened a fresh set of guesses');
+  test('★ the key is the name EXACTLY as the lookup uses it: a retyped name neither spends nor refills alice\'s guesses', async () => {
+    // `Alice` matches no row (the lookup is exact), so guesses at it reach no account. Folding case made them
+    // share alice's budget, which both let an outsider slow her with names that are not hers and, worse, let a good
+    // sign-in under one spelling reset another account's count.
+    for (let i = 0; i < FREE_FAILURES; i++) await login('Alice');
+    assert.equal((await login('alice', 'correct-horse')).status, 200, 'a re-cased name spent alice\'s guesses');
+  });
+
+  test('★ a good sign-in as ALICE does not refill alice\'s guesses (two rows, two accounts)', async () => {
+    // The Codex finding on #868, verified by running: alice and ALICE are separate users (the column is UNIQUE, not
+    // NOCASE). With one folded key a good sign-in as ALICE reset the count, so alternating them gave unlimited guesses.
+    makeUser(db, { id: 'u-c', username: 'ALICE', role: 'caregiver', password: 'other-horse' });
+    for (let i = 0; i < FREE_FAILURES - 1; i++) await login('alice');
+    assert.equal((await login('ALICE', 'other-horse')).status, 200);
+    const seen = await tally(5, () => login('alice'));
+    assert.equal(seen.passed, 1, 'a sign-in as another account refilled alice\'s guesses');
+    assert.equal(seen.throttled, 4);
   });
 
   test('★ a name that does not exist is throttled exactly like one that does (no way to tell them apart)', async () => {

@@ -34,7 +34,7 @@ import { useTempDataDir, cleanupTempDataDirs, makeUser, call } from './helpers/h
 useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
-const { default: authRouter } = await import('../src/routes/auth.js');
+const { default: authRouter, resetPasswordThrottles } = await import('../src/routes/auth.js');
 const { applyTrustProxy } = await import('../src/lib/trustProxy.js');
 
 const listen = (app) => new Promise((resolve) => {
@@ -223,6 +223,10 @@ describe('the login limiter against forged X-Forwarded-For', () => {
 
   test('when the peer IS a trusted proxy, distinct forwarded clients get distinct buckets', async () => {
     // The #248 behaviour: one remote user failing must not lock out another behind the same proxy.
+    // The per-ACCOUNT password throttle (#553) is address-blind by design and its store is module-level, so the failures
+    // the case above spent on this account would add to this case's and reach its 30; it is emptied here so the
+    // per-address buckets are what this case is about. The throttle itself is pinned in login-account-throttle.test.js.
+    resetPasswordThrottles('u-a', 'alice');
     for (let i = 0; i < 21; i++) await attempt(trusted, '192.0.2.10');
     const other = await attempt(trusted, '192.0.2.11');
     assert.equal(other.status, 401, `expected a normal auth failure for a different client, got ${other.status}`);

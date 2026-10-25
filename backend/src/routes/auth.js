@@ -95,11 +95,8 @@ const clientKey = (req) => ipKeyGenerator(req.ip);
 
 // /login has no verified identity yet, so the submitted username is the account being attempted.
 // Lower-casing keeps `Admin` and `admin` from becoming two budgets against one account.
-function accountKeyFor(username) {
-  return typeof username === 'string' ? username.trim().toLowerCase() : '';
-}
 function usernameKey(req) {
-  return accountKeyFor(req.body?.username);
+  return typeof req.body?.username === 'string' ? req.body.username.trim().toLowerCase() : '';
 }
 
 // /login/mfa only: the account is inside its short-lived MFA token. DECODED, not verified — this
@@ -310,8 +307,13 @@ const sessionActionLimiter = [sessionAccountLimiter, perClientLimiter];
 // owner accepted it here, for the password step only, with a delay that grows to 15 minutes and never a hard
 // lock-out). It engages at 30 failures, above the 20 a single source is held to, so one honest device never gets
 // there: it only meets a guesser spread over many (or forged) addresses.
-//   * loginThrottle: keyed by the submitted username, normalised like usernameKey, and the SAME for a name that
-//     does not exist (an unknown name is counted and answered exactly like a known one: no way to tell them apart).
+//   * loginThrottle: keyed by the submitted username EXACTLY AS SUBMITTED, the string the lookup below uses
+//     (`WHERE username = ?`: exact and case-sensitive), and the SAME for a name that does not exist (an unknown name
+//     is counted and answered exactly like a known one: no way to tell them apart). ⚠️ NOT trimmed or lower-cased
+//     like usernameKey: the per-source limiters fold case to stop a retyped name buying a second budget, but
+//     here one key must be ONE account. `alice` and `ALICE` are two rows (the column is UNIQUE, not NOCASE), and
+//     folding them let a good sign-in as one reset the other's guesses (Codex review of #868, verified by running).
+//     A retyped name that matches no row only reaches an account that does not exist, so it buys no guess.
 //   * sessionThrottle: keyed by the signed-in user's id, ONE budget for the three routes that ask for the current
 //     password (/me/password, /me/mfa/setup, /me/mfa/disable), as their per-source limiter already is.
 // Separate stores on purpose: a correct sign-in resets only the login counter, so someone who holds a session cannot
@@ -350,7 +352,12 @@ function answerThrottled(res, retryAfterSec) {
 // share the store across cases the way they share the limiters.
 export function resetPasswordThrottles(userId, username) {
   sessionThrottle.reset(userId);
-  loginThrottle.reset(accountKeyFor(username));
+  loginThrottle.reset(loginAccountKey(username));
+}
+
+// The login throttle's key: the name exactly as the lookup will use it (see the comment above loginThrottle).
+function loginAccountKey(username) {
+  return typeof username === 'string' ? username : '';
 }
 
 // First-run only, and it 400s once any user exists — so it cannot be used for guessing and does not
@@ -636,7 +643,7 @@ router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   // like a miss on a real one: neither the status, the body nor the timing says which names exist.
   const attempt = await throttledPasswordCheck(
     loginThrottle,
-    usernameKey(req),
+    loginAccountKey(username),
     async () => (await passwordHash.compare(String(password || ''), hashToCheck)) && !!user
   );
   if (attempt.throttled) return answerThrottled(res, attempt.retryAfterSec);

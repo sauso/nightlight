@@ -29,10 +29,12 @@
 //     against a password of any real length. 15 min is also the window every other limiter here uses.
 //   * DECAY_MS = 1 h without a failure forgets the account, so old typos never accumulate into a delay.
 //   * MAX_ENTRIES = 10,000 accounts tracked. Entries exist only for accounts with failures, are dropped when they
-//     decay or the person signs in, and a username the attacker invents costs one small entry. Known limit: an
+//     decay or the person signs in, and a username the attacker invents costs one small entry. Known limits: an
 //     attacker who fills the table with invented names can push a not-yet-delayed account out and so give it a
-//     fresh set of free guesses; delayed accounts are never evicted while room can be made another way. Doing that
-//     takes thousands of requests per fresh set of 30, each costing the server a password hash.
+//     fresh set of free guesses (delayed accounts, and accounts with a guess being checked, are never evicted);
+//     doing that takes thousands of requests per fresh set of 30, each costing the server a password hash. And if
+//     every entry is protected at once (10,000 accounts delayed or being checked), new attempts are refused for a
+//     second at a time until room frees: the table fails closed, never open.
 //
 // CONCURRENCY. Hashing a password yields (a worker thread, see passwordHash), so N parallel requests could all
 // pass a check-then-record before any failure is recorded and so get N guesses through one gate. `acquire`
@@ -47,13 +49,6 @@ export const DECAY_MS = 60 * 60 * 1000;
 export const MAX_ENTRIES = 10_000;
 // A submitted username can be any length; the key is what is stored, so it is bounded.
 const MAX_KEY_LENGTH = 256;
-
-const UNTRACKED = Object.freeze({
-  allowed: true,
-  fail() {},
-  succeed() {},
-  release() {},
-});
 
 export function createAccountThrottle({
   // Read at call time, not captured: a caller (or a test) that replaces the clock after this is built is still obeyed.
@@ -116,8 +111,13 @@ export function createAccountThrottle({
       }
     } else {
       if (entries.size >= maxEntries && !makeRoom(t)) {
-        // Every entry is protected (in a delay or in flight): track nothing rather than grow without bound.
-        return UNTRACKED;
+        // Every entry is protected (in a delay, or a guess is being checked). FAIL CLOSED: refuse for a second rather
+        // than let the guess through untracked, which was the first design and was wrong (Codex review of #868,
+        // verified by running): checks queue behind one password-hash worker, so a flood of invented names can hold
+        // thousands of entries "in flight" for minutes, and an untracked fallback then gave any account unlimited
+        // guesses for as long as the flood lasted. Refusing costs real people a second's wait during such a flood,
+        // when sign-in is slow for everyone anyway.
+        return denied(1);
       }
       entry = { fails: 0, lastFailAt: 0, blockedUntil: 0, inflight: 0 };
       entries.set(key, entry);
