@@ -76,8 +76,9 @@ Set it to the address your proxy connects *from*:
 
 > **⚠️ Only set this to an address you control.** Whatever you trust here is allowed to declare a
 > client's IP. Too broad a value — or `true`, which trusts *every* upstream — lets anyone forge
-> `X-Forwarded-For` and slip the login rate limit entirely, which is worse than leaving it unset. If
-> you are not sure, leave it alone.
+> `X-Forwarded-For` and slip the per-address login limits entirely, which is worse than leaving it unset. If
+> you are not sure, leave it alone. Password guesses are also limited per account whatever address a request
+> claims ([Password guesses](mfa.md#password-guesses-553)), but that is a backstop, not a reason to trust more.
 
 **IPv6 ranges and IPv4 clients (changed with the `proxy-addr` 2.0.8 update).** An IPv6 range is now
 compared with IPv4 peers only if it is an IPv4-mapped range of /96 or longer, such as `::ffff:a00:0/104`,

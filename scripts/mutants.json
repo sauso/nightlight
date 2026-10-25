@@ -18268,8 +18268,8 @@
   {
     "label": "#548 login: synchronous compare back on the request path",
     "file": "backend/src/routes/auth.js",
-    "find": "!(await passwordHash.compare(String(password || ''), hashToCheck))",
-    "replace": "!bcrypt.compareSync(String(password || ''), hashToCheck)",
+    "find": "(await passwordHash.compare(String(password || ''), hashToCheck)) && !!user",
+    "replace": "bcrypt.compareSync(String(password || ''), hashToCheck) && !!user",
     "expect": "killed",
     "tests": [
       "mfa-replay-and-async-bcrypt.test.js"
@@ -21857,8 +21857,8 @@
   {
     "label": "#765 mfa setup skips the password (a borrowed session can start, plant or read a secret)",
     "file": "backend/src/routes/auth.js",
-    "find": "if (!(await passwordHash.compare(String(req.body?.password || ''), user.password_hash))) {",
-    "replace": "if (false) {",
+    "find": "() => passwordHash.compare(String(req.body?.password || ''), user.password_hash)",
+    "replace": "() => true",
     "expect": "killed",
     "tests": ["mfa-setup-resume.test.js"],
     "namePattern": "a first start without the right password"
