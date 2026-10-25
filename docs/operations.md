@@ -7,18 +7,70 @@ installation. Everything here is read-only against the running container except 
 
 Everything that matters lives under the data volume you mapped to `/app/data` (`APPDATA_DIR` in
 `.env`, or the **Data Directory** field on Unraid) — there's nothing else to back up unless
-you've moved clips elsewhere:
+you've moved clips elsewhere. The database and the app's secrets are in a folder of their own
+inside it, `private/` (see [The private folder](#the-private-folder)):
 
-- `babymonitor.db` (+ its `-wal`/`-shm` companion files — see "Backing up" below, this matters)
-- `.jwt_secret` — signs every session; losing it just signs everyone out, it isn't sensitive
-  key material for anything else
-- Generated MediaMTX config
+- `private/babymonitor.db` (+ its `-wal`/`-shm` companion files — see "Backing up" below, this
+  matters): cameras, children, settings, accounts, sessions, and every stored password and token
+- `private/.jwt_secret` — signs every session; losing it just signs everyone out, it isn't sensitive
+  key material for anything else (there is none if you set `JWT_SECRET`)
+- `private/firebase-service-account.json` and `private/google-services.json`, if you use Firebase
+  push ([notifications.md](notifications.md#option-b-firebase))
+- `private/detection-snapshots/` and `private/transition-snapshots/` — the pictures taken for alerts
+  and bed changes
+- `private/backup-<date>-<time>.db` — online backups, if you have made any ([Backing up](#3-backing-up))
 - `clips/` — automatic clips, wake clips, manual recordings, timelapses (unless you've set
   `CLIPS_DIR` to a separate mount — see [recording.md](recording.md) — in which case back that
   path up too)
 
-Firebase push credentials, if you use them, are entered through the UI and stored in the
-database, not as a separate file.
+Nothing else in it needs backing up. The MediaMTX configuration is written fresh at every start
+into the container's temporary folder, not the data volume, and the logs go to Docker
+(`docker logs`), not to a file here.
+
+### The private folder
+
+`private/` is always `700` and owned by `PUID`:`PGID`, whatever `UMASK` says. Only the app can open
+it. A later version will let a separate, unprivileged user write clips into the data directory (so
+that a camera stream that takes over FFmpeg cannot read the app's secrets); a folder only the app may
+enter protects even a file inside it whose own mode is too open, after a restore as root, say.
+
+**An install from before this version is moved for you, once.** It has these files at the top of the
+data directory. The first start of this version moves them into `private/` before the app starts, and
+says so in one line of `docker logs nightlight`:
+
+```
+[entrypoint] private layout: the database and secrets are in /app/data/private (or there are none yet)
+```
+
+What the move does, and what it never does:
+
+- The database moves only when nothing else has it open. It is first merged into one self-contained
+  file (no `-wal` beside it) and locked, then moved by a single rename. If that cannot be proven, or
+  the rename fails (for example because `private/` is a separate mount on another disk), it stays
+  where it is, the app uses it there, the line above becomes a **warning**, and the next start tries
+  again.
+- A `-wal`, `-shm` or `-journal` already in `private/` with no database beside it (left by a database
+  that was deleted from there) is set aside before the database moves in, so SQLite cannot replay it
+  over the one moving in. Pictures in `private/` from that database are set aside the same way.
+- The snapshot folders move with the database, never ahead of it.
+- A **symbolic link** is never moved, since moving it can break it. It stays at the top level, and the
+  warning says so on every start. A `private/` that is itself a symbolic link to a folder is used, and
+  the folder it points to is made `700`; it is never re-owned through the link (the start-up warns if
+  its owner is wrong).
+- **Nothing is deleted, and nothing is written over.** If `private/` already has a file and the top
+  level has another copy, the one in `private/` is used and the other is set aside. See
+  [Two copies of the database](#two-copies-of-the-database).
+- A file named by `FIREBASE_CREDENTIALS` or `FIREBASE_CLIENT_CONFIG` stays where it is. With
+  `JWT_SECRET` set, a `.jwt_secret` file is not used, and it is left where it is.
+- It runs on every start and is quick when there is nothing to do, so a Firebase file or an old
+  backup that lands at the top level later is moved at the next start.
+- It waits up to 30 seconds for the database checks before it gives up for that start. A network share
+  that stops answering altogether holds the start-up while it waits, exactly as it would hold the app.
+- **Known limit:** two containers on the same data directory are not supported (they never were: each
+  would open the same database). The move cannot tell another container's database from its own.
+
+The move is **one way**: an older version does not look in `private/`. Read
+[Rolling back](#6-rolling-back) before you go back to one.
 
 ### Who can read the data directory
 
@@ -38,17 +90,29 @@ some. Before that, new files were readable by every account on the host (`644`, 
 | Range | 3 or 4 octal digits whose **owner digit is `0`**: `000`–`077`, or `0000`–`0077`. For example `077`, `027` (the group may read), `022` (everyone may read, as before #549). |
 | Anything else | Ignored with one warning in the log, and `077` is used. That includes a mask with an owner digit (`700`, `0777`): it would create files the app itself cannot open. A bad value never stops the container starting. |
 | Existing files | Tightened on every start **only at `077`**. With any other value, files already there are left exactly as they are, and only new ones follow the mask. |
+| Not affected | **`private/` is always `700`**, whatever the mask (see [The private folder](#the-private-folder)). So at `022` the clips and the data directory itself are readable by other accounts, but the database, the secrets, the snapshots and the backups are not. |
 
-Each start logs two lines (`docker logs nightlight`). The first is the container's start-up script,
-the second is the app itself, which shows the mask actually reached it:
+⚠️ **`UMASK=022` no longer opens the database to other users.** Before this version the opt-out
+below also let a backup job running as another user read the database. Now that it is in
+`private/`, such a job cannot read it at any `UMASK`. Run the job as root (Unraid's CA Appdata Backup
+does), or have it copy the file [the online backup](#3-backing-up) writes.
+
+Each start logs these lines (`docker logs nightlight`). The first two are the container's start-up
+script; the last is the app itself, which shows the mask actually reached it:
 
 ```
-[entrypoint] umask 077; existing entries with group/other access found: 0; modes: babymonitor.db=600 babymonitor.db-wal=600 babymonitor.db-shm=600 .jwt_secret=600
-[data-dir] app umask 077; babymonitor.db mode 600
+[entrypoint] private layout: the database and secrets are in /app/data/private (or there are none yet)
+[entrypoint] umask 077; existing entries with group/other access found: 0; modes: private=700 private/babymonitor.db=600 private/babymonitor.db-wal=600 private/babymonitor.db-shm=600 private/.jwt_secret=600
+[data-dir] app umask 077; private/babymonitor.db mode 600
 ```
 
-`absent` in the first line is normal on a first start (no database or `.jwt_secret` yet), and for
-`-wal`/`-shm`, which come and go with the open database. The count is the files and folders the
+Each file is named by where it is. On an install whose move has not happened (see
+[The private folder](#the-private-folder)) the database is named without `private/`, and the first
+line is a warning that says why.
+
+`absent` in the second line is normal on a first start (no database or `.jwt_secret` yet), and for
+`-wal`/`-shm`, which come and go with the open database (they are also absent on the start that moves
+the database, which merges them into it). The count is the files and folders the
 start **found** with group/other access; the same start then takes that access away, and the
 modes after it are what the line shows. So expect a large number once, on the first start after
 upgrading, and `0` after that. A number that comes back on **every** start means the modes are not
@@ -80,6 +144,9 @@ the host, then keep `UMASK=022` set (or the next start tightens everything again
 chmod -R go+rX /mnt/user/appdata/nightlight     # your Data Directory / APPDATA_DIR
 ```
 
+That opens the clips and the data directory itself. `private/` is tightened back to `700` at the next
+start whatever you do, so the database and secrets stay owner-only.
+
 **Known limits:**
 
 - A **default ACL** on the host folder (`setfacl -d …`) overrides the umask: new files get the ACL's
@@ -93,10 +160,13 @@ chmod -R go+rX /mnt/user/appdata/nightlight     # your Data Directory / APPDATA_
   changed too. A **symbolic link** is never followed: what it points to keeps its mode. On a large
   `clips/` folder this pass still reads every entry on every start (it writes only what needs
   tightening); the ownership fix, which rewrites every entry, now runs only when the data directory,
-  the database or `.jwt_secret` has the wrong owner.
+  `private/`, the database (in either place) or `.jwt_secret` has the wrong owner. A Firebase file, a
+  snapshot folder or a backup at the top level with the wrong owner (copied in as root) is re-owned on
+  its own, without the walk, so that it can be moved into `private/`.
 - A `DATA_DIR` that is **itself a symbolic link** is neither re-owned nor tightened (the ownership
   fix stops at the link, and tightening files another user still owns would lock the app out of
-  them); only new files in it follow the mask. The default `/app/data` mount is not a link.
+  them); only new files in it follow the mask. `private/` is still made inside it, `700` and owned by
+  `PUID`:`PGID`. The default `/app/data` mount is not a link.
 - An **external `CLIPS_DIR`** (e.g. a `/recordings` mount) is neither re-owned nor tightened: new
   clips there are `600`, files already there keep their mode.
 - **Demo mode**'s reset ([demo-mode.md](demo-mode.md)) copies its sample pictures and clips with
@@ -192,45 +262,55 @@ write happened to be the one still sitting in the WAL.
 **Recommended — works while the container is running, no downtime:**
 
 ```bash
-docker exec nightlight node -e "
-process.umask(0o077);
-const Database = require('/app/node_modules/better-sqlite3');
-const db = new Database('/app/data/babymonitor.db', { readonly: true });
-db.backup('/app/data/backup-$(date +%Y%m%d-%H%M%S).db')
-  .then(() => { console.log('Backup complete.'); process.exit(0); })
-  .catch((e) => { console.error(e); process.exit(1); });
-"
+docker exec nightlight node src/scripts/backup-db.js
+# Backup written to /app/data/private/backup-20261026-101500.db
 ```
 
-This uses SQLite's official online-backup API (via `better-sqlite3`, already installed in the
-image) — safe to run at any time, including while Nightlight is actively writing. Copy the
-resulting `backup-<timestamp>.db` file out of the data volume; it's a single self-contained
-file, no `-wal`/`-shm` companions needed.
+This uses SQLite's official online-backup API — safe to run at any time, including while
+Nightlight is actively writing. The copy is a single self-contained file (no `-wal`/`-shm`
+companions needed), named by the date and time in the container's timezone (`TZ`), and written
+**into `private/`**, owner-only (`600`) and owned by `PUID`:`PGID`, so it is as protected as the
+database itself. Copy it out of the data directory as root on the host, for example
+`cp /mnt/user/appdata/nightlight/private/backup-*.db /mnt/user/backups/` (your Data Directory /
+`APPDATA_DIR`), and delete the old ones from `private/` when you no longer need them.
 
-The first line, `process.umask(0o077)`, makes the copy owner-only (`600`). `docker exec` does not
-go through the container's start-up script, so without it the copy would be created with Docker's
-`022`: a world-readable file holding every secret in the database, sitting in the data directory
-until the next start tightens it (at the default `UMASK`; see
-[Who can read the data directory](#who-can-read-the-data-directory)).
-The copy belongs to root until then, so copy it out as root.
+It refuses, and writes nothing, before the first start of this version (there is no `private/`
+yet), and on a data directory with no database. It never creates either.
+
+⚠️ **A scheduled job that runs the old command from this page** (`docker exec nightlight node -e "…
+new Database('/app/data/babymonitor.db', { readonly: true }) … backup('/app/data/backup-…')"`) stops
+working at the upgrade: once the database has moved, that path no longer exists, so the command fails
+with `unable to open database file` and writes nothing (it opens the path read-only, so it never
+creates an empty database there either). Change the job to the command above. Copies the old
+command left at the top of the data directory are moved into `private/` at the next start.
 
 **If you'd rather back up with the container stopped**, copy **all three** files together —
-`babymonitor.db`, `babymonitor.db-wal`, and `babymonitor.db-shm` (the last two may not exist if
-there's nothing pending, which is also fine) — never just the `.db` file alone, for the reason
-above.
+`private/babymonitor.db`, `private/babymonitor.db-wal`, and `private/babymonitor.db-shm` (the last
+two may not exist if there's nothing pending, which is also fine) — never just the `.db` file alone,
+for the reason above.
 
-Either way, also copy `.jwt_secret` and (if you don't use the online method) the whole data
+Either way, also copy `private/.jwt_secret` and (if you don't use the online method) the whole data
 directory is simplest — `clips/` included, though it's large and, if you're not worried about
 losing a few recent clips, arguably more disposable than the database.
 
 ## 4. Restoring
 
 1. Stop Nightlight (or don't yet start it on a new host).
-2. Put the backed-up files in the target's data directory (`APPDATA_DIR` / Data Directory) —
-   just `babymonitor.db` if you used the online-backup method, or all three database files plus
-   `.jwt_secret` and `clips/` for a full restore.
+2. Put the backed-up files in the target's data directory (`APPDATA_DIR` / Data Directory), **in its
+   `private/` folder** (create it if it is a new data directory) — just the database if you used the
+   online-backup method, renamed to `private/babymonitor.db`, or all three database files plus
+   `private/.jwt_secret`, the two snapshot folders and `clips/` (at the top level, not in `private/`)
+   for a full restore. Remove any `babymonitor.db-wal` and `-shm` already in `private/` that do not
+   belong to the copy you are restoring.
+   - A backup from before this version has the files at the top of the data directory. Put them in
+     `private/` the same way, or restore them to the top of an **empty** data directory: the first
+     start moves them in.
+   - ⚠️ **Do not put a restored database at the top level of a data directory that already has
+     `private/babymonitor.db`.** The one in `private/` is used, and your restored copy is set aside, not
+     used (the start-up log has a warning; see [Two copies of the database](#two-copies-of-the-database)).
 3. **Ownership matters**: the container `chown`s the data directory to `PUID`/`PGID` on startup
-   when the directory itself, or the database / `.jwt_secret`, is not already owned by them, so
+   when the directory itself, `private/`, or the database / `.jwt_secret` (in either place), is not
+   already owned by them, so
    restoring those as root (or a different user) and starting with the usual `PUID=99`/`PGID=100`
    self-corrects — you don't need to manually `chown` first. ⚠️ It no longer walks the whole tree
    on every start (that was slow with many GB of clips): a **restored `clips/` folder** owned by
@@ -263,6 +343,16 @@ owner-only. If a backup job, another container or an SMB user other than `nobody
 [Who can read the data directory](#who-can-read-the-data-directory) **before** you upgrade: the
 opt-out (`UMASK=022`) has to be set before that first start to keep the old modes.
 
+**Upgrading to the version with the private folder for the first time?** That start moves the
+database and secrets into `private/` ([The private folder](#the-private-folder)), and it is one way.
+Before you upgrade: make a backup, read [Rolling back](#6-rolling-back), and change any scheduled
+backup job to the new [backup command](#3-backing-up). Afterwards, check the start-up log for the
+`private layout:` line: a warning there means something stayed at the top level, and says why. Then,
+a day or so later, **check that your newest backup is dated after the upgrade**: a scheduled job still
+using the old command fails without anyone seeing it. A job on the host that copies `backup-*.db` from
+the top of the data directory now copies nothing, because backups are written into `private/`: point it
+at `private/backup-*.db` (and run it as root).
+
 After upgrading:
 
 1. Check `docker logs nightlight` for a clean startup with no error lines.
@@ -280,15 +370,87 @@ data, not just added columns, would need checking against that release's own not
 the common case of "this update broke something, go back one version," it's expected to work.
 Confirm with the same three checks as upgrading (logs, `/api/health`, one camera) before trusting it.
 
+**Going back past the private folder needs one more step.** A version from before the private folder
+looks for its database at the top of the data directory. Once this version has moved it into
+`private/`, an older image finds none there and **starts empty**: it asks for first-run setup as if
+it were a new install. Your data is still there, in `private/`; the older version does not look
+there. (This is checked by the automated `private-layout` test, which starts the previous release
+on a moved data directory.)
+
+To roll back, stop the container and move the files back to the top level, as root on the host,
+before you start the older image:
+
+```bash
+cd /mnt/user/appdata/nightlight                       # your Data Directory / APPDATA_DIR
+mv private/babymonitor.db* private/.jwt_secret .
+mv private/detection-snapshots private/transition-snapshots .
+mv private/firebase-service-account.json private/google-services.json .    # only if you use Firebase push
+```
+
+(Leave out any file that is not there.) Or restore a backup you made before the upgrade. If you have
+already started the older image on the moved data directory, it made a new, empty `babymonitor.db`
+(and `.jwt_secret`) at the top level: move those aside first (`mkdir empty-copy && mv babymonitor.db*
+.jwt_secret empty-copy/`), then move yours back as above.
+
+**Coming forward again later:**
+
+- If you rolled back by **moving the files back** as above, `private/` has no database, and the next
+  start of this version moves them in again.
+- If you rolled back by **restoring a backup to the top level** instead, `private/` still holds the
+  copy from before the rollback. Coming forward as it is would keep using THAT copy, and set your
+  rolled-back weeks aside as the "other" copy ([Two copies](#two-copies-of-the-database)). So before you
+  start this version again, move the old private copy out of the way, as root on the host:
+  `cd private && mkdir before-rollback && mv babymonitor.db* detection-snapshots transition-snapshots before-rollback/`
+  (leave out anything that is not there).
+
 ## 7. Recovering from a corrupt or partial backup
 
 If a `.db` file won't open (the classic symptom described in "Backing up" above — a plain
 mid-write copy with no `-wal`/`-shm`), first check whether you also have the companion files
 from the same backup: if `babymonitor.db-wal` and `-shm` from the *same* backup are available
-alongside it, put all three in place together and SQLite will recover the pending writes on
-next open. If you only have the bare `.db` file and it won't open, there is no supported repair
-— restore an earlier backup instead. This is exactly why the online-backup method in step 3 is
+alongside it, put all three in place together (in `private/`) and SQLite will recover the pending
+writes on next open. If you only have the bare `.db` file and it won't open, there is no supported
+repair — restore an earlier backup instead. This is exactly why the online-backup method in step 3 is
 recommended: it never produces a partial file in the first place.
+
+## Two copies of the database
+
+The start-up script sets a copy aside when `private/` already has a file and the top of the data
+directory has another one by the same name. That happens after a restore put at the top level of a
+moved install, or after an older version ran on it (see [Rolling back](#6-rolling-back)). The copy in
+`private/` is always the one used: nothing is chosen by size or date, and nothing is deleted or
+overwritten. The other copy is moved to `private/legacy-<date>-<time>/` as one unit: the database
+first, then its `-wal`/`-shm` and its snapshot folders into the same folder (if the database itself
+cannot be moved, none of it is, and the next start tries again). The start-up log has one warning:
+
+```
+[entrypoint] warning: private layout: a copy at the top of /app/data was set aside in /app/data/private/legacy-*/ because /app/data/private already had one, which is the one used (docs/operations.md, "Two copies of the database"); starting anyway
+```
+
+The same rule applies to `.jwt_secret` (so nobody is signed out), the Firebase files, a backup with
+the same name, and a snapshot folder when both hold pictures (it is set aside whole, never merged). The
+pictures of a set-aside database never go into `private/`: they are named by its own row ids, and would
+show up against the wrong alerts there.
+While any `legacy-*` folder exists, `GET /api/about` reports `"layoutConflict": true` (and so does the
+diagnostics bundle, as `layout_conflict`). The About page itself does not show it yet.
+
+Then decide:
+
+- **Keep what is running:** check the set-aside copy is not something you need, then delete the
+  `legacy-*` folder. The flag clears at once.
+- **Use the set-aside copy instead:** stop the container and swap them, as root on the host, then
+  start it:
+
+  ```bash
+  cd /mnt/user/appdata/nightlight/private                # your Data Directory / APPDATA_DIR
+  mkdir replaced
+  mv babymonitor.db* detection-snapshots transition-snapshots replaced/                # the copy in use
+  mv legacy-<date>-<time>/babymonitor.db* legacy-<date>-<time>/*-snapshots .          # the one you want
+  ```
+
+  (Leave out a snapshot folder that is not there.) The database and its pictures go together, both
+  ways: pictures are named by their database's row ids. Move `.jwt_secret` the same way if you want
+  that copy's sign-ins too. Keep `replaced/` until you are sure; it is not used.
 
 ## Hardening the container (optional)
 
@@ -356,15 +518,16 @@ Each of the six has one job. If one is left out, this is what you see, in the or
 - **CHOWN, SETUID, SETGID** re-own the data directory to `PUID`:`PGID` and hand the app over to that user.
   Without one of them the container stops at every start, and the log shows `Operation not permitted` or
   `usermod: Failed to change ownership of the home directory`.
-- **DAC_OVERRIDE** lets root into the owner-only (`700`) data directory. Without it the first start works,
+- **DAC_OVERRIDE** lets root into the owner-only (`700`) data directory and its `private/` folder. Without
+  it the first start works,
   but once the container is re-created (an update, or **Apply** on Unraid) it stops at start with
   `usermod: Failed to change ownership of the home directory`. That message points at ownership; the cause
   is the missing capability. The `docker exec` commands in these guides (the
   [online backup](#3-backing-up), the [two-factor reset](mfa.md#recovery)) also fail, because they run as
   root and cannot open the database.
 - **FOWNER** lets the start-up script take group/other access off files the app owns. Without it the
-  container runs, but logs `could not tighten every entry`, and the data directory keeps whatever access
-  it had.
+  container runs, but logs `could not tighten every entry` (and `could not make /app/data/private
+  owner-only`), and the data directory keeps whatever access it had.
 - **KILL** lets the container's init process pass Docker's stop signal on to the app. **This is the silent
   one:** everything works until the container stops. Then the app is killed instead of stopping cleanly, so
   a recording in progress is lost on every stop, restart and update. The log shows a

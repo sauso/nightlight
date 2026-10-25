@@ -28,7 +28,8 @@ const { default: db } = await import('../src/db.js');
 const bt = await import('../src/lib/bedTransitions.js');
 const { logger } = await import('../src/lib/logger.js');
 
-const SNAPSHOT_DIR = path.join(process.env.DATA_DIR, 'transition-snapshots');
+// #553 phase 2a: a fresh data directory keeps the pictures in private/, next to the database.
+const SNAPSHOT_DIR = path.join(process.env.DATA_DIR, 'private', 'transition-snapshots');
 
 // Insert a row directly so the test controls `created_at` — recordBedTransition() stamps "now", which
 // cannot express "this happened five days ago".

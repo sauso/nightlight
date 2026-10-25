@@ -127,9 +127,17 @@ Two files from a Firebase project you create, dropped into Nightlight's data dir
 | `firebase-service-account.json` | Lets the **server send** notifications | Firebase → Project settings → Service accounts |
 | `google-services.json` | Lets the **app connect** to your project | Firebase → the Android app you add |
 
-Both are read from the data directory (the same volume as your database, e.g.
-`/mnt/user/appdata/nightlight` — mounted at `/app/data` in the container). Paths can be overridden
-with the `FIREBASE_CREDENTIALS` and `FIREBASE_CLIENT_CONFIG` environment variables.
+You drop both at the top of the data directory (the same volume as your database, e.g.
+`/mnt/user/appdata/nightlight` — mounted at `/app/data` in the container). The next start moves them
+into the data directory's owner-only `private/` folder, next to the database, and makes the key `600`
+([The private folder](operations.md#the-private-folder)); they are read from either place, `private/`
+first. Paths can be overridden with the `FIREBASE_CREDENTIALS` and `FIREBASE_CLIENT_CONFIG`
+environment variables; a file named that way is read where it is and never moved.
+
+**Replacing them later** (a new key, another Firebase project): replace the files **in `private/`**,
+then restart. A new file dropped at the top level while `private/` still has one is not used: the next
+start sets it aside in `private/legacy-<date>-<time>/` and keeps the one in `private/`
+([Two copies](operations.md#two-copies-of-the-database)).
 
 ## Step by step
 
@@ -154,6 +162,8 @@ Copy them into your Nightlight data directory, named exactly:
 <data dir>/firebase-service-account.json   # the service-account key from step 3
 <data dir>/google-services.json            # the file from step 2
 ```
+
+(If they are already in `<data dir>/private/` from an earlier set-up, replace them there instead.)
 
 Then **restart the container** so the server picks up the credential:
 
@@ -671,8 +681,8 @@ too. What counts as one silence, who receives it on each channel, and the known 
   in**, which re-registers it automatically. Pushover, ntfy and Gotify alerts are not affected. The
   same applies to any phone you sign out of and back into: alerts resume once it has registered again.
 - **"Notifications aren't set up on this server."** The app can reach the server but
-  `google-services.json` isn't present/valid in the data dir. It must be the file from *your* Firebase
-  Android app (package `com.sauso.nightlight`).
+  `google-services.json` isn't present/valid in the data dir (at its top level or in `private/`). It must
+  be the file from *your* Firebase Android app (package `com.sauso.nightlight`).
 - **Dead devices.** If you uninstall the app or clear its data, its token goes stale; the server
   prunes tokens that Firebase reports as unregistered automatically.
 - **Many devices.** Firebase accepts at most **500** messages per request, so the server sends an

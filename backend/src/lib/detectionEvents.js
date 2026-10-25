@@ -3,11 +3,16 @@ import path from 'path';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { CLIPS_DIR } from './clipRecorder.js';
+import { dataDirFrom, DETECTION_SNAPSHOTS_DIR, resolveSnapshotDir } from './dataPaths.js';
 
 // One JPEG per detection event, named <id>.jpg, kept next to the DB. Stored on disk (not as a
 // DB blob) so the SQLite file stays small; pruned in lockstep with the rows below.
-const DATA_DIR = process.env.DATA_DIR || '/app/data';
-const SNAPSHOT_DIR = path.join(DATA_DIR, 'detection-snapshots');
+// #553 phase 2a: next to the DB means DATA_DIR/private/detection-snapshots once the start-up move has run (it moves the
+// folder WITH the database), the top-level one before that. Resolved once here (lib/dataPaths.js, resolveSnapshotDir);
+// the app never moves it. Exported for demoSeed.js, which must fill the SAME folder this module serves from. The mkdir
+// below never has to make private/ itself: db.js, imported first, already has.
+const SNAPSHOT_DIR = resolveSnapshotDir(DETECTION_SNAPSHOTS_DIR, dataDirFrom());
+export { SNAPSHOT_DIR as DETECTION_SNAPSHOT_DIR };
 try {
   fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
 } catch (err) {

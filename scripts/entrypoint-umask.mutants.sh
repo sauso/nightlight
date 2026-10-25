@@ -12,11 +12,14 @@
 #
 # #553 added a second block, media isolation's decision, with its own test (backend/test/entrypoint-media-isolation.test.js,
 # which also runs unprivileged and reads ENTRYPOINT_UNDER_TEST); its mutants are at the bottom and run against that test.
+# #553 phase 2a added a third, the private folder and the move into it (backend/test/entrypoint-private-layout.test.js,
+# with a stand-in for the move, so a copied script needs no tool next to it); its mutants are last.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/backend/entrypoint.sh"
 TEST="$ROOT/backend/test/entrypoint-umask.test.js"
 ISO_TEST="$ROOT/backend/test/entrypoint-media-isolation.test.js"
+PRIV_TEST="$ROOT/backend/test/entrypoint-private-layout.test.js"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 KILLED=0; SURVIVED=0
 
@@ -38,6 +41,7 @@ baseline() {  # baseline <test file> <minimum number of tests>
 }
 baseline "$TEST" 22
 baseline "$ISO_TEST" 11
+baseline "$PRIV_TEST" 16
 
 mutant() {  # mutant <name> <perl -pe expression> [test file, default the umask test]
   local name="$1" expr="$2" test="${3:-$TEST}" f="$T/entrypoint.sh"
@@ -90,7 +94,7 @@ mutant "the walk follows a symlinked DATA_DIR (trailing slash added)"      'if (
 mutant "nothing is counted (-print dropped)"                               's/ -print -exec / -exec /'
 mutant "a failed walk is not reported"                                     's/ \|\| printf .\[entrypoint\] warning: could not tighten.*?>&2;/;/'
 mutant "a failed walk stops the container (set -e)"                        's/^  FOUND=.*$/  FOUND=\$(find "\$DATA_DIR" ! -type l -perm \/077 -print | wc -l); find "\$DATA_DIR" ! -type l -perm \/077 -exec chmod go-rwx {} +/'
-mutant "the report is not existence-guarded (a first boot says unknown)"   's/^  if \[ -e "\$DATA_DIR\/\$f" \]; then$/  if true; then/'
+mutant "the report is not existence-guarded (a first boot says unknown)"   's/^  if \[ -e "\$DATA_DIR\/\$r" \]; then$/  if true; then/'
 mutant "the report follows no link (stat -L -> stat: a linked db shows 777)" 's/stat -L -c %a/stat -c %a/'
 mutant "the report line is never printed"                                  's/^printf .\[entrypoint\] umask .*$/:/'
 
@@ -107,6 +111,27 @@ mutant "ids compared and passed as text (01700, 099)"                      's/^A
 mutant "an operator's MEDIA_ISOLATION=on reaches the app"                  's/^MEDIA_ISOLATION=off$/:/' "$I"
 mutant "the app's drop loses --no-new-privs"                               's/ --no-new-privs"$/"/' "$I"
 mutant "a fallback says nothing"                                           's/^  printf .\[entrypoint\] warning: media isolation is off.*$/  :/' "$I"
+
+# --- #553 phase 2a: the private folder and the move into it (run against entrypoint-private-layout.test.js) ---
+P="$PRIV_TEST"
+MOVE='^if su-exec nightlight node "\$PRIVATE_TOOL"; then PRIVATE_RC=0; else PRIVATE_RC=\$\?; fi$'
+mutant "the move runs in the background (the app can start mid-move, C1)"  "s/$MOVE/su-exec nightlight node \"\\\$PRIVATE_TOOL\" \\& PRIVATE_RC=0/" "$P"
+mutant "the move never runs"                                               "s/$MOVE/PRIVATE_RC=0/" "$P"
+mutant "a failed move stops the container (set -e, C8)"                    "s/$MOVE/su-exec nightlight node \"\\\$PRIVATE_TOOL\"; PRIVATE_RC=0/" "$P"
+mutant "the move runs as root (no su-exec)"                                's/^if su-exec nightlight node /if node /' "$P"
+mutant "exit 10 (something left at the top) says nothing"                  's/^  10\) private_warn .*$/  10) ;;/' "$P"
+mutant "exit 11 (a copy set aside) says nothing"                           's/^  11\) private_warn .*$/  11) ;;/' "$P"
+mutant "a failed move tool says nothing"                                   's/^  \*\) private_warn "private layout: the move .*$/  *) ;;/' "$P"
+mutant "private/ is left to the umask (no chmod 700)"                      's/^    chmod 700 "\$PRIVATE_DIR" \|\| .*$/    :/' "$P"
+mutant "private/ is chowned on every start, even when it is right"         's/^    if \[ "\$\(stat -c %u:%g "\$PRIVATE_DIR" 2>\/dev\/null\)" != "\$WANT_OWNER" \]; then$/    if true; then/' "$P"
+mutant "a symbolic-link private/'s target is not made 700 (review of #870)" 's/^  if \[ -d "\$PRIVATE_DIR" \]; then$/  if [ -d "\$PRIVATE_DIR" ] && [ ! -L "\$PRIVATE_DIR" ]; then/' "$P"
+mutant "a symbolic-link private/ is chown-ed through the link"             's/^  if \[ -L "\$PRIVATE_DIR" \]; then$/  if false; then/' "$P"
+mutant "no warning when root cannot look inside private/"                  's/^    if ! stat "\$PRIVATE_DIR\/\." >\/dev\/null 2>&1; then$/    if false; then/' "$P"
+mutant "a top-level item owned by root is never re-owned before the move"  's/^if \[ -z "\$NEEDS_CHOWN" \]; then$/if false; then/' "$P"
+mutant "the re-own runs even after the full walk"                          's/^if \[ -z "\$NEEDS_CHOWN" \]; then$/if true; then/' "$P"
+mutant "the re-own follows a symbolic link"                                's/^    if \[ ! -e "\$p" \] \|\| \[ -L "\$p" \]; then continue; fi$/    if [ ! -e "\$p" ]; then continue; fi/' "$P"
+mutant "the modes line ignores a database in private/"                     's/^if exists_or_link "\$PRIVATE_DIR\/babymonitor.db"; then DB_AT=private\/$/if false; then DB_AT=private\//' "$P"
+mutant "the modes line looks for .jwt_secret at the top level first"       's/^    if exists_or_link "\$PRIVATE_DIR\/\$f"; then r="private\/\$f"; elif/    if false; then r="private\/\$f"; elif/' "$P"
 
 echo "== killed $KILLED, survived/error $SURVIVED"
 [ "$SURVIVED" -eq 0 ]

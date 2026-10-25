@@ -146,6 +146,14 @@ test('demo seed is deterministic, timezone-native, safe and stable throughout a 
     }
   }
   assert.equal(repeated.db.prepare('SELECT COUNT(*) AS count FROM detection_events WHERE snapshot = 1').get().count, 16);
+  // #553 phase 2a: the seed writes its alert pictures into the folder the server serves them from (detectionEvents.js
+  // resolves it; the seed used to spell the path a second time), and on this fresh data directory that is in private/.
+  const { DETECTION_SNAPSHOT_DIR, getEventSnapshotFile } = await import('../src/lib/detectionEvents.js');
+  assert.equal(DETECTION_SNAPSHOT_DIR, path.join(dataDir, 'private', 'detection-snapshots'));
+  for (const { id } of repeated.db.prepare('SELECT id FROM detection_events WHERE snapshot = 1').all()) {
+    assert.ok(getEventSnapshotFile(id), `the seeded picture for event ${id} is not where the server looks for it`);
+  }
+  assert.equal(fs.existsSync(path.join(dataDir, 'detection-snapshots')), false, 'a second folder at the top level');
   assert.equal(repeated.db.prepare('SELECT COUNT(*) AS count FROM sleep_reviews').get().count, 2);
 
   const guest = repeated.db.prepare(

@@ -1577,7 +1577,7 @@ go through this shared grab, so it does not hold them up, and other cameras' fra
 running as a non-root user, another container mounting the same folder with a different `PUID`) now gets
 *permission denied*. A named Unraid user browsing the share over SMB may lose access too (not verified). The
 log has a line like
-`[entrypoint] umask 077; existing entries with group/other access found: 1234; modes: babymonitor.db=600 ...`
+`[entrypoint] umask 077; existing entries with group/other access found: 1234; modes: private=700 private/babymonitor.db=600 ...`
 on the first start after the upgrade.
 
 **Why:** On purpose (#549). The database keeps every stored secret in plaintext, so by default the container
@@ -1590,6 +1590,43 @@ The app itself, and anything running as root, are not affected.
 loosens the old ones automatically. Better still, give the other reader the same `PUID`, or run it as root,
 and keep the default. See
 [Who can read the data directory](docs/operations.md#who-can-read-the-data-directory).
+
+⚠️ **This no longer reaches the database or the secrets (#553).** They are in the data directory's `private/`
+folder, which is always `700` whatever `UMASK` says, so another user can read the clips this way but not the
+database. A backup job that needs the database has to run as root, or copy the file
+`docker exec nightlight node src/scripts/backup-db.js` writes
+([Backing up](docs/operations.md#3-backing-up)).
+
+## The start-up log warns that something is still at the top of the data directory
+
+**What you see:** `[entrypoint] warning: private layout: something is still at the top of /app/data this start
+…` in `docker logs`, on every start, with `[private-layout]` lines just before it naming the file and the reason.
+
+**Why:** Since #553 the database and secrets move into the data directory's `private/` folder, and the move
+leaves a file where it is rather than risk it: a **symbolic link** (moving it could break it); a database that
+**another process has open** (another container on the same data directory, or a program outside the container),
+so it cannot be merged and moved safely; a move between **two filesystems** (`private/` mounted separately, or a
+link to another disk), which a rename cannot do; or database checks that took longer than **30 seconds** (a slow
+network share). Nothing is lost: the app uses the file where it is, and every start tries again.
+
+**What to do:** Read the `[private-layout]` lines. For a link, put the real file or folder in its place if you want
+it protected by `private/`. For another process, stop it, then restart Nightlight. For two filesystems, keep
+`private/` on the same filesystem as the rest of the data directory. See
+[The private folder](docs/operations.md#the-private-folder).
+
+## The start-up log says a copy was set aside in `private/legacy-…`
+
+**What you see:** `[entrypoint] warning: private layout: a copy at the top of /app/data was set aside in
+/app/data/private/legacy-*/ …` once, and a `private/legacy-<date>-<time>/` folder in the data directory.
+
+**Why:** `private/` already had that file (the database, `.jwt_secret`, a Firebase file, a backup, or pictures),
+and the top level had another copy: a backup restored to the old place, an older version started on the data
+directory, or a new Firebase file dropped at the top level. The copy in `private/` is always the one used; the
+other is kept, never deleted, and never merged.
+
+**What to do:** Decide which one you want, as described in
+[Two copies of the database](docs/operations.md#two-copies-of-the-database). To replace Firebase files, put the new
+ones in `private/`.
 
 ## A camera turned off and on again in quick succession, or edited while it is being turned on or off, can briefly run the wrong thing
 
@@ -1613,7 +1650,7 @@ did not take, wait five minutes or save it again.
 ## The `[entrypoint]` line reports the same number of entries "with group/other access found" on every start
 
 **What you see:** At the default `UMASK=077`, every start logs the same non-zero count, e.g.
-`[entrypoint] umask 077; existing entries with group/other access found: 57; modes: babymonitor.db=644 ...`,
+`[entrypoint] umask 077; existing entries with group/other access found: 57; modes: private=755 private/babymonitor.db=644 ...`,
 and the modes it lists stay `644` (or `777`) instead of becoming `600`.
 
 **Why:** The data directory is on a filesystem that ignores `chmod`: a Docker Desktop for Windows bind mount

@@ -49,7 +49,8 @@ export default function SettingsPushFirebase() {
             <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
               Delivers alerts straight to the Nightlight Android app via your own Firebase project — drop
               <strong> firebase-service-account.json</strong> and <strong>google-services.json</strong> into the
-              data directory first (see <strong>docs/notifications.md</strong>). Android only.
+              data directory first; the next start moves them into its private folder (see
+              <strong> docs/notifications.md</strong>). Android only.
             </div>
             <label className="log-viewer__toggle" style={{ margin: 0 }}>
               <Switch checked={fbEnabled} disabled={busy || !pushStatus} onChange={(e) => setFbEnabled(e.target.checked)} />

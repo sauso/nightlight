@@ -294,7 +294,8 @@ as they keep at it. They cannot guess any faster. Ways out:
 ## Notes for operators
 
 - The TOTP secret and the (hashed) backup codes live in the `users` table of the app database
-  (`babymonitor.db` in the data volume). Treat that database as sensitive, as you already should
-  (it also holds password hashes).
+  (`private/babymonitor.db` in the data volume; see
+  [The private folder](operations.md#the-private-folder)). Treat that database as sensitive, as you
+  already should (it also holds password hashes).
 - Verification tolerates ±30s of clock drift. If codes are consistently rejected, check the server's
   clock/timezone against the phone running the authenticator.

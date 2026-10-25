@@ -19356,8 +19356,8 @@
   {
     "label": "#701 chown: the -shm file is dropped from the ownership sentinel list",
     "file": "backend/entrypoint.sh",
-    "find": "for f in . babymonitor.db babymonitor.db-wal babymonitor.db-shm .jwt_secret; do",
-    "replace": "for f in . babymonitor.db babymonitor.db-wal .jwt_secret; do",
+    "find": "for f in . babymonitor.db babymonitor.db-wal babymonitor.db-shm .jwt_secret private private/babymonitor.db private/babymonitor.db-wal private/babymonitor.db-shm private/.jwt_secret; do",
+    "replace": "for f in . babymonitor.db babymonitor.db-wal .jwt_secret private private/babymonitor.db private/babymonitor.db-wal private/babymonitor.db-shm private/.jwt_secret; do",
     "expect": "killed",
     "tests": [
       "entrypoint-chown.test.js"
@@ -23469,5 +23469,347 @@
     "expect": "killed",
     "tests": ["stun-servers.test.js"],
     "namePattern": "the folder AND the file are given to the media group"
+  },
+  {
+    "label": "#553 phase 2a move: private/ no longer wins, so a top-level copy is renamed over the private database",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  if (present(privDb)) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "the top-level copy and its -wal are set aside"
+  },
+  {
+    "label": "#553 phase 2a move: a companion file still there after the close no longer stops the move",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  if (leftover.length) return skip(",
+    "replace": "  if (false) return skip(",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "a companion that survives the close"
+  },
+  {
+    "label": "#553 phase 2a move: top-level items are looked at with stat, so a symbolic link is moved as if it were its target",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  const st = lstatOrNull(src);",
+    "replace": "  const st = (() => { try { return fs.statSync(src); } catch { return null; } })();",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "symbolic links are never moved"
+  },
+  {
+    "label": "#553 phase 2a move: the snapshot folders go ahead of a database that stayed at the top level",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  if (present(path.join(ctx.dataDir, DB_FILE))) return;",
+    "replace": "  if (false) return;",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "snapshot folders stay with a database that stayed at the top"
+  },
+  {
+    "label": "#553 phase 2a move: an empty private snapshot folder blocks the move for ever (C4)",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  if (dst && isEmptyDir(dest)) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "an EMPTY private snapshot folder"
+  },
+  {
+    "label": "#553 phase 2a move: a Firebase file is moved although its FIREBASE_* variable is set (C7)",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      if (env[variable]) return;",
+    "replace": "      if (false) return;",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "a Firebase file named by FIREBASE_CREDENTIALS"
+  },
+  {
+    "label": "#553 phase 2a move: .jwt_secret is moved although JWT_SECRET is set",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "    if (env.JWT_SECRET) {",
+    "replace": "    if (false) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "JWT_SECRET set: a top-level"
+  },
+  {
+    "label": "#553 phase 2a move: the database pass has no time limit before its rename (C1)",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  const overBudget = () => now() - start > budgetMs;",
+    "replace": "  const overBudget = () => false;",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "the time budget runs out"
+  },
+  {
+    "label": "#553 phase 2a move: a moved secret keeps its 0644 (no chmod 0600)",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "    fs.chmodSync(dest, SECRET_FILE_MODE);",
+    "replace": "    void 0;",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "the Firebase files made 0644 by hand"
+  },
+  {
+    "label": "#553 phase 2a move: top-level backups are left where the media group could later reach them",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  for (const name of names.filter((n) => BACKUP_FILE_RE.test(n))) {",
+    "replace": "  for (const name of [].filter((n) => BACKUP_FILE_RE.test(n))) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "backups at the top level"
+  },
+  {
+    "label": "#553 phase 2a move: a -wal with no database is deleted instead of set aside",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      if (!src) continue;",
+    "replace": "      if (!src) continue;\n      fs.rmSync(src);\n      continue;",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "a -wal with no database next to it"
+  },
+  {
+    "label": "#553 phase 2a move: the exit code always says done (the entrypoint never warns)",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  const code = ctx.left.length ? EXIT.LEFT : ctx.setAside.length ? EXIT.SET_ASIDE : EXIT.DONE;",
+    "replace": "  const code = EXIT.DONE;",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "another connection has it open"
+  },
+  {
+    "label": "#553 phase 2a paths: a top-level database is not seen, so a fresh empty one is created in private/",
+    "file": "backend/src/lib/dataPaths.js",
+    "find": "  if (present(path.join(dataDir, DB_FILE))) return 'legacy';",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["data-paths.test.js"],
+    "namePattern": "only at the top level"
+  },
+  {
+    "label": "#553 phase 2a paths: existence follows symbolic links, so a dangling linked database reads as nothing",
+    "file": "backend/src/lib/dataPaths.js",
+    "find": "    fs.lstatSync(p);",
+    "replace": "    fs.statSync(p);",
+    "expect": "killed",
+    "tests": ["data-paths.test.js"],
+    "namePattern": "DANGLING symbolic link"
+  },
+  {
+    "label": "#553 phase 2a paths: a snapshot folder is looked for in private/ first even with the database at the top",
+    "file": "backend/src/lib/dataPaths.js",
+    "find": "resolveLayout(dataDir) === 'private' ? [inPrivate, atTop] : [atTop, inPrivate]",
+    "replace": "[inPrivate, atTop]",
+    "expect": "killed",
+    "tests": ["data-paths.test.js"],
+    "namePattern": "a snapshot folder follows its DATABASE"
+  },
+  {
+    "label": "#553 phase 2a paths: private/ is left to the umask (no explicit chmod 0700)",
+    "file": "backend/src/lib/dataPaths.js",
+    "find": "  if ((st.mode & 0o777) !== PRIVATE_DIR_MODE) fsImpl.chmodSync(dir, PRIVATE_DIR_MODE);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["data-paths.test.js"],
+    "namePattern": "creates it, and makes it 0700 whatever the umask"
+  },
+  {
+    "label": "#553 phase 2a db.js: a fresh install does not create private/ before opening the database in it",
+    "file": "backend/src/db.js",
+    "find": "if (DB_LAYOUT === 'private' && !present(DB_PATH)) ensurePrivateDir(DATA_DIR);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["about-data-layout.test.js"],
+    "namePattern": "a fresh install: private"
+  },
+  {
+    "label": "#553 phase 2a auth: a new secret is written into a private/ nobody created (it fails, and sessions die at every restart)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "    if (path.dirname(SECRET_FILE) === privateDirOf(DATA_DIR)) ensurePrivateDir(DATA_DIR);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["jwt-secret.test.js"],
+    "namePattern": "a new one goes into private/, which auth.js creates"
+  },
+  {
+    "label": "#553 phase 2a auth: a secret that cannot be saved is silent again (C9)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "    logger.error(\n      `[auth] could not save the session signing secret",
+    "replace": "    void (\n      `[auth] could not save the session signing secret",
+    "expect": "killed",
+    "tests": ["jwt-secret.test.js"],
+    "namePattern": "is said LOUDLY"
+  },
+  {
+    "label": "#553 phase 2a console scripts: they may create a database (root-owned, through docker exec) where there is none",
+    "file": "backend/src/scripts/consoleDb.js",
+    "find": "    return new Database(file, { fileMustExist: true, readonly });",
+    "replace": "    return new Database(file, { readonly });",
+    "expect": "killed",
+    "tests": ["console-scripts-layout.test.js"],
+    "namePattern": "but there is no database yet"
+  },
+  {
+    "label": "#553 phase 2a backup-db: the copy is written to the top level again",
+    "file": "backend/src/scripts/backup-db.js",
+    "find": "  const dest = freeBackupPath(priv, timestampForName(now()));",
+    "replace": "  const dest = freeBackupPath(dataDir, timestampForName(now()));",
+    "expect": "killed",
+    "tests": ["console-scripts-layout.test.js"],
+    "namePattern": "a consistent copy, written into private/"
+  },
+  {
+    "label": "#553 phase 2a push: the Firebase client config's place is resolved once at load (a file dropped in later is missed)",
+    "file": "backend/src/lib/push.js",
+    "find": "const clientConfigPath = () => CLIENT_CONFIG_OVERRIDE || resolveDropInFile(FIREBASE_CLIENT_CONFIG_FILE, DATA_DIR);",
+    "replace": "const CLIENT_CONFIG_ONCE = CLIENT_CONFIG_OVERRIDE || resolveDropInFile(FIREBASE_CLIENT_CONFIG_FILE, DATA_DIR); const clientConfigPath = () => CLIENT_CONFIG_ONCE;",
+    "expect": "killed",
+    "tests": ["push-firebase-location.test.js"],
+    "namePattern": "a file that appears in private/ AFTER start"
+  },
+  {
+    "label": "#553 phase 2a data-dir line: the database mode is read from the old top-level name (unknown for ever after the move)",
+    "file": "backend/src/lib/dataDirModes.js",
+    "find": "  try { dbMode = stat(dbPath).mode; } catch { /* reported as unknown */ }",
+    "replace": "  try { dbMode = stat(path.join(dataDir, 'babymonitor.db')).mode; } catch { /* reported as unknown */ }",
+    "expect": "killed",
+    "tests": ["data-dir-modes.test.js"],
+    "namePattern": "logs exactly one line, from the status text and the database file the app opened"
+  },
+  {
+    "label": "#553 phase 2a About: layoutConflict is always false",
+    "file": "backend/src/routes/about.js",
+    "find": "    layoutConflict: layoutConflict(dataDirFrom()),",
+    "replace": "    layoutConflict: false,",
+    "expect": "killed",
+    "tests": ["about-data-layout.test.js"],
+    "namePattern": "a set-aside copy in private/legacy"
+  },
+  {
+    "label": "#553 phase 2a demo seed: its alert pictures go to a second, hand-spelled top-level folder again",
+    "file": "backend/src/lib/demoSeed.js",
+    "find": "  const snapshotsDir = resolveSnapshotDir(DETECTION_SNAPSHOTS_DIR, dataDir);",
+    "replace": "  const snapshotsDir = path.join(dataDir, 'detection-snapshots');",
+    "expect": "killed",
+    "tests": ["demo-seed.test.js"],
+    "namePattern": "demo seed is deterministic"
+  },
+  {
+    "label": "#553 phase 2a review HIGH 1: a stale -wal/-shm/-journal in private/ is left for SQLite to replay over the database moving in",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "    for (const name of DB_SIDECARS) {\n      const stale = path.join(priv, name);",
+    "replace": "    for (const name of []) {\n      const stale = path.join(priv, name);",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "a stale -wal in private/ with no private database"
+  },
+  {
+    "label": "#553 phase 2a review HIGH 1: a private snapshot folder of a database that is gone is kept as the moved database's",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  if (dst && ctx.dbMovedIn) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "snapshot folder of that gone database"
+  },
+  {
+    "label": "#553 phase 2a review HIGH 2: the companions are set aside even when their .db could not be (the trio splits)",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "    if (!setAside(ctx, src, 'private/ already has a database, and the copy in private/ always wins')) return;",
+    "replace": "    setAside(ctx, src, 'private/ already has a database, and the copy in private/ always wins');",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "if the .db cannot be set aside, NOTHING of it moves"
+  },
+  {
+    "label": "#553 phase 2a review HIGH 2: an orphan companion gets a new legacy folder instead of joining its set-aside database",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      const awaiting = legacyDirAwaiting(ctx, name);",
+    "replace": "      const awaiting = null;",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "a run cut off between the .db and its -wal"
+  },
+  {
+    "label": "#553 phase 2a review HIGH 3: a symbolic-link private/ keeps its target's mode (an old 0644 database goes into a 0755 folder)",
+    "file": "backend/src/lib/dataPaths.js",
+    "find": "    st = fsImpl.statSync(dir);\n  } catch (err) {",
+    "replace": "    st = fsImpl.lstatSync(dir);\n    if (st.isSymbolicLink()) return dir;\n  } catch (err) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "HIGH 3"
+  },
+  {
+    "label": "#553 phase 2a review MEDIUM 4: the set-aside database's pictures are moved into private/ as the winner's",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  if (ctx.dbSetAside) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "pictures go aside with it, never into private"
+  },
+  {
+    "label": "#553 phase 2a review MEDIUM 4: with two databases the app serves the top-level (other) database's pictures",
+    "file": "backend/src/lib/dataPaths.js",
+    "find": "  if (first === inPrivate && present(path.join(dataDir, DB_FILE))) return first;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "two databases still there"
+  },
+  {
+    "label": "#553 phase 2a review MEDIUM 5: a secret that exists but cannot be read is written over",
+    "file": "backend/src/middleware/auth.js",
+    "find": "      return crypto.randomBytes(48).toString('hex');",
+    "replace": "      void 0;",
+    "expect": "killed",
+    "tests": ["jwt-secret.test.js"],
+    "namePattern": "exists but cannot be read is NEVER written over"
+  },
+  {
+    "label": "#553 phase 2a review 6: no exclusive lock between the proof and the rename",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      conn.exec('BEGIN EXCLUSIVE');",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "the exclusive lock is refused"
+  },
+  {
+    "label": "#553 phase 2a review M10: the journal_mode answer is not checked",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      if (mode !== 'delete') return skip(",
+    "replace": "      if (false) return skip(",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "answers with the old mode"
+  },
+  {
+    "label": "#553 phase 2a review M11: a private database that appeared before the rename is replaced by it",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "    if (present(privDb)) return skip('private/babymonitor.db appeared while it was being prepared');\n    for (const name of DB_SIDECARS) {",
+    "replace": "    for (const name of DB_SIDECARS) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "is never replaced"
+  },
+  {
+    "label": "#553 phase 2a review M14: the time limit also undoes a rename already done",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  ctx.dbMovedIn = true;",
+    "replace": "  ctx.dbMovedIn = true;\n  if (overBudget()) { ctx.rename(privDb, src); ctx.moved.pop(); ctx.left.push(DB_FILE); return; }",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "running out AFTER the rename"
+  },
+  {
+    "label": "#553 phase 2a review: a rename refused while the file is open (EBUSY) is not retried after the lock is let go",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      if (!RENAME_REFUSED_WHILE_OPEN.has(err.code)) {",
+    "replace": "      if (true) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "refuses to rename an OPEN file"
   }
 ]

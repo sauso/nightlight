@@ -42,6 +42,9 @@ after(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
+// #553 phase 2a: db.js on a fresh data directory creates its database in private/.
+const dbFile = (dir) => join(dir, 'private', 'babymonitor.db');
+
 // Import db.js in a child process with DATA_DIR pointed at `dir`. Returns the exit status and stderr,
 // so a scenario can assert that a boot failed as well as what it left behind.
 function bootDbJs(dir) {
@@ -55,7 +58,7 @@ function bootDbJs(dir) {
 }
 
 const columnsOf = (dir, table) => {
-  const db = new Database(join(dir, 'babymonitor.db'));
+  const db = new Database(dbFile(dir));
   try {
     return db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
   } finally {
@@ -70,7 +73,7 @@ describe('sound percentile diagnostic migration', () => {
     const full = columnsOf(dir, 'activity_samples');
     const diagnostics = ['sound_p75', 'sound_p90', 'sound_sd'];
     {
-      const db = new Database(join(dir, 'babymonitor.db'));
+      const db = new Database(dbFile(dir));
       try {
         // Rewind the actual table, rather than booting today's schema twice and calling it an upgrade.
         // Remove the older motion group's last-added sentinel AND its companion so it can rerun too.
@@ -91,7 +94,7 @@ describe('sound percentile diagnostic migration', () => {
       const boot = bootDbJs(dir);
       assert.equal(boot.status, 0, `upgrade/reboot ${bootNumber}: ${boot.stderr}`);
       assert.deepEqual(columnsOf(dir, 'activity_samples').sort(), [...full].sort());
-      const db = new Database(join(dir, 'babymonitor.db'));
+      const db = new Database(dbFile(dir));
       try {
         // Derived from the schema diff, not the hand-typed `diagnostics` list above — a future
         // column added to this same migration group is checked automatically, the PRAGMA tripwire
@@ -130,7 +133,7 @@ describe('issue #501 columns: sleep_nights.in_bed_at and bed_transitions.wrong_r
     assert.ok(full.sleep_nights.includes('in_bed_at'), 'a fresh install has in_bed_at');
     assert.ok(full.bed_transitions.includes('wrong_reason'), 'a fresh install has wrong_reason');
     {
-      const db = new Database(join(dir, 'babymonitor.db'));
+      const db = new Database(dbFile(dir));
       try {
         db.exec('ALTER TABLE sleep_nights DROP COLUMN in_bed_at');
         db.exec('ALTER TABLE bed_transitions DROP COLUMN wrong_reason');
@@ -151,7 +154,7 @@ describe('issue #501 columns: sleep_nights.in_bed_at and bed_transitions.wrong_r
       for (const table of ['sleep_nights', 'bed_transitions']) {
         assert.deepEqual(columnsOf(dir, table).sort(), [...full[table]].sort(), `${table} after boot ${bootNumber}`);
       }
-      const db = new Database(join(dir, 'babymonitor.db'));
+      const db = new Database(dbFile(dir));
       try {
         for (const [table, col] of [['sleep_nights', 'in_bed_at'], ['bed_transitions', 'wrong_reason']]) {
           const def = db.prepare(`PRAGMA table_info(${table})`).all().find((c) => c.name === col);
@@ -179,7 +182,7 @@ describe('#361 sleep_nights.scoring_context', () => {
     const full = columnsOf(dir, 'sleep_nights');
     assert.ok(full.includes('scoring_context'), 'a fresh install has scoring_context');
     {
-      const db = new Database(join(dir, 'babymonitor.db'));
+      const db = new Database(dbFile(dir));
       try {
         db.exec('ALTER TABLE sleep_nights DROP COLUMN scoring_context');
         db.exec(`INSERT INTO sleep_nights (child_id, night_date, window_start, window_end, status, asleep_minutes)
@@ -194,7 +197,7 @@ describe('#361 sleep_nights.scoring_context', () => {
       const boot = bootDbJs(dir);
       assert.equal(boot.status, 0, `upgrade/reboot ${bootNumber}: ${boot.stderr}`);
       assert.deepEqual(columnsOf(dir, 'sleep_nights').sort(), [...full].sort(), `sleep_nights after boot ${bootNumber}`);
-      const db = new Database(join(dir, 'babymonitor.db'));
+      const db = new Database(dbFile(dir));
       try {
         const def = db.prepare('PRAGMA table_info(sleep_nights)').all().find((c) => c.name === 'scoring_context');
         assert.equal(def.type, 'TEXT');
@@ -221,7 +224,7 @@ describe('sleep_reviews.nobody_in_bed ("no one was in the bed")', () => {
     const full = columnsOf(dir, 'sleep_reviews');
     assert.ok(full.includes('nobody_in_bed'), 'a fresh install has it');
     {
-      const db = new Database(join(dir, 'babymonitor.db'));
+      const db = new Database(dbFile(dir));
       try {
         db.exec('ALTER TABLE sleep_reviews DROP COLUMN nobody_in_bed');
         db.exec(`INSERT INTO sleep_reviews (child_id, night_date, true_wake_at, dismissed)
@@ -236,7 +239,7 @@ describe('sleep_reviews.nobody_in_bed ("no one was in the bed")', () => {
       const boot = bootDbJs(dir);
       assert.equal(boot.status, 0, `upgrade/reboot ${bootNumber}: ${boot.stderr}`);
       assert.deepEqual(columnsOf(dir, 'sleep_reviews').sort(), [...full].sort(), `after boot ${bootNumber}`);
-      const db = new Database(join(dir, 'babymonitor.db'));
+      const db = new Database(dbFile(dir));
       try {
         const def = db.prepare('PRAGMA table_info(sleep_reviews)').all().find((c) => c.name === 'nobody_in_bed');
         assert.equal(def.type, 'INTEGER');
@@ -264,7 +267,7 @@ describe('sleep_reviews.true_in_bed_at and true_in_bed_transition_id (in bed sep
     const full = columnsOf(dir, 'sleep_reviews');
     assert.ok(full.includes('true_in_bed_at') && full.includes('true_in_bed_transition_id'), 'a fresh install has both');
     {
-      const db = new Database(join(dir, 'babymonitor.db'));
+      const db = new Database(dbFile(dir));
       try {
         db.exec('ALTER TABLE sleep_reviews DROP COLUMN true_in_bed_at');
         db.exec('ALTER TABLE sleep_reviews DROP COLUMN true_in_bed_transition_id');
@@ -281,7 +284,7 @@ describe('sleep_reviews.true_in_bed_at and true_in_bed_transition_id (in bed sep
       const boot = bootDbJs(dir);
       assert.equal(boot.status, 0, `upgrade/reboot ${bootNumber}: ${boot.stderr}`);
       assert.deepEqual(columnsOf(dir, 'sleep_reviews').sort(), [...full].sort(), `after boot ${bootNumber}`);
-      const db = new Database(join(dir, 'babymonitor.db'));
+      const db = new Database(dbFile(dir));
       try {
         const info = db.prepare('PRAGMA table_info(sleep_reviews)').all();
         for (const [col, type] of [['true_in_bed_at', 'TEXT'], ['true_in_bed_transition_id', 'INTEGER']]) {
@@ -315,7 +318,7 @@ describe('a migration group that fails partway', () => {
     //    cleanest way to make the group fail at a known point — the guard keys on `ntfy_enabled`, which
     //    is absent, so the group runs, adds `ntfy_enabled`, then hits `ntfy_server_url` and throws.
     {
-      const db = new Database(join(dir, 'babymonitor.db'));
+      const db = new Database(dbFile(dir));
       for (const col of ['ntfy_enabled', 'ntfy_server_url', 'ntfy_topic', 'ntfy_token', 'ntfy_username', 'ntfy_password']) {
         db.exec(`ALTER TABLE settings DROP COLUMN ${col}`);
       }
@@ -369,7 +372,7 @@ describe('a migration group that fails partway', () => {
     const full = columnsOf(dir, 'settings');
 
     {
-      const db = new Database(join(dir, 'babymonitor.db'));
+      const db = new Database(dbFile(dir));
       for (const col of ['ntfy_enabled', 'ntfy_server_url', 'ntfy_topic', 'ntfy_token', 'ntfy_username', 'ntfy_password']) {
         db.exec(`ALTER TABLE settings DROP COLUMN ${col}`);
       }

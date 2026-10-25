@@ -1,11 +1,22 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import { dataDirFrom, ensurePrivateDir, present, privateDirOf, resolveDbPath } from './lib/dataPaths.js';
 
-const DATA_DIR = process.env.DATA_DIR || '/app/data';
+const DATA_DIR = dataDirFrom();
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-const db = new Database(path.join(DATA_DIR, 'babymonitor.db'));
+// #553 phase 2a: the database lives in DATA_DIR/private/ (0700), or at the top level on an install the start-up
+// move has not reached (lib/dataPaths.js has the rule). This file only RESOLVES; it never moves anything, so a
+// start without the image's start-up script cannot split a database from its WAL or open an empty copy next to it.
+export const DB_PATH = resolveDbPath(DATA_DIR);
+// 'private' or 'legacy', as opened: what About and the diagnostics bundle report (routes/about.js, diagnostics.js).
+export const DB_LAYOUT = path.dirname(DB_PATH) === privateDirOf(DATA_DIR) ? 'private' : 'legacy';
+// A fresh install creates private/ itself, 0700 by an explicit chmod, BEFORE SQLite creates the file in it (SQLite
+// does not create folders, and a folder made under UMASK=022 would be 0755).
+if (DB_LAYOUT === 'private' && !present(DB_PATH)) ensurePrivateDir(DATA_DIR);
+
+const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
@@ -833,8 +844,9 @@ if (!camerasColumns.includes('detect_record_clips')) {
   db.exec('ALTER TABLE cameras ADD COLUMN detect_record_clips INTEGER NOT NULL DEFAULT 0');
 }
 
-// snapshot: 1 when the alert-time image was captured and saved to disk (DATA_DIR/detection-snapshots/
-// <id>.jpg), so the in-app Alerts feed knows to show a thumbnail. See lib/detectionEvents.js.
+// snapshot: 1 when the alert-time image was captured and saved to disk (DATA_DIR/private/detection-snapshots/
+// <id>.jpg since #553; at the top level on an install not yet moved), so the in-app Alerts feed knows to show a
+// thumbnail. See lib/detectionEvents.js.
 const detectionEventsColumns = db.prepare('PRAGMA table_info(detection_events)').all().map((c) => c.name);
 if (!detectionEventsColumns.includes('snapshot')) {
   db.exec('ALTER TABLE detection_events ADD COLUMN snapshot INTEGER NOT NULL DEFAULT 0');

@@ -4,9 +4,12 @@ import path from 'path';
 import crypto from 'crypto';
 import db from '../db.js';
 import { logger } from '../lib/logger.js';
+import { dataDirFrom, ensurePrivateDir, JWT_SECRET_FILE, present, privateDirOf, resolveSecretFile } from '../lib/dataPaths.js';
 
-const DATA_DIR = process.env.DATA_DIR || '/app/data';
-const SECRET_FILE = path.join(DATA_DIR, '.jwt_secret');
+const DATA_DIR = dataDirFrom();
+// #553 phase 2a: private/.jwt_secret, or the top-level one on an install the start-up move has not reached; a new
+// secret goes into private/ (lib/dataPaths.js, resolveSecretFile).
+const SECRET_FILE = resolveSecretFile(JWT_SECRET_FILE, DATA_DIR);
 
 // --- How long a sign-in lasts: SESSION_TTL_DAYS (#562 bullet 7) -------------------------------------
 //
@@ -107,20 +110,37 @@ export function sessionAgeCondition(alias = '') {
 // would mean every default install shares the same, publicly-known signing key.
 function loadOrCreateSecret() {
   if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
-  try {
-    if (fs.existsSync(SECRET_FILE)) {
+  if (present(SECRET_FILE)) {
+    try {
       return fs.readFileSync(SECRET_FILE, 'utf8').trim();
+    } catch (err) {
+      // It EXISTS but cannot be read (a restore that left it owner-writable but not readable, say). Never write over
+      // it: that would destroy the real secret and sign everyone out for good, which a fresh secret written over it
+      // used to do without a word (Codex review of PR #870). This run signs with a temporary secret instead, and says so.
+      logger.error(
+        `[auth] the session signing secret at ${SECRET_FILE} exists but cannot be read (${err.code || err.message}). It ` +
+          'was left as it is, and this run uses a temporary secret, so every sign-in ends at the next restart. Give the ' +
+          'file to PUID:PGID with mode 600 on the host (or set JWT_SECRET), then restart.'
+      );
+      return crypto.randomBytes(48).toString('hex');
     }
-  } catch {
-    // Fall through to generating a fresh one.
   }
   const secret = crypto.randomBytes(48).toString('hex');
   try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    // #553 phase 2a: a new secret goes into private/, which may not exist yet (a fresh install whose JWT_SECRET was
+    // set before, an install whose database the start-up move left at the top level). Created 0700 by an explicit
+    // chmod first: writeFileSync does not create folders, and this used to fail SILENTLY (plan review, C9).
+    if (path.dirname(SECRET_FILE) === privateDirOf(DATA_DIR)) ensurePrivateDir(DATA_DIR);
     fs.writeFileSync(SECRET_FILE, secret, { mode: 0o600 });
-  } catch {
-    // If this can't be persisted, sessions just won't survive a restart - the
-    // app still works fine for the current run either way.
+  } catch (err) {
+    // The app still works for this run, so this is not fatal; but every restart would then sign everyone out (and
+    // stop their push alerts), with nothing else to say why. So it is said here, once, loudly.
+    logger.error(
+      `[auth] could not save the session signing secret to ${SECRET_FILE} (${err.message}): everyone will be signed ` +
+        'out at every restart until it can be saved. Check that the data directory, and private/ inside it, belong ' +
+        'to PUID:PGID, or set JWT_SECRET.'
+    );
   }
   return secret;
 }

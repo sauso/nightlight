@@ -5,7 +5,9 @@ notification-provider tokens, and recordings/snapshots of your home and family. 
 security issues privately, not as a public GitHub issue.
 
 Those secrets sit in the data directory in plaintext; at rest they are protected by file
-permissions (owner-only by default, `UMASK`), so keep that directory private to the container. See
+permissions, so keep that directory private to the container. The database, `.jwt_secret`, the
+Firebase files, the snapshots and the backups are in its `private/` folder, which is always owner-only
+(`700`); everything else is owner-only by default (`UMASK`). See
 [Who can read the data directory](docs/operations.md#who-can-read-the-data-directory).
 
 ## Supported versions
@@ -148,7 +150,7 @@ manual:
   edit camera).
 - **Admin/caregiver account password**: sign in and change it (Account → Change password), or
   have an admin reset another account's.
-- **JWT signing secret** (`.jwt_secret` in the data volume): deleting it and restarting the
+- **JWT signing secret** (`private/.jwt_secret` in the data volume): deleting it and restarting the
   container generates a new one and signs everyone out, forcing a fresh login everywhere.
 - **Notification-provider tokens** (Pushover, Firebase, Gotify, ntfy): regenerate/revoke the
   token or key at the provider and re-enter it in Settings → Push notifications.

@@ -12,11 +12,12 @@
 // What it does NOT clear: the per-user second-step attempt limit (#550). That count lives in the memory of
 // the running server, and this script is a separate process, so it cannot reach it. The admin reset in the
 // app does clear it (routes/auth.js, resetMfaUserLimit); so does a restart of the container.
-import Database from 'better-sqlite3';
-import path from 'path';
+//
+// #553 phase 2a: it finds the database where the app does (private/ once the start-up move has run) and never
+// creates one (scripts/consoleDb.js).
+import { openConsoleDatabase } from './consoleDb.js';
 
-const DATA_DIR = process.env.DATA_DIR || '/app/data';
-const db = new Database(path.join(DATA_DIR, 'babymonitor.db'));
+const db = openConsoleDatabase();
 db.pragma('busy_timeout = 5000');
 
 const arg = process.argv[2];
