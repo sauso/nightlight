@@ -4,9 +4,12 @@ import path from 'path';
 import crypto from 'crypto';
 import db from '../db.js';
 import { logger } from '../lib/logger.js';
+import { dataDirFrom, ensurePrivateDir, JWT_SECRET_FILE, privateDirOf, resolveSecretFile } from '../lib/dataPaths.js';
 
-const DATA_DIR = process.env.DATA_DIR || '/app/data';
-const SECRET_FILE = path.join(DATA_DIR, '.jwt_secret');
+const DATA_DIR = dataDirFrom();
+// #553 phase 2a: private/.jwt_secret, or the top-level one on an install the start-up move has not reached; a new
+// secret goes into private/ (lib/dataPaths.js, resolveSecretFile).
+const SECRET_FILE = resolveSecretFile(JWT_SECRET_FILE, DATA_DIR);
 
 // --- How long a sign-in lasts: SESSION_TTL_DAYS (#562 bullet 7) -------------------------------------
 //
@@ -117,10 +120,19 @@ function loadOrCreateSecret() {
   const secret = crypto.randomBytes(48).toString('hex');
   try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    // #553 phase 2a: a new secret goes into private/, which may not exist yet (a fresh install whose JWT_SECRET was
+    // set before, an install whose database the start-up move left at the top level). Created 0700 by an explicit
+    // chmod first: writeFileSync does not create folders, and this used to fail SILENTLY (plan review, C9).
+    if (path.dirname(SECRET_FILE) === privateDirOf(DATA_DIR)) ensurePrivateDir(DATA_DIR);
     fs.writeFileSync(SECRET_FILE, secret, { mode: 0o600 });
-  } catch {
-    // If this can't be persisted, sessions just won't survive a restart - the
-    // app still works fine for the current run either way.
+  } catch (err) {
+    // The app still works for this run, so this is not fatal; but every restart would then sign everyone out (and
+    // stop their push alerts), with nothing else to say why. So it is said here, once, loudly.
+    logger.error(
+      `[auth] could not save the session signing secret to ${SECRET_FILE} (${err.message}): everyone will be signed ` +
+        'out at every restart until it can be saved. Check that the data directory, and private/ inside it, belong ' +
+        'to PUID:PGID, or set JWT_SECRET.'
+    );
   }
   return secret;
 }

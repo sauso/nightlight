@@ -3,6 +3,7 @@ import path from 'path';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { captureSnapshot, fetchHttpSnapshot } from './snapshot.js';
+import { dataDirFrom, resolveSnapshotDir, TRANSITION_SNAPSHOTS_DIR } from './dataPaths.js';
 import {
   findQuickReversals,
   findAllLingeringBedMotion,
@@ -37,8 +38,12 @@ const MAX_AGE_DAYS = 45;
 // is also what any occupancy classifier has to be measured against, because the question that decides
 // whether such a thing is worth shipping is not "how accurate is it on random frames" but "is it right
 // on the frames the detector got wrong".
-const DATA_DIR = process.env.DATA_DIR || '/app/data';
-const SNAPSHOT_DIR = path.join(DATA_DIR, 'transition-snapshots');
+//
+// #553 phase 2a: DATA_DIR/private/transition-snapshots once the start-up move has run (it moves the folder WITH the
+// database, since the JPEGs are named by its row ids), the top-level one before that (lib/dataPaths.js,
+// resolveSnapshotDir). The mkdir below never has to make private/ itself: db.js, imported first, already has.
+const SNAPSHOT_DIR = resolveSnapshotDir(TRANSITION_SNAPSHOTS_DIR, dataDirFrom());
+export { SNAPSHOT_DIR as TRANSITION_SNAPSHOT_DIR };
 try {
   fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
 } catch (err) {

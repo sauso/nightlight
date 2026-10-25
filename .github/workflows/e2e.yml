@@ -183,3 +183,45 @@ jobs:
       - name: Tear down (safety net)
         if: always()
         run: bash e2e/media-isolation.sh teardown || true
+
+  # #553 phase 2a: the one-way move of the database and secrets into DATA_DIR/private/, on an install made by the LAST
+  # RELEASE (pulled from Docker Hub), upgraded to an image built from this commit: the move itself (a database with a
+  # non-empty -wal, a root-owned Firebase file and backup, the snapshot folders), the old session and password still
+  # working, a second start doing nothing, the documented rollback starting empty, the "two copies" case after it,
+  # PUID=0, and console scripts on an empty volume creating nothing. A job of its own, like `hardened`: its own
+  # containers, network, volumes and host port (4300).
+  private-layout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # Same rule as the e2e job: a nightly run covers dev.
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+
+      # Same reason as the e2e job's Phase 4 step: test this commit, never a published tag.
+      - name: Build the app image from this commit
+        run: docker build -t sauso/nightlight:dev .
+
+      - name: Record which image the run uses
+        run: |
+          echo "commit: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          docker image inspect sauso/nightlight:dev --format 'image id: {{.Id}}' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Private layout (upgrade from the last release, rollback, two copies, PUID=0, empty volume)
+        env:
+          PRIVATE_LAYOUT_LOG_DIR: ${{ runner.temp }}/private-layout-logs
+        run: bash e2e/private-layout.sh all
+
+      - name: Upload the private layout run's container logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: private-layout-logs
+          path: ${{ runner.temp }}/private-layout-logs
+          if-no-files-found: ignore
+
+      - name: Tear down (safety net)
+        if: always()
+        run: bash e2e/private-layout.sh teardown || true

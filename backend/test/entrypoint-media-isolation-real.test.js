@@ -41,7 +41,10 @@ const STUBS = {
   usermod: '#!/bin/sh\nexit 0\n',
   groupmod: '#!/bin/sh\nexit 0\n',
   chown: '#!/bin/sh\nexit 0\n',
-  'su-exec': '#!/bin/sh\necho "STUB su-exec $1"\nshift\nexec "$@"\n',
+  // $2 too (#553 phase 2a): the move into private/ also starts through su-exec (`su-exec nightlight node <tool>`), so
+  // "su-exec ran" must mean the app's start (/bin/sh app.sh). `node`, that tool, is a no-op here.
+  'su-exec': '#!/bin/sh\necho "STUB su-exec $1 $2"\nshift\nexec "$@"\n',
+  node: '#!/bin/sh\nexit 0\n',
   // The programs the dry run makes the media user run (media-probe.sh): stand-ins that print a version line, so the
   // check is about whether the MEDIA USER can execute them, which is the part that depends on the kernel.
   ffmpeg: '#!/bin/sh\necho "ffmpeg version stub"\n',
@@ -106,7 +109,7 @@ function run(dir, { prefix = [], stubDir = STUB_DIR } = {}) {
     status: r.status,
     app: line('APP'),
     child: line('CHILD'),
-    suExec: r.stdout.includes('STUB su-exec nightlight'),
+    suExec: r.stdout.includes('STUB su-exec nightlight /bin/sh'),
     onLine: r.stdout.includes('[entrypoint] media isolation on:'),
     warning: `${r.stdout}\n${r.stderr}`.split('\n').find((l) => l.includes('[entrypoint] warning: media isolation is off:')) ?? null,
     leftovers: fs.readdirSync(tmp),

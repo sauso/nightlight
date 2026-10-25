@@ -86,7 +86,10 @@ mkdir -p "$DATA_DIR"
 #   - the data directory itself: new install (mkdir above made it root-owned), or PUID/PGID changed (the
 #     directory still belongs to the old ids); this is the check that catches the cases the walk exists for;
 #   - the database, its -wal/-shm and .jwt_secret, if present: the files a backup restore or a hand-copy as
-#     root is most likely to drop in, and the ones the app cannot run without.
+#     root is most likely to drop in, and the ones the app cannot run without. Since #553 phase 2a they normally live
+#     in private/, so both places are checked, and private/ itself (a `docker exec` as root must not be able to leave a
+#     root-owned private/ that locks the app out of its own database). Inside private/ (0700, the app's) root can only
+#     look with DAC_OVERRIDE; without it those names read as absent and are skipped (the warning below says so).
 # Compared with $PUID:$PGID, not `id nightlight`: the usermod/groupmod above made them the same, and this reads
 # the same in the tests, where those tools are stubbed. Compared NUMERICALLY (canonical_id below): stat prints 99,
 # so PUID=099 (which usermod reads as uid 99, and entrypoint-puid-root.test.js keeps legitimate) never matched as
@@ -117,7 +120,7 @@ canonical_id() {
 }
 WANT_OWNER="$(canonical_id "$PUID"):$(canonical_id "$PGID")"
 NEEDS_CHOWN=
-for f in . babymonitor.db babymonitor.db-wal babymonitor.db-shm .jwt_secret; do
+for f in . babymonitor.db babymonitor.db-wal babymonitor.db-shm .jwt_secret private private/babymonitor.db private/babymonitor.db-wal private/babymonitor.db-shm private/.jwt_secret; do
   if [ -e "$DATA_DIR/$f" ] && [ "$(stat -L -c %u:%g "$DATA_DIR/$f" 2>/dev/null)" != "$WANT_OWNER" ]; then
     NEEDS_CHOWN="$f"
     break
@@ -128,6 +131,54 @@ if [ -n "$NEEDS_CHOWN" ]; then
   chown -R nightlight:nightlight "$DATA_DIR"
 else
   printf '[entrypoint] data directory already owned by %s; not walking it\n' "$WANT_OWNER"
+fi
+
+# --- The private folder (#553 phase 2a) ------------------------------------------------------------
+# The database and the app's secrets live in DATA_DIR/private/, a folder that is always 700 and owned by PUID:PGID, so
+# that a later phase can open DATA_DIR itself to the media group without exposing them (a 700 folder protects even a
+# wrongly permissive file inside it). The MOVE is src/scripts/migrate-private-layout.js, run further down as the app
+# user; this part only prepares, as root:
+#   - private/ itself: created if missing, given to PUID:PGID only if it is not already theirs, and chmod 700 on every
+#     start (the umask must not decide it: UMASK=022 is a supported opt-out, and private/ stays 700 under it too). A
+#     private/ that is a symbolic link, or not a folder, is left exactly as it is, with a warning.
+#   - the top-level items the tool moves that are not sentinels above, when one has the wrong owner (a restore or a
+#     hand-copy as root; most often a Firebase file dropped in as root): the tool runs as the app user and could not
+#     move it (a folder's rename into another needs write access to the folder itself). Only these few names, never
+#     the clip tree (#567), never through a symbolic link (the tool will not move a link either), and not at all when
+#     the full walk above just ran, because it re-owned all of them.
+# EVERY step is guarded: under `set -e` a failed mkdir, chown or chmod (no CAP_CHOWN or CAP_FOWNER, a read-only or
+# root-squashed share) must never become a container that will not start. Root cannot look inside the 700 private/
+# without DAC_OVERRIDE (the optional hardening keeps it; e2e/hardened.sh's control D takes it away).
+PRIVATE_DIR="$DATA_DIR/private"
+private_warn() { printf '[entrypoint] warning: %s; starting anyway\n' "$1" >&2; }
+if [ -L "$PRIVATE_DIR" ]; then
+  private_warn "$PRIVATE_DIR is a symbolic link, so it is left as it is (what it points to must be owned by $WANT_OWNER and mode 700)"
+elif [ -e "$PRIVATE_DIR" ] && [ ! -d "$PRIVATE_DIR" ]; then
+  private_warn "$PRIVATE_DIR exists and is not a folder, so nothing can be moved into it; move it out of the way"
+else
+  if [ ! -d "$PRIVATE_DIR" ]; then
+    mkdir "$PRIVATE_DIR" || private_warn "could not create $PRIVATE_DIR"
+  fi
+  if [ -d "$PRIVATE_DIR" ]; then
+    if [ "$(stat -c %u:%g "$PRIVATE_DIR" 2>/dev/null)" != "$WANT_OWNER" ]; then
+      chown nightlight:nightlight "$PRIVATE_DIR" || private_warn "could not give $PRIVATE_DIR to $WANT_OWNER"
+    fi
+    chmod 700 "$PRIVATE_DIR" || private_warn "could not make $PRIVATE_DIR owner-only (700)"
+    if ! stat "$PRIVATE_DIR/." >/dev/null 2>&1; then
+      private_warn "root cannot look inside $PRIVATE_DIR (is DAC_OVERRIDE missing?), so the owners of the files in it were not checked"
+    fi
+  fi
+fi
+if [ -z "$NEEDS_CHOWN" ]; then
+  for p in "$DATA_DIR/babymonitor.db-journal" "$DATA_DIR/firebase-service-account.json" "$DATA_DIR/google-services.json" \
+    "$DATA_DIR/detection-snapshots" "$DATA_DIR/transition-snapshots" "$DATA_DIR"/backup-*.db; do
+    # An unmatched backup-*.db stays a literal word, which -e rejects.
+    if [ ! -e "$p" ] || [ -L "$p" ]; then continue; fi
+    _owner=$(stat -c %u:%g "$p" 2>/dev/null) || continue
+    if [ "$_owner" = "$WANT_OWNER" ]; then continue; fi
+    printf '[entrypoint] %s is owned by %s, not %s; re-owning it so it can be moved into private/\n' "$p" "$_owner" "$WANT_OWNER"
+    chown -R nightlight:nightlight "$p" || private_warn "could not re-own $p"
+  done
 fi
 
 # A umask only shapes NEW files. An install upgraded from before #549 has every file 0644 and every
@@ -163,19 +214,52 @@ else
   DONE="existing entries left as they are (UMASK is not 077)"
 fi
 
+# --- Moving the database and secrets into private/ (#553 phase 2a) ---------------------------------
+# src/scripts/migrate-private-layout.js, found next to this script (/app/src/... in the image, backend/src/... in a
+# checkout). In the FOREGROUND and waited for, as the app user, BEFORE the app starts at the bottom of this script:
+# nothing else may have the database open while it moves, and a start-up that stopped waiting at a deadline could start
+# the app in the middle of the move (plan review of #553 phase 2a, C1). Its own time limit applies only before its
+# point of no return. Its exit code becomes ONE `private layout:` line, and no exit code can stop the container (inside
+# an `if`, `set -e` does not apply):
+#   0 everything that belongs in private/ is there   10 something stays at the top level this start
+#   11 a top-level copy was set aside in private/legacy-*/   anything else: the tool itself failed
+# Its own `[private-layout]` lines, just before, say what moved and why anything did not.
+PRIVATE_TOOL="$(dirname "$0")/src/scripts/migrate-private-layout.js"
+if su-exec nightlight node "$PRIVATE_TOOL"; then PRIVATE_RC=0; else PRIVATE_RC=$?; fi
+case "$PRIVATE_RC" in
+  0) printf '[entrypoint] private layout: the database and secrets are in %s (or there are none yet)\n' "$PRIVATE_DIR" ;;
+  10) private_warn "private layout: something is still at the top of $DATA_DIR this start (the [private-layout] lines above say what and why), and the app uses it there" ;;
+  11) private_warn "private layout: a copy at the top of $DATA_DIR was set aside in $PRIVATE_DIR/legacy-*/ because $PRIVATE_DIR already had one, which is the one used (docs/operations.md, \"Two copies of the database\")" ;;
+  *) private_warn "private layout: the move into $PRIVATE_DIR did not finish (exit $PRIVATE_RC), and the app uses the files where they are" ;;
+esac
+
 # One line to check after an upgrade (`docker logs`; on staging, `hx.sh logs`): the mask, what the
-# walk found, and the modes of the files that hold the secrets (read AFTER the chmod, so they show
-# whether it took). Each is existence-guarded: on a first
+# walk found, and the modes of the files that hold the secrets (read AFTER the chmod and the move, so they show
+# whether they took). Each is existence-guarded: on a first
 # boot there is no database or .jwt_secret yet, and -wal/-shm come and go with the open database.
 # stat -L: if one of them is a symlink, report the file the app actually opens, not the link.
+# #553 phase 2a: each is named by its path in the data directory, found by the app's own rule (src/lib/dataPaths.js):
+# the database and its companions where the database is (private/ if it is there, else the top level if it is there,
+# else private/), .jwt_secret private/ first. private/ itself comes first.
 # The app logs its own `[data-dir]` line once it is up, which shows the mask actually REACHED it.
-MODES=
+exists_or_link() { [ -e "$1" ] || [ -L "$1" ]; }
+if exists_or_link "$PRIVATE_DIR/babymonitor.db"; then DB_AT=private/
+elif exists_or_link "$DATA_DIR/babymonitor.db"; then DB_AT=
+else DB_AT=private/
+fi
+m=absent
+if [ -e "$PRIVATE_DIR" ]; then m=$(stat -L -c %a "$PRIVATE_DIR" 2>/dev/null) || m=unknown; fi
+MODES=" private=$m"
 for f in babymonitor.db babymonitor.db-wal babymonitor.db-shm .jwt_secret; do
-  m=absent
-  if [ -e "$DATA_DIR/$f" ]; then
-    m=$(stat -L -c %a "$DATA_DIR/$f" 2>/dev/null) || m=unknown
+  r="$DB_AT$f"
+  if [ "$f" = .jwt_secret ]; then
+    if exists_or_link "$PRIVATE_DIR/$f"; then r="private/$f"; elif exists_or_link "$DATA_DIR/$f"; then r=$f; else r="private/$f"; fi
   fi
-  MODES="$MODES $f=$m"
+  m=absent
+  if [ -e "$DATA_DIR/$r" ]; then
+    m=$(stat -L -c %a "$DATA_DIR/$r" 2>/dev/null) || m=unknown
+  fi
+  MODES="$MODES $r=$m"
 done
 printf '[entrypoint] umask %s; %s; modes:%s\n' "$UMASK" "$DONE" "$MODES"
 

@@ -60,10 +60,13 @@ jobs:
       #      umask test (BusyBox sh is what production runs it on); and entrypoint-media-isolation-real.test.js as
       #      ROOT with util-linux's setpriv installed (`apk add setpriv`, as the Dockerfile does): the real drops, the
       #      real probe. `npm test` above skips that file (not root), so a skip here fails the step.
+      #   5. (#553 phase 2a) entrypoint-private-layout.test.js, the private/ folder and the move into it, in the
+      #      unprivileged run (BusyBox sh, stat, chmod). Its real-move half, entrypoint-private-layout-real.test.js,
+      #      needs the host's better-sqlite3 (musl cannot load it), so it runs in `npm run test:core` above only.
       - name: Entrypoint file modes and ownership on BusyBox, and the shell mutants (#549, #567)
         run: |
           docker run --rm --user node -v "$PWD/backend:/w:ro" -w /w node:24-alpine \
-            node --test --test-reporter=tap test/entrypoint-umask.test.js test/entrypoint-media-isolation.test.js > "$RUNNER_TEMP/busybox.tap" \
+            node --test --test-reporter=tap test/entrypoint-umask.test.js test/entrypoint-media-isolation.test.js test/entrypoint-private-layout.test.js > "$RUNNER_TEMP/busybox.tap" \
             || { cat "$RUNNER_TEMP/busybox.tap"; exit 1; }
           grep -q '^# skipped 0$' "$RUNNER_TEMP/busybox.tap" \
             || { cat "$RUNNER_TEMP/busybox.tap"; echo "::error::the BusyBox run skipped tests"; exit 1; }

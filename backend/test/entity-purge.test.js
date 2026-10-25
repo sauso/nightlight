@@ -80,9 +80,10 @@ function linkDirOrSkip(t, target, at) {
 
 // Where a table's id-named snapshot JPEGs live. Only the DIRECTORY is spelled out; which tables have a
 // snapshot is read from the schema, and a table with a `snapshot` column missing from this map fails below.
+// #553 phase 2a: in private/ on this fresh data directory, next to the database.
 const SNAPSHOT_DIRS = {
-  bed_transitions: path.join(dataDir, 'transition-snapshots'),
-  detection_events: path.join(dataDir, 'detection-snapshots'),
+  bed_transitions: path.join(dataDir, 'private', 'transition-snapshots'),
+  detection_events: path.join(dataDir, 'private', 'detection-snapshots'),
 };
 
 let childServer;

@@ -4,7 +4,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
-import db from '../db.js';
+import db, { DB_LAYOUT } from '../db.js';
+import { dataDirFrom, layoutConflict } from '../lib/dataPaths.js';
 import { logger } from '../lib/logger.js';
 import { getPathStatus } from '../lib/mediamtx.js';
 import { mqttStatus, getReading } from '../lib/mqttClient.js';
@@ -202,6 +203,10 @@ router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
           puid: process.env.PUID || null,
           pgid: process.env.PGID || null,
         },
+        // #553 phase 2a (added): where the opened database is ('private' or 'legacy'), and whether a copy the start-up
+        // move set aside waits for a decision. The same two values as GET /api/about; no paths, so nothing to redact.
+        data_layout: DB_LAYOUT,
+        layout_conflict: layoutConflict(dataDirFrom()),
       },
 
       settings: {

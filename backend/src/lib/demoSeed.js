@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import db from '../db.js';
 import * as sleep from './sleepAnalysis.js';
+import { DETECTION_SNAPSHOTS_DIR, resolveSnapshotDir } from './dataPaths.js';
 
 const CHILDREN = [
   { id: 'demo-child-avery', name: 'Avery', color: '#9ec5e5', cameraId: 'demo-camera-avery', cameraName: 'Avery camera', mediaPath: 'demo-avery' },
@@ -88,7 +89,9 @@ export async function seedDemo(clock = () => new Date()) {
     throw new Error(`demo media assets are missing from ${assetDir}`);
   }
 
-  const snapshotsDir = path.join(dataDir, 'detection-snapshots');
+  // #553 phase 2a: the folder lib/detectionEvents.js serves from, by the same rule (private/ once the database is
+  // there). This used to be a second, hand-written copy of that path, which the move into private/ would have split.
+  const snapshotsDir = resolveSnapshotDir(DETECTION_SNAPSHOTS_DIR, dataDir);
   const seededClipsDir = path.join(clipsDir, 'demo-seed');
   fs.rmSync(snapshotsDir, { recursive: true, force: true });
   fs.rmSync(seededClipsDir, { recursive: true, force: true });

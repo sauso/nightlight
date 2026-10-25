@@ -6,6 +6,8 @@ import { requireAuth } from '../middleware/auth.js';
 import { parseStunServers } from '../lib/stunServers.js';
 import { getPublicBaseUrl } from '../lib/push.js';
 import { mediaIsolationOn } from '../lib/childEnv.js';
+import { DB_LAYOUT } from '../db.js';
+import { dataDirFrom, layoutConflict } from '../lib/dataPaths.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -43,12 +45,18 @@ router.get('/', requireAuth, (req, res) => {
   // is what backend/entrypoint.sh decided and exported at start (lib/childEnv.js, mediaIsolationOn), never guessed
   // here. Added to the response, nothing else changed (an older app reading it ignores the field). Not shown on the
   // About page yet: the switch is internal until the later phases of #553, which add the page line with its docs.
+  // dataLayout and layoutConflict (#553 phase 2a, both added, nothing else changed): where the database this server
+  // OPENED is ('private' = DATA_DIR/private/, 'legacy' = the top level, an install the start-up move has not reached),
+  // and whether a copy waits for the owner's decision (a private/legacy-* folder the move set aside, or a second
+  // database at the top level). The conflict is read per request, so deleting the set-aside folder clears it at once.
   res.json({
     version,
     ...build,
     stunServers: parseStunServers(process.env.STUN_SERVERS).urls,
     publicBaseUrl: getPublicBaseUrl(),
     mediaIsolation: mediaIsolationOn() ? 'on' : 'off',
+    dataLayout: DB_LAYOUT,
+    layoutConflict: layoutConflict(dataDirFrom()),
   });
 });
 

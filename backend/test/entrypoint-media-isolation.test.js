@@ -51,12 +51,16 @@ const SETPRIV_STUB = [
   '',
 ].join('\n');
 
+// su-exec prints its user AND the command's first word (#553 phase 2a): the move into private/ also starts through
+// su-exec, as `su-exec nightlight node <tool>`, so "su-exec ran" has to mean the APP's start (/bin/sh here). `node` is
+// that tool, stubbed: it logs that it ran, so a case can check it ran before the app, whichever way the app starts.
 const STUBS = {
   id: '#!/bin/sh\ncase "$1" in -u) echo 99 ;; -g) echo 100 ;; *) exit 1 ;; esac\n',
   usermod: '#!/bin/sh\nexit 0\n',
   groupmod: '#!/bin/sh\nexit 0\n',
   chown: '#!/bin/sh\nexit 0\n',
-  'su-exec': '#!/bin/sh\necho "STUB su-exec $1"\nshift\nexec "$@"\n',
+  'su-exec': '#!/bin/sh\necho "STUB su-exec $1 $2"\nshift\nexec "$@"\n',
+  node: '#!/bin/sh\necho "STUB node $*"\nexit 0\n',
   timeout: '#!/bin/sh\nprintf \'%s\\n\' "$1" >> "$NL_LOG.timeout"\nshift\nexec "$@"\n',
   setpriv: SETPRIV_STUB,
 };
@@ -84,7 +88,9 @@ function run(env) {
   return {
     status: r.status,
     app: (/^APP MEDIA_ISOLATION=(.*)$/m.exec(r.stdout) || [])[1] ?? null,
-    suExec: r.stdout.includes('STUB su-exec nightlight'),
+    suExec: r.stdout.includes('STUB su-exec nightlight /bin/sh'),
+    // #553 phase 2a: the move ran as the app user, before the app (its line comes first in the output).
+    movedFirst: /STUB su-exec nightlight node\nSTUB node \S*migrate-private-layout\.js\n[\s\S]*APP MEDIA_ISOLATION=/.test(r.stdout),
     setpriv: read(`${log}.setpriv`).map((l) => { const [opts, cmd] = l.split('|'); return { opts, cmd }; }),
     timeouts: read(`${log}.timeout`),
     isoWarnings: both.filter((l) => l.includes('[entrypoint] warning: media isolation is off:')),
@@ -101,6 +107,7 @@ function assertUsualSilent(r, why) {
   assert.deepEqual(r.setpriv, [], `${why}: setpriv ran${r.ctx}`);
   assert.deepEqual(r.isoWarnings, [], `${why}: a warning nobody asked for${r.ctx}`);
   assert.deepEqual(r.onLines, [], r.ctx);
+  assert.ok(r.movedFirst, `${why}: the move into private/ did not run, as the app user, before the app${r.ctx}`);
 }
 
 // The fallback: the switch asked, isolation could not be had. su-exec, off, exactly one warning with `reason` in it.
@@ -112,6 +119,7 @@ function assertFallback(r, reason, why) {
   assert.equal(r.isoWarnings.length, 1, `${why}: exactly one warning${r.ctx}`);
   assert.ok(r.isoWarnings[0].includes(reason), `${why}: the warning does not say "${reason}": ${r.isoWarnings[0]}`);
   assert.ok(r.isoWarnings[0].endsWith('; starting the usual way'), r.isoWarnings[0]);
+  assert.ok(r.movedFirst, `${why}: the move into private/ did not run, as the app user, before the app${r.ctx}`);
 }
 
 describe('#553 entrypoint: the media isolation decision', { skip }, () => {
@@ -140,6 +148,7 @@ describe('#553 entrypoint: the media isolation decision', { skip }, () => {
     assert.equal(r.status, 0, r.ctx);
     assert.equal(r.app, 'on', r.ctx);
     assert.equal(r.suExec, false, `su-exec ran${r.ctx}`);
+    assert.ok(r.movedFirst, `the move into private/ must run before the isolated start too${r.ctx}`);
     assert.deepEqual(r.isoWarnings, [], r.ctx);
     assert.deepEqual(r.onLines, ['[entrypoint] media isolation on: ffmpeg, ffprobe and MediaMTX run as uid 1700, the app as 99:100'], r.ctx);
     // Two setpriv calls: the dry run, then the real start. The SAME options in both, and they are exactly these.

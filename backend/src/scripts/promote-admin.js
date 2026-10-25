@@ -12,11 +12,10 @@
 //
 // See README.md's "Adding caregivers" section and docs/mfa.md's Recovery section, where this is
 // documented alongside the reset-mfa recovery path.
-import Database from 'better-sqlite3';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-const DATA_DIR = process.env.DATA_DIR || '/app/data';
+// #553 phase 2a: the database where the app finds it (private/ once the start-up move has run), never created here.
+import { openConsoleDatabase } from './consoleDb.js';
 
 // --- core logic, exported so a test can exercise it directly against a throwaway database without
 // going through argv/console/process.exit (there is no reset-mfa test file to model this on; grepped
@@ -72,7 +71,7 @@ export function parseArgs(argv) {
 }
 
 if (isMainModule()) {
-  const db = new Database(path.join(DATA_DIR, 'babymonitor.db'));
+  const db = openConsoleDatabase();
   db.pragma('busy_timeout = 5000');
 
   const { mode, username } = parseArgs(process.argv.slice(2));

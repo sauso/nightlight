@@ -23,6 +23,7 @@ const STUBS = {
   groupmod: '#!/bin/sh\nexit 0\n',
   chown: '#!/bin/sh\nexit 0\n',
   'su-exec': '#!/bin/sh\nshift\nexec "$@"\n',
+  node: '#!/bin/sh\nexit 0\n', // the #553 phase 2a move into private/: not what this file tests
 };
 let ROOT;
 let STUB_DIR;

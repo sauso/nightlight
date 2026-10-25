@@ -78,8 +78,9 @@ TINI_FATAL='FATAL tini'
 # backend/entrypoint.sh, the mode walk's warning.
 TIGHTEN_WARNING='could not tighten'
 ALREADY_OWNED_LINE="data directory already owned by $EXPECT_DATA_OWNER"
-# The second start can only print this if root could look inside the owner-only data directory.
-DB_MODE_TOKEN='babymonitor.db=600'
+# The second start can only print this if root could look inside the owner-only data directory, and (#553 phase 2a)
+# inside the owner-only private/ folder in it, where a fresh install keeps its database.
+DB_MODE_TOKEN='private/babymonitor.db=600'
 # docs/mfa.md, "Recovery": the console failsafe. The run creates an admin without two-factor.
 MFA_LIST_OK='No users have two-factor enabled.'
 # Control D, the SECOND start without DAC_OVERRIDE. Seen in CI (runs of 2026-10-24): a NEW container's
