@@ -218,8 +218,9 @@ describe('#567 entrypoint ownership pass', { skip }, () => {
     const data = freshData();
     const r = run(data, { puid: '000', pgid: '00', fake: { suffix: '.', owner: '0:0' } });
     assert.equal(r.status, 0, r.ctx);
-    // No walk. (private/, made by this user and not faked, is not 0:0's, so it alone is given to them by name.)
-    assert.deepEqual(r.chowns, [privateChown(data)], r.ctx);
+    // No walk. (private/, made by this user and not faked, is not 0:0's unless this user IS root, as in CI's BusyBox
+    // run of this file, so it alone may be given to them by name.)
+    assert.deepEqual(r.chowns, UID === 0 && GID === 0 ? [] : [privateChown(data)], r.ctx);
     assert.match(r.out, /data directory already owned by 0:0; not walking it/, r.ctx);
   });
 });
