@@ -9,6 +9,16 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- **Corrected the media-isolation limits about MediaMTX's API (#553 follow-up).** The docs said a taken-over media
+  program could read your cameras' addresses and passwords from MediaMTX's control API. It cannot: Nightlight never gives
+  MediaMTX a camera address or password (every stream path is registered publisher-only, and FFmpeg connects to the
+  camera itself). What a taken-over media program can do through the loopback API and RTSP port, which have no password,
+  is change or remove stream paths and read or publish a camera's stream. The passwords visible on FFmpeg's command line
+  are unchanged and still documented. No behaviour changes; a new test now fails if a camera address or password is ever
+  sent to MediaMTX. See [docs/operations.md](docs/operations.md#media-isolation).
+
 ### Fixed
 
 - **The weekly image rebuild now keeps the `org.opencontainers.image.revision` label (#864).** `:latest` and `:dev`

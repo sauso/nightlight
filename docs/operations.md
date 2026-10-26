@@ -698,8 +698,11 @@ make the container a sandbox, and it does not stop everything:
   at a compromised app.
 - **All the media programs share one user.** One taken-over FFmpeg can signal or inspect the others, MediaMTX and
   other cameras' FFmpeg included.
-- **MediaMTX's control API on `127.0.0.1:9997` has no password.** A taken-over media program can ask it for the
-  cameras' addresses and passwords. Nothing here closes that yet.
+- **MediaMTX's control API (`127.0.0.1:9997`) and its RTSP port (`127.0.0.1:8554`) have no password.** A taken-over
+  media program can add, change or remove stream paths, and read or publish a camera's stream. It cannot get a camera's
+  address or password from them: MediaMTX is never told them (FFmpeg connects to the camera itself). A password on the
+  API would not help while all the media programs share one user, which can already signal or inspect MediaMTX. The
+  passwords that can be read are the ones on FFmpeg's command line, next.
 - **Camera passwords are on FFmpeg's command line,** visible to every process in the container.
 - **Other accounts can no longer read new recordings** (see "What changes for you" above). A backup job or file manager
   running as a non-root user needs read access to files owned by uid `1700`, group `1700`; root (Unraid's CA Appdata
