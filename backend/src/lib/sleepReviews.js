@@ -815,7 +815,7 @@ export function applyCorrections(childId, nights) {
 // computeNight's `base` is kept automatically, which is the right default for those.
 //
 // `wake_unconfirmed` (#700, in `base`) and its stored time `wake_unconfirmed_at` are deliberately NOT listed: they
-// are the detector's note that it flagged an exit as far earlier than this child gets up, a remark about its own
+// are the detector's note that it skipped an exit as far earlier than this child gets up, a remark about its own
 // answer like the `algo_*` fields kept below, not a claim that anyone slept. A night the parent said was empty
 // therefore keeps them as the detector computed them (pinned by the "no one was in the bed" test in
 // sleep-early-exit-lead.test.js, and by OBSERVED_COLUMNS in nobody-in-bed.test.js). They can only be non-null when

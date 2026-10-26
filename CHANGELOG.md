@@ -33,13 +33,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   now set aside, and a later one can still be the wake. With none, the night keeps the wake worked out from movement,
   which can be none at all: the night may then show "still asleep" and the notification no "up" time. Limits, all
   in the guide: it needs 10 earlier saved nights with the same wake-time setting (a new install, a child's first ten
-  nights and the ten after a wake-time or timezone change are unchanged); it switches itself off once 4 of the previous
-  7 nights had an exit set aside, so a changed routine is learnt rather than locked out; a child who really is up that
-  early, or was carried to a parent's bed, is set aside the same way while it is on; and a night's answer now depends
-  on the nights saved before it. An improvement, not a fix, fitted to four nights in one house: their wake errors of
-  -450, -197, -215 and -580 minutes became a blank, +90, -1 and +96. Nights already saved keep their figures (a wake
-  time already notified is never cleared). Saved nights gain a `wake_unconfirmed_at` column (empty on older nights),
-  a night worked out fresh gains `wake_unconfirmed` in the API, and the detection-rules version is now `2`. See
+  nights and the ten after a wake-time or timezone change are unchanged). A child who really is up that early, or was
+  carried to a parent's bed, is set aside the same way: a new routine is learnt after about 4 nights of it (each set
+  aside night still counts, with its early time), during which up to 4 nights can show no wake time or a late one,
+  but an early wake on fewer than about 1 night in 4 is set aside every time. 4 or more false exits inside 14 nights
+  switch the rule off until they age out. A night's answer now depends on the nights saved before it. An improvement,
+  not a fix, fitted to four nights in one house: their wake errors of -450, -197, -215 and -580 minutes became a
+  blank, +90, -1 and +96. Nights already saved keep their figures (a wake time already notified is never cleared).
+  Saved nights gain a `wake_unconfirmed_at` column (empty on older nights; an added key wherever the API returns a
+  saved row), a night worked out fresh gains `wake_unconfirmed`, and the detection-rules version is now `2`. See
   [docs/sleep-tracking.md](docs/sleep-tracking.md#an-exit-far-earlier-than-usual-does-not-end-the-night).
 - **The weekly image rebuild now keeps the `org.opencontainers.image.revision` label (#864).** `:latest` and `:dev`
   lost it every Monday, so `docker inspect` printed nothing after a rebuild. Rebuilt images now carry the revision

@@ -199,8 +199,9 @@ test('the flag reaches /sleep?nights, /sleep/:date (with and without detail) and
 // ("slept 10h") on a night the parent said was empty is the harmful direction.
 // `scoring_context` (#361) is an observation: which camera, timezone, window and scoring version produced the
 // row. A detector-empty night stores one too, and "nobody was in the bed" changes none of it.
-// `wake_unconfirmed_at` (#700) is the detector's own note that it flagged an early exit (it feeds the lead test's
-// disarm), not a claim that anyone slept: classified as an observation, as sleepReviews.js explains beside
+// `wake_unconfirmed_at` (#700) is the detector's own note that it skipped an early exit (later nights' lead test
+// reads it as this night's departure candidate), not a claim that anyone slept: classified as an observation, as
+// sleepReviews.js explains beside
 // EMPTY_NIGHT_NULLS. A detector-empty row stores it NULL (nothing is flagged on a night that is not `ok`).
 const OBSERVED_COLUMNS = [
   'id', 'child_id', 'night_date', 'window_start', 'window_end', 'coverage_minutes',

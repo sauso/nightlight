@@ -217,7 +217,7 @@ describe('#700 sleep_nights.wake_unconfirmed_at', () => {
   // The same shape as the #361 test above: the column is in the literal CREATE TABLE (fresh installs) AND a guarded
   // ALTER (upgrades). Rewinding a real database proves the ALTER path, that a night stored before the upgrade reads
   // NULL (never flagged: whether an old night would have been depends on the history it had then, so nothing is
-  // backfilled) and that a second boot changes nothing. NULL is what the lead test's disarm reads as "not flagged".
+  // backfilled) and that a second boot changes nothing. NULL is what the lead test's history reads as "use wake_at".
   test('an existing install gains the column on upgrade, TEXT, nullable, no default, old rows NULL, twice harmless', () => {
     const dir = freshDir();
     assert.equal(bootDbJs(dir).status, 0);

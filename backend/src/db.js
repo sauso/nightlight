@@ -973,12 +973,13 @@ if (!sleepNightsColumns.includes('scoring_context')) {
 }
 
 // #700: the `created_at` (UTC 'YYYY-MM-DD HH:MM:SS', as stored in bed_transitions) of the EARLIEST out_of_bed
-// that the departure scan's lead test flagged on this night as far earlier than the child usually gets up,
-// whether the rule then skipped it or, disarmed, accepted it (sleepAnalysis.js, LEAD_FACTOR and
-// DISARM_AFTER_FLAGGED). NULL when nothing was flagged, and on every row stored before this column: no backfill,
-// because whether an old night would have been flagged depends on the history it had then. Its one reader is
-// the disarm count, which treats NULL as "not flagged". Written by upsertNight with the other computed columns.
-// Also in the CREATE TABLE above for fresh installs; this guard is the upgrade path.
+// that the departure scan's lead test skipped on this night as far earlier than the child usually gets up, where
+// the skip changed the night (sleepAnalysis.js, LEAD_FACTOR). NULL when nothing was skipped, and on every row
+// stored before this column: no backfill, because whether an old night would have been skipped depends on the
+// history it had then. Its one reader is the lead test's history, which takes it as that night's departure
+// candidate in place of wake_at (COALESCE), so a skipped night still teaches the rule a new routine; NULL means
+// "use wake_at". Written by upsertNight with the other computed columns. Also in the CREATE TABLE above for fresh
+// installs; this guard is the upgrade path.
 if (!sleepNightsColumns.includes('wake_unconfirmed_at')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN wake_unconfirmed_at TEXT');
 }

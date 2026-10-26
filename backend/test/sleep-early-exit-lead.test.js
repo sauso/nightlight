@@ -96,7 +96,9 @@ function layMorningExitNight(h, m) {
 
 // Earlier stored nights for `childId`, newest first: leads[0] is the night before DATE, leads[1] the one
 // before that, and so on. Each row is a scored night with a wake, `lead` minutes before its own window end.
-// `flagged` plants a `wake_unconfirmed_at` on the row (the lead test flagged an exit that night).
+// `skipped` plants instead a night whose departure candidate the lead test SKIPPED, `lead` minutes before its
+// window end: `wake_unconfirmed_at` set (20 s into the minute, as an exit's time is), `wake_at` NULL (a quiet
+// room: no later wake) unless `wakeAt` gives one.
 const insertNight = db.prepare(
   `INSERT INTO sleep_nights (child_id, night_date, window_start, window_end, status, wake_at, scoring_context,
      wake_unconfirmed_at, computed_at)
@@ -104,27 +106,23 @@ const insertNight = db.prepare(
      @wake_unconfirmed_at, @computed_at)`
 );
 const dateOf = (dayShift) => new Date(Date.UTC(2026, 6, 15 + dayShift)).toISOString().slice(0, 10);
-function plantNight(dayShift, lead, { childId = CHILD, status = 'ok', endHm = [7, 0], wakeAt, context = null, flagged = false } = {}) {
+function plantNight(dayShift, lead, { childId = CHILD, status = 'ok', endHm = [7, 0], wakeAt, context = null, skipped = false } = {}) {
   const windowEnd = at(endHm[0], endHm[1], dayShift + 1);
+  const leadAt = new Date(windowEnd.getTime() - lead * 60000);
   insertNight.run({
     child_id: childId,
     night_date: dateOf(dayShift),
     window_start: sqlTime(at(19, 30, dayShift)),
     window_end: sqlTime(windowEnd),
     status,
-    wake_at: wakeAt !== undefined ? wakeAt : sqlTime(new Date(windowEnd.getTime() - lead * 60000)),
+    wake_at: wakeAt !== undefined ? wakeAt : skipped ? null : sqlTime(leadAt),
     scoring_context: context,
-    wake_unconfirmed_at: flagged ? sqlTime(at(20, 30, dayShift)) : null,
+    wake_unconfirmed_at: skipped ? sqlTime(new Date(leadAt.getTime() + 20000)) : null,
     computed_at: sqlTime(windowEnd),
   });
 }
 function plantHistory(leads, opts = {}) {
   leads.forEach((lead, i) => plantNight(-(i + 1), lead, opts));
-}
-// NORMAL history with flags on the earlier nights named by their day offsets (-1 is the night before DATE). The
-// leads (so the threshold, 80) are unchanged by the flags, so only the disarm count moves.
-function plantFlaggedHistory(flaggedDays) {
-  NORMAL.forEach((lead, i) => plantNight(-(i + 1), lead, { flagged: flaggedDays.includes(-(i + 1)) }));
 }
 // A child who is usually up 5-55 minutes before the window closes: p75 (index floor(0.75 x 14) = 10 of the
 // sorted list) is 40, so the threshold is 2 x max(40, 30) = 80 minutes.
@@ -195,7 +193,7 @@ describe('#700 a far-early exit is not the night\'s departure', () => {
     // On dev before #700: ok, wake 20:30, asleep 50 minutes (the exit was taken).
     assert.equal(night.status, 'ok', 'the settling movement keeps the night occupied, not `empty`');
     assert.equal(night.wake_at, null, 'nothing later qualifies, so the movement-only wake stands: still asleep at the close');
-    assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80, applied: true });
+    assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80 });
     assert.ok(night.wake_unconfirmed.lead_min > night.wake_unconfirmed.threshold_min);
     // The STORED row is what the card and the push read, so the stored fields are pinned exactly.
     computeAndStoreNight(CHILD, DATE, { allowDowngrade: false });
@@ -203,7 +201,7 @@ describe('#700 a far-early exit is not the night\'s departure', () => {
       status: 'ok', wake_at: null, asleep_minutes: 680, awake_minutes: 0, unknown_minutes: 0, wake_count: 0,
       longest_stretch_minutes: 680, // 19:40 to 07:00
     });
-    assert.equal(storedRow().wake_unconfirmed_at, FALSE_EXIT_AT, 'the flag is stored, for the disarm to count');
+    assert.equal(storedRow().wake_unconfirmed_at, FALSE_EXIT_AT, 'the skip is stored: later nights read it as this night\'s departure');
   });
 
   test('#700 T2: a strong exit (14 frames, peak 0.1, three minutes of movement) is not taken either', () => {
@@ -213,7 +211,7 @@ describe('#700 a far-early exit is not the night\'s departure', () => {
     layFalseExitNight({ stir: [[at(20, 28), at(20, 31), 0.12]], peak: 0.1, frames: 14 });
     const night = computeNight(CHILD, DATE);
     assert.equal(night.wake_at, null);
-    assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80, applied: true });
+    assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80 });
     assert.equal(night.asleep_minutes, 680);
   });
 
@@ -260,7 +258,7 @@ describe('#700 history minimum', () => {
     layFalseExitNight();
     const night = computeNight(CHILD, DATE);
     assert.equal(night.wake_at, null);
-    assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 60, applied: true });
+    assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 60 });
   });
 
   test('#700 T3c: earlier rows with no wake, or not scored `ok`, are not history', () => {
@@ -308,7 +306,7 @@ describe('#700 the threshold', () => {
     const night = computeNight(CHILD, DATE);
     // On dev before #700: wake 05:29, asleep 589.
     assert.equal(night.wake_at, null);
-    assert.deepEqual(night.wake_unconfirmed, { at: '2026-07-15 19:29:10', lead_min: 91, threshold_min: 90, applied: true });
+    assert.deepEqual(night.wake_unconfirmed, { at: '2026-07-15 19:29:10', lead_min: 91, threshold_min: 90 });
   });
 
   // A child who usually wakes at or after the close: p75 (index 10) is 15, under the floor.
@@ -327,7 +325,7 @@ describe('#700 the threshold', () => {
     layMorningExitNight(5, 59);
     const night = computeNight(CHILD, DATE);
     assert.equal(night.wake_at, null);
-    assert.deepEqual(night.wake_unconfirmed, { at: '2026-07-15 19:59:10', lead_min: 61, threshold_min: 60, applied: true });
+    assert.deepEqual(night.wake_unconfirmed, { at: '2026-07-15 19:59:10', lead_min: 61, threshold_min: 60 });
   });
 });
 
@@ -344,19 +342,63 @@ describe('#700 the scan goes on', () => {
     assert.equal(hhmm(night.wake_at), '06:40', 'a distinct, later gap corroborated by its own exit');
     assert.equal(night.asleep_minutes, 654);
     assert.equal(night.wake_count, 1, 'the six-minute morning stir before it');
-    assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80, applied: true },
+    assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80 },
       'still set: it says the earlier exit was not trusted');
   });
 
   test('#700 T7b: an exit the settling-tail guard would hand back is not handed back when it is far early', () => {
     // A stray into_bed 30 s before the false exit, over a still sleeper: the settling-tail guard sets the exit
     // aside, and with no later exit its fallback used to hand it back (dev before #700: wake 20:30, asleep 50).
+    // Here the skip DID change the night (no `best` won, so the hand-back would have been the wake), so it is
+    // recorded, unlike T7c's, where a later exit wins anyway.
     plantHistory(NORMAL);
     layFalseExitNight();
     insertTransition.run(CAM, 'into_bed', 0.02, 1, sqlTime(at(20, 29, 0, 50)));
     const night = computeNight(CHILD, DATE);
     assert.equal(night.wake_at, null);
-    assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80, applied: true });
+    assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80 });
+  });
+
+  test('#700 T7c: a fallback-site skip is NOT recorded when a later exit wins anyway (the rule changed nothing)', () => {
+    // PR #888 round 2 (Opus A5): the evening exit sits behind a stray into_bed, so the settling-tail guard has set
+    // it aside already; the genuine 06:30 exit wins whether or not the rule exists. Recording a skip here would
+    // teach later nights a 20:30 departure that never was. The night must be exactly the rule-off night.
+    layFalseExitNight({ extraBed: [[at(6, 28, 1), at(6, 30, 1)]], still: [[at(6, 30, 1), STILL_EMPTY]] });
+    insertTransition.run(CAM, 'into_bed', 0.02, 1, sqlTime(at(20, 29, 0, 50)));
+    exit(at(6, 30, 1, 15));
+    const ruleOff = computeNight(CHILD, DATE, { includeTimeline: true }); // no history: the rule cannot fire
+    plantHistory(NORMAL);
+    const { out: night, reads } = historyReadsDuring(() => computeNight(CHILD, DATE, { includeTimeline: true }));
+    assert.equal(reads, 1, 'precondition: the rule did look at the evening exit');
+    assert.equal(hhmm(night.wake_at), '06:30');
+    assert.equal(night.wake_unconfirmed, null);
+    assert.deepEqual(night, ruleOff, 'the whole night, timeline included, as with the rule off');
+    computeAndStoreNight(CHILD, DATE, { allowDowngrade: false });
+    assert.equal(storedRow().wake_unconfirmed_at, null, 'and nothing is stored for the history');
+  });
+
+  test('#700 T7d: four such nights do not switch the rule off: a plain false exit after them is still skipped', () => {
+    // Opus A6: under the fix-round-1 disarm those four nights each stored a flag, so the fifth night's false exit
+    // was taken. Now they store nothing and their history lead is their 06:30 wake (30), so the rule stands.
+    plantHistory(NORMAL, {});
+    for (let day = 0; day < 4; day++) {
+      layNight({
+        from: at(19, 0, day), to: at(7, 0, day + 1),
+        bed: [[at(19, 30, day), at(19, 40, day)], [at(20, 30, day), at(20, 31, day), 0.02], [at(6, 28, day + 1), at(6, 30, day + 1)]],
+        still: [[at(6, 30, day + 1), STILL_EMPTY]],
+      });
+      insertTransition.run(CAM, 'into_bed', 0.02, 1, sqlTime(at(20, 29, day, 50)));
+      exit(at(20, 30, day, 20), { peak: 0.02, frames: 1 });
+      exit(at(6, 30, day + 1, 15));
+      const s = computeAndStoreNight(CHILD, dateOf(day), { allowDowngrade: false });
+      assert.equal(hhmm(s.wake_at), '06:30', `night ${day}`);
+      assert.equal(storedRow(dateOf(day)).wake_unconfirmed_at, null, `night ${day}`);
+    }
+    layNight({ from: at(19, 0, 4), to: at(7, 0, 5), bed: [[at(19, 30, 4), at(19, 40, 4)], [at(20, 30, 4), at(20, 31, 4), 0.02]] });
+    exit(at(20, 30, 4, 20), { peak: 0.02, frames: 1 });
+    const fifth = computeNight(CHILD, dateOf(4));
+    assert.equal(fifth.wake_at, null, 'skipped');
+    assert.equal(fifth.wake_unconfirmed?.lead_min, 630);
   });
 });
 
@@ -451,7 +493,7 @@ describe('#700 the history', () => {
     layFalseExitNight();
     const night = computeNight(CHILD, DATE);
     assert.equal(night.wake_at, null);
-    assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80, applied: true });
+    assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80 });
   });
 
   test('#700 T8j: a clock change inside the history does not exclude nights whose LOCAL window end is unchanged', () => {
@@ -476,7 +518,7 @@ describe('#700 the history', () => {
     exit(local(12, 20, 30, 20));
     const night = computeNight(CHILD, '2026-10-12');
     assert.equal(night.wake_at, null);
-    assert.deepEqual(night.wake_unconfirmed, { at: sqlTime(local(12, 20, 30, 20)), lead_min: 630, threshold_min: 80, applied: true });
+    assert.deepEqual(night.wake_unconfirmed, { at: sqlTime(local(12, 20, 30, 20)), lead_min: 630, threshold_min: 80 });
   });
 
   test('#700 T8k: the history is sorted by lead, not taken in the order it is read (newest first)', () => {
@@ -498,6 +540,63 @@ describe('#700 the history', () => {
     layFalseExitNight();
     const night = computeNight(CHILD, DATE);
     assert.equal(hhmm(night.wake_at), '20:30');
+    assert.equal(night.wake_unconfirmed, null);
+  });
+
+  test('#700 T8m: the window-end match is minute-exact: nights ending 07:00 are not history for a 07:30 end', () => {
+    // PR #888 round 2 (Opus A8). The wake time moved from 07:00 to 07:30; a genuine 06:00 exit is 90 minutes before
+    // the new end. Matched on the hour alone, the fourteen 07:00 nights (threshold 80) would skip it.
+    db.prepare("UPDATE children SET sleep_window_end = '07:30' WHERE id = ?").run(CHILD);
+    plantHistory(NORMAL); // window ends 07:00
+    layNight({ to: at(7, 30, 1), bed: [[at(19, 30), at(19, 40)], [at(5, 59, 1), at(6, 1, 1)]], still: [[at(6, 1, 1), STILL_EMPTY]] });
+    exit(at(6, 0, 1, 10));
+    const night = computeNight(CHILD, DATE);
+    assert.equal(hhmm(night.window_end), '07:30', 'precondition');
+    assert.equal(hhmm(night.wake_at), '06:00', 'no matching history: taken, as before #700');
+    assert.equal(night.wake_unconfirmed, null);
+  });
+
+  // A window ending 02:30 and Melbourne's spring-forward at 02:00 on 2026-10-04: that night's end does not exist and
+  // resolves to 03:30 (zonedToUtc). `mel(d, h, m)` is local Melbourne time on day d of October 2026 (0 = 30 Sep).
+  const mel = (d, h, m, s = 0) => new Date(zonedToUtc(2026, 9, d, h, m, TZ).getTime() + s * 1000);
+  const octDate = (d) => new Date(Date.UTC(2026, 9, d)).toISOString().slice(0, 10);
+  function plantOctNight(d, lead, end = mel(d + 1, 2, 30)) {
+    insertNight.run({
+      child_id: CHILD, night_date: octDate(d), window_start: sqlTime(mel(d, 20, 0)), window_end: sqlTime(end), status: 'ok',
+      wake_at: sqlTime(new Date(end.getTime() - lead * 60000)), scoring_context: null, wake_unconfirmed_at: null,
+      computed_at: sqlTime(end),
+    });
+  }
+  // Settling at the window start, a weak false exit at 21:00 local, a still child to the end.
+  function layOctFalseExit(d, end) {
+    layNight({ from: mel(d, 19, 30), to: end, bed: [[mel(d, 20, 0), mel(d, 20, 10)], [mel(d, 21, 0), mel(d, 21, 1), 0.02]] });
+    exit(mel(d, 21, 0, 20), { peak: 0.02, frames: 1 });
+  }
+
+  test('#700 T8n: on the night a clock change makes the window end not exist, there is no matching history: rule off', () => {
+    db.prepare("UPDATE children SET sleep_window_start = '20:00', sleep_window_end = '02:30' WHERE id = ?").run(CHILD);
+    NORMAL.forEach((lead, i) => plantOctNight(2 - i, lead)); // nights 2 Oct back to 19 Sep, each ending 02:30
+    const end = mel(4, 2, 30);
+    assert.equal(sqlTime(end), sqlTime(mel(4, 3, 30)), 'precondition: 02:30 on 4 October resolves to 03:30');
+    layOctFalseExit(3, end);
+    const { out: night, reads } = historyReadsDuring(() => computeNight(CHILD, octDate(3)));
+    assert.equal(reads, 1, 'precondition: the history was read');
+    assert.equal(hhmm(night.window_end), '03:30');
+    assert.equal(hhmm(night.wake_at), '21:00', 'taken, as before #700');
+    assert.equal(night.wake_unconfirmed, null);
+  });
+
+  test('#700 T8o: ...and that night\'s row then drops out of the next night\'s history', () => {
+    // Nine nights ending 02:30 plus the clock-change night's row (its window_end reads 03:30). Counted, it would make
+    // ten and turn the rule on for 4 October; left out, the child has nine and the false exit is taken.
+    db.prepare("UPDATE children SET sleep_window_start = '20:00', sleep_window_end = '02:30' WHERE id = ?").run(CHILD);
+    NORMAL.slice(0, 9).forEach((lead, i) => plantOctNight(2 - i, lead));
+    plantOctNight(3, 10, mel(4, 2, 30)); // the 3 October row, ending at the resolved 03:30
+    const end = mel(5, 2, 30);
+    layOctFalseExit(4, end);
+    const night = computeNight(CHILD, octDate(4));
+    assert.equal(hhmm(night.window_end), '02:30', 'precondition: 02:30 exists again on 5 October');
+    assert.equal(hhmm(night.wake_at), '21:00');
     assert.equal(night.wake_unconfirmed, null);
   });
 
@@ -542,7 +641,7 @@ describe('#700 known limit: a genuine very early wake', () => {
       });
       exit(at(c.h, 0, 1, 10), { peak: 0.05 });
       const summary = computeAndStoreNight(CHILD, DATE, { allowDowngrade: false });
-      assert.deepEqual(summary.wake_unconfirmed, { at: c.at, lead_min: c.lead, threshold_min: 80, applied: true }, `${c.h}:00`);
+      assert.deepEqual(summary.wake_unconfirmed, { at: c.at, lead_min: c.lead, threshold_min: 80 }, `${c.h}:00`);
       assert.deepEqual(storedFigures(storedRow()), {
         status: 'ok', wake_at: null, asleep_minutes: 633, awake_minutes: 47, unknown_minutes: 0, wake_count: 1,
         longest_stretch_minutes: c.longest,
@@ -604,7 +703,7 @@ describe('#700 wake_unconfirmed is an added key; only its time is stored', () =>
 
   test('#700 T10c2: a re-store that no longer flags anything CLEARS the stored flag', () => {
     // The nightly job re-stores a provisional night; a flag that a later pass no longer finds must not stay behind
-    // and keep counting toward the disarm. Written in the upsert's ON CONFLICT half for exactly this.
+    // and keep teaching later nights a departure no pass found. Written in the upsert's ON CONFLICT half for this.
     plantHistory(NORMAL);
     layFalseExitNight();
     computeAndStoreNight(CHILD, DATE, { allowDowngrade: false });
@@ -657,7 +756,7 @@ describe('#700 wake_unconfirmed is an added key; only its time is stored', () =>
   test('#700 T10f: it reaches the detail, Recompute preview, store and last-night answers', async (t) => {
     plantHistory(NORMAL);
     layFalseExitNight();
-    const expected = { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80, applied: true };
+    const expected = { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80 };
     const get = (q) => call(`${server.url}/api/children/${CHILD}${q}`, { token: adminToken });
     assert.deepEqual((await get(`/sleep/${DATE}`)).body.wake_unconfirmed, expected, 'detail');
     assert.deepEqual((await get(`/sleep/${DATE}?detail=1`)).body.wake_unconfirmed, expected, 'detail with timeline');
@@ -673,7 +772,11 @@ describe('#700 wake_unconfirmed is an added key; only its time is stored', () =>
     assert.equal(stored.status, 200);
     assert.deepEqual(stored.body.wake_unconfirmed, expected, 'the store answer');
     // ...but not the saved row, nor the morning review's `computed` (a whitelist, left alone).
-    assert.ok(!('wake_unconfirmed' in (await get(`/sleep/${DATE}?stored=1`)).body.night), 'saved row');
+    const savedRow = (await get(`/sleep/${DATE}?stored=1`)).body.night;
+    assert.ok(!('wake_unconfirmed' in savedRow), 'saved row');
+    // ...which instead carries the stored column as an ADDED key (the stored-night readers `SELECT *`).
+    assert.equal(savedRow.wake_unconfirmed_at, FALSE_EXIT_AT, 'the saved row carries its own column');
+    assert.equal((await get('/sleep?nights=14')).body.nights.find((n) => n.night_date === DATE).wake_unconfirmed_at, FALSE_EXIT_AT);
     assert.ok(!('wake_unconfirmed' in getNightReview(CHILD, DATE).computed), 'morning review');
   });
 
@@ -701,7 +804,7 @@ describe('#700 wake_unconfirmed is an added key; only its time is stored', () =>
       assert.equal(shown[k], null, `${k} is cleared`);
     }
     assert.equal(shown.algo_status, 'ok');
-    assert.deepEqual(shown.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80, applied: true });
+    assert.deepEqual(shown.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80 });
   });
 
   test('#700 T10i: a second camera\'s exits are never candidates, so they are never skipped or reported', () => {
@@ -721,122 +824,133 @@ describe('#700 wake_unconfirmed is an added key; only its time is stored', () =>
   });
 });
 
-// --- 11. the disarm: 4 flagged nights of the previous 7 switch the skip off -------------------------------
+// --- 11. false exits in the history: the measured run of 3 keeps the rule on, 4 switch it off -----------------
 //
-// WHY IT DISARMS ITSELF (sleepAnalysis.js, LEAD_FACTOR): a skipped genuine exit stores no wake, so without this
-// a changed routine would never reach the history and every night would be skipped for good. The history in
-// these tests is NORMAL (threshold 80) with flags planted on chosen earlier nights, so only the count moves.
+// HOW THE HISTORY LEARNS (sleepAnalysis.js, LEAD_FACTOR): a night whose false exit the rule SKIPPED contributes that
+// exit's lead (its stored `wake_unconfirmed_at`), so false exits weigh on the p75 like stored early wakes do. These
+// plant skipped nights (wake NULL, a 630-minute candidate) among NORMAL ones.
 
-describe('#700 the disarm', () => {
-  test('#700 T11a: 3 flagged nights of the previous 7: still armed, the false exit is skipped and flagged', () => {
-    plantFlaggedHistory([-1, -2, -3]);
-    layFalseExitNight();
-    const summary = computeAndStoreNight(CHILD, DATE, { allowDowngrade: false });
-    assert.deepEqual(summary.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80, applied: true });
-    assert.equal(storedRow().wake_at, null, 'skipped');
-    assert.equal(storedRow().wake_unconfirmed_at, FALSE_EXIT_AT, 'and flagged');
-  });
-
-  test('#700 T11b: 4 flagged nights of the previous 7: disarmed, the exit is taken as before #700 but still flagged', () => {
-    plantFlaggedHistory([-1, -2, -3, -4]);
-    layFalseExitNight();
-    const summary = computeAndStoreNight(CHILD, DATE, { allowDowngrade: false });
-    assert.deepEqual(summary.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80, applied: false });
-    // Exactly the pre-#700 answer for this night (T3 has it: wake 20:30, asleep 50).
-    assert.deepEqual(storedFigures(storedRow()), {
-      status: 'ok', wake_at: '2026-07-15 10:30:00', asleep_minutes: 50, awake_minutes: 0, unknown_minutes: 0, wake_count: 0,
-      longest_stretch_minutes: 50,
-    });
-    assert.equal(storedRow().wake_unconfirmed_at, FALSE_EXIT_AT, 'a disarmed night is flagged too: the disarm counts it');
-  });
-
-  test('#700 T11c: the lookback is 7 nights: 4 flags on the 4th to 7th nights back disarm it', () => {
-    plantFlaggedHistory([-4, -5, -6, -7]);
+describe('#700 skipped false exits in the history', () => {
+  test('#700 T11a: two earlier skipped false exits in the newest 14 still leave the rule on for the third', () => {
+    // The measured child had three false exits inside eight days; the first two must not let the third through.
+    NORMAL.slice(0, 12).forEach((lead, i) => plantNight(-(i + 1), lead));
+    for (const d of [-13, -14]) plantNight(d, 630, { skipped: true });
     layFalseExitNight();
     const night = computeNight(CHILD, DATE);
-    assert.equal(hhmm(night.wake_at), '20:30');
-    assert.equal(night.wake_unconfirmed.applied, false);
+    assert.equal(night.wake_at, null, 'skipped');
+    assert.equal(night.wake_unconfirmed.threshold_min, 80);
   });
 
-  test('#700 T11d: ...and a flag 8 nights back is outside it: 3 inside, still armed', () => {
-    plantFlaggedHistory([-5, -6, -7, -8]);
+  test('#700 T11b: three of them still leave it on for the fourth', () => {
+    NORMAL.slice(0, 11).forEach((lead, i) => plantNight(-(i + 1), lead));
+    for (const d of [-12, -13, -14]) plantNight(d, 630, { skipped: true });
     layFalseExitNight();
     const night = computeNight(CHILD, DATE);
     assert.equal(night.wake_at, null);
-    assert.equal(night.wake_unconfirmed.applied, true);
+    assert.equal(night.wake_unconfirmed.threshold_min, 80);
   });
 
-  test('#700 T11e: flags on this night\'s own row or on later nights do not count', () => {
-    // 3 earlier flags (armed), plus a flag on this night's own stored row (a provisional pass) and on two later
-    // nights. Counted, any one of them would make 4 and disarm the rule.
-    plantFlaggedHistory([-1, -2, -3]);
-    plantNight(0, 10, { flagged: true });
-    plantNight(1, 10, { flagged: true });
-    plantNight(2, 10, { flagged: true });
-    layFalseExitNight();
-    const night = computeNight(CHILD, DATE);
-    assert.equal(night.wake_at, null);
-    assert.equal(night.wake_unconfirmed.applied, true);
-  });
-
-  test('#700 T11f: KNOWN LIMIT: four FALSE exits in a week disarm it too, and the fifth is taken as before #700', () => {
-    // The cost of the disarm, stated in LEAD_FACTOR's comment and the docs. The measured child had three flagged
-    // nights in eight days (all false exits); a fourth inside the week would have switched the rule off.
-    plantFlaggedHistory([-1, -3, -5, -7]);
+  test('#700 T11c: KNOWN LIMIT: four skipped false exits in the newest 14 switch the rule off for the fifth', () => {
+    // The other side, pinned: the p75 (11th smallest of 14) is then a 630, the threshold 1260, and the fifth false
+    // exit is taken as before #700, until those nights age out of the newest 14.
+    NORMAL.slice(0, 10).forEach((lead, i) => plantNight(-(i + 1), lead));
+    for (const d of [-11, -12, -13, -14]) plantNight(d, 630, { skipped: true });
     layFalseExitNight();
     const night = computeNight(CHILD, DATE);
     assert.equal(hhmm(night.wake_at), '20:30');
-    assert.equal(night.wake_unconfirmed.applied, false);
+    assert.equal(night.wake_unconfirmed, null);
   });
 });
 
-// --- 12. a changed routine: the lock-in the disarm exists for, over 21 consecutive nights -------------------
+// --- 12. a changed routine is learnt by the history, over 21 consecutive nights -------------------------------
 
-// Runs `nights` consecutive nights from DATE through computeAndStoreNight (what the nightly job does), each with
-// the same genuine exit, and returns one word per night: 'skipped' (flagged, applied, no wake), 'late' (flagged,
-// applied, a later movement-only wake), 'disarmed' (flagged, not applied, the exit taken) or 'taken' (not flagged).
-function runRoutine(nights, exitHm, opts) {
+// Runs nights `0..plan.length-1` from DATE through computeAndStoreNight (what the nightly job does) and returns one
+// word per night. `plan[day]` is 'early' (a genuine exit at 05:15), 'normal' (a genuine exit at 06:30, lead 30),
+// 'empty' (the child is away: a still, empty bed all night) or 'no_data' (the camera recorded nothing).
+//   'skipped'    the rule skipped the exit and the night stores no wake
+//   'late HH:MM' the rule skipped it and a later movement-only wake was stored
+//   'taken'      no skip, and the stored wake is the night's genuine exit
+//   'empty' / 'no_data' the stored status
+function runPlan(plan, { room = null } = {}) {
   const words = [];
-  for (let day = 0; day < nights; day++) {
-    layRoutineNight(day, exitHm, opts);
+  plan.forEach((kind, day) => {
+    if (kind === 'early') layRoutineNight(day, [5, 15], { room });
+    else if (kind === 'normal') layRoutineNight(day, [6, 30], { room });
+    else if (kind === 'empty') layNight({ from: at(19, 0, day), to: at(7, 0, day + 1), still: [[at(19, 0, day), STILL_EMPTY]] });
     const s = computeAndStoreNight(CHILD, dateOf(day), { allowDowngrade: false });
     const row = storedRow(dateOf(day));
-    assert.equal(row.wake_unconfirmed_at, s.wake_unconfirmed?.at ?? null, `night ${day}: the stored flag is the summary's`);
+    assert.equal(row.wake_unconfirmed_at, s.wake_unconfirmed?.at ?? null, `night ${day}: the stored skip is the summary's`);
+    if (kind === 'empty' || kind === 'no_data') {
+      assert.equal(row.status, kind, `night ${day}: precondition`);
+      words.push(kind);
+      return;
+    }
+    const genuine = kind === 'early' ? '05:15' : '06:30';
     const wake = hhmm(row.wake_at);
-    if (!s.wake_unconfirmed) words.push(wake === hhmm(sqlTime(at(exitHm[0], exitHm[1], day + 1))) ? 'taken' : `taken ${wake}`);
-    else if (!s.wake_unconfirmed.applied) words.push(`disarmed ${wake}`);
+    if (!s.wake_unconfirmed) words.push(wake === genuine ? 'taken' : `taken ${wake}`);
     else words.push(wake == null ? 'skipped' : `late ${wake}`);
-  }
+  });
   return words;
 }
+const times = (n, w) => new Array(n).fill(w);
 
-describe('#700 a changed routine does not lock the rule in', () => {
-  test('#700 T12: a child now up at 05:15 every day: 4 nights skipped, then disarmed, then taken for good', () => {
-    // The lock-in found in the PR #888 review: without the disarm all 21 nights were skipped (wake blank).
-    // Day by day: the first 4 are skipped (each stores a flag but no wake); the 5th sees 4 flags in its last 7 and
-    // is disarmed, so its 05:15 is taken and stored; by the 9th, 4 stored 05:15 wakes (lead 105) are in the newest
-    // 14 and the p75 is 105 (threshold 210), so nothing is flagged again. The flag count then falls and the rule
-    // re-arms, still not flagging, so it never flips back.
+describe('#700 a changed routine is learnt, and does not lock the rule in', () => {
+  test('#700 T12: a child now up at 05:15 every day: 4 nights skipped, then taken for good', () => {
+    // The lock-in found in the PR #888 review (without the learning history all 21 nights were skipped). Each
+    // skipped night stores its 05:15 exit as `wake_unconfirmed_at`, which the next night's history reads as a lead
+    // of 105; once 4 of the newest 14 are 105 the p75 is 105, the threshold 210, and the rule stops firing. Nothing
+    // flips back: every later night has more 105s, not fewer.
     plantHistory(NORMAL);
-    const words = runRoutine(21, [5, 15]);
-    assert.deepEqual(words, [
-      'skipped', 'skipped', 'skipped', 'skipped',
-      'disarmed 05:15', 'disarmed 05:15', 'disarmed 05:15', 'disarmed 05:15',
-      ...new Array(13).fill('taken'),
-    ]);
+    assert.deepEqual(runPlan(times(21, 'early')), [...times(4, 'skipped'), ...times(17, 'taken')]);
   });
 
-  test('#700 T12b: the same, in a bedroom that hears the house wake at 06:40: 4 nights stored late, then settled', () => {
+  test('#700 T12b: the same in a bedroom that hears the house wake at 06:40: 4 nights stored late, then taken', () => {
     // The other lock-in shape: a skipped night stores the movement-only wake, 06:40 (85 minutes late), whose short
-    // lead (20) pulls the threshold DOWN. The disarm still comes on the 5th night, the 05:15 wakes then feed the
-    // history, and from the 9th night nothing is flagged.
+    // lead would pull the threshold DOWN if it were the history's lead. The history takes the skipped exit instead.
     plantHistory(NORMAL);
-    const words = runRoutine(21, [5, 15], { room: [[6, 40], [7, 0]] });
-    assert.deepEqual(words, [
-      'late 06:40', 'late 06:40', 'late 06:40', 'late 06:40',
-      'disarmed 05:15', 'disarmed 05:15', 'disarmed 05:15', 'disarmed 05:15',
-      ...new Array(13).fill('taken'),
-    ]);
+    assert.deepEqual(runPlan(times(21, 'early'), { room: [[6, 40], [7, 0]] }), [...times(4, 'late 06:40'), ...times(17, 'taken')]);
+  });
+
+  test('#700 T12c: home 3 nights a week, away nights stored `empty`: learnt after the 4th home night', () => {
+    // PR #888 round 2 (Opus A1): an `empty` night is not history at all, so it cannot dilute it. Under the fix-round-1
+    // disarm (any status counted) this child stayed skipped for six weeks.
+    plantHistory(NORMAL);
+    const plan = Array.from({ length: 21 }, (_, d) => ([0, 2, 4].includes(d % 7) ? 'early' : 'empty'));
+    const words = runPlan(plan);
+    const home = words.filter((w) => w !== 'empty');
+    assert.deepEqual(home, [...times(4, 'skipped'), ...times(home.length - 4, 'taken')]);
+    assert.equal(home.length, 9, 'precondition: 9 home nights in the 21');
+  });
+
+  test('#700 T12d: a camera that records nothing every other night (`no_data`): learnt after the 4th night it records', () => {
+    // Opus A4: the same for `no_data` nights.
+    plantHistory(NORMAL);
+    const plan = Array.from({ length: 21 }, (_, d) => (d % 2 === 0 ? 'early' : 'no_data'));
+    const words = runPlan(plan);
+    const seen = words.filter((w) => w !== 'no_data');
+    assert.deepEqual(seen, [...times(4, 'skipped'), ...times(seen.length - 4, 'taken')]);
+  });
+
+  test('#700 T12e: early on 4 days of every 7: learnt after the 4th early night', () => {
+    // Codex round 2: an early wake on SOME mornings. Here 4 of every 7 (and 8 of any 14 nights): the first four are
+    // skipped, then the history holds 4 of them and every later early morning is taken.
+    plantHistory(NORMAL);
+    const plan = Array.from({ length: 21 }, (_, d) => (d % 7 < 4 ? 'early' : 'normal'));
+    const words = runPlan(plan);
+    assert.deepEqual(words.filter((_, d) => plan[d] === 'normal'), times(9, 'taken'), 'the 06:30 mornings are never touched');
+    const early = words.filter((_, d) => plan[d] === 'early');
+    assert.deepEqual(early, [...times(4, 'skipped'), ...times(early.length - 4, 'taken')]);
+  });
+
+  test('#700 T12f: KNOWN LIMIT: early on only 1 night in 5 (at most 3 of any 14): skipped every time', () => {
+    // The limit, pinned: with 3 or fewer long leads among the newest 14 the p75 never moves, so a genuine early wake
+    // this rare stays an outlier and is set aside every time (the night reads "still asleep"). The 06:30 mornings
+    // between are taken as usual.
+    plantHistory(NORMAL);
+    const plan = Array.from({ length: 21 }, (_, d) => (d % 5 === 0 ? 'early' : 'normal'));
+    const words = runPlan(plan);
+    assert.deepEqual(words.filter((_, d) => plan[d] === 'early'), times(5, 'skipped'));
+    assert.deepEqual(words.filter((_, d) => plan[d] === 'normal'), times(16, 'taken'));
   });
 });
 
@@ -858,6 +972,6 @@ describe('#700 known limit: a later exit takes over', () => {
     exit(at(6, 33, 1, 30));
     const night = computeNight(CHILD, DATE);
     assert.equal(hhmm(night.wake_at), '06:33');
-    assert.deepEqual(night.wake_unconfirmed, { at: '2026-07-15 17:00:10', lead_min: 240, threshold_min: 80, applied: true });
+    assert.deepEqual(night.wake_unconfirmed, { at: '2026-07-15 17:00:10', lead_min: 240, threshold_min: 80 });
   });
 });
