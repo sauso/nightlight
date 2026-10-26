@@ -32,6 +32,41 @@ const build = {
   buildTime: envOrNull('NIGHTLIGHT_BUILD_TIME'),
 };
 
+// WHY isolation is off (#553), as backend/entrypoint.sh exported it. The About page warns admins for `fallback` (asked
+// for, the host could not give it) and `id-clash` (PUID or PGID is the media user's id; the operator can fix it);
+// `disabled` is the operator's switch and `root` is a setup where off is the rule, so those stay quiet.
+//
+// NO FREE TEXT CROSSES THIS BOUNDARY. This route is readable by every signed-in user, a caregiver included, and the
+// entrypoint's warning line can name a file or folder of the host (a leftover backup's name, a path with a person's name
+// in it). So the environment supplies only CODES, each checked against a fixed set here (anything else is null, or
+// `other` for a cause), and the sentence a person reads comes from the tables below. No value from the environment is
+// ever echoed. The log keeps the full free-text warning.
+const ISOLATION_REASONS = new Set(['disabled', 'root', 'id-clash', 'fallback']);
+// Causes of a fallback, as the entrypoint's MEDIA_CAUSE names them. A Map, so a cause such as "constructor" is not found
+// on a prototype. Keep this list and the entrypoint's in step (the tests pin both ends).
+const FALLBACK_DETAILS = new Map([
+  ['probe-failed', 'The start-up trial run found that a media program could reach files only the app may read, or could not run as the media user.'],
+  ['probe-timeout', 'The start-up trial run did not finish in time (a stalled network share, for example) and was abandoned.'],
+  ['missing-capability', 'The container lacks a capability the app needs to start the camera programs as a separate user (SETUID, SETGID or KILL), or the trial run could not start.'],
+  ['layout-failed', 'The data or clips folders could not be set up for the media user (an owner or permission the host does not allow).'],
+  ['top-level-leftover', 'A database, backup or secret is still at the top of the data directory instead of in private/, so the move into private/ has not finished.'],
+  ['bad-ids', 'PUID or PGID is not a number.'],
+  ['other', 'The host could not support it. The container log has the reason.'],
+]);
+const ID_CLASH_DETAIL = 'PUID or PGID is 1700, the media user\'s own id. Change it to another number and re-create the container.';
+function isolationReason() {
+  if (mediaIsolationOn()) return null;
+  const v = process.env.MEDIA_ISOLATION_REASON;
+  return ISOLATION_REASONS.has(v) ? v : null;
+}
+function isolationDetail() {
+  const reason = isolationReason();
+  if (reason === 'id-clash') return ID_CLASH_DETAIL;
+  if (reason !== 'fallback') return null;
+  const cause = process.env.MEDIA_ISOLATION_CAUSE;
+  return FALLBACK_DETAILS.get(cause) ?? FALLBACK_DETAILS.get('other');
+}
+
 const router = Router();
 
 router.get('/', requireAuth, (req, res) => {
@@ -55,6 +90,8 @@ router.get('/', requireAuth, (req, res) => {
     stunServers: parseStunServers(process.env.STUN_SERVERS).urls,
     publicBaseUrl: getPublicBaseUrl(),
     mediaIsolation: mediaIsolationOn() ? 'on' : 'off',
+    mediaIsolationReason: isolationReason(),
+    mediaIsolationDetail: isolationDetail(),
     dataLayout: DB_LAYOUT,
     layoutConflict: layoutConflict(dataDirFrom()),
   });

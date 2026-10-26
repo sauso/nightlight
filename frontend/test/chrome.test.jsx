@@ -13,7 +13,7 @@
 //      on its sub-pages, and "/" must not light up on every route.
 //   4. About shows the build provenance that tells you whether you are looking at staging or prod.
 import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
-import { screen, waitFor, act, render } from '@testing-library/react';
+import { screen, waitFor, act, render, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
@@ -304,6 +304,65 @@ describe('About', () => {
     renderAsAdmin(<About />);
     await screen.findByText(/Version 0\.43\.0/);
     expect(screen.queryByText(/Media isolation/)).not.toBeInTheDocument();
+  });
+
+  // The loud banner is for isolation that is off although it was asked for: a host that could not give it (`fallback`)
+  // or PUID/PGID equal to the media id (`id-clash`, which the admin can fix), and only for an admin. A deliberate off,
+  // PUID=0 (`root`), an ON start and an older server (no reason) keep the quiet line.
+  test('#553 a FALLBACK off shows an admin a warning with the server\'s sentence and a link to the docs', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      version: '0.45.0', mediaIsolation: 'off', mediaIsolationReason: 'fallback', mediaIsolationDetail: 'The start-up trial run failed.',
+    });
+    renderAsAdmin(<About />);
+    const banner = await screen.findByRole('status');
+    expect(banner).toHaveTextContent('Media isolation could not start');
+    expect(banner).toHaveTextContent('without the extra protection');
+    expect(banner).toHaveTextContent('The start-up trial run failed.');
+    const link = within(banner).getByRole('link');
+    expect(link).toHaveAttribute('href', expect.stringContaining('docs/operations.md#media-isolation'));
+    expect(link).toHaveAttribute('rel', 'noreferrer');
+    expect(screen.getByText('Media isolation: off')).toBeInTheDocument();
+  });
+
+  test('#553 an ID CLASH (PUID or PGID is 1700) warns an admin too, with the sentence that says what to change', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      version: '0.45.0', mediaIsolation: 'off', mediaIsolationReason: 'id-clash', mediaIsolationDetail: 'PUID or PGID is 1700. Change it.',
+    });
+    renderAsAdmin(<About />);
+    const banner = await screen.findByRole('status');
+    expect(banner).toHaveTextContent('PUID or PGID is 1700. Change it.');
+  });
+
+  test('#553 a caregiver does not get the warning, for a fallback or an id clash (they cannot fix a container)', async () => {
+    for (const reason of ['fallback', 'id-clash']) {
+      vi.spyOn(api, 'get').mockResolvedValue({
+        version: '0.45.0', mediaIsolation: 'off', mediaIsolationReason: reason, mediaIsolationDetail: 'Some sentence.',
+      });
+      const { unmount } = renderAsCaregiver(<About />);
+      await screen.findByText('Media isolation: off');
+      expect(screen.queryByRole('status'), reason).not.toBeInTheDocument();
+      expect(screen.queryByText(/could not start/), reason).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  test('#553 no warning for a deliberate off, PUID=0, an ON start, or a server that sends no reason', async () => {
+    const quiet = [
+      { mediaIsolation: 'off', mediaIsolationReason: 'disabled', mediaIsolationDetail: null },
+      { mediaIsolation: 'off', mediaIsolationReason: 'root', mediaIsolationDetail: null },
+      { mediaIsolation: 'on', mediaIsolationReason: null, mediaIsolationDetail: null },
+      // a fallback or id-clash reason beside an ON start is not a warning
+      { mediaIsolation: 'on', mediaIsolationReason: 'fallback', mediaIsolationDetail: 'stale' },
+      { mediaIsolation: 'on', mediaIsolationReason: 'id-clash', mediaIsolationDetail: 'stale' },
+      { mediaIsolation: 'off' },
+    ];
+    for (const extra of quiet) {
+      vi.spyOn(api, 'get').mockResolvedValue({ version: '0.45.0', ...extra });
+      const { unmount } = renderAsAdmin(<About />);
+      await screen.findByText(`Media isolation: ${extra.mediaIsolation}`);
+      expect(screen.queryByRole('status'), JSON.stringify(extra)).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
   test('every outbound link opens safely, for either role', () => {

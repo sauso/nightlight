@@ -587,6 +587,30 @@ whoever has taken over the camera) controls. With isolation on, they run as a se
 the same user as the app, which is how Nightlight worked before. **Settings → About** shows one line, "Media
 isolation: on" or "off", for what this start decided; `GET /api/about` reports it as `mediaIsolation`.
 
+**When About warns you.** "Off" has four different causes, and two of them are worth a warning. `GET /api/about`
+reports which as `mediaIsolationReason` (`null` when isolation is on), with a fixed sentence in `mediaIsolationDetail`
+when there is something to fix:
+
+- `disabled`: you turned it off with `NIGHTLIGHT_MEDIA_ISOLATION`. That is your choice, so About shows only the quiet
+  line.
+- `root`: `PUID=0`. Isolation stays off by design when the app runs as root, so About shows only the quiet line.
+- `id-clash`: `PUID` or `PGID` is `1700`, the media user's own id. You can fix this, so **admins see a warning at the
+  top of About** telling them to change it to another number and re-create the container.
+- `fallback`: isolation was on (the default) but the host could not provide it. **Admins see a warning at the top of
+  About** saying the camera programs are running without the extra protection, with one of these causes:
+  - the start-up trial run found a media program could reach files only the app may read, or could not run as the
+    media user;
+  - the trial run did not finish in time (a stalled network share, say);
+  - the container lacks a capability the app needs (`SETUID`, `SETGID` or `KILL`), or the trial run could not start;
+  - the data or clips folders could not be set up for the media user;
+  - a database, backup or secret is still at the top of the data directory instead of in `private/`;
+  - `PUID` or `PGID` is not a number;
+  - anything else, in which case the sentence says the container log has the reason.
+
+Caregivers never see the warning. The full reason, with file and folder names, is only in the container log, as the
+`[entrypoint] warning: media isolation is off: ...` line. The page and `GET /api/about` (which every signed-in user can
+read) carry one of the fixed sentences above and nothing from your host: no file names, no folder paths.
+
 **Turning it off.** Set `NIGHTLIGHT_MEDIA_ISOLATION=0` and re-create the container. Going back is automatic and needs
 nothing else: files the media user wrote are handed back to `PUID`:`PGID` once, at that start (see "Going back to
 off" below). Use it if something on your host misbehaves with isolation and the log does not say why, and please

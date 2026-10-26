@@ -23850,5 +23850,122 @@
     "expect": "killed",
     "tests": ["entrypoint-media-isolation.test.js"],
     "namePattern": "the data directory carries the media group and the start ends OFF"
+  },
+  {
+    "label": "#553 About reason: PUID=0 is reported as a fallback (it would raise the warning on every root setup)",
+    "file": "backend/entrypoint.sh",
+    "find": "isolation needs a non-root app\"; MEDIA_OFF_KIND=root",
+    "replace": "isolation needs a non-root app\"",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "PUID=0 is `root`"
+  },
+  {
+    "label": "#553 About reason: PUID or PGID 1700 is reported as a fallback",
+    "file": "backend/entrypoint.sh",
+    "find": "would not be separate\"; MEDIA_OFF_KIND=id-clash",
+    "replace": "would not be separate\"",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "PUID=0 is `root`"
+  },
+  {
+    "label": "#553 About reason: the operator's own kill switch is reported as a fallback",
+    "file": "backend/entrypoint.sh",
+    "find": "if [ -z \"$MEDIA_ASKED\" ]; then MEDIA_OFF_KIND=disabled; fi",
+    "replace": ":",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "the kill switch is `disabled`"
+  },
+  {
+    "label": "#553 About reason: a fallback carries no cause code",
+    "file": "backend/entrypoint.sh",
+    "find": "if [ \"$MEDIA_OFF_KIND\" = fallback ]; then",
+    "replace": "if false; then",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "cause: a failed trial run"
+  },
+  {
+    "label": "#553 About reason: an ON start keeps an operator's own reason variables",
+    "file": "backend/entrypoint.sh",
+    "find": "  unset MEDIA_ISOLATION_REASON MEDIA_ISOLATION_CAUSE",
+    "replace": "  :",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "an ON start carries neither variable"
+  },
+  {
+    "label": "#553 About reason: an unknown reason value is passed through to the page",
+    "file": "backend/src/routes/about.js",
+    "find": "return ISOLATION_REASONS.has(v) ? v : null;",
+    "replace": "return v ?? null;",
+    "expect": "killed",
+    "tests": ["about-media-isolation.test.js"],
+    "namePattern": "an unknown or unset reason is null"
+  },
+  {
+    "label": "#553 About cause: a failed trial run is not reported as probe-failed",
+    "file": "backend/entrypoint.sh",
+    "find": "MEDIA_CAUSE=probe-failed",
+    "replace": ":",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "cause: a failed trial run"
+  },
+  {
+    "label": "#553 About cause: a missing capability is not reported as missing-capability",
+    "file": "backend/entrypoint.sh",
+    "find": "MEDIA_CAUSE=missing-capability",
+    "replace": ":",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "cause: a failed trial run"
+  },
+  {
+    "label": "#553 About cause: a stalled trial run is not reported as probe-timeout",
+    "file": "backend/entrypoint.sh",
+    "find": "MEDIA_CAUSE=probe-timeout",
+    "replace": ":",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "cause: a trial run that never finishes"
+  },
+  {
+    "label": "#553 About cause: a folder another user owns is not reported as layout-failed",
+    "file": "backend/entrypoint.sh",
+    "find": "on the host\"; MEDIA_CAUSE=layout-failed",
+    "replace": "on the host\"",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "cause: a database left at the top"
+  },
+  {
+    "label": "#553 About cause: a database left at the top is not reported as top-level-leftover",
+    "file": "backend/entrypoint.sh",
+    "find": "; MEDIA_CAUSE=top-level-leftover",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "cause: a database left at the top"
+  },
+  {
+    "label": "#553 About cause: a non-numeric PUID is not reported as bad-ids",
+    "file": "backend/entrypoint.sh",
+    "find": "; MEDIA_CAUSE=bad-ids",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "cause: a database left at the top"
+  },
+  {
+    "label": "#553 About cause: the cause code is echoed as the sentence (free text would reach a caregiver)",
+    "file": "backend/src/routes/about.js",
+    "find": "return FALLBACK_DETAILS.get(cause) ?? FALLBACK_DETAILS.get('other');",
+    "replace": "return FALLBACK_DETAILS.get(cause) ?? cause;",
+    "expect": "killed",
+    "tests": ["about-media-isolation.test.js"],
+    "namePattern": "is `other`, and is NEVER echoed"
   }
 ]
