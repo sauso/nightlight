@@ -398,7 +398,10 @@ async function assembleOnce(childId, nightDate) {
 // unmeasured guesses, not calibrated on any failure we have seen. A night that exhausts them keeps its frames and logs
 // where they are, until it is FRAME_EXPIRE_DAYS (32) days old: then discardExpiredFrames (#851, the frames half of
 // #846) deletes them, so restarts can no longer keep a night's frames, or its retries, going for ever. The in-memory
-// count itself still resets on a restart (#846 stays open for that half).
+// count resets on a restart, and that is kept on purpose (#846, decided 2026-10-26): the harm is bounded (3 encodes per
+// start per failing night, for at most 32 days), a restart is usually an update and so the moment a fixed encoder
+// problem should get another go, and persisting the count would need a version stamp (else it blocks exactly that
+// retry) plus a path for a night with no row (see above), which a `timelapses` column cannot serve.
 const MAX_RETRIES = 3;
 const retryAttempts = new Map(); // nightKey -> attempts made by this process
 let retrying = false;
