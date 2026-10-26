@@ -217,6 +217,7 @@ db.exec(`
     unknown_minutes INTEGER,
     in_bed_at TEXT,
     scoring_context TEXT,
+    wake_unconfirmed_at TEXT,
     computed_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (child_id, night_date)
   );
@@ -969,6 +970,18 @@ if (!sleepNightsColumns.includes('in_bed_at')) {
 // the CREATE TABLE above for fresh installs; this guard is the upgrade path.
 if (!sleepNightsColumns.includes('scoring_context')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN scoring_context TEXT');
+}
+
+// #700: the `created_at` (UTC 'YYYY-MM-DD HH:MM:SS', as stored in bed_transitions) of the EARLIEST out_of_bed
+// that the departure scan's lead test skipped on this night as far earlier than the child usually gets up, where
+// the skip changed the night (sleepAnalysis.js, LEAD_FACTOR). NULL when nothing was skipped, and on every row
+// stored before this column: no backfill, because whether an old night would have been skipped depends on the
+// history it had then. Its one reader is the lead test's history, which takes it as that night's departure
+// candidate in place of wake_at (COALESCE), so a skipped night still teaches the rule a new routine; NULL means
+// "use wake_at". Written by upsertNight with the other computed columns. Also in the CREATE TABLE above for fresh
+// installs; this guard is the upgrade path.
+if (!sleepNightsColumns.includes('wake_unconfirmed_at')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN wake_unconfirmed_at TEXT');
 }
 
 // Quick-silence: a per-camera temporary mute of ALL alerts (motion/sound/ONVIF/MQTT), for when you're

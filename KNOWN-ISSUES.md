@@ -1364,6 +1364,9 @@ real 07:12 exit set that exit aside, so the night reported 09:27 instead.
   asleep and look at what it covers.
 - **It never leaves a night without a wake.** If no later *got out of bed* backs up a departure, the marker
   that was set aside is still used, as before. The result is a wrong time at worst, never "still asleep".
+  One exception since #700: a marker far earlier than the child usually gets up is not handed back either, so
+  such a night can read "still asleep" (docs/sleep-tracking.md, "An exit far earlier than usual does not end the
+  night", which also says when that rule is off).
 - **Possible regression, unconfirmed:** on one production night (2026-09-05) the wake moved 46 minutes
   earlier, 07:20 to 06:34. The later time had been accepted in the morning review rather than corrected, and
   the bed then shows no slight movement at all for 45 minutes, which fits an empty bed as well as a very
@@ -1380,6 +1383,11 @@ real 07:12 exit set that exit aside, so the night reported 09:27 instead.
 - **Not fixed: an early wake with no stray marker at all.** If the child stirs, only a *got out of bed* is
   logged and the bed then reads empty because the child lies still, the night still ends at that stir. Telling
   that apart needs a way to tell an adult's movement from a child's, which the detector does not have.
+  Partly addressed by #700: for a child with at least 10 saved nights with the same wake-time setting, a stir
+  far earlier than the child usually gets up no longer ends the night on its own, unless such stirs are no longer
+  unusual for the child: 4 or more inside its last 14 nights switch that rule off until they age out
+  (docs/sleep-tracking.md, "An exit far earlier than usual does not end the night"). A stir closer to the usual
+  time still does.
 - **The same check before a mid-night trip is unchanged.** A *got out of bed* within a minute of a *got into
   bed* is also set aside when counting short trips out of bed during the night, and there any 3 minutes of
   movement still count. It probably has the same weakness (a missed trip, not a wrong morning); that is to be
