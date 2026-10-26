@@ -86,7 +86,9 @@ function run(dataDir, { env = {}, stat = null } = {}) {
     Object.assign(extra, { NL_REAL_STAT: REAL_STAT, NL_FAKE_SUFFIX: stat.suffix || '', NL_FAKE_OWNER: stat.owner || '', NL_FAIL_LOOK: stat.failLook ? '1' : '' });
   }
   const r = spawnSync('/bin/sh', [SCRIPT, ...APP], {
-    env: { PATH, DATA_DIR: dataDir, PUID: String(UID), PGID: String(GID), NL_MARK: mark, ...extra, ...env },
+    // NIGHTLIGHT_MEDIA_ISOLATION=0 by default: the move into private/ is tested with isolation off (it is asked for by
+    // default since #553 phase 4); a case can still override it through `env`.
+    env: { PATH, DATA_DIR: dataDir, PUID: String(UID), PGID: String(GID), NL_MARK: mark, NIGHTLIGHT_MEDIA_ISOLATION: '0', ...extra, ...env },
     encoding: 'utf8',
     timeout: 60_000,
   });
