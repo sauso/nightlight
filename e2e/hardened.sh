@@ -426,13 +426,20 @@ camera_and_hls() {
 AUTH_TOKEN=
 CAMERA_ID=
 MEDIA_TOKEN=
-check_media_isolation_reported() { # expected value (on|off)
-  local about got
+check_media_isolation_reported() { # expected value (on|off), expected mediaIsolationReason (disabled|root|id-clash|fallback; empty = null, i.e. on)
+  local about got reason
   [ -n "$AUTH_TOKEN" ] || die "no token yet: call camera_and_hls (or sign in) first"
   about=$(curl -fsS -m 15 "$BASE/api/about" -H "Authorization: Bearer $AUTH_TOKEN") || die "GET /api/about failed"
   got=$(printf '%s' "$about" | field mediaIsolation)
   [ "$got" = "$1" ] || die "GET /api/about reports mediaIsolation '$got', expected '$1': $about"
   ok "GET /api/about reports mediaIsolation $got"
+  # #553: WHY it is off, which the About page's admin warning is keyed on (only `fallback` warns). Checked only when the
+  # caller names it (hardened.sh's own calls do not); field() prints nothing for a JSON null, which is what "on" reports.
+  if [ "$#" -ge 2 ]; then
+    reason=$(printf '%s' "$about" | field mediaIsolationReason)
+    [ "$reason" = "$2" ] || die "GET /api/about reports mediaIsolationReason '$reason' (empty = null), expected '$2': $about"
+    ok "GET /api/about reports mediaIsolationReason '${reason:-null}'"
+  fi
 }
 
 found_count() { # log -> the count on the start-up script's "found: N" line
