@@ -80,7 +80,9 @@ ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100 '
   ★★ **Use this, NOT the OCI `org.opencontainers.image.revision` label — and the guard script prints
   the label.** Measured 2026-09-06: the label is populated on `nightlight-dev` and **empty on
   `nightlight`**, so on a *production* deploy the script's own verification line prints nothing and
-  looks like a failure. It is not. The env var is set on both.
+  looks like a failure. It is not. The env var is set on both. (Cause: the weekly rebuild replaced the
+  labelled `:latest` with an unlabelled image. #864 makes it label its images; an image rebuilt before
+  that can still be empty.)
 - **GATE:** `StopTimeout=30`, not `<nil>` (see §3.1). ★ It really does print the literal `<nil>` when
   unset, not `<no value>` — verified both ways.
 - **GATE:** logs show cameras streaming and detectors alive, with no crash-restart loop.

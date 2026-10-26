@@ -282,4 +282,5 @@ Deploys are **not** automated — after CI publishes an image, pull it and recre
 container on Unraid (prod pulls `:latest`, staging pulls `:dev`). A push/merge does NOT mean the
 change is live. Verify via the Actions tab / Docker Hub tag, then the running container's
 `NIGHTLIGHT_GIT_SHA` environment variable (`docker inspect`). Not the
-`org.opencontainers.image.revision` label: it exists only on CI-built images.
+`org.opencontainers.image.revision` label: it exists only on CI-built images, and the weekly rebuild
+dropped it until #864 (an image rebuilt before that fix is unlabelled although CI built it).
