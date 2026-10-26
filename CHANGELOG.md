@@ -93,7 +93,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   (run in the background, 30 seconds at most) fails. Nothing changes unless the internal switch is set: it is off, the
   default is not changed here, and no setting was added. With the switch off, one thing differs from before: the temporary
   file the clips-folder check writes (`.write-test`) now lives in `clips/.app/`, and the concat lists FFmpeg cuts from
-  moved from the ring folder to `clips/.concat/`; existing clips and files are left as they are. See
+  moved from the ring folder to `clips/.concat/`; existing clips and files are left as they are. If a start ends with
+  isolation off after an earlier one had it on, the data directory and clips folder are given back to `PUID:PGID` once
+  so clips made in between stay playable. See
   [Media isolation](docs/operations.md#media-isolation-not-on-by-default).
 
 ### Fixed

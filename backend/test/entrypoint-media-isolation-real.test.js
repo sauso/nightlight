@@ -45,7 +45,9 @@ const STUBS = {
   id: '#!/bin/sh\ncase "$1" in -u) echo 99 ;; -g) echo 100 ;; *) exit 1 ;; esac\n',
   usermod: '#!/bin/sh\nexit 0\n',
   groupmod: '#!/bin/sh\nexit 0\n',
-  chown: '#!/bin/sh\nexit 0\n',
+  // The image's "nightlight" user does not exist here: the name is read as 99:100 and the REAL chown runs (root), so a
+  // re-own can be seen on real files.
+  chown: '#!/bin/sh\nfor a; do shift; case "$a" in nightlight:nightlight) a=99:100 ;; esac; set -- "$@" "$a"; done\nexec /bin/chown "$@"\n',
   // $2 too (#553 phase 2a): the move into private/ also starts through su-exec (`su-exec nightlight node <tool>`), so
   // "su-exec ran" must mean the app's start (/bin/sh app.sh). `node`, that tool, is a no-op here.
   'su-exec': '#!/bin/sh\necho "STUB su-exec $1 $2"\nshift\nexec "$@"\n',
@@ -279,6 +281,74 @@ describe('#553 media isolation, the real chain (root, util-linux setpriv)', { sk
   test('#553 the folder probe refuses a clips folder the app cannot write to', () => {
     const r = probeLayout({ clipsOwner: [0, 1700], clipsMode: 0o750 });
     assert.match(r.last, /^MEDIA-PROBE-FAIL the app could not create a folder in the clips folder/, r.out);
+  });
+
+
+  // --- back to OFF after an ON run (review of PR #871) -----------------------------------------------------------
+  // A real media-owned file, written the way an ON run leaves it (1700:1700, 0660, in a folder with the media group), and a
+  // start that ends OFF (KILL missing from the bounding set, as in the nokill case). The app (99:100, no media group) must be
+  // able to read the clip afterwards, which it could not if the tighten walk had made it media-owned 0600.
+  test('★ #553 a media-owned clip stays READABLE by the app after a start that falls back to off; the next start re-owns nothing', () => {
+    n += 1;
+    const data = path.join(ROOT, `data-${n}`);
+    const clips = path.join(data, 'clips');
+    const clip = path.join(clips, 'cam', 'a.mp4');
+    for (const d of [data, clips, path.dirname(clip)]) { fs.mkdirSync(d, { recursive: true }); fs.chownSync(d, 99, 1700); }
+    fs.chmodSync(data, 0o710); fs.chmodSync(clips, 0o750); fs.chmodSync(path.dirname(clip), 0o1770);
+    fs.writeFileSync(clip, 'clip bytes');
+    fs.chownSync(clip, 1700, 1700); fs.chmodSync(clip, 0o660);
+    const readAsApp = () => spawnSync('setpriv', ['--reuid=99', '--regid=100', '--clear-groups', '--', 'cat', clip], { encoding: 'utf8' });
+    assert.notEqual(readAsApp().stdout, 'clip bytes', 'precondition: the app WITHOUT the media group cannot read the file yet (0660 1700:1700 in a 99:1700 tree... other has no access)');
+
+    const go = (prefix) => {
+      const dir = tree();
+      const tmp = path.join(ROOT, `tmp-${n}-${Math.random().toString(36).slice(2, 6)}`);
+      fs.mkdirSync(tmp);
+      fs.chmodSync(tmp, 0o1777);
+      const r = spawnSync(prefix[0], [...prefix.slice(1), '/bin/sh', path.join(dir, 'entrypoint.sh'), '/bin/sh', path.join(dir, 'app.sh'), 'app', path.join(dir, 'media-exec.sh')], {
+        env: { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: data, TMPDIR: tmp, PUID: '99', PGID: '100', NIGHTLIGHT_MEDIA_ISOLATION: '1' },
+        encoding: 'utf8', timeout: 60_000,
+      });
+      return { out: `${r.stdout}\n${r.stderr}`, status: r.status };
+    };
+    const noKill = ['setpriv', '--bounding-set=-kill', '--'];
+    const first = go(noKill);
+    assert.equal(first.status, 0, first.out);
+    assert.match(first.out, /media isolation is off: the dry run could not start the app/, first.out);
+    assert.match(first.out, /an earlier start had it on: giving \S+ and the clip tree back to 99:100 once/, first.out);
+    const st = fs.statSync(clip);
+    assert.equal(`${st.uid}:${st.gid}`, '99:100', 'the media-owned clip was not given back to the app');
+    assert.equal(readAsApp().stdout, 'clip bytes', 'the app cannot read the clip after the fallback');
+    assert.equal(fs.statSync(data).mode & 0o7777, 0o700, 'the data directory is back to its OFF mode');
+    assert.equal(fs.statSync(data).gid, 100);
+
+    const second = go(noKill);
+    assert.equal(second.status, 0, second.out);
+    assert.doesNotMatch(second.out, /an earlier start had it on/, 'the second start walked the tree again');
+    assert.equal(readAsApp().stdout, 'clip bytes');
+  });
+
+  test('★ #553 the same with an EXTERNAL clips folder: its media-owned files are given back too', () => {
+    n += 1;
+    const data = path.join(ROOT, `data-${n}`);
+    const ext = path.join(ROOT, `ext-${n}`);
+    const clip = path.join(ext, 'cam', 'a.mp4');
+    for (const d of [data, ext, path.dirname(clip)]) { fs.mkdirSync(d, { recursive: true }); fs.chownSync(d, 99, 100); }
+    fs.chownSync(ext, 99, 1700); fs.chmodSync(ext, 0o750);
+    fs.writeFileSync(clip, 'ext bytes');
+    fs.chownSync(clip, 1700, 1700); fs.chmodSync(clip, 0o660);
+    const dir = tree();
+    const tmp = path.join(ROOT, `tmp-ext-${n}`);
+    fs.mkdirSync(tmp);
+    fs.chmodSync(tmp, 0o1777);
+    const r = spawnSync('setpriv', ['--bounding-set=-kill', '--', '/bin/sh', path.join(dir, 'entrypoint.sh'), '/bin/sh', path.join(dir, 'app.sh'), 'app', path.join(dir, 'media-exec.sh')], {
+      env: { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: data, CLIPS_DIR: ext, TMPDIR: tmp, PUID: '99', PGID: '100', NIGHTLIGHT_MEDIA_ISOLATION: '1' },
+      encoding: 'utf8', timeout: 60_000,
+    });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const st = fs.statSync(clip);
+    assert.equal(`${st.uid}:${st.gid}`, '99:100', r.stdout + r.stderr);
+    assert.equal(spawnSync('setpriv', ['--reuid=99', '--regid=100', '--clear-groups', '--', 'cat', clip], { encoding: 'utf8' }).stdout, 'ext bytes');
   });
 
 });

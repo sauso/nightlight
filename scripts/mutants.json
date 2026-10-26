@@ -23841,5 +23841,14 @@
     "expect": "killed",
     "tests": ["entity-purge.test.js"],
     "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#553 phase 2b: an OFF start after an ON run does not give the media-owned clip tree back to the app",
+    "file": "backend/entrypoint.sh",
+    "find": "  if [ -n \"$MEDIA_EVER_ON\" ]; then media_reown; fi",
+    "replace": "  :",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "the data directory carries the media group and the start ends OFF"
   }
 ]

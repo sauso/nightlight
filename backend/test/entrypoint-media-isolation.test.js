@@ -23,8 +23,11 @@
 //   the dry run runs in the BACKGROUND with a deadline: a probe that never finishes (a stalled share) is abandoned, isolation
 //   stays off, and the container still starts
 //   the data directory's own group (1700) does not trigger the full ownership walk on the next start
+//   BACK TO OFF after an ON run (review of PR #871): a start that ends off and finds the media group on the data directory or
+//   the clips folder (or media-owned entries at the top of the clips folder) re-owns both ONCE, before the tighten walk,
+//   and hands back what a failed attempt prepared, so the next start finds nothing to do
 // HOW. The REAL script, with only what needs root, the image or a kernel stubbed by a directory first on PATH (the
-// entrypoint-umask.test.js technique): id, usermod, groupmod, chown and chgrp as there (chgrp records what it was asked);
+// entrypoint-umask.test.js technique): id, usermod and groupmod as there; chown and chgrp record what they were asked;
 // su-exec prints a marker and execs; `stat` answers "owner 99" for the owner check and is the real one otherwise; `setpriv`
 // records its options and its command, then either plays the dry run's part (NL_PROBE: what the probe would have printed and
 // returned) or execs the app, as the real one does. The real chmod, find and mktemp run on real folders.
@@ -73,7 +76,8 @@ const STUBS = {
   id: '#!/bin/sh\ncase "$1" in -u) echo 99 ;; -g) echo 100 ;; *) exit 1 ;; esac\n',
   usermod: '#!/bin/sh\nexit 0\n',
   groupmod: '#!/bin/sh\nexit 0\n',
-  chown: '#!/bin/sh\nexit 0\n',
+  // chown needs root: it records what was asked (so a re-own can be seen) and succeeds.
+  chown: '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$NL_LOG.chown"\nexit 0\n',
   'su-exec': '#!/bin/sh\necho "STUB su-exec $1 $2"\nshift\nexec "$@"\n',
   node: '#!/bin/sh\necho "STUB node $*"\nexit 0\n',
   setpriv: SETPRIV_STUB,
@@ -87,6 +91,8 @@ const STUBS = {
     'case "$*" in',
     '  "-L -c %u "*) u=${NL_STAT_UID:-${PUID:-99}}; u=$(printf "%s" "$u" | sed "s/^0*//"); echo "${u:-0}"; exit 0 ;;',
     '  "-L -c %u:%g "*/.) if [ -n "${NL_DATA_UG:-}" ]; then echo "$NL_DATA_UG"; exit 0; fi ;;',
+    '  "-L -c %g "*/.) if [ -n "${NL_DATA_UG:-}" ]; then echo "${NL_DATA_UG#*:}"; exit 0; fi ;;',
+    '  "-L -c %g "*) if [ -n "${NL_CLIPS_G:-}" ]; then echo "$NL_CLIPS_G"; exit 0; fi ;;',
     'esac',
     'exec "$NL_REAL_STAT" "$@"',
     '',
@@ -135,6 +141,7 @@ function run(env, { seed, cwd, script = SCRIPT } = {}) {
     movedFirst: /STUB su-exec nightlight node\nSTUB node \S*migrate-private-layout\.js\n[\s\S]*APP MEDIA_ISOLATION=/.test(r.stdout),
     setpriv: read(`${log}.setpriv`).map((l) => { const [opts, cmd] = l.split('|'); return { opts, cmd }; }),
     chgrp: read(`${log}.chgrp`),
+    chown: read(`${log}.chown`),
     isoWarnings: both.filter((l) => l.includes('[entrypoint] warning: media isolation is off:')),
     onLines: both.filter((l) => l.startsWith('[entrypoint] media isolation on:')),
     lines: both.filter((l) => l.startsWith('[entrypoint]')),
@@ -512,5 +519,82 @@ describe('#553 phase 2b entrypoint: the dry run runs in the background and gives
     const v = variant('MEDIA_DRY_RUN_TIMEOUT=30', 'MEDIA_DRY_RUN_TIMEOUT=1');
     const r = run({ ...ASK, NL_PROBE: 'hang' }, { script: path.join(v, 'entrypoint.sh') });
     assert.ok(r.elapsedMs < 12_000, `${r.elapsedMs} ms`);
+  });
+});
+
+describe('#553 phase 2b entrypoint: back to OFF after an ON run (media-owned clips must stay readable)', { skip }, () => {
+  before(() => {
+    ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'nl-media-iso-'));
+    STUB_DIR = path.join(ROOT, 'bin');
+    fs.mkdirSync(STUB_DIR);
+    for (const [name, body] of Object.entries(STUBS)) fs.writeFileSync(path.join(STUB_DIR, name), body, { mode: 0o755 });
+  });
+  after(() => { if (ROOT) { fs.rmSync(ROOT, { recursive: true, force: true }); ROOT = undefined; STUB_DIR = undefined; } });
+
+  const REOWN = 'an earlier start had it on';
+  const reowns = (r) => r.chown.filter((l) => l.startsWith('-R '));
+  const tree = (d) => { write(path.join(d, 'clips', 'cam', 'a.mp4'), 'x', 0o660); dir(path.join(d, 'clips', 'cam'), 0o770); dir(path.join(d, 'clips'), 0o750); };
+
+  test('★ the data directory carries the media group and the start ends OFF: the data directory and clip tree are re-owned ONCE, before the tighten walk', () => {
+    const r = run({ ...ASK, NL_PROBE: 'fail', NL_DATA_UG: '99:1700' }, { seed: tree });
+    assertFallback(r, 'a media process could read', 'ON then off');
+    const reown = r.lines.findIndex((l) => l.includes(REOWN));
+    const tightened = r.lines.findIndex((l) => l.includes('tightened after all'));
+    assert.ok(reown >= 0, `no re-own line${r.ctx}`);
+    assert.ok(tightened > reown, `the walk ran before the re-own, so it saw media-owned files${r.ctx}`);
+    assert.deepEqual(reowns(r), [`-R nightlight:nightlight ${r.data}`], 'exactly one recursive re-own, of the data directory (the clips folder is inside it)');
+    assert.equal(modeOf(r.data), 0o700, 'the data directory is back to its OFF mode');
+    assert.ok(r.chgrp.includes(`100 ${r.data}`), `the data directory was not handed back to the app's group${r.ctx}`);
+  });
+
+  test('★ ...and the NEXT start (the group is no longer the media group) does not walk or re-own anything', () => {
+    const second = run({ ...ASK, NL_PROBE: 'fail', NL_DATA_UG: '99:100' }, { seed: tree });
+    assertFallback(second, 'a media process could read', 'second start');
+    assert.deepEqual(reowns(second), [], `a start with nothing to undo still re-owned the tree: ${second.chown}`);
+    assert.ok(!second.lines.some((l) => l.includes(REOWN)));
+  });
+
+  test('★ a failed FIRST attempt hands its own top folders back, so a configuration that never worked walks nothing on later starts', () => {
+    const r = run({ ...ASK, NL_PROBE: 'fail' }, { seed: tree });
+    assertFallback(r, 'a media process could read', 'first failed attempt');
+    assert.ok(!r.lines.some((l) => l.includes(REOWN)), `nothing had been on before, yet it re-owned${r.ctx}`);
+    // opened to the media group for the dry run, then given back
+    assert.deepEqual(r.chgrp, [`1700 ${r.data}`, `1700 ${r.data}/clips`, `100 ${r.data}`, `100 ${r.data}/clips`]);
+    assert.equal(modeOf(r.data), 0o700);
+    assert.equal(modeOf(path.join(r.data, 'clips')), 0o700);
+  });
+
+  test('★ an EXTERNAL clips folder in the media group is re-owned too (the ownership block never reaches it)', () => {
+    n += 1;
+    const ext = path.join(ROOT, `ext-${n}`);
+    write(path.join(ext, 'cam', 'a.mp4'), 'x', 0o660);
+    dir(ext, 0o750);
+    const r = run({ ...ASK, NL_PROBE: 'fail', NL_CLIPS_G: '1700', CLIPS_DIR: ext });
+    assertFallback(r, 'a media process could read', 'external');
+    assert.ok(r.lines.some((l) => l.includes(REOWN)), r.ctx);
+    assert.ok(reowns(r).includes(`-R nightlight:nightlight ${ext}`), `the external folder was not re-owned: ${r.chown}`);
+    assert.ok(reowns(r).includes(`-R nightlight:nightlight ${r.data}`));
+    assert.ok(r.chgrp.includes(`100 ${ext}`));
+  });
+
+  test('★ the switch taken away entirely (not asked for, nothing prepared): an external folder still in the media group is re-owned', () => {
+    n += 1;
+    const ext = path.join(ROOT, `ext-${n}`);
+    dir(ext, 0o750);
+    const r = run({ NL_CLIPS_G: '1700', CLIPS_DIR: ext });
+    assert.equal(r.status, 0, r.ctx);
+    assert.equal(r.app, 'off', r.ctx);
+    assert.ok(reowns(r).includes(`-R nightlight:nightlight ${ext}`), `${r.chown}`);
+  });
+
+  test('PUID/PGID equal to the media id is never evidence (the group IS the app\'s own)', () => {
+    const r = run({ NL_DATA_UG: '99:1700', PGID: '1700' });
+    assert.ok(!r.lines.some((l) => l.includes(REOWN)), r.ctx);
+  });
+
+  test('no evidence, no re-own: an OFF start on an ordinary tree touches nothing extra', () => {
+    const r = run({}, { seed: tree });
+    assert.ok(!r.lines.some((l) => l.includes(REOWN)), r.ctx);
+    assert.deepEqual(r.chgrp, []);
   });
 });

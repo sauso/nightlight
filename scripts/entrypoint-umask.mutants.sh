@@ -40,7 +40,7 @@ baseline() {  # baseline <test file> <minimum number of tests>
   echo "  baseline ok ($PASS tests of $(basename "$1"), none skipped)"
 }
 baseline "$TEST" 22
-baseline "$ISO_TEST" 41
+baseline "$ISO_TEST" 48
 baseline "$PRIV_TEST" 16
 
 mutant() {  # mutant <name> <perl -pe expression> [test file, default the umask test]
@@ -122,7 +122,11 @@ mutant "the probe is not told which folders to try"                        's/ "
 mutant "a folder another uid owns is taken over (no owner check)"          's/^  if \[ "\$\{3:-\}" != own \] && .*; then$/  if false; then/' "$I"
 mutant "the parents between the data directory and a nested CLIPS_DIR are not prepared" 's/^    "\$DATA_DIR"\/\*\) media_layout_up_to .*$/    "\$DATA_DIR"\/*) ;;/' "$I"
 mutant "the media group on the data directory reads as wrong ownership (a full walk every start)" 's/ && ! media_layout_ok "\$f"//' "$I"
-mutant "the dry run leaves its temporary folder behind"                    's/^  rmdir -- "\$_dd" 2>\/dev\/null \|\| :$/  :/' "$I"
+mutant "an OFF start after an ON run does not re-own the data directory and clip tree" 's/^  if \[ -n "\$MEDIA_EVER_ON" \]; then media_reown; fi$/  :/' "$I"
+mutant "a failed first attempt leaves its folders in the media group (a walk on every later start)" 's/^  media_undo_prepare$/  :/' "$I"
+mutant "an external CLIPS_DIR is not re-owned after an ON run"             's/^        chown -R nightlight:nightlight "\$CLIPS_ABS" \|\| .*$/        :/' "$I"
+mutant "PUID/PGID = the media id counts as evidence of an earlier ON run"  's/^  if \[ "\$APP_UID" = "\$MEDIA_ID" \] \|\| \[ "\$APP_GID" = "\$MEDIA_ID" \]; then return 1; fi$/  :/' "$I"
+mutant "the dry run leaves its temporary folder behind"                   's/^  rmdir -- "\$_dd" 2>\/dev\/null \|\| :$/  :/' "$I"
 
 # --- #553 phase 2a: the private folder and the move into it (run against entrypoint-private-layout.test.js) ---
 P="$PRIV_TEST"

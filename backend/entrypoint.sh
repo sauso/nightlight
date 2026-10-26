@@ -387,6 +387,9 @@ media_traverse_dir() {
     MEDIA_REASON="$1 is not owned by uid $APP_UID (the app), so the media folders cannot be set up in it; give it to $APP_UID on the host"
     return 1
   fi
+  # Remembered BEFORE the change, so that a start which ends with isolation off can hand the folder back (media_undo_prepare).
+  MEDIA_PREPARED="$MEDIA_PREPARED
+$1"
   { chgrp "$MEDIA_ID" "$1" && chmod "$2" "$1"; } || { MEDIA_REASON="could not give $1 to the media group (mode $2)"; return 1; }
 }
 
@@ -452,6 +455,61 @@ media_dry_run() {
   return 1
 }
 
+# --- Going back to off after an ON start (#553 phase 2b review) ------------------------------------------------
+# An ON run leaves files the MEDIA user wrote in the clip tree: owned 1700:1700, mode 0660. A later start that ends OFF
+# (the dry run fails, a capability went missing, or the switch was taken away) runs the app WITHOUT the media group, so it
+# could neither read nor serve those clips, and the tighten walk would turn them into media-owned 0600 files that nothing
+# but root can open. So an OFF start that finds evidence of an earlier ON run gives the data directory and the clip tree
+# (an external CLIPS_DIR included, which the ownership block above never reaches) back to PUID:PGID ONCE, before the
+# tighten walk. The evidence is read BEFORE this start prepares the folders, because preparing sets the same group; and a
+# failed attempt hands its own top folders back (media_undo_prepare), so a configuration that never worked does not walk the
+# clip tree on every start (#567). Once the group is no longer the media group, the next start finds no evidence: a no-op.
+MEDIA_PREPARED=
+media_ever_on() {
+  # PUID or PGID equal to the media id is a configuration where "the group is the media group" means nothing (isolation is
+  # refused for it); never a reason to re-own anything.
+  if [ "$APP_UID" = "$MEDIA_ID" ] || [ "$APP_GID" = "$MEDIA_ID" ]; then return 1; fi
+  [ "$(stat -L -c %g "$DATA_DIR/." 2>/dev/null)" = "$MEDIA_ID" ] && return 0
+  [ "$(stat -L -c %g "$CLIPS_ABS" 2>/dev/null)" = "$MEDIA_ID" ] && return 0
+  [ -d "$CLIPS_ABS" ] && [ -n "$(find "$CLIPS_ABS" -maxdepth 1 -user "$MEDIA_ID" 2>/dev/null | head -n 1)" ] && return 0
+  return 1
+}
+if media_ever_on; then MEDIA_EVER_ON=1; else MEDIA_EVER_ON=; fi
+# What a new file or folder would get under the configured mask (700 at the default 077): the OFF mode of the two top folders.
+OFF_MODE=$(printf '%o' $((0777 & ~0$UMASK)))
+media_set_back() { # give a top folder back to the app's group and the OFF mode; never fatal
+  chgrp "$APP_GID" "$1" 2>/dev/null && chmod "$OFF_MODE" "$1" 2>/dev/null || private_warn "could not hand $1 back to group $APP_GID"
+}
+media_undo_prepare() { # this start opened these top folders to the media group and then did not go on
+  # one path per line (a path may hold a space); no globbing of the names
+  _ifs=$IFS
+  set -f
+  IFS='
+'
+  for _p in $MEDIA_PREPARED; do
+    IFS=$_ifs
+    media_set_back "$_p"
+    IFS='
+'
+  done
+  IFS=$_ifs
+  set +f
+}
+media_reown() {
+  printf '[entrypoint] media isolation is off, but an earlier start had it on: giving %s and the clip tree back to %s once\n' "$DATA_DIR" "$WANT_OWNER"
+  chown -R nightlight:nightlight "$DATA_DIR" || private_warn "could not re-own every entry under $DATA_DIR"
+  media_set_back "$DATA_DIR"
+  case "$CLIPS_ABS" in
+    "$DATA_DIR"|"$DATA_DIR"/*) ;; # inside the data directory: just done
+    *)
+      if [ -d "$CLIPS_ABS" ]; then
+        chown -R nightlight:nightlight "$CLIPS_ABS" || private_warn "could not re-own every entry under $CLIPS_ABS"
+        media_set_back "$CLIPS_ABS"
+      fi
+      ;;
+  esac
+}
+
 MEDIA_ISOLATION=off
 MEDIA_REASON=
 if [ "${NIGHTLIGHT_MEDIA_ISOLATION:-}" = 1 ]; then
@@ -473,6 +531,13 @@ if [ "${NIGHTLIGHT_MEDIA_ISOLATION:-}" = 1 ]; then
   fi
 fi
 export MEDIA_ISOLATION
+
+# Off after all: first undo what this start prepared, then (if an earlier start had it on) re-own, THEN tighten, so the walk
+# sees app-owned files.
+if [ "$MEDIA_ISOLATION" = off ]; then
+  media_undo_prepare
+  if [ -n "$MEDIA_EVER_ON" ]; then media_reown; fi
+fi
 
 # Isolation was asked for but is off: the confined walk above skipped the clip tree on that promise, so the whole tree is
 # tightened now, as it would have been without the switch (the start-up line above said what was skipped).

@@ -426,14 +426,19 @@ phase_default() {
 }
 
 # A fallback: the container starts the usual way, says why once, reports off, and still streams.
-iso_off_case() { # part name, kind, puid, expected reason, app uid
-  local part=$1 kind=$2 puid=$3 reason=$4 auid=$5 vol="$PROJECT-$1-data" c="$PROJECT-$1" log warn
+iso_off_case() { # part name, kind, puid, expected reason, app uid, [keep: reuse the volume of an earlier ON run]
+  local part=$1 kind=$2 puid=$3 reason=$4 auid=$5 keep=${6:-} vol="$PROJECT-$1-data" c="$PROJECT-$1" log warn
   cleanup_apps
-  new_volume "$vol"
+  if [ -z "$keep" ]; then new_volume "$vol"; fi
   start_fakecam
   start_iso_app "$c" "$vol" "$kind" "$puid"
   healthy_or_die "$c" "$part (expected to start the usual way)"
-  camera_and_hls "$c"
+  if [ -n "$keep" ]; then
+    sign_in_again
+    wait_until 120 "the camera's ring to come back" can_record
+  else
+    camera_and_hls "$c"
+  fi
   check_iso_processes "$c" off "$auid" "$APP_PGID"
   check_media_isolation_reported off
   log=$(save_log "$c")
@@ -450,10 +455,52 @@ iso_off_case() { # part name, kind, puid, expected reason, app uid
 # KILL left out: the app's drop asks for CAP_KILL as an ambient capability, which the bounding set no longer holds, so
 # setpriv refuses (#553 spike, run 3: "apply capabilities: Operation not permitted", exit 127). The stop is NOT checked:
 # without KILL tini cannot signal the app either (hardened.sh, control K).
+#
+# #553 phase 2b review of PR #871: the fallback FOLLOWS AN ON RUN on the same volume. The ON run leaves clips owned by the
+# media user (1700:1700, 0660) in a tree with the media group; the fallback start runs the app without that group, so
+# unless the start-up script gives the tree back to the app, the existing clips cannot be served. Checked here with a
+# real clip, through the API.
+sign_in_again() {
+  local r
+  r=$(curl -fsS -m 15 -X POST "$BASE/api/auth/login" -H 'Content-Type: application/json' \
+    -d '{"username":"e2e","password":"e2e-admin-pw"}') || die "sign-in on the reused volume failed"
+  AUTH_TOKEN=$(printf '%s' "$r" | field token)
+  [ -n "$AUTH_TOKEN" ] || die "no token from sign-in: $r"
+  MEDIA_TOKEN=$(curl -fsS -m 15 -X POST "$BASE/api/auth/media-token" -H "Authorization: Bearer $AUTH_TOKEN" | field token) || true
+  [ -n "$MEDIA_TOKEN" ] || die "could not mint a media token"
+  ok "signed in again on the reused volume (the earlier ON run's database)"
+}
+
 phase_nokill() {
-  say "NOKILL: NIGHTLIGHT_MEDIA_ISOLATION=1, the six capabilities without KILL; the dry run must fail and the app start as before"
-  iso_off_case nokill nokill "$APP_PUID" "$NOKILL_REASON" "$APP_PUID"
-  docker rm -f "$PROJECT-nokill" >/dev/null
+  local c1="$PROJECT-nokill-on" vol="$PROJECT-nokill-data" c="$PROJECT-nokill" rec f body log
+  say "NOKILL: an ON run first (to leave media-owned clips), then NIGHTLIGHT_MEDIA_ISOLATION=1 with the six capabilities without KILL; the dry run must fail and the app start as before, with the clips still served"
+  cleanup_apps
+  new_volume "$vol"
+  start_fakecam
+  start_iso_app "$c1" "$vol" six
+  healthy_or_die "$c1" "nokill (the earlier ON run)"
+  camera_and_hls "$c1"
+  check_media_isolation_reported on
+  wait_until 90 "the ring to hold 3 segments" ring_has_segments "$c1" 3
+  wait_until 90 "the camera to report can_record" can_record
+  rec=$(record_a_clip "$c1")
+  f=$(recording_file "$c1" "$rec")
+  [ "$(mode_of "$c1" "$f")" = "660 $MEDIA_ID:$MEDIA_ID" ] || die "precondition: the ON run's clip is '$(mode_of "$c1" "$f")', expected 660 $MEDIA_ID:$MEDIA_ID"
+  ok "an ON run left a media-owned clip (recording $rec: 660 $MEDIA_ID:$MEDIA_ID)"
+  stop_app "$c1"
+  docker rm "$c1" >/dev/null
+
+  iso_off_case nokill nokill "$APP_PUID" "$NOKILL_REASON" "$APP_PUID" keep
+  log=$(save_log "$c")
+  grep -qF 'an earlier start had it on' "$log" || die_log "$log" "nokill: the fallback did not give the media-owned tree back to the app"
+  [ "$(mode_of "$c" "$f")" = "600 $APP_PUID:$APP_PGID" ] || die "the clip after the fallback is '$(mode_of "$c" "$f")', expected 600 $APP_PUID:$APP_PGID (the app's, tightened)"
+  body=$(mktemp)
+  http "$body" "$BASE/api/recordings/$rec/video?token=$MEDIA_TOKEN"
+  [ "$HTTP_CODE" = 200 ] || die "the clip made by the ON run is answered $HTTP_CODE after the fallback, expected 200"
+  [ "$(head -c 8 "$body" | tail -c 4)" = ftyp ] || die "the clip served after the fallback is not an MP4"
+  rm -f "$body"
+  ok "after the fallback the clip made while isolation was on is the app's again and is still served (200, an MP4)"
+  docker rm -f "$c" >/dev/null
   say "NOKILL PASSED"
 }
 

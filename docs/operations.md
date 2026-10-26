@@ -620,6 +620,14 @@ nothing at start. The media user must be able to reach the mount: the folders ab
 because it would otherwise remove the group access this layout depends on. If isolation then turns out to be off, the
 whole tree is walked as usual.
 
+**Going back to off.** Clips and recordings made while isolation was on belong to the media user. If a later start ends
+with isolation off (the trial failed, a capability went missing, or the setting was removed), the start-up script gives
+the data directory and the clips folder (an external one too) back to `PUID`:`PGID` **once**, before it tightens modes,
+and logs `[entrypoint] media isolation is off, but an earlier start had it on: giving … back`. Without that the app,
+which is not in the media group when isolation is off, could not play those clips. It recognises the case by the media
+group (or media-owned entries) on the data directory or clips folder, so the next start finds nothing to do. On a big
+clips folder that one pass reads every entry, like the ownership fix described under [Who can read the data directory](#who-can-read-the-data-directory).
+
 **Known limits.** The app can still become any user in the container, because it keeps `SETUID` to start the media
 programs. This protects the database and secrets from a fault in FFmpeg or MediaMTX; it does not make the container a
 sandbox. The unauthenticated MediaMTX control API on `127.0.0.1:9997` and camera passwords in process arguments are not
