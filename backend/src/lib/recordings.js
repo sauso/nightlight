@@ -219,22 +219,36 @@ export const SHUTDOWN_SETTLE_MS = 2500;
 // ⚠️ THIS COMMENT USED TO READ "Docker's default stop grace is 10s", and that is false — there is no
 // such default (Engine 29 documents none; a bare `docker stop` was measured SIGKILLing at ~4s). The
 // budget is NOT derived from Docker's behaviour. It is a deliberate cap on how long shutdown will wait
-// for a clip, chosen so the whole of shutdown stays inside the 9s bound index.js documents, which is
-// in turn what the DECLARED 30s grace is sized from (issue #279: `stop_grace_period` in
-// docker-compose.yml, `--stop-timeout 30` in the Unraid template and the README).
+// for a clip, sized from the DECLARED 30s grace (issue #279: `stop_grace_period` in docker-compose.yml,
+// `--stop-timeout 30` in the Unraid template and the README), not from a smaller number.
+// ⚠️ IT WAS 6000 UNTIL #867, AND THAT WAS TOO SMALL FOR THE CUT IT WAITS FOR. The cut is the settle above, then a
+// libx264 re-encode of pre-roll + recording (the default pre-roll is 30 s, so even a 4-10 s manual recording is
+// roughly 40 s of video), then a thumbnail and an ffprobe. On the staging NAS (2026-10-25) that took 6-8 s: three
+// of six stops with a recording in flight logged "gave up waiting" at 6 s, one lost the clip and two were saved
+// only because the process happened to live a second longer. The 6000 was a cap chosen to fit a 9 s bound that was
+// itself only the number the 30 s grace was sized from; nothing needed the app to use so little of it.
+// The worst case of the whole of shutdown() is now max(budget, 3 s motion + 3 s sound stops) + 3 s transcoder stop
+// = 23 s, which leaves 7 s of the declared 30 s for everything after (stopMediaMTX, the exit itself).
+// What this means for another install: a cut that needs more than 20 s (a long recording with a large pre-roll on a
+// slow CPU) is still given up on and marked failed on the next start. A known limit, documented in
+// docs/recording.md, not something a larger stop timeout fixes.
 // ⚠️ Raising this does NOT let a longer recording finish "if the grace allows" — the cap is absolute
 // and independent of the grace (`stopAllRecordings` races the work against it).
 // Which test stops you changing it, precisely — because an earlier version of THIS comment named the
 // wrong one, and a second adversarial review of #279 proved it by raising the value and watching that
-// test pass. Three guards, three different thresholds:
-//   * recordings-shutdown.test.js catches any RAISE: its bound is max(budget, 6000) + 3000 <= 9000.
-//   * shutdown-grace-declared.test.js catches any change UP OR DOWN, via the docs tripwire — three
-//     user-facing files state this value in seconds and must agree with it. (A LOWERING is otherwise
-//     invisible: 4500 cleared every arithmetic check while leaving three documents saying "6 seconds".)
-//   * that same file's grace arithmetic — ceil((budget + 9000)/1000) vs the DECLARED 30s — only bites
-//     above 21000. It is the weakest of the three, and naming it alone was the false claim.
+// test pass. Four guards, four different thresholds:
+//   * recordings-shutdown.test.js catches any RAISE past the declared grace: worst case + 5 s margin must fit
+//     inside docker-compose.yml's stop_grace_period (read from the file, not typed). That bites above 22000.
+//   * shutdown-grace-declared.test.js's grace arithmetic — ceil((budget + 9000)/1000) vs the DECLARED 30s — is
+//     the stricter of the two and bites above 21000.
+//   * shutdown-grace-declared.test.js's docs tripwire catches any change UP OR DOWN — three user-facing files
+//     state this value in seconds and must agree with it. (A LOWERING is otherwise invisible: 4500 cleared every
+//     arithmetic check while leaving three documents saying "6 seconds".) ⚠️ It is WEAK for 20 -> 6 specifically:
+//     the docs and CHANGELOG now mention the old "6 seconds" as history, so that one value still matches (found by
+//     running it on #867). It still catches any other value.
+//   * recordings-lifecycle.test.js catches a LOWERING back below a 7 s cut, which is the #867 regression itself.
 // Over budget we give up and let reconcileStaleRecordings mark the row on next boot.
-export const SHUTDOWN_BUDGET_MS = 6000;
+export const SHUTDOWN_BUDGET_MS = 20000;
 // Exported so a test can assert the relationship between them: a settle longer than the budget makes
 // the whole save path permanently inert, and that mutant survived the first review of #277.
 

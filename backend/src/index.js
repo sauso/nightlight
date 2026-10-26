@@ -533,15 +533,17 @@ async function shutdown() {
   // regression caught by adversarial review of PR #277. Each detector stop is bounded by its own 3s
   // force-kill, and so is the transcoder stop: awaiting in sequence gave 3 + 3 + 6 + 3 = 15s worst
   // case, where before that PR it was 3 + 3 + 3 = 9s. Overlapping the recording wait with the
-  // detector stops restores that: max(6, 3+3) + 3 = 9s. Asserted in recordings-shutdown.test.js,
+  // detector stops keeps it at max(budget, 3+3) + 3. Asserted in recordings-shutdown.test.js,
   // because it is not observable any other way.
   //
-  // ⚠️ 9s is the number the DEPLOYMENT grace is sized from — see issue #279 and the
-  // `stop_grace_period` / `--stop-timeout 30` declarations in docker-compose.yml, unraid-template.xml
-  // and the README. An earlier version of this comment said 15s exceeded "Docker's DEFAULT 10s stop
-  // grace"; soak-testing this on Docker Engine 29.7.2 showed there is no such guarantee — `docker
-  // stop` with no `-t` SIGKILLed the container after ~4s, losing exactly the recording this code
-  // exists to save. Keep the bound under 9s AND keep the grace declared; neither alone is enough.
+  // ⚠️ THE BUDGET WAS 6s (so the bound 9s) UNTIL #867 and is now 20s (so 23s): a cut on a NAS takes 6-8s and the 6s
+  // cap gave up on clips the 30s grace had plenty of time for. The bound is what the DEPLOYMENT grace is checked
+  // against — see issue #279 and the `stop_grace_period` / `--stop-timeout 30` declarations in
+  // docker-compose.yml, unraid-template.xml and the README; recordings-shutdown.test.js reads that value and
+  // requires this bound plus a 5s margin to fit inside it. An earlier version of this comment said 15s exceeded
+  // "Docker's DEFAULT 10s stop grace"; soak-testing this on Docker Engine 29.7.2 showed there is no such guarantee —
+  // `docker stop` with no `-t` SIGKILLed the container after ~4s, losing exactly the recording this code exists to
+  // save. Keep the bound inside the declared grace AND keep the grace declared; neither alone is enough.
   const recordingsFinished = stopAllRecordingsForShutdown();
   await stopAllMotionDetectors();
   await stopAllOnvifMotion();

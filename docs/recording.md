@@ -355,10 +355,12 @@ Parameters*) is for. Stopping takes a few seconds and the container exits as soo
 that setting Docker may kill it part-way, and the recording is marked **failed** instead — see
 [Quick start](../README.md#quick-start) and [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 
-Nightlight waits **up to 6 seconds** for that final step, which is enough for the recordings this is
-for. It's a fixed limit: **raising the stop timeout past 30 seconds won't buy a long recording more
-time**, because the wait isn't derived from it. A recording still being assembled after 6 seconds is
-given up on, and marked **failed** the next time Nightlight starts — a bounded wait, not a promise.
+Nightlight waits **up to 20 seconds** for that final step, which is enough for the recordings this is
+for (assembling one takes a few seconds on a NAS, longer for a large pre-roll). It's a fixed limit:
+**raising the stop timeout past 30 seconds won't buy a long recording more time**, because the wait isn't
+derived from it. A recording still being assembled after 20 seconds is given up on, and marked **failed**
+the next time Nightlight starts — a bounded wait, not a promise. *(Older versions waited only 6 seconds,
+which was often too short, so a recording in progress at a stop could be lost.)*
 
 **When a recording can't be saved, it says so.** A recording that fails — the camera was offline and
 the buffer had no frames in it, the clip couldn't be assembled, or a restart interrupted it — appears

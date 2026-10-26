@@ -220,9 +220,10 @@ in progress when Nightlight restarted (a deploy, a reboot, a power cut).
 
 **Why:** a clip is assembled from the buffer *after* you press stop, and a restart during that step
 loses it. Nightlight now marks such a recording as failed when it next starts, rather than leaving it
-stuck half-finished forever. It tries to finish the clip first, but only for up to 6 seconds — a fixed
+stuck half-finished forever. It tries to finish the clip first, but only for up to 20 seconds — a fixed
 limit that allowing your container longer to stop does **not** extend — so a long recording may still
-be lost.
+be lost. (Versions before this fix waited only 6 seconds, shorter than assembling a clip usually takes on a
+NAS, so a recording in progress at a stop was often lost.)
 
 **What to do:** re-record if you still need it, then tap the entry and choose **Remove** to clear it —
 recordings have no automatic retention, so it stays until you do. *(Older versions hid these
