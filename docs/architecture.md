@@ -593,8 +593,12 @@ which the six-capability hardening does not grant).
   camera-facing programs, not the app.
 - **One uid for all media processes.** A taken-over ffmpeg can signal or `ptrace` the others (MediaMTX, other
   cameras' ffmpeg); there is no per-camera separation.
-- **MediaMTX's API on `127.0.0.1:9997` is unauthenticated** and returns each camera's credentials, so a taken-over media
-  process can still read them. Authenticating that API is a follow-up.
+- **MediaMTX's API on `127.0.0.1:9997` and its RTSP port `127.0.0.1:8554` have no password.** A taken-over media process
+  can add, change or remove stream paths and read or publish a camera's stream. It cannot learn a camera's address or
+  password from them: MediaMTX is never given one (every path is registered as publisher-only and FFmpeg pulls the
+  camera itself; `backend/test/mediamtx-never-given-credentials.test.js` pins that, and it was read back from a real
+  MediaMTX). A password on the API would not close this while the media programs share one user, because a process of
+  that user can already signal or `ptrace` MediaMTX, and MediaMTX needs the check material in a file it can read.
 - **Camera passwords are on ffmpeg's command line** (`/proc/<pid>/cmdline`), readable by anything in the container.
 - **Some hosts cannot do it** (rootless Docker/Podman, SMB/ACL shares that ignore `chmod`, NFS `root_squash`, PUID/PGID
   1700, missing capabilities) and run with isolation off and a warning.

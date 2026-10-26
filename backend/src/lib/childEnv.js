@@ -21,7 +21,8 @@ import { fileURLToPath } from 'url';
 // WHAT ISOLATION STILL DOES NOT STOP (docs/architecture.md, "Media isolation", has the full list):
 //   - the app itself holds CAP_SETUID/SETGID/KILL, so a compromised APP can become uid 0 inside the container;
 //   - every media process shares one uid, so one taken-over ffmpeg can signal or ptrace the others, MediaMTX included;
-//   - MediaMTX's API on loopback is unauthenticated and lists the cameras' credentials;
+//   - MediaMTX's API and RTSP port on loopback have no password: a taken-over media process can change or remove stream
+//     paths and read or publish a stream. MediaMTX holds no camera address or password (test/mediamtx-never-given-credentials);
 //   - a camera's password is on its ffmpeg command line, visible to every process in the container.
 //
 // THE ALLOWLIST (names, not values; a name that is unset in the parent stays unset in the child):
