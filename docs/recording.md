@@ -506,6 +506,10 @@ Each kind ages out differently — this is the part most worth reading twice:
     month) cannot get a timelapse any more, because its frames are gone first. A clock set far into the
     future makes every folder look old and deletes it, as it would the activity history. A partial video
     left by a failed timelapse is not deleted by this rule; it stays until the child is removed.
+  - A night whose timelapse keeps failing is retried up to 3 times (one try per 30 minutes), then left
+    alone. The count is not saved, so each time Nightlight starts it tries that night 3 more times, until
+    the frames are deleted at about 32 days. That is deliberate: a restart is usually an update, and an
+    update is when a fixed problem should get another go. The cost is a few wasted video encodes per start.
 
 **A stuck timelapse is given up on.** If the assembly's frames, time and bytes written stop moving for
 **2 minutes plus 1 second per 2 MB already written**, Nightlight stops it and marks that night failed.
