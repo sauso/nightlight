@@ -373,7 +373,7 @@ iso_on_case() { # part name, kind (six|default)
   healthy_or_die "$c" "$part"
   camera_and_hls "$c"
   check_iso_processes "$c" on "$APP_PUID" "$APP_PGID"
-  check_media_isolation_reported on
+  check_media_isolation_reported on ''
   check_no_probe_leftovers "$c"
   check_media_layout "$c" "$part"
   start_unfinished_recording "$c"
@@ -405,7 +405,7 @@ phase_control() {
   healthy_or_die "$c" "control"
   camera_and_hls "$c"
   check_iso_processes "$c" off "$APP_PUID" "$APP_PGID"
-  check_media_isolation_reported off
+  check_media_isolation_reported off disabled
   [ "$(as_app "$c" head -c 15 "$DATA/private/babymonitor.db")" = "$SQLITE_MAGIC" ] || die "control: the app's uid cannot read the database"
   ok "isolation off: ffmpeg and MediaMTX run as $APP_PUID:$APP_PGID, and that uid reads the database: the old access, so the media user's denial in the on-cases is a real difference"
   # The old layout is what it was: the data directory is the app's alone, no media group.
@@ -427,8 +427,8 @@ phase_default() {
 }
 
 # A fallback: the container starts the usual way, says why once, reports off, and still streams.
-iso_off_case() { # part name, kind, puid, expected reason, app uid, [keep: reuse the volume of an earlier ON run]
-  local part=$1 kind=$2 puid=$3 reason=$4 auid=$5 keep=${6:-} vol="$PROJECT-$1-data" c="$PROJECT-$1" log warn
+iso_off_case() { # part name, kind, puid, expected reason, app uid, expected mediaIsolationReason code, [keep: reuse the volume of an earlier ON run]
+  local part=$1 kind=$2 puid=$3 reason=$4 auid=$5 code=$6 keep=${7:-} vol="$PROJECT-$1-data" c="$PROJECT-$1" log warn
   cleanup_apps
   if [ -z "$keep" ]; then new_volume "$vol"; fi
   start_fakecam
@@ -441,7 +441,7 @@ iso_off_case() { # part name, kind, puid, expected reason, app uid, [keep: reuse
     camera_and_hls "$c"
   fi
   check_iso_processes "$c" off "$auid" "$APP_PGID"
-  check_media_isolation_reported off
+  check_media_isolation_reported off "$code"
   log=$(save_log "$c")
   show_startup "$log"
   if grep -qF "$ON_LINE" "$log"; then die_log "$log" "$part: the start-up script switched isolation ON"; fi
@@ -481,7 +481,7 @@ phase_nokill() {
   start_iso_app "$c1" "$vol" six
   healthy_or_die "$c1" "nokill (the earlier ON run)"
   camera_and_hls "$c1"
-  check_media_isolation_reported on
+  check_media_isolation_reported on ''
   wait_until 90 "the ring to hold 3 segments" ring_has_segments "$c1" 3
   wait_until 90 "the camera to report can_record" can_record
   rec=$(record_a_clip "$c1")
@@ -491,7 +491,7 @@ phase_nokill() {
   stop_app "$c1"
   docker rm "$c1" >/dev/null
 
-  iso_off_case nokill nokill "$APP_PUID" "$NOKILL_REASON" "$APP_PUID" keep
+  iso_off_case nokill nokill "$APP_PUID" "$NOKILL_REASON" "$APP_PUID" fallback keep
   log=$(save_log "$c")
   grep -qF 'an earlier start had it on' "$log" || die_log "$log" "nokill: the fallback did not give the media-owned tree back to the app"
   [ "$(mode_of "$c" "$f")" = "600 $APP_PUID:$APP_PGID" ] || die "the clip after the fallback is '$(mode_of "$c" "$f")', expected 600 $APP_PUID:$APP_PGID (the app's, tightened)"
@@ -510,7 +510,7 @@ phase_nokill() {
 phase_puid() {
   local c="$PROJECT-puid" log
   say "PUID: isolation by default (no switch) with PUID=$MEDIA_ID; isolation must be refused and the app start as before"
-  iso_off_case puid default "$MEDIA_ID" "$PUID_REASON" "$MEDIA_ID"
+  iso_off_case puid default "$MEDIA_ID" "$PUID_REASON" "$MEDIA_ID" id-clash
   stop_app "$c"
   log=$(save_log "$c")
   check_clean_stop "$c" "$log" "puid"

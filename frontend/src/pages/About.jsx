@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ExternalLink, Heart } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
+import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 
 const LINKS = [
@@ -11,10 +12,13 @@ const LINKS = [
   { label: 'Report an issue', url: 'https://github.com/sauso/nightlight/issues' },
 ];
 
-const DONATE_URL = 'https://www.paypal.com/donate/?hosted_button_id=VGCB7WFYPJQ3G';
+const ISOLATION_DOCS_URL = 'https://github.com/sauso/nightlight/blob/main/docs/operations.md#media-isolation';
+
+const DONATE_URL ='https://www.paypal.com/donate/?hosted_button_id=VGCB7WFYPJQ3G';
 
 export default function About() {
   const { settings } = useSettings();
+  const { user } = useAuth();
   const [info, setInfo] = useState(null);
 
   useEffect(() => {
@@ -36,6 +40,20 @@ export default function About() {
     <>
       <AppHeader title="About" back={{ to: '/settings', label: 'Settings' }} />
       <main className="app-main">
+        {/* #553: isolation is off although it was asked for: either the host could not give it (`fallback`) or PUID/PGID
+            is the media user's id (`id-clash`, which the admin can fix). The camera programs run as the app's own
+            user. Loud, but admins only (a caregiver cannot fix a container). The operator's own switch (`disabled`)
+            and PUID=0 (`root`) keep the quiet line below. A server that sends no reason (an older one) shows no
+            banner. The sentence comes from the server's fixed table, never from the environment. */}
+        {user?.role === 'admin' && info?.mediaIsolation === 'off'
+          && (info?.mediaIsolationReason === 'fallback' || info?.mediaIsolationReason === 'id-clash') && (
+          <div className="form-warning" role="status">
+            <strong>Media isolation could not start.</strong> The camera programs (FFmpeg and MediaMTX) are running
+            without the extra protection, as the same user as the app.
+            {info.mediaIsolationDetail && <> {info.mediaIsolationDetail}</>}{' '}
+            <a href={ISOLATION_DOCS_URL} target="_blank" rel="noreferrer">What this means and how to fix it</a>
+          </div>
+        )}
         <div className="card about-hero">
           <img src="/icons/icon-192.png" alt="" className="about-hero__icon" />
           <div>
