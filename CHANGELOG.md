@@ -18,6 +18,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   is change or remove stream paths and read or publish a camera's stream. The passwords visible on FFmpeg's command line
   are unchanged and still documented. No behaviour changes; a new test now fails if a camera address or password is ever
   sent to MediaMTX. See [docs/operations.md](docs/operations.md#media-isolation).
+- **Documented why camera passwords on FFmpeg's command line are not hidden (#883).** On a host kernel without Yama's
+  `ptrace_scope` (Unraid's, for one) a taken-over media program can read another camera's FFmpeg memory anyway, so moving
+  the password off the command line would not close the exposure; only a separate user per camera would, and that is not
+  planned. On a kernel with `ptrace_scope` 1 or higher only the command line leaks. No behaviour changes.
+  See [docs/operations.md](docs/operations.md#media-isolation).
 
 ### Fixed
 

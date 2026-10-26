@@ -703,7 +703,12 @@ make the container a sandbox, and it does not stop everything:
   address or password from them: MediaMTX is never told them (FFmpeg connects to the camera itself). A password on the
   API would not help while all the media programs share one user, which can already signal or inspect MediaMTX. The
   passwords that can be read are the ones on FFmpeg's command line, next.
-- **Camera passwords are on FFmpeg's command line,** visible to every process in the container.
+- **Camera passwords are on FFmpeg's command line,** visible to every process in the container, and they are in that
+  FFmpeg's memory too. Whether another media program can read that memory depends on your host's kernel: where Yama's
+  `ptrace_scope` is 1 or higher it cannot, and only the command line leaks. On a kernel without Yama, as on Unraid
+  (`cat /proc/sys/kernel/yama/ptrace_scope` says "No such file"), it can, so hiding the command line alone would not
+  help and nothing here closes this. Only a separate user for each camera would, which is a large change that is not
+  planned. This is why the advice to keep cameras on their own network matters.
 - **Other accounts can no longer read new recordings** (see "What changes for you" above). A backup job or file manager
   running as a non-root user needs read access to files owned by uid `1700`, group `1700`; root (Unraid's CA Appdata
   Backup, `docker exec`) is unaffected. Give such a job the group, or turn isolation off.
