@@ -277,8 +277,9 @@ const MAX_POST_EXIT_ACTIVE_MIN = 20;
 //     guard is unchanged, so the nights stored before this rule keep their figures.
 //
 // HISTORY_MIN_NIGHTS: fewer earlier `ok` nights with a departure candidate and the same window end than this and
-// the rule is off, so a new install, every child's first ten nights and the first ten after a change of window
-// end behave exactly as before #700. A p75 of a handful of nights is a guess. It was 7 in the first plan; the
+// the rule is off, so a new install, every child's first ten nights and the nights after a change of window end
+// (until ten at the new end have built up; going back to an earlier end counts the older nights again at once)
+// behave exactly as before #700. A p75 of a handful of nights is a guess. It was 7 in the first plan; the
 // four measured nights each had 14 earlier rows, so 10 leaves the measured result unchanged.
 const HISTORY_MIN_NIGHTS = 10;
 // HISTORY_MAX_NIGHTS: only the newest this many matching nights are used, the same two weeks the measurement

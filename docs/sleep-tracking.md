@@ -324,8 +324,9 @@ than that is not taken as the morning wake on its own.
 - **Which nights:** the child's newest **14** saved nights that **have a wake time or a set-aside
   *got out of bed***, and **the same wake-time setting** (their window ended at the same time of day as
   tonight's). It needs at least **10**. A child with fewer is worked out exactly as before. That includes
-  a new install, every child's first ten nights, and the first ten nights after you change the child's
-  wake time. Nights saved as "no one in the bed" or "no data" are not counted at all.
+  a new install, every child's first ten nights, and the nights after you change the child's wake time
+  until ten nights at the new time have built up (going back to a wake time you used before counts the
+  older nights again straight away). Nights saved as "no one in the bed" or "no data" are not counted at all.
 - **How much earlier:** it takes the child's usual gap before the window ends (most of their nights,
   three in four, woke this close to the end or closer) and doubles it, but never uses less than
   **60 minutes**. A *got out of bed* further from the window's end than that is set aside. For a child
