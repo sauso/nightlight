@@ -40,75 +40,100 @@ describe('#553 GET /api/about: mediaIsolation', () => {
   });
 });
 
-// WHY isolation is off, as the entrypoint exported it (MEDIA_ISOLATION_REASON / _DETAIL), added next to mediaIsolation.
-// The About page warns admins only for `fallback`; these tests are what keep a bad value from turning into a warning.
+// WHY isolation is off, as the entrypoint exported it (MEDIA_ISOLATION_REASON, and MEDIA_ISOLATION_CAUSE for a fallback),
+// added next to mediaIsolation. The About page warns admins for `fallback` and `id-clash`.
+//
+// THE POINT OF THESE TESTS: this route is readable by a caregiver, so NO value from the environment may be echoed. The
+// environment supplies codes; the sentence comes from a table in the server. A marker planted in every variable must
+// never appear in the response (a review found the first design echoed the entrypoint's free-text warning, which can
+// name a leftover file or a folder with a person's name in it).
 describe('GET /api/about: mediaIsolationReason and mediaIsolationDetail', () => {
-  const savedReason = process.env.MEDIA_ISOLATION_REASON;
-  const savedDetail = process.env.MEDIA_ISOLATION_DETAIL;
-  const put = (isolation, reason, detail) => {
-    for (const [k, v] of [['MEDIA_ISOLATION', isolation], ['MEDIA_ISOLATION_REASON', reason], ['MEDIA_ISOLATION_DETAIL', detail]]) {
+  const NAMES = ['MEDIA_ISOLATION_REASON', 'MEDIA_ISOLATION_CAUSE', 'MEDIA_ISOLATION_DETAIL'];
+  const savedVars = Object.fromEntries(NAMES.map((k) => [k, process.env[k]]));
+  const put = (isolation, reason, cause) => {
+    for (const [k, v] of [['MEDIA_ISOLATION', isolation], ['MEDIA_ISOLATION_REASON', reason], ['MEDIA_ISOLATION_CAUSE', cause]]) {
       if (v === undefined) delete process.env[k]; else process.env[k] = v;
     }
   };
   afterEach(() => {
-    for (const [k, v] of [['MEDIA_ISOLATION_REASON', savedReason], ['MEDIA_ISOLATION_DETAIL', savedDetail]]) {
-      if (v === undefined) delete process.env[k]; else process.env[k] = v;
-    }
+    for (const [k, v] of Object.entries(savedVars)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
   });
   const get = async () => (await call(`${srv.url}/api/about`, { token })).body;
 
-  test('each reason is reported as given; only a fallback carries the detail', async () => {
-    put('off', 'fallback', 'the dry run failed');
+  const CAUSES = ['probe-failed', 'probe-timeout', 'missing-capability', 'layout-failed', 'top-level-leftover', 'bad-ids', 'other'];
+
+  test('each fallback cause maps to its own fixed sentence, and the sentences are all different', async () => {
+    const seen = new Set();
+    for (const cause of CAUSES) {
+      put('off', 'fallback', cause);
+      const b = await get();
+      assert.equal(b.mediaIsolation, 'off');
+      assert.equal(b.mediaIsolationReason, 'fallback');
+      assert.equal(typeof b.mediaIsolationDetail, 'string', cause);
+      assert.ok(b.mediaIsolationDetail.length > 10 && b.mediaIsolationDetail.length < 200, cause);
+      seen.add(b.mediaIsolationDetail);
+    }
+    assert.equal(seen.size, CAUSES.length, 'two causes share a sentence');
+  });
+
+  test('a cause that is not on the list (arbitrary text, a path, a name with spaces, a newline) is `other`, and is NEVER echoed', async () => {
+    put('off', 'fallback', 'other');
+    const generic = (await get()).mediaIsolationDetail;
+    const MARKER = 'MARKER-7f3a';
+    for (const bad of [
+      `${MARKER}`, `/home/Alice Smith/data ${MARKER}`, `backup-20261001-0100.db ${MARKER}`, `probe-failed\n${MARKER}`,
+      'Probe-Failed', ' probe-failed', '', 'constructor', '__proto__', 'toString', undefined,
+    ]) {
+      put('off', 'fallback', bad);
+      const b = await get();
+      assert.equal(b.mediaIsolationReason, 'fallback', JSON.stringify(bad));
+      assert.equal(b.mediaIsolationDetail, generic, JSON.stringify(bad));
+      assert.ok(!JSON.stringify(b).includes(MARKER), `a value from the environment was echoed: ${JSON.stringify(bad)}`);
+    }
+  });
+
+  test('the old free-text variable is ignored: a planted MEDIA_ISOLATION_DETAIL never appears', async () => {
+    process.env.MEDIA_ISOLATION_DETAIL = 'MARKER-detail /home/Alice Smith';
+    for (const [reason, cause] of [['fallback', 'probe-failed'], ['id-clash', undefined], ['disabled', undefined]]) {
+      put('off', reason, cause);
+      const b = await get();
+      assert.ok(!JSON.stringify(b).includes('MARKER-detail'), reason);
+    }
+  });
+
+  test('`id-clash` has its own fixed sentence (it tells the admin what to change); `disabled` and `root` have none', async () => {
+    put('off', 'id-clash', undefined);
     let b = await get();
-    assert.equal(b.mediaIsolation, 'off');
-    assert.equal(b.mediaIsolationReason, 'fallback');
-    assert.equal(b.mediaIsolationDetail, 'the dry run failed');
-    for (const reason of ['disabled', 'root', 'id-clash']) {
-      // A detail the entrypoint never exports for these must not be shown even if it is in the environment.
-      put('off', reason, 'stray detail');
+    assert.equal(b.mediaIsolationReason, 'id-clash');
+    assert.match(b.mediaIsolationDetail, /PUID or PGID is 1700/);
+    for (const reason of ['disabled', 'root']) {
+      // A cause left in the environment must not give a deliberate off a sentence.
+      put('off', reason, 'probe-failed');
       b = await get();
       assert.equal(b.mediaIsolationReason, reason);
       assert.equal(b.mediaIsolationDetail, null, `${reason}: detail must be null`);
     }
   });
 
-  test('on: both are null, even if the environment still carries a reason', async () => {
-    put('on', 'fallback', 'stale');
+  test('on: both are null, even if the environment still carries a reason and a cause', async () => {
+    put('on', 'fallback', 'probe-failed');
     const b = await get();
     assert.equal(b.mediaIsolation, 'on');
     assert.equal(b.mediaIsolationReason, null);
     assert.equal(b.mediaIsolationDetail, null);
   });
 
-  test('garbage becomes null: an unknown reason, an unset one, and a fallback with no usable detail', async () => {
-    for (const bad of ['Fallback', 'FALLBACK', 'other', '', ' fallback']) {
-      put('off', bad, 'text');
+  test('an unknown or unset reason is null, with no detail', async () => {
+    for (const bad of ['Fallback', 'FALLBACK', 'other', '', ' fallback', 'constructor', undefined]) {
+      put('off', bad, 'probe-failed');
       const b = await get();
       assert.equal(b.mediaIsolationReason, null, JSON.stringify(bad));
       assert.equal(b.mediaIsolationDetail, null, JSON.stringify(bad));
     }
-    put('off', undefined, undefined);
-    let b = await get();
-    assert.equal(b.mediaIsolationReason, null);
-    assert.equal(b.mediaIsolationDetail, null);
-    for (const blank of [undefined, '', '  \n ']) {
-      put('off', 'fallback', blank);
-      b = await get();
-      assert.equal(b.mediaIsolationReason, 'fallback');
-      assert.equal(b.mediaIsolationDetail, null, JSON.stringify(blank));
-    }
-  });
-
-  test('the detail is one line of at most 200 characters', async () => {
-    put('off', 'fallback', `line one\nline two\u0007${'x'.repeat(300)}`);
-    const b = await get();
-    assert.equal(b.mediaIsolationDetail.length, 200);
-    assert.ok(!/[\u0000-\u001f]/.test(b.mediaIsolationDetail));
-    assert.ok(b.mediaIsolationDetail.startsWith('line one line two '));
   });
 
   test('the existing fields are untouched (additive)', async () => {
-    put('off', 'fallback', 'd');
+    put('off', 'fallback', 'probe-failed');
     const b = await get();
     for (const k of ['version', 'gitSha', 'gitRef', 'buildTime', 'stunServers', 'publicBaseUrl', 'mediaIsolation', 'dataLayout', 'layoutConflict']) {
       assert.ok(k in b, `${k} went missing`);

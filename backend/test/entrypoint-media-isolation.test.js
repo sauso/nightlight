@@ -62,7 +62,6 @@ const SETPRIV_STUB = [
   '      ok) echo MEDIA-PROBE-OK; exit 0 ;;',
   "      fail) echo 'MEDIA-PROBE-FAIL a media process could read a file only the app may read'; exit 1 ;;",
   "      pathy) echo 'MEDIA-PROBE-FAIL /mnt/user/appdata/nl/clips is on a share; a media process wrote to /mnt/disk1/x, (see /var/log)'; exit 1 ;;",
-  "      long) printf 'MEDIA-PROBE-FAIL %0300d\\n' 7; exit 1 ;;",
   '      ok-status-1) echo MEDIA-PROBE-OK; exit 1 ;;',
   '      silent) exit 0 ;;',
   '      hang) exec sleep 20 ;;',
@@ -104,7 +103,7 @@ const STUBS = {
 };
 
 // The app prints what the entrypoint handed it: the decision, and (#553, About page) why isolation is off.
-const APP = ['/bin/sh', '-c', 'printf "APP MEDIA_ISOLATION=%s\\nAPP REASON=%s\\nAPP DETAIL=%s\\n" "${MEDIA_ISOLATION-unset}" "${MEDIA_ISOLATION_REASON-unset}" "${MEDIA_ISOLATION_DETAIL-unset}"'];
+const APP = ['/bin/sh', '-c', 'printf "APP MEDIA_ISOLATION=%s\\nAPP REASON=%s\\nAPP CAUSE=%s\\n" "${MEDIA_ISOLATION-unset}" "${MEDIA_ISOLATION_REASON-unset}" "${MEDIA_ISOLATION_CAUSE-unset}"'];
 const DROP_99 = '--reuid=99 --regid=100 --groups=100,1700 --inh-caps=+setuid,+setgid,+kill --ambient-caps=+setuid,+setgid,+kill --no-new-privs';
 // The probe's command: the app, the wrapper, the media id, the app's uid, then (phase 2b) the clips folder and the data directory.
 const PROBE_CMD = (uid, clips, data, dir = SCRIPT_DIR) =>
@@ -142,7 +141,7 @@ function run(env, { seed, cwd, script = SCRIPT } = {}) {
     elapsedMs: Date.now() - t0,
     app: (/^APP MEDIA_ISOLATION=(.*)$/m.exec(r.stdout) || [])[1] ?? null,
     reason: (/^APP REASON=(.*)$/m.exec(r.stdout) || [])[1] ?? null,
-    detail: (/^APP DETAIL=(.*)$/m.exec(r.stdout) || [])[1] ?? null,
+    cause: (/^APP CAUSE=(.*)$/m.exec(r.stdout) || [])[1] ?? null,
     suExec: r.stdout.includes('STUB su-exec nightlight /bin/sh'),
     // #553 phase 2a: the move ran as the app user, before the app (its line comes first in the output).
     movedFirst: /STUB su-exec nightlight node\nSTUB node \S*migrate-private-layout\.js\n[\s\S]*APP MEDIA_ISOLATION=/.test(r.stdout),
@@ -307,63 +306,85 @@ describe('#553 entrypoint: the media isolation decision', { skip }, () => {
     assert.deepEqual(r.setpriv, [], r.ctx);
   });
 
-  // --- The REASON the app is handed (About page: it warns only for `fallback`) -----------------------------------------
-  // One test per cause, because the page treats them differently: a deliberate off, and a setup where off is the rule, are
-  // quiet; a host that could not give isolation is not.
-  test('#553 reason: the kill switch is `disabled`, with no detail, whatever spelling', () => {
+  // --- The REASON (and, for a fallback, the CAUSE) the app is handed -----------------------------------------------------
+  // About warns admins for `fallback` and `id-clash`; `disabled` and `root` stay quiet. Only FIXED CODES cross to the app
+  // (the warning line is free text and can name files and folders; the API is readable by a caregiver): the server turns
+  // the cause into its own sentence, so nothing here carries a detail string.
+  test('#553 reason: the kill switch is `disabled`, with no cause, whatever spelling', () => {
     for (const v of ['0', 'off', 'False']) {
       const r = run({ NIGHTLIGHT_MEDIA_ISOLATION: v, NL_PROBE: 'ok' });
       assert.equal(r.reason, 'disabled', `${v}${r.ctx}`);
-      assert.equal(r.detail, 'unset', `${v}${r.ctx}`);
+      assert.equal(r.cause, 'unset', `${v}${r.ctx}`);
     }
   });
 
-  test('#553 reason: PUID=0 is `root`, PUID or PGID 1700 is `id-clash`; neither has a detail', () => {
+  test('#553 reason: PUID=0 is `root`, PUID or PGID 1700 is `id-clash`; neither has a cause', () => {
     const root = run({ ...ASK, PUID: '0' });
     assert.equal(root.reason, 'root', root.ctx);
-    assert.equal(root.detail, 'unset', root.ctx);
+    assert.equal(root.cause, 'unset', root.ctx);
     for (const ids of [{ PUID: '1700' }, { PGID: '1700' }]) {
       const r = run({ ...ASK, ...ids });
       assert.equal(r.reason, 'id-clash', `${JSON.stringify(ids)}${r.ctx}`);
-      assert.equal(r.detail, 'unset', r.ctx);
+      assert.equal(r.cause, 'unset', r.ctx);
     }
   });
 
-  test('#553 reason: a host that could not give isolation is `fallback`, with the warning\'s sentence as the detail', () => {
+  test('#553 cause: a failed trial run is `probe-failed`, a start that cannot happen at all is `missing-capability`', () => {
     const probe = run({ ...ASK, NL_PROBE: 'fail' });
     assert.equal(probe.reason, 'fallback', probe.ctx);
-    assert.equal(probe.detail, 'a media process could read a file only the app may read', probe.ctx);
-    const drop = run({ ...ASK, NL_PROBE: 'drop-fails' });
-    assert.equal(drop.reason, 'fallback', drop.ctx);
-    assert.match(drop.detail, /^the dry run could not start the app as uid 99 with CAP_SETUID/, drop.ctx);
-    const nan = run({ ...ASK, PUID: 'abc' });
-    assert.equal(nan.reason, 'fallback', nan.ctx);
-    assert.match(nan.detail, /are not both numbers/, nan.ctx);
-    // A database left at the top level (the move did not finish) is also a fallback, and the data directory is not named.
-    const left = run(ASK, { seed: (d) => write(path.join(d, 'babymonitor.db')) });
-    assert.equal(left.reason, 'fallback', left.ctx);
-    assert.match(left.detail, /^babymonitor\.db is still at the top level of <path> instead of in private\//, left.ctx);
-    assert.ok(!left.detail.includes(left.data), left.ctx);
+    assert.equal(probe.cause, 'probe-failed', probe.ctx);
+    for (const mode of ['drop-fails', 'ok-status-1', 'silent']) {
+      const r = run({ ...ASK, NL_PROBE: mode });
+      assert.equal(r.reason, 'fallback', `${mode}${r.ctx}`);
+      assert.equal(r.cause, 'missing-capability', `${mode}${r.ctx}`);
+    }
   });
 
-  test('#553 reason: the detail has no path in it and is cut to 200 characters', () => {
-    const p = run({ ...ASK, NL_PROBE: 'pathy' });
-    assert.equal(p.detail, '<path> is on a share; a media process wrote to <path>, (see <path>)', p.ctx);
-    const l = run({ ...ASK, NL_PROBE: 'long' });
-    assert.equal(l.detail.length, 200, l.ctx);
+  test('#553 cause: a trial run that never finishes is `probe-timeout`', () => {
+    const v = variant('MEDIA_DRY_RUN_TIMEOUT=30', 'MEDIA_DRY_RUN_TIMEOUT=1');
+    const r = run({ ...ASK, NL_PROBE: 'hang' }, { script: path.join(v, 'entrypoint.sh') });
+    assert.equal(r.reason, 'fallback', r.ctx);
+    assert.equal(r.cause, 'probe-timeout', r.ctx);
+  });
+
+  test('#553 cause: a database left at the top is `top-level-leftover`, a folder another user owns is `layout-failed`, a PUID that is no number is `bad-ids`', () => {
+    const left = run(ASK, { seed: (d) => write(path.join(d, 'babymonitor.db')) });
+    assert.equal(left.reason, 'fallback', left.ctx);
+    assert.equal(left.cause, 'top-level-leftover', left.ctx);
+    const owned = run({ ...ASK, NL_STAT_UID: '5' }, { seed: (d) => dir(path.join(d, 'clips')) });
+    assert.equal(owned.reason, 'fallback', owned.ctx);
+    assert.equal(owned.cause, 'layout-failed', owned.ctx);
+    const nan = run({ ...ASK, PUID: 'abc' });
+    assert.equal(nan.reason, 'fallback', nan.ctx);
+    assert.equal(nan.cause, 'bad-ids', nan.ctx);
+  });
+
+  test('#553 cause: what the log\'s warning says (a file name, a path) is never in the environment the app gets', () => {
+    // The warning names the file; the app's environment must not contain it anywhere.
+    const r = run({ ...ASK, NL_PROBE: 'pathy' });
+    assert.equal(r.cause, 'probe-failed', r.ctx);
+    assert.ok(r.isoWarnings[0].includes('/mnt/user/appdata'), 'precondition: the log keeps the free text');
+    assert.ok(!/appdata|mnt\//.test(`${r.reason} ${r.cause}`), r.ctx);
+    const left = run(ASK, { seed: (d) => write(path.join(d, 'babymonitor.db')) });
+    assert.ok(left.isoWarnings[0].includes('babymonitor.db'), 'precondition: the log names the file');
+    assert.ok(!`${left.reason} ${left.cause}`.includes('babymonitor'), left.ctx);
   });
 
   test('#553 reason: an ON start carries neither variable, even if the operator set both', () => {
-    const r = run({ ...ASK, MEDIA_ISOLATION_REASON: 'fallback', MEDIA_ISOLATION_DETAIL: 'planted' });
+    const r = run({ ...ASK, MEDIA_ISOLATION_REASON: 'fallback', MEDIA_ISOLATION_CAUSE: 'probe-failed' });
     assert.equal(r.app, 'on', r.ctx);
     assert.equal(r.reason, 'unset', r.ctx);
-    assert.equal(r.detail, 'unset', r.ctx);
+    assert.equal(r.cause, 'unset', r.ctx);
   });
 
   test('#553 reason: an operator\'s own values never survive an OFF start (a deliberate off must not read as a fallback)', () => {
-    const r = run({ ...OFF, MEDIA_ISOLATION_REASON: 'fallback', MEDIA_ISOLATION_DETAIL: 'planted' });
+    const r = run({ ...OFF, MEDIA_ISOLATION_REASON: 'fallback', MEDIA_ISOLATION_CAUSE: 'probe-failed' });
     assert.equal(r.reason, 'disabled', r.ctx);
-    assert.equal(r.detail, 'unset', r.ctx);
+    assert.equal(r.cause, 'unset', r.ctx);
+    // ...and a cause the operator planted does not outlive a start that has none of its own.
+    const id = run({ ...ASK, PUID: '1700', MEDIA_ISOLATION_CAUSE: 'probe-failed' });
+    assert.equal(id.reason, 'id-clash', id.ctx);
+    assert.equal(id.cause, 'unset', id.ctx);
   });
 });
 

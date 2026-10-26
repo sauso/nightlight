@@ -40,11 +40,13 @@ export default function About() {
     <>
       <AppHeader title="About" back={{ to: '/settings', label: 'Settings' }} />
       <main className="app-main">
-        {/* #553: isolation fell back (it was asked for and the host could not give it): the camera programs run as the
-            app's own user. Loud, but admins only (a caregiver cannot fix a container) and ONLY for `fallback`: the
-            operator's own switch (`disabled`) and the setups where off is the rule (`root`, `id-clash`) keep the quiet
-            line below. A server that sends no reason (an older one) shows no banner. */}
-        {user?.role === 'admin' && info?.mediaIsolation === 'off' && info?.mediaIsolationReason === 'fallback' && (
+        {/* #553: isolation is off although it was asked for: either the host could not give it (`fallback`) or PUID/PGID
+            is the media user's id (`id-clash`, which the admin can fix). The camera programs run as the app's own
+            user. Loud, but admins only (a caregiver cannot fix a container). The operator's own switch (`disabled`)
+            and PUID=0 (`root`) keep the quiet line below. A server that sends no reason (an older one) shows no
+            banner. The sentence comes from the server's fixed table, never from the environment. */}
+        {user?.role === 'admin' && info?.mediaIsolation === 'off'
+          && (info?.mediaIsolationReason === 'fallback' || info?.mediaIsolationReason === 'id-clash') && (
           <div className="form-warning" role="status">
             <strong>Media isolation could not start.</strong> The camera programs (FFmpeg and MediaMTX) are running
             without the extra protection, as the same user as the app.

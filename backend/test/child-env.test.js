@@ -64,7 +64,7 @@ const SECRETS = {
   // every child, the same as MEDIA_ISOLATION itself.
   MEDIA_ISOLATION: 'off',
   MEDIA_ISOLATION_REASON: 'fallback',
-  MEDIA_ISOLATION_DETAIL: 'planted detail',
+  MEDIA_ISOLATION_CAUSE: 'probe-failed',
 };
 
 describe('a spawned child receives exactly the allowlist (#553)', () => {

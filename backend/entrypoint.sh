@@ -393,16 +393,16 @@ media_toplevel_leftover() {
 media_traverse_dir() {
   if [ ! -d "$1" ]; then
     # 022 for any parents (as for DATA_DIR's above); the folder itself is then given to the app.
-    { ( umask 022; mkdir -p "$1" ) && chown "$APP_UID:$APP_GID" "$1"; } || { MEDIA_REASON="could not create $1"; return 1; }
+    { ( umask 022; mkdir -p "$1" ) && chown "$APP_UID:$APP_GID" "$1"; } || { MEDIA_REASON="could not create $1"; MEDIA_CAUSE=layout-failed; return 1; }
   fi
   if [ "${3:-}" != own ] && [ "$(stat -L -c %u "$1" 2>/dev/null)" != "$APP_UID" ]; then
-    MEDIA_REASON="$1 is not owned by uid $APP_UID (the app), so the media folders cannot be set up in it; give it to $APP_UID on the host"
+    MEDIA_REASON="$1 is not owned by uid $APP_UID (the app), so the media folders cannot be set up in it; give it to $APP_UID on the host"; MEDIA_CAUSE=layout-failed
     return 1
   fi
   # Remembered BEFORE the change, so that a start which ends with isolation off can hand the folder back (media_undo_prepare).
   MEDIA_PREPARED="$MEDIA_PREPARED
 $1"
-  { chgrp "$MEDIA_ID" "$1" && chmod "$2" "$1"; } || { MEDIA_REASON="could not give $1 to the media group (mode $2)"; return 1; }
+  { chgrp "$MEDIA_ID" "$1" && chmod "$2" "$1"; } || { MEDIA_REASON="could not give $1 to the media group (mode $2)"; MEDIA_CAUSE=layout-failed; return 1; }
 }
 
 # Every folder from $1 up to (not including) DATA_DIR, for a clips folder inside the data directory; for an external one
@@ -446,6 +446,7 @@ media_dry_run() {
     if [ "$_i" -ge $((MEDIA_DRY_RUN_TIMEOUT * 10)) ]; then
       kill "$_pid" 2>/dev/null || :
       MEDIA_REASON="the dry run did not finish within $MEDIA_DRY_RUN_TIMEOUT seconds (is a media folder on a stalled share?); it was abandoned"
+      MEDIA_CAUSE=probe-timeout
       return 1
     fi
     # 0.1 s steps; a sleep without fractions (some minimal systems) waits a whole second and counts it as ten steps.
@@ -459,7 +460,9 @@ media_dry_run() {
     return 0
   fi
   MEDIA_REASON=$(printf '%s\n' "$_out" | sed -n 's/^MEDIA-PROBE-FAIL //p' | head -n 1)
+  MEDIA_CAUSE=probe-failed
   if [ -z "$MEDIA_REASON" ]; then
+    MEDIA_CAUSE=missing-capability
     # The probe never ran or never finished: the drop to the app user itself failed (a missing capability makes
     # setpriv exit 127, #553 spike run 3), setpriv is not util-linux's, or the time limit hit. Its last line says which.
     MEDIA_REASON="the dry run could not start the app as uid $APP_UID with CAP_SETUID, CAP_SETGID and CAP_KILL (exit $_rc: $(printf '%s\n' "$_out" | sed '/^$/d' | tail -n 1))"
@@ -524,14 +527,19 @@ media_reown() {
 
 MEDIA_ISOLATION=off
 MEDIA_REASON=
-# WHY isolation is off, for the About page (the reason code GET /api/about reports). Only a FALLBACK, where isolation was
-# asked for and the host could not give it, deserves a loud warning there; the other two are the operator's own choice
-# (disabled) or a setup where off is the rule (root, id-clash). Set to disabled/root/id-clash below; anything else that
-# stops an asked-for start is a fallback.
+# WHY isolation is off, for the About page (the reason code GET /api/about reports). A FALLBACK (asked for, the host could
+# not give it) and an id-clash (PUID or PGID is the media id, which the operator can fix) warn admins there; the other two
+# are the operator's own choice (disabled) or a setup where off is the rule (root). Set to disabled/root/id-clash below;
+# anything else that stops an asked-for start is a fallback.
 MEDIA_OFF_KIND=fallback
+# For a fallback, WHICH cause, from a FIXED list (never free text): probe-failed, probe-timeout, missing-capability,
+# layout-failed, top-level-leftover, bad-ids, other. The log's warning line (MEDIA_REASON) is free text and may name
+# files and folders; GET /api/about is readable by every signed-in user, so only this code crosses to the app, and the
+# server turns it into a sentence of its own (src/routes/about.js). The functions above set it next to their MEDIA_REASON.
+MEDIA_CAUSE=other
 if [ -n "$MEDIA_ASKED" ]; then
   if ! is_id "$APP_UID" || ! is_id "$APP_GID"; then
-    MEDIA_REASON="PUID=$PUID PGID=$PGID are not both numbers"
+    MEDIA_REASON="PUID=$PUID PGID=$PGID are not both numbers"; MEDIA_CAUSE=bad-ids
   elif [ "$APP_UID" = 0 ]; then
     MEDIA_REASON="PUID=0 runs the app as root, and isolation needs a non-root app"; MEDIA_OFF_KIND=root
   elif [ "$APP_UID" = "$MEDIA_ID" ] || [ "$APP_GID" = "$MEDIA_ID" ]; then
@@ -540,7 +548,7 @@ if [ -n "$MEDIA_ASKED" ]; then
     # A skipped or unfinished move must not become a silent, permanent gap: with the data directory open to the media group,
     # a database or secret still at its top level is protected by nothing but its own mode (docs/operations.md, "Media
     # isolation"). Refused until the move has finished (the [private-layout] lines above say what is stopping it).
-    MEDIA_REASON="$_left is still at the top level of $DATA_DIR instead of in private/, so the media user could not be kept away from it; the move into private/ has not finished"
+    MEDIA_REASON="$_left is still at the top level of $DATA_DIR instead of in private/, so the media user could not be kept away from it; the move into private/ has not finished"; MEDIA_CAUSE=top-level-leftover
   elif ! media_prepare_layout; then
     : # MEDIA_REASON says which folder and why
   elif media_dry_run; then
@@ -548,21 +556,22 @@ if [ -n "$MEDIA_ASKED" ]; then
   fi
 fi
 export MEDIA_ISOLATION
-# Hand the app the REASON as well (src/routes/about.js reports it; the About page warns only for `fallback`). Set or unset
-# on every start, never left to the environment: an operator's own value must not reach the page, and an ON start must
-# carry neither. The detail is the one warning line's text, made safe for a page every signed-in user's API can read: one
-# line, anything that looks like a path replaced (a path can name a mount of the host's), cut to 200 characters.
+# Hand the app the REASON (and, for a fallback, the CAUSE code) as well (src/routes/about.js reports them; the About page
+# warns for `fallback` and `id-clash`). Set or unset on every start, never left to the environment: an operator's own
+# value must not reach the page, and an ON start must carry none. Only these fixed codes cross, never the warning line's
+# free text (it can name files and folders, and every signed-in user can read the API).
 if [ "$MEDIA_ISOLATION" = on ]; then
-  unset MEDIA_ISOLATION_REASON MEDIA_ISOLATION_DETAIL
+  unset MEDIA_ISOLATION_REASON MEDIA_ISOLATION_CAUSE
 else
   if [ -z "$MEDIA_ASKED" ]; then MEDIA_OFF_KIND=disabled; fi
   MEDIA_ISOLATION_REASON=$MEDIA_OFF_KIND
-  MEDIA_ISOLATION_DETAIL=
-  if [ "$MEDIA_OFF_KIND" = fallback ]; then
-    MEDIA_ISOLATION_DETAIL=$(printf '%s' "$MEDIA_REASON" | tr -d '\000-\037\177' | sed 's# /[^ ,;:)]*# <path>#g; s#^/[^ ,;:)]*#<path>#' | cut -c1-200) || MEDIA_ISOLATION_DETAIL=
-  fi
   export MEDIA_ISOLATION_REASON
-  if [ -n "$MEDIA_ISOLATION_DETAIL" ]; then export MEDIA_ISOLATION_DETAIL; else unset MEDIA_ISOLATION_DETAIL; fi
+  if [ "$MEDIA_OFF_KIND" = fallback ]; then
+    MEDIA_ISOLATION_CAUSE=$MEDIA_CAUSE
+    export MEDIA_ISOLATION_CAUSE
+  else
+    unset MEDIA_ISOLATION_CAUSE
+  fi
 fi
 
 # Off after all: first undo what this start prepared, then (if an earlier start had it on) re-own, THEN tighten, so the walk
