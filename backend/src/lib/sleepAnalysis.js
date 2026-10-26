@@ -188,11 +188,38 @@ const MAX_POST_EXIT_ACTIVE_MIN = 20;
 // THE RULE. An exit's LEAD is how long before the night's OWN window end it happened (window_end minus the
 // exit truncated to its minute, the way a wake is stored). The child's EARLIER stored nights say how far
 // ahead of their window end it usually gets up: the lead of each is its own window_end minus its own
-// wake_at. A candidate exit is skipped when the child has at least HISTORY_MIN_NIGHTS such nights and the
-// exit's lead is more than LEAD_FACTOR x max(p75 of the newest HISTORY_MAX_NIGHTS leads, LEAD_FLOOR_MIN).
-// A skipped exit is rejected like any other candidate: the scan carries on, a later corroborated exit can
-// still win, and if none does the night keeps its movement-only wake, which can be "still asleep" (wake_at
-// null). Nothing new is guessed. The earliest skipped exit is reported as `wake_unconfirmed`, never stored.
+// wake_at, counted only for a night whose window ended at the SAME local clock time (THE WINDOW-END MATCH,
+// below). An exit is FLAGGED when the child has at least HISTORY_MIN_NIGHTS such nights and the exit's lead
+// is more than LEAD_FACTOR x max(p75 of the newest HISTORY_MAX_NIGHTS leads, LEAD_FLOOR_MIN). A flagged exit
+// is SKIPPED unless the rule has disarmed itself (WHY IT DISARMS ITSELF, below). A skipped exit is rejected
+// like any other candidate: the scan carries on, a later corroborated exit can still win, and if none does
+// the night keeps its movement-only wake, which can be "still asleep" (wake_at null). Nothing new is guessed.
+// The earliest flagged exit is reported as `wake_unconfirmed` (`applied`: whether it was skipped) and stored
+// as `sleep_nights.wake_unconfirmed_at`, which is what the disarm counts.
+//
+// WHY IT DISARMS ITSELF (found in the code review of PR #888 and reproduced there by attack tests). The
+// history counts only nights that STORED a wake. A night whose genuine exit is skipped stores none (a quiet
+// room) or a late movement-only one (a bedroom microphone hearing the house wake up), so the nights that
+// would teach the rule a new routine never reach the history, and the rule locks itself onto the old one.
+// Reproduced on synthetic nights: a child now up at 05:15 every day, against a history with a threshold of
+// 80 minutes, had 21 of 21 nights skipped (wake blank, "asleep" to the close); with the house heard at 06:40
+// all 21 stored 06:40 and the threshold fell 80 -> 70 -> 60. An early-rising phase, a moved wake time, a clock
+// change or a camera with no microphone all do it. So once DISARM_AFTER_FLAGGED of the previous
+// DISARM_LOOKBACK_NIGHTS stored nights carry a flag, the rule stops skipping: a flagged exit is accepted
+// exactly as before #700 (`applied: false`, still flagged and stored), those wakes feed the history, the p75
+// adapts, nights stop being flagged, the count falls, and the rule re-arms only once the leads are back
+// inside the threshold. While the new routine lasts it does not flip back and forth: pinned over 21
+// consecutive nights in sleep-early-exit-lead.test.js.
+//
+// THE WINDOW-END MATCH (same review). A lead only compares with leads measured against the same window end:
+// after the owner moves the wake time from 07:00 to 08:30, every earlier lead is 90 minutes short and the old
+// routine reads as "up far too early". So an earlier night counts only when its own window_end, read in the
+// night's timezone, shows the same local HH:MM as this night's window end. On the LOCAL clock (Intl), so a
+// 07:00 end on both sides of a clock change still matches although the UTC instants differ by an hour. After
+// a change of window end the rule is OFF (fewer than HISTORY_MIN_NIGHTS match) until ten nights with the new
+// end are stored, which is the behaviour before #700. The zone is the one the night is worked out in: today's
+// app timezone, or the saved one when a stored scoring context is replayed (so a replay judges its history
+// in the zone the night had).
 //
 // THE NUMBERS. Over 64 night-ending out_of_bed candidates on 8 snapshots (one house, two cameras, prod and
 // staging), lead divided by the child's p75: the 4 wrong nights 17.5, 7.6, 3.8 and 3.2; the 17 nights a
@@ -209,33 +236,55 @@ const MAX_POST_EXIT_ACTIVE_MIN = 20;
 // child who is always up an hour before the window closes all get a threshold of their own.
 //
 // ⚠️ KNOWN LIMITS, all stated in docs/sleep-tracking.md:
-//   - A GENUINE very early wake in a silent room (the child really is up for the day hours before the window
-//     closes, and the bed and room are quiet afterwards) is skipped too, and the night reads as asleep until
-//     the close unless a later exit or a movement-only wake ends it; `wake_unconfirmed` says so. No such night
-//     is in the measured data, so false rejection is untested beyond the planted exits in
-//     sleep-early-exit-lead.test.js. Sound after the exit also separates the two groups on the measured
-//     nights, but it is confounded with "it is morning" (a house wakes up whoever left the bed), so it is NOT
-//     used and does not rescue an early wake.
+//   - A GENUINE very early exit in a quiet room (the child really is up for the day hours before the window
+//     closes, or was carried to a parent's bed, and the bed and room are quiet afterwards) is skipped too
+//     while the rule is armed, and the night reads as asleep until the close unless a later exit or a
+//     movement-only wake ends it; `wake_unconfirmed` says so. No such night is in the measured data, so false
+//     rejection is untested beyond the planted exits in sleep-early-exit-lead.test.js. A parent's correction in
+//     the morning review fixes THAT night only: it lives in sleep_reviews, is never read as history, and locks
+//     the row. Sound after the exit also separates the two groups on the measured nights, but it is
+//     confounded with "it is morning" (a house wakes up whoever left the bed), so it is NOT used and does not
+//     rescue an early wake.
+//   - The reverse of the above: when a genuine early exit is skipped, a LATER qualifying exit (a false one, or
+//     a parent handling the empty bed) can become the wake, so the night is reported up hours late rather than
+//     blank (pinned by a test).
 //   - A night's answer now depends on EARLIER STORED ROWS. Only nights before this one are read (never the
 //     night's own row or a later one), but back-filling, recomputing or deleting an earlier night can change
 //     a later night's replay while its samples, transitions and saved context stay identical (SCORING_ALGO).
-//   - The history is used AS STORED, whatever camera, window or rules produced each row. A row's lead is
-//     against its own window_end, so a changed window is respected, but an earlier WRONG night pollutes it.
-//     The p75 of n rows is the element at index floor(0.75 n) of the ascending list, so it moves once
-//     n - floor(0.75 n) rows are long: 3 of 10, 4 of 14. The four measured wrong nights fell inside 8 days for
-//     one child, so a run of wrong nights can disable the rule for the next one (pinned by a test).
+//   - The history is used AS STORED, whatever camera or rules produced each row and without the parent's
+//     corrections. A row with another window end is left out (above); one under another TIMEZONE setting is
+//     too, because its window end reads at a different local time, so changing the timezone turns the rule
+//     off for ten nights. An earlier WRONG night with the same window end pollutes it: the p75 of n rows is the
+//     element at index floor(0.75 n) of the ascending list, so it moves once n - floor(0.75 n) rows are long
+//     (3 of 10 to 12, 4 of 13 or 14). The four measured wrong nights fell inside 8 days for one child, so a run
+//     of wrong nights can raise the threshold past the next one (pinned by a test).
+//   - The disarm has its own cost: DISARM_AFTER_FLAGGED false exits within DISARM_LOOKBACK_NIGHTS also disarm
+//     the rule, and the next false exit is then taken as it was before #700 (pinned by a test).
 //   - A night whose only candidate is skipped stores wake_at null. A night a parent was already told a wake
 //     time for (`notified_wake_at`) cannot be blanked: computeAndStoreNight's `would_blank_notified_wake`
 //     guard is unchanged, so the nights stored before this rule keep their figures.
 //
-// HISTORY_MIN_NIGHTS: fewer earlier ok nights with a wake than this and the rule is off, so a new install,
-// and every child's first ten nights, behave exactly as before #700. A p75 of a handful of nights is a guess.
-// It was 7 in the first plan; the four measured nights each had 14 earlier rows, so 10 leaves the measured
-// result unchanged and keeps early history out.
+// HISTORY_MIN_NIGHTS: fewer earlier ok nights with a wake and the same window end than this and the rule is
+// off, so a new install, every child's first ten nights and the first ten after a change of window end behave
+// exactly as before #700. A p75 of a handful of nights is a guess. It was 7 in the first plan; the four
+// measured nights each had 14 earlier rows, so 10 leaves the measured result unchanged.
 const HISTORY_MIN_NIGHTS = 10;
-// HISTORY_MAX_NIGHTS: only the newest this many are used, the same two weeks the measurement used, so a
-// child whose schedule changes gets a threshold from the new one within a fortnight.
+// HISTORY_MAX_NIGHTS: only the newest this many matching nights are used, the same two weeks the measurement
+// used. A changed routine reaches them only through nights that STORE the new wake, which the disarm below is
+// what guarantees: without it a skipped night never stores one (WHY IT DISARMS ITSELF).
 const HISTORY_MAX_NIGHTS = 14;
+// HISTORY_SCAN_ROWS: how many earlier rows are read to find HISTORY_MAX_NIGHTS with the same window end (about
+// two months of nights). A bound on the read, not a tuned number: fewer than 10 matches inside it turns the rule
+// off, which is the behaviour before #700, so a smaller value could only switch the rule off sooner.
+const HISTORY_SCAN_ROWS = 60;
+// DISARM_AFTER_FLAGGED / DISARM_LOOKBACK_NIGHTS: the rule is enforced on a night only while FEWER than 4 of the
+// child's previous 7 stored nights (any status, newest first) were flagged. Set by the measured nights: one
+// child had three flagged nights inside eight days (all three false exits the rule must keep catching), so 3
+// would have disarmed it in the middle of them; a routine change flags every night, so 4 in 7 is reached on its
+// fifth night and the rule stops skipping from then on. A judgement fitted to one house, not a measurement of
+// every other: a child whose false exits come four a week loses the rule (stated above).
+const DISARM_AFTER_FLAGGED = 4;
+const DISARM_LOOKBACK_NIGHTS = 7;
 // LEAD_FACTOR: measured, see THE NUMBERS above (wrong >= 3.2 x p75, right <= 1.35 x p75).
 const LEAD_FACTOR = 2;
 // LEAD_FLOOR_MIN: the usual lead is never taken as less than this. A child who usually wakes at or after the
@@ -939,10 +988,20 @@ const contextCameraStmt = db.prepare('SELECT id, name FROM cameras WHERE id = ?'
 // and its limits). `night_date < ?` is the causal bound: never this night's own row, never a later one.
 // `status = 'ok' AND wake_at IS NOT NULL` because only a scored night with a wake says when this child gets
 // up; a night that read "still asleep" says nothing about it and is left out rather than counted as zero.
+// HISTORY_SCAN_ROWS of them, because the window-end match below can leave some out.
 const priorWakeLeadsStmt = db.prepare(
   `SELECT window_end, wake_at FROM sleep_nights
     WHERE child_id = ? AND night_date < ? AND status = 'ok' AND wake_at IS NOT NULL
     ORDER BY night_date DESC LIMIT ?`
+);
+// #700, the disarm: how many of the child's previous DISARM_LOOKBACK_NIGHTS stored nights (any status, newest
+// first, the same causal bound) carry a flag. NULL, including every row stored before the column existed,
+// is "not flagged".
+const priorFlaggedStmt = db.prepare(
+  `SELECT COUNT(*) AS n FROM (
+     SELECT wake_unconfirmed_at FROM sleep_nights WHERE child_id = ? AND night_date < ?
+      ORDER BY night_date DESC LIMIT ?)
+    WHERE wake_unconfirmed_at IS NOT NULL`
 );
 let priorWakeLeadReads = 0;
 // Test seam ONLY (sleep-early-exit-lead.test.js), like transcoder.js's startChainCountForTest: how many times the
@@ -952,24 +1011,37 @@ export function priorWakeLeadReadsForTest() {
   return priorWakeLeadReads;
 }
 
-// The lead (minutes) above which an exit is skipped for this child's night, or null when the child has too
-// little history for the rule to apply (HISTORY_MIN_NIGHTS). Each lead is that row's OWN window_end minus its
-// own wake_at, so a night stored under another window is measured against the window it had.
-function earlyExitLeadThresholdMin(childId, nightDate) {
+// The lead test for this child's night: `{ threshold, armed }` (the lead in minutes above which an exit is
+// flagged, and whether a flagged exit is skipped), or null when the child has too little matching history for
+// the rule to apply at all (HISTORY_MIN_NIGHTS). Both reads happen here, together, at most once per computeNight.
+//
+// Each lead is that row's OWN window_end minus its own wake_at, and a row counts only when its window_end shows
+// the same local HH:MM in `tz` as this night's (`windowEndMs`): THE WINDOW-END MATCH in LEAD_FACTOR's comment.
+// The newest HISTORY_MAX_NIGHTS matching rows are used, so the cap applies after the match.
+function earlyExitRule(childId, nightDate, tz, windowEndMs) {
   priorWakeLeadReads++;
   const utcMs = (s) => new Date(`${s.replace(' ', 'T')}Z`).getTime();
-  const leads = priorWakeLeadsStmt
-    .all(childId, nightDate, HISTORY_MAX_NIGHTS)
-    .map((r) => (utcMs(r.window_end) - utcMs(r.wake_at)) / 60000)
+  const localHm = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hourCycle: 'h23', hour: '2-digit', minute: '2-digit' });
+  const endHm = localHm.format(new Date(windowEndMs));
+  const leads = [];
+  for (const r of priorWakeLeadsStmt.all(childId, nightDate, HISTORY_SCAN_ROWS)) {
+    const endMs = utcMs(r.window_end);
+    const lead = (endMs - utcMs(r.wake_at)) / 60000;
     // A row whose times do not parse (never written by upsertNight; a hand-edited database) is left out, so it
-    // can only take the child below the minimum, never produce a threshold that is not a number.
-    .filter(Number.isFinite)
-    .sort((a, b) => a - b);
+    // can only take the child below the minimum, never produce a threshold that is not a number. Checked before
+    // the match, because Intl throws on an invalid date.
+    if (!Number.isFinite(lead)) continue;
+    if (localHm.format(new Date(endMs)) !== endHm) continue;
+    leads.push(lead);
+    if (leads.length === HISTORY_MAX_NIGHTS) break;
+  }
   if (leads.length < HISTORY_MIN_NIGHTS) return null;
-  // Nearest rank: the element at index floor(0.75 n). The Math.min only matters below 4 rows, which the
-  // minimum above already excludes; it is kept so the expression is safe on its own.
-  const p75 = leads[Math.min(leads.length - 1, Math.floor(0.75 * leads.length))];
-  return LEAD_FACTOR * Math.max(p75, LEAD_FLOOR_MIN);
+  // The rows arrive newest first, not in lead order, so the sort is what makes the index a percentile.
+  leads.sort((a, b) => a - b);
+  // Nearest rank: the element at index floor(0.75 n), which is always inside the list (0.75 n < n).
+  const p75 = leads[Math.floor(0.75 * leads.length)];
+  const flagged = priorFlaggedStmt.get(childId, nightDate, DISARM_LOOKBACK_NIGHTS).n;
+  return { threshold: LEAD_FACTOR * Math.max(p75, LEAD_FLOOR_MIN), armed: flagged < DISARM_AFTER_FLAGGED };
 }
 
 // Compute (but do not store) a child's sleep summary for the night starting on local date `nightDate`.
@@ -1108,11 +1180,13 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     wake_count: null,
     longest_stretch_minutes: null,
     coverage_minutes: 0,
-    // #700: the out_of_bed the lead test set aside as far earlier than this child gets up, as
-    // `{ at, lead_min, threshold_min }` (the earliest one, `at` exactly as stored), else null. In `base` so every
-    // return has the key; only a scored (`ok`) night can carry a value (an `empty` night has no wake to doubt).
-    // A DIAGNOSTIC, ADDED to the response shape: it is not a column, so upsertNight (named parameters only)
-    // never stores it, and it is not in the scoring context, the push text or the morning review's `computed`.
+    // #700: the out_of_bed the lead test flagged as far earlier than this child gets up, as
+    // `{ at, lead_min, threshold_min, applied }` (the earliest one, `at` exactly as stored; `applied` true when the
+    // rule skipped it, false when the rule was disarmed and it was accepted as before), else null. In `base` so
+    // every return has the key; only a scored (`ok`) night can carry a value (an `empty` night has no wake to
+    // doubt). ADDED to the response shape. Only `at` is stored, as `sleep_nights.wake_unconfirmed_at` (bound by
+    // computeAndStoreNight, never a key of this object), because the disarm counts it; the object itself is not
+    // in the scoring context, the push text or the morning review's `computed`.
     wake_unconfirmed: null,
     climate,
     // #361: present ONLY when a context was passed, so a plain compute's output keeps its exact shape (every
@@ -1576,10 +1650,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // a reference to the function itself, the ordinary JS closure guarantee, not a special case.
   let cribActExt = null;
   let bedOccupiedFrom = null;
-  // #700: the earliest exit the lead test skipped, read into `wake_unconfirmed` on the result. Hoisted for the same
+  // #700: the earliest exit the lead test flagged, read into `wake_unconfirmed` on the result. Hoisted for the same
   // reason as the two above (set only inside the block below); stays null on a night in progress, where no
   // departure is looked for at all.
-  let earlyExitSkipped = null;
+  let earlyExitFlagged = null;
   if (!inProgress) {
     // Indices here share the timeline origin (analysisStartUtc) used by idxOf, so the lookbehind is
     // included at the front and the lookahead past the window end at the back.
@@ -1765,16 +1839,21 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     // late. Verified over 400k random timelines that the candidate START set is identical to the old
     // one, bridged or not; only the run extents differ.
     // ★ #700: IS THIS EXIT FAR EARLIER THAN THIS CHILD EVER GETS UP? (LEAD_FACTOR has the measurement, the
-    // rule and every limit.) It is the LAST term of both conditions that would take an exit below, so it is
-    // asked only of an exit that would otherwise be taken, and an exit it skips can neither become `best` for
-    // its gap (where it would push aside another corroborating exit in the same gap) nor come back through
-    // `settlingFallback`, the settling-tail guard's hand-back. A skip is a rejection like the others: the
-    // scan goes on to later gaps exactly as it does today.
+    // rule and every limit.) It is the LAST term of both conditions below that would record an exit, `best`
+    // and `settlingFallback`, so it is asked only of an exit that has passed every other test there (the onset
+    // bound, the reversal and settling-tail guards, the snap window) and that beats what its gap or the
+    // fallback already holds. Being asked is not being taken: a later exit in the same gap that sits closer to
+    // the gap's start can still replace it, so a flag can name an exit that would have lost anyway. A skipped
+    // exit can neither become `best` for its gap (where it would push aside another corroborating exit in the
+    // same gap) nor come back through `settlingFallback`, the settling-tail guard's hand-back. A skip is a
+    // rejection like the others: the scan goes on to later gaps exactly as it does today. When the rule is
+    // DISARMED (`rule.armed` false, see DISARM_AFTER_FLAGGED) the exit is still flagged but is not skipped: the
+    // scan behaves exactly as it did before #700.
     //
-    // CHEAP AND CAUSAL. The child's history is read at most once per computeNight, and only for an exit whose
-    // lead could trip the rule at all: no threshold is below LEAD_FACTOR x LEAD_FLOOR_MIN, so an exit closer
-    // to the window end than that (every ordinary morning) is taken without a query. Only earlier nights are
-    // read (earlyExitLeadThresholdMin).
+    // CHEAP AND CAUSAL. The child's history and the flag count are read together at most once per
+    // computeNight, and only for an exit whose lead could trip the rule at all: no threshold is below
+    // LEAD_FACTOR x LEAD_FLOOR_MIN, so an exit closer to the window end than that (every ordinary morning) is
+    // taken without a query. Only earlier nights are read (earlyExitRule).
     //
     // The lead is measured from the exit TRUNCATED TO ITS MINUTE, as a stored wake is (toSqlUtc), so it is on
     // the same footing as the stored history it is compared with. Against a whole-minute threshold (every one
@@ -1784,19 +1863,21 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     // `endUtc` is the night's own window end (the `window_end` of the result), never the scan's lookahead: an
     // exit after the window closes has a negative lead and is never skipped.
     const windowEndMs = endUtc.getTime();
-    let leadThreshold; // undefined until read; then null (too little history, the rule is off) or minutes
+    let rule; // undefined until read; then null (too little matching history, the rule is off) or { threshold, armed }
     const leadTooEarly = (t) => {
       const exitMs = txMs(t.created_at);
       const leadMin = (windowEndMs - Math.floor(exitMs / 60000) * 60000) / 60000;
       if (leadMin <= LEAD_FACTOR * LEAD_FLOOR_MIN) return false;
-      if (leadThreshold === undefined) leadThreshold = earlyExitLeadThresholdMin(childId, nightDate);
-      if (leadThreshold == null || leadMin <= leadThreshold) return false;
-      // The EARLIEST skip is the one reported. The scan meets exits roughly in time order, but one exit can be
-      // asked about for two gaps and a later gap can snap to an earlier exit, so it is compared, not assumed.
-      if (earlyExitSkipped == null || exitMs < earlyExitSkipped.ms) {
-        earlyExitSkipped = { ms: exitMs, at: t.created_at, lead_min: leadMin, threshold_min: leadThreshold };
+      if (rule === undefined) rule = earlyExitRule(childId, nightDate, tz, windowEndMs);
+      if (rule == null || leadMin <= rule.threshold) return false;
+      // The EARLIEST flag is the one reported (and stored). The scan meets exits roughly in time order, but one
+      // exit can be asked about for two gaps and a later gap can snap to an earlier exit, so it is compared, not
+      // assumed. `applied` is the night's armed state, the same for every flag on it.
+      if (earlyExitFlagged == null || exitMs < earlyExitFlagged.ms) {
+        earlyExitFlagged = { ms: exitMs, at: t.created_at, lead_min: leadMin, threshold_min: rule.threshold, applied: rule.armed };
       }
-      return true;
+      // Disarmed: flagged, and taken exactly as before #700.
+      return rule.armed;
     };
 
     // The best exit that ONLY the settling-tail guard rejected, kept across every candidate gap. See
@@ -2323,9 +2404,15 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     onset_at_algo: minuteTime(algoOnset),
     wake_at_algo: algoWakeAt,
     // #700 (see `base`): set even when a LATER exit was then accepted, because it still says an earlier exit was
-    // not trusted. The key keeps its place from `base`, so the response's key order does not move.
-    wake_unconfirmed: earlyExitSkipped
-      ? { at: earlyExitSkipped.at, lead_min: earlyExitSkipped.lead_min, threshold_min: earlyExitSkipped.threshold_min }
+    // not trusted, and set when the rule was disarmed (`applied: false`), because the disarm counts those flags
+    // too. The key keeps its place from `base`, so the response's key order does not move.
+    wake_unconfirmed: earlyExitFlagged
+      ? {
+          at: earlyExitFlagged.at,
+          lead_min: earlyExitFlagged.lead_min,
+          threshold_min: earlyExitFlagged.threshold_min,
+          applied: earlyExitFlagged.applied,
+        }
       : null,
   };
 
@@ -2592,16 +2679,21 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
 // camera on a later pass (an admin fixed the primary), so a context frozen on the first write would describe
 // numbers it did not produce. Once the row is final the existing finality rule stops re-storing it, so its
 // context freezes with it.
+//
+// `wake_unconfirmed_at` (#700) is written the same way, in both halves, for the same reason: a provisional re-store
+// recomputes the night's flag, and a later pass that no longer flags anything must clear it, or a stale flag would
+// keep counting toward the disarm (DISARM_AFTER_FLAGGED).
 const upsertNight = db.prepare(
   `INSERT INTO sleep_nights
      (child_id, night_date, window_start, window_end, status, onset_at, wake_at,
       onset_at_shadow, wake_at_shadow, onset_at_algo, wake_at_algo,
       asleep_minutes, awake_minutes, wake_count, longest_stretch_minutes, coverage_minutes,
-      unknown_minutes, in_bed_at, avg_temperature, avg_humidity, scoring_context, computed_at)
+      unknown_minutes, in_bed_at, avg_temperature, avg_humidity, scoring_context, wake_unconfirmed_at, computed_at)
    VALUES (@child_id, @night_date, @window_start, @window_end, @status, @onset_at, @wake_at,
            @onset_at_shadow, @wake_at_shadow, @onset_at_algo, @wake_at_algo,
            @asleep_minutes, @awake_minutes, @wake_count, @longest_stretch_minutes, @coverage_minutes,
-           @unknown_minutes, @in_bed_at, @avg_temperature, @avg_humidity, @scoring_context, @computed_at)
+           @unknown_minutes, @in_bed_at, @avg_temperature, @avg_humidity, @scoring_context, @wake_unconfirmed_at,
+           @computed_at)
    ON CONFLICT(child_id, night_date) DO UPDATE SET
      window_start=excluded.window_start, window_end=excluded.window_end, status=excluded.status,
      onset_at=excluded.onset_at, wake_at=excluded.wake_at, in_bed_at=excluded.in_bed_at,
@@ -2613,6 +2705,7 @@ const upsertNight = db.prepare(
      unknown_minutes=excluded.unknown_minutes,
      avg_temperature=excluded.avg_temperature, avg_humidity=excluded.avg_humidity,
      scoring_context=excluded.scoring_context,
+     wake_unconfirmed_at=excluded.wake_unconfirmed_at,
      computed_at=excluded.computed_at`
 );
 
@@ -3013,6 +3106,10 @@ export function computeAndStoreNight(childId, nightDate, { allowDowngrade = true
     // it, stays exactly as it was (#361 PR 1 changes no number and no response shape except the stored row).
     // With a context, the context the night was re-scored WITH, and today's rules label (see scoringContextFor).
     scoring_context: scoringContextFor(childId, summary, ctx),
+    // #700: only the flag's time is stored, whatever `applied` was: the disarm counts flagged nights, armed or not
+    // (a disarmed night that stopped counting would re-arm the rule while the new routine is still being flagged).
+    // Bound here like scoring_context, never a key of `summary`, so the response shape stays as computeNight made it.
+    wake_unconfirmed_at: summary.wake_unconfirmed?.at ?? null,
     // toSqlUtc truncates to the minute (it exists to match activity_samples.bucket_start) — a harmless
     // sub-minute fuzz against runNightlySleepJob's 3h/30min-granularity finality check, and nothing else
     // reads computed_at at second precision.

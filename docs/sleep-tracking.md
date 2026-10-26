@@ -321,38 +321,57 @@ Now each possible wake is compared with **when this child usually gets up**: how
 of the sleep window the wake times of their earlier saved nights were. A *got out of bed* much earlier
 than that is not taken as the morning wake on its own.
 
-- **Which nights:** the child's newest **14** saved nights that have a wake time, and it needs at
-  least **10**. A child with fewer, which includes a new install and every child's first ten nights,
-  is worked out exactly as before.
+- **Which nights:** the child's newest **14** saved nights that have a wake time **and the same
+  wake-time setting** (their window ended at the same time of day as tonight's), and it needs at least
+  **10**. A child with fewer is worked out exactly as before. That includes a new install, every
+  child's first ten nights, and the first ten nights after you change the child's wake time.
 - **How much earlier:** it takes the child's usual gap before the window ends (most of their nights,
   three in four, woke this close to the end or closer) and doubles it, but never uses less than
   **60 minutes**. A *got out of bed* further from the window's end than that is set aside. For a child
   who is usually up within 40 minutes of the window's end, the limit is 80 minutes.
+- **It switches itself off when the routine changes.** If **4 of the child's previous 7** saved nights
+  each had a *got out of bed* set aside, the next one is taken as the wake, as before this change. A
+  child who has really started getting up earlier is set aside on four nights and counted from the
+  fifth; once four of those earlier wakes are saved the limit has moved with them, and nothing is set
+  aside any more (from the ninth night, in a test of a child up 1¾ hours earlier every day). Three such
+  nights in a week leave it on: one child in the house it was measured in had exactly that many false
+  exits in eight days.
 - **These are fixed, not settings.** They were measured on two cameras in one house: the false exits
   were 3.2 to 17.5 times the child's usual gap, and every night a review confirmed was right was at most
-  1.35 times it. A reasonable starting point for other homes, not a measurement of them.
+  1.35 times it. The 4-of-7 was chosen from the same nights. A reasonable starting point for other homes,
+  not a measurement of them.
 - **What the night shows instead:** a later *got out of bed* can still be the wake, found the usual
   way. If there is none, the night keeps the wake worked out from movement alone, which is often none:
   the card and the detail page then say "still asleep at" the window's end, and the morning
-  notification has no "up" time. Not right either, but much closer than a night that ended in the
-  evening (on the four measured nights, wake errors of 3 to 10 hours became a blank or under 2 hours).
+  notification has no "up" time. Not right either, but closer than a night that ended in the evening:
+  on the four measured nights, wake errors of 3 to 10 hours became a blank on one night and under
+  2 hours on the other three. Fitted to those four nights in one house.
 - **For developers:** a night worked out fresh (`GET /api/children/:id/sleep/:date`, the Recompute
   preview and its save, and `/sleep/live` when it works last night out fresh) carries `wake_unconfirmed`:
-  `null`, or `{ at, lead_min, threshold_min }` for the earliest *got out of bed* that was set aside (its
-  time as recorded, how many minutes before the window's end it was, and the limit it went over). It is
-  not saved with the night, not in the notification, and not shown on the page.
+  `null`, or `{ at, lead_min, threshold_min, applied }` for the earliest *got out of bed* that was
+  flagged (its time as recorded, how many minutes before the window's end it was, the limit it went
+  over, and whether it was set aside: `false` when the rule had switched itself off and it was taken).
+  The saved night keeps only its time, in `sleep_nights.wake_unconfirmed_at` (that is what the
+  4-of-7 count reads; `null` on nights saved before this). Not in the notification, not shown on the page.
 
 **Known limits:**
-- A child who **really is up for the day** that early, in a room that goes quiet again afterwards, is
-  treated the same way: the night reads as asleep until the window's end (or until a later *got out
-  of bed*). Noise or movement in the room after the exit doesn't change that, because it is just as
-  much a sign that the house is waking up. No such night is in the measured data. If it happens,
-  correct the night in the morning review.
-- It relies on the saved nights **as they were saved**: whichever camera or window they were worked
-  out with (each is measured against its own window), and without your morning-review corrections. A
-  run of earlier nights that were themselves ended far too early makes an early wake look usual, and
-  the rule stops catching them until those nights drop out of the last 14: 3 such nights do it when
-  there are 10 to 12 saved nights, 4 when there are 13 or 14.
+- A child who **really is up for the day** that early, or who was **carried to a parent's bed**, in a
+  room that goes quiet again afterwards, is treated the same way: the night reads as asleep until the
+  window's end (or until a later *got out of bed*). Noise or movement in the room after the exit doesn't
+  change that, because it is just as much a sign that the house is waking up. No such night is in the
+  measured data. Correcting the night in the morning review fixes **that night only**: a correction is
+  never read as history, so it does not teach the rule, and it locks the night.
+- The other way round: when a real early *got out of bed* is set aside, a **later** one can become the
+  wake (a parent handling the empty bed, or a false one), so the night is reported up hours late
+  rather than blank.
+- It relies on the saved nights **as they were saved**: whichever camera or rules produced them, and
+  without your morning-review corrections. Nights saved with another wake time are left out, and so are
+  nights saved under another **timezone** setting (their window ends at a different local time), so
+  changing the timezone switches the rule off for ten nights too. A clock change (daylight saving) does
+  not: the comparison is on the local time.
+- A run of earlier nights that were themselves ended far too early makes an early wake look usual: 3
+  such nights raise the limit when there are 10 to 12 saved nights, 4 when there are 13 or 14. And 4
+  false exits inside a week switch the rule off (above), so the next one is taken as before.
 - Because a night's answer now depends on the nights before it, working out an earlier night again
   (or deleting one) can change a later night's answer, even though nothing about that later night
   changed.

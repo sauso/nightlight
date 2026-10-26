@@ -24040,8 +24040,8 @@
   {
     "label": "#700 an exit exactly at the threshold is skipped (`<` instead of `<=`, i.e. the test becomes >=)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "if (leadThreshold == null || leadMin <= leadThreshold) return false;",
-    "replace": "if (leadThreshold == null || leadMin < leadThreshold) return false;",
+    "find": "if (rule == null || leadMin <= rule.threshold) return false;",
+    "replace": "if (rule == null || leadMin < rule.threshold) return false;",
     "expect": "killed",
     "tests": ["sleep-early-exit-lead.test.js"],
     "namePattern": "#700 T5:"
@@ -24068,8 +24068,8 @@
   {
     "label": "#700 wake_unconfirmed is never set",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "wake_unconfirmed: earlyExitSkipped",
-    "replace": "wake_unconfirmed: null && earlyExitSkipped",
+    "find": "wake_unconfirmed: earlyExitFlagged",
+    "replace": "wake_unconfirmed: null && earlyExitFlagged",
     "expect": "killed",
     "tests": ["sleep-early-exit-lead.test.js"],
     "namePattern": "#700 T1:"
@@ -24077,10 +24077,106 @@
   {
     "label": "#700 wake_unconfirmed reports the LATEST skipped exit instead of the earliest",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "if (earlyExitSkipped == null || exitMs < earlyExitSkipped.ms) {",
-    "replace": "if (earlyExitSkipped == null || exitMs > earlyExitSkipped.ms) {",
+    "find": "if (earlyExitFlagged == null || exitMs < earlyExitFlagged.ms) {",
+    "replace": "if (earlyExitFlagged == null || exitMs > earlyExitFlagged.ms) {",
     "expect": "killed",
     "tests": ["sleep-early-exit-lead.test.js"],
     "namePattern": "#700 T2c"
+  },
+  {
+    "label": "#700 the disarm threshold drops from 4 flagged nights to 3",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const DISARM_AFTER_FLAGGED = 4;",
+    "replace": "const DISARM_AFTER_FLAGGED = 3;",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T11a",
+    "note": "The measured child had three flagged nights in eight days, all false exits: at 3 the rule would switch itself off in the middle of them."
+  },
+  {
+    "label": "#700 the disarm threshold rises from 4 flagged nights to 5",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const DISARM_AFTER_FLAGGED = 4;",
+    "replace": "const DISARM_AFTER_FLAGGED = 5;",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T11b",
+    "note": "A changed routine would be skipped one night longer; T12 sees it too."
+  },
+  {
+    "label": "#700 the disarm looks back 8 nights instead of 7",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const DISARM_LOOKBACK_NIGHTS = 7;",
+    "replace": "const DISARM_LOOKBACK_NIGHTS = 8;",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T11d"
+  },
+  {
+    "label": "#700 the disarm counts this night's own stored row (`<=` on night_date)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "SELECT wake_unconfirmed_at FROM sleep_nights WHERE child_id = ? AND night_date < ?",
+    "replace": "SELECT wake_unconfirmed_at FROM sleep_nights WHERE child_id = ? AND night_date <= ?",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T11e",
+    "note": "A provisional re-store would count the night's own earlier flag toward disarming itself."
+  },
+  {
+    "label": "#700 applied is always true (a disarmed night reports a skip it did not make)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "applied: rule.armed };",
+    "replace": "applied: true };",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T11b"
+  },
+  {
+    "label": "#700 the flag is not stored (the disarm can never see a flagged night)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "wake_unconfirmed_at: summary.wake_unconfirmed?.at ?? null,",
+    "replace": "wake_unconfirmed_at: null,",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T12:",
+    "note": "The lock-in of the PR #888 review: every night of a changed routine skipped for good."
+  },
+  {
+    "label": "#700 the window-end match is dropped (nights with another window end count)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (localHm.format(new Date(endMs)) !== endHm) continue;",
+    "replace": "    if (false) continue;",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T8h:"
+  },
+  {
+    "label": "#700 the window-end match reads the UTC clock instead of the local one",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "new Intl.DateTimeFormat('en-GB', { timeZone: tz, hourCycle: 'h23', hour: '2-digit', minute: '2-digit' });",
+    "replace": "new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', hourCycle: 'h23', hour: '2-digit', minute: '2-digit' });",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T8j",
+    "note": "Across a clock change the same local 07:00 end is a different UTC hour, so a UTC match drops the nights before it."
+  },
+  {
+    "label": "#700 the percentile index becomes ceil(0.75 n) - 1",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "Math.floor(0.75 * leads.length)",
+    "replace": "(Math.ceil(0.75 * leads.length) - 1)",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T8l",
+    "note": "The two nearest-rank conventions differ only when 0.75 n is whole; 12 nights is such a case."
+  },
+  {
+    "label": "#700 the leads are not sorted (the index reads them newest first)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  leads.sort((a, b) => a - b);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T8k"
   }
 ]
