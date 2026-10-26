@@ -236,8 +236,9 @@ What the test does not cover:
   then stays on the previous image until the cause is fixed.
 - Rebuilds carry the same `org.opencontainers.image.revision` label as a normal publish (#864), set to
   the commit that was rebuilt. Rebuilds from before that change did not, so the command above prints
-  nothing for them. A Monday run uses the workflow file on `main`, so `:latest` is labelled again only
-  after a release that contains the fix and the Monday after it. **Settings → About** shows the commit
+  nothing for them. A Monday run uses the workflow file on `main`, so `:latest` keeps its label through
+  a rebuild only after a release that contains the fix and the Monday after it (the release's own
+  publish labels `:latest` in between, until that Monday). **Settings → About** shows the commit
   either way.
 
 Each run's summary on the repository's Actions page lists the digest the tag had before. To go back
