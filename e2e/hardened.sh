@@ -18,6 +18,12 @@
 #   bash e2e/hardened.sh green      # or k, d, f: one part only
 #   bash e2e/hardened.sh teardown   # remove whatever a killed run left behind
 #
+# MEDIA ISOLATION (#553 phase 4: asked for by default). Every container here is started with the kill switch
+# NIGHTLIGHT_MEDIA_ISOLATION=0, on purpose: this script measures what the SIX CAPABILITIES are each needed for on the
+# plain start (uid, modes and the stop), and those assertions (every process the app user, a 700 data directory) describe
+# the OFF start. The default start, ON, under the same six capabilities and the same flags, is e2e/media-isolation.sh's
+# "six" case, which also proves that taking KILL out falls back to the plain start.
+#
 # Needs a LINUX Docker host: the process checks read the container's processes from the host's /proc
 # (Docker Desktop keeps them inside its VM). CI runs this in the `hardened` job of .github/workflows/e2e.yml,
 # on an image built from the checked-out commit. Locally, build first (`docker build -t sauso/nightlight:dev .`)
@@ -173,7 +179,7 @@ start_app() { # name volume [capability to leave out]
   # clean stop here is a clean stop there.
   docker run -d --name "$name" --label "$LABEL" --label "$ROLE_APP" \
     --network "$NET" -p "127.0.0.1:$PORT:4000" \
-    -e TZ=UTC -e "PUID=$APP_PUID" -e "PGID=$APP_PGID" \
+    -e TZ=UTC -e "PUID=$APP_PUID" -e "PGID=$APP_PGID" -e NIGHTLIGHT_MEDIA_ISOLATION=0 \
     --stop-timeout 30 \
     -v "$vol:/app/data" \
     "${flags[@]}" \
@@ -414,8 +420,9 @@ camera_and_hls() {
   done
 }
 
-# #553: what GET /api/about says about media isolation must be what the start-up script decided. Here, with
-# NIGHTLIGHT_MEDIA_ISOLATION not set, that is "off" (its default); e2e/media-isolation.sh checks "on" and the fallbacks.
+# #553: what GET /api/about says about media isolation must be what the start-up script decided. Here,
+# with the kill switch NIGHTLIGHT_MEDIA_ISOLATION=0 (every container of this script), that is "off"; e2e/media-isolation.sh
+# checks "on" (the default) and the fallbacks.
 AUTH_TOKEN=
 CAMERA_ID=
 MEDIA_TOKEN=

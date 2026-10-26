@@ -83,7 +83,9 @@ function modes(dir) {
 
 function runEntrypoint(dataDir, umaskValue) {
   // A clean environment, so a PUID/PGID/UMASK in the CI runner's own environment cannot leak in.
-  const env = { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: dataDir };
+  // NIGHTLIGHT_MEDIA_ISOLATION=0: the umask and tighten-walk behaviour with isolation off (it is asked for by default since
+  // #553 phase 4; the confined walk with it on is in entrypoint-media-isolation.test.js).
+  const env = { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: dataDir, NIGHTLIGHT_MEDIA_ISOLATION: '0' };
   if (umaskValue !== undefined) env.UMASK = umaskValue;
   const r = spawnSync(
     '/bin/sh',

@@ -120,7 +120,7 @@ export function renderMediamtxConfig(baseText, urls) {
  * next start to write THROUGH (fs.protected_symlinks is 0 on some hosts, Unraid among them). The file holds no secret
  * (mediamtx.yml has none; camera paths are added later through the API). One small folder per container start is left
  * in the temp directory; it is never reused. If any step fails, the base file is used, as above. The general rule for
- * app-written files the media user reads comes with the later phases of #553; this is the one MediaMTX needs to start.
+ * app-written files the media user reads is src/lib/mediaLayout.js (writeInputFile); this is the one MediaMTX needs to start.
  */
 export function writeMediamtxConfig(basePath, urls, { tmpDir = os.tmpdir(), log = null, mediaGid = mediaIsolationOn() ? MEDIA_GID : null } = {}) {
   try {

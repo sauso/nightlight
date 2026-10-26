@@ -123,8 +123,18 @@ WANT_OWNER="$(canonical_id "$PUID"):$(canonical_id "$PGID")"
 # MEDIA group (media_layout_ok below), and that must not read as "wrong owner" here, or the full walk below would run on
 # every start and hand the group of everything beneath it back to PGID, including the folders the media user writes into.
 MEDIA_ID=1700
+# Is isolation asked for? YES unless NIGHTLIGHT_MEDIA_ISOLATION says no (the default flipped in #553 phase 4; before it,
+# only an exact 1 asked). The kill switch is 0, and also off or false in any capitals, because an operator who sets this
+# variable at all means "off" and a spelling that quietly kept isolation on would be a surprise. Unset, blank and any
+# other text (including the old 1) ask: the dry run below still has to pass, so asking is never a risk to starting.
+# Computed ONCE, here, because three places read it and must never disagree (the ownership check just below, the
+# confined tighten walk, and the decision at the bottom).
+case "${NIGHTLIGHT_MEDIA_ISOLATION:-}" in
+  0|[Oo][Ff][Ff]|[Ff][Aa][Ll][Ss][Ee]) MEDIA_ASKED= ;;
+  *) MEDIA_ASKED=1 ;;
+esac
 media_layout_ok() {
-  [ "$1" = . ] && [ "${NIGHTLIGHT_MEDIA_ISOLATION:-}" = 1 ] \
+  [ "$1" = . ] && [ -n "$MEDIA_ASKED" ] \
     && [ "$(stat -L -c %u:%g "$DATA_DIR/." 2>/dev/null)" = "$(canonical_id "$PUID"):$MEDIA_ID" ]
 }
 NEEDS_CHOWN=
@@ -143,7 +153,7 @@ fi
 
 # --- The private folder (#553 phase 2a) ------------------------------------------------------------
 # The database and the app's secrets live in DATA_DIR/private/, a folder that is always 700 and owned by PUID:PGID, so
-# that a later phase can open DATA_DIR itself to the media group without exposing them (a 700 folder protects even a
+# that media isolation can open DATA_DIR itself to the media group without exposing them (a 700 folder protects even a
 # wrongly permissive file inside it). The MOVE is src/scripts/migrate-private-layout.js, run further down as the app
 # user; this part only prepares, as root:
 #   - private/ itself: created if missing, given to PUID:PGID only if it is not already theirs, and chmod 700 on every
@@ -235,7 +245,7 @@ tighten_all() {
   FOUND=$( { find "$DATA_DIR" ! -type l -perm /077 -print -exec chmod go-rwx {} + || printf '[entrypoint] warning: could not tighten every entry under %s (see the error above); starting anyway\n' "$DATA_DIR" >&2; } | wc -l)
 }
 TIGHTEN_CONFINED=
-if [ "$UMASK" = 077 ] && [ "${NIGHTLIGHT_MEDIA_ISOLATION:-}" = 1 ]; then
+if [ "$UMASK" = 077 ] && [ -n "$MEDIA_ASKED" ]; then
   TIGHTEN_CONFINED=1
   FOUND=$( { { find "$DATA_DIR/private" ! -type l -perm /077 -print -exec chmod go-rwx {} +; find "$DATA_DIR" -maxdepth 1 -type f ! -type l -perm /077 -print -exec chmod go-rwx {} +; } || printf '[entrypoint] warning: could not tighten every entry under %s (see the error above); starting anyway\n' "$DATA_DIR" >&2; } | wc -l)
   DONE="existing entries with group/other access found in private/ and at the top level: $FOUND (media isolation asked for: the clip tree is left alone)"
@@ -302,10 +312,12 @@ printf '[entrypoint] umask %s; %s; modes:%s\n' "$UMASK" "$DONE" "$MODES"
 # instead of `su-exec`, keeping exactly three capabilities as AMBIENT ones: SETUID and SETGID (to start each child as
 # the media user, through media-exec.sh) and KILL (to signal those children, which belong to another uid now).
 #
-# NIGHTLIGHT_MEDIA_ISOLATION is an INTERNAL switch, read only here: 1 asks for isolation, anything else (unset, 0,
-# blank, any other text) means off, silently. Off by default ON PURPOSE while #553 is built in phases: until the
-# shared-folder layout lands (phase 2), the media user cannot write recordings, clips or timelapses, so only
-# streaming works with it on. Not documented for users yet; a later phase flips the default and documents it.
+# NIGHTLIGHT_MEDIA_ISOLATION is read only here (MEDIA_ASKED, further up): isolation is ASKED FOR unless it is 0 (or
+# off, or false), which is the documented kill switch (docs/operations.md, "Media isolation"). It was off by default
+# while #553 was built in phases and was flipped on in phase 4, once the layout, the safe file serving and the proof
+# test were all in. Asking is not the same as getting: every refusal below falls back to the old start, with ONE
+# warning, so a host that cannot do it (rootless Docker, a share that ignores chmod, a missing capability) still
+# starts exactly as it did before #553. An explicit 0 is silent, as the old default was.
 #
 # THE RULES (plan review of #553):
 #   - Decided HERE, as root, never in the app: Node cannot drop capabilities, so an app-side fallback would hand
@@ -512,7 +524,7 @@ media_reown() {
 
 MEDIA_ISOLATION=off
 MEDIA_REASON=
-if [ "${NIGHTLIGHT_MEDIA_ISOLATION:-}" = 1 ]; then
+if [ -n "$MEDIA_ASKED" ]; then
   if ! is_id "$APP_UID" || ! is_id "$APP_GID"; then
     MEDIA_REASON="PUID=$PUID PGID=$PGID are not both numbers"
   elif [ "$APP_UID" = 0 ]; then

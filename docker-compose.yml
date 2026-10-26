@@ -32,6 +32,8 @@ services:
     #   - CHOWN          # re-owns the data directory to PUID:PGID; without it the container never starts
     #   - SETUID         # hands the app over to PUID; without it the container never starts
     #   - SETGID         # ...and to PGID and its groups; without it the container never starts
+    #                    # (SETUID, SETGID and KILL are also what media isolation keeps for the app, to start
+    #                    # and signal FFmpeg as the media user; without KILL isolation turns itself off)
     #   - DAC_OVERRIDE   # lets root into the owner-only (700) data directory and its private/ folder; without it the first start
     #                    # works, then a re-created container (an update) never starts, and `docker exec`
     #                    # commands such as the backup and the two-factor reset fail
@@ -58,6 +60,13 @@ services:
       # signed in and gets no Nightlight push alerts until it signs in again; lowering it signs out older
       # sign-ins at their next request. See .env.example and SECURITY.md.
       - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-}
+      # Media isolation: FFmpeg, ffprobe and MediaMTX run as a separate user (uid 1700) that cannot read the
+      # database or the secrets. ON by default: blank or unset means "try it", and on a host that cannot do it
+      # (rootless Docker/Podman, a share that ignores chmod, NFS root_squash, PUID/PGID 1700, PUID=0, missing
+      # capabilities) it starts the old way with one warning in the log. 0, off or false turns it off; anything
+      # else is the same as blank. Read at start, so re-create the container after a change. New recordings are
+      # then owned by uid 1700 (existing ones are not). Limits: docs/operations.md, "Media isolation".
+      - NIGHTLIGHT_MEDIA_ISOLATION=${NIGHTLIGHT_MEDIA_ISOLATION:-}
       # Allow Cloudflare Web Analytics' beacon in the Content-Security-Policy: 1/true/yes/on = allow,
       # blank (the default) or 0/false/no/off = blocked; anything else is also blocked, with a warning.
       # Only for a site served through Cloudflare's proxy with Web Analytics on. See .env.example.

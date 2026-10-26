@@ -71,6 +71,12 @@ bash e2e/hardened.sh green      # one part: green, k, d or f
 bash e2e/hardened.sh teardown   # remove whatever a killed run left behind
 ```
 
+Every container in this script is started with `NIGHTLIGHT_MEDIA_ISOLATION=0`.
+Media isolation is on by default, and the assertions below (every process runs
+as the app user, a `700` data directory) describe the plain start. The same six
+capabilities with isolation on, and the fallbacks, are `media-isolation.sh`
+(`bash e2e/media-isolation.sh`), which runs as its own CI job.
+
 `NIGHTLIGHT_IMAGE` picks another image; `HARDENED_LOG_DIR` keeps every
 container's log in that folder (CI uploads it as the `hardened-logs` artifact).
 

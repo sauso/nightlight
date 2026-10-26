@@ -142,14 +142,14 @@ jobs:
         if: always()
         run: bash e2e/hardened.sh teardown || true
 
-  # #553 phase 1: media isolation (ffmpeg, ffprobe and MediaMTX as a separate user), behind the internal switch
-  # NIGHTLIGHT_MEDIA_ISOLATION=1, proven against an image built from this commit. e2e/media-isolation.sh checks the
-  # "on" start under the six-capability hardening and under Docker's defaults, and two fallbacks that must start the
+  # #553 phase 1: media isolation (ffmpeg, ffprobe and MediaMTX as a separate user), ON BY DEFAULT since phase 4
+  # (NIGHTLIGHT_MEDIA_ISOLATION=0 is the kill switch), proven against an image built from this commit.
+  # e2e/media-isolation.sh checks the "on" start (no variable set) under the six-capability hardening and under Docker's defaults, and two fallbacks that must start the
   # usual way and report "off" (KILL missing, PUID=1700), each failing the job if its signature does not show. A job of
   # its own, like `hardened`: its own containers, network, volumes and host port (4200), and it reads the containers'
   # processes from this runner's /proc, which needs a Linux host.
   # #553 phase 2b: the "on" cases also prove the folder layout as the media user (docker exec -u 1700) and serve real
-  # recordings with Range requests, and a negative control (the switch not set) runs in the same job; the time limit is
+  # recordings with Range requests, and a negative control (the kill switch, NIGHTLIGHT_MEDIA_ISOLATION=0) runs in the same job; the time limit is
   # longer for the recordings those make.
   media-isolation:
     runs-on: ubuntu-latest

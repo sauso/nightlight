@@ -301,8 +301,9 @@ export async function startSoundDetector(camera) {
       // #553: checked FIRST, and NOT a no-microphone strike. A 126/127 at once means ffmpeg (or the switch to the
       // media user) could not run at all; counting it as a strike would stop sound detection after 3 tries with "does
       // this camera have a microphone?", the wrong diagnosis, and it would not come back when the program is fixed.
-      // It neither adds a strike nor resets them. A real ffmpeg on a camera with no audio track exits 1, not 126/127,
-      // so the no-microphone rule below sees exactly the exits it saw before.
+      // It neither adds a strike nor resets them. A real ffmpeg on a camera with no audio track exits 1, and ffmpeg
+      // can in principle return a raw error code that looks like 126/127 (processGuards.js says so), so a rare such
+      // exit may be read as an exec failure here; the no-microphone rule below sees the exits it always saw.
       const next = execBackoff.exited(code);
       if (next.execFailed) {
         if (next.log) logger.error(`[sound:${path}] ${describeExecFailure('ffmpeg', next)}`);

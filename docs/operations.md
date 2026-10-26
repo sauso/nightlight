@@ -30,9 +30,10 @@ into the container's temporary folder, not the data volume, and the logs go to D
 ### The private folder
 
 `private/` is always `700` and owned by `PUID`:`PGID`, whatever `UMASK` says. Only the app can open
-it. A later version will let a separate, unprivileged user write clips into the data directory (so
-that a camera stream that takes over FFmpeg cannot read the app's secrets); a folder only the app may
-enter protects even a file inside it whose own mode is too open, after a restore as root, say.
+it. This is what lets FFmpeg, ffprobe and MediaMTX run as a separate, unprivileged user that writes clips into
+the data directory ([Media isolation](#media-isolation), on by default), so that a camera stream that takes
+over FFmpeg cannot read the app's secrets. A folder only the app may enter protects even a file inside it
+whose own mode is too open, after a restore as root, say.
 
 **An install from before this version is moved for you, once.** It has these files at the top of the
 data directory. The first start of this version moves them into `private/` before the app starts, and
@@ -84,7 +85,7 @@ Since #549 the container makes everything in it **owner-only** — files `600`, 
 by `PUID`:`PGID` — and on every start takes group/other access off anything in it that still has
 some. Before that, new files were readable by every account on the host (`644`, folders `755`).
 
-| `UMASK` | The file-creation mask for the app and the FFmpeg/MediaMTX processes it starts. |
+| `UMASK` | The file-creation mask for the app, and for the FFmpeg/MediaMTX processes it starts when [media isolation](#media-isolation) is off. With isolation on, those processes always use their own mask (`007`: their files are readable and writable by the media group and by no one else), whatever `UMASK` says. |
 |---|---|
 | Default | `077` (owner only). Blank or unset means the default. |
 | Range | 3 or 4 octal digits whose **owner digit is `0`**: `000`–`077`, or `0000`–`0077`. For example `077`, `027` (the group may read), `022` (everyone may read, as before #549). |
@@ -120,8 +121,10 @@ sticking (see the filesystem limit below); a change that failed is logged as a s
 
 **Who keeps access, and who loses it**, at the default, from the first start after upgrading:
 
-- **Unchanged:** the app, FFmpeg and MediaMTX (they run as `PUID`), and anything running as
-  **root**: Unraid's CA Appdata Backup, `docker exec`, a file manager running as root.
+- **Unchanged:** the app (it runs as `PUID`), and anything running as **root**: Unraid's CA Appdata
+  Backup, `docker exec`, a file manager running as root. FFmpeg, ffprobe and MediaMTX run as `PUID` too
+  when [media isolation](#media-isolation) is off; with it on (the default) they run as a separate
+  user and cannot read the database or the secrets, only the clips and recordings.
 - **Loses access:** anything that reads the data directory as a **different user** — a backup job
   or `rsync` running as a non-root user, another container that mounts the same folder with a
   different `PUID`, any other account on the host.
@@ -466,15 +469,20 @@ the checks in [Checking it works](#checking-it-works).
 ### What it changes, and what it does not
 
 The container starts as root just long enough to set up the data directory, then hands over to `PUID`.
-The app, FFmpeg and MediaMTX already run as that user, with no special privileges. The hardening limits
-what stays root: the container's init process, the start-up script, `docker exec` commands and the health
-check keep only the six capabilities listed below, and nothing in the container can gain privileges again
-(`no-new-privileges`). Raw network access (`NET_RAW`) is among the capabilities removed, which matters most
-on host networking.
+The app already runs as that user, with no special privileges, and so do FFmpeg, ffprobe and MediaMTX
+unless [media isolation](#media-isolation) is on (it is by default, and it works with this hardening: the
+app then keeps `SETUID`, `SETGID` and `KILL` as its own capabilities, and the media programs run as a
+separate user with none). The hardening limits what stays root: the container's init process, the start-up
+script, `docker exec` commands and the health check keep only the six capabilities listed below, and
+nothing in the container can gain privileges again (`no-new-privileges`). Raw network access (`NET_RAW`)
+is among the capabilities removed, which matters most on host networking.
 
 It does **not**:
 
-- keep FFmpeg away from the database. They run as the same user, so a compromised FFmpeg could still read it.
+- keep FFmpeg away from the database by itself. That is [media isolation](#media-isolation), which is a
+  separate thing: it is on by default whether or not you add these flags. If it cannot start on your host
+  (the log has a `media isolation is off` warning), FFmpeg runs as the app's user and could still read the
+  database.
 - hold the app itself back if you set `PUID=0`. The app then runs as root and keeps all six capabilities.
 - replace keeping the data directory private (see [Who can read the data directory](#who-can-read-the-data-directory)).
 
@@ -517,7 +525,9 @@ Each of the six has one job. If one is left out, this is what you see, in the or
 
 - **CHOWN, SETUID, SETGID** re-own the data directory to `PUID`:`PGID` and hand the app over to that user.
   Without one of them the container stops at every start, and the log shows `Operation not permitted` or
-  `usermod: Failed to change ownership of the home directory`.
+  `usermod: Failed to change ownership of the home directory`. With [media isolation](#media-isolation),
+  the app keeps `SETUID` and `SETGID` (and `KILL`) after the hand-over, to start each media program as the
+  media user.
 - **DAC_OVERRIDE** lets root into the owner-only (`700`) data directory and its `private/` folder. Without
   it the first start works,
   but once the container is re-created (an update, or **Apply** on Unraid) it stops at start with
@@ -532,7 +542,8 @@ Each of the six has one job. If one is left out, this is what you see, in the or
   one:** everything works until the container stops. Then the app is killed instead of stopping cleanly, so
   a recording in progress is lost on every stop, restart and update. The log shows a
   `[FATAL tini (1)] Unexpected error when forwarding signal` line and no `Shutting down` line, and the exit
-  code is 1.
+  code is 1. (With media isolation, a missing `KILL` is caught at start instead: isolation turns itself off with a
+  warning and the container starts the plain way, where the stop problem above applies.)
 
 The automated test checks the KILL, DAC_OVERRIDE and FOWNER cases. The CHOWN, SETUID and SETGID messages
 are worked out from the start-up script, not tested.
@@ -561,22 +572,39 @@ On Unraid, set **Extra Parameters** back to `--log-opt max-size=10m --log-opt ma
 and apply. With Compose, comment the lines out again and run `docker compose up -d`. Nothing in the data
 directory depends on the hardening, so you can turn it off at any time.
 
-## Media isolation (not on by default)
+## Media isolation
 
-**Status:** this is built but **off**, and nothing in a normal install turns it on. It is controlled by an internal
-setting, `NIGHTLIGHT_MEDIA_ISOLATION`, which is read only when the container starts: the value `1` asks for it, and
-anything else (not set, `0`, blank, any other text) leaves it off. That is the default. A later release is expected to
-switch it on by default, after it has run on a real install for a while; this page describes what the switch does today.
+**Status:** on by default. Nothing to set. The container tries it at every start and, if the host cannot do it, starts
+the old way with one warning (below). **The setting:** `NIGHTLIGHT_MEDIA_ISOLATION`, read only when the container
+starts. **Default:** not set, which means "try it". **Range:** `0`, `off` or `false` (any capitals) turns it off, and
+nothing else does: blank, `1` or any other text is the same as not set. Because it is read only at start, changing it
+needs the container to be re-created (**Apply** on Unraid, `docker compose up -d`), not just restarted. On Unraid,
+add it as a variable on the container: it is deliberately not in the template.
 
 **What it does.** FFmpeg, ffprobe and MediaMTX read video from your cameras, so they handle data that the camera (or
 whoever has taken over the camera) controls. With isolation on, they run as a separate user inside the container (id
 `1700`, with no extra privileges), so a fault in one of them cannot read the database or the secrets. Off, they run as
-the same user as the app, which is how Nightlight has always worked.
+the same user as the app, which is how Nightlight worked before. **Settings → About** shows one line, "Media
+isolation: on" or "off", for what this start decided; `GET /api/about` reports it as `mediaIsolation`.
+
+**Turning it off.** Set `NIGHTLIGHT_MEDIA_ISOLATION=0` and re-create the container. Going back is automatic and needs
+nothing else: files the media user wrote are handed back to `PUID`:`PGID` once, at that start (see "Going back to
+off" below). Use it if something on your host misbehaves with isolation and the log does not say why, and please
+report it.
+
+**What changes for you when it is on.** Recordings, clips and timelapses that already exist stay exactly as they are
+(owned by `PUID`, mode `600`). New ones are written by the media user, so they are owned by uid `1700`, group `1700`,
+mode `660`: **another account on the host, or a share user over SMB, can no longer read new recordings straight from
+the folder**, only root and the app can. The app plays and downloads them as it always did. If a backup job or file
+manager that is not root reads your clips folder, see "Known limits" below before you rely on it. The database,
+secrets, backups and pictures are in [`private/`](#the-private-folder), as before.
 
 **What it needs, and what it checks.** The container checks this at every start and, if anything is wrong, starts the
-usual way with one `[entrypoint] warning: media isolation is off: <reason>` line. It never refuses to start. It stays off when:
+usual way (isolation off) with one `[entrypoint] warning: media isolation is off: <reason>` line. It never refuses to
+start. It stays off when:
 
-- `PUID` is `0` (the app would run as root), `PUID` or `PGID` is `1700` (the media user's own id), or either is not a number;
+- `PUID` is `0` (the app would run as root; the warning then appears at every start, and `NIGHTLIGHT_MEDIA_ISOLATION=0`
+  silences it), `PUID` or `PGID` is `1700` (the media user's own id), or either is not a number;
 - the database, a backup, a snapshot folder, `.jwt_secret` or a Firebase file is still at the top level of the data
   directory instead of in [`private/`](#the-private-folder). Isolation opens the data directory to the media group, so a
   file left at the top would be protected only by its own permissions. A `.jwt_secret` is exempt if you set
@@ -588,7 +616,12 @@ usual way with one `[entrypoint] warning: media isolation is off: <reason>` line
 - the container lacks the three capabilities the app keeps (`SETUID`, `SETGID`, `KILL`), or a media program cannot run
   as the media user;
 - a trial run of the folders fails or takes longer than 30 seconds (a network share that has stalled, say). The trial
-  is a dry run: nothing it does changes your data.
+  is a dry run: nothing it does changes your data;
+- the host does not behave the way isolation needs, so the trial fails. Known cases: **rootless Docker or Podman**
+  (the container cannot use the media user's id), **an SMB or CIFS share, or an ACL-based share, that ignores
+  `chmod`** and ownership, and **NFS with `root_squash`** (the start-up script's root cannot change the group of the
+  folders). What has been checked: the permission checks by hand on one Unraid user share, and the whole chain in
+  automated tests on a Linux runner. It has not been tried on rootless Docker, rootless Podman or NFS.
 
 **Who can read what, with isolation on.**
 
@@ -628,11 +661,26 @@ which is not in the media group when isolation is off, could not play those clip
 group (or media-owned entries) on the data directory or clips folder, so the next start finds nothing to do. On a big
 clips folder that one pass reads every entry, like the ownership fix described under [Who can read the data directory](#who-can-read-the-data-directory).
 
-**Known limits.** The app can still become any user in the container, because it keeps `SETUID` to start the media
-programs. This protects the database and secrets from a fault in FFmpeg or MediaMTX; it does not make the container a
-sandbox. The unauthenticated MediaMTX control API on `127.0.0.1:9997` and camera passwords in process arguments are not
-covered. Keep cameras on their own network, as [cameras.md](cameras.md) says. Real-device streaming has not been
-re-checked with isolation on; that is part of the plan before it becomes the default.
+**Known limits.** This protects the database and the secrets from a fault in FFmpeg, ffprobe or MediaMTX. It does not
+make the container a sandbox, and it does not stop everything:
+
+- **The app itself can still become root inside the container.** It keeps `SETUID` and `SETGID` to start the media
+  programs. A fault in the app (not in FFmpeg) could use them to become any user in the container. If the data share is
+  not mounted `nosuid`, it could also create setuid files on it. Isolation is aimed at the camera-facing programs, not
+  at a compromised app.
+- **All the media programs share one user.** One taken-over FFmpeg can signal or inspect the others, MediaMTX and
+  other cameras' FFmpeg included.
+- **MediaMTX's control API on `127.0.0.1:9997` has no password.** A taken-over media program can ask it for the
+  cameras' addresses and passwords. Nothing here closes that yet.
+- **Camera passwords are on FFmpeg's command line,** visible to every process in the container.
+- **Other accounts can no longer read new recordings** (see "What changes for you" above). A backup job or file manager
+  running as a non-root user needs read access to files owned by uid `1700`, group `1700`; root (Unraid's CA Appdata
+  Backup, `docker exec`) is unaffected. Give such a job the group, or turn isolation off.
+- **Playback on real devices is not proven by the automated tests.** They show that a live stream is served and that
+  recordings are made and played back through the app, not that every phone or browser decodes it. After an upgrade,
+  check that each camera plays and that a recording saves, as in [Checking it works](#checking-it-works).
+
+Keep cameras on their own network, as [cameras.md](cameras.md) says; that advice is unchanged by isolation.
 
 ## Logs
 

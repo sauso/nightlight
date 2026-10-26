@@ -58,15 +58,19 @@ purpose). For a per-launch computed value (MediaMTX's) pass it as `extra` instea
 site:** call `spawnChild()`, never `child_process` directly; the source test in `child-env.test.js` fails
 on any other import of it under `backend/src`.
 
-**What this does not do:**
+**What the allowlist does not do:**
 
-- **It is not a sandbox.** The children still run as the same operating-system user as the backend, so a
-  child that a camera managed to take over could still read the backend's own environment through the
-  process table (`/proc` on Linux), `JWT_SECRET` included. The allowlist narrows what a child *inherits*:
-  what a bug that discloses the child's own memory or environment (in a demuxer, a crash report or log
-  output) could expose, and what a command run by a MediaMTX hook inherits from MediaMTX.
-- **It does not protect the files.** For the same reason a child can read the database and `.jwt_secret`
-  from disk. A separate user was considered and not done (#553 (b)).
+- **It is not a sandbox.** It narrows what a child *inherits*: what a bug that discloses the child's own
+  memory or environment (in a demuxer, a crash report or log output) could expose, and what a command run by a
+  MediaMTX hook inherits from MediaMTX. Taken alone it does not stop a child reading the backend's own
+  environment through the process table (`/proc` on Linux), `JWT_SECRET` included, or the files on disk.
+- **The separation that does is [media isolation](#media-isolation-the-layout-and-the-fence-553-phases-2b-and-4-on-by-default)**
+  (#553), which is **on by default**: the children run as a second operating-system user (uid 1700, no
+  capabilities), so a child a camera took over cannot read the database, `.jwt_secret` or the app's
+  `/proc/<pid>/environ`. (An earlier version of this page said a separate user was considered and not done; the
+  owner reversed that on 2026-10-25.) With isolation **off** (`NIGHTLIGHT_MEDIA_ISOLATION=0`, or a host where it
+  cannot start) the children run as the backend's user and everything in the first bullet applies in full.
+  The limits of isolation are listed at the end of that section.
 
 Keep cameras on their own VLAN, as [docs/cameras.md](cameras.md) advises.
 
@@ -499,6 +503,15 @@ Container starts as root, remaps a pre-baked user to `PUID`/`PGID` (default 99/1
 app via `su-exec` — the app process itself never runs as root. `tini` is PID 1 to reap zombies
 from the MediaMTX + per-camera-FFmpeg child process tree and forward signals correctly.
 
+That is the start with [media isolation](#media-isolation-the-layout-and-the-fence-553-phases-2b-and-4-on-by-default)
+OFF. Isolation is on by default, and then the entrypoint dry-runs the whole chain and, if it passes, starts the app
+through `setpriv` instead of `su-exec`: still as `PUID:PGID`, but with `CAP_SETUID`, `CAP_SETGID` and `CAP_KILL`
+kept as ambient capabilities and `no-new-privileges`, so it can start every ffmpeg, ffprobe and MediaMTX as the
+media user (uid:gid 1700:1700, no capabilities) and signal them. The app is still never root at start, but unlike the
+`su-exec` start it **can become root** (or any uid) while it runs; see the limits at the end of the isolation
+section. If the dry run fails the start is the `su-exec` one above, with one warning and `MEDIA_ISOLATION=off`;
+the container never refuses to start because of it.
+
 `PUID=0` is accepted but logs a warning (`[entrypoint] warning: PUID=0 runs the app as root`) and starts anyway;
 refusing it, or substituting the default, is not done (#555, `entrypoint-puid-root.test.js`).
 
@@ -519,7 +532,7 @@ data directory". Tests: `entrypoint-umask.test.js` (Linux only) and
 
 The database (with `-wal`/`-shm`), `.jwt_secret`, the two Firebase files, the two snapshot folders and online
 backups live in `DATA_DIR/private/`, always `0700` and owned by `PUID:PGID` (explicit chmod: the umask never decides
-it). Why: a later phase opens `DATA_DIR` to a media group so that FFmpeg can run as a separate user, and a folder only
+it). Why: media isolation (on by default) opens `DATA_DIR` to a media group so that FFmpeg can run as a separate user, and a folder only
 the app can enter protects even a file inside it whose own mode is too open.
 
 - **`lib/dataPaths.js` owns every one of these paths, and only RESOLVES** (lstat and a folder listing, never a
@@ -557,12 +570,35 @@ the app can enter protects even a file inside it whose own mode is too open.
   `entrypoint-private-layout-real.test.js`; the real-image upgrade from the last release, the rollback and the
   two-copies case are `e2e/private-layout.sh` (the `private-layout` job in `e2e.yml`).
 
-### Media isolation: the layout and the fence (#553 phase 2b; the switch is OFF by default)
+### Media isolation: the layout and the fence (#553 phases 2b and 4; on by default)
 
-**State today.** `NIGHTLIGHT_MEDIA_ISOLATION=1` (internal, read only by `entrypoint.sh`) makes ffmpeg, ffprobe and MediaMTX run
-as uid:gid 1700:1700 through `media-exec.sh`; anything else leaves the start as it has always been. Everything below
-describes the switch-ON state; nothing here is on by default, and the earlier statements on this page that the children run as
-the same user describe the default, which is unchanged. User-facing summary: [operations.md](operations.md#media-isolation-not-on-by-default).
+**State today.** Isolation is **asked for at every start** (since phase 4) unless `NIGHTLIGHT_MEDIA_ISOLATION` is `0`,
+`off` or `false` (any capitals); it is read only by `entrypoint.sh`. Asking is not getting: the entrypoint, as root,
+dry-runs the chain and, if anything fails (PUID 0, PUID/PGID 1700, a leftover at the top level, a missing capability, a
+share that ignores `chmod`, rootless Docker), starts the old way with `MEDIA_ISOLATION=off` and one warning. When it
+passes, ffmpeg, ffprobe and MediaMTX run as uid:gid 1700:1700 through `media-exec.sh`, and `MEDIA_ISOLATION=on`. The
+statements elsewhere on this page that the children run as the same user describe the OFF state. Going from ON back to
+OFF re-owns the media-written files once (#871). User-facing summary: [operations.md](operations.md#media-isolation).
+
+**Roles of the capabilities with isolation on.** The app keeps `CAP_SETUID` and `CAP_SETGID` (to start each child as the
+media user through `setpriv`) and `CAP_KILL` (to signal children that are now another uid), as ambient capabilities.
+`CHOWN`, `DAC_OVERRIDE` and `FOWNER` stay root's, for the start-up script only. Every child gets none, and
+`no-new-privileges` is set on the app and on every child; the bounding set is never trimmed (that needs `CAP_SETPCAP`,
+which the six-capability hardening does not grant).
+
+**What it does not stop (state these plainly wherever isolation is described):**
+
+- **The app is not confined.** It holds `SETUID`/`SETGID`/`KILL`, so a compromised app can become uid 0 inside the
+  container, and, if the data share is not mounted `nosuid`, create setuid files there. The target is the
+  camera-facing programs, not the app.
+- **One uid for all media processes.** A taken-over ffmpeg can signal or `ptrace` the others (MediaMTX, other
+  cameras' ffmpeg); there is no per-camera separation.
+- **MediaMTX's API on `127.0.0.1:9997` is unauthenticated** and returns each camera's credentials, so a taken-over media
+  process can still read them. Authenticating that API is a follow-up.
+- **Camera passwords are on ffmpeg's command line** (`/proc/<pid>/cmdline`), readable by anything in the container.
+- **Some hosts cannot do it** (rootless Docker/Podman, SMB/ACL shares that ignore `chmod`, NFS `root_squash`, PUID/PGID
+  1700, missing capabilities) and run with isolation off and a warning.
+- **The camera VLAN advice stands**: isolation limits what a bad stream can reach; it does not make an exposed camera safe.
 
 **The rule:** a folder the app writes into is never one the media user can write into, and the media user can never rename
 a folder the app trusts. `src/lib/mediaLayout.js` makes the folders (`ensureClipsFolder`, lazily, by the code that needs

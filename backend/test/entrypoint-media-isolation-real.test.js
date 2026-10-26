@@ -108,7 +108,7 @@ function run(dir, { prefix = [], stubDir = STUB_DIR } = {}) {
   const r = spawnSync(argv[0], argv.slice(1), {
     env: {
       PATH: `${stubDir}:${process.env.PATH}`, DATA_DIR: path.join(ROOT, `data-${n}`), TMPDIR: tmp,
-      PUID: '99', PGID: '100', NIGHTLIGHT_MEDIA_ISOLATION: '1',
+      PUID: '99', PGID: '100',
     },
     encoding: 'utf8',
     timeout: 60_000,
@@ -306,7 +306,7 @@ describe('#553 media isolation, the real chain (root, util-linux setpriv)', { sk
       fs.mkdirSync(tmp);
       fs.chmodSync(tmp, 0o1777);
       const r = spawnSync(prefix[0], [...prefix.slice(1), '/bin/sh', path.join(dir, 'entrypoint.sh'), '/bin/sh', path.join(dir, 'app.sh'), 'app', path.join(dir, 'media-exec.sh')], {
-        env: { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: data, TMPDIR: tmp, PUID: '99', PGID: '100', NIGHTLIGHT_MEDIA_ISOLATION: '1' },
+        env: { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: data, TMPDIR: tmp, PUID: '99', PGID: '100' },
         encoding: 'utf8', timeout: 60_000,
       });
       return { out: `${r.stdout}\n${r.stderr}`, status: r.status };
@@ -342,7 +342,7 @@ describe('#553 media isolation, the real chain (root, util-linux setpriv)', { sk
     fs.mkdirSync(tmp);
     fs.chmodSync(tmp, 0o1777);
     const r = spawnSync('setpriv', ['--bounding-set=-kill', '--', '/bin/sh', path.join(dir, 'entrypoint.sh'), '/bin/sh', path.join(dir, 'app.sh'), 'app', path.join(dir, 'media-exec.sh')], {
-      env: { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: data, CLIPS_DIR: ext, TMPDIR: tmp, PUID: '99', PGID: '100', NIGHTLIGHT_MEDIA_ISOLATION: '1' },
+      env: { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: data, CLIPS_DIR: ext, TMPDIR: tmp, PUID: '99', PGID: '100' },
       encoding: 'utf8', timeout: 60_000,
     });
     assert.equal(r.status, 0, r.stdout + r.stderr);

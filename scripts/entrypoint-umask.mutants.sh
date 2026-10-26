@@ -101,8 +101,12 @@ mutant "the report line is never printed"                                  's/^p
 
 # --- #553 media isolation: the decision (run against entrypoint-media-isolation.test.js) ---
 I="$ISO_TEST"
-mutant "the switch is never read (isolation can never be asked for)"       's/^if \[ "\$\{NIGHTLIGHT_MEDIA_ISOLATION:-\}" = 1 \]; then$/if false; then/' "$I"
-mutant "any non-empty switch value asks for isolation"                     's/^if \[ "\$\{NIGHTLIGHT_MEDIA_ISOLATION:-\}" = 1 \]; then$/if [ -n "\${NIGHTLIGHT_MEDIA_ISOLATION:-}" ]; then/' "$I"
+# Phase 4 flipped the default: isolation is asked for unless NIGHTLIGHT_MEDIA_ISOLATION is 0, off or false.
+mutant "the decision is never reached (isolation can never be asked for)"  's/^if \[ -n "\$MEDIA_ASKED" \]; then$/if false; then/' "$I"
+mutant "the default is off again (an unset switch does not ask)"           's/^  \*\) MEDIA_ASKED=1 ;;$/  *) MEDIA_ASKED= ;;/' "$I"
+mutant "the kill switch does nothing (0 still asks)"                       's/^  0\|\[Oo\]\[Ff\]\[Ff\]\|\[Ff\]\[Aa\]\[Ll\]\[Ss\]\[Ee\]\) MEDIA_ASKED= ;;$/  never-matches) MEDIA_ASKED= ;;/' "$I"
+mutant "only 0 is a kill switch (off and false still ask)"                 's/^  0\|\[Oo\]\[Ff\]\[Ff\]\|\[Ff\]\[Aa\]\[Ll\]\[Ss\]\[Ee\]\) MEDIA_ASKED= ;;$/  0) MEDIA_ASKED= ;;/' "$I"
+mutant "the kill switch is case-sensitive (OFF, False still ask)"          's/^  0\|\[Oo\]\[Ff\]\[Ff\]\|\[Ff\]\[Aa\]\[Ll\]\[Ss\]\[Ee\]\) MEDIA_ASKED= ;;$/  0|off|false) MEDIA_ASKED= ;;/' "$I"
 mutant "no dry run: on without proof"                                      's/^  elif media_dry_run; then$/  elif true; then/' "$I"
 mutant "the probe's OK line alone is enough (its status ignored)"          's/^  if \[ "\$_rc" = 0 \] && /  if /' "$I"
 mutant "the dry run has no deadline (a stalled share would hold the container)" 's/"\$_i" -ge \$\(\(MEDIA_DRY_RUN_TIMEOUT \* 10\)\)/"\$_i" -ge 999999/' "$I"
@@ -116,7 +120,7 @@ mutant "a fallback says nothing"                                           's/^ 
 # --- #553 phase 2b: the layout steps (run against the same test) ---
 mutant "a database or secret left at the top level does not refuse isolation" 's/^  elif _left=\$\(media_toplevel_leftover\); then$/  elif false; then/' "$I"
 mutant "the folders are never prepared (data 0710, clips 0750, the media group)" 's/^  elif ! media_prepare_layout; then$/  elif false; then/' "$I"
-mutant "the confined tighten is never used (the walk strips the group bits back off)" 's/^if \[ "\$UMASK" = 077 \] && \[ "\$\{NIGHTLIGHT_MEDIA_ISOLATION:-\}" = 1 \]; then$/if false; then/' "$I"
+mutant "the confined tighten is never used (the walk strips the group bits back off)" 's/^if \[ "\$UMASK" = 077 \] && \[ -n "\$MEDIA_ASKED" \]; then$/if false; then/' "$I"
 mutant "a refused isolation keeps the CONFINED walk (the clip tree is never tightened)" 's/^if \[ -n "\$TIGHTEN_CONFINED" \] && \[ "\$MEDIA_ISOLATION" = off \]; then$/if false; then/' "$I"
 mutant "the probe is not told which folders to try"                        's/ "\$CLIPS_ABS" "\$DATA_DIR" > "\$_dd\/out"/ > "\$_dd\/out"/' "$I"
 mutant "a folder another uid owns is taken over (no owner check)"          's/^  if \[ "\$\{3:-\}" != own \] && .*; then$/  if false; then/' "$I"

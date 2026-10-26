@@ -79,7 +79,9 @@ let STAT_STUB_DIR;
 let REAL_STAT;
 
 function run(dataDir, { puid, pgid, fake }) {
-  const env = { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: dataDir, PUID: String(puid), PGID: String(pgid) };
+  // NIGHTLIGHT_MEDIA_ISOLATION=0: these are the ownership-walk tests, run with isolation off (it is asked for by default
+  // since #553 phase 4, and entrypoint-media-isolation.test.js covers the ownership check with it on).
+  const env = { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: dataDir, PUID: String(puid), PGID: String(pgid), NIGHTLIGHT_MEDIA_ISOLATION: '0' };
   if (fake) {
     Object.assign(env, { PATH: `${STAT_STUB_DIR}:${env.PATH}`, NL_REAL_STAT: REAL_STAT, NL_FAKE_SUFFIX: fake.suffix, NL_FAKE_OWNER: fake.owner });
   }

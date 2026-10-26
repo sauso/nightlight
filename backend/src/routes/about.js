@@ -43,8 +43,8 @@ router.get('/', requireAuth, (req, res) => {
   // not asked to "switch" to the server it is already on. Read per request: an admin's phone can change it.
   // mediaIsolation (#553): 'on' when ffmpeg, ffprobe and MediaMTX run as the separate media user, 'off' otherwise. It
   // is what backend/entrypoint.sh decided and exported at start (lib/childEnv.js, mediaIsolationOn), never guessed
-  // here. Added to the response, nothing else changed (an older app reading it ignores the field). Not shown on the
-  // About page yet: the switch is internal until the later phases of #553, which add the page line with its docs.
+  // here. Added to the response, nothing else changed (an older app reading it ignores the field). The About page
+  // shows it as one line (frontend/src/pages/About.jsx) since isolation became the default (#553 phase 4).
   // dataLayout and layoutConflict (#553 phase 2a, both added, nothing else changed): where the database this server
   // OPENED is ('private' = DATA_DIR/private/, 'legacy' = the top level, an install the start-up move has not reached),
   // and whether a copy waits for the owner's decision (a private/legacy-* folder the move set aside, or a second

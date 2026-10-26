@@ -10,13 +10,19 @@ import { fileURLToPath } from 'url';
 // the child's own memory or environment (a demuxer over-read, a crash report, a log line), and what every
 // command a MediaMTX hook runs inherits in turn. No such bug is claimed; this narrows what one would expose.
 //
-// WHAT THIS DOES NOT DO (yet). By default the children still run as the same operating-system user as the backend.
-// A child that a camera managed to take over could therefore still read the backend's own environment through the
-// process table (/proc on Linux), JWT_SECRET included, and the database and .jwt_secret on disk. This narrows what a
-// child inherits; it is not a sandbox. The earlier decision not to separate the user (#553 (b)) was reversed by the
-// owner on 2026-10-25: MEDIA ISOLATION below runs every child as a second user. It is behind an internal switch,
-// off by default, until the shared-folder layout and the secrets move (later phases of #553) let ffmpeg write
-// recordings as that user; until then only streaming works with it on.
+// WHAT THIS DOES NOT DO ON ITS OWN. This file narrows what a child INHERITS; it is not a sandbox. The separation that
+// matters is MEDIA ISOLATION below: since #553 phase 4 it is ON BY DEFAULT, and every child runs as a second operating
+// system user (1700), so a child a camera managed to take over cannot read the database, .jwt_secret or the app's
+// /proc/<pid>/environ. (An earlier version of this comment said a separate user "was considered and NOT done"; the
+// owner reversed that on 2026-10-25.) When isolation is OFF, the children still run as the backend's own user and can
+// read all of that: it is off when NIGHTLIGHT_MEDIA_ISOLATION=0, and also, with a warning in the log, on a host where
+// it cannot start (rootless Docker or Podman, a share that ignores chmod, NFS root_squash, PUID or PGID 1700, PUID=0,
+// a missing capability).
+// WHAT ISOLATION STILL DOES NOT STOP (docs/architecture.md, "Media isolation", has the full list):
+//   - the app itself holds CAP_SETUID/SETGID/KILL, so a compromised APP can become uid 0 inside the container;
+//   - every media process shares one uid, so one taken-over ffmpeg can signal or ptrace the others, MediaMTX included;
+//   - MediaMTX's API on loopback is unauthenticated and lists the cameras' credentials;
+//   - a camera's password is on its ffmpeg command line, visible to every process in the container.
 //
 // THE ALLOWLIST (names, not values; a name that is unset in the parent stays unset in the child):
 //   PATH            finds the binary and anything it execs.

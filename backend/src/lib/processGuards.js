@@ -118,9 +118,11 @@ export function isKillError(err) {
 // all of them as an ordinary 'exit', not an 'error', so the supervisors' "do not relaunch a binary that cannot run"
 // rule (the 'error' handlers, #257) never sees it, and every supervisor would relaunch every 3-5 s forever, one log
 // line each time.
-// Could a program that really RAN exit 126 or 127 within 5 s? None of ffmpeg, ffprobe or MediaMTX uses those codes
-// (by convention they are the shell's), so it is vanishingly rare, and misreading one costs only a slower relaunch,
-// which the next ordinary exit resets.
+// Could a program that really RAN exit 126 or 127 within 5 s? It can, and this cannot tell it from an exec failure:
+// ffmpeg returns raw error codes (an errno-style value, negated or not, truncated to 8 bits), so a rare failure could
+// come out as 126 or 127; MediaMTX and ffprobe use plain 0/1 as far as we know, but that is not a promise. By
+// convention those two codes are the shell's, so it is uncommon, and misreading one costs only a slower relaunch
+// (up to a minute, one log line that says the program "could not be run"), which the next ordinary exit resets.
 export const EXEC_FAILED_EXIT_CODES = Object.freeze([126, 127]);
 // "At once": such an exit within this long of the spawn. setpriv fails in milliseconds; 5 s is generous so a loaded
 // machine still counts it, and a 126/127 after a longer run is treated as an ordinary exit.

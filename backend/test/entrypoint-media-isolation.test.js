@@ -1,18 +1,20 @@
 // #553 phases 1 and 2b: backend/entrypoint.sh decides whether media isolation is on, prepares the folders it needs, and
 // starts the app accordingly.
 //
-// THE DECISION TABLE pinned here (the switch is NIGHTLIGHT_MEDIA_ISOLATION, internal, read only by the entrypoint):
-//   switch not exactly 1 (unset, 0, blank, "true", "on", " 1")  -> off, SILENT, no dry run, the su-exec start
-//   switch 1 and the dry run passes                              -> on: `setpriv <app drop>` with the SAME argv the dry
+// THE DECISION TABLE pinned here (the switch is NIGHTLIGHT_MEDIA_ISOLATION, read only by the entrypoint). Since phase 4
+// isolation is ASKED FOR unless the switch is 0, off or false (any capitals); "asked" below means that. The tests that say
+// ASK set NO switch at all, so they pin the default.
+//   switch 0 / off / false                                       -> off, SILENT, no dry run, the su-exec start
+//   asked and the dry run passes                                 -> on: `setpriv <app drop>` with the SAME argv the dry
 //                                                                   run used, MEDIA_ISOLATION=on, one info line
-//   switch 1 and the dry run fails (a FAIL line, the drop itself
+//   asked and the dry run fails (a FAIL line, the drop itself
 //   failing, an OK with a bad status, no OK at all)              -> off, ONE warning with the reason, su-exec, and the
 //                                                                   container still starts (set -e cannot abort it)
-//   switch 1 and PUID=0 / 000                                    -> off, one warning, no dry run
-//   switch 1 and PUID or PGID = 1700 (also written 01700)        -> off, one warning, no dry run
-//   switch 1 and PUID=099 PGID=0100                              -> the drop uses 99 and 100 (compared and passed as numbers)
+//   asked and PUID=0 / 000                                       -> off, one warning, no dry run
+//   asked and PUID or PGID = 1700 (also written 01700)           -> off, one warning, no dry run
+//   asked and PUID=099 PGID=0100                                 -> the drop uses 99 and 100 (compared and passed as numbers)
 //   an operator's own MEDIA_ISOLATION=on with the switch off     -> the app is told off
-// #553 PHASE 2B adds, all with the switch at 1 (and none of it with the switch off, which is the old start unchanged):
+// #553 PHASE 2B adds, all when asked (and none of it with the switch off, which is the old start unchanged):
 //   a database, backup, snapshot folder, secret or Firebase file still at the TOP of the data directory
 //                                                                -> off, one warning naming it, no dry run, nothing re-moded
 //   (.jwt_secret with JWT_SECRET set, a Firebase file named by its env var, .demo-ready and the clips folder are exempt)
@@ -188,7 +190,10 @@ function assertFallback(r, reason, why) {
   assert.ok(r.movedFirst, `${why}: the move into private/ did not run, as the app user, before the app${r.ctx}`);
 }
 
-const ASK = { NIGHTLIGHT_MEDIA_ISOLATION: '1', NL_PROBE: 'ok' };
+// The default: NO switch set (isolation is asked for unless it says 0, #553 phase 4). `ASK` below therefore tests the default.
+const ASK = { NL_PROBE: 'ok' };
+// The documented kill switch.
+const OFF = { NIGHTLIGHT_MEDIA_ISOLATION: '0' };
 
 describe('#553 entrypoint: the media isolation decision', { skip }, () => {
   before(() => {
@@ -199,16 +204,35 @@ describe('#553 entrypoint: the media isolation decision', { skip }, () => {
   });
   after(() => { if (ROOT) { fs.rmSync(ROOT, { recursive: true, force: true }); ROOT = undefined; STUB_DIR = undefined; } });
 
-  test('#553 off by default: no switch, the usual start, and the app is told "off"', () => {
-    assertUsualSilent(run({}), 'unset');
+  test('#553 phase 4 ON BY DEFAULT: no switch at all, and a passing dry run, is an isolated start', () => {
+    // run(ASK) sets no NIGHTLIGHT_MEDIA_ISOLATION. This is the test that fails if the default goes back to off.
+    const r = run(ASK);
+    assert.equal(r.app, 'on', r.ctx);
+    assert.equal(r.setpriv.length, 2, `the dry run and the real start${r.ctx}`);
+    assert.equal(r.suExec, false, r.ctx);
   });
 
-  test('#553 only exactly "1" asks: 0, blank, true, on, " 1" are off, silently', () => {
-    for (const v of ['0', '', 'true', 'on', ' 1', '1 ', 'yes']) assertUsualSilent(run({ NIGHTLIGHT_MEDIA_ISOLATION: v, NL_PROBE: 'ok' }), JSON.stringify(v));
+  test('#553 phase 4: blank, 1 and any other text ask too (only the three off spellings do not)', () => {
+    for (const v of ['', '1', 'true', 'on', 'yes']) {
+      assert.equal(run({ NIGHTLIGHT_MEDIA_ISOLATION: v, NL_PROBE: 'ok' }).app, 'on', JSON.stringify(v));
+    }
   });
 
-  test('#553 an operator\'s own MEDIA_ISOLATION=on never reaches the app (the entrypoint always sets it)', () => {
-    assertUsualSilent(run({ MEDIA_ISOLATION: 'on' }), 'MEDIA_ISOLATION=on, switch off');
+  test('#553 phase 4 KILL SWITCH: 0, off, false (any capitals) is off, silently, with no dry run and the su-exec start', () => {
+    for (const v of ['0', 'off', 'OFF', 'Off', 'false', 'FALSE', 'False']) {
+      const r = run({ NIGHTLIGHT_MEDIA_ISOLATION: v, NL_PROBE: 'ok' });
+      assertUsualSilent(r, JSON.stringify(v));
+    }
+  });
+
+  test('#553 an operator\'s own MEDIA_ISOLATION=on never reaches the app when the switch says off (the entrypoint always sets it)', () => {
+    assertUsualSilent(run({ ...OFF, MEDIA_ISOLATION: 'on' }), 'MEDIA_ISOLATION=on, switch off');
+  });
+
+  test('#553 phase 4: the default start with PUID=0 or a failed dry run is the old start plus ONE warning, not a refusal to start', () => {
+    assertFallback(run({ PUID: '0', NL_PROBE: 'ok' }), 'PUID=0 runs the app as root', 'unset switch, PUID=0');
+    assertFallback(run({ NL_PROBE: 'fail' }), 'a media process could read', 'unset switch, failed probe');
+    assertFallback(run({ NL_PROBE: 'drop-fails' }), 'the dry run could not start the app', 'unset switch, no capability');
   });
 
   test('#553 on: the dry run passes, and the app starts through setpriv with the SAME argv, told "on"', () => {
@@ -331,7 +355,7 @@ describe('#553 phase 2b entrypoint: nothing at the top level of the data directo
   });
 
   test('#553 with the switch off the same leftovers change nothing: the usual start, no warning, nothing re-moded', () => {
-    const r = run({}, { seed: (d) => { write(path.join(d, 'babymonitor.db')); dir(path.join(d, 'clips'), 0o755); } });
+    const r = run(OFF, { seed: (d) => { write(path.join(d, 'babymonitor.db')); dir(path.join(d, 'clips'), 0o755); } });
     assertUsualSilent(r, 'switch off, leftover at the top');
     assert.equal(modeOf(r.data), 0o700, 'the data directory is the owner-only one it always was');
   });
@@ -411,8 +435,8 @@ describe('#553 phase 2b entrypoint: the folders the media user needs', { skip },
   test('#553 the data directory carrying the media group is NOT a reason to walk and re-own everything on the next start', () => {
     const on = run({ ...ASK, NL_DATA_UG: '99:1700' });
     assert.ok(on.lines.some((l) => l.includes('data directory already owned by 99:100; not walking it')), `walked although it was right${on.ctx}`);
-    // The control: without the switch the same answer IS wrong ownership, and the walk runs (that is the old behaviour).
-    const off = run({ NL_DATA_UG: '99:1700' });
+    // The control: with the kill switch the same answer IS wrong ownership, and the walk runs (that is the old behaviour).
+    const off = run({ ...OFF, NL_DATA_UG: "99:1700" });
     assert.ok(off.lines.some((l) => l.includes('is not 99:100; fixing the whole data directory')), `the old check changed${off.ctx}`);
   });
 
@@ -453,7 +477,7 @@ describe('#553 phase 2b entrypoint: the tighten walk and the group bits', { skip
   });
 
   test('#553 the SAME tree with the switch off is walked whole, as before: every entry loses its group and other bits', () => {
-    const r = run({}, { seed: legacy });
+    const r = run(OFF, { seed: legacy });
     assert.equal(modeOf(r.data), 0o700);
     assert.equal(modeOf(path.join(r.data, 'clips')), 0o700);
     assert.equal(modeOf(path.join(r.data, 'clips', 'cam', 'old.mp4')), 0o600);
@@ -581,7 +605,7 @@ describe('#553 phase 2b entrypoint: back to OFF after an ON run (media-owned cli
     n += 1;
     const ext = path.join(ROOT, `ext-${n}`);
     dir(ext, 0o750);
-    const r = run({ NL_CLIPS_G: '1700', CLIPS_DIR: ext });
+    const r = run({ ...OFF, NL_CLIPS_G: "1700", CLIPS_DIR: ext });
     assert.equal(r.status, 0, r.ctx);
     assert.equal(r.app, 'off', r.ctx);
     assert.ok(reowns(r).includes(`-R nightlight:nightlight ${ext}`), `${r.chown}`);
@@ -593,7 +617,7 @@ describe('#553 phase 2b entrypoint: back to OFF after an ON run (media-owned cli
   });
 
   test('no evidence, no re-own: an OFF start on an ordinary tree touches nothing extra', () => {
-    const r = run({}, { seed: tree });
+    const r = run(OFF, { seed: tree });
     assert.ok(!r.lines.some((l) => l.includes(REOWN)), r.ctx);
     assert.deepEqual(r.chgrp, []);
   });

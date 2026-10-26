@@ -92,6 +92,14 @@ a trusted device.
   in and gets no Nightlight push alerts until it signs in again; lowering the value
   signs out older sign-ins at their next request. Details:
   [How long a sign-in lasts](https://github.com/sauso/nightlight/blob/main/SECURITY.md#how-long-a-sign-in-lasts-and-where-it-is-kept).
+- Media isolation is on by default: FFmpeg, ffprobe and MediaMTX run as a separate
+  user inside the container, so a camera stream that takes one over cannot read the
+  database or your secrets. New recordings are owned by user `1700` rather than
+  `PUID`. On a host that can't support it (rootless Docker or Podman, a share that
+  ignores `chmod`, NFS with `root_squash`) the container still starts and logs one
+  warning. `-e NIGHTLIGHT_MEDIA_ISOLATION=0` (or `off`, `false`) turns it off.
+  Limits and details:
+  [Media isolation](https://github.com/sauso/nightlight/blob/main/docs/operations.md#media-isolation).
 
 ### Links
 

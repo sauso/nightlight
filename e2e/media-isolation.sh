@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Media isolation (#553, phases 1 and 2b), proven against the real image.
 #
-# With NIGHTLIGHT_MEDIA_ISOLATION=1 (an INTERNAL switch for now: backend/entrypoint.sh, "Media isolation") the start-up
+# With media isolation ASKED FOR (since #553 phase 4 that is the DEFAULT: no variable is set in the on-cases below; only
+# NIGHTLIGHT_MEDIA_ISOLATION=0 turns it off, backend/entrypoint.sh, "Media isolation") the start-up
 # script dry-runs the chain as root and, if it works, starts the app through `setpriv` with CAP_SETUID, CAP_SETGID and
 # CAP_KILL as ambient capabilities; the app then starts every ffmpeg, ffprobe and MediaMTX through media-exec.sh as the
 # media user (uid:gid 1700:1700, no capabilities). If the dry run fails it starts the usual way (su-exec), says why in
@@ -24,7 +25,7 @@
 #            camera can fake in a short run; its folders are covered by backend/test/media-layout.test.js and the
 #            timelapse unit tests, not by this script.
 #   default  plain Docker defaults: the same;
-#   control  the NEGATIVE CONTROL, in the same run: the switch NOT set. FFmpeg and MediaMTX then run as the app's own uid,
+#   control  the NEGATIVE CONTROL, in the same run: the kill switch, NIGHTLIGHT_MEDIA_ISOLATION=0. FFmpeg and MediaMTX then run as the app's own uid,
 #            and that uid reads the database, which is exactly what the denials above would be worthless without;
 #   nokill   the six capabilities WITHOUT KILL: the dry run fails, the container still starts the usual way and
 #            serves HLS, the one warning names the failed drop, About says "off", and nothing runs as 1700;
@@ -60,9 +61,9 @@ NOKILL_REASON='with CAP_SETUID, CAP_SETGID and CAP_KILL (exit 127: setpriv: appl
 PUID_REASON="PUID or PGID is $MEDIA_ID"
 
 # ── Start ────────────────────────────────────────────────────────────────────────────────────────
-start_iso_app() { # name volume six|default|nokill|plain [puid]   (plain = Docker defaults, the switch NOT set: isolation off)
+start_iso_app() { # name volume six|default|nokill|plain [puid]   (plain = Docker defaults and the kill switch NIGHTLIGHT_MEDIA_ISOLATION=0: isolation off; the others set NO switch, so they run the DEFAULT)
   local name=$1 vol=$2 kind=$3 puid=${4:-$APP_PUID} cap leave_out=
-  local -a flags=() switch=(-e NIGHTLIGHT_MEDIA_ISOLATION=1)
+  local -a flags=() switch=()
   case "$kind" in
     six | nokill)
       if [ "$kind" = nokill ]; then leave_out=KILL; fi
@@ -71,7 +72,7 @@ start_iso_app() { # name volume six|default|nokill|plain [puid]   (plain = Docke
       flags+=("--security-opt=$NO_NEW_PRIVS")
       ;;
     default) ;;
-    plain) switch=() ;;
+    plain) switch=(-e NIGHTLIGHT_MEDIA_ISOLATION=0) ;;
     *) die "unknown kind '$kind'" ;;
   esac
   docker run -d --name "$name" --label "$LABEL" --label "$ROLE_APP" \
@@ -387,16 +388,16 @@ iso_on_case() { # part name, kind (six|default)
 }
 
 phase_six() {
-  say "SIX: NIGHTLIGHT_MEDIA_ISOLATION=1 under the documented hardening (--cap-drop=ALL + ${HARDENING_CAPS[*]}, $NO_NEW_PRIVS)"
+  say "SIX: isolation by default (no switch) under the documented hardening (--cap-drop=ALL + ${HARDENING_CAPS[*]}, $NO_NEW_PRIVS)"
   iso_on_case six six
   say "SIX PASSED"
 }
 
-# The negative control: isolation off (the default). The process that parses the camera's stream is the app's own uid, so it
+# The negative control: isolation off by the kill switch (NIGHTLIGHT_MEDIA_ISOLATION=0). The process that parses the camera's stream is the app's own uid, so it
 # reads the database: the layout checks in the on-cases are about a difference that exists.
 phase_control() {
   local c="$PROJECT-control" vol="$PROJECT-control-data" log
-  say "CONTROL: no switch (isolation off); the media processes are the app's own user, who reads the database"
+  say "CONTROL: NIGHTLIGHT_MEDIA_ISOLATION=0 (isolation off); the media processes are the app's own user, who reads the database"
   cleanup_apps
   new_volume "$vol"
   start_fakecam
@@ -412,15 +413,15 @@ phase_control() {
   stop_app "$c"
   log=$(save_log "$c")
   show_startup "$log"
-  if grep -qF "$ON_LINE" "$log"; then die_log "$log" "control: isolation went on without the switch"; fi
-  if grep -qF "$OFF_LINE" "$log"; then die_log "$log" "control: a warning about isolation without the switch"; fi
+  if grep -qF "$ON_LINE" "$log"; then die_log "$log" "control: isolation went on although the kill switch was set"; fi
+  if grep -qF "$OFF_LINE" "$log"; then die_log "$log" "control: a warning about isolation although the kill switch was set"; fi
   check_clean_stop "$c" "$log" "control"
   docker rm "$c" >/dev/null
   say "CONTROL PASSED"
 }
 
 phase_default() {
-  say "DEFAULT: NIGHTLIGHT_MEDIA_ISOLATION=1 with Docker's default capabilities"
+  say "DEFAULT: isolation by default (no switch) with Docker's default capabilities"
   iso_on_case default default
   say "DEFAULT PASSED"
 }
@@ -473,7 +474,7 @@ sign_in_again() {
 
 phase_nokill() {
   local c1="$PROJECT-nokill-on" vol="$PROJECT-nokill-data" c="$PROJECT-nokill" rec f body log
-  say "NOKILL: an ON run first (to leave media-owned clips), then NIGHTLIGHT_MEDIA_ISOLATION=1 with the six capabilities without KILL; the dry run must fail and the app start as before, with the clips still served"
+  say "NOKILL: an ON run first (to leave media-owned clips), then the default (no switch) with the six capabilities without KILL; the dry run must fail and the app start as before, with the clips still served"
   cleanup_apps
   new_volume "$vol"
   start_fakecam
@@ -508,7 +509,7 @@ phase_nokill() {
 # would have for that PUID. Plain defaults, so the stop can be checked too.
 phase_puid() {
   local c="$PROJECT-puid" log
-  say "PUID: NIGHTLIGHT_MEDIA_ISOLATION=1 with PUID=$MEDIA_ID; isolation must be refused and the app start as before"
+  say "PUID: isolation by default (no switch) with PUID=$MEDIA_ID; isolation must be refused and the app start as before"
   iso_off_case puid default "$MEDIA_ID" "$PUID_REASON" "$MEDIA_ID"
   stop_app "$c"
   log=$(save_log "$c")

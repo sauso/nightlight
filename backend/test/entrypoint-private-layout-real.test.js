@@ -36,7 +36,8 @@ function run(dataDir) {
   }
   // PUID/PGID: this user, so the ownership pass has nothing to do and every file stays readable to the test.
   const r = spawnSync('/bin/sh', [SCRIPT, '/bin/sh', '-c', 'echo "APP ran"'], {
-    env: { PATH: `${stubs}:${process.env.PATH}`, DATA_DIR: dataDir, PUID: String(process.getuid()), PGID: String(process.getgid()) },
+    // NIGHTLIGHT_MEDIA_ISOLATION=0: the real move into private/, with isolation off (asked for by default since #553 phase 4).
+    env: { PATH: `${stubs}:${process.env.PATH}`, DATA_DIR: dataDir, PUID: String(process.getuid()), PGID: String(process.getgid()), NIGHTLIGHT_MEDIA_ISOLATION: '0' },
     encoding: 'utf8',
     timeout: 60_000,
   });

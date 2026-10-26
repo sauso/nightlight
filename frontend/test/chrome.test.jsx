@@ -289,6 +289,23 @@ describe('About', () => {
     expect(await screen.findByText('main')).toBeInTheDocument();
   });
 
+  test('#553 shows whether media isolation is on or off, and nothing when an older server sends no field', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({ version: '0.44.0', mediaIsolation: 'on' });
+    const { unmount } = renderAsAdmin(<About />);
+    expect(await screen.findByText('Media isolation: on')).toBeInTheDocument();
+    unmount();
+
+    vi.spyOn(api, 'get').mockResolvedValue({ version: '0.44.0', mediaIsolation: 'off' });
+    const second = renderAsAdmin(<About />);
+    expect(await screen.findByText('Media isolation: off')).toBeInTheDocument();
+    second.unmount();
+
+    vi.spyOn(api, 'get').mockResolvedValue({ version: '0.43.0' });
+    renderAsAdmin(<About />);
+    await screen.findByText(/Version 0\.43\.0/);
+    expect(screen.queryByText(/Media isolation/)).not.toBeInTheDocument();
+  });
+
   test('every outbound link opens safely, for either role', () => {
     vi.spyOn(api, 'get').mockResolvedValue({ version: '0.29.0' });
     const { unmount } = renderAsAdmin(<About />);
