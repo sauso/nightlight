@@ -30,7 +30,7 @@ Nightlight is designed for local-network use first. Remote viewing is possible, 
 
 ## Quick start
 
-You'll need an always-on Linux host running Docker (such as Unraid or an arm64 Raspberry Pi) and a camera that exposes an RTSP stream. ONVIF is useful but optional. Performance depends on your hardware, camera count and enabled analysis features; there isn't a published minimum-hardware benchmark.
+You'll need an always-on Linux host running Docker (such as Unraid or an arm64 Raspberry Pi) and a camera that exposes an RTSP stream. ONVIF is useful but optional. Performance depends on your hardware, camera count and enabled analysis features, and there isn't a published minimum-hardware benchmark. [What you need, and what has been tested](docs/requirements.md) says what is known and what isn't.
 
 On Unraid? Jump to [Running on Unraid](#running-on-unraid). Anywhere else, run Nightlight on a trusted home network:
 
@@ -94,6 +94,7 @@ Read [privacy, security and networking details](docs/networking.md) before expos
 Start with the [documentation hub](docs/README.md), or jump directly to:
 
 - [Installation and upgrades](docs/installation.md)
+- [What you need, and what has been tested](docs/requirements.md)
 - [Cameras and controls](docs/cameras.md)
 - [Networking and remote access](docs/networking.md)
 - [Recordings](docs/recording.md)
