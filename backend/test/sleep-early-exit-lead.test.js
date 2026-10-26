@@ -359,6 +359,36 @@ describe('#700 the scan goes on', () => {
     assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80 });
   });
 
+  test('#700 T7e: a fallback-site skip does not displace a LATER best-site skip, the exit the rule really changed', () => {
+    // Round 3, Opus D1 (a probe). A false exit behind a stray into_bed at 20:30 (fallback site) and a plain false exit
+    // at 23:00 (best site), nothing later. With the rule off the 20:30 one is handed back and then the 23:00 one wins
+    // as `best`, so the night is up at 23:00: the 23:00 skip is the one that changed the night, and it is what must be
+    // reported and stored (as the history's candidate), not the earlier fallback one.
+    layFalseExitNight({ extraBed: [[at(23, 0), at(23, 1), 0.02]] });
+    insertTransition.run(CAM, 'into_bed', 0.02, 1, sqlTime(at(20, 29, 0, 50)));
+    exit(at(23, 0, 0, 30), { peak: 0.02, frames: 1 });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '23:00', 'precondition: with no history (rule off) the 23:00 exit wins');
+    plantHistory(NORMAL);
+    const summary = computeAndStoreNight(CHILD, DATE, { allowDowngrade: false });
+    assert.equal(summary.wake_at, null);
+    assert.deepEqual(summary.wake_unconfirmed, { at: '2026-07-15 13:00:30', lead_min: 480, threshold_min: 80 });
+    assert.equal(storedRow().wake_unconfirmed_at, '2026-07-15 13:00:30');
+  });
+
+  test('#700 T7f: of two fallback-site skips with no best, the EARLIER is recorded', () => {
+    // Round 3, Opus M25 (a probe): two false exits, each behind its own stray into_bed (both set aside by the settling-
+    // tail guard), nothing later. With the rule off the first one is handed back and kept, so it is the one to record.
+    layFalseExitNight({ extraBed: [[at(23, 0), at(23, 1), 0.02]] });
+    insertTransition.run(CAM, 'into_bed', 0.02, 1, sqlTime(at(20, 29, 0, 50)));
+    insertTransition.run(CAM, 'into_bed', 0.02, 1, sqlTime(at(23, 0, 0, 0)));
+    exit(at(23, 0, 0, 30), { peak: 0.02, frames: 1 });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '20:30', 'precondition: with no history the first one is handed back');
+    plantHistory(NORMAL);
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.wake_at, null);
+    assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80 });
+  });
+
   test('#700 T7c: a fallback-site skip is NOT recorded when a later exit wins anyway (the rule changed nothing)', () => {
     // PR #888 round 2 (Opus A5): the evening exit sits behind a stray into_bed, so the settling-tail guard has set
     // it aside already; the genuine 06:30 exit wins whether or not the rule exists. Recording a skip here would
@@ -437,7 +467,8 @@ describe('#700 the history', () => {
   });
 
   test('#700 T8d: KNOWN LIMIT: of 14 earlier nights, 4 long ones disable the rule for the next false exit', () => {
-    // The four measured wrong nights fell inside 8 days for one child: a run of them is a real possibility.
+    // Three of the four measured wrong nights were one child's, inside 8 days (the fourth was the other child's):
+    // a run of them is a real possibility.
     plantHistory([...NORMAL.slice(0, 10), LONG, LONG, LONG, LONG]);
     layFalseExitNight();
     const night = computeNight(CHILD, DATE);
@@ -490,6 +521,18 @@ describe('#700 the history', () => {
     // 14 are found and the rule applies.
     for (let i = 1; i <= 10; i++) plantNight(-i, 10, { endHm: [5, 0] });
     NORMAL.forEach((lead, i) => plantNight(-(i + 11), lead));
+    layFalseExitNight();
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.wake_at, null);
+    assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80 });
+  });
+
+  test('#700 T8h3: the scan reads 60 rows deep: 46 non-matching nights do not hide the 14 matching ones behind them', () => {
+    // Round 3, Opus M13b. HISTORY_SCAN_ROWS is a bound on the read. Here the newest 46 earlier nights ended 05:00 and the
+    // 14 before them 07:00 like this night: 60 rows in all, every one of them read. A shallower scan (50, say) would
+    // find only 4 matching rows and turn the rule off.
+    for (let i = 1; i <= 46; i++) plantNight(-i, 10, { endHm: [5, 0] });
+    NORMAL.forEach((lead, i) => plantNight(-(i + 47), lead));
     layFalseExitNight();
     const night = computeNight(CHILD, DATE);
     assert.equal(night.wake_at, null);
@@ -832,7 +875,8 @@ describe('#700 wake_unconfirmed is an added key; only its time is stored', () =>
 
 describe('#700 skipped false exits in the history', () => {
   test('#700 T11a: two earlier skipped false exits in the newest 14 still leave the rule on for the third', () => {
-    // The measured child had three false exits inside eight days; the first two must not let the third through.
+    // One measured child had three false exits inside eight days (the fourth measured one was the other child's); the
+    // first two must not let the third through.
     NORMAL.slice(0, 12).forEach((lead, i) => plantNight(-(i + 1), lead));
     for (const d of [-13, -14]) plantNight(d, 630, { skipped: true });
     layFalseExitNight();

@@ -24182,11 +24182,41 @@
   {
     "label": "#700 a fallback-site skip that DID change the night is not recorded",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "    if (!bestTaken && fallbackSkipped) noteFlag(fallbackSkipped);",
+    "find": "    if (!bestTaken && earlyExitFlagged == null && fallbackSkipped) noteFlag(fallbackSkipped);",
     "replace": "",
     "expect": "killed",
     "tests": ["sleep-early-exit-lead.test.js"],
     "namePattern": "#700 T7b",
     "note": "No later exit, so the hand-back would have been the wake: the skip changed the night and must teach the history."
+  },
+  {
+    "label": "#700 a fallback-site skip displaces a later best-site skip (the earlyExitFlagged condition dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (!bestTaken && earlyExitFlagged == null && fallbackSkipped)",
+    "replace": "if (!bestTaken && fallbackSkipped)",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T7e",
+    "note": "Round 3, Opus D1: the 20:30 fallback skip would be stored as the history's candidate instead of the 23:00 best-site skip, the exit the rule really changed."
+  },
+  {
+    "label": "#700 of two fallback-site skips the LATER is kept",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (fallbackSkipped == null || earlyFallback.ms < fallbackSkipped.ms) fallbackSkipped = earlyFallback;",
+    "replace": "if (fallbackSkipped == null || earlyFallback.ms > fallbackSkipped.ms) fallbackSkipped = earlyFallback;",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T7f",
+    "note": "Round 3, Opus M25: a survivor until T7f; without the rule the first fallback is handed back and kept."
+  },
+  {
+    "label": "#700 the history scan reads 50 rows instead of 60",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const HISTORY_SCAN_ROWS = 60;",
+    "replace": "const HISTORY_SCAN_ROWS = 50;",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T8h3",
+    "note": "Round 3, Opus M13b: 46 non-matching rows then 14 matching; a 50-row scan finds only 4 and turns the rule off."
   }
 ]

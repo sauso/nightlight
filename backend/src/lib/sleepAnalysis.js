@@ -213,8 +213,9 @@ const MAX_POST_EXIT_ACTIVE_MIN = 20;
 // is not `ok`, or an `ok` one with neither a wake nor a skipped exit, is not history at all: it neither dilutes
 // the count nor counts. The same arithmetic is the limit in both directions, both pinned: a genuine early wake on
 // fewer than about 1 night in 4 (3 of 14 or fewer) stays an outlier and is skipped every time; and 4 or more FALSE
-// exits within 14 nights lift the p75 and switch the rule off until they age out. The measured child had 3 inside
-// 8 days, so the rule stays on for it.
+// exits within 14 nights lift the p75 and switch the rule off until they age out. Three of the four measured wrong
+// nights were one child's, inside 8 days (26 Sep, 27 Sep, 3 Oct; the fourth, 12 Oct, was the other child's), so the
+// rule stays on for that child.
 //
 // THE WINDOW-END MATCH (fix round 1). A lead only compares with leads measured against the same window end:
 // after the owner moves the wake time from 07:00 to 08:30, every earlier lead is 90 minutes short and the old
@@ -261,13 +262,16 @@ const MAX_POST_EXIT_ACTIVE_MIN = 20;
 //     night's own row or a later one), but back-filling, recomputing or deleting an earlier night can change
 //     a later night's replay while its samples, transitions and saved context stay identical (SCORING_ALGO).
 //   - The history is used AS STORED, whatever camera or rules produced each row and without the parent's
-//     corrections. A row with another window end is left out (above); one under another TIMEZONE setting is
-//     too, because its window end reads at a different local time, so changing the timezone turns the rule
-//     off for ten nights. An earlier FALSE exit with the same window end pollutes it, whether that night stored
-//     it as its wake (before #700, or with the rule off) or the rule skipped it (its candidate is the history's
-//     lead): the p75 of n rows is the element at index floor(0.75 n) of the ascending list, so it moves once
-//     n - floor(0.75 n) rows are long (3 of 10 to 12, 4 of 13 or 14). The four measured wrong nights fell inside
-//     8 days for one child, so a run of false exits can switch the rule off until they age out (pinned).
+//     corrections. A row with another window end is left out (above). After a TIMEZONE change the rows are read
+//     in the new zone: one whose window end still shows the same local time there keeps matching (Melbourne to
+//     Sydney, both 07:00), one that shifts (Melbourne to Perth, 07:00 becomes 05:00) is left out, so such a change
+//     turns the rule off until ten matching nights are stored again. An earlier FALSE exit with the same window
+//     end pollutes it, whether that night stored it as its wake (before #700, or with the rule off) or the rule
+//     skipped it (its candidate is the history's lead): the p75 of n rows is the element at index floor(0.75 n) of
+//     the ascending list, so it moves once n - floor(0.75 n) rows are long (3 of 10 to 12, 4 of 13 or 14). Three
+//     of the four measured wrong nights were one child's inside 8 days (the fourth was the other child's), so a
+//     run of false exits like that is real, and 4 of them inside 14 nights switch the rule off until they age out
+//     (pinned).
 //   - A night whose only candidate is skipped stores wake_at null. A night a parent was already told a wake
 //     time for (`notified_wake_at`) cannot be blanked: computeAndStoreNight's `would_blank_notified_wake`
 //     guard is unchanged, so the nights stored before this rule keep their figures.
@@ -1846,11 +1850,17 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     // Opus: a flag on a night the rule did not change taught the history a departure that never was).
     //   - at `best`: always. A skipped `best` sits in a gap no later than whatever is finally accepted, so it is
     //     the exit the scan would have taken without the rule (or one in the same gap, at the same lead).
-    //   - at `settlingFallback`: only when NO `best` wins the scan. The settling-tail guard had already set that
-    //     exit aside, so if a later `best` wins the rule changed nothing; if none does, the hand-back would have
-    //     been the night's departure, and the skip did change it.
+    //   - at `settlingFallback`: only when NO `best` wins the scan AND no `best`-site skip was recorded. The
+    //     settling-tail guard had already set that exit aside, so if a later `best` wins the rule changed nothing;
+    //     if none does, the hand-back would have been the night's departure, and the skip did change it, unless a
+    //     `best`-site exit was skipped too: without the rule that later `best` would have won over the hand-back,
+    //     so IT is the exit the rule changed, and the earlier fallback one must not take its place (round 3,
+    //     Opus D1, found by a probe).
     // Being recorded is not proof the exit would have been the wake: a later exit in the same gap that sits
-    // closer to the gap's start can still replace a `best`.
+    // closer to the gap's start can still replace a `best`. Both are within WAKE_SNAP_MS of the gap's start, so
+    // they are at most 10 minutes apart (5 either side of it; in practice an exit is logged in the minute the
+    // bed empties), which bounds how far the stored candidate can be from the exit that would have been taken:
+    // a small imprecision in the history's lead, never in the night's wake.
     //
     // CHEAP AND CAUSAL. The child's history is read at most once per computeNight, and only for an exit whose
     // lead could trip the rule at all: no threshold is below LEAD_FACTOR x LEAD_FLOOR_MIN, so an exit closer to
@@ -2084,9 +2094,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     }
     }
     // #700: after the scan's loop (the hand-back just above sits INSIDE it, whatever its indentation suggests).
-    // A fallback-site skip changed the night only when no `best` won: then the hand-back would have been the
-    // departure (WHICH SKIPS ARE RECORDED, above the scan).
-    if (!bestTaken && fallbackSkipped) noteFlag(fallbackSkipped);
+    // A fallback-site skip changed the night only when no `best` won and no `best`-site exit was skipped: then the
+    // hand-back would have been the departure (WHICH SKIPS ARE RECORDED, above the scan).
+    if (!bestTaken && earlyExitFlagged == null && fallbackSkipped) noteFlag(fallbackSkipped);
   }
 
   let transitionExitIdx =

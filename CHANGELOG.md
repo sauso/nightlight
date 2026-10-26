@@ -33,7 +33,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   now set aside, and a later one can still be the wake. With none, the night keeps the wake worked out from movement,
   which can be none at all: the night may then show "still asleep" and the notification no "up" time. Limits, all
   in the guide: it needs 10 earlier saved nights with the same wake-time setting (a new install, a child's first ten
-  nights and the ten after a wake-time or timezone change are unchanged). A child who really is up that early, or was
+  nights, the ten after a wake-time change, and the ten after a timezone change that moves the local wake time are
+  unchanged). A child who really is up that early, or was
   carried to a parent's bed, is set aside the same way: a new routine is learnt after about 4 nights of it (each set
   aside night still counts, with its early time), during which up to 4 nights can show no wake time or a late one,
   but an early wake on fewer than about 1 night in 4 is set aside every time. 4 or more false exits inside 14 nights

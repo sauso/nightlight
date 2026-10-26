@@ -334,8 +334,9 @@ than that is not taken as the morning wake on its own.
   time of that *got out of bed*, even if the night saved no wake time or a later one. So a child who
   has really started getting up earlier is set aside on about **4 nights** (up to 4 nights can show no
   wake time, or a late one), and from then on the limit has moved and the new time is taken. In a test
-  of a child up 1¾ hours earlier every day, nights 1 to 4 were set aside and every night from the 5th
-  was taken, also with the away nights in between saved as "no one in the bed".
+  of a child up about 75 minutes earlier than usual every day (105 minutes before the window ends
+  instead of about 30), nights 1 to 4 were set aside and every night from the 5th was taken, also with
+  the away nights in between saved as "no one in the bed".
 - **These are fixed, not settings.** They were measured on two cameras in one house: the false exits
   were 3.2 to 17.5 times the child's usual gap, and every night a review confirmed was right was at most
   1.35 times it. A reasonable starting point for other homes, not a measurement of them.
@@ -369,9 +370,11 @@ than that is not taken as the morning wake on its own.
   wake (a parent handling the empty bed, or a false one), so the night is reported up hours late
   rather than blank.
 - It relies on the saved nights **as they were saved**: whichever camera or rules produced them, and
-  without your morning-review corrections. Nights saved with another wake time are left out, and so are
-  nights saved under another **timezone** setting (their window ends at a different local time), so
-  changing the timezone switches the rule off for ten nights too. A clock change (daylight saving) does
+  without your morning-review corrections. Nights saved with another wake time are left out. After you
+  change the **timezone**, earlier nights are read in the new one: if their window end still shows the
+  same time of day there (Melbourne to Sydney, both 07:00) they keep counting; if it shifts (Melbourne
+  to Perth, where a Melbourne 07:00 reads 05:00) they are left out, and the rule is off until ten nights
+  with the new time are saved. A clock change (daylight saving) does
   not: the comparison is on the local time. One exception: on the night a clock change makes the
   configured wake time not exist (a window ending 02:30 on the night the clocks go forward at 02:00
   ends at 03:30), that night has no matching history, so the rule is off for it, and that night is
@@ -380,7 +383,8 @@ than that is not taken as the morning wake on its own.
 - False *got out of bed* events count too, whether they were saved as the wake (before this change) or
   set aside: **4 or more inside 14 nights** (3 when there are only 10 to 12 saved nights) make an early
   wake look usual and switch the rule off until they drop out of the last 14. Three inside 14 leave it
-  on: one child in the house it was measured in had three false exits in eight days.
+  on: in the house it was measured in, one child had three false exits in eight days (the fourth one
+  measured was the other child's).
 - Because a night's answer now depends on the nights before it, working out an earlier night again
   (or deleting one) can change a later night's answer, even though nothing about that later night
   changed.
