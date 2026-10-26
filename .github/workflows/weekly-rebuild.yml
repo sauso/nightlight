@@ -123,6 +123,19 @@ jobs:
           # promoting the index by digest carries them along (the promotion step checks the digest).
           sbom: true
           provenance: mode=max
+          # OCI labels (#864), so a rebuild does not strip the revision label docker-publish.yml puts on the
+          # image (without them `org.opencontainers.image.revision` was empty on :latest / :dev after every
+          # Monday). Written out here rather than taken from docker/metadata-action, which docker-publish.yml
+          # uses: that action reads the revision from `github.sha`, the commit of the ref the WORKFLOW runs
+          # from (main on a schedule, the branch on a dispatch), while this matrix builds main AND dev. The
+          # :dev image would be stamped with main's commit, a wrong label being worse than a missing one.
+          # steps.bmeta.outputs.sha is the checked-out commit, the same value baked into GIT_SHA below.
+          # Keys and formats match docker-publish.yml's; its title, description, url, licenses and version
+          # labels are not repeated (nothing reads them, and a rebuild owns no version).
+          labels: |
+            org.opencontainers.image.revision=${{ steps.bmeta.outputs.sha }}
+            org.opencontainers.image.created=${{ steps.bmeta.outputs.date }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           build-args: |
             GIT_SHA=${{ steps.bmeta.outputs.sha }}
             GIT_REF=${{ matrix.ref }}

@@ -200,7 +200,7 @@ docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}'
 ```
 
 (Empty if the image was built manually rather than by CI — that label only exists on images
-built through this repo's `docker-publish.yml` workflow.)
+built through this repo's `docker-publish.yml` workflow or its weekly rebuild.)
 
 Images published by that workflow (and by the weekly rebuild) also carry an **SBOM** and a **build provenance**
 attestation (#566). `docker buildx imagetools inspect sauso/nightlight:latest` lists them; a registry page may
@@ -234,8 +234,11 @@ What the test does not cover:
 - The synthetic camera (`bluenviron/mediamtx:latest-ffmpeg`) and the test's HTTPS proxy
   (`caddy:2-alpine`) are not pinned, so a change in either can fail a rebuild that is fine. The tag
   then stays on the previous image until the cause is fixed.
-- A rebuilt image has no `org.opencontainers.image.revision` label (only `docker-publish.yml` sets
-  it), so the command above prints nothing for it. **Settings → About** still shows the commit.
+- Rebuilds carry the same `org.opencontainers.image.revision` label as a normal publish (#864), set to
+  the commit that was rebuilt. Rebuilds from before that change did not, so the command above prints
+  nothing for them. A Monday run uses the workflow file on `main`, so `:latest` is labelled again only
+  after a release that contains the fix and the Monday after it. **Settings → About** shows the commit
+  either way.
 
 Each run's summary on the repository's Actions page lists the digest the tag had before. To go back
 to that image, pull it by digest (`docker pull sauso/nightlight@sha256:<digest>`) or pin a release

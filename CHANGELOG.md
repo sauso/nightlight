@@ -9,6 +9,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- **The weekly image rebuild now keeps the `org.opencontainers.image.revision` label (#864).** `:latest` and `:dev`
+  lost it every Monday, so `docker inspect` printed nothing after a rebuild. Rebuilt images now carry the revision
+  (the commit that was rebuilt), created-time and source labels, like a normal publish. Settings → About was never
+  affected. `:latest` is labelled again after a release containing this and the Monday after it; see
+  [docs/operations.md](docs/operations.md#the-weekly-rebuild).
+
 ## [0.44.1] - 2026-10-26
 
 ### Changed
