@@ -232,6 +232,11 @@ export const SHUTDOWN_SETTLE_MS = 2500;
 // What this means for another install: a cut that needs more than 20 s (a long recording with a large pre-roll on a
 // slow CPU) is still given up on and marked failed on the next start. A known limit, documented in
 // docs/recording.md, not something a larger stop timeout fixes.
+// ⚠️ AND FOR AN INSTALL WITH A SHORTER GRACE THAN THE DECLARED 30s (an older container without --stop-timeout) this is
+// a trade, not a free win: shutdown now waits for a long cut instead of moving on at 6s, so Docker's SIGKILL can arrive
+// while it is still waiting and skip the writes that come after (stopActivityTracker's last completed minutes).
+// Accepted: the docs ask for 30s everywhere, and a grace that short was already losing the recording itself (Codex
+// review of #879).
 // ⚠️ Raising this does NOT let a longer recording finish "if the grace allows" — the cap is absolute
 // and independent of the grace (`stopAllRecordings` races the work against it).
 // Which test stops you changing it, precisely — because an earlier version of THIS comment named the

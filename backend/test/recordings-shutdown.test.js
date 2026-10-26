@@ -198,7 +198,7 @@ describe('stopAllRecordings', () => {
     assert.ok(SHUTDOWN_SETTLE_MS < SEGMENT_SETTLE_MS, 'the shutdown settle is no longer the shorter one');
   });
 
-  test('shutdown stays inside the 9s bound the deployment grace is sized from', () => {
+  test('shutdown stays inside the declared stop grace (worst case 23s of the 30s)', () => {
     // Arithmetic, because this is not otherwise observable and getting it wrong is a REGRESSION that a
     // green suite would never show. Each detector stop and the transcoder stop are each bounded by a 3s
     // force-kill. Awaiting the recording stop in sequence gave 3+3+6+3 = 15s, where the pre-PR worst
