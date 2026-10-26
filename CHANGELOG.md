@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.44.1] - 2026-10-26
+
 ### Changed
 
 - **Settings → About now warns admins when media isolation could not start (#553).** If your host cannot support
