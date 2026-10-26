@@ -58,15 +58,19 @@ purpose). For a per-launch computed value (MediaMTX's) pass it as `extra` instea
 site:** call `spawnChild()`, never `child_process` directly; the source test in `child-env.test.js` fails
 on any other import of it under `backend/src`.
 
-**What this does not do:**
+**What the allowlist does not do:**
 
-- **It is not a sandbox.** The children still run as the same operating-system user as the backend, so a
-  child that a camera managed to take over could still read the backend's own environment through the
-  process table (`/proc` on Linux), `JWT_SECRET` included. The allowlist narrows what a child *inherits*:
-  what a bug that discloses the child's own memory or environment (in a demuxer, a crash report or log
-  output) could expose, and what a command run by a MediaMTX hook inherits from MediaMTX.
-- **It does not protect the files.** For the same reason a child can read the database and `.jwt_secret`
-  from disk. A separate user was considered and not done (#553 (b)).
+- **It is not a sandbox.** It narrows what a child *inherits*: what a bug that discloses the child's own
+  memory or environment (in a demuxer, a crash report or log output) could expose, and what a command run by a
+  MediaMTX hook inherits from MediaMTX. Taken alone it does not stop a child reading the backend's own
+  environment through the process table (`/proc` on Linux), `JWT_SECRET` included, or the files on disk.
+- **The separation that does is [media isolation](#media-isolation-the-layout-and-the-fence-553-phases-2b-and-4-on-by-default)**
+  (#553), which is **on by default**: the children run as a second operating-system user (uid 1700, no
+  capabilities), so a child a camera took over cannot read the database, `.jwt_secret` or the app's
+  `/proc/<pid>/environ`. (An earlier version of this page said a separate user was considered and not done; the
+  owner reversed that on 2026-10-25.) With isolation **off** (`NIGHTLIGHT_MEDIA_ISOLATION=0`, or a host where it
+  cannot start) the children run as the backend's user and everything in the first bullet applies in full.
+  The limits of isolation are listed at the end of that section.
 
 Keep cameras on their own VLAN, as [docs/cameras.md](cameras.md) advises.
 
@@ -279,9 +283,10 @@ over its 100 KB default first. For colour, birthday and photo, a value identical
 unchecked, so a record saved before the rule can still be edited
 (`children-field-validation.test.js`, `input-validation.test.js`).
 
-The JWT signing secret is auto-generated and persisted to `DATA_DIR/.jwt_secret` if
+The JWT signing secret is auto-generated and persisted to `DATA_DIR/private/.jwt_secret` if
 `JWT_SECRET` isn't set — deliberately avoiding a hardcoded fallback, since this image is
-publicly distributed and a baked-in secret would be a shared key across every install.
+publicly distributed and a baked-in secret would be a shared key across every install. A secret that
+cannot be saved is logged as an error (every restart would otherwise sign everyone out, silently).
 
 
 **Client startup (#382).** The SPA decides "signed in" from `/auth/me` and "which form" from `/auth/status`.
@@ -299,7 +304,8 @@ check runs, so a retry timer that comes due in the same moment cannot open a sec
 
 ## Data layer (`backend/src/db.js`)
 
-better-sqlite3, single file in `DATA_DIR` (default `/app/data`). Schema is created with
+better-sqlite3, WAL mode, `DATA_DIR/private/babymonitor.db` (default `/app/data/private/`; the top-level
+`DATA_DIR/babymonitor.db` on an install the start-up move has not reached: see "Where the data lives" below). Schema is created with
 `CREATE TABLE IF NOT EXISTS`, and columns added after initial release are migrated by hand at
 the bottom of `db.js` (`PRAGMA table_info` + conditional `ALTER TABLE`) — there is no migration
 framework. Follow this same pattern for new columns: check `table_info`, `ALTER TABLE` if
@@ -497,6 +503,15 @@ Container starts as root, remaps a pre-baked user to `PUID`/`PGID` (default 99/1
 app via `su-exec` — the app process itself never runs as root. `tini` is PID 1 to reap zombies
 from the MediaMTX + per-camera-FFmpeg child process tree and forward signals correctly.
 
+That is the start with [media isolation](#media-isolation-the-layout-and-the-fence-553-phases-2b-and-4-on-by-default)
+OFF. Isolation is on by default, and then the entrypoint dry-runs the whole chain and, if it passes, starts the app
+through `setpriv` instead of `su-exec`: still as `PUID:PGID`, but with `CAP_SETUID`, `CAP_SETGID` and `CAP_KILL`
+kept as ambient capabilities and `no-new-privileges`, so it can start every ffmpeg, ffprobe and MediaMTX as the
+media user (uid:gid 1700:1700, no capabilities) and signal them. The app is still never root at start, but unlike the
+`su-exec` start it **can become root** (or any uid) while it runs; see the limits at the end of the isolation
+section. If the dry run fails the start is the `su-exec` one above, with one warning and `MEDIA_ISOLATION=off`;
+the container never refuses to start because of it.
+
 `PUID=0` is accepted but logs a warning (`[entrypoint] warning: PUID=0 runs the app as root`) and starts anyway;
 refusing it, or substituting the default, is not done (#555, `entrypoint-puid-root.test.js`).
 
@@ -512,6 +527,119 @@ alone, as `chown -R` leaves it) and logs one `[entrypoint] umask …` line with 
 the app logs `[data-dir] app umask …` once it is up (`lib/dataDirModes.js`). User-facing rules and limits: `docs/operations.md`, "Who can read the
 data directory". Tests: `entrypoint-umask.test.js` (Linux only) and
 `scripts/entrypoint-umask.mutants.sh`, both run in CI.
+
+### Where the data lives: `DATA_DIR/private/` (#553 phase 2a)
+
+The database (with `-wal`/`-shm`), `.jwt_secret`, the two Firebase files, the two snapshot folders and online
+backups live in `DATA_DIR/private/`, always `0700` and owned by `PUID:PGID` (explicit chmod: the umask never decides
+it). Why: media isolation (on by default) opens `DATA_DIR` to a media group so that FFmpeg can run as a separate user, and a folder only
+the app can enter protects even a file inside it whose own mode is too open.
+
+- **`lib/dataPaths.js` owns every one of these paths, and only RESOLVES** (lstat and a folder listing, never a
+  write): the database is `private/babymonitor.db` if it exists, else the top-level one if THAT exists (an install the
+  move has not reached; a second, empty database is never created next to real data), else `private/` for a fresh
+  install. A secret file is looked up `private/` first; the Firebase files too, falling back to the top level where
+  the admin drops them (re-resolved on every call in `lib/push.js`, so a dropped file works without a restart); a
+  snapshot folder follows its database's place. `db.js`, `middleware/auth.js`, `lib/push.js`,
+  `lib/detectionEvents.js`, `lib/bedTransitions.js`, `lib/demoSeed.js`, `lib/dataDirModes.js` and the console
+  scripts (`src/scripts/consoleDb.js`: resolve, `fileMustExist`, never create) all go through it. The writers that
+  can make `private/` (`db.js` on a fresh install, `auth.js` before a new secret, the move tool) use its one
+  `ensurePrivateDir`.
+- **The app never moves anything.** The one-way move is `src/scripts/migrate-private-layout.js`, which
+  `entrypoint.sh` runs on every start in the FOREGROUND, as the app user (`su-exec`), after its ownership and mode
+  steps and before either `exec` of the app (so nothing else has the database open). Independent passes, each
+  deciding from lstat: the database (open with `fileMustExist`, `PRAGMA journal_mode=DELETE`, which fails while
+  another connection holds it, then `BEGIN EXCLUSIVE` held until after the rename, then require that no
+  `-wal`/`-shm`/`-journal` is beside it, set aside any companion already in `private/` with no private database (it
+  would be replayed over the one moving in), then ONE rename of the `.db`; a 30 s budget applies before the rename
+  only), `.jwt_secret` (only without `JWT_SECRET`), the Firebase files (only when their `FIREBASE_*` variable is
+  unset), the snapshot folders (only once the database is in `private/`; an empty private one is removed first), and
+  leftovers (`backup-*.db`, companions with no database). A symbolic link is never moved. `private/` always wins: a
+  top-level copy is moved into `private/legacy-<date>-<time>/` as a unit (the `.db` first, then its companions and its
+  snapshot folders into the same folder; an orphaned companion joins the newest such folder whose database lacks it),
+  never deleted or merged. Exit codes 0 / 10 (something left at the top level) / 11 (something set aside) become one
+  `[entrypoint] private layout:` line; no exit code stops the container. Two containers on one data directory are not
+  supported.
+- **The entrypoint's preflight** (guarded under `set -e`): creates `private/`, gives it to `PUID:PGID` only when it is
+  not theirs, chmods it `700` every start, and re-owns by name the top-level items the move takes when one has the
+  wrong owner (never the clip tree, #567; skipped when the full walk ran). The ownership sentinels and the modes line
+  cover both layouts.
+- **About and the diagnostics bundle** add `dataLayout` (as opened) and `layoutConflict` (any `private/legacy-*`, or
+  two databases). Tests: `data-paths.test.js`, `migrate-private-layout.test.js` (real better-sqlite3, temp dirs),
+  `console-scripts-layout.test.js`, `entrypoint-private-layout.test.js` (stubs, also on BusyBox) and
+  `entrypoint-private-layout-real.test.js`; the real-image upgrade from the last release, the rollback and the
+  two-copies case are `e2e/private-layout.sh` (the `private-layout` job in `e2e.yml`).
+
+### Media isolation: the layout and the fence (#553 phases 2b and 4; on by default)
+
+**State today.** Isolation is **asked for at every start** (since phase 4) unless `NIGHTLIGHT_MEDIA_ISOLATION` is `0`,
+`off` or `false` (any capitals); it is read only by `entrypoint.sh`. Asking is not getting: the entrypoint, as root,
+dry-runs the chain and, if anything fails (PUID 0, PUID/PGID 1700, a leftover at the top level, a missing capability, a
+share that ignores `chmod`, rootless Docker), starts the old way with `MEDIA_ISOLATION=off` and one warning. When it
+passes, ffmpeg, ffprobe and MediaMTX run as uid:gid 1700:1700 through `media-exec.sh`, and `MEDIA_ISOLATION=on`. The
+statements elsewhere on this page that the children run as the same user describe the OFF state. Going from ON back to
+OFF re-owns the media-written files once (#871). User-facing summary: [operations.md](operations.md#media-isolation).
+
+**Roles of the capabilities with isolation on.** The app keeps `CAP_SETUID` and `CAP_SETGID` (to start each child as the
+media user through `setpriv`) and `CAP_KILL` (to signal children that are now another uid), as ambient capabilities.
+`CHOWN`, `DAC_OVERRIDE` and `FOWNER` stay root's, for the start-up script only. Every child gets none, and
+`no-new-privileges` is set on the app and on every child; the bounding set is never trimmed (that needs `CAP_SETPCAP`,
+which the six-capability hardening does not grant).
+
+**What it does not stop (state these plainly wherever isolation is described):**
+
+- **The app is not confined.** It holds `SETUID`/`SETGID`/`KILL`, so a compromised app can become uid 0 inside the
+  container, and, if the data share is not mounted `nosuid`, create setuid files there. The target is the
+  camera-facing programs, not the app.
+- **One uid for all media processes.** A taken-over ffmpeg can signal or `ptrace` the others (MediaMTX, other
+  cameras' ffmpeg); there is no per-camera separation.
+- **MediaMTX's API on `127.0.0.1:9997` is unauthenticated** and returns each camera's credentials, so a taken-over media
+  process can still read them. Authenticating that API is a follow-up.
+- **Camera passwords are on ffmpeg's command line** (`/proc/<pid>/cmdline`), readable by anything in the container.
+- **Some hosts cannot do it** (rootless Docker/Podman, SMB/ACL shares that ignore `chmod`, NFS `root_squash`, PUID/PGID
+  1700, missing capabilities) and run with isolation off and a warning.
+- **The camera VLAN advice stands**: isolation limits what a bad stream can reach; it does not make an exposed camera safe.
+
+**The rule:** a folder the app writes into is never one the media user can write into, and the media user can never rename
+a folder the app trusts. `src/lib/mediaLayout.js` makes the folders (`ensureClipsFolder`, lazily, by the code that needs
+them, each with an `fchmod`/`fchown` on a descriptor opened `O_NOFOLLOW|O_DIRECTORY`, because existing folders are `0700`):
+
+| Kind | Where | Owner:group, mode |
+| --- | --- | --- |
+| traverse | `CLIPS_DIR`, `.ring`, `timelapse`, `.concat`, `.timelapse-frames` and the folders below the last two | app:media, `0750` |
+| leaf (the only media-writable places) | `.ring/<camera>`, `<camera>`, `timelapse/<child>` | app:media, `1770` (sticky) |
+| input files | concat lists, timelapse frames (`writeInputFile`, `O_EXCL`, group set on the descriptor before any content) | app:media, `0640` |
+| app-only | `CLIPS_DIR/.app` (the writability probe), `private/` | app, `0700` |
+
+No setgid bit anywhere (the Unraid kernel drops it without `CAP_FSETID`, measured; the share does not inherit a group
+either): the media process has group 1700 as its primary group, so its files get it without inheritance, and the app sets
+the group of everything it makes. The sticky bit stops the media user deleting or replacing the app's files in a leaf; a leaf is
+app-owned so the app can always remove what is in it. Files that existed before stay app-owned `0600`.
+
+**Every read, serve and delete of a media-written file goes through `src/lib/mediaFiles.js`.** It opens with
+`O_NOFOLLOW|O_NONBLOCK`, `fstat`s the descriptor and requires a regular file with `nlink === 1` (hard-link defence:
+`fs.protected_hardlinks` is 0 on the owner's host, measured), and checks that the real path of the file's parent is the
+expected folder. `serveMediaFile` serves from that descriptor (Range, 206/416, 304, HEAD, ETag/Last-Modified as
+`res.sendFile` did; the tests compare the two request by request), never reopening by path. `unlinkMediaFile` is a flat
+`unlink`; `removeLeafDir` sweeps a leaf one name at a time and never recurses; `safeSegmentNames` accepts only
+`seg-YYYYMMDD-HHMMSS.mkv`, because a segment list becomes a concat list read with `-safe 0` where a newline in a name
+adds directives. `statMediaFile` is an `lstat`, so a link's target is never counted. `test/media-files-fence.test.js` reads the
+source and fails if a `sendFile`/`download` or a path-based read, stat or delete appears in a file that handles the clips
+folder without a `fence-ok`/`app-only` comment saying why.
+
+**What the entrypoint adds (ON path only; the OFF path is the old one):** it refuses isolation while the database, a backup,
+a snapshot folder, `.jwt_secret` (unless `JWT_SECRET`) or a Firebase file (unless named by its env var) is still at the
+top level; sets the data directory to group 1700 / `0710` and the clips folder (and the folders above it inside the data
+directory; only the top of an external mount, never a walk, #567) to `0750`, refusing a folder another uid owns; confines
+the tighten walk to `private/` and the top-level files while isolation is asked for (and runs the full walk after all if
+it ends off); and runs the dry run, folders included, in the BACKGROUND with a 30 s deadline (`BusyBox timeout` around
+`$(...)` cannot stop a probe stuck on a stalled mount). `media-probe.sh` is the probe: it builds a probe folder with
+every kind of folder above in each real mount and lets the media user try to misuse each.
+
+Tests: `media-files.test.js`, `media-layout.test.js`, `media-files-fence.test.js`, `entrypoint-media-isolation.test.js`
+(stubs, also on BusyBox), `entrypoint-media-isolation-real.test.js` (root, real `setpriv`, wrong layouts the probe must
+refuse), the shell mutants in `scripts/entrypoint-umask.mutants.sh`, and `e2e/media-isolation.sh` (the image, as uid 1700).
+Not covered: a real timelapse assembly (needs a child, a sleep window and a night of frames).
 
 ## Frontend structure (`frontend/src/`)
 

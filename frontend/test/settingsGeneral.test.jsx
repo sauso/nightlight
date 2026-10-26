@@ -148,6 +148,21 @@ describe('theme presets', () => {
 });
 
 describe('saving', () => {
+  // #855: the "Saved ✓" banner blanked itself with a bare setTimeout that nothing cancelled (now useLater). The same
+  // swap is in the other settings pages; this is the representative test, they are not tested one by one.
+  test('★ #855: leaving the page cancels the "Saved" timer', async () => {
+    const setSpy = vi.spyOn(globalThis, 'setTimeout');
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const { user, unmount } = renderWith({ app_name: 'Nightlight' });
+    await user.click(await screen.findByRole('button', { name: /Save/ }));
+    await screen.findByText('Saved ✓');
+    const ids = setSpy.mock.calls.flatMap((c, i) => (c[1] === 2500 ? [setSpy.mock.results[i].value] : []));
+    expect(ids).toHaveLength(1);
+    expect(clearSpy).not.toHaveBeenCalledWith(ids[0]);
+    unmount();
+    expect(clearSpy).toHaveBeenCalledWith(ids[0]);
+  });
+
   test('a failed save shows the reason and does not claim success', async () => {
     vi.restoreAllMocks();
     mockApi({ putFails: 'Timezone is not recognised' });

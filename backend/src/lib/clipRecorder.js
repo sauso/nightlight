@@ -4,7 +4,10 @@ import path from 'path';
 import { logger, isNoisyMediaLine } from './logger.js';
 import { forwardProcessLines, createLineBuffer } from './processOutput.js';
 import { addHold, removeHold, effectiveHold, clearHolds } from './ringHolds.js';
-import { killIfSpawned } from './processGuards.js';
+import { killIfSpawned, isKillError, execFailureBackoff, describeExecFailure } from './processGuards.js';
+import { CLIPS_DIR, resolveClipsDir } from './clipsDir.js';
+import { statMediaFile, unlinkMediaFile, safeSegmentNames } from './mediaFiles.js';
+import { ensureClipsFolder, writeInputFile } from './mediaLayout.js';
 
 // Event-recording capture core (Stage 1, "Option A"; shipped in 0.17.0).
 //
@@ -37,32 +40,15 @@ import { killIfSpawned } from './processGuards.js';
 // Phase 2 wires startSegmenter/stopSegmenter to the per-camera `detect_record_clips` toggle and
 // extractClip to fireDetectionAlert, writing clip_* onto the detection_events row.
 
-const DATA_DIR = process.env.DATA_DIR || '/app/data';
-// Clips live OUTSIDE the container layer: default under the mapped /app/data, overridable to a
-// separate array mount via CLIPS_DIR (see the plan's storage section). Phase 2 adds the startup
-// "is this actually a mount?" guard; the spike just needs a writable dir.
-//
-// NORMALISED ONCE, HERE (#545). Every containment guard elsewhere (detectionEvents.unlinkClip /
-// getEventClipFile, recordings.jailedFile, timelapse.jailedFile) compares `path.resolve(CLIPS_DIR, rel)`
-// against `CLIPS_DIR + path.sep`. path.resolve normalises, the raw env value does not: with
-// `CLIPS_DIR=/recordings/` (an easy entry in the Unraid "Recordings Directory" field) the prefix became
-// `/recordings//` and nothing matched, so clips were written (path.join) but 404'd and were never
-// deleted, while retention still cleared the rows and reported success — the disk filled silently.
-// A relative value failed the same way. Resolving here makes every consumer agree with no per-guard patch.
-// A trailing backslash is deliberately NOT stripped: on Linux (the only supported host) it is a legal
-// file-name character, so removing it would silently point at a different directory; on Windows
-// (dev machines only) path.resolve already handles both separators.
-// SURROUNDING SPACES ARE NOT STRIPPED, for the same reason: a trailing (or leading) space is a legal character
-// in a Linux directory name, so an install whose CLIPS_DIR is `/data/clips ` (a real folder with that space)
-// would, if we trimmed, silently resolve to a different, empty folder after an upgrade. trim() is used ONLY to
-// recognise a blank / whitespace-only value, which means "unset" (an empty compose default, `CLIPS_DIR=`).
-export function resolveClipsDir(raw, dataDir) {
-  const v = typeof raw === 'string' && raw.trim() !== '' ? raw : '';
-  return path.resolve(v || path.join(dataDir, 'clips'));
-}
-export const CLIPS_DIR = resolveClipsDir(process.env.CLIPS_DIR, DATA_DIR);
-// Raw segments are scratch — a hidden sibling so they're obviously not the finished clips.
-const RING_ROOT = path.join(CLIPS_DIR, '.ring');
+// CLIPS_DIR (and resolveClipsDir, with its #545 note on why it is normalised once) now live in clipsDir.js, so that
+// mediaFiles.js and mediaLayout.js can use them without importing this file back. Re-exported: every importer
+// (and the tests) still gets them from here.
+export { CLIPS_DIR, resolveClipsDir };
+// Raw segments are scratch — CLIPS_DIR/.ring/<cameraId>, a hidden sibling so they're obviously not the finished clips.
+// The concat lists extractClip hands ffmpeg. NOT in the ring folder: that is one the media user writes into, and a
+// list is an INPUT it must read and never change (#553 phase 2b, mediaLayout.js). Per camera, so a clean-up and the
+// purge can take a camera's whole folder.
+export const CONCAT_SUBDIR = '.concat';
 
 // 2s segments: short enough that pre-roll rounds to a whole-segment boundary the plan calls
 // acceptable, long enough to keep the file/keyframe overhead low.
@@ -105,12 +91,10 @@ function safeReaddir(dir) {
   }
 }
 
+// A segment's mtime, or null when it is gone or not a plain one-name file. statMediaFile (lstat), not stat: a
+// symbolic link the media user planted under a segment's name must not borrow its target's age (#553 phase 2b).
 function statMtime(p) {
-  try {
-    return fs.statSync(p).mtimeMs;
-  } catch {
-    return null;
-  }
+  return statMediaFile(p)?.mtimeMs ?? null;
 }
 
 function segmenterArgs(pathName, ringDir) {
@@ -141,13 +125,14 @@ function segmenterArgs(pathName, ringDir) {
 // grow without limit, and normal depth resumes the moment the recording ends.
 function pruneRing(ringDir, depthMs, holdFromMs = null) {
   const cutoff = Math.min(Date.now() - depthMs, holdFromMs ?? Infinity);
-  for (const f of safeReaddir(ringDir)) {
-    if (!f.endsWith('.mkv')) continue;
+  // Only the segmenter's own names (safeSegmentNames), and a flat unlink of each (unlinkMediaFile): the ring folder is
+  // one the media user writes into (#553 phase 2b).
+  for (const f of safeSegmentNames(safeReaddir(ringDir))) {
     const p = path.join(ringDir, f);
     const m = statMtime(p);
     if (m != null && m < cutoff) {
       try {
-        fs.rmSync(p, { force: true });
+        unlinkMediaFile(p);
       } catch {
         /* raced with another prune / still open — ignore */
       }
@@ -197,13 +182,20 @@ export function ringDepthMsFor(preRollSec, postRollSec) {
 export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec = 15 } = {}) {
   stopSegmenter(cameraId);
 
-  const ringDir = path.join(RING_ROOT, safePathSegment(cameraId, 'cameraId'));
-  fs.mkdirSync(ringDir, { recursive: true });
-  // Start clean so stale segments from a previous run can't leak into a fresh clip.
+  const safeId = safePathSegment(cameraId, 'cameraId');
+  // The ring folder is a media-writable LEAF (mediaLayout.js): made, or repaired if it is an older app-only one.
+  const ringDir = ensureClipsFolder(['.ring', safeId], { leaf: true });
+  // Start clean so stale segments from a previous run can't leak into a fresh clip. EVERYTHING in the folder goes
+  // (a flat unlink of each name): since #553 phase 2b the app's concat lists live elsewhere, so what is here was
+  // written by the media user, and a stray file of any name is junk, not footage. A stray folder cannot be unlinked and
+  // stays (the error is swallowed); nothing recurses into a folder the media user can write.
   for (const f of safeReaddir(ringDir)) {
-    if (f.endsWith('.mkv') || f.startsWith('concat-')) {
-      try { fs.rmSync(path.join(ringDir, f), { force: true }); } catch { /* ignore */ }
-    }
+    try { unlinkMediaFile(path.join(ringDir, f)); } catch { /* ignore */ }
+  }
+  // Concat lists left by a run that was killed mid-cut (the finally in extractClip removes them otherwise).
+  const listDir = path.join(CLIPS_DIR, CONCAT_SUBDIR, safeId);
+  for (const f of safeReaddir(listDir)) {
+    try { unlinkMediaFile(path.join(listDir, f)); } catch { /* ignore */ }
   }
 
   const ringDepthMs = ringDepthMsFor(preRollSec, postRollSec);
@@ -214,15 +206,27 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
   // recovery when it comes back — see the exit handler.
   const entry = { proc: null, stopped: false, ringDir, ringDepthMs, janitor: null, fastFails: 0 };
   segmenters.set(cameraId, entry);
+  // #553: a 126/127 at once (the program, or the switch to the media user, could not run) backs off from RESTART_DELAY_MS
+  // to a minute with its own line (processGuards.js, execFailureBackoff). Every other exit keeps the fast-fail logging
+  // below and the 5 s relaunch. Per segmenter entry, like fastFails.
+  const execBackoff = execFailureBackoff(RESTART_DELAY_MS);
 
   function launch() {
     const launchedAt = Date.now();
     const proc = spawnChild('ffmpeg', segmenterArgs(pathName, ringDir), {
       stdio: ['ignore', 'ignore', 'pipe'],
     });
+    execBackoff.launched();
     entry.proc = proc;
 
     proc.on('error', (err) => {
+      // #553: a SIGNAL that could not be delivered (EPERM), not a failed spawn (isKillError): the segmenter is still
+      // running and writing the ring. Deregistering it here would let startClipCapture start a second one into the same
+      // folder. Keep the entry; its 'exit' still does the rest.
+      if (isKillError(err)) {
+        logger.error(`[clipseg:${pathName}] could not signal the segmenter (pid ${proc.pid}): ${err.code || err.message}. It is still running.`);
+        return;
+      }
       // A spawn that never started. Node emits 'error' INSTEAD OF 'exit', so the exit handler below
       // never runs — and an EventEmitter 'error' with no listener THROWS, taking the backend down. The
       // sibling extractClip spawn already handles this; the segmenter did not. See issue #257.
@@ -257,6 +261,15 @@ export function startSegmenter(cameraId, pathName, { preRollSec = 5, postRollSec
       // Only the tracked entry owns this camera; a superseded process must not resurrect itself
       // (same reasoning as transcoder.js).
       if (entry.stopped || segmenters.get(cameraId) !== entry) return;
+
+      const next = execBackoff.exited(code);
+      if (next.execFailed) {
+        if (next.log) logger.error(`[clipseg:${pathName}] ${describeExecFailure('the segmenter (ffmpeg)', next)} Last output: ${lastLine}`);
+        setTimeout(() => {
+          if (!entry.stopped && segmenters.get(cameraId) === entry) launch();
+        }, next.delayMs);
+        return;
+      }
 
       // A segmenter that ran a good while and then died is a real event — log it, and reset the
       // fast-fail run so a later blip starts its own fresh (loud-then-quiet) cycle. One that dies
@@ -353,8 +366,7 @@ export function ringOldestStartMs(cameraId) {
   if (!entry) return null;
   const now = Date.now();
   let oldest = null;
-  for (const f of safeReaddir(entry.ringDir)) {
-    if (!f.endsWith('.mkv')) continue; // concat-*.txt lists are not footage
+  for (const f of safeSegmentNames(safeReaddir(entry.ringDir))) { // only the segmenter's own names are footage
     const m = statMtime(path.join(entry.ringDir, f));
     if (m == null || now - m <= SEGMENT_OPEN_MS) continue; // gone, or still being written
     if (oldest === null || m < oldest) oldest = m;
@@ -371,8 +383,9 @@ export function ringOldestStartMs(cameraId) {
 function selectRingSegments(ringDir, at, preRollSec, postRollSec, now) {
   const coverStart = clipCoverStartMs(at, preRollSec);
   const coverEnd = at + (postRollSec + 2 * SEGMENT_SEC) * 1000;
-  return safeReaddir(ringDir)
-    .filter((f) => f.endsWith('.mkv'))
+  // safeSegmentNames: this list becomes a concat list read with `-safe 0`, so a name the media user chose (a newline
+  // or a quote in it) must never reach it (#553 phase 2b).
+  return safeSegmentNames(safeReaddir(ringDir))
     .map((f) => {
       const p = path.join(ringDir, f);
       return { f, p, m: statMtime(p) };
@@ -450,9 +463,10 @@ export function stallWindowMs(totalSizeBytes) {
 export const PROBE_DEADLINE_MS = 120_000;
 
 // Remove one file this extraction itself named (the clip or its thumbnail, from safePathSegment). Never anything
-// else, and never a directory: rmSync without `recursive` throws on a directory, and the catch swallows that.
+// else, and never a directory: a flat unlink (unlinkMediaFile) throws on a directory, and the catch swallows that.
+// The folder is one the media user writes into, hence the helper and not a plain rm (#553 phase 2b).
 function removeOwnFile(file) {
-  try { fs.rmSync(file, { force: true }); } catch { /* not there, or not a plain file: leave it */ }
+  try { unlinkMediaFile(file); } catch { /* not a plain file: leave it */ }
 }
 
 const secs = (ms) => (ms == null ? '?' : (ms / 1000).toFixed(1));
@@ -563,7 +577,16 @@ export function runFfmpeg(args, { tool = 'ffmpeg', deadlineMs = null, stallLabel
     // Stays attached for the child's whole life, settled or not: an 'error' emitted with no listener THROWS and
     // takes the backend down (the #257 class). So nothing here ever removes a listener.
     // A spawn that fails emits 'error' and may never emit 'close'; this settles it either way.
-    proc.on('error', (e) => settle(false, e, `could not run (${e.code || e.message})`));
+    // #553: but a SIGNAL that could not be delivered (EPERM, isKillError) is not "could not run": it is reported on this
+    // same event, synchronously inside the deadline's kill, and used to settle first with that wrong outcome. The
+    // deadline settles it with its own reason right after; only say that the kill failed.
+    proc.on('error', (e) => {
+      if (isKillError(e)) {
+        logger.error(`[${tool}] could not signal ${tool} (pid ${proc.pid}): ${e.code || e.message}. It may still be running.`);
+        return;
+      }
+      settle(false, e, `could not run (${e.code || e.message})`);
+    });
     proc.on('exit', (code) => {
       exited = true;
       exitCode = code;
@@ -643,15 +666,25 @@ export async function extractClip(
   const safeId = safePathSegment(cameraId, 'cameraId');
   const safeBase = safePathSegment(outBase, 'outBase');
 
-  const outDir = path.join(CLIPS_DIR, safeId);
-  fs.mkdirSync(outDir, { recursive: true });
+  // The clip folder is a media-writable LEAF (ffmpeg writes the clip and thumbnail into it); the concat list goes in an
+  // app-only folder beside it, read-only to the media user (mediaLayout.js).
+  const outDir = ensureClipsFolder([safeId], { leaf: true });
+  const listDir = ensureClipsFolder([CONCAT_SUBDIR, safeId]);
 
-  // concat demuxer list. Absolute paths + `-safe 0`; single-quote-escape for safety.
-  const listFile = path.join(ringDir, `concat-${safeBase}.txt`);
-  fs.writeFileSync(
+  // concat demuxer list. Absolute paths + `-safe 0`; single-quote-escape for safety. The names come from
+  // selectRingSegments, i.e. only ever `seg-YYYYMMDD-HHMMSS.mkv`, so none can carry a newline or a quote.
+  const listFile = path.join(listDir, `concat-${safeBase}.txt`);
+  writeInputFile(
     listFile,
     segs.map((s) => `file '${s.p.replace(/'/g, "'\\''")}'`).join('\n') + '\n'
   );
+
+  // A clip or thumbnail of this name left by an earlier run (a restored database reuses event ids) belongs to the app,
+  // and the media user, which writes the new one, could not overwrite it. Flat unlink, as ffmpeg's -y would have replaced it.
+  const outFile = path.join(outDir, `${safeBase}.mp4`);
+  const thumbFile = path.join(outDir, `${safeBase}.jpg`);
+  removeOwnFile(outFile);
+  removeOwnFile(thumbFile);
 
   // Where the requested window starts within the concatenated timeline. The first segment's content
   // began ~SEGMENT_SEC before its close-time (mtime), so that's wall-clock position 0 of the concat;
@@ -660,8 +693,6 @@ export async function extractClip(
   const offsetSec = Math.max(0, (at - preRollSec * 1000 - clipStartWallMs) / 1000);
   const durSec = preRollSec + postRollSec;
 
-  const outFile = path.join(outDir, `${safeBase}.mp4`);
-  const thumbFile = path.join(outDir, `${safeBase}.jpg`);
   try {
     try {
       // Concatenate the ring segments, then trim to EXACTLY [pre+post] seconds. Because a `-c copy` cut
@@ -685,7 +716,7 @@ export async function extractClip(
         '-y', outFile,
       ], { stallLabel: `${safeId}/${safeBase} (${durSec} s clip)` });
     } finally {
-      try { fs.rmSync(listFile, { force: true }); } catch { /* ignore */ }
+      removeOwnFile(listFile);
     }
 
     // Thumbnail — one frame from the finished clip. Best-effort (Phase 2 reuses the event snapshot). A failure is
@@ -696,7 +727,7 @@ export async function extractClip(
     ], { deadlineMs: PROBE_DEADLINE_MS }).catch(() => removeOwnFile(thumbFile));
 
     const probe = await probeClip(outFile);
-    return { file: outFile, thumb: fs.existsSync(thumbFile) ? thumbFile : null, segments: segs.length, probe };
+    return { file: outFile, thumb: statMediaFile(thumbFile) ? thumbFile : null, segments: segs.length, probe };
   } catch (err) {
     // #773: a failed extraction leaves nothing of its own behind. Before this only the concat list was removed, so a
     // failed or killed encode orphaned its partial MP4, and a probe failing after a good encode orphaned a complete

@@ -3,6 +3,7 @@ import path from 'path';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { CLIPS_DIR } from './clipRecorder.js';
+import { ensureAppOnlyFolder } from './mediaLayout.js';
 import {
   getExpiredClips,
   getReadyClipsOldestFirst,
@@ -49,7 +50,7 @@ let sweepTimer = null;
 // PATH problem in spawn-failure.test.js, where a suite was green for a reason unrelated to the code.
 export function readMounts() {
   try {
-    return fs.readFileSync('/proc/mounts', 'utf8');
+    return fs.readFileSync('/proc/mounts', 'utf8'); // fence-ok: the kernel's mount table, not a media file
   } catch {
     return null; // not a Linux container — can't check
   }
@@ -85,9 +86,14 @@ export function checkClipStorage({ mounts = readMounts() } = {}) {
   let writable = false;
   try {
     fs.mkdirSync(abs, { recursive: true });
-    const probe = path.join(abs, '.write-test');
-    fs.writeFileSync(probe, 'ok');
-    fs.rmSync(probe, { force: true });
+    // The probe goes in CLIPS_DIR/.app, an app-only (0700) folder the media user cannot even enter (#553 phase 2b), not
+    // in the clips folder's top level, where it was a file in a folder the media user can list. It stays ON THE CLIPS
+    // VOLUME (an external CLIPS_DIR is its own mount, and that is the volume whose writability this must report), which
+    // is why it is not under DATA_DIR/private. A leftover from a crash is replaced, not tripped over.
+    const probe = path.join(ensureAppOnlyFolder('.app'), '.write-test');
+    fs.rmSync(probe, { force: true /* app-only */ });
+    fs.writeFileSync(probe, 'ok', { flag: 'wx' /* app-only */ });
+    fs.rmSync(probe, { force: true /* app-only */ });
     writable = true;
   } catch (e) {
     logger.error(`[clips] CLIPS_DIR "${abs}" is not writable (${e.message}). Clip recording disabled.`);

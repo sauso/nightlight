@@ -80,9 +80,10 @@ function linkDirOrSkip(t, target, at) {
 
 // Where a table's id-named snapshot JPEGs live. Only the DIRECTORY is spelled out; which tables have a
 // snapshot is read from the schema, and a table with a `snapshot` column missing from this map fails below.
+// #553 phase 2a: in private/ on this fresh data directory, next to the database.
 const SNAPSHOT_DIRS = {
-  bed_transitions: path.join(dataDir, 'transition-snapshots'),
-  detection_events: path.join(dataDir, 'detection-snapshots'),
+  bed_transitions: path.join(dataDir, 'private', 'transition-snapshots'),
+  detection_events: path.join(dataDir, 'private', 'detection-snapshots'),
 };
 
 let childServer;
@@ -177,6 +178,8 @@ function populate(kind, id, { cameraTablesToo = true } = {}) {
   if (kind === 'camera') {
     files.push(writeFile(path.join(CLIPS_DIR, id, 'stray.mp4')));
     files.push(writeFile(path.join(CLIPS_DIR, '.ring', id, 'seg-1.mkv')));
+    // The concat lists live in their own app-only folder since #553 phase 2b; a cut a restart killed leaves one behind.
+    files.push(writeFile(path.join(CLIPS_DIR, '.concat', id, 'concat-7.txt')));
   } else {
     files.push(writeFile(path.join(CLIPS_DIR, 'timelapse', id, 'stray.mp4')));
     files.push(writeFile(path.join(CLIPS_DIR, '.timelapse-frames', id, '2026-01-01', 'f-1.jpg')));

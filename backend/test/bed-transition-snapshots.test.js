@@ -77,7 +77,7 @@ test('an aged-out transition takes its image with it', () => {
   // The image is named by the row id, so deleting the rows first would leave a file nobody can name.
   // This is the ordering bug the implementation is written to avoid, pinned here.
   const id = recordBedTransition(CAM, TRANSITION.INTO_BED, 0.2);
-  const file = path.join(TMP, 'transition-snapshots', `${id}.jpg`);
+  const file = path.join(TMP, 'private', 'transition-snapshots', `${id}.jpg`); // #553 phase 2a: next to the database
   fs.writeFileSync(file, Buffer.from([0xff, 0xd8, 0xff]));
   db.prepare("UPDATE bed_transitions SET snapshot = 1, created_at = datetime('now', '-90 days') WHERE id = ?").run(id);
   assert.ok(fs.existsSync(file));
@@ -90,7 +90,7 @@ test('an aged-out transition takes its image with it', () => {
 
 test('a recent transition and its image are left alone', () => {
   const id = recordBedTransition(CAM, TRANSITION.INTO_BED, 0.2);
-  const file = path.join(TMP, 'transition-snapshots', `${id}.jpg`);
+  const file = path.join(TMP, 'private', 'transition-snapshots', `${id}.jpg`); // #553 phase 2a: next to the database
   fs.writeFileSync(file, Buffer.from([0xff, 0xd8, 0xff]));
   db.prepare('UPDATE bed_transitions SET snapshot = 1 WHERE id = ?').run(id);
 

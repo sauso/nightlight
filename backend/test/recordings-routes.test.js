@@ -191,6 +191,58 @@ describe('GET /:id/video and /:id/thumb', () => {
     assert.equal((await call(url(`/${r.id}/thumb`), { token })).status, 404);
   });
 
+  // #553 phase 2b: ffmpeg may run as another user and write these files, so a file under a clip's name is untrusted.
+  // The secret stands for the database; a response that carries it would be a defect.
+  describe('★ #553 a link planted under the recording\'s name is not served, and deleting the recording leaves its target', () => {
+    const SECRET_FILE = () => path.join(ABS, '..', 'planted-secret.db');
+    const SECRET = 'SQLite format 3 secret rows';
+    beforeEach(() => fs.writeFileSync(SECRET_FILE(), SECRET));
+
+    test('a hard link (two names): 404 on the video, the secret is not in the body, and DELETE removes only the name', async () => {
+      const r = makeRecording();
+      fs.rmSync(r.abs);
+      fs.linkSync(SECRET_FILE(), r.abs);
+      const res = await call(url(`/${r.id}/video`), { token });
+      assert.equal(res.status, 404);
+      assert.ok(!String(res.raw ?? JSON.stringify(res.body)).includes('SQLite format'), 'the secret was served');
+      assert.equal((await call(url(`/${r.id}`), { method: 'DELETE', token })).status, 200);
+      assert.equal(fs.existsSync(r.abs), false, 'the planted name was left behind');
+      assert.equal(fs.readFileSync(SECRET_FILE(), 'utf8'), SECRET, 'the file the link pointed at was damaged');
+    });
+
+    test('a symbolic link: 404, nothing served, DELETE removes the link and leaves the target', async (t) => {
+      const r = makeRecording();
+      fs.rmSync(r.abs);
+      try { fs.symlinkSync(SECRET_FILE(), r.abs); } catch { t.skip('no symbolic links on this machine'); return; }
+      const res = await call(url(`/${r.id}/video`), { token });
+      assert.equal(res.status, 404);
+      assert.ok(!JSON.stringify(res.body).includes('SQLite format'));
+      assert.equal((await call(url(`/${r.id}`), { method: 'DELETE', token })).status, 200);
+      assert.equal(fs.existsSync(SECRET_FILE()), true, 'the target of the link was deleted');
+      assert.equal(fs.readFileSync(SECRET_FILE(), 'utf8'), SECRET);
+    });
+
+    test('control: the same recording with an ordinary file is served', async () => {
+      const r = makeRecording();
+      assert.equal((await call(url(`/${r.id}/video`), { token })).status, 200);
+    });
+  });
+
+  test('★ #553 a Range request is answered as sendFile did: 206 with Content-Range, 416 past the end', async () => {
+    const r = makeRecording(); // the file holds the 9 bytes "mp4 bytes"
+    const part = await fetch(url(`/${r.id}/video`), { headers: { Authorization: `Bearer ${token}`, Range: 'bytes=4-8' } });
+    assert.equal(part.status, 206);
+    assert.equal(part.headers.get('content-range'), 'bytes 4-8/9');
+    assert.equal(await part.text(), 'bytes');
+    const past = await fetch(url(`/${r.id}/video`), { headers: { Authorization: `Bearer ${token}`, Range: 'bytes=99-' } });
+    assert.equal(past.status, 416);
+    assert.equal(past.headers.get('content-range'), 'bytes */9');
+    const head = await fetch(url(`/${r.id}/video`), { method: 'HEAD', headers: { Authorization: `Bearer ${token}` } });
+    assert.equal(head.status, 200);
+    assert.equal(head.headers.get('content-length'), '9');
+    assert.equal(head.headers.get('content-type'), 'video/mp4');
+  });
+
   test('a recording with no thumbnail recorded is a 404 on /thumb but still plays', async () => {
     const r = makeRecording();
     fs.rmSync(r.thumbAbs, { force: true });

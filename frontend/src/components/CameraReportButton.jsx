@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { FileText, ExternalLink } from 'lucide-react';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
+import { useLater } from '../lib/useLater.js';
 import { isNativeApp, hasFileExport, saveToDownloads, saveTextFile } from '../lib/nativeBridge.js';
 
 // Where to send an unsupported-camera report. Title/body prefilled so the attachment + the one thing
@@ -25,6 +26,7 @@ export default function CameraReportButton({ payload }) {
   const [error, setError] = useState('');
   const [savedMsg, setSavedMsg] = useState('');
   const busyRef = useRef(false);
+  const later = useLater(); // the idle reset after a report; cancelled if the button goes away first (#855)
 
   async function build() {
     if (busyRef.current) return;
@@ -61,7 +63,7 @@ export default function CameraReportButton({ payload }) {
       }
       setSavedMsg(msg);
       setState('done');
-      setTimeout(() => { setState('idle'); setSavedMsg(''); busyRef.current = false; }, 4000);
+      later(() => { setState('idle'); setSavedMsg(''); busyRef.current = false; }, 4000);
     } catch (err) {
       setError(err.message || 'Failed to build the report');
       setState('idle');

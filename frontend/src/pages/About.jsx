@@ -51,6 +51,14 @@ export default function About() {
             <div className="camera-tile__sub">
               Self-hosted baby monitor — no cloud, no subscription.
             </div>
+            {/* #553: whether ffmpeg and MediaMTX run as a separate user. Shown only when the server says (an older
+                server sends no field). 'off' is not an error: it is the documented fallback on a host that cannot
+                do it, or the kill switch (docs/operations.md, "Media isolation"). */}
+            {(info?.mediaIsolation === 'on' || info?.mediaIsolation === 'off') && (
+              <div className="camera-tile__sub">
+                Media isolation: {info.mediaIsolation}
+              </div>
+            )}
           </div>
         </div>
 

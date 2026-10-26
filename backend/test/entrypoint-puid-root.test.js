@@ -23,6 +23,7 @@ const STUBS = {
   groupmod: '#!/bin/sh\nexit 0\n',
   chown: '#!/bin/sh\nexit 0\n',
   'su-exec': '#!/bin/sh\nshift\nexec "$@"\n',
+  node: '#!/bin/sh\nexit 0\n', // the #553 phase 2a move into private/: not what this file tests
 };
 let ROOT;
 let STUB_DIR;
@@ -37,7 +38,9 @@ after(() => fs.rmSync(ROOT, { recursive: true, force: true }));
 
 function run(puid) {
   const data = fs.mkdtempSync(path.join(ROOT, 'data-'));
-  const env = { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: data };
+  // NIGHTLIGHT_MEDIA_ISOLATION=0: isolation is asked for by default since #553 phase 4, and its own PUID=0 refusal also
+  // contains "PUID=0" (entrypoint-media-isolation.test.js pins that one). This file is about the #555 warning alone.
+  const env = { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: data, NIGHTLIGHT_MEDIA_ISOLATION: '0' };
   if (puid !== undefined) env.PUID = puid;
   const r = spawnSync('/bin/sh', [SCRIPT, '/bin/sh', '-c', 'echo APP-RAN'], { env, encoding: 'utf8', timeout: 30_000 });
   return { warnings: r.stderr.split('\n').filter((l) => l.includes('PUID=0')), ran: r.stdout.includes('APP-RAN'), r };

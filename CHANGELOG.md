@@ -9,6 +9,132 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-10-26
+
+### Added
+
+- **Optional container hardening, documented and tested (#553).** You can now run the container with only the six
+  Linux capabilities it needs (`--cap-drop=ALL` plus CHOWN, DAC_OVERRIDE, FOWNER, KILL, SETUID and SETGID) and
+  `no-new-privileges`. Nothing changes unless you add it: the Compose file has the lines commented out, and the Unraid
+  template is unchanged. A new CI job starts the image that way and checks that it streams, stops cleanly and starts
+  again on the same data, and that leaving out KILL, DAC_OVERRIDE or FOWNER fails the way the docs describe. It is
+  tested on bridge networking; it has also been tried by hand on one Unraid install, with host networking and with a
+  dedicated LAN address, which is not an automated check. On its own it does not separate FFmpeg from
+  the database (media isolation, further down, does that). See [docs/operations.md](docs/operations.md#hardening-the-container-optional), including the exact
+  Unraid **Extra Parameters** (keep the existing log and stop-timeout flags) and how to check it worked.
+
+### Changed
+
+- **The database and the app's secrets now live in a private folder in the data directory, moved there for you at
+  the first start (#553).** `babymonitor.db` (with its `-wal`/`-shm`), `.jwt_secret`, the Firebase files, the alert
+  and bed-change pictures and online backups move into `DATA_DIR/private/`, which is always `700` and owned by
+  `PUID:PGID`, whatever `UMASK` says. It is the groundwork for running FFmpeg as a separate user later. The move
+  runs before the app starts and says so in one `[entrypoint] private layout:` log line; nothing is deleted or
+  written over, a symbolic link is left where it is, and a database that cannot be moved safely stays where it is
+  (the line is then a warning saying why). Sign-ins, passwords and settings carry over. Before you upgrade:
+  - ⚠️ **It is one way.** An older version on the moved data directory starts empty and asks for first-run setup;
+    [Rolling back](docs/operations.md#6-rolling-back) has the commands to move the files back first.
+  - ⚠️ **A scheduled backup that runs the old `docker exec … node -e` command stops working** after the move (it
+    fails and writes nothing). Use `docker exec nightlight node src/scripts/backup-db.js`, which writes the copy into
+    `private/`.
+  - ⚠️ **`UMASK=022` no longer lets another user read the database or the secrets.** Run such a backup job as root.
+  - A restore goes into `private/`. A database restored to the top level of a moved install is set aside in
+    `private/legacy-<date>-<time>/`, not used ([Two copies of the database](docs/operations.md#two-copies-of-the-database)).
+    A `-wal` or pictures left in `private/` by a database deleted from there are set aside before another moves in.
+  - Two containers on one data directory are not supported.
+  - Firebase files are still dropped at the top level, and moved at the next start; to replace them later, replace
+    them inside `private/`.
+  `GET /api/about` and the diagnostics bundle report the layout and any set-aside copy (`dataLayout`,
+  `layoutConflict`). Also corrected in the docs: the Firebase credentials are files, not stored in the database, and
+  the data volume holds no MediaMTX configuration or logs. See [The private folder](docs/operations.md#the-private-folder).
+- **Password guesses are now limited per account, whatever address a request claims (#553).** Sign-in and the three
+  "enter your current password" steps (change password, set up two-factor, turn two-factor off) already had
+  per-address limits, which a program that can reach Nightlight on `127.0.0.1` could get around by naming a new
+  address in every request. After **30** wrong passwords on an account, each further guess has to wait **1 minute**,
+  doubling to a maximum of **15 minutes**; a correct password resets it, every 15 minutes without a wrong one forgives one (so a guesser gets 30 and then one guess per 15 minutes, however they pace themselves), and
+  changing the password empties it at once. One device mistyping stops at the existing 20-per-15-minutes limit
+  first, so an ordinary mistyped password does not get there. The trade-off, stated in
+  [docs/mfa.md](docs/mfa.md#password-guesses-553): someone who can reach your sign-in page can slow that account's
+  own sign-in, though never guess faster; the ways out are waiting, changing the password, or restarting the
+  container. The counts are in memory. No setting.
+- **An alert or link from another server now asks before the app switches, and only offers servers the app
+  already knows (#559).** Tapping an alert that names a different server used to switch the Android app to it
+  straight away. Now a server saved in the app gets a **Switch server?** question (with **Stay** selected
+  first), and a server the app has never connected to is refused with an explanation and nothing changes; add
+  it from **Settings → Change server** if it is yours. An alert from the server you are on, including the
+  address it uses in its own links, opens as before. This covers the app's own (Firebase) alerts from this
+  version of the server on; Pushover, ntfy and Gotify alert links also need the next Android app release.
+  GET `/api/about` now also reports `publicBaseUrl`, the address the server puts in its alert links (or
+  `null`). See [docs/mobile.md](docs/mobile.md#tapping-an-alert-from-another-server).
+- **The weekly image rebuild now tests the rebuilt image before `:latest` or `:dev` moves to it (#566).** Every
+  Monday those two tags are rebuilt with fresh base images to pick up security fixes, and until now the rebuild
+  replaced them straight away, untested. Now each image is built once, started with a synthetic camera that has to
+  deliver live video and AAC audio (on arm64 it only has to start), and only then is the tag pointed at that same
+  image. If a check fails, the tag keeps the image it had. Release tags (`vX.Y.Z`) are still never rebuilt. See
+  [docs/operations.md](docs/operations.md#the-weekly-rebuild).
+- **Groundwork for running FFmpeg and MediaMTX as a separate user (#553, first step).** This is the machinery; the last entry
+  in this list turns it on. The image now contains util-linux's `setpriv` and a second user for the media processes (`nlmedia`, uid and
+  gid 1700, used only inside the container), and the start-up script can test whether that separation would work on
+  your system and fall back to the usual start if not. Two things you might notice: GET `/api/about` now also
+  reports `mediaIsolation` (`"on"` or `"off"`), and if FFmpeg or MediaMTX cannot be run at all (exit status 126 or
+  127) the app now retries with a growing pause, up to a minute, and logs it once and then every tenth time, instead
+  of restarting every few seconds with a line each time; this covers the stream, the recording ring and the motion
+  and sound detectors, and such a failure no longer counts towards "does this camera have a microphone?". A signal
+  the app could not deliver to one of these processes is no longer mistaken for a process that failed to start,
+  which could start a second MediaMTX beside the running one.
+- **Running FFmpeg and MediaMTX as a separate user now works end to end (#553, second step).**
+  With isolation on, recordings, clips, thumbnails and the ring buffer are written by the media user into
+  folders only it can write in, and the app reads, serves and deletes what it wrote more carefully: it opens a file
+  without following a link, refuses one with a second name (a hard link to the database would otherwise pass), serves
+  from the file it checked, deletes one file at a time, and ignores any ring file that is not named like its own
+  segments. A clip request returns what it always did (status, headers, seeking). The start-up script prepares the
+  folders (data directory `710`, clips folder `750`, both in the media group), and keeps isolation off, with one
+  warning, if the database, a backup, a snapshot folder, `.jwt_secret` or a Firebase file is still at the top level of
+  the data directory, if a folder it would open to the media group belongs to another user, or if a trial of the folders
+  (run in the background, 30 seconds at most) fails. Whether it is on by default is the next entry. Either way, one thing
+  differs from before: the temporary
+  file the clips-folder check writes (`.write-test`) now lives in `clips/.app/`, and the concat lists FFmpeg cuts from
+  moved from the ring folder to `clips/.concat/`; existing clips and files are left as they are. If a start ends with
+  isolation off after an earlier one had it on, the data directory and clips folder are given back to `PUID:PGID` once
+  so clips made in between stay playable. See
+  [Media isolation](docs/operations.md#media-isolation).
+- **FFmpeg, ffprobe and MediaMTX now run as a separate user by default (#553).** They parse whatever a camera sends,
+  so a camera that has been taken over could, until now, make them read the database and every stored secret. At
+  every start the container now tries to run them as a separate, unprivileged user (uid `1700`) that cannot open the
+  database, `.jwt_secret` or the app's environment. If your host cannot do that (rootless Docker or Podman, a share
+  that ignores `chmod`, NFS with `root_squash`, `PUID` or `PGID` set to `1700`, `PUID=0`, a missing capability), the
+  container still starts the old way and logs one `media isolation is off` warning; it never refuses to start.
+  **Settings → About** shows "Media isolation: on" or "off". To turn it off, set `NIGHTLIGHT_MEDIA_ISOLATION=0` (or
+  `off`, `false`) and re-create the container; default: not set, which means on; no other value turns it off, and the
+  setting is read only at start. What changes for you: **recordings, clips and timelapses made from now on are owned
+  by user `1700` (mode `660`), so a backup job or SMB user that is not root can no longer read the new ones from the
+  folder**; the ones that already exist stay exactly as they are, and going back to off is automatic (the files are
+  handed back to `PUID`:`PGID` once at that start). What it does **not** stop, stated in
+  [Media isolation](docs/operations.md#media-isolation): the app itself can still become root inside the container
+  (and create setuid files on a share not mounted `nosuid`); all the media programs share one user, so one that is
+  taken over can interfere with the others; MediaMTX's local API has no password and lists the cameras' credentials;
+  and camera passwords are on FFmpeg's command line. Keep cameras on their own network. A rare FFmpeg error that
+  happens to exit with status 126 or 127 within five seconds can be mistaken for "could not run" and retried more
+  slowly (up to a minute) with one extra log line. Not tested by the project: playback on every phone and browser,
+  rootless Docker, rootless Podman, NFS, a real Unraid kernel in CI.
+
+### Fixed
+
+- **The "Photo saved" tick no longer leaves a timer running after you leave the page (#855).** On a child's page and on
+  Account, saving a photo shows a tick for two seconds; its timer kept running if you left the page first. You would
+  not have seen it, but it could raise a stray error, and it made one automated check fail at random. The timer is now
+  cancelled when the page closes, and is not started at all if the photo finishes saving after you have left.
+- **The other "Saved ✓" and "Copied" ticks, and the camera restart and reboot messages, no longer leave a timer running
+  after you leave the page (#855).** The same flaw as the photo tick was in the settings screens (General, Camera,
+  Recording, MQTT and the push services), Account's name and password ticks, the two-factor "Copied" tick, the
+  download tick in the video player, the camera report button and the camera tile (recording error, restarting,
+  rebooting). Nothing you would have seen; it could raise a stray error and make an automated check fail at random.
+- **The pull-to-refresh spinner on the live view no longer leaves a timer running when the live view is torn down (#855).**
+  After a pull-down refresh the spinner is held for a moment before it resets; that timer is now cancelled when the live
+  view is removed from the page (for example on signing out), and is not started if the refresh finishes after that.
+  While the live view stays on the page the spinner resets as before, even if you move to another screen.
+  Each of those timers is now cancelled when you leave the screen.
+
 ## [0.43.0] - 2026-10-24
 
 ### Added

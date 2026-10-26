@@ -55,7 +55,9 @@ a trusted device.
   database holds every stored secret), and each start also tightens existing files.
   Range `000`-`077` (owner digit `0`); an invalid value logs a warning and `077` is
   used. If another user or container reads the data directory, set `-e UMASK=022`
-  **before** upgrading - after one start at `077` it only affects new files. Details:
+  **before** upgrading - after one start at `077` it only affects new files. The
+  database and secrets are in the data directory's `private/` folder, which stays `700`
+  at any `UMASK`. Details:
   [Who can read the data directory](https://github.com/sauso/nightlight/blob/main/docs/operations.md#who-can-read-the-data-directory).
 - `STUN_SERVERS` (optional) sets the STUN servers for Low Latency (WebRTC), in the browser
   and in the bundled MediaMTX. Unset = Google's public server
@@ -77,14 +79,27 @@ a trusted device.
   Stopping normally takes a few seconds; the container exits as soon as it's done, so
   the generous timeout costs nothing.
 - An Unraid template is available - see the GitHub repo below for setup.
-- A random session secret is generated and stored in your data directory
-  automatically on first run - nothing to configure.
+- A random session secret is generated and stored in your data directory (in its
+  owner-only `private/` folder) automatically on first run - nothing to configure.
+- Upgrading from 0.43 or earlier moves the database and secrets into that `private/`
+  folder at the first start. It is one way, and a scheduled backup using the old
+  `node -e` command stops working: read
+  [the private folder](https://github.com/sauso/nightlight/blob/main/docs/operations.md#the-private-folder)
+  before you upgrade.
 - `SESSION_TTL_DAYS` (optional) sets how many days a sign-in lasts, counted from
   sign-in: range `7`-`30`, blank = `30` (the default); an invalid value logs a
   warning and `30` is used. A phone is signed out at the same time of day it signed
   in and gets no Nightlight push alerts until it signs in again; lowering the value
   signs out older sign-ins at their next request. Details:
   [How long a sign-in lasts](https://github.com/sauso/nightlight/blob/main/SECURITY.md#how-long-a-sign-in-lasts-and-where-it-is-kept).
+- Media isolation is on by default: FFmpeg, ffprobe and MediaMTX run as a separate
+  user inside the container, so a camera stream that takes one over cannot read the
+  database or your secrets. New recordings are owned by user `1700` rather than
+  `PUID`. On a host that can't support it (rootless Docker or Podman, a share that
+  ignores `chmod`, NFS with `root_squash`) the container still starts and logs one
+  warning. `-e NIGHTLIGHT_MEDIA_ISOLATION=0` (or `off`, `false`) turns it off.
+  Limits and details:
+  [Media isolation](https://github.com/sauso/nightlight/blob/main/docs/operations.md#media-isolation).
 
 ### Links
 

@@ -1,6 +1,6 @@
-import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
+import { jailedMediaFile, resolveUnder, unlinkMediaFile } from './mediaFiles.js';
 import { logger } from './logger.js';
 import {
   CLIPS_DIR,
@@ -142,7 +142,7 @@ function discardIfRowGone(changes, res, what) {
   if (changes !== 0) return false;
   for (const f of [res.file, res.thumb]) {
     if (!f) continue;
-    try { fs.rmSync(f, { force: true }); } catch (e) { logger.error(`[rec] could not remove ${f}: ${e.message}`); }
+    try { unlinkMediaFile(f); } catch (e) { logger.error(`[rec] could not remove ${f}: ${e.message}`); }
   }
   logger.info(`[rec] ${what} was removed while it was being cut; its files were deleted`);
   return true;
@@ -482,13 +482,9 @@ export function listChildRecordings(childId, limit = 50) {
 }
 
 // A jailed { root, path } for a ready recording's MP4 (or thumbnail), or null — same containment guard
-// as clips and timelapses (resolve under CLIPS_DIR, reject any escape).
-function jailedFile(relPath) {
-  if (!relPath) return null;
-  const abs = path.resolve(CLIPS_DIR, relPath);
-  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;
-  return fs.existsSync(abs) ? { root: CLIPS_DIR, path: path.relative(CLIPS_DIR, abs) } : null;
-}
+// as clips and timelapses (resolve under CLIPS_DIR, reject any escape), and since #553 phase 2b the file must be a
+// plain one-name file (mediaFiles.js), not a link or a hard link the media user planted under that name.
+const jailedFile = (relPath) => jailedMediaFile(relPath, CLIPS_DIR);
 
 export function getRecordingVideoFile(id) {
   const row = db.prepare("SELECT path, status FROM recordings WHERE id = ?").get(id);
@@ -514,8 +510,10 @@ export function deleteRecording(id) {
   const row = db.prepare('SELECT path, thumb_path FROM recordings WHERE id = ?').get(id);
   if (!row) return false;
   for (const rel of [row.path, row.thumb_path]) {
-    const f = jailedFile(rel);
-    if (f) { try { fs.rmSync(path.resolve(f.root, f.path), { force: true }); } catch { /* ignore */ } }
+    // Not through jailedFile: a file that is not servable (a planted hard link, say) must still lose its NAME here.
+    // unlinkMediaFile is a flat unlink, jailed under CLIPS_DIR, that never follows a link.
+    const abs = resolveUnder(rel, CLIPS_DIR);
+    if (abs) { try { unlinkMediaFile(abs); } catch { /* ignore */ } }
   }
   db.prepare('DELETE FROM recordings WHERE id = ?').run(id);
   return true;

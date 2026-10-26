@@ -288,7 +288,7 @@ const publicDir = path.join(__dirname, '..', 'public');
 app.use(express.static(publicDir));
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
-  res.sendFile(path.join(publicDir, 'index.html'));
+  res.sendFile(path.join(publicDir, 'index.html')); // fence-ok: the built web app, not a media file
 });
 
 // The error handler MUST be registered after every route above (Express only passes an error to handlers
@@ -302,7 +302,8 @@ const server = app.listen(PORT, () => {
   logger.info(`Baby monitor backend listening on port ${PORT}`);
   // #549: the mask this process (and every FFmpeg/MediaMTX it starts) creates files with, and the database's mode.
   // Read-only and cannot throw; see lib/dataDirModes.js and docs/operations.md, "Who can read the data directory".
-  logDataDirModes(DATA_DIR);
+  // #553 phase 2a: the database file as opened (db.name), so the line names private/ once the move has run.
+  logDataDirModes(DATA_DIR, { dbPath: db.name });
   // From here on a background fault should be survived, not fatal. BEFORE this point it is a failed
   // start, and the guards exit non-zero instead of leaving a healthy-looking container with no server
   // bound — see the boot/steady-state note in lib/processGuards.js.

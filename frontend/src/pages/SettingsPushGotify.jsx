@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
+import { useLater } from '../lib/useLater.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 import SecretField from '../components/SecretField.jsx';
@@ -34,6 +35,7 @@ export default function SettingsPushGotify() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  const later = useLater(); // blanks the "Saved" tick; cancelled when the page goes away (#855)
   const [testMsg, setTestMsg] = useState(null);
 
   useEffect(() => {
@@ -48,7 +50,7 @@ export default function SettingsPushGotify() {
     setBusy(true); setError(''); setSaved(false); setTestMsg(null);
     try {
       const next = await api.put('/gotify/config', { enabled: form.enabled, server_url: form.server_url, app_token: appToken, priority: form.priority });
-      setForm(next); setLastSaved(next); setConfigLoaded(true); setAppToken(''); setSaved(true); setTimeout(() => setSaved(false), 2500);
+      setForm(next); setLastSaved(next); setConfigLoaded(true); setAppToken(''); setSaved(true); later(() => setSaved(false), 2500);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 

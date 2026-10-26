@@ -4,6 +4,8 @@ import db from '../db.js';
 import { logger } from './logger.js';
 import { safeInterval } from './processGuards.js';
 import { CLIPS_DIR, PROBE_DEADLINE_MS, runFfmpeg } from './clipRecorder.js';
+import { jailedMediaFile, resolveUnder, statMediaFile, unlinkMediaFile } from './mediaFiles.js';
+import { ensureClipsFolder, shareInputFile, writeInputFile } from './mediaLayout.js';
 import { clipStorageReady, hasMinFreeSpace } from './clipStorage.js';
 import { captureSnapshot, fetchHttpSnapshot } from './snapshot.js';
 import {
@@ -46,8 +48,11 @@ export function frameDir(childId, nightDate) {
 function safeReaddir(dir) {
   try { return fs.readdirSync(dir); } catch { return []; }
 }
+// Recursive removal is for the FRAME folders only: .timelapse-frames/** is written by the app alone (the media user
+// can read it, not write it), so nothing in it can be swapped under the walk. Never call it on a folder the media
+// user writes into (timelapse/<child>): that is removeLeafDir's flat sweep (mediaFiles.js, #553 phase 2b).
 function rmrf(dir) {
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  try { fs.rmSync(dir, { recursive: true, force: true }); /* app-only */ } catch { /* ignore */ }
 }
 
 // --- DB helpers (own table; see db.js) ---
@@ -90,13 +95,9 @@ export function listChildTimelapses(childId, limit = 30) {
 }
 
 // A jailed { root, path } for a ready timelapse's MP4 (or thumbnail), or null — used by the serving
-// route, same containment guard as clips (resolve under CLIPS_DIR, reject any escape).
-function jailedFile(relPath) {
-  if (!relPath) return null;
-  const abs = path.resolve(CLIPS_DIR, relPath);
-  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;
-  return fs.existsSync(abs) ? { root: CLIPS_DIR, path: path.relative(CLIPS_DIR, abs) } : null;
-}
+// route, same containment guard as clips (resolve under CLIPS_DIR, reject any escape), and a plain one-name file
+// (mediaFiles.js, #553 phase 2b).
+const jailedFile = (relPath) => jailedMediaFile(relPath, CLIPS_DIR);
 export function getTimelapseVideoFile(id) {
   const row = db.prepare("SELECT path, status FROM timelapses WHERE id = ?").get(id);
   if (!row || row.status !== 'ready') return null;
@@ -134,10 +135,11 @@ export async function captureChildFrame(childId, nightDate) {
   // started, so disabling/reassigning/deleting the camera mid-capture can't produce a late frame
   // from a camera the timelapse is no longer supposed to include.
   if (!isStillEligibleStmt.get(cam.id, childId)) return;
-  const dir = frameDir(childId, nightDate);
-  fs.mkdirSync(dir, { recursive: true });
+  // The frame folders are traverse folders and a frame is an INPUT the media user (ffmpeg) reads and never changes
+  // (mediaLayout.js): 0640, group = media, with isolation on.
+  const dir = ensureClipsFolder(['.timelapse-frames', safeSeg(childId), safeSeg(nightDate)]);
   // Fixed-width epoch names sort lexically = chronologically, so assembly just sorts the dir.
-  fs.writeFileSync(path.join(dir, `f-${Date.now()}.jpg`), buf);
+  writeInputFile(path.join(dir, `f-${Date.now()}.jpg`), buf);
 }
 
 let sampleTimer = null;
@@ -199,11 +201,16 @@ export function stopTimelapseSampler() {
 function buildSeqDir(dir, frames) {
   const seqDir = path.join(dir, '.seq');
   rmrf(seqDir);
-  fs.mkdirSync(seqDir, { recursive: true });
+  ensureClipsFolder(path.relative(CLIPS_DIR, seqDir).split(path.sep));
   frames.forEach((f, i) => {
     const src = path.join(dir, f);
     const dst = path.join(seqDir, `${String(i + 1).padStart(6, '0')}.jpg`);
-    try { fs.linkSync(src, dst); } catch { fs.copyFileSync(src, dst); }
+    // A frame saved before isolation was switched on is 0600 and the media user could not read it: bring it to the
+    // input mode first (a no-op with isolation off, and for a frame that is already right). The link shares the
+    // inode, so it carries the mode.
+    shareInputFile(src);
+    // Falls back to a copy if a link can't be made; the copy is an input file too (own mode and group).
+    try { fs.linkSync(src, dst); /* app-only */ } catch { writeInputFile(dst, fs.readFileSync(src) /* app-only */); }
   });
   return seqDir;
 }
@@ -215,8 +222,9 @@ function pruneChild(childId) {
     .all(childId);
   for (const row of rows.slice(KEEP_PER_CHILD)) {
     for (const rel of [row.path, row.thumb_path]) {
-      const f = jailedFile(rel);
-      if (f) { try { fs.rmSync(path.resolve(f.root, f.path), { force: true }); } catch { /* ignore */ } }
+      // unlinkMediaFile jails the path under CLIPS_DIR itself (and is a flat unlink): the folder is media-writable.
+      const abs = resolveUnder(rel, CLIPS_DIR);
+      if (abs) { try { unlinkMediaFile(abs); } catch { /* ignore */ } }
     }
     try { db.prepare('DELETE FROM timelapses WHERE id = ?').run(row.id); } catch { /* ignore */ }
   }
@@ -238,7 +246,7 @@ export function discardTimelapseFrames(childId, nightDate, reason = 'no one in t
   const dir = frameDir(childId, nightDate);
   const frames = safeReaddir(dir).filter((f) => /^f-\d+\.jpg$/.test(f));
   rmrf(dir);
-  if (fs.existsSync(dir)) {
+  if (fs.existsSync(dir /* app-only */)) {
     logger.warn(`[timelapse] child ${childId} ${nightDate}: could not delete ${dir} (${reason}); tried again on the next pass`);
     return -1;
   }
@@ -257,9 +265,8 @@ export function deleteTimelapse(id) {
   const row = db.prepare('SELECT id, path, thumb_path FROM timelapses WHERE id = ?').get(id);
   if (!row) return false;
   for (const rel of [row.path, row.thumb_path]) {
-    if (!rel) continue;
-    const f = jailedFile(rel);
-    if (f) { try { fs.unlinkSync(path.join(f.root, f.path)); } catch { /* already gone */ } }
+    const abs = resolveUnder(rel, CLIPS_DIR);
+    if (abs) { try { unlinkMediaFile(abs); } catch { /* already gone */ } }
   }
   db.prepare('DELETE FROM timelapses WHERE id = ?').run(id);
   logger.info(`[timelapse] deleted timelapse ${id}`);
@@ -308,11 +315,16 @@ async function assembleOnce(childId, nightDate) {
     seqDir = buildSeqDir(dir, frames);
     const fps = Math.min(MAX_FPS, Math.max(MIN_FPS, Math.round(frames.length / TARGET_DURATION_SEC)));
 
-    const outDir = path.join(CLIPS_DIR, OUT_SUBDIR, safeSeg(childId));
-    fs.mkdirSync(outDir, { recursive: true });
+    // timelapse/<child> is a media-writable LEAF: ffmpeg writes the video and the thumbnail into it (mediaLayout.js).
+    const outDir = ensureClipsFolder([OUT_SUBDIR, safeSeg(childId)], { leaf: true });
     const base = safeSeg(nightDate);
     const outFile = path.join(outDir, `${base}.mp4`);
     const thumbFile = path.join(outDir, `${base}.jpg`);
+    // Assembly is idempotent (a re-run overwrites). With isolation on the old file is the APP's (written before it was
+    // switched on, or by an earlier assembly of a re-scored night) and the media user could not overwrite it, so the
+    // names are cleared first; ffmpeg's -y would have replaced them anyway.
+    unlinkMediaFile(outFile);
+    unlinkMediaFile(thumbFile);
 
     // #781 reuses #773's unmeasured 120 s plus 1 s per 2 MB stall hypothesis. The
     // [timelapse] assemble line records waits for calibration. A slower machine keeps
@@ -335,15 +347,16 @@ async function assembleOnce(childId, nightDate) {
       '-i', outFile, '-frames:v', '1', '-q:v', '4', '-y', thumbFile,
     ], { deadlineMs: PROBE_DEADLINE_MS }).catch(() => {
       // #781: a timed-out thumbnail can leave a partial JPG; a ready row must not point at it.
-      try { fs.rmSync(thumbFile, { force: true }); } catch { /* already gone */ }
+      try { unlinkMediaFile(thumbFile); } catch { /* not a plain file: leave it */ }
     });
 
-    const bytes = (() => { try { return fs.statSync(outFile).size; } catch { return null; } })();
+    // statMediaFile (lstat): a link named like the video must not report its target's size (#553 phase 2b).
+    const bytes = statMediaFile(outFile)?.size ?? null;
     const durationS = Math.round(frames.length / fps);
     setReadyStmt.run({
       id,
       path: path.relative(CLIPS_DIR, outFile),
-      thumb_path: fs.existsSync(thumbFile) ? path.relative(CLIPS_DIR, thumbFile) : null,
+      thumb_path: statMediaFile(thumbFile) ? path.relative(CLIPS_DIR, thumbFile) : null,
       frame_count: frames.length,
       duration_s: durationS,
       bytes,
@@ -591,7 +604,7 @@ function isCalendarDate(s) {
 }
 // lstat describes a link itself, so a link (or a stray file) is never a directory here and is left alone.
 function isRealDir(p) {
-  try { return fs.lstatSync(p).isDirectory(); } catch { return false; }
+  try { return fs.lstatSync(p /* app-only */).isDirectory(); } catch { return false; }
 }
 
 export function discardExpiredFrames() {

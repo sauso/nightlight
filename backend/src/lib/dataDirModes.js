@@ -3,12 +3,17 @@
 // processes it starts (a umask is inherited by every child). After an upgrade, `docker logs` (on staging,
 // `hx.sh logs`) shows both lines; docs/operations.md, "Who can read the data directory", says what they should read.
 //
-//   [data-dir] app umask 077; babymonitor.db mode 600
+//   [data-dir] app umask 077; private/babymonitor.db mode 600
+//
+// #553 phase 2a: the database is named by its path inside the data directory, the one the app actually OPENED (db.js,
+// DB_PATH): `private/babymonitor.db` once the start-up move has run, `babymonitor.db` on an install it has not reached.
+// Without that it would stat the old top-level name and say `unknown` forever after the move.
 //
 // Read-only and never throws: a log line must not be able to stop the server starting.
 import fs from 'node:fs';
 import path from 'node:path';
 import { logger } from './logger.js';
+import { resolveDbPath } from './dataPaths.js';
 
 // The mask is read from /proc/self/status (Linux 4.7+, every Docker host) and NOT from `process.umask()`. Called
 // without an argument, process.umask() SETS the mask to 0 and back again (Node's DEP0139): for that instant any file a
@@ -22,14 +27,15 @@ export function parseUmask(procStatus) {
 // Three octal digits, as `stat -c %a` and the entrypoint's own line print them, so the two lines read the same.
 const octal = (n) => (n & 0o777).toString(8).padStart(3, '0');
 
-export function formatDataDirModes({ umask, dbMode }) {
+export function formatDataDirModes({ umask, dbMode, dbName = 'babymonitor.db' }) {
   return (
     `[data-dir] app umask ${umask == null ? 'unknown' : octal(umask)}; ` +
-    `babymonitor.db mode ${dbMode == null ? 'unknown' : octal(dbMode)}`
+    `${dbName} mode ${dbMode == null ? 'unknown' : octal(dbMode)}`
   );
 }
 
 export function logDataDirModes(dataDir, {
+  dbPath = resolveDbPath(dataDir),
   readStatus = () => fs.readFileSync('/proc/self/status', 'utf8'),
   stat = fs.statSync,
   log = (line) => logger.info(line),
@@ -37,6 +43,8 @@ export function logDataDirModes(dataDir, {
   let umask = null;
   try { umask = parseUmask(readStatus()); } catch { /* no /proc: reported as unknown */ }
   let dbMode = null;
-  try { dbMode = stat(path.join(dataDir, 'babymonitor.db')).mode; } catch { /* reported as unknown */ }
-  log(formatDataDirModes({ umask, dbMode }));
+  try { dbMode = stat(dbPath).mode; } catch { /* reported as unknown */ }
+  // Forward slashes whatever the platform, so the line reads the same as the entrypoint's.
+  const dbName = path.relative(dataDir, dbPath).split(path.sep).join('/');
+  log(formatDataDirModes({ umask, dbMode, dbName }));
 }

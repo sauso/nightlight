@@ -40,12 +40,15 @@ const skipNotRoot = skip || (IS_ROOT ? false : 'needs root to create a file owne
 const UID = process.getuid?.() ?? 0;
 const GID = process.getgid?.() ?? 0;
 
+// node: the #553 phase 2a move into private/ does nothing here (entrypoint-private-layout.test.js tests it); in the
+// BusyBox run as root the host's better-sqlite3 could not even load.
 const STUBS = {
   id: '#!/bin/sh\ncase "$1" in -u) echo 99 ;; -g) echo 100 ;; *) exit 1 ;; esac\n',
   usermod: '#!/bin/sh\nexit 0\n',
   groupmod: '#!/bin/sh\nexit 0\n',
   chown: '#!/bin/sh\necho "STUB chown $*"\n',
   'su-exec': '#!/bin/sh\nshift\nexec "$@"\n',
+  node: '#!/bin/sh\nexit 0\n',
 };
 
 let ROOT;
@@ -76,7 +79,9 @@ let STAT_STUB_DIR;
 let REAL_STAT;
 
 function run(dataDir, { puid, pgid, fake }) {
-  const env = { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: dataDir, PUID: String(puid), PGID: String(pgid) };
+  // NIGHTLIGHT_MEDIA_ISOLATION=0: these are the ownership-walk tests, run with isolation off (it is asked for by default
+  // since #553 phase 4, and entrypoint-media-isolation.test.js covers the ownership check with it on).
+  const env = { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: dataDir, PUID: String(puid), PGID: String(pgid), NIGHTLIGHT_MEDIA_ISOLATION: '0' };
   if (fake) {
     Object.assign(env, { PATH: `${STAT_STUB_DIR}:${env.PATH}`, NL_REAL_STAT: REAL_STAT, NL_FAKE_SUFFIX: fake.suffix, NL_FAKE_OWNER: fake.owner });
   }
@@ -90,10 +95,15 @@ function run(dataDir, { puid, pgid, fake }) {
 // where the root-only test further down is skipped (#701 review: the -shm entry could be dropped unnoticed).
 describe('#567 entrypoint ownership check: which files it looks at', () => {
   test('#701 chown: the sentinel loop names the data directory, the database, BOTH its sidecar files and .jwt_secret', () => {
+    // #553 phase 2a: in both places (the top level, where an install not moved yet has them, and private/), and
+    // private/ itself, which a `docker exec` as root must not be able to leave root-owned.
     const text = fs.readFileSync(SCRIPT, 'utf8').replace(/\r\n/g, '\n');
     const m = /^for f in (.+); do$/m.exec(text.slice(text.indexOf('NEEDS_CHOWN=')));
     assert.ok(m, 'the sentinel loop is found');
-    assert.deepEqual(m[1].split(/\s+/), ['.', 'babymonitor.db', 'babymonitor.db-wal', 'babymonitor.db-shm', '.jwt_secret']);
+    assert.deepEqual(m[1].split(/\s+/), [
+      '.', 'babymonitor.db', 'babymonitor.db-wal', 'babymonitor.db-shm', '.jwt_secret',
+      'private', 'private/babymonitor.db', 'private/babymonitor.db-wal', 'private/babymonitor.db-shm', 'private/.jwt_secret',
+    ]);
   });
 });
 
@@ -120,17 +130,21 @@ describe('#567 entrypoint ownership pass', { skip }, () => {
     assert.match(r.out, new RegExp(`data directory already owned by ${UID}:${GID}; not walking it`), r.ctx);
   });
 
+  // The stub chown changes nothing, so the private/ the script then makes (as this user) still is not PUID:PGID's,
+  // and is given to them by name: the second, non-recursive chown. In the image the walk ran first, so it is the same.
+  const privateChown = (data) => `STUB chown nightlight:nightlight ${data}/private`;
+
   test('#567 chown: a different PUID (changed since the last start) walks the whole directory once', () => {
     const data = freshData();
     const r = run(data, { puid: UID + 1, pgid: GID });
-    assert.deepEqual(r.chowns, [`STUB chown -R nightlight:nightlight ${data}`], r.ctx);
+    assert.deepEqual(r.chowns, [`STUB chown -R nightlight:nightlight ${data}`, privateChown(data)], r.ctx);
     assert.match(r.out, /ownership of .* is not \d+:\d+; fixing the whole data directory/, r.ctx);
   });
 
   test('#567 chown: a different PGID alone also walks it (the group is half of the pair)', () => {
     const data = freshData();
     const r = run(data, { puid: UID, pgid: GID + 1 });
-    assert.equal(r.chowns.length, 1, r.ctx);
+    assert.equal(r.chowns.filter((c) => c.startsWith('STUB chown -R ')).length, 1, r.ctx);
   });
 
   test('#567 chown: the script still starts the app after skipping, and still prints the umask report line', () => {
@@ -179,7 +193,7 @@ describe('#567 entrypoint ownership pass', { skip }, () => {
     fs.writeFileSync(path.join(data, 'babymonitor.db'), 'x');
     const r = run(data, { puid: UID, pgid: GID, fake: { suffix: 'babymonitor.db', owner: `${UID}:${GID}` } });
     assert.deepEqual(r.chowns, [], r.ctx);
-    assert.match(r.out, /\[entrypoint\] umask .* modes: babymonitor\.db=\d+ /, `the modes line still reads the real stat${r.ctx}`);
+    assert.match(r.out, /\[entrypoint\] umask .* modes: private=\d+ babymonitor\.db=\d+ /, `the modes line still reads the real stat${r.ctx}`);
   });
 
   // #701 review: usermod reads PUID=099 as uid 99, but stat prints 99, so a TEXT comparison never matched and every
@@ -196,7 +210,7 @@ describe('#567 entrypoint ownership pass', { skip }, () => {
   test('#701 review chown: a leading-zero PUID that is really a different id still walks', () => {
     const data = freshData();
     const r = run(data, { puid: `0${UID + 1}`, pgid: `0${GID}` });
-    assert.deepEqual(r.chowns, [`STUB chown -R nightlight:nightlight ${data}`], r.ctx);
+    assert.deepEqual(r.chowns, [`STUB chown -R nightlight:nightlight ${data}`, privateChown(data)], r.ctx);
     assert.match(r.out, new RegExp(`is not ${UID + 1}:${GID}; fixing the whole data directory`), r.ctx);
   });
 
@@ -206,7 +220,9 @@ describe('#567 entrypoint ownership pass', { skip }, () => {
     const data = freshData();
     const r = run(data, { puid: '000', pgid: '00', fake: { suffix: '.', owner: '0:0' } });
     assert.equal(r.status, 0, r.ctx);
-    assert.deepEqual(r.chowns, [], r.ctx);
+    // No walk. (private/, made by this user and not faked, is not 0:0's unless this user IS root, as in CI's BusyBox
+    // run of this file, so it alone may be given to them by name.)
+    assert.deepEqual(r.chowns, UID === 0 && GID === 0 ? [] : [privateChown(data)], r.ctx);
     assert.match(r.out, /data directory already owned by 0:0; not walking it/, r.ctx);
   });
 });

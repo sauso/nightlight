@@ -18,10 +18,35 @@ services:
     # No `healthcheck:` here on purpose: the image defines one (GET /api/health on $PORT, 120s start
     # period), and a container inherits it. It only labels the container healthy/unhealthy
     # (`docker ps`, Unraid's Docker tab); nothing restarts an unhealthy container. See docs/operations.md.
+    # Optional hardening (#553): drop every Linux capability except the six the start-up script needs, and
+    # stop anything in the container gaining privileges again. Off by default. Tested in CI on bridge
+    # networking only (e2e/hardened.sh); also tried by hand with the host networking below, on one install.
+    # Check yours as docs/operations.md, "Hardening the container (optional)", describes. To roll back, comment the lines
+    # out again and run `docker compose up -d`. The same six are listed in e2e/hardened.sh and that docs
+    # section: change all three together.
+    # cap_drop:
+    #   - ALL
+    # cap_add:
+    #   # Root runs the start-up script, then hands the app to PUID:PGID. Each line: what needs it, and
+    #   # what you see without it.
+    #   - CHOWN          # re-owns the data directory to PUID:PGID; without it the container never starts
+    #   - SETUID         # hands the app over to PUID; without it the container never starts
+    #   - SETGID         # ...and to PGID and its groups; without it the container never starts
+    #                    # (SETUID, SETGID and KILL are also what media isolation keeps for the app, to start
+    #                    # and signal FFmpeg as the media user; without KILL isolation turns itself off)
+    #   - DAC_OVERRIDE   # lets root into the owner-only (700) data directory and its private/ folder; without it the first start
+    #                    # works, then a re-created container (an update) never starts, and `docker exec`
+    #                    # commands such as the backup and the two-factor reset fail
+    #   - FOWNER         # takes group/other access off existing files; without it the log warns "could
+    #                    # not tighten" and the data directory keeps that access
+    #   - KILL           # lets the container's init pass the stop signal on to the app; without it every
+    #                    # stop or update kills the app instead, losing a recording in progress (silently)
+    # security_opt:
+    #   - no-new-privileges=true
     network_mode: host
     environment:
       # Which host user/group owns files this container creates in the data volume
-      # (database, logs, MediaMTX config) - matters because Docker otherwise runs the
+      # (the database and secrets in its private/ folder, snapshots, clips) - matters because Docker otherwise runs the
       # app as root, leaving everything root-owned and awkward to manage from outside
       # the container. Defaults to 99/100 - Unraid's own "nobody"/"users" convention.
       # Find your own with `id your_username` if you want something else.
@@ -35,6 +60,13 @@ services:
       # signed in and gets no Nightlight push alerts until it signs in again; lowering it signs out older
       # sign-ins at their next request. See .env.example and SECURITY.md.
       - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-}
+      # Media isolation: FFmpeg, ffprobe and MediaMTX run as a separate user (uid 1700) that cannot read the
+      # database or the secrets. ON by default: blank or unset means "try it", and on a host that cannot do it
+      # (rootless Docker/Podman, a share that ignores chmod, NFS root_squash, PUID/PGID 1700, PUID=0, missing
+      # capabilities) it starts the old way with one warning in the log. 0, off or false turns it off; anything
+      # else is the same as blank. Read at start, so re-create the container after a change. New recordings are
+      # then owned by uid 1700 (existing ones are not). Limits: docs/operations.md, "Media isolation".
+      - NIGHTLIGHT_MEDIA_ISOLATION=${NIGHTLIGHT_MEDIA_ISOLATION:-}
       # Allow Cloudflare Web Analytics' beacon in the Content-Security-Policy: 1/true/yes/on = allow,
       # blank (the default) or 0/false/no/off = blocked; anything else is also blocked, with a warning.
       # Only for a site served through Cloudflare's proxy with Web Analytics on. See .env.example.
@@ -44,7 +76,8 @@ services:
       # stored secret in plaintext, and each start takes group/other access off existing files too.
       # Range 000-077 (3 or 4 octal digits, owner digit 0); an invalid value logs a warning and 077
       # is used. 022 = the old world-readable modes, for when another user/container reads the
-      # volume: set it BEFORE upgrading, it only affects new files after one start at 077.
+      # volume: set it BEFORE upgrading, it only affects new files after one start at 077. It never
+      # opens the volume's private/ folder (database, secrets, snapshots, backups): always 700.
       # See docs/operations.md, "Who can read the data directory".
       - UMASK=${UMASK:-077}
       # Your local timezone (e.g. Australia/Melbourne) - affects log timestamps and the names of the video
@@ -52,7 +85,7 @@ services:
       # Defaults to UTC if unset. Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
       - TZ=${TZ:-UTC}
       # Optional. A random, persistent secret is auto-generated and stored in the
-      # data volume on first run if this is left unset - only set this yourself if
+      # data volume (private/.jwt_secret) on first run if this is left unset - only set this yourself if
       # you specifically want a fixed value (e.g. shared across a migration).
       - JWT_SECRET=${JWT_SECRET:-}
       # Your public IP or DDNS hostname - only needed for Low Latency (WebRTC) mode

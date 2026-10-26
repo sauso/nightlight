@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { mediaIsolationOn, MEDIA_GID } from './childEnv.js';
 
 // The ONE place the STUN_SERVERS setting is read (#558).
 //
@@ -110,11 +111,36 @@ export function renderMediamtxConfig(baseText, urls) {
  *
  * If it cannot be written the BASE file is returned: its list is empty, so the failure mode is "no STUN",
  * never "Google when you asked for none".
+ *
+ * #553, with media isolation on (`mediaGid` set), MediaMTX runs as the media user, another uid, and could not read
+ * the copy above: the app writes it under its own UMASK (default 077, so 0600). So the copy then goes into a FRESH
+ * folder made for this start (mkdtemp: a new random name, created atomically, so nothing can be planted in it
+ * beforehand) with the media group and modes 0750 / 0640: the media user may read it and nothing else. Not the fixed
+ * /tmp/nightlight-mediamtx.yml: /tmp is shared with the media user, who could leave a symlink at that name for the
+ * next start to write THROUGH (fs.protected_symlinks is 0 on some hosts, Unraid among them). The file holds no secret
+ * (mediamtx.yml has none; camera paths are added later through the API). One small folder per container start is left
+ * in the temp directory; it is never reused. If any step fails, the base file is used, as above. The general rule for
+ * app-written files the media user reads is src/lib/mediaLayout.js (writeInputFile); this is the one MediaMTX needs to start.
  */
-export function writeMediamtxConfig(basePath, urls, { tmpDir = os.tmpdir(), log = null } = {}) {
+export function writeMediamtxConfig(basePath, urls, { tmpDir = os.tmpdir(), log = null, mediaGid = mediaIsolationOn() ? MEDIA_GID : null } = {}) {
   try {
-    const out = path.join(tmpDir, 'nightlight-mediamtx.yml');
-    fs.writeFileSync(out, renderMediamtxConfig(fs.readFileSync(basePath, 'utf8'), urls));
+    const text = renderMediamtxConfig(fs.readFileSync(basePath, 'utf8'), urls);
+    if (mediaGid == null) {
+      const out = path.join(tmpDir, 'nightlight-mediamtx.yml');
+      fs.writeFileSync(out, text);
+      return out;
+    }
+    const dir = fs.mkdtempSync(path.join(tmpDir, 'nightlight-mediamtx-'));
+    // The group first, then the mode (chmod sets exactly these bits whatever the umask made). The app may give its
+    // own folder and file to the media group because the PROCESS has that group: the entrypoint's isolated start
+    // passes --groups=PGID,1700 (the kernel checks the process's groups, not /etc/group, and the image does not make
+    // the app a member). No capability is involved.
+    fs.chownSync(dir, -1, mediaGid);
+    fs.chmodSync(dir, 0o750);
+    const out = path.join(dir, 'mediamtx.yml');
+    fs.writeFileSync(out, text, { flag: 'wx', mode: 0o640 });
+    fs.chownSync(out, -1, mediaGid);
+    fs.chmodSync(out, 0o640);
     return out;
   } catch (err) {
     if (log) log.error(`[mediamtx] could not write the STUN-aware config (${err.message}); starting with no STUN servers`);

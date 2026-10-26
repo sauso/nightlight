@@ -613,6 +613,10 @@ Either:
     the lock works as before). So the morning report and push, which are built from the app's own
     summary, say "no one in the bed" for that night, even when you corrected it before they were sent;
     and the sleep ↔ temperature averages, which read only nights the app saved as slept, leave it out.
+    That is deliberate (decided for #755), not an oversight. The averages compare room temperature with
+    wake-ups, and a corrected "no one in the bed" night shows 0 wake-ups only because nothing was measured,
+    not because none happened, so counting it would add an invented calm night. A report built over your own
+    correction would also only repeat what you just typed.
     Only a "no one in the bed" night is promoted; "no data" and "no sleep" nights are not.
   - A corrected total still subtracts every unwatched minute the detector counted for the night,
     even ones outside your corrected times (the camera-outage limit under "Minutes with no video are

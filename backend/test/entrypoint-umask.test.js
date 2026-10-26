@@ -43,12 +43,17 @@ const APP_SCRIPT = [
   'printf "APP done\\n"',
 ].join('; ');
 
+// `node` (#553 phase 2a): the move into private/ (src/scripts/migrate-private-layout.js) is the subject of
+// entrypoint-private-layout.test.js and migrate-private-layout.test.js. Here it does nothing, so these cases see
+// only the mode block; it also keeps this file runnable inside node:24-alpine, whose musl cannot load the
+// better-sqlite3 the Ubuntu host installed.
 const STUBS = {
   id: '#!/bin/sh\ncase "$1" in -u) echo 99 ;; -g) echo 100 ;; *) echo "id stub: unexpected: $*" >&2; exit 1 ;; esac\n',
   usermod: '#!/bin/sh\necho "STUB usermod $*"\n',
   groupmod: '#!/bin/sh\necho "STUB groupmod $*"\n',
   chown: '#!/bin/sh\necho "STUB chown $*"\n',
   'su-exec': '#!/bin/sh\nshift\nexec "$@"\n',
+  node: '#!/bin/sh\nexit 0\n',
 };
 
 let ROOT;
@@ -78,7 +83,9 @@ function modes(dir) {
 
 function runEntrypoint(dataDir, umaskValue) {
   // A clean environment, so a PUID/PGID/UMASK in the CI runner's own environment cannot leak in.
-  const env = { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: dataDir };
+  // NIGHTLIGHT_MEDIA_ISOLATION=0: the umask and tighten-walk behaviour with isolation off (it is asked for by default since
+  // #553 phase 4; the confined walk with it on is in entrypoint-media-isolation.test.js).
+  const env = { PATH: `${STUB_DIR}:${process.env.PATH}`, DATA_DIR: dataDir, NIGHTLIGHT_MEDIA_ISOLATION: '0' };
   if (umaskValue !== undefined) env.UMASK = umaskValue;
   const r = spawnSync(
     '/bin/sh',
@@ -141,8 +148,12 @@ function seedUpgradedInstall(base) {
 
 // The count is what the walk FOUND (printed before chmod runs), so the line says found, not tightened (PR #689).
 const FOUND = (n) => `existing entries with group/other access found: ${n}`;
-const REPORT_TIGHT = 'modes: babymonitor.db=600 babymonitor.db-wal=600 babymonitor.db-shm=600 .jwt_secret=600';
-const REPORT_ABSENT = 'modes: babymonitor.db=absent babymonitor.db-wal=absent babymonitor.db-shm=absent .jwt_secret=absent';
+// #553 phase 2a: private/ first (always 700, by its own chmod), then each file by its path in the data directory, where
+// the app will open it: the top level here, where the database still is (the move is stubbed out); private/ on a
+// first boot, where a new database will be made.
+const REPORT_TIGHT = 'modes: private=700 babymonitor.db=600 babymonitor.db-wal=600 babymonitor.db-shm=600 .jwt_secret=600';
+const REPORT_ABSENT =
+  'modes: private=700 private/babymonitor.db=absent private/babymonitor.db-wal=absent private/babymonitor.db-shm=absent private/.jwt_secret=absent';
 
 describe('entrypoint.sh: data directory file modes (#549)', () => {
   before(() => {
@@ -183,6 +194,7 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
       'clips/cam1/a/b/y.mp4': '600',
       'link-to-file': 'link',
       'link-to-dir': 'link',
+      private: '700',
       'app-file': '600',
       'app-dir': '700',
     });
@@ -229,12 +241,13 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
     assert.equal(r.status, 0, r.ctx);
     assert.deepEqual(r.warnings, [], r.ctx);
     assert.equal(r.appUmask, 0o022, r.ctx);
-    assert.deepEqual(modes(data), { ...before, 'app-file': '644', 'app-dir': '755' });
+    // #553 phase 2a: private/ is new, and 700 even under the opt-out (its own chmod; the umask must not decide it).
+    assert.deepEqual(modes(data), { ...before, private: '700', 'app-file': '644', 'app-dir': '755' });
     assert.deepEqual(modes(outside), outsideBefore);
     assert.equal(
       r.report,
       '[entrypoint] umask 022; existing entries left as they are (UMASK is not 077); ' +
-        'modes: babymonitor.db=644 babymonitor.db-wal=644 babymonitor.db-shm=644 .jwt_secret=644',
+        'modes: private=700 babymonitor.db=644 babymonitor.db-wal=644 babymonitor.db-shm=644 .jwt_secret=644',
       r.ctx
     );
   });
@@ -250,7 +263,7 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
     assert.ok(r.appRan, r.ctx);
     assert.equal(r.appUmask, 0o027, r.ctx);
     assert.equal(modeOf(path.join(base, 'fresh')), '755');
-    assert.deepEqual(modes(data), { '.': '750', 'app-file': '640', 'app-dir': '750' });
+    assert.deepEqual(modes(data), { '.': '750', private: '700', 'app-file': '640', 'app-dir': '750' });
     assert.equal(r.report, `[entrypoint] umask 027; existing entries left as they are (UMASK is not 077); ${REPORT_ABSENT}`, r.ctx);
   });
 
@@ -262,7 +275,7 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
     assert.deepEqual(r.warnings, [], r.ctx);
     // 0 found: mkdir -p already ran under 077. (With the mask set after mkdir, this would say 1.)
     assert.equal(r.report, `[entrypoint] umask 077; ${FOUND(0)}; ${REPORT_ABSENT}`, r.ctx);
-    assert.deepEqual(modes(data), { '.': '700', 'app-file': '600', 'app-dir': '700' });
+    assert.deepEqual(modes(data), { '.': '700', private: '700', 'app-file': '600', 'app-dir': '700' });
   });
 
   test('first boot with the PARENTS missing too: they are 0755, so the app user can reach the data directory', { skip }, () => {
@@ -276,7 +289,7 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
     assert.ok(r.appRan, r.ctx);
     assert.equal(modeOf(path.join(base, 'p1')), '755');
     assert.equal(modeOf(path.join(base, 'p1', 'p2')), '755');
-    assert.deepEqual(modes(data), { '.': '700', 'app-file': '600', 'app-dir': '700' });
+    assert.deepEqual(modes(data), { '.': '700', private: '700', 'app-file': '600', 'app-dir': '700' });
     assert.equal(r.report, `[entrypoint] umask 077; ${FOUND(0)}; ${REPORT_ABSENT}`, r.ctx);
   });
 
@@ -307,18 +320,20 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
     assert.ok(r.appRan, r.ctx);
     assert.deepEqual(r.warnings, [], r.ctx);
     assert.equal(r.appUmask, 0o077, r.ctx);
+    // #553 phase 2a: private/ is made inside the link's target (the app's files go there); only it, nothing else.
     assert.deepEqual(modes(real), {
       '.': '755',
       'babymonitor.db': '644',
       clips: '755',
       'clips/a.mp4': '644',
+      private: '700',
       'app-file': '600',
       'app-dir': '700',
     });
     assert.equal(
       r.report,
       `[entrypoint] umask 077; ${FOUND(0)}; ` +
-        'modes: babymonitor.db=644 babymonitor.db-wal=absent babymonitor.db-shm=absent .jwt_secret=absent',
+        'modes: private=700 babymonitor.db=644 babymonitor.db-wal=absent babymonitor.db-shm=absent private/.jwt_secret=absent',
       r.ctx
     );
   });
@@ -338,13 +353,14 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
       'babymonitor.db': 'link',
       'db-real': '700',
       'db-real/babymonitor.db': '600',
+      private: '700',
       'app-file': '600',
       'app-dir': '700',
     });
     assert.equal(
       r.report,
       `[entrypoint] umask 077; ${FOUND(3)}; ` +
-        'modes: babymonitor.db=600 babymonitor.db-wal=absent babymonitor.db-shm=absent .jwt_secret=absent',
+        'modes: private=700 babymonitor.db=600 babymonitor.db-wal=absent babymonitor.db-shm=absent private/.jwt_secret=absent',
       r.ctx
     );
   });
@@ -392,7 +408,7 @@ describe('entrypoint.sh: data directory file modes (#549)', () => {
       assert.match(r.warnings[0], /could not tighten every entry under .*; starting anyway$/, r.ctx);
       assert.equal(modeOf(path.join(data, 'babymonitor.db')), '600');
       // The count is what was FOUND: the unreadable folder itself has no group/other bit, so it is not in it.
-      assert.ok(r.report.startsWith(`[entrypoint] umask 077; ${FOUND(2)}; modes: babymonitor.db=600 `), r.ctx);
+      assert.ok(r.report.startsWith(`[entrypoint] umask 077; ${FOUND(2)}; modes: private=700 babymonitor.db=600 `), r.ctx);
     } finally {
       fs.chmodSync(locked, 0o700);
     }

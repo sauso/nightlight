@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import Modal from './Modal.jsx';
 import { holdReload } from '../lib/reloadGuard.js';
 import { isNativeApp } from '../lib/nativeBridge.js';
+import { useLater } from '../lib/useLater.js';
 
 // A touch device, where the authenticator is likely on the same phone and a QR code cannot be scanned from
 // the screen it is on. Guarded because jsdom (and old browsers) have no matchMedia.
@@ -23,6 +24,7 @@ const PASSWORD_STEP = {
 // one-time backup codes), and turn off (password-confirmed). Works everywhere (no secure-context
 // requirement), unlike the passkeys planned for a later phase.
 export default function TwoFactorSection() {
+  const later = useLater(); // the "Copied" tick (#855)
   const [status, setStatus] = useState(null); // { enabled, backup_codes_remaining } | null
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -114,7 +116,7 @@ export default function TwoFactorSection() {
 
   function copyCodes() {
     navigator.clipboard?.writeText(backupCodes.join('\n')).then(
-      () => { setCopied(true); setTimeout(() => setCopied(false), 2000); },
+      () => { setCopied(true); later(() => setCopied(false), 2000); },
       () => {},
     );
   }

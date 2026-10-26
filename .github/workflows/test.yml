@@ -56,10 +56,17 @@ jobs:
       #      owned by someone else" cases need root to create such a file, so `npm test` above (the unprivileged
       #      `runner` user) SKIPS them. Here they run, under BusyBox stat, and a skip fails the step. Root inside a
       #      throwaway container only: the job's token permissions are unchanged.
+      #   4. (#553) entrypoint-media-isolation.test.js, the media isolation decision, in the unprivileged run with the
+      #      umask test (BusyBox sh is what production runs it on); and entrypoint-media-isolation-real.test.js as
+      #      ROOT with util-linux's setpriv installed (`apk add setpriv`, as the Dockerfile does): the real drops, the
+      #      real probe. `npm test` above skips that file (not root), so a skip here fails the step.
+      #   5. (#553 phase 2a) entrypoint-private-layout.test.js, the private/ folder and the move into it, in the
+      #      unprivileged run (BusyBox sh, stat, chmod). Its real-move half, entrypoint-private-layout-real.test.js,
+      #      needs the host's better-sqlite3 (musl cannot load it), so it runs in `npm run test:core` above only.
       - name: Entrypoint file modes and ownership on BusyBox, and the shell mutants (#549, #567)
         run: |
           docker run --rm --user node -v "$PWD/backend:/w:ro" -w /w node:24-alpine \
-            node --test --test-reporter=tap test/entrypoint-umask.test.js > "$RUNNER_TEMP/busybox.tap" \
+            node --test --test-reporter=tap test/entrypoint-umask.test.js test/entrypoint-media-isolation.test.js test/entrypoint-private-layout.test.js > "$RUNNER_TEMP/busybox.tap" \
             || { cat "$RUNNER_TEMP/busybox.tap"; exit 1; }
           grep -q '^# skipped 0$' "$RUNNER_TEMP/busybox.tap" \
             || { cat "$RUNNER_TEMP/busybox.tap"; echo "::error::the BusyBox run skipped tests"; exit 1; }
@@ -70,6 +77,13 @@ jobs:
           grep -q '^# skipped 0$' "$RUNNER_TEMP/busybox-chown.tap" \
             || { cat "$RUNNER_TEMP/busybox-chown.tap"; echo "::error::the BusyBox chown run (as root) skipped tests"; exit 1; }
           tail -9 "$RUNNER_TEMP/busybox-chown.tap"
+          docker run --rm --user root -v "$PWD/backend:/w:ro" -w /w node:24-alpine \
+            sh -c 'apk add --no-cache setpriv >/dev/null && node --test --test-reporter=tap test/entrypoint-media-isolation-real.test.js' \
+            > "$RUNNER_TEMP/busybox-media.tap" \
+            || { cat "$RUNNER_TEMP/busybox-media.tap"; exit 1; }
+          grep -q '^# skipped 0$' "$RUNNER_TEMP/busybox-media.tap" \
+            || { cat "$RUNNER_TEMP/busybox-media.tap"; echo "::error::the media isolation run (as root) skipped tests"; exit 1; }
+          tail -9 "$RUNNER_TEMP/busybox-media.tap"
           bash scripts/entrypoint-umask.mutants.sh
 
   frontend:

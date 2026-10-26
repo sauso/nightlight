@@ -140,54 +140,12 @@
     "note": "Validates the harness. If this is ever KILLED, no other result in the run means anything."
   },
   {
-    "label": "unlinkClip: containment guard deleted outright",
-    "file": "backend/src/lib/detectionEvents.js",
-    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return;",
-    "replace": "if (false) return;",
-    "expect": "killed",
-    "tests": [
-      "detection-events.test.js"
-    ]
-  },
-  {
-    "label": "unlinkClip: path.sep dropped from the prefix check",
-    "file": "backend/src/lib/detectionEvents.js",
-    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return;",
-    "replace": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR)) return;",
-    "expect": "killed",
-    "tests": [
-      "detection-events.test.js"
-    ]
-  },
-  {
     "label": "unlinkClip: stops removing the sibling thumbnail",
     "file": "backend/src/lib/detectionEvents.js",
-    "find": "try { fs.rmSync(abs.replace(/\\.mp4$/i, '.jpg'), { force: true }); } catch { /* ignore */ }",
+    "find": "try { unlinkMediaFile(abs.replace(/\\.mp4$/i, '.jpg')); } catch { /* ignore */ }",
     "replace": ";",
     "expect": "killed",
-    "tests": [
-      "detection-events.test.js"
-    ]
-  },
-  {
-    "label": "getEventClipFile: containment guard deleted outright",
-    "file": "backend/src/lib/detectionEvents.js",
-    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
-    "replace": "if (false) return null;",
-    "expect": "killed",
-    "tests": [
-      "detection-events.test.js"
-    ]
-  },
-  {
-    "label": "getEventClipFile: path.sep dropped from the prefix check",
-    "file": "backend/src/lib/detectionEvents.js",
-    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
-    "replace": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR)) return null;",
-    "expect": "killed",
-    "tests": [
-      "detection-events.test.js"
-    ]
+    "tests": ["detection-events.test.js"]
   },
   {
     "label": "schema default: wake clips off on a fresh install",
@@ -790,23 +748,18 @@
   {
     "label": "startSegmenter: the cameraId path guard is dropped",
     "file": "backend/src/lib/clipRecorder.js",
-    "find": "  const ringDir = path.join(RING_ROOT, safePathSegment(cameraId, 'cameraId'));",
-    "replace": "  const ringDir = path.join(RING_ROOT, String(cameraId));",
+    "find": "  const safeId = safePathSegment(cameraId, 'cameraId');\n  // The ring folder is a media-writable LEAF",
+    "replace": "  const safeId = String(cameraId);\n  // The ring folder is a media-writable LEAF",
     "expect": "killed",
-    "tests": [
-      "clip-recorder.test.js"
-    ]
+    "tests": ["clip-recorder.test.js"]
   },
   {
     "label": "startSegmenter: a stale ring is left in place across a restart",
     "file": "backend/src/lib/clipRecorder.js",
-    "find": "    if (f.endsWith('.mkv') || f.startsWith('concat-')) {",
-    "replace": "    if (false) {",
+    "find": "    try { unlinkMediaFile(path.join(ringDir, f)); } catch { /* ignore */ }",
+    "replace": "    void f;",
     "expect": "killed",
-    "tests": [
-      "clip-recorder.test.js",
-      "clip-capture.test.js"
-    ]
+    "tests": ["clip-recorder.test.js", "clip-capture.test.js"]
   },
   {
     "label": "holdRing: reports success when there is no ring to hold",
@@ -1032,35 +985,12 @@
     ]
   },
   {
-    "label": "★ jailedFile: the containment guard is dropped, so any file on the volume is servable",
-    "file": "backend/src/lib/recordings.js",
-    "find": "  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
-    "replace": ";",
-    "expect": "killed",
-    "tests": [
-      "recordings-routes.test.js"
-    ]
-  },
-  {
-    "label": "★ jailedFile: path.sep dropped, so a sibling directory sharing the prefix is served",
-    "file": "backend/src/lib/recordings.js",
-    "find": "  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
-    "replace": "  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR)) return null;",
-    "expect": "killed",
-    "tests": [
-      "recordings-routes.test.js"
-    ],
-    "note": "Found by adversarial review: the third copy of this guard was the one without the test its two siblings have."
-  },
-  {
     "label": "★ jailedFile: the existsSync check is dropped",
-    "file": "backend/src/lib/recordings.js",
-    "find": "  return fs.existsSync(abs) ? { root: CLIPS_DIR, path: path.relative(CLIPS_DIR, abs) } : null;",
-    "replace": "  return { root: CLIPS_DIR, path: path.relative(CLIPS_DIR, abs) };",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "  if (!abs || !statMediaFile(abs)) return null;",
+    "replace": "  if (!abs) return null;",
     "expect": "killed",
-    "tests": [
-      "recordings-routes.test.js"
-    ],
+    "tests": ["recordings-routes.test.js"],
     "note": "Survived before: the route test that claimed to cover it passes anyway, because res.sendFile 404s on ENOENT by itself. It was testing Express."
   },
   {
@@ -11977,8 +11907,8 @@
   {
     "label": "#412 M-412-45: ringOldestStartMs counts concat lists and other non-segment files",
     "file": "backend/src/lib/clipRecorder.js",
-    "find": "if (!f.endsWith('.mkv')) continue; // concat-*.txt lists are not footage",
-    "replace": "/* every file counts */",
+    "find": "for (const f of safeSegmentNames(safeReaddir(entry.ringDir))) { // only the segmenter's own names are footage",
+    "replace": "for (const f of safeReaddir(entry.ringDir)) { // every file counts",
     "expect": "killed",
     "tests": ["clip-recorder.test.js"],
     "namePattern": "#412 ringOldestStartMs"
@@ -13745,7 +13675,7 @@
   },
   {
     "label": "#545 CLIPS_DIR: path.resolve dropped from the one place it is normalised",
-    "file": "backend/src/lib/clipRecorder.js",
+    "file": "backend/src/lib/clipsDir.js",
     "find": "return path.resolve(v || path.join(dataDir, 'clips'));",
     "replace": "return v || path.join(dataDir, 'clips');",
     "expect": "killed",
@@ -13753,7 +13683,7 @@
   },
   {
     "label": "#545 CLIPS_DIR: a whitespace-only value no longer means unset (blank test dropped)",
-    "file": "backend/src/lib/clipRecorder.js",
+    "file": "backend/src/lib/clipsDir.js",
     "find": "typeof raw === 'string' && raw.trim() !== '' ? raw : ''",
     "replace": "typeof raw === 'string' ? raw : ''",
     "expect": "killed",
@@ -13761,28 +13691,12 @@
   },
   {
     "label": "#545 CLIPS_DIR: a non-blank value is trimmed again (a folder name ending in a space moves on upgrade)",
-    "file": "backend/src/lib/clipRecorder.js",
+    "file": "backend/src/lib/clipsDir.js",
     "find": "typeof raw === 'string' && raw.trim() !== '' ? raw : ''",
     "replace": "typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : ''",
     "expect": "killed",
     "tests": ["clips-dir-normalisation.test.js"],
     "namePattern": "keeps surrounding spaces"
-  },
-  {
-    "label": "#545 CLIPS_DIR: recordings containment guard deleted (traversal row would be served)",
-    "file": "backend/src/lib/recordings.js",
-    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
-    "replace": "if (false) return null;",
-    "expect": "killed",
-    "tests": ["clips-dir-normalisation.test.js"]
-  },
-  {
-    "label": "#545 CLIPS_DIR: timelapse containment guard deleted (traversal row would be served)",
-    "file": "backend/src/lib/timelapse.js",
-    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
-    "replace": "if (false) return null;",
-    "expect": "killed",
-    "tests": ["clips-dir-normalisation.test.js"]
   },
   {
     "label": "W5 role gate M1: DELETE /api/cameras/alerts/:id/clip loses requireAdmin (a caregiver deletes a clip)",
@@ -17900,8 +17814,8 @@
   {
     "label": "#554 entityPurge: a camera delete leaves its clip directory",
     "file": "backend/src/lib/entityPurge.js",
-    "find": "[[id], ['.ring', id]]",
-    "replace": "[['.ring', id]]",
+    "find": "[[id], ['.ring', id], ['.concat', id]]",
+    "replace": "[['.ring', id], ['.concat', id]]",
     "expect": "killed",
     "tests": ["entity-purge.test.js"],
     "namePattern": "deleting a camera deletes everything"
@@ -17909,8 +17823,8 @@
   {
     "label": "#554 entityPurge: a camera delete leaves its segment ring",
     "file": "backend/src/lib/entityPurge.js",
-    "find": "[[id], ['.ring', id]]",
-    "replace": "[[id]]",
+    "find": "[[id], ['.ring', id], ['.concat', id]]",
+    "replace": "[[id], ['.concat', id]]",
     "expect": "killed",
     "tests": ["entity-purge.test.js"],
     "namePattern": "deleting a camera deletes everything"
@@ -18074,8 +17988,8 @@
   {
     "label": "#719 entityPurge: a folder sweep that fails is swallowed (the child goes, its frames stay)",
     "file": "backend/src/lib/entityPurge.js",
-    "find": "  fs.rmSync(dir, { recursive: true, force: true });\n}",
-    "replace": "  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* swallowed */ }\n}",
+    "find": "  if (APP_ONLY_ROOTS.has(parts[0])) fs.rmSync(dir, { recursive: true, force: true /* app-only */ });",
+    "replace": "  if (APP_ONLY_ROOTS.has(parts[0])) { try { fs.rmSync(dir, { recursive: true, force: true /* app-only */ }); } catch { /* swallowed */ } }",
     "expect": "killed",
     "tests": ["entity-purge.test.js"],
     "namePattern": "a frames folder that cannot be removed"
@@ -18268,8 +18182,8 @@
   {
     "label": "#548 login: synchronous compare back on the request path",
     "file": "backend/src/routes/auth.js",
-    "find": "!(await passwordHash.compare(String(password || ''), hashToCheck))",
-    "replace": "!bcrypt.compareSync(String(password || ''), hashToCheck)",
+    "find": "(await passwordHash.compare(String(password || ''), hashToCheck)) && !!user",
+    "replace": "bcrypt.compareSync(String(password || ''), hashToCheck) && !!user",
     "expect": "killed",
     "tests": [
       "mfa-replay-and-async-bcrypt.test.js"
@@ -18678,8 +18592,8 @@
   {
     "label": "#553 spawnChild: the allowlisted env is not applied (full environment inherited)",
     "file": "backend/src/lib/childEnv.js",
-    "find": "{ ...rest, env: childEnv({ mediamtx, extra }) }",
-    "replace": "{ ...rest }",
+    "find": "return spawn(command, args, { ...rest, env: childEnv({ mediamtx, extra }) });",
+    "replace": "return spawn(command, args, { ...rest });",
     "expect": "killed",
     "tests": [
       "child-env.test.js"
@@ -18689,8 +18603,8 @@
   {
     "label": "#553 spawnChild: a caller-supplied env wins over the allowlist",
     "file": "backend/src/lib/childEnv.js",
-    "find": "{ ...rest, env: childEnv({ mediamtx, extra }) }",
-    "replace": "{ ...rest, env: options.env ?? childEnv({ mediamtx, extra }) }",
+    "find": "return spawn(command, args, { ...rest, env: childEnv({ mediamtx, extra }) });",
+    "replace": "return spawn(command, args, { ...rest, env: options.env ?? childEnv({ mediamtx, extra }) });",
     "expect": "killed",
     "tests": [
       "child-env.test.js"
@@ -19356,8 +19270,8 @@
   {
     "label": "#701 chown: the -shm file is dropped from the ownership sentinel list",
     "file": "backend/entrypoint.sh",
-    "find": "for f in . babymonitor.db babymonitor.db-wal babymonitor.db-shm .jwt_secret; do",
-    "replace": "for f in . babymonitor.db babymonitor.db-wal .jwt_secret; do",
+    "find": "for f in . babymonitor.db babymonitor.db-wal babymonitor.db-shm .jwt_secret private private/babymonitor.db private/babymonitor.db-wal private/babymonitor.db-shm private/.jwt_secret; do",
+    "replace": "for f in . babymonitor.db babymonitor.db-wal .jwt_secret private private/babymonitor.db private/babymonitor.db-wal private/babymonitor.db-shm private/.jwt_secret; do",
     "expect": "killed",
     "tests": [
       "entrypoint-chown.test.js"
@@ -21857,8 +21771,8 @@
   {
     "label": "#765 mfa setup skips the password (a borrowed session can start, plant or read a secret)",
     "file": "backend/src/routes/auth.js",
-    "find": "if (!(await passwordHash.compare(String(req.body?.password || ''), user.password_hash))) {",
-    "replace": "if (false) {",
+    "find": "() => passwordHash.compare(String(req.body?.password || ''), user.password_hash)",
+    "replace": "() => true",
     "expect": "killed",
     "tests": ["mfa-setup-resume.test.js"],
     "namePattern": "a first start without the right password"
@@ -23170,8 +23084,8 @@
   {
     "label": "#851 M3: the old-frames sweep follows a linked child folder and deletes what it points at",
     "file": "backend/src/lib/timelapse.js",
-    "find": "  try { return fs.lstatSync(p).isDirectory(); } catch { return false; }",
-    "replace": "  try { return fs.statSync(p).isDirectory(); } catch { return false; }",
+    "find": "  try { return fs.lstatSync(p /* app-only */).isDirectory(); } catch { return false; }",
+    "replace": "  try { return fs.statSync(p /* app-only */).isDirectory(); } catch { return false; }",
     "expect": "killed",
     "tests": ["timelapse-expire-frames.test.js"],
     "namePattern": "^l1:"
@@ -23184,5 +23098,757 @@
     "expect": "killed",
     "tests": ["timelapse-expire-frames.test.js"],
     "namePattern": "^j1:"
+  },
+  {
+    "label": "#553 phase 1 spawnChild: isolation on is ignored (the program is spawned unwrapped)",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "  if (mediaIsolationOn()) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["media-exec.test.js"],
+    "namePattern": "on: the wrapper is spawned"
+  },
+  {
+    "label": "#553 phase 1 spawnChild: the wrapped child gets the full environment (the switch and secrets leak)",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "return spawn(MEDIA_EXEC_PATH, [command, ...(args ?? [])], { ...rest, env: childEnv({ mediamtx, extra }) });",
+    "replace": "return spawn(MEDIA_EXEC_PATH, [command, ...(args ?? [])], { ...rest });",
+    "expect": "killed",
+    "tests": ["media-exec.test.js"],
+    "namePattern": "setpriv gets exactly the media drop"
+  },
+  {
+    "label": "#553 phase 1 mediaIsolationOn: any value turns it on",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "return env.MEDIA_ISOLATION === 'on';",
+    "replace": "return Boolean(env.MEDIA_ISOLATION);",
+    "expect": "killed",
+    "tests": ["media-exec.test.js"],
+    "namePattern": "^off: unset"
+  },
+  {
+    "label": "#553 phase 1 About: mediaIsolation is always reported off",
+    "file": "backend/src/routes/about.js",
+    "find": "mediaIsolation: mediaIsolationOn() ? 'on' : 'off',",
+    "replace": "mediaIsolation: 'off',",
+    "expect": "killed",
+    "tests": ["about-media-isolation.test.js"],
+    "namePattern": "MEDIA_ISOLATION=on"
+  },
+  {
+    "label": "#553 phase 1 processGuards: a 127 at once is treated like any exit (no back-off)",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "if (!EXEC_FAILED_EXIT_CODES.includes(code) || !atOnce) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": ["exec-failure-backoff.test.js"],
+    "namePattern": "127 at once, again and again"
+  },
+  {
+    "label": "#553 phase 1 processGuards: the back-off never grows",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "delayMs: Math.min(maxDelayMs, baseDelayMs * 2 ** (streak - 1)),",
+    "replace": "delayMs: baseDelayMs,",
+    "expect": "killed",
+    "tests": ["exec-failure-backoff.test.js"],
+    "namePattern": "127 at once, again and again"
+  },
+  {
+    "label": "#553 phase 1 processGuards: a 127 after a real run also backs off",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "const atOnce = launchedAt != null && now() - launchedAt < withinMs;",
+    "replace": "const atOnce = launchedAt != null;",
+    "expect": "killed",
+    "tests": ["exec-failure-backoff.test.js"],
+    "namePattern": "a 127 after a real run"
+  },
+  {
+    "label": "#553 phase 1 processGuards: every exec failure is logged (the flood is back)",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "log: streak === 1 || streak % EXEC_FAILED_RELOG_EVERY === 0,",
+    "replace": "log: true,",
+    "expect": "killed",
+    "tests": ["exec-failure-backoff.test.js"],
+    "namePattern": "127 at once, again and again"
+  },
+  {
+    "label": "#553 phase 1 processGuards: isKillError never recognises a kill error",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "return err?.syscall === 'kill';",
+    "replace": "return false;",
+    "expect": "killed",
+    "tests": ["exec-failure-backoff.test.js"],
+    "namePattern": "a kill error is one"
+  },
+  {
+    "label": "#553 phase 1 MediaMTX: the back-off delay is not used (relaunch every 3 s)",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "}, next.delayMs);",
+    "replace": "}, RESTART_DELAY_MS);",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^m1:"
+  },
+  {
+    "label": "#553 phase 1 MediaMTX: a refused SIGTERM is read as a failed spawn (a second MediaMTX)",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "      if (isKillError(err)) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^m2:"
+  },
+  {
+    "label": "#553 phase 1 transcoder: the back-off delay is not used (relaunch every 5 s)",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "}, next.delayMs));",
+    "replace": "}, RESTART_DELAY_MS));",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^t1:"
+  },
+  {
+    "label": "#553 phase 1 transcoder: a refused kill drops the live camera from the map",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "      if (isKillError(err)) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^t2:"
+  },
+  {
+    "label": "#553 phase 1 transcoder: a stop whose SIGTERM is refused resolves at once",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "entry.proc.once('error', (err) => { if (!isKillError(err)) done(); });",
+    "replace": "entry.proc.once('error', done);",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^t2:"
+  },
+  {
+    "label": "#553 phase 1 segmenter: the back-off delay is not used (relaunch every 5 s)",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "}, next.delayMs);",
+    "replace": "}, RESTART_DELAY_MS);",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^s1:"
+  },
+  {
+    "label": "#553 phase 1 runFfmpeg: a refused kill settles as \"could not run\" instead of the deadline",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "      if (isKillError(e)) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^r1:"
+  },
+  {
+    "label": "#553 phase 1 motion detector: a refused kill drops the live detector from the map",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "      if (isKillError(err)) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["detector-kill-eperm.test.js"],
+    "namePattern": "^motion:"
+  },
+  {
+    "label": "#553 phase 1 motion detector: a stop whose SIGTERM is refused resolves at once",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "entry.proc.once('error', (err) => { if (!isKillError(err)) done(); });",
+    "replace": "entry.proc.once('error', done);",
+    "expect": "killed",
+    "tests": ["detector-kill-eperm.test.js"],
+    "namePattern": "^motion:"
+  },
+  {
+    "label": "#553 phase 1 sound detector: a refused kill drops the live detector from the map",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      if (isKillError(err)) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["detector-kill-eperm.test.js"],
+    "namePattern": "^sound:"
+  },
+  {
+    "label": "#553 phase 1 sound detector: a stop whose SIGTERM is refused resolves at once",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "entry.proc.once('error', (err) => { if (!isKillError(err)) done(); });",
+    "replace": "entry.proc.once('error', done);",
+    "expect": "killed",
+    "tests": ["detector-kill-eperm.test.js"],
+    "namePattern": "^sound:"
+  },
+  {
+    "label": "#553 phase 1 MediaMTX config: with isolation on it is still written to the fixed shared name",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "    if (mediaGid == null) {",
+    "replace": "    if (true) {",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "#553 media isolation: the copy goes into a FRESH folder"
+  },
+  {
+    "label": "#553 phase 1 processGuards: a 126 (found but not executable) is treated like any exit",
+    "file": "backend/src/lib/processGuards.js",
+    "find": "Object.freeze([126, 127])",
+    "replace": "Object.freeze([127])",
+    "expect": "killed",
+    "tests": ["exec-failure-backoff.test.js"],
+    "namePattern": "126 at once"
+  },
+  {
+    "label": "#553 phase 1 motion detector: the back-off delay is not used (relaunch every 5 s)",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "}, next.delayMs));",
+    "replace": "}, timing.restartDelayMs));",
+    "expect": "killed",
+    "tests": ["motion-exec-backoff.test.js"]
+  },
+  {
+    "label": "#553 phase 1 sound detector: the back-off delay is not used (relaunch every 5 s)",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "}, next.delayMs));",
+    "replace": "}, RESTART_DELAY_MS));",
+    "expect": "killed",
+    "tests": ["sound-exec-backoff.test.js"]
+  },
+  {
+    "label": "#553 phase 1 sound detector: an exec failure counts as a no-microphone strike (the leg stops)",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "      if (next.execFailed) {",
+    "replace": "      if (false) {",
+    "expect": "killed",
+    "tests": ["sound-exec-backoff.test.js"]
+  },
+  {
+    "label": "#553 phase 1 transcoder: a camera event row for every back-off relaunch",
+    "file": "backend/src/lib/transcoder.js",
+    "find": "if (!restarting && next.log) {",
+    "replace": "if (!restarting) {",
+    "expect": "killed",
+    "tests": ["media-supervision.test.js"],
+    "namePattern": "^t1:"
+  },
+  {
+    "label": "#553 phase 1 media-exec.sh: the media process loses --no-new-privs",
+    "file": "backend/media-exec.sh",
+    "find": "--ambient-caps=-all --no-new-privs -- \"$@\"",
+    "replace": "--ambient-caps=-all -- \"$@\"",
+    "expect": "killed",
+    "tests": ["media-exec.test.js"],
+    "namePattern": "setpriv gets exactly the media drop"
+  },
+  {
+    "label": "#553 phase 1 media-exec.sh: the app's inheritable and ambient capabilities are not cleared",
+    "file": "backend/media-exec.sh",
+    "find": " --groups=1700 --inh-caps=-all --ambient-caps=-all --no-new-privs",
+    "replace": " --groups=1700 --no-new-privs",
+    "expect": "killed",
+    "tests": ["media-exec.test.js"],
+    "namePattern": "setpriv gets exactly the media drop"
+  },
+  {
+    "label": "#553 phase 1 media-exec.sh: no exec (the app's pid is the shell, not the program)",
+    "file": "backend/media-exec.sh",
+    "find": "exec setpriv --reuid=1700",
+    "replace": "setpriv --reuid=1700",
+    "expect": "killed",
+    "tests": ["media-exec.test.js"],
+    "namePattern": "setpriv gets exactly the media drop"
+  },
+  {
+    "label": "#553 phase 1 media-exec.sh: no umask 007 (media files would get the app's mask)",
+    "file": "backend/media-exec.sh",
+    "find": "umask 007\nexec setpriv",
+    "replace": "exec setpriv",
+    "expect": "killed",
+    "tests": ["media-exec.test.js"],
+    "namePattern": "setpriv gets exactly the media drop"
+  },
+  {
+    "label": "#553 phase 1 MediaMTX config: the folder is not given to the media group",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "fs.chownSync(dir, -1, mediaGid);",
+    "replace": "void 0;",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "the folder AND the file are given to the media group"
+  },
+  {
+    "label": "#553 phase 1 MediaMTX config: the file is not given to the media group",
+    "file": "backend/src/lib/stunServers.js",
+    "find": "fs.chownSync(out, -1, mediaGid);",
+    "replace": "void 0;",
+    "expect": "killed",
+    "tests": ["stun-servers.test.js"],
+    "namePattern": "the folder AND the file are given to the media group"
+  },
+  {
+    "label": "#553 phase 2a move: private/ no longer wins, so a top-level copy is renamed over the private database",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  if (present(privDb)) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "the top-level copy and its -wal are set aside"
+  },
+  {
+    "label": "#553 phase 2a move: a companion file still there after the close no longer stops the move",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  if (leftover.length) return skip(",
+    "replace": "  if (false) return skip(",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "a companion that survives the close"
+  },
+  {
+    "label": "#553 phase 2a move: top-level items are looked at with stat, so a symbolic link is moved as if it were its target",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  const st = lstatOrNull(src);",
+    "replace": "  const st = (() => { try { return fs.statSync(src); } catch { return null; } })();",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "symbolic links are never moved"
+  },
+  {
+    "label": "#553 phase 2a move: the snapshot folders go ahead of a database that stayed at the top level",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  if (present(path.join(ctx.dataDir, DB_FILE))) return;",
+    "replace": "  if (false) return;",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "snapshot folders stay with a database that stayed at the top"
+  },
+  {
+    "label": "#553 phase 2a move: an empty private snapshot folder blocks the move for ever (C4)",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  if (dst && isEmptyDir(dest)) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "an EMPTY private snapshot folder"
+  },
+  {
+    "label": "#553 phase 2a move: a Firebase file is moved although its FIREBASE_* variable is set (C7)",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      if (env[variable]) return;",
+    "replace": "      if (false) return;",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "a Firebase file named by FIREBASE_CREDENTIALS"
+  },
+  {
+    "label": "#553 phase 2a move: .jwt_secret is moved although JWT_SECRET is set",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "    if (env.JWT_SECRET) {",
+    "replace": "    if (false) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "JWT_SECRET set: a top-level"
+  },
+  {
+    "label": "#553 phase 2a move: the database pass has no time limit before its rename (C1)",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  const overBudget = () => now() - start > budgetMs;",
+    "replace": "  const overBudget = () => false;",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "the time budget runs out"
+  },
+  {
+    "label": "#553 phase 2a move: a moved secret keeps its 0644 (no chmod 0600)",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "    fs.chmodSync(dest, SECRET_FILE_MODE);",
+    "replace": "    void 0;",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "the Firebase files made 0644 by hand"
+  },
+  {
+    "label": "#553 phase 2a move: top-level backups are left where the media group could later reach them",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  for (const name of names.filter((n) => BACKUP_FILE_RE.test(n))) {",
+    "replace": "  for (const name of [].filter((n) => BACKUP_FILE_RE.test(n))) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "backups at the top level"
+  },
+  {
+    "label": "#553 phase 2a move: a -wal with no database is deleted instead of set aside",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      if (!src) continue;",
+    "replace": "      if (!src) continue;\n      fs.rmSync(src);\n      continue;",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "a -wal with no database next to it"
+  },
+  {
+    "label": "#553 phase 2a move: the exit code always says done (the entrypoint never warns)",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  const code = ctx.left.length ? EXIT.LEFT : ctx.setAside.length ? EXIT.SET_ASIDE : EXIT.DONE;",
+    "replace": "  const code = EXIT.DONE;",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "another connection has it open"
+  },
+  {
+    "label": "#553 phase 2a paths: a top-level database is not seen, so a fresh empty one is created in private/",
+    "file": "backend/src/lib/dataPaths.js",
+    "find": "  if (present(path.join(dataDir, DB_FILE))) return 'legacy';",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["data-paths.test.js"],
+    "namePattern": "only at the top level"
+  },
+  {
+    "label": "#553 phase 2a paths: existence follows symbolic links, so a dangling linked database reads as nothing",
+    "file": "backend/src/lib/dataPaths.js",
+    "find": "    fs.lstatSync(p);",
+    "replace": "    fs.statSync(p);",
+    "expect": "killed",
+    "tests": ["data-paths.test.js"],
+    "namePattern": "DANGLING symbolic link"
+  },
+  {
+    "label": "#553 phase 2a paths: a snapshot folder is looked for in private/ first even with the database at the top",
+    "file": "backend/src/lib/dataPaths.js",
+    "find": "resolveLayout(dataDir) === 'private' ? [inPrivate, atTop] : [atTop, inPrivate]",
+    "replace": "[inPrivate, atTop]",
+    "expect": "killed",
+    "tests": ["data-paths.test.js"],
+    "namePattern": "a snapshot folder follows its DATABASE"
+  },
+  {
+    "label": "#553 phase 2a paths: private/ is left to the umask (no explicit chmod 0700)",
+    "file": "backend/src/lib/dataPaths.js",
+    "find": "  if ((st.mode & 0o777) !== PRIVATE_DIR_MODE) fsImpl.chmodSync(dir, PRIVATE_DIR_MODE);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["data-paths.test.js"],
+    "namePattern": "creates it, and makes it 0700 whatever the umask"
+  },
+  {
+    "label": "#553 phase 2a db.js: a fresh install does not create private/ before opening the database in it",
+    "file": "backend/src/db.js",
+    "find": "if (DB_LAYOUT === 'private' && !present(DB_PATH)) ensurePrivateDir(DATA_DIR);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["about-data-layout.test.js"],
+    "namePattern": "a fresh install: private"
+  },
+  {
+    "label": "#553 phase 2a auth: a new secret is written into a private/ nobody created (it fails, and sessions die at every restart)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "    if (path.dirname(SECRET_FILE) === privateDirOf(DATA_DIR)) ensurePrivateDir(DATA_DIR);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["jwt-secret.test.js"],
+    "namePattern": "a new one goes into private/, which auth.js creates"
+  },
+  {
+    "label": "#553 phase 2a auth: a secret that cannot be saved is silent again (C9)",
+    "file": "backend/src/middleware/auth.js",
+    "find": "    logger.error(\n      `[auth] could not save the session signing secret",
+    "replace": "    void (\n      `[auth] could not save the session signing secret",
+    "expect": "killed",
+    "tests": ["jwt-secret.test.js"],
+    "namePattern": "is said LOUDLY"
+  },
+  {
+    "label": "#553 phase 2a console scripts: they may create a database (root-owned, through docker exec) where there is none",
+    "file": "backend/src/scripts/consoleDb.js",
+    "find": "    return new Database(file, { fileMustExist: true, readonly });",
+    "replace": "    return new Database(file, { readonly });",
+    "expect": "killed",
+    "tests": ["console-scripts-layout.test.js"],
+    "namePattern": "but there is no database yet"
+  },
+  {
+    "label": "#553 phase 2a backup-db: the copy is written to the top level again",
+    "file": "backend/src/scripts/backup-db.js",
+    "find": "  const dest = freeBackupPath(priv, timestampForName(now()));",
+    "replace": "  const dest = freeBackupPath(dataDir, timestampForName(now()));",
+    "expect": "killed",
+    "tests": ["console-scripts-layout.test.js"],
+    "namePattern": "a consistent copy, written into private/"
+  },
+  {
+    "label": "#553 phase 2a push: the Firebase client config's place is resolved once at load (a file dropped in later is missed)",
+    "file": "backend/src/lib/push.js",
+    "find": "const clientConfigPath = () => CLIENT_CONFIG_OVERRIDE || resolveDropInFile(FIREBASE_CLIENT_CONFIG_FILE, DATA_DIR);",
+    "replace": "const CLIENT_CONFIG_ONCE = CLIENT_CONFIG_OVERRIDE || resolveDropInFile(FIREBASE_CLIENT_CONFIG_FILE, DATA_DIR); const clientConfigPath = () => CLIENT_CONFIG_ONCE;",
+    "expect": "killed",
+    "tests": ["push-firebase-location.test.js"],
+    "namePattern": "a file that appears in private/ AFTER start"
+  },
+  {
+    "label": "#553 phase 2a data-dir line: the database mode is read from the old top-level name (unknown for ever after the move)",
+    "file": "backend/src/lib/dataDirModes.js",
+    "find": "  try { dbMode = stat(dbPath).mode; } catch { /* reported as unknown */ }",
+    "replace": "  try { dbMode = stat(path.join(dataDir, 'babymonitor.db')).mode; } catch { /* reported as unknown */ }",
+    "expect": "killed",
+    "tests": ["data-dir-modes.test.js"],
+    "namePattern": "logs exactly one line, from the status text and the database file the app opened"
+  },
+  {
+    "label": "#553 phase 2a About: layoutConflict is always false",
+    "file": "backend/src/routes/about.js",
+    "find": "    layoutConflict: layoutConflict(dataDirFrom()),",
+    "replace": "    layoutConflict: false,",
+    "expect": "killed",
+    "tests": ["about-data-layout.test.js"],
+    "namePattern": "a set-aside copy in private/legacy"
+  },
+  {
+    "label": "#553 phase 2a demo seed: its alert pictures go to a second, hand-spelled top-level folder again",
+    "file": "backend/src/lib/demoSeed.js",
+    "find": "  const snapshotsDir = resolveSnapshotDir(DETECTION_SNAPSHOTS_DIR, dataDir);",
+    "replace": "  const snapshotsDir = path.join(dataDir, 'detection-snapshots');",
+    "expect": "killed",
+    "tests": ["demo-seed.test.js"],
+    "namePattern": "demo seed is deterministic"
+  },
+  {
+    "label": "#553 phase 2a review HIGH 1: a stale -wal/-shm/-journal in private/ is left for SQLite to replay over the database moving in",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "    for (const name of DB_SIDECARS) {\n      const stale = path.join(priv, name);",
+    "replace": "    for (const name of []) {\n      const stale = path.join(priv, name);",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "a stale -wal in private/ with no private database"
+  },
+  {
+    "label": "#553 phase 2a review HIGH 1: a private snapshot folder of a database that is gone is kept as the moved database's",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  if (dst && ctx.dbMovedIn) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "snapshot folder of that gone database"
+  },
+  {
+    "label": "#553 phase 2a review HIGH 2: the companions are set aside even when their .db could not be (the trio splits)",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "    if (!setAside(ctx, src, 'private/ already has a database, and the copy in private/ always wins')) return;",
+    "replace": "    setAside(ctx, src, 'private/ already has a database, and the copy in private/ always wins');",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "if the .db cannot be set aside, NOTHING of it moves"
+  },
+  {
+    "label": "#553 phase 2a review HIGH 2: an orphan companion gets a new legacy folder instead of joining its set-aside database",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      const awaiting = legacyDirAwaiting(ctx, name);",
+    "replace": "      const awaiting = null;",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "a run cut off between the .db and its -wal"
+  },
+  {
+    "label": "#553 phase 2a review HIGH 3: a symbolic-link private/ keeps its target's mode (an old 0644 database goes into a 0755 folder)",
+    "file": "backend/src/lib/dataPaths.js",
+    "find": "    st = fsImpl.statSync(dir);\n  } catch (err) {",
+    "replace": "    st = fsImpl.lstatSync(dir);\n    if (st.isSymbolicLink()) return dir;\n  } catch (err) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "HIGH 3"
+  },
+  {
+    "label": "#553 phase 2a review MEDIUM 4: the set-aside database's pictures are moved into private/ as the winner's",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  if (ctx.dbSetAside) {",
+    "replace": "  if (false) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "pictures go aside with it, never into private"
+  },
+  {
+    "label": "#553 phase 2a review MEDIUM 4: with two databases the app serves the top-level (other) database's pictures",
+    "file": "backend/src/lib/dataPaths.js",
+    "find": "  if (first === inPrivate && present(path.join(dataDir, DB_FILE))) return first;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "two databases still there"
+  },
+  {
+    "label": "#553 phase 2a review MEDIUM 5: a secret that exists but cannot be read is written over",
+    "file": "backend/src/middleware/auth.js",
+    "find": "      return crypto.randomBytes(48).toString('hex');",
+    "replace": "      void 0;",
+    "expect": "killed",
+    "tests": ["jwt-secret.test.js"],
+    "namePattern": "exists but cannot be read is NEVER written over"
+  },
+  {
+    "label": "#553 phase 2a review 6: no exclusive lock between the proof and the rename",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      conn.exec('BEGIN EXCLUSIVE');",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "the exclusive lock is refused"
+  },
+  {
+    "label": "#553 phase 2a review M10: the journal_mode answer is not checked",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      if (mode !== 'delete') return skip(",
+    "replace": "      if (false) return skip(",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "answers with the old mode"
+  },
+  {
+    "label": "#553 phase 2a review M11: a private database that appeared before the rename is replaced by it",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "    if (present(privDb)) return skip('private/babymonitor.db appeared while it was being prepared');\n    for (const name of DB_SIDECARS) {",
+    "replace": "    for (const name of DB_SIDECARS) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "is never replaced"
+  },
+  {
+    "label": "#553 phase 2a review M14: the time limit also undoes a rename already done",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "  ctx.dbMovedIn = true;",
+    "replace": "  ctx.dbMovedIn = true;\n  if (overBudget()) { ctx.rename(privDb, src); ctx.moved.pop(); ctx.left.push(DB_FILE); return; }",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "running out AFTER the rename"
+  },
+  {
+    "label": "#553 phase 2a review: a rename refused while the file is open (EBUSY) is not retried after the lock is let go",
+    "file": "backend/src/scripts/migrate-private-layout.js",
+    "find": "      if (!RENAME_REFUSED_WHILE_OPEN.has(err.code)) {",
+    "replace": "      if (true) {",
+    "expect": "killed",
+    "tests": ["migrate-private-layout.test.js"],
+    "namePattern": "refuses to rename an OPEN file"
+  },
+  {
+    "label": "#553 phase 2b: the containment guard of a stored path is dropped (a row with ../ escapes the clips folder)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;",
+    "replace": "  if (rel === '') return null;",
+    "expect": "killed",
+    "tests": ["media-files.test.js", "detection-events.test.js", "recordings-routes.test.js", "clips-dir-normalisation.test.js"]
+  },
+  {
+    "label": "#553 phase 2b: O_NOFOLLOW dropped (a symbolic link planted under a clip's name is opened and served)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "fs.openSync(abs, fs.constants.O_RDONLY | O_NOFOLLOW | O_NONBLOCK)",
+    "replace": "fs.openSync(abs, fs.constants.O_RDONLY | O_NONBLOCK)",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "SYMBOLIC LINK"
+  },
+  {
+    "label": "#553 phase 2b: the link-count check is dropped (a hard link to the database is served)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "    } else if (st.nlink !== 1) {",
+    "replace": "    } else if (false) {",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "HARD LINK"
+  },
+  {
+    "label": "#553 phase 2b: the size accounting counts a hard link or a link's target (statMediaFile)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "    if (!st.isFile() || st.nlink !== 1) return null;",
+    "replace": "    if (!st.isFile()) return null;",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "a hard link and a missing file are null"
+  },
+  {
+    "label": "#553 phase 2b: the parent folder's real path is no longer compared (a leaf swapped for a link is followed)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "  if (realParent === path.join(realRoot, path.dirname(rel))) return 'ok';",
+    "replace": "  return 'ok';",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "swapped|THROWS EMEDIAJAIL"
+  },
+  {
+    "label": "#553 phase 2b: the descriptor is reopened by path for the stream (a file swapped after the checks is what is sent; the checked one leaks)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "fs.createReadStream(null, { fd: f.fd, start, end, autoClose: true })",
+    "replace": "fs.createReadStream(abs, { start, end })",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "the descriptor is closed on every path"
+  },
+  {
+    "label": "#553 phase 2b: the segment name filter is dropped (a newline in a name reaches the concat list)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "    if (typeof name === 'string' && SEGMENT_NAME_RE.test(name)) out.push(name);",
+    "replace": "    out.push(name);",
+    "expect": "killed",
+    "tests": ["media-files.test.js", "clip-recorder.test.js"],
+    "namePattern": "segmenter|never footage"
+  },
+  {
+    "label": "#553 phase 2b: O_NONBLOCK dropped (a FIFO planted under a clip's name hangs the request)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "fs.openSync(abs, fs.constants.O_RDONLY | O_NOFOLLOW | O_NONBLOCK)",
+    "replace": "fs.openSync(abs, fs.constants.O_RDONLY | O_NOFOLLOW)",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "FIFO"
+  },
+  {
+    "label": "#553 phase 2b: a leaf folder is swept recursively (a folder swapped for a link mid-walk deletes elsewhere)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "    if (fs.lstatSync(p).isDirectory()) fs.rmdirSync(p);",
+    "replace": "    if (fs.lstatSync(p).isDirectory()) fs.rmSync(p, { recursive: true });",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "NON-empty sub-folder"
+  },
+  {
+    "label": "#553 phase 2b: unlinkMediaFile no longer checks the folder chain (a delete follows a swapped folder)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "  const parent = checkParent(abs, root);\n  if (parent === 'missing') return false;",
+    "replace": "  const parent = 'ok';\n  if (parent === 'missing') return false;",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "EMEDIAJAIL"
+  },
+  {
+    "label": "#553 phase 2b: a leaf folder loses its sticky bit (the media user can delete the app's files in it)",
+    "file": "backend/src/lib/mediaLayout.js",
+    "find": "export const LEAF_MODE = 0o1770;",
+    "replace": "export const LEAF_MODE = 0o770;",
+    "expect": "killed",
+    "tests": ["media-layout.test.js"],
+    "namePattern": "LEAF is 1770"
+  },
+  {
+    "label": "#553 phase 2b: a folder is opened without O_NOFOLLOW before it is chmod-ed (a link redirects the chmod)",
+    "file": "backend/src/lib/mediaLayout.js",
+    "find": "const fd = fs.openSync(abs, fs.constants.O_RDONLY | O_DIRECTORY | O_NOFOLLOW);\n  try {\n    if (!fs.fstatSync(fd).isDirectory())",
+    "replace": "const fd = fs.openSync(abs, fs.constants.O_RDONLY | O_DIRECTORY);\n  try {\n    if (!fs.fstatSync(fd).isDirectory())",
+    "expect": "killed",
+    "tests": ["media-layout.test.js"],
+    "namePattern": "LINK is refused"
+  },
+  {
+    "label": "#553 phase 2b: a purged camera's concat-list folder is left behind",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "[[id], ['.ring', id], ['.concat', id]]",
+    "replace": "[[id], ['.ring', id]]",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#553 phase 2b: an OFF start after an ON run does not give the media-owned clip tree back to the app",
+    "file": "backend/entrypoint.sh",
+    "find": "  if [ -n \"$MEDIA_EVER_ON\" ]; then media_reown; fi",
+    "replace": "  :",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "the data directory carries the media group and the start ends OFF"
   }
 ]

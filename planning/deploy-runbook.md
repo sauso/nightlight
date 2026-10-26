@@ -198,7 +198,7 @@ to the owner. Also outstanding: pressing **Recompute this night** for **Child B,
 Schema changes are hand-rolled at the bottom of `db.js`. After a release that adds columns or tables,
 confirm they actually applied: `PRAGMA table_info(<table>)` via
 `docker exec -e NODE_PATH=/app/node_modules -w /app nightlight node /tmp/x.cjs`.
-⚠️ The production database is **`/app/data/babymonitor.db`**, not `nightlight.db`.
+⚠️ The production database is **`/app/data/private/babymonitor.db`** (older installs before the move into `private/`: `/app/data/babymonitor.db`), not `nightlight.db`.
 
 ---
 

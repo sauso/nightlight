@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
 
 // The ONE way this backend starts ffmpeg, ffprobe and MediaMTX (issue #553, part a).
 //
@@ -9,11 +10,19 @@ import { spawn } from 'child_process';
 // the child's own memory or environment (a demuxer over-read, a crash report, a log line), and what every
 // command a MediaMTX hook runs inherits in turn. No such bug is claimed; this narrows what one would expose.
 //
-// WHAT THIS DOES NOT DO. The children still run as the same operating-system user as the backend. A child
-// that a camera managed to take over could therefore still read the backend's own environment through the
-// process table (/proc on Linux), JWT_SECRET included, and the database and .jwt_secret on disk. Separating
-// the user was considered and NOT done (owner decision, #553 (b)). This narrows what a child inherits; it is
-// not a sandbox.
+// WHAT THIS DOES NOT DO ON ITS OWN. This file narrows what a child INHERITS; it is not a sandbox. The separation that
+// matters is MEDIA ISOLATION below: since #553 phase 4 it is ON BY DEFAULT, and every child runs as a second operating
+// system user (1700), so a child a camera managed to take over cannot read the database, .jwt_secret or the app's
+// /proc/<pid>/environ. (An earlier version of this comment said a separate user "was considered and NOT done"; the
+// owner reversed that on 2026-10-25.) When isolation is OFF, the children still run as the backend's own user and can
+// read all of that: it is off when NIGHTLIGHT_MEDIA_ISOLATION=0, and also, with a warning in the log, on a host where
+// it cannot start (rootless Docker or Podman, a share that ignores chmod, NFS root_squash, PUID or PGID 1700, PUID=0,
+// a missing capability).
+// WHAT ISOLATION STILL DOES NOT STOP (docs/architecture.md, "Media isolation", has the full list):
+//   - the app itself holds CAP_SETUID/SETGID/KILL, so a compromised APP can become uid 0 inside the container;
+//   - every media process shares one uid, so one taken-over ffmpeg can signal or ptrace the others, MediaMTX included;
+//   - MediaMTX's API on loopback is unauthenticated and lists the cameras' credentials;
+//   - a camera's password is on its ffmpeg command line, visible to every process in the container.
 //
 // THE ALLOWLIST (names, not values; a name that is unset in the parent stays unset in the child):
 //   PATH            finds the binary and anything it execs.
@@ -48,10 +57,41 @@ export function childEnv({ mediamtx = false, extra = {}, parent = process.env } 
   return { ...env, ...extra };
 }
 
+// MEDIA ISOLATION (#553). When it is on, every child runs as the media user (uid:gid 1700:1700, no capabilities,
+// no-new-privs) through media-exec.sh, which is exactly one `umask 007; exec setpriv ... -- "$@"` (see its header).
+//
+// WHO DECIDES. backend/entrypoint.sh, as root, before the app exists: it dry-runs the whole chain (the app's own drop
+// to PUID with CAP_SETUID/SETGID/KILL as ambient capabilities, then this wrapper) and exports MEDIA_ISOLATION=on only
+// if all of it worked, otherwise MEDIA_ISOLATION=off and the usual su-exec start. It always exports one of the two,
+// so a value an operator put in the environment never reaches here. The app only reports what it was given: Node
+// cannot drop capabilities, so a fallback decided HERE ("run unwrapped") would hand SETUID/SETGID/KILL to every child.
+// That is why, when it is on, EVERY call below is wrapped and there is no unwrapped path at all.
+// NIGHTLIGHT_MEDIA_ISOLATION (the switch, read only by the entrypoint) and MEDIA_ISOLATION are not in ALLOWED_NAMES,
+// so no child sees either.
+//
+// WHERE THE WRAPPER IS. Next to the backend's root, found from this file's own location: /app/media-exec.sh in the
+// image (this file is /app/src/lib/childEnv.js), backend/media-exec.sh in a checkout. The entrypoint finds it the same
+// way, next to itself, so the dry run tests the very file this spawns.
+export const MEDIA_EXEC_PATH = fileURLToPath(new URL('../../media-exec.sh', import.meta.url));
+// The media user and group. Must equal the ids in media-exec.sh, the Dockerfile (nlmedia) and entrypoint.sh (MEDIA_ID).
+export const MEDIA_UID = 1700;
+export const MEDIA_GID = 1700;
+
+// Read at CALL time, not at load, so a test can switch it per case.
+export function mediaIsolationOn(env = process.env) {
+  return env.MEDIA_ISOLATION === 'on';
+}
+
 // spawn() with the allowlisted environment forced on. A caller-supplied `env` in `options` is IGNORED on
 // purpose: the only way to add a variable is `extra`, which keeps the allowlist reviewable in one place.
 // `source` test (child-env.test.js) fails if any other file calls spawn/execFile directly.
+// With media isolation on, the same command and arguments go to the wrapper, with the same options and environment:
+// the program is the wrapper's first argument. The returned ChildProcess is the wrapper's, and because the wrapper
+// execs (twice: sh into setpriv, setpriv into the program) its pid IS the program's, which is what every kill uses.
 export function spawnChild(command, args, options = {}, { mediamtx = false, extra = {} } = {}) {
   const { env: _ignored, ...rest } = options;
+  if (mediaIsolationOn()) {
+    return spawn(MEDIA_EXEC_PATH, [command, ...(args ?? [])], { ...rest, env: childEnv({ mediamtx, extra }) });
+  }
   return spawn(command, args, { ...rest, env: childEnv({ mediamtx, extra }) });
 }

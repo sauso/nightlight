@@ -1,6 +1,6 @@
 import fs from 'fs';
-import path from 'path';
 import { logger } from './logger.js';
+import { dataDirFrom, FIREBASE_CLIENT_CONFIG_FILE, FIREBASE_CREDENTIALS_FILE, resolveDropInFile } from './dataPaths.js';
 import db from '../db.js';
 import { storeSnapshot } from './pushSnapshots.js';
 import { sessionAgeCondition } from '../middleware/auth.js';
@@ -9,12 +9,20 @@ import { sessionAgeCondition } from '../middleware/auth.js';
 // so it is NEVER baked into the (public) image — it's mounted as a file into the data dir. If
 // it's absent, push is simply disabled (no error): everything else, including the in-app alerts
 // list, works without it.
-const DATA_DIR = process.env.DATA_DIR || '/app/data';
-const CRED_PATH = process.env.FIREBASE_CREDENTIALS || path.join(DATA_DIR, 'firebase-service-account.json');
+//
+// #553 phase 2a: the files live in DATA_DIR/private/ once the start-up move has run; the admin still drops them at
+// the TOP of the data directory (docs/notifications.md), where they work at once and are moved into private/ at the
+// next start. So the default path is resolved on EVERY call (private/ first, then the top level), not once at load:
+// "drop the file in, then enable push, no restart" has to keep working. FIREBASE_CREDENTIALS / FIREBASE_CLIENT_CONFIG
+// still override the path, read once at load as before, and the files they name are never moved.
+const DATA_DIR = dataDirFrom();
+const CRED_OVERRIDE = process.env.FIREBASE_CREDENTIALS || null;
+const credPath = () => CRED_OVERRIDE || resolveDropInFile(FIREBASE_CREDENTIALS_FILE, DATA_DIR);
 // The client-side Firebase config (the admin's google-services.json). Nightlight is self-hosted,
 // so each install uses its OWN Firebase project: the generic app fetches these values from its own
 // server at runtime and initializes Firebase with them (rather than baking them into the APK).
-const CLIENT_CONFIG_PATH = process.env.FIREBASE_CLIENT_CONFIG || path.join(DATA_DIR, 'google-services.json');
+const CLIENT_CONFIG_OVERRIDE = process.env.FIREBASE_CLIENT_CONFIG || null;
+const clientConfigPath = () => CLIENT_CONFIG_OVERRIDE || resolveDropInFile(FIREBASE_CLIENT_CONFIG_FILE, DATA_DIR);
 
 // Android notification channel the app must define (see the mobile client). Matched here so the
 // notification is delivered to the right channel on Android 8+.
@@ -33,12 +41,13 @@ let messaging = null;
 // unavailable until it's provided.
 export async function initPush() {
   if (messaging) return true;
-  if (!fs.existsSync(CRED_PATH)) {
-    logger.info(`[push] no Firebase credentials at ${CRED_PATH} — push notifications disabled`);
+  const file = credPath();
+  if (!fs.existsSync(file)) {
+    logger.info(`[push] no Firebase credentials at ${file} — push notifications disabled`);
     return false;
   }
   try {
-    const cred = JSON.parse(fs.readFileSync(CRED_PATH, 'utf8'));
+    const cred = JSON.parse(fs.readFileSync(file, 'utf8'));
     const { initializeApp, cert } = await import('firebase-admin/app');
     const { getMessaging } = await import('firebase-admin/messaging');
     initializeApp({ credential: cert(cred) });
@@ -77,16 +86,17 @@ export function pushEnabled() {
 // missing/invalid piece so the Settings page can tell the admin exactly what to fix. Returns
 // { ok: true } or { ok: false, error }.
 export function validatePushSetup() {
-  if (!fs.existsSync(CRED_PATH)) {
+  const cred = credPath();
+  if (!fs.existsSync(cred)) {
     return { ok: false, error: 'The Firebase service-account key (firebase-service-account.json) is missing from the data directory.' };
   }
   try {
-    const cred = JSON.parse(fs.readFileSync(CRED_PATH, 'utf8'));
-    if (!cred.project_id || !cred.private_key) throw new Error('missing fields');
+    const parsed = JSON.parse(fs.readFileSync(cred, 'utf8'));
+    if (!parsed.project_id || !parsed.private_key) throw new Error('missing fields');
   } catch {
     return { ok: false, error: 'firebase-service-account.json is present but is not a valid service-account key.' };
   }
-  if (!fs.existsSync(CLIENT_CONFIG_PATH)) {
+  if (!fs.existsSync(clientConfigPath())) {
     return { ok: false, error: 'google-services.json is missing from the data directory.' };
   }
   if (!getClientConfig()) {
@@ -100,8 +110,9 @@ export function validatePushSetup() {
 // call (cheap, tiny file) so dropping the file in doesn't need a restart to take effect.
 export function getClientConfig() {
   try {
-    if (!fs.existsSync(CLIENT_CONFIG_PATH)) return null;
-    const gs = JSON.parse(fs.readFileSync(CLIENT_CONFIG_PATH, 'utf8'));
+    const file = clientConfigPath();
+    if (!fs.existsSync(file)) return null;
+    const gs = JSON.parse(fs.readFileSync(file, 'utf8'));
     const client = gs?.client?.[0];
     const appId = client?.client_info?.mobilesdk_app_id;
     const apiKey = client?.api_key?.[0]?.current_key;

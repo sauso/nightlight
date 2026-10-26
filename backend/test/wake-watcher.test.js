@@ -13,6 +13,10 @@ import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { useTempDataDir, cleanupTempDataDirs, makeChild, makeCamera } from './helpers/harness.js';
 
+// A ring segment's real file name (seg-YYYYMMDD-HHMMSS.mkv, UTC) for the instant t. The segmenter writes only these and
+// the ring code ignores any other name (#553 phase 2b, mediaFiles.safeSegmentNames), so a fixture has to use them.
+const segNameAt = (t) => `seg-${new Date(t).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')}.mkv`;
+
 const DATA_DIR = useTempDataDir();
 
 // Before any import that can spawn: an empty directory as the entire PATH, so ffmpeg never resolves.
@@ -525,7 +529,7 @@ describe('★ #412 — the wake clip is anchored on the first active frame, clam
   let plantedN = 0;
   function plant(entry, mtimes) {
     for (const m of mtimes) {
-      const p = path.join(entry.ringDir, `seg-${String(plantedN++).padStart(6, '0')}.mkv`);
+      const p = path.join(entry.ringDir, `seg-20260101-${String(plantedN++).padStart(6, '0')}.mkv`);
       fs.writeFileSync(p, 'x');
       fs.utimesSync(p, new Date(m), new Date(m));
     }
@@ -1890,7 +1894,7 @@ describe('★ #448 — the watcher counts MINUTES, not callbacks', () => {
         // round the watcher keeps an earlier anchor only when extractClip's selection finds footage for it, and one
         // 10-day-old segment (this fixture before) covers nothing, so every anchor would fall back to `at`.
         for (let t = labelStartMs(0) - 12_000; t <= labelStartMs(100) + 60_000; t += 10_000) {
-          const seg = path.join(entry.ringDir, `seg-${t}.mkv`);
+          const seg = path.join(entry.ringDir, `${segNameAt(t)}`);
           fs.writeFileSync(seg, 'x');
           fs.utimesSync(seg, new Date(t), new Date(t));
         }
@@ -1929,7 +1933,7 @@ describe('★ #448 — the watcher counts MINUTES, not callbacks', () => {
         // Continuous footage around the first active minute (see the seeded test above for why a single old
         // segment no longer does): a closed segment every 2 s from 10 s before the minute to 40 s after it.
         for (let t = labelStartMs(idxFirst) - 10_000; t <= labelStartMs(idxFirst) + 40_000; t += 2_000) {
-          const seg = path.join(entry.ringDir, `seg-${t}.mkv`);
+          const seg = path.join(entry.ringDir, `${segNameAt(t)}`);
           fs.writeFileSync(seg, 'x');
           fs.utimesSync(seg, new Date(t), new Date(t));
         }

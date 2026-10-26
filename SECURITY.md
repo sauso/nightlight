@@ -5,7 +5,9 @@ notification-provider tokens, and recordings/snapshots of your home and family. 
 security issues privately, not as a public GitHub issue.
 
 Those secrets sit in the data directory in plaintext; at rest they are protected by file
-permissions (owner-only by default, `UMASK`), so keep that directory private to the container. See
+permissions, so keep that directory private to the container. The database, `.jwt_secret`, the
+Firebase files, the snapshots and the backups are in its `private/` folder, which is always owner-only
+(`700`); everything else is owner-only by default (`UMASK`). See
 [Who can read the data directory](docs/operations.md#who-can-read-the-data-directory).
 
 ## Supported versions
@@ -148,11 +150,26 @@ manual:
   edit camera).
 - **Admin/caregiver account password**: sign in and change it (Account → Change password), or
   have an admin reset another account's.
-- **JWT signing secret** (`.jwt_secret` in the data volume): deleting it and restarting the
+- **JWT signing secret** (`private/.jwt_secret` in the data volume): deleting it and restarting the
   container generates a new one and signs everyone out, forcing a fresh login everywhere.
 - **Notification-provider tokens** (Pushover, Firebase, Gotify, ntfy): regenerate/revoke the
   token or key at the provider and re-enter it in Settings → Push notifications.
 - **MQTT broker credentials**: rotate on the broker and update the camera's MQTT settings.
+
+## Camera streams are untrusted input (media isolation)
+
+FFmpeg, ffprobe and MediaMTX parse whatever a camera sends. By default (#553) they run as a separate,
+unprivileged user inside the container, with no Linux capabilities, so one that a camera takes over cannot read
+the database, `.jwt_secret` or the app's environment. They are also given only a short allowlist of environment
+variables. It is on unless `NIGHTLIGHT_MEDIA_ISOLATION=0`, and it turns itself off, with a warning in the log and
+a line on Settings → About, on a host that cannot support it (rootless Docker or Podman, a share that ignores
+`chmod`, NFS `root_squash`, `PUID` or `PGID` 1700, `PUID=0`, missing capabilities). The limits, stated plainly:
+the app itself holds `CAP_SETUID`, `CAP_SETGID` and `CAP_KILL`, so a compromised app can become root inside the
+container and, if the data share is not mounted `nosuid`, create setuid files; the media programs share one user, so
+one can signal or inspect the others; MediaMTX's API on the container's loopback has no password and exposes the
+cameras' credentials; and camera passwords are on FFmpeg's command line. Keep cameras on their own network. Detail
+and the reasoning: [docs/operations.md](docs/operations.md#media-isolation) and
+[docs/architecture.md](docs/architecture.md#media-isolation-the-layout-and-the-fence-553-phases-2b-and-4-on-by-default).
 
 ## Scope
 
