@@ -24,8 +24,9 @@ default, opt-in per camera.**
 For every camera with recording on, Nightlight keeps a small rolling buffer of that camera's stream
 (pulled from the stream it already transcodes — no extra load on the camera, no second RTSP session).
 When a detection fires it cuts a clip spanning a few seconds **before** the trigger through the moments
-**after**, remuxes it to a browser-playable MP4, and links it to the alert. Video is copied (no
-re-encode); only the clip's short audio track is re-encoded, once.
+**after**, turns it into a browser-playable MP4, and links it to the alert. The rolling buffer is a plain
+copy of the stream, but the clip itself is re-encoded once (video with x264 `veryfast`, audio to AAC),
+because a straight copy can only cut on a keyframe and the clip has to be exactly as long as you set.
 
 **Turning it on**
 

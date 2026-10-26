@@ -5,6 +5,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 ## Get Nightlight running
 
 - [Installation](installation.md) — Unraid, Docker, Compose, storage and first setup
+- [What you need, and what has been tested](requirements.md) — hosts, what each camera starts, disk, browsers and apps, and what has not been measured
 - [How it works](how-it-works.md) — FFmpeg, MediaMTX, the backend and the app, and how video reaches your browser
 - [Cameras and caregivers](cameras.md) — add cameras and share access
 - [Adding caregivers](caregivers.md) — what caregivers and admins can each do, and how long a sign-in lasts (`SESSION_TTL_DAYS`)
