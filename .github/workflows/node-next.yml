@@ -7,7 +7,8 @@ name: Next Node major preview
 #
 # HOW TO READ IT. A failure here that ALSO fails on the supported Node is an ordinary bug. A failure that appears
 # only here is a Node-26 incompatibility: file it as its own issue and link it from #751. The run summary lists
-# every failing test, so a red run can be triaged without opening the log.
+# the first 60 failing tests (and the suite's own totals), so a red run can usually be triaged without opening the
+# log; a run that fails with no failing test (an unhandled error) says so in the log, and is red either way.
 #
 # WHY A SEPARATE WORKFLOW, AND WHEN IT RUNS
 #   * Not a matrix entry in test.yml: that would run the extra Node on every PR, and a Node-26-only failure
@@ -126,7 +127,9 @@ jobs:
               else
                 echo "No failing tests reported."
               fi
-              grep -E '^\s*(Test Files|Tests)\s' "$RUNNER_TEMP/frontend.log" | sed 's/^/    /' || true
+              # Vitest can fail a run for an unhandled error while every assertion passed; its `Errors` line is the only
+              # place that says so, so it is kept with the totals.
+              grep -E '^\s*(Test Files|Tests|Errors)\s' "$RUNNER_TEMP/frontend.log" | sed 's/^/    /' || true
             else
               echo "The suite produced no output: it did not start. See the log."
             fi

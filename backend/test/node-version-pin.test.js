@@ -44,17 +44,51 @@ test('every Dockerfile stage runs that major', () => {
 // is a mistake and must fail here.
 const PREVIEW_WORKFLOW = 'node-next.yml';
 
+// What a workflow's text pins. Two holes the first version of this scan had, found by the review of #884 (the first
+// pre-dates #751): a COMMENT such as `# node-version: 26` counted as a pin, so a workflow could set up Node from
+// `.nvmrc` and still pass on the strength of its own comment; and a value that is not a bare major (`lts/*`, `26.x`,
+// `node-version-file:`) was not matched at all, so it escaped the scan instead of failing it. So: comments are removed
+// first, every `node-version` value is returned RAW, and a separate test requires each one to be a bare integer.
+export function scanNodeVersions(text) {
+  const out = [];
+  for (const line of text.split(/\r?\n/)) {
+    const code = line.replace(/(^|\s)#.*$/, ''); // a YAML comment starts at a `#` at the start or after whitespace
+    const file = /\bnode-version-file\s*:/.exec(code);
+    if (file) out.push({ key: 'node-version-file', raw: code.trim() });
+    const m = /\bnode-version\s*:\s*(\S+)/.exec(code);
+    if (m) out.push({ key: 'node-version', raw: m[1] });
+  }
+  return out;
+}
+
 function workflowNodeVersions() {
   const dir = path.join(REPO, '.github', 'workflows');
   const found = [];
   for (const f of fs.readdirSync(dir).filter((n) => /\.ya?ml$/.test(n))) {
-    for (const m of fs.readFileSync(path.join(dir, f), 'utf8').matchAll(/node-version:\s*['"]?(\d+)/g)) found.push([f, Number(m[1])]);
+    for (const e of scanNodeVersions(fs.readFileSync(path.join(dir, f), 'utf8'))) found.push({ file: f, ...e });
   }
   return found;
 }
 
-test('every workflow that sets up Node uses that major, except the one next-major preview', () => {
+test('the workflow scan ignores comments and does not let an alias, a range or a version file through', () => {
+  assert.deepEqual(scanNodeVersions("# node-version: 26\n      - run: x # node-version: 99\n"), [], 'a comment was read as a pin');
+  assert.deepEqual(scanNodeVersions("          node-version: '24'  # the supported major\n"), [{ key: 'node-version', raw: "'24'" }]);
+  assert.deepEqual(scanNodeVersions('          node-version: lts/*\n'), [{ key: 'node-version', raw: 'lts/*' }]);
+  assert.deepEqual(scanNodeVersions('          node-version: 26.x\n'), [{ key: 'node-version', raw: '26.x' }]);
+  assert.equal(scanNodeVersions('          node-version-file: .nvmrc\n')[0].key, 'node-version-file');
+});
+
+test('every workflow pins Node by a bare major: no version file, alias or range', () => {
   const found = workflowNodeVersions();
+  assert.ok(found.length >= 1, 'no `node-version:` found in any workflow');
+  for (const e of found) {
+    assert.equal(e.key, 'node-version', `${e.file} uses ${e.raw}: a version file hides which Node CI runs from this test`);
+    assert.match(e.raw, /^['"]?\d+['"]?$/, `${e.file} sets node-version ${e.raw}: it must be a bare major (an alias or range cannot be compared with .nvmrc)`);
+  }
+});
+
+test('every workflow that sets up Node uses that major, except the one next-major preview', () => {
+  const found = workflowNodeVersions().map((e) => [e.file, Number(e.raw.replace(/['"]/g, ''))]);
   assert.ok(found.length >= 1, 'no `node-version:` found in any workflow');
   for (const [f, v] of found) {
     if (f === PREVIEW_WORKFLOW) continue;
@@ -63,10 +97,13 @@ test('every workflow that sets up Node uses that major, except the one next-majo
 });
 
 test('the next-major preview workflow exists and pins a major above the supported one', () => {
-  const preview = workflowNodeVersions().filter(([f]) => f === PREVIEW_WORKFLOW);
+  const preview = workflowNodeVersions().filter((e) => e.file === PREVIEW_WORKFLOW && e.key === 'node-version');
   // Not vacuous: the exemption above must not outlive the file, and a file that stops setting up Node is a rename to notice.
   assert.ok(preview.length >= 1, `${PREVIEW_WORKFLOW} no longer sets up Node: drop the exemption in this test, or restore the workflow`);
-  for (const [f, v] of preview) assert.ok(v > major, `${f} sets up Node ${v}, which must be above the supported ${major} (it is the preview of the NEXT major)`);
+  for (const e of preview) {
+    const v = Number(e.raw.replace(/['"]/g, ''));
+    assert.ok(v > major, `${e.file} sets up Node ${v}, which must be above the supported ${major} (it is the preview of the NEXT major)`);
+  }
 });
 
 // WHY A RUNNING-VERSION CHECK TOO (issue #565, the "cause unexplained" half). The five places above say what

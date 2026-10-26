@@ -19,7 +19,7 @@ updates:
     schedule:
       interval: "weekly"
     ignore:
-      # Node 24 is the only version tested (CLAUDE.md, .nvmrc, node-version-pin.test.js); a bump to the next
+      # Node 24 is the only supported version (CLAUDE.md, .nvmrc, node-version-pin.test.js); a bump to the next
       # major is a deliberate change across five places, not a Dependabot PR. Patch/minor still come through.
       # (.github/workflows/node-next.yml previews the NEXT major, #751; it is not a support statement.)
       - dependency-name: "node"
