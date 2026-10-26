@@ -23967,5 +23967,14 @@
     "expect": "killed",
     "tests": ["about-media-isolation.test.js"],
     "namePattern": "is `other`, and is NEVER echoed"
+  },
+  {
+    "label": "#867 shutdown budget back to 6000: a 7 s cut is given up on",
+    "file": "backend/src/lib/recordings.js",
+    "find": "export const SHUTDOWN_BUDGET_MS = 20000;",
+    "replace": "export const SHUTDOWN_BUDGET_MS = 6000;",
+    "expect": "killed",
+    "tests": ["recordings-lifecycle.test.js"],
+    "namePattern": "a cut that takes 7 s is waited for"
   }
 ]

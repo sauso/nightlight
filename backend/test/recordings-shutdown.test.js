@@ -198,12 +198,13 @@ describe('stopAllRecordings', () => {
     assert.ok(SHUTDOWN_SETTLE_MS < SEGMENT_SETTLE_MS, 'the shutdown settle is no longer the shorter one');
   });
 
-  test('shutdown stays inside the 9s bound the deployment grace is sized from', () => {
+  test('shutdown stays inside the declared stop grace (worst case 23s of the 30s)', () => {
     // Arithmetic, because this is not otherwise observable and getting it wrong is a REGRESSION that a
     // green suite would never show. Each detector stop and the transcoder stop are each bounded by a 3s
     // force-kill. Awaiting the recording stop in sequence gave 3+3+6+3 = 15s, where the pre-PR worst
     // case was 9s. Overlapping the recording wait with the detector stops restores that:
-    // max(6, 3+3) + 3 = 9s. Found by adversarial review of #277.
+    // max(budget, 3+3) + 3 (9s while the budget was 6s; 23s since #867 raised it to 20s). Found by adversarial
+    // review of #277.
     //
     // ⚠️ THE ORIGINAL VERSION OF THIS CASE CALLED 9s "inside Docker's default 10s stop grace". That
     // was false, and it is the reason issue #279 exists: Docker Engine 29 documents no default, the
@@ -230,7 +231,23 @@ describe('stopAllRecordings', () => {
     // not process-bound and adds nothing), then the transcoder stop runs after.
     const detectors = forceKill('motionDetector.js') + forceKill('soundDetector.js');
     const worstCase = Math.max(SHUTDOWN_BUDGET_MS, detectors) + forceKill('transcoder.js');
-    assert.ok(worstCase <= 9000, `worst-case shutdown is now ${worstCase}ms — it must not exceed the pre-PR 9000ms`);
+    // #867: this used to be the literal `<= 9000`, which was only ever a stand-in for "fits inside the declared
+    // grace" (and forced the recording budget down to 6s, too short for a cut on a NAS). The grace is read from
+    // docker-compose.yml, not typed, so the bound cannot drift from the config. The 5s margin is for what runs
+    // after the waits (stopMediaMTX, stopMqtt, the exit) and for Docker's own overhead before its SIGKILL timer.
+    const compose = fs
+      .readFileSync(new URL('../../docker-compose.yml', import.meta.url), 'utf8')
+      .replace(/\r\n/g, '\n');
+    const graceMatch = /^\s*stop_grace_period:\s*(\d+)s\s*$/m.exec(compose);
+    assert.ok(graceMatch, 'docker-compose.yml no longer declares stop_grace_period in whole seconds');
+    const graceMs = Number(graceMatch[1]) * 1000;
+    const MARGIN_MS = 5000;
+    assert.ok(
+      worstCase + MARGIN_MS <= graceMs,
+      `worst-case shutdown is now ${worstCase}ms; with a ${MARGIN_MS}ms margin it must fit the declared ${graceMs}ms grace`
+    );
+    // And it must not shrink back to the old 6s cap: that is the #867 defect (a 6-8s cut on a NAS was given up on).
+    assert.ok(SHUTDOWN_BUDGET_MS >= 10000, `the ${SHUTDOWN_BUDGET_MS}ms budget is below the 6-8s cuts measured on staging (#867)`);
 
     // ...and the code must actually overlap them, not await in place. A source check, because
     // index.js boots the whole app and cannot be unit-tested.

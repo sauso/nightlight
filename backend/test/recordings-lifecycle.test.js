@@ -15,7 +15,7 @@
 // write `status='ready'` with a path and a duration. Both only run when `extractClip` returns, which
 // needs a real encoder. e2e/playwright/tests/10-clip-lifecycle.spec.js covers them against the real
 // image. Everything else, including both failure branches, is below.
-import { test, before, after, beforeEach, describe } from 'node:test';
+import { test, before, after, beforeEach, describe, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -32,7 +32,7 @@ const { CLIPS_DIR, startSegmenter, stopSegmenter, stopAllSegmenters } = await im
 const { checkClipStorage } = await import('../src/lib/clipStorage.js');
 const { holdOwners, effectiveHold, RING_OWNER, ondemandHoldOwner } = await import('../src/lib/ringHolds.js');
 const {
-  startRecording, stopRecording, stopAllRecordings, stopAllRecordingsForShutdown,
+  startRecording, stopRecording, stopAllRecordings, stopAllRecordingsForShutdown, SHUTDOWN_BUDGET_MS,
   isRecording, recordingState, reconcileStaleRecordings,
   getOndemandSettings, getWakeClipSettings, captureWakeClip, listChildWakeClips, pruneWakeClips,
   wakeClipStats, listChildRecordings,
@@ -437,6 +437,66 @@ describe('★ stopping everything, on the way down', () => {
     assert.equal(isRecording(CAM), false, 'the camera should already have left the active map');
     assert.equal(rowOf(st.id).status, 'pending', 'precondition: the cut really did overrun');
     assert.equal(reconcileStaleRecordings(), 1, 'the abandoned row is not swept on the next boot');
+    assert.equal(rowOf(st.id).status, 'failed');
+  });
+
+  // Let promise callbacks and the already-failed spawn's real I/O run. setImmediate is NOT mocked (only setTimeout is).
+  const flushIo = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
+
+  test('★ #867: a cut that takes 7 s is waited for, not given up on at the old 6 s cap', async () => {
+    // Staging (2026-10-25): cuts of a 4-10 s manual recording took 6-8 s on the NAS, the 6 s budget logged "gave up
+    // waiting", and the clip was kept or lost by luck. Simulated here with the settle (the part of the cut a test can
+    // lengthen without an encoder) under MOCKED setTimeout, so seven seconds cost nothing. The budget is the REAL
+    // constant, not a number typed here: this is the test that fails when it drops back below a 7 s cut.
+    // After the sleep the absent encoder fails the cut quickly (real I/O), so "the cut ran to its end" shows as
+    // 'failed'.
+    // ⚠️ THE CLOCK IS ADVANCED IN STAGES AND THE STATE READ BETWEEN THEM. A single tick(7000) fires the budget AND
+    // the settle in one go, the failed cut then finishes before anything can look, and the case passed on the old
+    // 6000 value too (demonstrated by running it there). Ticking to 6.5 s first, past the old cap and short of the
+    // cut, is what makes the old value observable: its budget has fired and shutdown has already moved on.
+    armRing();
+    const st = startRecording(camera());
+    mock.timers.enable({ apis: ['setTimeout'] });
+    try {
+      let finished = false;
+      const done = stopAllRecordings({ settleMs: 7_000, budgetMs: SHUTDOWN_BUDGET_MS }).then(() => { finished = true; });
+      mock.timers.tick(6_500);
+      await flushIo();
+      assert.equal(finished, false, 'shutdown gave up on a cut that was still within 7 s (the old 6 s cap)');
+      mock.timers.tick(500);
+      await done;
+      assert.equal(rowOf(st.id).status, 'failed', 'the cut did not run to its end');
+    } finally {
+      mock.timers.reset();
+    }
+  });
+
+  test('...and the budget is still a cap: a cut that outlasts it is given up on, row left for the boot sweep', async () => {
+    // The other side of the case above: the MECHANISM still caps the wait (a budget that never fires would let a wedged
+    // encode hold shutdown until Docker's SIGKILL, which is the loss this code exists to avoid).
+    // ⚠️ It takes the budget as SHUTDOWN_BUDGET_MS, so it does NOT pin the VALUE from above (a 600000 budget passes it,
+    // demonstrated by running it). The value's upper bound is recordings-shutdown.test.js: worst case plus margin must
+    // fit the declared grace.
+    // Staged ticks again (see above): the settle is 1 s PAST the budget, so stopping the clock exactly on the budget
+    // shows the cap firing while the cut is still sleeping. Asserted with `finished`, not by awaiting, so a budget
+    // that never fires fails here instead of hanging the file.
+    armRing();
+    const st = startRecording(camera());
+    mock.timers.enable({ apis: ['setTimeout'] });
+    try {
+      let finished = false;
+      stopAllRecordings({ settleMs: SHUTDOWN_BUDGET_MS + 1_000, budgetMs: SHUTDOWN_BUDGET_MS }).then(() => { finished = true; });
+      mock.timers.tick(SHUTDOWN_BUDGET_MS - 1_000);
+      await flushIo();
+      assert.equal(finished, false, 'shutdown stopped waiting before the budget');
+      mock.timers.tick(1_000);
+      await flushIo();
+      assert.equal(finished, true, 'the budget did not cap the wait');
+      assert.equal(rowOf(st.id).status, 'pending', 'the cut was not abandoned mid-flight');
+    } finally {
+      mock.timers.reset();
+    }
+    assert.equal(reconcileStaleRecordings(), 1);
     assert.equal(rowOf(st.id).status, 'failed');
   });
 
