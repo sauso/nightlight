@@ -16,8 +16,10 @@
 // a marker without changing behaviour; a stale exemption (a column that no longer exists) fails the test too.
 //
 // WHAT IS DRIVEN: the routes that talk to MediaMTX, against a fake that records every request in full (method,
-// URL, headers, body): add, edit the address, disable, enable, delete. The sub-stream path is registered too, since
-// the seeded camera has a sub-stream address. Not covered, stated: the watchdog and reconcile paths take the same
+// URL, headers, body): add, edit the address, disable, enable, delete. The sub-stream path is registered too (the
+// seeded camera has a sub-stream address, and the mocked transcoder runs a start's `prepare` step), through both
+// write calls (PATCH answered 404, then POST). Not covered, stated: the `-hls` sibling path, which transcoder.js's
+// own start registers (the transcoder is mocked here), and the watchdog and reconcile paths. They use the same
 // `upsertPath(pathName)` / `isPathConfiguredCorrectly(pathName)` helpers, which receive only a path name and so
 // cannot be handed an address by their signature; a caller that changed that signature is what the routes here
 // would catch.
@@ -37,20 +39,29 @@ mock.module('../src/lib/rtspProbe.js', {
 });
 mock.module('../src/lib/transcoder.js', {
   exports: {
-    startTranscoder: async () => {},
+    // No process is spawned, but the `prepare` step a start carries IS run: subStream.js registers the sub-stream's
+    // MediaMTX path there (#806), so skipping it left that registration unobserved (Codex review of this change).
+    startTranscoder: async (_id, _url, _path, _name, { prepare } = {}) => { if (prepare) await prepare(() => false); },
     stopTranscoder: async () => {},
     isRunning: () => false,
   },
 });
 
 // A fake MediaMTX that keeps EVERYTHING it is sent. The body is read to the end; headers are kept whole.
+// It behaves like the real one for the add path: PATCH of a path that does not exist answers 404, which sends
+// upsertPath on to the POST (`add`) call, so both write calls are observed, not just the first.
 const requests = [];
+const known = new Set();
 const mediamtx = createServer((req, res) => {
   const chunks = [];
   req.on('data', (c) => chunks.push(c));
   req.on('end', () => {
     requests.push({ method: req.method, url: req.url, headers: req.headers, body: Buffer.concat(chunks).toString('utf8') });
     res.setHeader('content-type', 'application/json');
+    const name = req.url.split('/').pop();
+    if (req.method === 'PATCH' && !known.has(name)) { res.statusCode = 404; return res.end('{}'); }
+    if (req.method === 'POST') known.add(name);
+    if (req.method === 'DELETE') known.delete(name);
     res.end('{}');
   });
 });
@@ -142,6 +153,9 @@ test('adding, editing, disabling, enabling and deleting a camera never sends Med
   assert.ok(writes.length >= 3, `expected path registrations, saw ${JSON.stringify(requests.map((r) => `${r.method} ${r.url}`))}`);
   for (const w of writes) assert.deepEqual(JSON.parse(w.body), { source: 'publisher' }, `${w.method} ${w.url} sent more than the publisher-only config`);
   assert.ok(requests.some((r) => r.method === 'DELETE'), 'expected a path removal');
+  // Both write calls and the sub-stream path were reached, or the loop above proves less than it says.
+  assert.ok(requests.some((r) => r.method === 'POST' && /\/paths\/add\//.test(r.url)), 'expected a POST (add) after a 404 PATCH');
+  assert.ok(writes.some((r) => /-sub$/.test(r.url)), `expected a sub-stream path registration, saw ${JSON.stringify(writes.map((r) => r.url))}`);
 
   // THE CLAIM: nothing MediaMTX was sent, in URL, headers or body, carries any marker or a camera address.
   for (const r of requests) {
