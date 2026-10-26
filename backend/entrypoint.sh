@@ -153,7 +153,7 @@ fi
 
 # --- The private folder (#553 phase 2a) ------------------------------------------------------------
 # The database and the app's secrets live in DATA_DIR/private/, a folder that is always 700 and owned by PUID:PGID, so
-# that a later phase can open DATA_DIR itself to the media group without exposing them (a 700 folder protects even a
+# that media isolation can open DATA_DIR itself to the media group without exposing them (a 700 folder protects even a
 # wrongly permissive file inside it). The MOVE is src/scripts/migrate-private-layout.js, run further down as the app
 # user; this part only prepares, as root:
 #   - private/ itself: created if missing, given to PUID:PGID only if it is not already theirs, and chmod 700 on every

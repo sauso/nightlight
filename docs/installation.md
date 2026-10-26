@@ -62,6 +62,12 @@ Replace `/path/to/your/data` with a persistent folder on your host.
 - Known limits: a default ACL on the host folder overrides it; an external `CLIPS_DIR` mount's existing files are not tightened; and on a filesystem that ignores `chmod` (a Docker Desktop for Windows bind mount, a CIFS mount with a fixed `file_mode`) modes cannot change at all, so that filesystem's own access control is what protects the data.
 - Details, including what this may mean for SMB shares (not verified) and backups: [Who can read the data directory](operations.md#who-can-read-the-data-directory).
 
+**`NIGHTLIGHT_MEDIA_ISOLATION`** (optional, default blank, which means on) runs FFmpeg, ffprobe and MediaMTX as a separate user inside the container, so a camera stream that takes one over cannot read the database or your secrets. You don't need to set anything.
+- Range: `0`, `off` or `false` turns it off. Anything else, blank included, leaves it on. It is read when the container starts, so re-create the container after changing it.
+- If your host can't support it (rootless Docker or Podman, a share that ignores `chmod`, NFS with `root_squash`), the container still starts, runs without it, and logs one `media isolation is off` warning. **Settings → About** shows "Media isolation: on" or "off".
+- New recordings are then owned by user `1700` rather than `PUID`, so a non-root backup job or SMB user can't read the new ones from the folder. Existing recordings keep their owner.
+- What it doesn't protect against: [Media isolation](operations.md#media-isolation).
+
 **`--log-opt`** caps Docker's own log storage at 10 MB × 3 files. Without it, logs grow without limit by default, which can be a real problem on Unraid in particular: Docker's storage there is a fixed-size image, and filling it can break the whole Docker service.
 
 **`--stop-timeout 30`** gives Nightlight enough time to stop cleanly. On the way down, an on-demand recording is assembled from the buffer, and being killed part-way through loses it. Stopping normally takes **1-5 seconds**, so 30 is deliberately generous, and it costs nothing: the container exits as soon as it has finished instead of waiting out the timeout. Don't rely on Docker's own default. Recent versions don't document one, and it has been measured killing the container after about 4 seconds, which was enough to lose the recording.

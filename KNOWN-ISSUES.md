@@ -1597,6 +1597,25 @@ database. A backup job that needs the database has to run as root, or copy the f
 `docker exec nightlight node src/scripts/backup-db.js` writes
 ([Backing up](docs/operations.md#3-backing-up)).
 
+## New recordings belong to user 1700, and the log says "media isolation is off" on some hosts
+
+**What you see:** After upgrading, recordings, clips and timelapses made from then on are owned by uid `1700`
+(group `1700`, mode `660`) instead of `PUID`, and a non-root backup job or an SMB user cannot read the new ones
+from the folder. Or, on some hosts, the start-up log has
+`[entrypoint] warning: media isolation is off: <reason>` and **Settings → About** says "Media isolation: off".
+
+**Why:** On purpose (#553). FFmpeg, ffprobe and MediaMTX parse whatever a camera sends, so they now run as a
+separate, unprivileged user and cannot read the database or the secrets. The warning means the container could not
+set that up on your host (rootless Docker or Podman, a share that ignores `chmod`, NFS `root_squash`,
+`PUID`/`PGID` `1700`, `PUID=0`, a missing capability) and started the old way instead; it never refuses to start.
+Files that already existed keep their owner.
+
+**What to do:** Nothing for the warning if you accept the old behaviour; the reason is in the line. To read new
+recordings as a non-root user, give that user group `1700`, or run the reader as root. To turn isolation off,
+set `NIGHTLIGHT_MEDIA_ISOLATION=0` and re-create the container; the files are handed back to `PUID`:`PGID`
+once. Limits that remain either way (the app is not confined, MediaMTX's local API has no password, camera
+passwords are in FFmpeg's command line): [Media isolation](docs/operations.md#media-isolation).
+
 ## The start-up log warns that something is still at the top of the data directory
 
 **What you see:** `[entrypoint] warning: private layout: something is still at the top of /app/data this start

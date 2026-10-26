@@ -427,6 +427,14 @@ and **Settings → Recording → Storage** shows the path with a warning that re
 automatic clip, wake clip, on-demand recording or timelapse is saved; alerts still go out, without a
 clip.
 
+**With [media isolation](operations.md#media-isolation) on (the default), the files are written by a separate
+user.** FFmpeg runs as uid `1700`, so new recordings, clips and timelapse frames are owned by `1700:1700` (mode
+`660`), not by `PUID:PGID`, and an account that is not root can no longer read them from the folder; the app plays
+and downloads them as before. Ones made earlier keep their owner. For an external `CLIPS_DIR`, the start-up script
+changes **only its top folder**, to group `1700` and mode `750`, and the folders above it need the execute permission
+for "other" (`755` is usual) so the media user can reach it; on a mount where that cannot be done, isolation turns
+itself off with a warning and nothing else changes. `NIGHTLIGHT_MEDIA_ISOLATION=0` returns to the old behaviour.
+
 **Safety guard:** at startup Nightlight checks `CLIPS_DIR` is writable and backed by a real mounted
 volume. If it resolves to an unmapped path (the container's ephemeral layer), recording is **disabled**
 and a clear error is logged — video is never written somewhere it would vanish on recreate or bloat the

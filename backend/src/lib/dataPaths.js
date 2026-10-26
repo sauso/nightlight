@@ -2,7 +2,7 @@
 //
 // WHY A PRIVATE FOLDER. The database (every camera password, MFA secret, session and provider token, in
 // plaintext by design), .jwt_secret, the Firebase files and the snapshot folders now live in DATA_DIR/private/,
-// a folder that is always 0700 and owned by the app. A later phase opens DATA_DIR itself to the media group
+// a folder that is always 0700 and owned by the app. Media isolation (on by default, #553) opens DATA_DIR itself to the media group
 // (so a separate media user can write clips); anything protected only by its OWN mode is then one wrong chmod,
 // one restore as root or one UMASK=022 away from being readable by a compromised ffmpeg. A 0700 folder protects
 // even a wrongly permissive file inside it (three plan reviewers agreed, #553 decision 2-A).

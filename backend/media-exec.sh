@@ -12,7 +12,7 @@
 #   umask 007     a media file is created group-read/writable (0660, folders 0770) and nothing for "other".
 #                 The app has the media group too (the entrypoint's isolated start passes --groups=PGID,1700; the
 #                 image itself does not make it a member), so it can still read, move and delete what ffmpeg
-#                 writes; a later phase of #553 makes the shared leaf folders sticky so the media user cannot delete
+#                 writes; the shared leaf folders are sticky (1770, src/lib/mediaLayout.js) so the media user cannot delete
 #                 the app's own files. Set here, not inherited: the app's own mask (UMASK, default 077) would
 #                 give the media files 0600, which the app, being another uid, could not read.
 #   exec          the process keeps the pid Node got back from spawn(). The app signals that pid

@@ -17,8 +17,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   template is unchanged. A new CI job starts the image that way and checks that it streams, stops cleanly and starts
   again on the same data, and that leaving out KILL, DAC_OVERRIDE or FOWNER fails the way the docs describe. It is
   tested on bridge networking; it has also been tried by hand on one Unraid install, with host networking and with a
-  dedicated LAN address, which is not an automated check. It does not separate FFmpeg from
-  the database. See [docs/operations.md](docs/operations.md#hardening-the-container-optional), including the exact
+  dedicated LAN address, which is not an automated check. On its own it does not separate FFmpeg from
+  the database (media isolation, further down, does that). See [docs/operations.md](docs/operations.md#hardening-the-container-optional), including the exact
   Unraid **Extra Parameters** (keep the existing log and stop-timeout flags) and how to check it worked.
 
 ### Changed
@@ -70,19 +70,18 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   deliver live video and AAC audio (on arm64 it only has to start), and only then is the tag pointed at that same
   image. If a check fails, the tag keeps the image it had. Release tags (`vX.Y.Z`) are still never rebuilt. See
   [docs/operations.md](docs/operations.md#the-weekly-rebuild).
-- **Groundwork for running FFmpeg and MediaMTX as a separate user (#553, first step).** Nothing changes for you yet:
-  FFmpeg, ffprobe and MediaMTX still run as the app's own user, and the switch that would change that is internal and
-  off. The image now contains util-linux's `setpriv` and a second user for the media processes (`nlmedia`, uid and
+- **Groundwork for running FFmpeg and MediaMTX as a separate user (#553, first step).** This is the machinery; the last entry
+  in this list turns it on. The image now contains util-linux's `setpriv` and a second user for the media processes (`nlmedia`, uid and
   gid 1700, used only inside the container), and the start-up script can test whether that separation would work on
   your system and fall back to the usual start if not. Two things you might notice: GET `/api/about` now also
-  reports `mediaIsolation` (`"off"` for now), and if FFmpeg or MediaMTX cannot be run at all (exit status 126 or
+  reports `mediaIsolation` (`"on"` or `"off"`), and if FFmpeg or MediaMTX cannot be run at all (exit status 126 or
   127) the app now retries with a growing pause, up to a minute, and logs it once and then every tenth time, instead
   of restarting every few seconds with a line each time; this covers the stream, the recording ring and the motion
   and sound detectors, and such a failure no longer counts towards "does this camera have a microphone?". A signal
   the app could not deliver to one of these processes is no longer mistaken for a process that failed to start,
   which could start a second MediaMTX beside the running one.
-- **Running FFmpeg and MediaMTX as a separate user now works end to end, still off by default (#553, second step).**
-  With the internal switch on, recordings, clips, thumbnails and the ring buffer are written by the media user into
+- **Running FFmpeg and MediaMTX as a separate user now works end to end (#553, second step).**
+  With isolation on, recordings, clips, thumbnails and the ring buffer are written by the media user into
   folders only it can write in, and the app reads, serves and deletes what it wrote more carefully: it opens a file
   without following a link, refuses one with a second name (a hard link to the database would otherwise pass), serves
   from the file it checked, deletes one file at a time, and ignores any ring file that is not named like its own
@@ -90,13 +89,32 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   folders (data directory `710`, clips folder `750`, both in the media group), and keeps isolation off, with one
   warning, if the database, a backup, a snapshot folder, `.jwt_secret` or a Firebase file is still at the top level of
   the data directory, if a folder it would open to the media group belongs to another user, or if a trial of the folders
-  (run in the background, 30 seconds at most) fails. Nothing changes unless the internal switch is set: it is off, the
-  default is not changed here, and no setting was added. With the switch off, one thing differs from before: the temporary
+  (run in the background, 30 seconds at most) fails. Whether it is on by default is the next entry. Either way, one thing
+  differs from before: the temporary
   file the clips-folder check writes (`.write-test`) now lives in `clips/.app/`, and the concat lists FFmpeg cuts from
   moved from the ring folder to `clips/.concat/`; existing clips and files are left as they are. If a start ends with
   isolation off after an earlier one had it on, the data directory and clips folder are given back to `PUID:PGID` once
   so clips made in between stay playable. See
-  [Media isolation](docs/operations.md#media-isolation-not-on-by-default).
+  [Media isolation](docs/operations.md#media-isolation).
+- **FFmpeg, ffprobe and MediaMTX now run as a separate user by default (#553).** They parse whatever a camera sends,
+  so a camera that has been taken over could, until now, make them read the database and every stored secret. At
+  every start the container now tries to run them as a separate, unprivileged user (uid `1700`) that cannot open the
+  database, `.jwt_secret` or the app's environment. If your host cannot do that (rootless Docker or Podman, a share
+  that ignores `chmod`, NFS with `root_squash`, `PUID` or `PGID` set to `1700`, `PUID=0`, a missing capability), the
+  container still starts the old way and logs one `media isolation is off` warning; it never refuses to start.
+  **Settings → About** shows "Media isolation: on" or "off". To turn it off, set `NIGHTLIGHT_MEDIA_ISOLATION=0` (or
+  `off`, `false`) and re-create the container; default: not set, which means on; no other value turns it off, and the
+  setting is read only at start. What changes for you: **recordings, clips and timelapses made from now on are owned
+  by user `1700` (mode `660`), so a backup job or SMB user that is not root can no longer read the new ones from the
+  folder**; the ones that already exist stay exactly as they are, and going back to off is automatic (the files are
+  handed back to `PUID`:`PGID` once at that start). What it does **not** stop, stated in
+  [Media isolation](docs/operations.md#media-isolation): the app itself can still become root inside the container
+  (and create setuid files on a share not mounted `nosuid`); all the media programs share one user, so one that is
+  taken over can interfere with the others; MediaMTX's local API has no password and lists the cameras' credentials;
+  and camera passwords are on FFmpeg's command line. Keep cameras on their own network. A rare FFmpeg error that
+  happens to exit with status 126 or 127 within five seconds can be mistaken for "could not run" and retried more
+  slowly (up to a minute) with one extra log line. Not tested by the project: playback on every phone and browser,
+  rootless Docker, rootless Podman, NFS, a real Unraid kernel in CI.
 
 ### Fixed
 

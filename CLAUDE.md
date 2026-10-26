@@ -239,7 +239,12 @@ before touching that subsystem.** These are the rules that must not be broken:
   secret is generated and persisted, **never a hardcoded fallback** (the image is public).
 - **Schema changes are hand-written, idempotent migrations** at the bottom of `db.js` (`PRAGMA table_info`
   + conditional `ALTER TABLE`). There is no migration framework.
-- **The app process never runs as root** (entrypoint remaps `PUID`/`PGID`, then `su-exec`).
+- **The app process never runs as root at start** (entrypoint remaps `PUID`/`PGID`, then `setpriv` or `su-exec`).
+  Media isolation (#553) is ON BY DEFAULT: ffmpeg, ffprobe and MediaMTX run as uid 1700, and the app keeps
+  `CAP_SETUID/SETGID/KILL` to start and signal them, so unlike the plain `su-exec` start it CAN become root while
+  running. `NIGHTLIGHT_MEDIA_ISOLATION=0` is the kill switch; a host that cannot do it falls back to `su-exec`
+  with one warning. Never describe the media programs as "the same user as the app" without saying that is the
+  isolation-off case (`docs/operations.md`, "Media isolation").
 - **The Settings hub is reachable by caregivers**; every Settings *sub*-route is individually
   `AdminProtected`.
 - **The CSP is enforcing.** Never add `unsafe-inline` / `unsafe-eval` to `script-src`; read the inline
