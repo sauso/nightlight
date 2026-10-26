@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-10-26
+
 ### Added
 
 - **Optional container hardening, documented and tested (#553).** You can now run the container with only the six

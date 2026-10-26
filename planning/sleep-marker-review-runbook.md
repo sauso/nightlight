@@ -61,7 +61,7 @@ then run it. Two hard-won rules:
 ```bash
 # 1. author query locally
 cat > /tmp/x.js <<'EOF'
-const db = require('better-sqlite3')('/app/data/babymonitor.db', { readonly: true });
+const db = require('better-sqlite3')('/app/data/private/babymonitor.db', { readonly: true }); // older installs, before the move: /app/data/babymonitor.db
 // ... query here ...
 EOF
 
@@ -75,7 +75,7 @@ ssh -i ~/.ssh/unraid_nightlight -o StrictHostKeyChecking=no root@192.168.1.100 \
 Ready-made query for a night's review (edit the child/camera as needed):
 
 ```js
-const db = require('better-sqlite3')('/app/data/babymonitor.db', { readonly: true });
+const db = require('better-sqlite3')('/app/data/private/babymonitor.db', { readonly: true }); // older installs, before the move: /app/data/babymonitor.db
 const cams = db.prepare("SELECT id,name,child_id FROM cameras").all();
 const c = cams.find(x => /child.a/i.test(x.name));
 
