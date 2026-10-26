@@ -38,14 +38,35 @@ test('every Dockerfile stage runs that major', () => {
   for (const s of stages) assert.equal(s, major, `a Dockerfile stage runs Node ${s}, .nvmrc says ${major}`);
 });
 
-test('every workflow that sets up Node uses that major', () => {
+// ONE named exception (#751 step 1): the preview workflow runs the suites on the NEXT major, beside the supported one,
+// so that what breaks on the move is known before anyone makes it. It is a preview, not a gate: it may pin a major
+// ABOVE .nvmrc's and nothing else may. A second exception, or this one pinning the supported major or something older,
+// is a mistake and must fail here.
+const PREVIEW_WORKFLOW = 'node-next.yml';
+
+function workflowNodeVersions() {
   const dir = path.join(REPO, '.github', 'workflows');
   const found = [];
   for (const f of fs.readdirSync(dir).filter((n) => /\.ya?ml$/.test(n))) {
     for (const m of fs.readFileSync(path.join(dir, f), 'utf8').matchAll(/node-version:\s*['"]?(\d+)/g)) found.push([f, Number(m[1])]);
   }
+  return found;
+}
+
+test('every workflow that sets up Node uses that major, except the one next-major preview', () => {
+  const found = workflowNodeVersions();
   assert.ok(found.length >= 1, 'no `node-version:` found in any workflow');
-  for (const [f, v] of found) assert.equal(v, major, `${f} sets up Node ${v}, .nvmrc says ${major}`);
+  for (const [f, v] of found) {
+    if (f === PREVIEW_WORKFLOW) continue;
+    assert.equal(v, major, `${f} sets up Node ${v}, .nvmrc says ${major}`);
+  }
+});
+
+test('the next-major preview workflow exists and pins a major above the supported one', () => {
+  const preview = workflowNodeVersions().filter(([f]) => f === PREVIEW_WORKFLOW);
+  // Not vacuous: the exemption above must not outlive the file, and a file that stops setting up Node is a rename to notice.
+  assert.ok(preview.length >= 1, `${PREVIEW_WORKFLOW} no longer sets up Node: drop the exemption in this test, or restore the workflow`);
+  for (const [f, v] of preview) assert.ok(v > major, `${f} sets up Node ${v}, which must be above the supported ${major} (it is the preview of the NEXT major)`);
 });
 
 // WHY A RUNNING-VERSION CHECK TOO (issue #565, the "cause unexplained" half). The five places above say what
