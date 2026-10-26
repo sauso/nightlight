@@ -599,7 +599,14 @@ which the six-capability hardening does not grant).
   camera itself; `backend/test/mediamtx-never-given-credentials.test.js` pins that, and it was read back from a real
   MediaMTX). A password on the API would not close this while the media programs share one user, because a process of
   that user can already signal or `ptrace` MediaMTX, and MediaMTX needs the check material in a file it can read.
-- **Camera passwords are on ffmpeg's command line** (`/proc/<pid>/cmdline`), readable by anything in the container.
+- **Camera passwords are on ffmpeg's command line** (`/proc/<pid>/cmdline`), readable by anything in the container, and
+  they are in that ffmpeg's memory. Whether another media process can read that memory depends on the host kernel: with
+  Yama's `ptrace_scope` at 1 or higher (the default on many Linux distributions) it cannot (measured: `/proc/<pid>/mem`
+  of a sibling answered `EACCES`), so only the command line leaks; on a kernel without Yama, such as Unraid's
+  (`/proc/sys/kernel/yama/ptrace_scope` does not exist there), the kernel rules for processes of one user allow the read
+  (not tried on that host). So moving the password off the command line (#883: FFmpeg can take its input from a list on
+  stdin, tried) would not close the exposure on such a host, and is not done. The real fix would be a separate user for
+  each camera's ffmpeg, a large change that is not planned.
 - **Some hosts cannot do it** (rootless Docker/Podman, SMB/ACL shares that ignore `chmod`, NFS `root_squash`, PUID/PGID
   1700, missing capabilities) and run with isolation off and a warning.
 - **The camera VLAN advice stands**: isolation limits what a bad stream can reach; it does not make an exposed camera safe.
