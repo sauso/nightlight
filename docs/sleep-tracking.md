@@ -300,15 +300,65 @@ and it cannot tell an adult's visit to the bed from the child's own trip out of 
 **Known limit:** a genuine departure less than a minute after a *got into bed* is read the same way
 when the bed then shows a still sleeper (6 or more of those minutes), because the two are not
 distinguishable from what the cameras record. Where that is the only *got out of bed* of the night it
-is still used, so the night is never left with no wake time at all; where a later one exists, the
-later one is reported instead. A genuine departure followed only by a parent at the bed (bigger
-movement) is no longer set aside: it is found.
+is still used, so the night is not left with no wake time (unless it is far earlier than your child
+usually gets up: see [the next section](#an-exit-far-earlier-than-usual-does-not-end-the-night)); where
+a later one exists, the later one is reported instead. A genuine departure followed only by a parent
+at the bed (bigger movement) is no longer set aside: it is found.
 **Known limit:** a child who climbs back in and then lies stiller than that (fewer than 6 minutes of
 slight movement in those 2½ hours), or a camera whose detection zone only ever registers bigger
 movement, is treated as having left at that second *got out of bed*: the wake is reported too
-**early**, never left blank. The 6 was measured on two cameras in one house, where the second exits
-that were the real wake showed 0-3 such minutes and the ones a review confirmed were not showed 10 or
-more; see KNOWN-ISSUES.
+**early**, not left blank (again unless it is far earlier than usual, next section). The 6 was
+measured on two cameras in one house, where the second exits that were the real wake showed 0-3 such
+minutes and the ones a review confirmed were not showed 10 or more; see KNOWN-ISSUES.
+
+### An exit far earlier than usual does not end the night
+
+A sleeping child and an empty bed can look the same to the camera. So one false *got out of bed* in
+the evening, followed by a child lying still, used to end the whole night there, and the card and the
+morning notification could say "asleep 58 min" for a ten-hour night.
+
+Now each possible wake is compared with **when this child usually gets up**: how long before the end
+of the sleep window the wake times of their earlier saved nights were. A *got out of bed* much earlier
+than that is not taken as the morning wake on its own.
+
+- **Which nights:** the child's newest **14** saved nights that have a wake time, and it needs at
+  least **10**. A child with fewer, which includes a new install and every child's first ten nights,
+  is worked out exactly as before.
+- **How much earlier:** it takes the child's usual gap before the window ends (most of their nights,
+  three in four, woke this close to the end or closer) and doubles it, but never uses less than
+  **60 minutes**. A *got out of bed* further from the window's end than that is set aside. For a child
+  who is usually up within 40 minutes of the window's end, the limit is 80 minutes.
+- **These are fixed, not settings.** They were measured on two cameras in one house: the false exits
+  were 3.2 to 17.5 times the child's usual gap, and every night a review confirmed was right was at most
+  1.35 times it. A reasonable starting point for other homes, not a measurement of them.
+- **What the night shows instead:** a later *got out of bed* can still be the wake, found the usual
+  way. If there is none, the night keeps the wake worked out from movement alone, which is often none:
+  the card and the detail page then say "still asleep at" the window's end, and the morning
+  notification has no "up" time. Not right either, but much closer than a night that ended in the
+  evening (on the four measured nights, wake errors of 3 to 10 hours became a blank or under 2 hours).
+- **For developers:** a night worked out fresh (`GET /api/children/:id/sleep/:date`, the Recompute
+  preview and its save, and `/sleep/live` when it works last night out fresh) carries `wake_unconfirmed`:
+  `null`, or `{ at, lead_min, threshold_min }` for the earliest *got out of bed* that was set aside (its
+  time as recorded, how many minutes before the window's end it was, and the limit it went over). It is
+  not saved with the night, not in the notification, and not shown on the page.
+
+**Known limits:**
+- A child who **really is up for the day** that early, in a room that goes quiet again afterwards, is
+  treated the same way: the night reads as asleep until the window's end (or until a later *got out
+  of bed*). Noise or movement in the room after the exit doesn't change that, because it is just as
+  much a sign that the house is waking up. No such night is in the measured data. If it happens,
+  correct the night in the morning review.
+- It relies on the saved nights **as they were saved**: whichever camera or window they were worked
+  out with (each is measured against its own window), and without your morning-review corrections. A
+  run of earlier nights that were themselves ended far too early makes an early wake look usual, and
+  the rule stops catching them until those nights drop out of the last 14: 3 such nights do it when
+  there are 10 to 12 saved nights, 4 when there are 13 or 14.
+- Because a night's answer now depends on the nights before it, working out an earlier night again
+  (or deleting one) can change a later night's answer, even though nothing about that later night
+  changed.
+- Nights already saved keep their figures until they are worked out again, and a night whose wake time
+  was already sent in a notification is never cleared back to "still asleep" (a Recompute of it is
+  refused, as before).
 
 ### When the motion camera samples
 
@@ -826,6 +876,7 @@ The limits are described beside the behaviour they affect:
 
 - [Bedtime and put-downs](#bedtime-is-a-guide-not-a-boundary)
 - [Getting up and returning to bed](#a-child-who-gets-out-and-climbs-straight-back-in-has-not-got-up)
+- [An exit far earlier than usual](#an-exit-far-earlier-than-usual-does-not-end-the-night)
 - [Motion camera sampling](#when-the-motion-camera-samples)
 - [Review corrections and locks](#known-limits-all-documented-rather-than-fixed)
 - [The detail page and a night's saved settings](#finished-nights-use-the-settings-they-were-saved-with)

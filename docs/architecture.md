@@ -344,9 +344,13 @@ with `scoring.problem: 'camera_deleted'`, never a fallback to today's main camer
 no `scoring` key (golden test). `currentScoringContext(childId)` is the one definition of today's settings, and the
 stored JSON is built from it, byte for byte what step 1 wrote. What a context does **not** replay: the rules (one
 implementation runs, today's; `algo_differs` marks a night saved under other rules), tracking on/off (`off` still
-comes first), room climate and the alert list (today's cameras), and who owned the camera when (samples are read by
+comes first), room climate and the alert list (today's cameras), who owned the camera when (samples are read by
 camera id and time, so a camera moved to another child inside the span a night reads, window start - 3 h to window
-end + 3 h, replays with that child's activity).
+end + 3 h, replays with that child's activity), and the child's EARLIER stored nights. Since #700 (`SCORING_ALGO`
+'2') the departure scan's lead test reads those live (`sleep_nights` rows with an earlier `night_date`, `ok` with a
+wake, the newest 14; never the night's own row or a later one), so back-filling, recomputing or deleting an earlier
+night can change a later night's replay while its samples, transitions and context are identical. Its finding is
+the additive result key `wake_unconfirmed`, which is never stored.
 
 **The admin Recompute is one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the
 dialog in `frontend/src/components/RecomputeNight.jsx`). `GET /api/children/:id/sleep/:date?context=stored` reads the

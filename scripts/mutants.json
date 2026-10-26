@@ -23976,5 +23976,111 @@
     "expect": "killed",
     "tests": ["recordings-lifecycle.test.js"],
     "namePattern": "a cut that takes 7 s is waited for"
+  },
+  {
+    "label": "#700 the lead test is dropped from the main path (an early exit is taken as the departure again)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "(best == null || dt < best.dt) && !leadTooEarly(t))",
+    "replace": "(best == null || dt < best.dt))",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T1:",
+    "note": "The whole fix reverted on the path the four measured nights took: wake 20:30, asleep 50 instead of still asleep, 680."
+  },
+  {
+    "label": "#700 the settling-tail fallback hands back an exit the lead test skipped",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "(settlingFallback == null || dt < settlingFallback.dt) && !leadTooEarly(t))",
+    "replace": "(settlingFallback == null || dt < settlingFallback.dt))",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T7b",
+    "note": "A false exit behind a stray into_bed comes back through the hand-back and ends the night at 20:30."
+  },
+  {
+    "label": "#700 the factor rises from 2 to 3",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const LEAD_FACTOR = 2;",
+    "replace": "const LEAD_FACTOR = 3;",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T5b",
+    "note": "Threshold 135 instead of 90: the lead-91 exit is taken. Measured: wrong nights >= 3.2 x p75, right <= 1.35."
+  },
+  {
+    "label": "#700 the floor drops from 30 to 20",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const LEAD_FLOOR_MIN = 30;",
+    "replace": "const LEAD_FLOOR_MIN = 20;",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T6:",
+    "note": "A child who wakes at the close (p75 15): threshold 40 instead of 60, so a lead-45 exit is skipped."
+  },
+  {
+    "label": "#700 the history minimum goes back to the first plan's 7",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const HISTORY_MIN_NIGHTS = 10;",
+    "replace": "const HISTORY_MIN_NIGHTS = 7;",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T3:",
+    "note": "A child with 9 earlier nights is no longer left as before. T3b pins the other side (exactly 10 applies)."
+  },
+  {
+    "label": "#700 the percentile becomes the median",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "Math.floor(0.75 * leads.length)",
+    "replace": "Math.floor(0.5 * leads.length)",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T8d",
+    "note": "With 4 long leads of 14 the p75 is long (the stated limit) but the median is not. A median was measured and rejected: it also changes a correct night (lead 100 against a median of 45)."
+  },
+  {
+    "label": "#700 an exit exactly at the threshold is skipped (`<` instead of `<=`, i.e. the test becomes >=)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (leadThreshold == null || leadMin <= leadThreshold) return false;",
+    "replace": "if (leadThreshold == null || leadMin < leadThreshold) return false;",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T5:"
+  },
+  {
+    "label": "#700 the history includes this night's own row (`<=` on night_date)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "WHERE child_id = ? AND night_date < ? AND status = 'ok' AND wake_at IS NOT NULL",
+    "replace": "WHERE child_id = ? AND night_date <= ? AND status = 'ok' AND wake_at IS NOT NULL",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T8:",
+    "note": "The causal bound: 9 earlier nights plus the night's own row would turn the rule on."
+  },
+  {
+    "label": "#700 the history takes the OLDEST nights instead of the newest",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "ORDER BY night_date DESC LIMIT ?`",
+    "replace": "ORDER BY night_date ASC LIMIT ?`",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T8g"
+  },
+  {
+    "label": "#700 wake_unconfirmed is never set",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "wake_unconfirmed: earlyExitSkipped",
+    "replace": "wake_unconfirmed: null && earlyExitSkipped",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T1:"
+  },
+  {
+    "label": "#700 wake_unconfirmed reports the LATEST skipped exit instead of the earliest",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (earlyExitSkipped == null || exitMs < earlyExitSkipped.ms) {",
+    "replace": "if (earlyExitSkipped == null || exitMs > earlyExitSkipped.ms) {",
+    "expect": "killed",
+    "tests": ["sleep-early-exit-lead.test.js"],
+    "namePattern": "#700 T2c"
   }
 ]

@@ -26,6 +26,18 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **A false "got out of bed" in the evening no longer ends the whole night (#700).** A sleeping child and an empty
+  bed can look the same to the camera, so one false exit followed by a still child could end a ten-hour night after
+  an hour, and the morning notification said so ("asleep 58 min"). A *got out of bed* much earlier than the child
+  usually gets up (more than twice the child's usual time before the window ends, and never less than an hour, judged
+  from the newest 14 saved nights) is no longer taken as the wake on its own. A later one can still be; with none, the
+  night keeps the wake worked out from movement, which is often "still asleep at" the window's end. It needs at least
+  10 saved nights, so a new install and every child's first ten nights are unchanged. A child who really is up that
+  early in a quiet room is treated the same way, and a night's answer now depends on the nights saved before it.
+  Saved nights keep their figures until worked out again, and a wake time already notified is never cleared. A night
+  worked out fresh gains `wake_unconfirmed` in the API; the detection-rules version is now `2`. Measured on two
+  cameras in one house. See
+  [docs/sleep-tracking.md](docs/sleep-tracking.md#an-exit-far-earlier-than-usual-does-not-end-the-night).
 - **The weekly image rebuild now keeps the `org.opencontainers.image.revision` label (#864).** `:latest` and `:dev`
   lost it every Monday, so `docker inspect` printed nothing after a rebuild. Rebuilt images now carry the revision
   (the commit that was rebuilt), created-time and source labels, like a normal publish. Settings → About was never

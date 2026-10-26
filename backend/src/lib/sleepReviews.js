@@ -813,6 +813,12 @@ export function applyCorrections(childId, nights) {
 // a list: a new sleep_nights column fails them until it is classified, and a new computeNight key fails
 // them if it leaks (as long as the test's `ok` night gives it a value). A new OBSERVATION key on
 // computeNight's `base` is kept automatically, which is the right default for those.
+//
+// `wake_unconfirmed` (#700, in `base`) is deliberately NOT listed: it is the detector's note that it set aside an
+// exit as far earlier than this child gets up, a remark about its own answer like the `algo_*` fields kept below,
+// not a claim that anyone slept. A flagged night therefore keeps it as the detector computed it (pinned by the
+// "no one was in the bed" test in sleep-early-exit-lead.test.js). It can only be non-null when the detector's own
+// night was `ok`, so a real detector-empty night always has it null, which the shape tests here see.
 const EMPTY_NIGHT_NULLS = [
   'onset_at', 'wake_at', 'in_bed_at',
   'onset_at_shadow', 'wake_at_shadow', 'onset_at_algo', 'wake_at_algo',
