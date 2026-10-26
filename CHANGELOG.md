@@ -27,6 +27,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   affected. `:latest` keeps its label through a rebuild once a release contains this and the Monday after it has run; see
   [docs/operations.md](docs/operations.md#the-weekly-rebuild).
 
+### Security
+
+- **Updated `body-parser` to 1.20.9 (GHSA-27r3-jxmh-p828, high).** `body-parser` is the part of Express that reads
+  request bodies. In 1.20.8 and earlier, one request whose body was compressed and followed by extra bytes could crash
+  the application (a denial of service), per the advisory. Nightlight reads request bodies before it checks who is
+  asking, so this applied to any request that reached the server, signed in or not; it matters most on an install that
+  is reachable from outside your home network. Nothing else changes.
+
 ## [0.44.1] - 2026-10-26
 
 ### Changed
