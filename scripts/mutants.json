@@ -23850,5 +23850,59 @@
     "expect": "killed",
     "tests": ["entrypoint-media-isolation.test.js"],
     "namePattern": "the data directory carries the media group and the start ends OFF"
+  },
+  {
+    "label": "#553 About reason: PUID=0 is reported as a fallback (it would raise the warning on every root setup)",
+    "file": "backend/entrypoint.sh",
+    "find": "isolation needs a non-root app\"; MEDIA_OFF_KIND=root",
+    "replace": "isolation needs a non-root app\"",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "PUID=0 is `root`"
+  },
+  {
+    "label": "#553 About reason: PUID or PGID 1700 is reported as a fallback",
+    "file": "backend/entrypoint.sh",
+    "find": "would not be separate\"; MEDIA_OFF_KIND=id-clash",
+    "replace": "would not be separate\"",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "PUID=0 is `root`"
+  },
+  {
+    "label": "#553 About reason: the operator's own kill switch is reported as a fallback",
+    "file": "backend/entrypoint.sh",
+    "find": "if [ -z \"$MEDIA_ASKED\" ]; then MEDIA_OFF_KIND=disabled; fi",
+    "replace": ":",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "the kill switch is `disabled`"
+  },
+  {
+    "label": "#553 About reason: a fallback carries no detail sentence",
+    "file": "backend/entrypoint.sh",
+    "find": "if [ \"$MEDIA_OFF_KIND\" = fallback ]; then",
+    "replace": "if false; then",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "could not give isolation is `fallback`"
+  },
+  {
+    "label": "#553 About reason: an ON start keeps an operator's own reason variables",
+    "file": "backend/entrypoint.sh",
+    "find": "  unset MEDIA_ISOLATION_REASON MEDIA_ISOLATION_DETAIL",
+    "replace": "  :",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "an ON start carries neither variable"
+  },
+  {
+    "label": "#553 About reason: an unknown reason value is passed through to the page",
+    "file": "backend/src/routes/about.js",
+    "find": "return ISOLATION_REASONS.has(v) ? v : null;",
+    "replace": "return v ?? null;",
+    "expect": "killed",
+    "tests": ["about-media-isolation.test.js"],
+    "namePattern": "garbage becomes null"
   }
 ]

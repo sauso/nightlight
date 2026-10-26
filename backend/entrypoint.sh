@@ -524,13 +524,18 @@ media_reown() {
 
 MEDIA_ISOLATION=off
 MEDIA_REASON=
+# WHY isolation is off, for the About page (the reason code GET /api/about reports). Only a FALLBACK, where isolation was
+# asked for and the host could not give it, deserves a loud warning there; the other two are the operator's own choice
+# (disabled) or a setup where off is the rule (root, id-clash). Set to disabled/root/id-clash below; anything else that
+# stops an asked-for start is a fallback.
+MEDIA_OFF_KIND=fallback
 if [ -n "$MEDIA_ASKED" ]; then
   if ! is_id "$APP_UID" || ! is_id "$APP_GID"; then
     MEDIA_REASON="PUID=$PUID PGID=$PGID are not both numbers"
   elif [ "$APP_UID" = 0 ]; then
-    MEDIA_REASON="PUID=0 runs the app as root, and isolation needs a non-root app"
+    MEDIA_REASON="PUID=0 runs the app as root, and isolation needs a non-root app"; MEDIA_OFF_KIND=root
   elif [ "$APP_UID" = "$MEDIA_ID" ] || [ "$APP_GID" = "$MEDIA_ID" ]; then
-    MEDIA_REASON="PUID or PGID is $MEDIA_ID, the media user's id, so the app and the media processes would not be separate"
+    MEDIA_REASON="PUID or PGID is $MEDIA_ID, the media user's id, so the app and the media processes would not be separate"; MEDIA_OFF_KIND=id-clash
   elif _left=$(media_toplevel_leftover); then
     # A skipped or unfinished move must not become a silent, permanent gap: with the data directory open to the media group,
     # a database or secret still at its top level is protected by nothing but its own mode (docs/operations.md, "Media
@@ -543,6 +548,22 @@ if [ -n "$MEDIA_ASKED" ]; then
   fi
 fi
 export MEDIA_ISOLATION
+# Hand the app the REASON as well (src/routes/about.js reports it; the About page warns only for `fallback`). Set or unset
+# on every start, never left to the environment: an operator's own value must not reach the page, and an ON start must
+# carry neither. The detail is the one warning line's text, made safe for a page every signed-in user's API can read: one
+# line, anything that looks like a path replaced (a path can name a mount of the host's), cut to 200 characters.
+if [ "$MEDIA_ISOLATION" = on ]; then
+  unset MEDIA_ISOLATION_REASON MEDIA_ISOLATION_DETAIL
+else
+  if [ -z "$MEDIA_ASKED" ]; then MEDIA_OFF_KIND=disabled; fi
+  MEDIA_ISOLATION_REASON=$MEDIA_OFF_KIND
+  MEDIA_ISOLATION_DETAIL=
+  if [ "$MEDIA_OFF_KIND" = fallback ]; then
+    MEDIA_ISOLATION_DETAIL=$(printf '%s' "$MEDIA_REASON" | tr -d '\000-\037\177' | sed 's# /[^ ,;:)]*# <path>#g; s#^/[^ ,;:)]*#<path>#' | cut -c1-200) || MEDIA_ISOLATION_DETAIL=
+  fi
+  export MEDIA_ISOLATION_REASON
+  if [ -n "$MEDIA_ISOLATION_DETAIL" ]; then export MEDIA_ISOLATION_DETAIL; else unset MEDIA_ISOLATION_DETAIL; fi
+fi
 
 # Off after all: first undo what this start prepared, then (if an earlier start had it on) re-own, THEN tighten, so the walk
 # sees app-owned files.

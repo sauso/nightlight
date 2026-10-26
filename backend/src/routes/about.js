@@ -32,6 +32,26 @@ const build = {
   buildTime: envOrNull('NIGHTLIGHT_BUILD_TIME'),
 };
 
+// WHY isolation is off (#553), as backend/entrypoint.sh exported it. Only `fallback` (asked for, the host could not give
+// it) makes the About page warn; `disabled` is the operator's switch and `root` / `id-clash` are setups where off is the
+// rule. Both values are validated here, because the entrypoint is the only writer but the page trusts the API: a reason
+// outside the set is null, and the detail is cut to one line of at most 200 characters.
+const ISOLATION_REASONS = new Set(['disabled', 'root', 'id-clash', 'fallback']);
+const DETAIL_MAX = 200;
+function isolationReason() {
+  if (mediaIsolationOn()) return null;
+  const v = process.env.MEDIA_ISOLATION_REASON;
+  return ISOLATION_REASONS.has(v) ? v : null;
+}
+function isolationDetail() {
+  if (mediaIsolationOn() || isolationReason() !== 'fallback') return null;
+  const v = process.env.MEDIA_ISOLATION_DETAIL;
+  if (typeof v !== 'string') return null;
+  // Control characters (a newline in a log-style string, say) become spaces: the page shows one line.
+  const clean = v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, DETAIL_MAX);
+  return clean || null;
+}
+
 const router = Router();
 
 router.get('/', requireAuth, (req, res) => {
@@ -55,6 +75,8 @@ router.get('/', requireAuth, (req, res) => {
     stunServers: parseStunServers(process.env.STUN_SERVERS).urls,
     publicBaseUrl: getPublicBaseUrl(),
     mediaIsolation: mediaIsolationOn() ? 'on' : 'off',
+    mediaIsolationReason: isolationReason(),
+    mediaIsolationDetail: isolationDetail(),
     dataLayout: DB_LAYOUT,
     layoutConflict: layoutConflict(dataDirFrom()),
   });

@@ -60,6 +60,11 @@ const SECRETS = {
   LIBVA_DRIVER_NAME: 'planted',
   HOME: '/planted/home',
   MTX_PLANTED: 'operator-override',
+  // The entrypoint's reason for isolation being off (the About page's warning); the allowlist must keep both out of
+  // every child, the same as MEDIA_ISOLATION itself.
+  MEDIA_ISOLATION: 'off',
+  MEDIA_ISOLATION_REASON: 'fallback',
+  MEDIA_ISOLATION_DETAIL: 'planted detail',
 };
 
 describe('a spawned child receives exactly the allowlist (#553)', () => {

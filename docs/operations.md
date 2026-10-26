@@ -587,6 +587,21 @@ whoever has taken over the camera) controls. With isolation on, they run as a se
 the same user as the app, which is how Nightlight worked before. **Settings → About** shows one line, "Media
 isolation: on" or "off", for what this start decided; `GET /api/about` reports it as `mediaIsolation`.
 
+**When About warns you.** "Off" has three different causes, and only one of them is a problem. The API reports which
+as `mediaIsolationReason` (`null` when isolation is on), with a short sentence in `mediaIsolationDetail` for the third:
+
+- `disabled`: you turned it off with `NIGHTLIGHT_MEDIA_ISOLATION`. That is your choice, so About shows only the quiet
+  line.
+- `root` or `id-clash`: `PUID=0`, or `PUID` or `PGID` is `1700`. Isolation stays off by design in these setups, so
+  About shows only the quiet line.
+- `fallback`: isolation was on (the default) but the host could not provide it, for example a missing capability, a
+  failed trial run, or a database still at the top level of the data directory. **Admins see a warning at the top of
+  About** saying the camera programs are running without the extra protection, with the reason and a link back here.
+  Caregivers do not see it. The same reason is in the container log as the `[entrypoint] warning: media isolation is
+  off: ...` line. The sentence on the page is that line with anything that looks like a folder path replaced by
+  `<path>` and cut to 200 characters. Any signed-in user can read it from `GET /api/about`, so the page and the API
+  carry no folder paths.
+
 **Turning it off.** Set `NIGHTLIGHT_MEDIA_ISOLATION=0` and re-create the container. Going back is automatic and needs
 nothing else: files the media user wrote are handed back to `PUID`:`PGID` once, at that start (see "Going back to
 off" below). Use it if something on your host misbehaves with isolation and the log does not say why, and please

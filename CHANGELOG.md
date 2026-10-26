@@ -9,6 +9,15 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- **Settings → About now warns admins when media isolation could not start (#553).** If your host cannot support
+  isolation, Nightlight still starts the old way, but the About page used to show only the quiet line "Media
+  isolation: off". Admins now see a warning that FFmpeg and MediaMTX are running without the extra protection, with the
+  reason and a link to [docs/operations.md](docs/operations.md#media-isolation). Turning it off yourself
+  (`NIGHTLIGHT_MEDIA_ISOLATION=0`), or running with `PUID=0` or an id of `1700`, still shows only the quiet line.
+  `GET /api/about` gains `mediaIsolationReason` and `mediaIsolationDetail`; nothing existing changes.
+
 ## [0.44.0] - 2026-10-26
 
 ### Added
