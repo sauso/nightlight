@@ -178,6 +178,8 @@ function populate(kind, id, { cameraTablesToo = true } = {}) {
   if (kind === 'camera') {
     files.push(writeFile(path.join(CLIPS_DIR, id, 'stray.mp4')));
     files.push(writeFile(path.join(CLIPS_DIR, '.ring', id, 'seg-1.mkv')));
+    // The concat lists live in their own app-only folder since #553 phase 2b; a cut a restart killed leaves one behind.
+    files.push(writeFile(path.join(CLIPS_DIR, '.concat', id, 'concat-7.txt')));
   } else {
     files.push(writeFile(path.join(CLIPS_DIR, 'timelapse', id, 'stray.mp4')));
     files.push(writeFile(path.join(CLIPS_DIR, '.timelapse-frames', id, '2026-01-01', 'f-1.jpg')));

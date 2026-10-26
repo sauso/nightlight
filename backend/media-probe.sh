@@ -12,7 +12,13 @@
 #     binary the media user cannot execute switches isolation off here instead of failing every camera later
 #     (review of PR #869);
 #   - the wrapper keeps the pid it was started with (media-exec.sh `exec`s), and the app can kill that pid (CAP_KILL
-#     across uids: the app signals its media children on every stop).
+#     across uids: the app signals its media children on every stop);
+#   - THE FOLDERS (#553 phase 2b), when the entrypoint passes the clips folder and the data directory: on the real mounts,
+#     the media user writes a file in a leaf folder and the app reads it, checks it has one name and unlinks it; the media
+#     user reads a 0640 file the app wrote and not a 0600 one; it cannot create a file in a folder the app trusts, nor in an
+#     app-only folder, nor rename a folder, nor delete a file the app owns in a leaf (sticky bit); and it can neither list the
+#     data directory nor enter private/. This is the layout of src/lib/mediaLayout.js, tried before isolation is switched on.
+#     The entrypoint runs the whole probe in the BACKGROUND with a deadline, because these steps touch mounts that can stall.
 # Output: the LAST line is MEDIA-PROBE-OK (exit 0), or a line `MEDIA-PROBE-FAIL <reason>` (exit 1). The entrypoint
 # switches isolation on only for the first, and prints the reason for the second.
 # It leaves nothing behind: its one temporary folder (mktemp -d, so $TMPDIR or /tmp) is removed on every exit path,
@@ -71,15 +77,106 @@ media_probe() {
   printf 'MEDIA-CHILD-OK\n'
 }
 
+# As the media user, in the clips folder's probe folder $1 (made by folders_probe below, which lists what is in it).
+media_folders() {
+  p=$1 clips=$2
+  cat "$p/in-0640" >/dev/null 2>&1 \
+    || fail "a media process could not read a 0640 file the app wrote for it in $clips (is the clips folder reachable for the media group?)"
+  if cat "$p/in-0600" >/dev/null 2>&1; then
+    fail "a media process could read a 0600 file the app wrote in $clips"
+  fi
+  # A media process writes in a leaf. This is the file the app then reads, counts and removes.
+  ( printf 'written by the media user\n' > "$p/leaf/from-media" ) 2>/dev/null \
+    || fail "a media process could not create a file in a leaf folder in $clips (the layout of mediaLayout.js is not in place there)"
+  # ...and nowhere else: not in the folder that holds the leaf, not in an app-only folder.
+  if ( : > "$p/planted" ) 2>/dev/null; then fail "a media process could create a file in a folder the app trusts, in $clips"; fi
+  if ( : > "$p/app-only/planted" ) 2>/dev/null; then fail "a media process could create a file in an app-only folder in $clips"; fi
+  # ...it cannot rename a folder the app trusts, nor the leaf out from under it...
+  if mv "$p/leaf" "$p/leaf-moved" 2>/dev/null; then fail "a media process could rename a leaf folder in $clips"; fi
+  if mv "$p" "$p-moved" 2>/dev/null; then fail "a media process could rename a folder the app trusts, in $clips"; fi
+  # ...and it cannot delete a file the app owns in a leaf (the sticky bit), even though the folder is group-writable.
+  rm -f "$p/leaf/app-file" 2>/dev/null
+  [ -e "$p/leaf/app-file" ] || fail "a media process could delete a file the app owns in a leaf folder in $clips (is the sticky bit missing?)"
+  printf 'MEDIA-CHILD-OK\n'
+}
+
+# As the media user: the data directory is for passing through, not for looking at.
+media_data() {
+  data=$1
+  if ls "$data" >/dev/null 2>&1; then fail "a media process could list the data directory $data"; fi
+  if ( cd "$data/private" ) 2>/dev/null; then fail "a media process could enter $data/private"; fi
+  if ls "$data/private" >/dev/null 2>&1; then fail "a media process could list $data/private"; fi
+  printf 'MEDIA-CHILD-OK\n'
+}
+
+# As the app: build a probe folder in the clips folder with every kind of thing the layout has, let the media user try
+# to use them (media_folders), then check what it wrote and remove it all. Named files only, nothing recursive.
+folders_probe() {
+  media_exec=$1 media_id=$2 clips=$3
+  p="$clips/.probe-$"
+  PROBE_P=$p
+  mkdir -m 750 "$p" 2>/dev/null || fail "the app could not create a folder in the clips folder $clips (is it writable by the app?)"
+  # mkdir -m is not cut by the umask; the group is set explicitly (no setgid inheritance anywhere, see mediaLayout.js).
+  chgrp "$media_id" "$p" 2>/dev/null || fail "the app could not give a folder in $clips to the media group $media_id (is the app in that group?)"
+  mkdir "$p/leaf" "$p/app-only" 2>/dev/null || fail "the app could not create folders in $clips"
+  chgrp "$media_id" "$p/leaf" 2>/dev/null && chmod 1770 "$p/leaf" 2>/dev/null && chmod 700 "$p/app-only" 2>/dev/null \
+    || fail "the app could not set up the leaf folder in $clips"
+  ( umask 027 && printf 'for the media user\n' > "$p/in-0640" ) && chgrp "$media_id" "$p/in-0640" && chmod 640 "$p/in-0640" \
+    || fail "the app could not write a file for the media user in $clips"
+  ( umask 077 && printf 'app only\n' > "$p/in-0600" ) && chmod 600 "$p/in-0600" \
+    || fail "the app could not write a private file in $clips"
+  ( umask 027 && printf 'the app owns this\n' > "$p/leaf/app-file" ) && chgrp "$media_id" "$p/leaf/app-file" && chmod 640 "$p/leaf/app-file" \
+    || fail "the app could not write a file in the leaf folder in $clips"
+
+  out=$(env -i PATH="$PATH" "$media_exec" /bin/sh "$0" media-folders "$p" "$clips" 2>&1)
+  case "$out" in
+    *MEDIA-PROBE-FAIL*) printf '%s\n' "$out" | grep '^MEDIA-PROBE-FAIL ' | head -n 1; exit 1 ;;
+    *MEDIA-CHILD-OK*) ;;
+    *) fail "a media process could not be started in $clips ($(printf '%s\n' "$out" | sed '/^$/d' | tail -n 1))" ;;
+  esac
+
+  # What the app can do with what the media process wrote: read it, see that it has ONE name, remove it.
+  f="$p/leaf/from-media"
+  [ "$(cat "$f" 2>/dev/null)" = 'written by the media user' ] || fail "the app could not read a file the media user wrote in $clips (is the app in the media group?)"
+  [ "$(stat -c %h "$f" 2>/dev/null)" = 1 ] || fail "a file the media user wrote in $clips does not have exactly one name"
+  [ "$(stat -c %u:%g "$f" 2>/dev/null)" = "$media_id:$media_id" ] || fail "a file the media user wrote in $clips is not owned by $media_id:$media_id"
+  rm -f -- "$f" || fail "the app could not remove a file the media user wrote in $clips"
+  [ ! -e "$f" ] || fail "a file the media user wrote in $clips is still there after the app removed it"
+}
+
+# Everything folders_probe made, by name. Also on every failure path (the EXIT trap), so a refused probe leaves nothing.
+folders_cleanup() {
+  [ -n "${PROBE_P:-}" ] || return 0
+  # Also under the name the media user would have renamed it to: a clips folder it can write to is exactly the fault this
+  # probe exists to find, and a refusal must still leave nothing behind.
+  for _q in "$PROBE_P" "$PROBE_P-moved"; do
+    rm -f -- "$_q/in-0640" "$_q/in-0600" "$_q/leaf/app-file" "$_q/leaf/from-media" "$_q/planted" "$_q/app-only/planted"
+    rmdir -- "$_q/leaf" "$_q/app-only" "$_q" 2>/dev/null
+  done
+  return 0
+}
+
+# As the app, then the media user: the data directory is closed to it.
+data_probe() {
+  media_exec=$1 data=$2
+  [ -d "$data/private" ] || fail "$data/private does not exist, so there is nothing to keep the media user out of (the entrypoint makes it)"
+  out=$(env -i PATH="$PATH" "$media_exec" /bin/sh "$0" media-data "$data" 2>&1)
+  case "$out" in
+    *MEDIA-PROBE-FAIL*) printf '%s\n' "$out" | grep '^MEDIA-PROBE-FAIL ' | head -n 1; exit 1 ;;
+    *MEDIA-CHILD-OK*) ;;
+    *) fail "a media process could not be started to check $data ($(printf '%s\n' "$out" | sed '/^$/d' | tail -n 1))" ;;
+  esac
+}
+
 # As the app, started by the entrypoint through the app's own launcher.
 app_probe() {
-  media_exec=$1 media_id=$2 app_uid=$3
+  media_exec=$1 media_id=$2 app_uid=$3 clips_dir=${4:-} data_dir=${5:-}
   got=$(status_field $$ Uid) || fail "the app could not read its own status"
   [ "$got" = "$app_uid $app_uid $app_uid $app_uid" ] || fail "the app's drop did not take: it ran as uid '$got', expected $app_uid"
 
   dir=$(mktemp -d) || fail "could not create a temporary folder"
   # The two named files, then the folder: nothing recursive.
-  trap 'rm -f -- "$dir/app-only" "$dir/anyone"; rmdir -- "$dir"' EXIT
+  trap 'rm -f -- "$dir/app-only" "$dir/anyone"; rmdir -- "$dir"; folders_cleanup' EXIT
   # The media user may enter the folder but not list it; one file only the app may read, one anyone may.
   chmod 711 "$dir" || fail "could not set up the temporary folder"
   ( umask 077 && printf 'app only\n' > "$dir/app-only" ) || fail "could not write the probe files"
@@ -106,8 +203,12 @@ app_probe() {
     [ "$rc" = 0 ] || fail "the media user cannot run $name (exit $rc)"
   done
 
-  # PHASE 2 HOOK (#553): the shared-folder probe goes here. For each media mount the entrypoint passes: the media user
-  # writes a file in its leaf folder, the app reads it, opens it without following links and unlinks it.
+  # The media folders (#553 phase 2b): each real mount the entrypoint passes. The clips folder is where the media user
+  # writes (an external CLIPS_DIR is its own mount, and is the one that can differ from the data directory's filesystem);
+  # the data directory is the one it must not be able to look into. Skipped only when the caller passes neither (the
+  # real-setpriv test of the phase 1 chain does not; the entrypoint always does).
+  if [ -n "$clips_dir" ]; then folders_probe "$media_exec" "$media_id" "$clips_dir"; fi
+  if [ -n "$data_dir" ]; then data_probe "$media_exec" "$data_dir"; fi
 
   # The kill check. `$!` is the pid of the job, i.e. of media-exec.sh: it has become the media process only if the
   # wrapper exec'd (into setpriv, which switches to the media uid and execs `sleep`). Wait for that uid on that pid,
@@ -136,5 +237,7 @@ app_probe() {
 case "${1:-}" in
   app) shift; app_probe "$@" ;;
   media) shift; media_probe "$@" ;;
-  *) fail "usage: media-probe.sh app <media-exec.sh> <media id> <app uid>" ;;
+  media-folders) shift; media_folders "$@" ;;
+  media-data) shift; media_data "$@" ;;
+  *) fail "usage: media-probe.sh app <media-exec.sh> <media id> <app uid> [<clips folder> <data directory>]" ;;
 esac

@@ -288,7 +288,7 @@ const publicDir = path.join(__dirname, '..', 'public');
 app.use(express.static(publicDir));
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
-  res.sendFile(path.join(publicDir, 'index.html'));
+  res.sendFile(path.join(publicDir, 'index.html')); // fence-ok: the built web app, not a media file
 });
 
 // The error handler MUST be registered after every route above (Express only passes an error to handlers

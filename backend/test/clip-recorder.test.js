@@ -40,8 +40,8 @@ const ringDir = (id = CAM) => path.join(path.resolve(CLIPS_DIR), '.ring', id);
 // re-implementing the code under test rather than checking it.
 const DEPTH_MS = (5 + 15 + 8 + 10) * 1000;
 
-// A ring segment with a chosen age. mtime is what selection and pruning both use — the filename is
-// only for humans.
+// A ring segment with a chosen age. mtime is what selection and pruning both use. The NAME has to be one the segmenter
+// writes (seg-YYYYMMDD-HHMMSS.mkv): the ring code ignores any other (#553 phase 2b, mediaFiles.safeSegmentNames).
 function segment(name, ageMs, id = CAM) {
   const dir = ringDir(id);
   fs.mkdirSync(dir, { recursive: true });
@@ -93,8 +93,8 @@ describe('★ camera ids and clip basenames become PATH SEGMENTS, and are valida
 
   test('★ an unsafe clip basename is refused by extractClip', async () => {
     startSegmenter(CAM, 'somepath');
-    segment('seg-a.mkv', 4000);
-    segment('seg-b.mkv', 2000);
+    segment('seg-20260101-000001.mkv', 4000);
+    segment('seg-20260101-000002.mkv', 2000);
     await assert.rejects(
       () => extractClip(CAM, { at: Date.now() - 3000, outBase: '../escape', settleMs: 0 }),
       /unsafe outBase/
@@ -108,12 +108,31 @@ describe('starting and stopping the ring', () => {
   test('the ring directory is created, and a stale ring is cleared first', () => {
     // startSegmenter is also the restart path. A segment left from a previous run has a wall-clock
     // mtime from before the gap and would be silently concatenated into the next clip.
-    segment('seg-stale.mkv', 60_000);
-    fs.writeFileSync(path.join(ringDir(), 'concat-old.txt'), 'stale list');
-    fs.writeFileSync(path.join(ringDir(), 'keep-me.txt'), 'not a segment');
+    segment('seg-20260101-000003.mkv', 60_000);
+    fs.writeFileSync(path.join(ringDir(), 'concat-old.txt'), 'stale list'); // an older release kept its lists here
+    fs.writeFileSync(path.join(ringDir(), 'not-a-segment.txt'), 'planted');
 
     startSegmenter(CAM, 'somepath');
-    assert.deepEqual(ringFiles(), ['keep-me.txt'], 'the stale ring was not cleared (or too much was)');
+    // EVERYTHING goes, whatever it is called (#553 phase 2b): the ring folder is one the media user writes in, so a file
+    // that is not a segment was not footage, and a flat unlink of each name is all that is safe there.
+    assert.deepEqual(ringFiles(), [], 'the stale ring was not cleared');
+  });
+
+  test('concat lists a killed cut left behind (they live outside the ring now) are cleared at start too', () => {
+    const listDir = path.join(path.resolve(CLIPS_DIR), '.concat', CAM);
+    fs.mkdirSync(listDir, { recursive: true });
+    const stale = path.join(listDir, 'concat-ev9.txt');
+    fs.writeFileSync(stale, 'file x');
+    startSegmenter(CAM, 'somepath');
+    assert.equal(fs.existsSync(stale), false, 'a stale concat list survived the start');
+  });
+
+  test('a folder planted in the ring cannot be unlinked, stays, and does not stop the start', () => {
+    fs.mkdirSync(path.join(ringDir(), 'a-folder'), { recursive: true });
+    startSegmenter(CAM, 'somepath');
+    assert.equal(isSegmenterRunning(CAM), true);
+    assert.deepEqual(ringFiles(), ['a-folder']);
+    fs.rmSync(path.join(ringDir(), 'a-folder'), { recursive: true });
   });
 
   test('isSegmenterRunning flips both ways', () => {
@@ -178,14 +197,14 @@ describe('★ the janitor prunes the ring, and a hold stops it', () => {
     // nothing fills the volume; one that pruned everything leaves no pre-roll to reach back into.
     t.mock.timers.enable({ apis: ['setInterval'] });
     startSegmenter(CAM, 'somepath');
-    segment('seg-old.mkv', DEPTH_MS + 30_000);
-    segment('seg-new.mkv', 5_000);
+    segment('seg-20260101-000004.mkv', DEPTH_MS + 30_000);
+    segment('seg-20260101-000005.mkv', 5_000);
     fs.writeFileSync(path.join(ringDir(), 'concat-list.txt'), 'not a segment');
 
     t.mock.timers.tick(2000); // SEGMENT_SEC
     const left = ringFiles();
-    assert.ok(!left.includes('seg-old.mkv'), 'an expired segment survived the janitor');
-    assert.ok(left.includes('seg-new.mkv'), 'a segment inside the ring depth was pruned');
+    assert.ok(!left.includes('seg-20260101-000004.mkv'), 'an expired segment survived the janitor');
+    assert.ok(left.includes('seg-20260101-000005.mkv'), 'a segment inside the ring depth was pruned');
     assert.ok(left.includes('concat-list.txt'), 'the janitor deleted something that is not a segment');
   });
 
@@ -194,7 +213,7 @@ describe('★ the janitor prunes the ring, and a hold stops it', () => {
     // alert clip would have its own opening pruned out from under it before the extraction runs.
     t.mock.timers.enable({ apis: ['setInterval'] });
     startSegmenter(CAM, 'somepath');
-    const old = segment('seg-old.mkv', DEPTH_MS + 30_000);
+    const old = segment('seg-20260101-000004.mkv', DEPTH_MS + 30_000);
     holdRing(CAM, RING_OWNER.ONDEMAND, Date.now() - (DEPTH_MS + 60_000));
     t.mock.timers.tick(2000);
     assert.equal(fs.existsSync(old), true, 'a held segment was pruned — the recording loses its opening');
@@ -209,7 +228,7 @@ describe('★ the janitor prunes the ring, and a hold stops it', () => {
     t.mock.timers.enable({ apis: ['setInterval'] });
     startSegmenter(CAM, 'somepath');
     stopSegmenter(CAM);
-    const old = segment('seg-old.mkv', DEPTH_MS + 30_000);
+    const old = segment('seg-20260101-000004.mkv', DEPTH_MS + 30_000);
     t.mock.timers.tick(10_000);
     assert.equal(fs.existsSync(old), true, 'the janitor outlived its segmenter and pruned a dead ring');
   });
@@ -227,8 +246,8 @@ describe('★ the janitor prunes the ring, and a hold stops it', () => {
     // ring unbounded for the rest of the process's life. So: the ring is still registered, and once the
     // directory exists again an expired segment is collected by the very same timer.
     assert.equal(isSegmenterRunning(CAM), true, 'the janitor tore the segmenter down because its directory vanished');
-    const old = segment('seg-old.mkv', DEPTH_MS + 30_000); // segment() recreates the directory
-    const fresh = segment('seg-new.mkv', 5_000);
+    const old = segment('seg-20260101-000004.mkv', DEPTH_MS + 30_000); // segment() recreates the directory
+    const fresh = segment('seg-20260101-000005.mkv', 5_000);
     t.mock.timers.tick(2000);
     assert.equal(fs.existsSync(old), false, 'the janitor stopped pruning after its directory vanished once');
     assert.equal(fs.existsSync(fresh), true, 'the janitor pruned a segment inside the ring depth');
@@ -252,7 +271,7 @@ describe('extractClip refuses before it spawns anything', () => {
     // of something that happened a moment ago, and concatenating it would produce a clip of the wrong
     // time — worse than no clip, because it looks like evidence.
     startSegmenter(CAM, 'somepath');
-    segment('seg-ancient.mkv', 60 * 60 * 1000);
+    segment('seg-20260101-000006.mkv', 60 * 60 * 1000);
     await assert.rejects(
       () => extractClip(CAM, { at: Date.now(), preRollSec: 5, postRollSec: 15, settleMs: 0 }),
       /no ring segments/
@@ -263,7 +282,7 @@ describe('extractClip refuses before it spawns anything', () => {
     // Its mtime is within ~700ms of now, meaning ffmpeg has not closed it. Concatenating a half-written
     // segment truncates the clip. Here it is the ONLY candidate, so skipping it leaves nothing.
     startSegmenter(CAM, 'somepath');
-    segment('seg-open.mkv', 0);
+    segment('seg-20260101-000007.mkv', 0);
     await assert.rejects(() => extractClip(CAM, { at: Date.now(), settleMs: 0 }), /no ring segments/);
   });
 
@@ -272,7 +291,7 @@ describe('extractClip refuses before it spawns anything', () => {
     // happens and is unavailable here by design. Without this control, every rejection above would
     // also pass for an extractClip that selected nothing, ever.
     startSegmenter(CAM, 'somepath');
-    segment('seg-usable.mkv', 3000);
+    segment('seg-20260101-000008.mkv', 3000);
     await assert.rejects(
       () => extractClip(CAM, { at: Date.now() - 4000, preRollSec: 5, postRollSec: 15, settleMs: 0 }),
       (err) => {
@@ -286,7 +305,7 @@ describe('extractClip refuses before it spawns anything', () => {
     // It is written into the ring directory, so a leaked one is both clutter and a file the next
     // startSegmenter has to know to clear.
     startSegmenter(CAM, 'somepath');
-    segment('seg-usable.mkv', 3000);
+    segment('seg-20260101-000008.mkv', 3000);
     await extractClip(CAM, { at: Date.now() - 4000, outBase: 'ev1', settleMs: 0 }).catch(() => {});
     assert.deepEqual(
       ringFiles().filter((f) => f.startsWith('concat-')), [],
@@ -304,7 +323,7 @@ describe('★ #412 ringOldestStartMs: where the ring\'s footage really starts', 
   const SEG_MS = 2000; // SEGMENT_SEC, restated only to build the expectation (a segment's content starts SEG before its mtime)
 
   test('null when no segmenter runs for the camera, even if segment files are lying in its ring dir', () => {
-    segment('seg-orphan.mkv', 10_000);
+    segment('seg-20260101-000009.mkv', 10_000);
     assert.equal(isSegmenterRunning(CAM), false, 'precondition');
     assert.equal(ringOldestStartMs(CAM), null);
   });
@@ -316,23 +335,23 @@ describe('★ #412 ringOldestStartMs: where the ring\'s footage really starts', 
 
   test('null when the only segment is still being written (younger than SEGMENT_OPEN_MS)', () => {
     startSegmenter(CAM, 'somepath');
-    segment('seg-open.mkv', 0);
+    segment('seg-20260101-000007.mkv', 0);
     assert.equal(ringOldestStartMs(CAM), null, 'a half-written tail is not footage a clip can be cut from');
   });
 
   test('the OLDEST closed segment\'s mtime minus one segment length, whatever the file names say', () => {
     startSegmenter(CAM, 'somepath');
     // Names deliberately in the opposite order to the mtimes: only the mtime may decide.
-    const oldest = segment('seg-z.mkv', 12_000);
-    segment('seg-m.mkv', 8_000);
-    segment('seg-a.mkv', 4_000);
-    segment('seg-open.mkv', 0);
+    const oldest = segment('seg-20260101-000010.mkv', 12_000);
+    segment('seg-20260101-000011.mkv', 8_000);
+    segment('seg-20260101-000001.mkv', 4_000);
+    segment('seg-20260101-000007.mkv', 0);
     assert.equal(ringOldestStartMs(CAM), mtimeOf(oldest) - SEG_MS);
   });
 
   test('ignores concat lists and anything that is not a .mkv segment (a leftover list is older than the footage)', () => {
     startSegmenter(CAM, 'somepath');
-    const usable = segment('seg-usable.mkv', 5_000);
+    const usable = segment('seg-20260101-000008.mkv', 5_000);
     const list = path.join(ringDir(), 'concat-ev1.txt');
     fs.writeFileSync(list, 'file x');
     const old = new Date(Date.now() - 60_000);
@@ -345,10 +364,10 @@ describe('★ #412 ringOldestStartMs: where the ring\'s footage really starts', 
 
   test('a segment that disappears between listing and stat is skipped, not thrown from', () => {
     startSegmenter(CAM, 'somepath');
-    const usable = segment('seg-usable.mkv', 5_000);
+    const usable = segment('seg-20260101-000008.mkv', 5_000);
     // A dangling symlink lists but cannot be stat-ed: statMtime returns null for it.
     try {
-      fs.symlinkSync(path.join(ringDir(), 'does-not-exist'), path.join(ringDir(), 'seg-gone.mkv'));
+      fs.symlinkSync(path.join(ringDir(), 'does-not-exist'), path.join(ringDir(), 'seg-20260101-000012.mkv'));
     } catch {
       return; // no symlink right on this machine (Windows without developer mode): the branch is not reachable here
     }
@@ -361,7 +380,7 @@ describe('★ #412 ringOldestStartMs: where the ring\'s footage really starts', 
       stopAllSegmenters();
       fs.rmSync(path.join(path.resolve(CLIPS_DIR), '.ring'), { recursive: true, force: true });
       startSegmenter(CAM, 'somepath');
-      segment('seg-only.mkv', ageMs);
+      segment('seg-20260101-000013.mkv', ageMs);
       const oldest = ringOldestStartMs(CAM);
       let selected = true;
       await extractClip(CAM, { at: Date.now(), preRollSec: 5, postRollSec: 15, settleMs: 0 }).catch((err) => {
@@ -380,31 +399,66 @@ describe('★ #412 ringHasFootageFor: would extractClip find any footage for a c
   const clip = { preRollSec: 5, postRollSec: 15 };
 
   test('false when no segmenter runs for the camera, even with segment files lying in its ring dir', () => {
-    segment('seg-orphan.mkv', 10_000);
+    segment('seg-20260101-000009.mkv', 10_000);
     assert.equal(ringHasFootageFor(CAM, { at: Date.now(), ...clip }), false);
   });
 
   test('false for an empty ring; true with a closed segment inside the window', () => {
     startSegmenter(CAM, 'somepath');
     assert.equal(ringHasFootageFor(CAM, { at: Date.now(), ...clip }), false);
-    segment('seg-in.mkv', 5_000);
+    segment('seg-20260101-000014.mkv', 5_000);
     assert.equal(ringHasFootageFor(CAM, { at: Date.now(), ...clip }), true);
   });
 
   test('false when the only footage is OLDER than the window or LATER than it', () => {
     startSegmenter(CAM, 'somepath');
-    segment('seg-old.mkv', 30_000); // mtime now - 30 s; the window for a clip at `now` starts 13 s before it
+    segment('seg-20260101-000004.mkv', 30_000); // mtime now - 30 s; the window for a clip at `now` starts 13 s before it
     assert.equal(ringHasFootageFor(CAM, { at: Date.now(), ...clip }), false, 'older than the window');
     // The same segment is footage for a clip that happened back then, and not for one that happens long after.
     assert.equal(ringHasFootageFor(CAM, { at: Date.now() - 30_000, ...clip }), true);
     assert.equal(ringHasFootageFor(CAM, { at: Date.now() - 120_000, ...clip }), false, 'the window ended before the segment began');
   });
 
+  // #553 phase 2b: the ring folder is one the media user writes in, so the names in it are not trusted. The selection
+  // becomes a concat list read with `-safe 0` (absolute paths allowed), where a newline in a name would add a directive.
+  test('★ #553 a name that is not the segmenter\'s own is never footage (a newline or a quote cannot reach the concat list)', () => {
+    startSegmenter(CAM, 'somepath');
+    for (const hostile of [
+      // (a newline cannot be in a Windows file name; CI is Linux, where this is the case that matters)
+      ...(process.platform === 'win32' ? [] : ["seg-20260101-000020.mkv\nfile 'x'"]),
+      "seg-20260101-000021.mkv'",
+      'seg-1.mkv',
+      'evil.mkv',
+    ]) {
+      segment(hostile, 5_000);
+    }
+    assert.equal(ringHasFootageFor(CAM, { at: Date.now(), ...clip }), false, 'planted names were taken for footage');
+    assert.equal(ringOldestStartMs(CAM), null);
+    segment('seg-20260101-000022.mkv', 5_000); // control: a real name beside them is footage
+    assert.equal(ringHasFootageFor(CAM, { at: Date.now(), ...clip }), true);
+  });
+
+  test('★ #553 a symbolic link named like a segment is not footage (it must not borrow its target\'s age)', (t) => {
+    startSegmenter(CAM, 'somepath');
+    const target = path.join(path.resolve(CLIPS_DIR), `link-target-${process.pid}.bin`);
+    fs.writeFileSync(target, 'x');
+    const recent = new Date(Date.now() - 5_000);
+    fs.utimesSync(target, recent, recent);
+    try {
+      fs.symlinkSync(target, path.join(ringDir(), 'seg-20260101-000030.mkv'));
+    } catch {
+      t.skip('no symbolic links on this machine');
+      return;
+    }
+    assert.equal(ringHasFootageFor(CAM, { at: Date.now(), ...clip }), false);
+    assert.equal(ringOldestStartMs(CAM), null);
+  });
+
   test('agrees with extractClip\'s own verdict (same selection) on windows either side of every boundary', async () => {
     startSegmenter(CAM, 'somepath');
-    segment('seg-a.mkv', 20_000);
-    segment('seg-b.mkv', 8_000);
-    segment('seg-open.mkv', 0); // still being written: not footage
+    segment('seg-20260101-000001.mkv', 20_000);
+    segment('seg-20260101-000002.mkv', 8_000);
+    segment('seg-20260101-000007.mkv', 0); // still being written: not footage
     // Every call is started SYNCHRONOUSLY: with no ffmpeg on PATH the segmenter's entry is deleted on the first tick
     // after its spawn fails, and extractClip checks the entry only before its first await.
     const ages = [0, 5_000, 12_000, 25_000, 40_000, 90_000];

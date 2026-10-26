@@ -77,7 +77,7 @@ const thumbProc = (base) =>
 const probeProc = (base) => spawned.find((p) => p.command === 'ffprobe' && String(p.args.at(-1)).endsWith(`${base}.mp4`));
 const cutLines = (base) => logger.getRecent().filter((l) => l.includes('[clip] cut ') && l.includes(`/${base} (`));
 
-function plantSegment(mtimeMs, name = 'seg-1.mkv') {
+function plantSegment(mtimeMs, name = 'seg-20260101-000001.mkv') {
   fs.mkdirSync(RING_DIR, { recursive: true });
   const p = path.join(RING_DIR, name);
   fs.writeFileSync(p, 'footage');

@@ -140,54 +140,12 @@
     "note": "Validates the harness. If this is ever KILLED, no other result in the run means anything."
   },
   {
-    "label": "unlinkClip: containment guard deleted outright",
-    "file": "backend/src/lib/detectionEvents.js",
-    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return;",
-    "replace": "if (false) return;",
-    "expect": "killed",
-    "tests": [
-      "detection-events.test.js"
-    ]
-  },
-  {
-    "label": "unlinkClip: path.sep dropped from the prefix check",
-    "file": "backend/src/lib/detectionEvents.js",
-    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return;",
-    "replace": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR)) return;",
-    "expect": "killed",
-    "tests": [
-      "detection-events.test.js"
-    ]
-  },
-  {
     "label": "unlinkClip: stops removing the sibling thumbnail",
     "file": "backend/src/lib/detectionEvents.js",
-    "find": "try { fs.rmSync(abs.replace(/\\.mp4$/i, '.jpg'), { force: true }); } catch { /* ignore */ }",
+    "find": "try { unlinkMediaFile(abs.replace(/\\.mp4$/i, '.jpg')); } catch { /* ignore */ }",
     "replace": ";",
     "expect": "killed",
-    "tests": [
-      "detection-events.test.js"
-    ]
-  },
-  {
-    "label": "getEventClipFile: containment guard deleted outright",
-    "file": "backend/src/lib/detectionEvents.js",
-    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
-    "replace": "if (false) return null;",
-    "expect": "killed",
-    "tests": [
-      "detection-events.test.js"
-    ]
-  },
-  {
-    "label": "getEventClipFile: path.sep dropped from the prefix check",
-    "file": "backend/src/lib/detectionEvents.js",
-    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
-    "replace": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR)) return null;",
-    "expect": "killed",
-    "tests": [
-      "detection-events.test.js"
-    ]
+    "tests": ["detection-events.test.js"]
   },
   {
     "label": "schema default: wake clips off on a fresh install",
@@ -790,23 +748,18 @@
   {
     "label": "startSegmenter: the cameraId path guard is dropped",
     "file": "backend/src/lib/clipRecorder.js",
-    "find": "  const ringDir = path.join(RING_ROOT, safePathSegment(cameraId, 'cameraId'));",
-    "replace": "  const ringDir = path.join(RING_ROOT, String(cameraId));",
+    "find": "  const safeId = safePathSegment(cameraId, 'cameraId');\n  // The ring folder is a media-writable LEAF",
+    "replace": "  const safeId = String(cameraId);\n  // The ring folder is a media-writable LEAF",
     "expect": "killed",
-    "tests": [
-      "clip-recorder.test.js"
-    ]
+    "tests": ["clip-recorder.test.js"]
   },
   {
     "label": "startSegmenter: a stale ring is left in place across a restart",
     "file": "backend/src/lib/clipRecorder.js",
-    "find": "    if (f.endsWith('.mkv') || f.startsWith('concat-')) {",
-    "replace": "    if (false) {",
+    "find": "    try { unlinkMediaFile(path.join(ringDir, f)); } catch { /* ignore */ }",
+    "replace": "    void f;",
     "expect": "killed",
-    "tests": [
-      "clip-recorder.test.js",
-      "clip-capture.test.js"
-    ]
+    "tests": ["clip-recorder.test.js", "clip-capture.test.js"]
   },
   {
     "label": "holdRing: reports success when there is no ring to hold",
@@ -1032,35 +985,12 @@
     ]
   },
   {
-    "label": "★ jailedFile: the containment guard is dropped, so any file on the volume is servable",
-    "file": "backend/src/lib/recordings.js",
-    "find": "  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
-    "replace": ";",
-    "expect": "killed",
-    "tests": [
-      "recordings-routes.test.js"
-    ]
-  },
-  {
-    "label": "★ jailedFile: path.sep dropped, so a sibling directory sharing the prefix is served",
-    "file": "backend/src/lib/recordings.js",
-    "find": "  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
-    "replace": "  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR)) return null;",
-    "expect": "killed",
-    "tests": [
-      "recordings-routes.test.js"
-    ],
-    "note": "Found by adversarial review: the third copy of this guard was the one without the test its two siblings have."
-  },
-  {
     "label": "★ jailedFile: the existsSync check is dropped",
-    "file": "backend/src/lib/recordings.js",
-    "find": "  return fs.existsSync(abs) ? { root: CLIPS_DIR, path: path.relative(CLIPS_DIR, abs) } : null;",
-    "replace": "  return { root: CLIPS_DIR, path: path.relative(CLIPS_DIR, abs) };",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "  if (!abs || !statMediaFile(abs)) return null;",
+    "replace": "  if (!abs) return null;",
     "expect": "killed",
-    "tests": [
-      "recordings-routes.test.js"
-    ],
+    "tests": ["recordings-routes.test.js"],
     "note": "Survived before: the route test that claimed to cover it passes anyway, because res.sendFile 404s on ENOENT by itself. It was testing Express."
   },
   {
@@ -11977,8 +11907,8 @@
   {
     "label": "#412 M-412-45: ringOldestStartMs counts concat lists and other non-segment files",
     "file": "backend/src/lib/clipRecorder.js",
-    "find": "if (!f.endsWith('.mkv')) continue; // concat-*.txt lists are not footage",
-    "replace": "/* every file counts */",
+    "find": "for (const f of safeSegmentNames(safeReaddir(entry.ringDir))) { // only the segmenter's own names are footage",
+    "replace": "for (const f of safeReaddir(entry.ringDir)) { // every file counts",
     "expect": "killed",
     "tests": ["clip-recorder.test.js"],
     "namePattern": "#412 ringOldestStartMs"
@@ -13745,7 +13675,7 @@
   },
   {
     "label": "#545 CLIPS_DIR: path.resolve dropped from the one place it is normalised",
-    "file": "backend/src/lib/clipRecorder.js",
+    "file": "backend/src/lib/clipsDir.js",
     "find": "return path.resolve(v || path.join(dataDir, 'clips'));",
     "replace": "return v || path.join(dataDir, 'clips');",
     "expect": "killed",
@@ -13753,7 +13683,7 @@
   },
   {
     "label": "#545 CLIPS_DIR: a whitespace-only value no longer means unset (blank test dropped)",
-    "file": "backend/src/lib/clipRecorder.js",
+    "file": "backend/src/lib/clipsDir.js",
     "find": "typeof raw === 'string' && raw.trim() !== '' ? raw : ''",
     "replace": "typeof raw === 'string' ? raw : ''",
     "expect": "killed",
@@ -13761,28 +13691,12 @@
   },
   {
     "label": "#545 CLIPS_DIR: a non-blank value is trimmed again (a folder name ending in a space moves on upgrade)",
-    "file": "backend/src/lib/clipRecorder.js",
+    "file": "backend/src/lib/clipsDir.js",
     "find": "typeof raw === 'string' && raw.trim() !== '' ? raw : ''",
     "replace": "typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : ''",
     "expect": "killed",
     "tests": ["clips-dir-normalisation.test.js"],
     "namePattern": "keeps surrounding spaces"
-  },
-  {
-    "label": "#545 CLIPS_DIR: recordings containment guard deleted (traversal row would be served)",
-    "file": "backend/src/lib/recordings.js",
-    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
-    "replace": "if (false) return null;",
-    "expect": "killed",
-    "tests": ["clips-dir-normalisation.test.js"]
-  },
-  {
-    "label": "#545 CLIPS_DIR: timelapse containment guard deleted (traversal row would be served)",
-    "file": "backend/src/lib/timelapse.js",
-    "find": "if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;",
-    "replace": "if (false) return null;",
-    "expect": "killed",
-    "tests": ["clips-dir-normalisation.test.js"]
   },
   {
     "label": "W5 role gate M1: DELETE /api/cameras/alerts/:id/clip loses requireAdmin (a caregiver deletes a clip)",
@@ -17900,8 +17814,8 @@
   {
     "label": "#554 entityPurge: a camera delete leaves its clip directory",
     "file": "backend/src/lib/entityPurge.js",
-    "find": "[[id], ['.ring', id]]",
-    "replace": "[['.ring', id]]",
+    "find": "[[id], ['.ring', id], ['.concat', id]]",
+    "replace": "[['.ring', id], ['.concat', id]]",
     "expect": "killed",
     "tests": ["entity-purge.test.js"],
     "namePattern": "deleting a camera deletes everything"
@@ -17909,8 +17823,8 @@
   {
     "label": "#554 entityPurge: a camera delete leaves its segment ring",
     "file": "backend/src/lib/entityPurge.js",
-    "find": "[[id], ['.ring', id]]",
-    "replace": "[[id]]",
+    "find": "[[id], ['.ring', id], ['.concat', id]]",
+    "replace": "[[id], ['.concat', id]]",
     "expect": "killed",
     "tests": ["entity-purge.test.js"],
     "namePattern": "deleting a camera deletes everything"
@@ -18074,8 +17988,8 @@
   {
     "label": "#719 entityPurge: a folder sweep that fails is swallowed (the child goes, its frames stay)",
     "file": "backend/src/lib/entityPurge.js",
-    "find": "  fs.rmSync(dir, { recursive: true, force: true });\n}",
-    "replace": "  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* swallowed */ }\n}",
+    "find": "  if (APP_ONLY_ROOTS.has(parts[0])) fs.rmSync(dir, { recursive: true, force: true /* app-only */ });",
+    "replace": "  if (APP_ONLY_ROOTS.has(parts[0])) { try { fs.rmSync(dir, { recursive: true, force: true /* app-only */ }); } catch { /* swallowed */ } }",
     "expect": "killed",
     "tests": ["entity-purge.test.js"],
     "namePattern": "a frames folder that cannot be removed"
@@ -23170,8 +23084,8 @@
   {
     "label": "#851 M3: the old-frames sweep follows a linked child folder and deletes what it points at",
     "file": "backend/src/lib/timelapse.js",
-    "find": "  try { return fs.lstatSync(p).isDirectory(); } catch { return false; }",
-    "replace": "  try { return fs.statSync(p).isDirectory(); } catch { return false; }",
+    "find": "  try { return fs.lstatSync(p /* app-only */).isDirectory(); } catch { return false; }",
+    "replace": "  try { return fs.statSync(p /* app-only */).isDirectory(); } catch { return false; }",
     "expect": "killed",
     "tests": ["timelapse-expire-frames.test.js"],
     "namePattern": "^l1:"
@@ -23811,5 +23725,130 @@
     "expect": "killed",
     "tests": ["migrate-private-layout.test.js"],
     "namePattern": "refuses to rename an OPEN file"
+  },
+  {
+    "label": "#553 phase 2b: the containment guard of a stored path is dropped (a row with ../ escapes the clips folder)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;",
+    "replace": "  if (rel === '') return null;",
+    "expect": "killed",
+    "tests": ["media-files.test.js", "detection-events.test.js", "recordings-routes.test.js", "clips-dir-normalisation.test.js"]
+  },
+  {
+    "label": "#553 phase 2b: O_NOFOLLOW dropped (a symbolic link planted under a clip's name is opened and served)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "fs.openSync(abs, fs.constants.O_RDONLY | O_NOFOLLOW | O_NONBLOCK)",
+    "replace": "fs.openSync(abs, fs.constants.O_RDONLY | O_NONBLOCK)",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "SYMBOLIC LINK"
+  },
+  {
+    "label": "#553 phase 2b: the link-count check is dropped (a hard link to the database is served)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "    } else if (st.nlink !== 1) {",
+    "replace": "    } else if (false) {",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "HARD LINK"
+  },
+  {
+    "label": "#553 phase 2b: the size accounting counts a hard link or a link's target (statMediaFile)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "    if (!st.isFile() || st.nlink !== 1) return null;",
+    "replace": "    if (!st.isFile()) return null;",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "a hard link and a missing file are null"
+  },
+  {
+    "label": "#553 phase 2b: the parent folder's real path is no longer compared (a leaf swapped for a link is followed)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "  if (realParent === path.join(realRoot, path.dirname(rel))) return 'ok';",
+    "replace": "  return 'ok';",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "swapped|THROWS EMEDIAJAIL"
+  },
+  {
+    "label": "#553 phase 2b: the descriptor is reopened by path for the stream (a file swapped after the checks is what is sent; the checked one leaks)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "fs.createReadStream(null, { fd: f.fd, start, end, autoClose: true })",
+    "replace": "fs.createReadStream(abs, { start, end })",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "the descriptor is closed on every path"
+  },
+  {
+    "label": "#553 phase 2b: the segment name filter is dropped (a newline in a name reaches the concat list)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "    if (typeof name === 'string' && SEGMENT_NAME_RE.test(name)) out.push(name);",
+    "replace": "    out.push(name);",
+    "expect": "killed",
+    "tests": ["media-files.test.js", "clip-recorder.test.js"],
+    "namePattern": "segmenter|never footage"
+  },
+  {
+    "label": "#553 phase 2b: O_NONBLOCK dropped (a FIFO planted under a clip's name hangs the request)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "fs.openSync(abs, fs.constants.O_RDONLY | O_NOFOLLOW | O_NONBLOCK)",
+    "replace": "fs.openSync(abs, fs.constants.O_RDONLY | O_NOFOLLOW)",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "FIFO"
+  },
+  {
+    "label": "#553 phase 2b: a leaf folder is swept recursively (a folder swapped for a link mid-walk deletes elsewhere)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "    if (fs.lstatSync(p).isDirectory()) fs.rmdirSync(p);",
+    "replace": "    if (fs.lstatSync(p).isDirectory()) fs.rmSync(p, { recursive: true });",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "NON-empty sub-folder"
+  },
+  {
+    "label": "#553 phase 2b: unlinkMediaFile no longer checks the folder chain (a delete follows a swapped folder)",
+    "file": "backend/src/lib/mediaFiles.js",
+    "find": "  const parent = checkParent(abs, root);\n  if (parent === 'missing') return false;",
+    "replace": "  const parent = 'ok';\n  if (parent === 'missing') return false;",
+    "expect": "killed",
+    "tests": ["media-files.test.js"],
+    "namePattern": "EMEDIAJAIL"
+  },
+  {
+    "label": "#553 phase 2b: a leaf folder loses its sticky bit (the media user can delete the app's files in it)",
+    "file": "backend/src/lib/mediaLayout.js",
+    "find": "export const LEAF_MODE = 0o1770;",
+    "replace": "export const LEAF_MODE = 0o770;",
+    "expect": "killed",
+    "tests": ["media-layout.test.js"],
+    "namePattern": "LEAF is 1770"
+  },
+  {
+    "label": "#553 phase 2b: a folder is opened without O_NOFOLLOW before it is chmod-ed (a link redirects the chmod)",
+    "file": "backend/src/lib/mediaLayout.js",
+    "find": "const fd = fs.openSync(abs, fs.constants.O_RDONLY | O_DIRECTORY | O_NOFOLLOW);\n  try {\n    if (!fs.fstatSync(fd).isDirectory())",
+    "replace": "const fd = fs.openSync(abs, fs.constants.O_RDONLY | O_DIRECTORY);\n  try {\n    if (!fs.fstatSync(fd).isDirectory())",
+    "expect": "killed",
+    "tests": ["media-layout.test.js"],
+    "namePattern": "LINK is refused"
+  },
+  {
+    "label": "#553 phase 2b: a purged camera's concat-list folder is left behind",
+    "file": "backend/src/lib/entityPurge.js",
+    "find": "[[id], ['.ring', id], ['.concat', id]]",
+    "replace": "[[id], ['.ring', id]]",
+    "expect": "killed",
+    "tests": ["entity-purge.test.js"],
+    "namePattern": "deleting a camera deletes everything"
+  },
+  {
+    "label": "#553 phase 2b: an OFF start after an ON run does not give the media-owned clip tree back to the app",
+    "file": "backend/entrypoint.sh",
+    "find": "  if [ -n \"$MEDIA_EVER_ON\" ]; then media_reown; fi",
+    "replace": "  :",
+    "expect": "killed",
+    "tests": ["entrypoint-media-isolation.test.js"],
+    "namePattern": "the data directory carries the media group and the start ends OFF"
   }
 ]

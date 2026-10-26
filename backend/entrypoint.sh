@@ -119,9 +119,17 @@ canonical_id() {
   esac
 }
 WANT_OWNER="$(canonical_id "$PUID"):$(canonical_id "$PGID")"
+# The media user's id (#553), needed this early for one reason: with isolation asked for, the data directory carries the
+# MEDIA group (media_layout_ok below), and that must not read as "wrong owner" here, or the full walk below would run on
+# every start and hand the group of everything beneath it back to PGID, including the folders the media user writes into.
+MEDIA_ID=1700
+media_layout_ok() {
+  [ "$1" = . ] && [ "${NIGHTLIGHT_MEDIA_ISOLATION:-}" = 1 ] \
+    && [ "$(stat -L -c %u:%g "$DATA_DIR/." 2>/dev/null)" = "$(canonical_id "$PUID"):$MEDIA_ID" ]
+}
 NEEDS_CHOWN=
 for f in . babymonitor.db babymonitor.db-wal babymonitor.db-shm .jwt_secret private private/babymonitor.db private/babymonitor.db-wal private/babymonitor.db-shm private/.jwt_secret; do
-  if [ -e "$DATA_DIR/$f" ] && [ "$(stat -L -c %u:%g "$DATA_DIR/$f" 2>/dev/null)" != "$WANT_OWNER" ]; then
+  if [ -e "$DATA_DIR/$f" ] && [ "$(stat -L -c %u:%g "$DATA_DIR/$f" 2>/dev/null)" != "$WANT_OWNER" ] && ! media_layout_ok "$f"; then
     NEEDS_CHOWN="$f"
     break
   fi
@@ -218,8 +226,21 @@ fi
 #   - NEVER fatal under set -e: an unreadable subfolder (a root-squashed network share, say) must not
 #     become a container that will not start. A pipeline's status is its last command's (wc), so the
 #     walk cannot stop the script; `|| printf` is only there to SAY that it fell short.
-if [ "$UMASK" = 077 ]; then
+#   - WHEN MEDIA ISOLATION IS ASKED FOR (#553 phase 2b) the walk is CONFINED to private/ and the files directly in the data
+#     directory. The media layout needs group access on purpose: the data directory is 0710 and the clips folders 0750 and
+#     1770 (src/lib/mediaLayout.js), and a walk over the whole tree would take those bits straight back off on every start
+#     and stop recording. What the walk skips is the clip tree, which the layout (not a umask) governs, and which holds no
+#     secret. If isolation then turns out to be off after all (the dry run failed), the whole tree is walked at that point.
+tighten_all() {
   FOUND=$( { find "$DATA_DIR" ! -type l -perm /077 -print -exec chmod go-rwx {} + || printf '[entrypoint] warning: could not tighten every entry under %s (see the error above); starting anyway\n' "$DATA_DIR" >&2; } | wc -l)
+}
+TIGHTEN_CONFINED=
+if [ "$UMASK" = 077 ] && [ "${NIGHTLIGHT_MEDIA_ISOLATION:-}" = 1 ]; then
+  TIGHTEN_CONFINED=1
+  FOUND=$( { { find "$DATA_DIR/private" ! -type l -perm /077 -print -exec chmod go-rwx {} +; find "$DATA_DIR" -maxdepth 1 -type f ! -type l -perm /077 -print -exec chmod go-rwx {} +; } || printf '[entrypoint] warning: could not tighten every entry under %s (see the error above); starting anyway\n' "$DATA_DIR" >&2; } | wc -l)
+  DONE="existing entries with group/other access found in private/ and at the top level: $FOUND (media isolation asked for: the clip tree is left alone)"
+elif [ "$UMASK" = 077 ]; then
+  tighten_all
   DONE="existing entries with group/other access found: $FOUND"
 else
   DONE="existing entries left as they are (UMASK is not 077)"
@@ -301,13 +322,13 @@ printf '[entrypoint] umask %s; %s; modes:%s\n' "$UMASK" "$DONE" "$MODES"
 #     user, or share its group, and the separation would be nothing.
 #   - No bounding-set trimming anywhere: it needs CAP_SETPCAP, which the documented six-capability hardening lacks
 #     (#553 spike, run 1). --no-new-privs is set on the app and on every child instead.
-MEDIA_ID=1700
+# MEDIA_ID (1700) is set further up, next to the ownership check that needs it.
 # Next to this script: /app/media-exec.sh in the image, backend/media-exec.sh in a checkout (the tests). Node finds the
 # same file the same way (MEDIA_EXEC_PATH in src/lib/childEnv.js), so the dry run tests what the app will run.
 MEDIA_EXEC="$(dirname "$0")/media-exec.sh"
 MEDIA_PROBE="$(dirname "$0")/media-probe.sh"
-# Normally well under a second; the limit exists so a hung step can never stop the container starting (phase 2 will
-# probe the media folders, and a stalled network share is the realistic hang).
+# Normally well under a second; the limit exists so a hung step can never stop the container starting. Since phase 2b the
+# dry run touches the media folders, and a stalled network share is the realistic hang: see media_dry_run.
 MEDIA_DRY_RUN_TIMEOUT=30
 APP_UID=$(canonical_id "$PUID")
 APP_GID=$(canonical_id "$PGID")
@@ -320,21 +341,108 @@ APP_DROP="--reuid=$APP_UID --regid=$APP_GID --groups=$APP_GID,$MEDIA_ID --inh-ca
 
 is_id() { case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
 
-# Sets MEDIA_REASON and returns 1 on any failure; returns 0 only on the probe's own success line AND status 0.
-media_dry_run() {
-  if _out=$(timeout "$MEDIA_DRY_RUN_TIMEOUT" setpriv $APP_DROP -- /bin/sh "$MEDIA_PROBE" app "$MEDIA_EXEC" "$MEDIA_ID" "$APP_UID" 2>&1); then
-    _rc=0
-  else
-    _rc=$?
+# --- The media layout and the dry run (#553 phase 2b) ---------------------------------------------------------
+# The folders the media user must traverse, and the one decision of the layout that only root can make: the group of the
+# data directory and of the clips folder's top (src/lib/mediaLayout.js says who may write where below that, and the app
+# makes the folders under it lazily). TOP LEVEL ONLY and never a recursive walk (#567: the clip tree is not walked on every
+# start; an external CLIPS_DIR mount can be terabytes on a spinning disk).
+#
+# Where the clips folder is, by the app's own rule (src/lib/clipsDir.js): CLIPS_DIR, blank meaning unset, which means
+# DATA_DIR/clips; a relative value is relative to the working directory; trailing slashes do not count.
+case "$(printf '%s' "${CLIPS_DIR:-}" | tr -d ' \t')" in
+  '') CLIPS_ABS="$DATA_DIR/clips" ;;
+  *) CLIPS_ABS=${CLIPS_DIR}; case "$CLIPS_ABS" in /*) ;; *) CLIPS_ABS="$PWD/$CLIPS_ABS" ;; esac ;;
+esac
+while [ "${CLIPS_ABS%/}" != "$CLIPS_ABS" ] && [ "$CLIPS_ABS" != / ]; do CLIPS_ABS=${CLIPS_ABS%/}; done
+
+# Is anything the move into private/ should have taken still at the top level? Prints the first such name and returns 0,
+# or returns 1. Isolation is REFUSED while one is there (see the decision below). .demo-ready and the clips folder are
+# exempt (neither is a secret). A secret the operator supplies through the environment is exempt too: JWT_SECRET means the
+# app never reads .jwt_secret, and FIREBASE_CREDENTIALS / FIREBASE_CLIENT_CONFIG name the file the app reads instead of the
+# one in the data directory.
+media_toplevel_leftover() {
+  for _n in babymonitor.db babymonitor.db-wal babymonitor.db-shm babymonitor.db-journal detection-snapshots transition-snapshots; do
+    if exists_or_link "$DATA_DIR/$_n"; then printf '%s' "$_n"; return 0; fi
+  done
+  if [ -z "${JWT_SECRET:-}" ] && exists_or_link "$DATA_DIR/.jwt_secret"; then printf '.jwt_secret'; return 0; fi
+  if [ -z "${FIREBASE_CREDENTIALS:-}" ] && exists_or_link "$DATA_DIR/firebase-service-account.json"; then printf 'firebase-service-account.json'; return 0; fi
+  if [ -z "${FIREBASE_CLIENT_CONFIG:-}" ] && exists_or_link "$DATA_DIR/google-services.json"; then printf 'google-services.json'; return 0; fi
+  for _n in "$DATA_DIR"/backup-*.db; do
+    # An unmatched glob stays a literal word, which exists_or_link rejects.
+    if exists_or_link "$_n"; then printf '%s' "${_n##*/}"; return 0; fi
+  done
+  return 1
+}
+
+# One folder the media user must be able to enter and list but not write in: the app's, group = the media group, mode $2.
+# Created (owned by the app) when missing. A folder some OTHER uid owns is refused, not taken over: the app could not write
+# into it afterwards, and a chgrp of someone else's folder is not ours to do. $3 = "own" skips that check for the data
+# directory, whose owner the ownership block above has just settled. Sets MEDIA_REASON and returns 1 on failure.
+media_traverse_dir() {
+  if [ ! -d "$1" ]; then
+    # 022 for any parents (as for DATA_DIR's above); the folder itself is then given to the app.
+    { ( umask 022; mkdir -p "$1" ) && chown "$APP_UID:$APP_GID" "$1"; } || { MEDIA_REASON="could not create $1"; return 1; }
   fi
-  # PHASE 2 HOOK (#553): the shared-folder check goes here, as more arguments to media-probe.sh (one per media mount:
-  # the clip ring, the clips folder, the timelapse folder), so that the media user's write, the app's read and the
-  # app's unlink are proven on the real mounts before isolation is switched on.
-  # ⚠️ CAVEAT FOR THAT STEP (review of PR #869): `timeout` around a `$(...)` does not bound it. A probe stuck in
-  # uninterruptible sleep (a dead network share) ignores the signal, and a child that keeps the pipe open keeps the
-  # command substitution waiting after `timeout` has given up. Phase 1's steps cannot hang that way (nothing touches a
-  # mount). Phase 2 must run the probe in the BACKGROUND, writing its output to a file, and stop waiting at the
-  # deadline (then treat it as a failure: isolation off, one warning), whatever the probe is still doing.
+  if [ "${3:-}" != own ] && [ "$(stat -L -c %u "$1" 2>/dev/null)" != "$APP_UID" ]; then
+    MEDIA_REASON="$1 is not owned by uid $APP_UID (the app), so the media folders cannot be set up in it; give it to $APP_UID on the host"
+    return 1
+  fi
+  # Remembered BEFORE the change, so that a start which ends with isolation off can hand the folder back (media_undo_prepare).
+  MEDIA_PREPARED="$MEDIA_PREPARED
+$1"
+  { chgrp "$MEDIA_ID" "$1" && chmod "$2" "$1"; } || { MEDIA_REASON="could not give $1 to the media group (mode $2)"; return 1; }
+}
+
+# Every folder from $1 up to (not including) DATA_DIR, for a clips folder inside the data directory; for an external one
+# (/recordings, say) only its own top folder, and nothing above it.
+media_layout_up_to() {
+  case "$1" in
+    "$DATA_DIR") return 0 ;;
+    "$DATA_DIR"/*) media_layout_up_to "$(dirname "$1")" || return 1 ;;
+  esac
+  media_traverse_dir "$1" 750
+}
+
+# The group of the data directory: 0710, so the media user can pass through it (to reach a clips folder inside) and nothing
+# else: it cannot list it, and private/ stays 0700 and the app's alone.
+media_prepare_layout() {
+  media_traverse_dir "$DATA_DIR" 710 own && media_layout_up_to "$CLIPS_ABS"
+}
+
+# Sets MEDIA_REASON and returns 1 on any failure; returns 0 only on the probe's own success line AND status 0.
+#
+# THE PROBE RUNS IN THE BACKGROUND (the caveat the phase 1 review of PR #869 wrote down for this step). The probe now
+# touches the real mounts, and `timeout` around a `$(...)` does not bound that: a probe stuck in uninterruptible sleep (a
+# dead network share) ignores the signal, and a child that keeps the pipe open keeps the command substitution waiting after
+# `timeout` has given up. So it writes to a file in a temp folder, a marker file says it finished, and this function stops
+# waiting at the deadline whatever the probe is still doing, and answers "failed". Abandoning is safe because this is the
+# DRY RUN, not the migration: nothing it started changes the data, and isolation simply stays off.
+media_dry_run() {
+  _dd=$(mktemp -d) || { MEDIA_REASON="could not create a temporary folder for the dry run"; return 1; }
+  # stdin, stdout and stderr of the whole background job go to files or /dev/null, so an abandoned probe holds nothing of
+  # this script's (not the container's log pipe either) open.
+  # (The `|| _r=$?` is not decoration: the subshell inherits `set -e`, and without it a probe that fails would end the
+  # subshell before the status is written, which the loop below would read as "never finished".)
+  (
+    _r=0
+    setpriv $APP_DROP -- /bin/sh "$MEDIA_PROBE" app "$MEDIA_EXEC" "$MEDIA_ID" "$APP_UID" "$CLIPS_ABS" "$DATA_DIR" > "$_dd/out" 2>&1 || _r=$?
+    echo "$_r" > "$_dd/rc"
+  ) > /dev/null 2>&1 < /dev/null &
+  _pid=$!
+  _i=0
+  while [ ! -s "$_dd/rc" ]; do
+    if [ "$_i" -ge $((MEDIA_DRY_RUN_TIMEOUT * 10)) ]; then
+      kill "$_pid" 2>/dev/null || :
+      MEDIA_REASON="the dry run did not finish within $MEDIA_DRY_RUN_TIMEOUT seconds (is a media folder on a stalled share?); it was abandoned"
+      return 1
+    fi
+    # 0.1 s steps; a sleep without fractions (some minimal systems) waits a whole second and counts it as ten steps.
+    if sleep 0.1 2>/dev/null; then _i=$((_i + 1)); else sleep 1; _i=$((_i + 10)); fi
+  done
+  _rc=$(cat "$_dd/rc")
+  _out=$(cat "$_dd/out" 2>/dev/null) || _out=
+  rm -f -- "$_dd/out" "$_dd/rc"
+  rmdir -- "$_dd" 2>/dev/null || :
   if [ "$_rc" = 0 ] && [ "$(printf '%s\n' "$_out" | tail -n 1)" = MEDIA-PROBE-OK ]; then
     return 0
   fi
@@ -347,6 +455,61 @@ media_dry_run() {
   return 1
 }
 
+# --- Going back to off after an ON start (#553 phase 2b review) ------------------------------------------------
+# An ON run leaves files the MEDIA user wrote in the clip tree: owned 1700:1700, mode 0660. A later start that ends OFF
+# (the dry run fails, a capability went missing, or the switch was taken away) runs the app WITHOUT the media group, so it
+# could neither read nor serve those clips, and the tighten walk would turn them into media-owned 0600 files that nothing
+# but root can open. So an OFF start that finds evidence of an earlier ON run gives the data directory and the clip tree
+# (an external CLIPS_DIR included, which the ownership block above never reaches) back to PUID:PGID ONCE, before the
+# tighten walk. The evidence is read BEFORE this start prepares the folders, because preparing sets the same group; and a
+# failed attempt hands its own top folders back (media_undo_prepare), so a configuration that never worked does not walk the
+# clip tree on every start (#567). Once the group is no longer the media group, the next start finds no evidence: a no-op.
+MEDIA_PREPARED=
+media_ever_on() {
+  # PUID or PGID equal to the media id is a configuration where "the group is the media group" means nothing (isolation is
+  # refused for it); never a reason to re-own anything.
+  if [ "$APP_UID" = "$MEDIA_ID" ] || [ "$APP_GID" = "$MEDIA_ID" ]; then return 1; fi
+  [ "$(stat -L -c %g "$DATA_DIR/." 2>/dev/null)" = "$MEDIA_ID" ] && return 0
+  [ "$(stat -L -c %g "$CLIPS_ABS" 2>/dev/null)" = "$MEDIA_ID" ] && return 0
+  [ -d "$CLIPS_ABS" ] && [ -n "$(find "$CLIPS_ABS" -maxdepth 1 -user "$MEDIA_ID" 2>/dev/null | head -n 1)" ] && return 0
+  return 1
+}
+if media_ever_on; then MEDIA_EVER_ON=1; else MEDIA_EVER_ON=; fi
+# What a new file or folder would get under the configured mask (700 at the default 077): the OFF mode of the two top folders.
+OFF_MODE=$(printf '%o' $((0777 & ~0$UMASK)))
+media_set_back() { # give a top folder back to the app's group and the OFF mode; never fatal
+  chgrp "$APP_GID" "$1" 2>/dev/null && chmod "$OFF_MODE" "$1" 2>/dev/null || private_warn "could not hand $1 back to group $APP_GID"
+}
+media_undo_prepare() { # this start opened these top folders to the media group and then did not go on
+  # one path per line (a path may hold a space); no globbing of the names
+  _ifs=$IFS
+  set -f
+  IFS='
+'
+  for _p in $MEDIA_PREPARED; do
+    IFS=$_ifs
+    media_set_back "$_p"
+    IFS='
+'
+  done
+  IFS=$_ifs
+  set +f
+}
+media_reown() {
+  printf '[entrypoint] media isolation is off, but an earlier start had it on: giving %s and the clip tree back to %s once\n' "$DATA_DIR" "$WANT_OWNER"
+  chown -R nightlight:nightlight "$DATA_DIR" || private_warn "could not re-own every entry under $DATA_DIR"
+  media_set_back "$DATA_DIR"
+  case "$CLIPS_ABS" in
+    "$DATA_DIR"|"$DATA_DIR"/*) ;; # inside the data directory: just done
+    *)
+      if [ -d "$CLIPS_ABS" ]; then
+        chown -R nightlight:nightlight "$CLIPS_ABS" || private_warn "could not re-own every entry under $CLIPS_ABS"
+        media_set_back "$CLIPS_ABS"
+      fi
+      ;;
+  esac
+}
+
 MEDIA_ISOLATION=off
 MEDIA_REASON=
 if [ "${NIGHTLIGHT_MEDIA_ISOLATION:-}" = 1 ]; then
@@ -356,11 +519,32 @@ if [ "${NIGHTLIGHT_MEDIA_ISOLATION:-}" = 1 ]; then
     MEDIA_REASON="PUID=0 runs the app as root, and isolation needs a non-root app"
   elif [ "$APP_UID" = "$MEDIA_ID" ] || [ "$APP_GID" = "$MEDIA_ID" ]; then
     MEDIA_REASON="PUID or PGID is $MEDIA_ID, the media user's id, so the app and the media processes would not be separate"
+  elif _left=$(media_toplevel_leftover); then
+    # A skipped or unfinished move must not become a silent, permanent gap: with the data directory open to the media group,
+    # a database or secret still at its top level is protected by nothing but its own mode (docs/operations.md, "Media
+    # isolation"). Refused until the move has finished (the [private-layout] lines above say what is stopping it).
+    MEDIA_REASON="$_left is still at the top level of $DATA_DIR instead of in private/, so the media user could not be kept away from it; the move into private/ has not finished"
+  elif ! media_prepare_layout; then
+    : # MEDIA_REASON says which folder and why
   elif media_dry_run; then
     MEDIA_ISOLATION=on
   fi
 fi
 export MEDIA_ISOLATION
+
+# Off after all: first undo what this start prepared, then (if an earlier start had it on) re-own, THEN tighten, so the walk
+# sees app-owned files.
+if [ "$MEDIA_ISOLATION" = off ]; then
+  media_undo_prepare
+  if [ -n "$MEDIA_EVER_ON" ]; then media_reown; fi
+fi
+
+# Isolation was asked for but is off: the confined walk above skipped the clip tree on that promise, so the whole tree is
+# tightened now, as it would have been without the switch (the start-up line above said what was skipped).
+if [ -n "$TIGHTEN_CONFINED" ] && [ "$MEDIA_ISOLATION" = off ]; then
+  tighten_all
+  printf '[entrypoint] media isolation is off, so the whole data directory was tightened after all: group/other access found: %s\n' "$FOUND"
+fi
 
 if [ "$MEDIA_ISOLATION" = on ]; then
   printf '[entrypoint] media isolation on: ffmpeg, ffprobe and MediaMTX run as uid %s, the app as %s:%s\n' "$MEDIA_ID" "$APP_UID" "$APP_GID"

@@ -3,6 +3,7 @@ import path from 'path';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { CLIPS_DIR } from './clipRecorder.js';
+import { jailedMediaFile, resolveUnder, unlinkMediaFile } from './mediaFiles.js';
 import { dataDirFrom, DETECTION_SNAPSHOTS_DIR, resolveSnapshotDir } from './dataPaths.js';
 
 // One JPEG per detection event, named <id>.jpg, kept next to the DB. Stored on disk (not as a
@@ -86,20 +87,20 @@ const overCountWithClipStmt = db.prepare(
 
 function unlinkSnapshot(id) {
   const file = snapshotFile(id);
-  if (file) fs.rm(file, { force: true }, () => {});
+  if (file) fs.rm(file, { force: true }, () => {}); // app-only: snapshots live in private/
 }
 
 // Resolve+delete a clip MP4 (and its sibling thumbnail) from a stored relative clip_path. Guards
 // against path escape so a crafted row can't reach outside CLIPS_DIR.
 export function unlinkClip(relPath) {
-  if (!relPath) return;
-  const abs = path.resolve(CLIPS_DIR, relPath);
-  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return;
+  const abs = resolveUnder(relPath, CLIPS_DIR);
+  if (!abs) return;
   // Synchronous: a retention sweep must actually finish deleting before it moves on / the process
   // can exit, otherwise a crash right after would leave the file behind while its row is already
   // cleared (orphaned on disk, uncounted by the size cap). A handful of files per sweep — cheap.
-  try { fs.rmSync(abs, { force: true }); } catch { /* ignore */ }
-  try { fs.rmSync(abs.replace(/\.mp4$/i, '.jpg'), { force: true }); } catch { /* ignore */ }
+  // unlinkMediaFile: a flat unlink of one name inside a folder the media user writes into (#553 phase 2b).
+  try { unlinkMediaFile(abs); } catch { /* ignore */ }
+  try { unlinkMediaFile(abs.replace(/\.mp4$/i, '.jpg')); } catch { /* ignore */ }
 }
 
 function prune() {
@@ -130,7 +131,7 @@ export function saveEventSnapshot(id, buffer) {
     // The alert row can be gone by now: the caller awaits the snapshot grab first, and removing the camera in
     // that window deletes the row (#719 review). A file no row names is an orphan nothing can reach to delete,
     // so remove it.
-    if (markSnapshotStmt.run(id).changes === 0) fs.rmSync(file, { force: true });
+    if (markSnapshotStmt.run(id).changes === 0) fs.rmSync(file, { force: true }); // app-only: snapshots live in private/
   } catch (err) {
     logger.error(`Failed to save detection snapshot for event ${id}:`, err.message);
   }
@@ -143,7 +144,7 @@ export function getEventSnapshotFile(id) {
   const n = Number(id);
   if (!Number.isInteger(n) || n <= 0) return null;
   const file = path.join(SNAPSHOT_DIR, `${n}.jpg`);
-  return fs.existsSync(file) ? { root: SNAPSHOT_DIR, path: `${n}.jpg` } : null;
+  return fs.existsSync(file) ? { root: SNAPSHOT_DIR, path: `${n}.jpg` } : null; // app-only: snapshots live in private/
 }
 
 // --- Clip status (Stage 1 recording). The clip lives on the same detection_events row; these just
@@ -172,13 +173,12 @@ export function setClipFailed(id) {
 
 // A jailed { root, path } for an event's ready clip MP4, or null (used by the serving route).
 // Validates the stored relative path stays under CLIPS_DIR, then returns CLIPS_DIR + that relative
-// path so the route can pass res.sendFile a `root` option and let Express re-enforce containment.
+// path; the route serves it with serveMediaFile (mediaFiles.js), which opens it once and re-checks it.
 export function getEventClipFile(id) {
   const row = db.prepare('SELECT clip_path, clip_status FROM detection_events WHERE id = ?').get(id);
   if (!row || row.clip_status !== 'ready' || !row.clip_path) return null;
-  const abs = path.resolve(CLIPS_DIR, row.clip_path);
-  if (abs !== CLIPS_DIR && !abs.startsWith(CLIPS_DIR + path.sep)) return null;
-  return fs.existsSync(abs) ? { root: CLIPS_DIR, path: path.relative(CLIPS_DIR, abs) } : null;
+  // Contained under CLIPS_DIR, and a plain one-name file (mediaFiles.js): the route serves it with serveMediaFile.
+  return jailedMediaFile(row.clip_path, CLIPS_DIR);
 }
 
 // --- Retention accounting (lib/clipStorage.js sweeps against these). Deleting a clip clears its
@@ -262,7 +262,7 @@ export function clearDetectionEvents() {
   // Best-effort: remove every stored JPEG too, so a cleared history leaves no images behind.
   try {
     for (const name of fs.readdirSync(SNAPSHOT_DIR)) {
-      if (name.endsWith('.jpg')) fs.rm(path.join(SNAPSHOT_DIR, name), { force: true }, () => {});
+      if (name.endsWith('.jpg')) fs.rm(path.join(SNAPSHOT_DIR, name), { force: true }, () => {}); // app-only: snapshots live in private/
     }
   } catch {
     // Directory missing / unreadable — nothing to clean.
