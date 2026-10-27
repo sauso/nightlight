@@ -1,5 +1,6 @@
 import { before, after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import express from 'express';
 import { useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, signToken, call } from './helpers/harness.js';
 
@@ -12,6 +13,8 @@ let server;
 let base;
 let admin;
 let caregiver;
+// The server side of the latest request: the stalled-download test watches it to know when the export is waiting.
+let lastResponse = null;
 const KEY = Buffer.alloc(32, 3).toString('base64');
 const KEY2 = Buffer.alloc(32, 4).toString('base64');
 
@@ -23,6 +26,7 @@ before(async () => {
   db.prepare("INSERT INTO children (id, name) VALUES ('child-a', 'Sample A'), ('child-b', 'Sample B')").run();
   const app = express();
   app.use(express.json(), demoGuard);
+  app.use((req, res, next) => { lastResponse = res; next(); });
   app.use('/api/esphome', router);
   server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
   base = `http://127.0.0.1:${server.address().port}`;
@@ -125,4 +129,83 @@ test('#506 device count is capped at eight', async () => {
   }
   assert.equal((await api('/devices', { method: 'POST', token: admin,
     body: { name: 'Ninth unit', host: '127.0.0.1', enabled: false } })).status, 400);
+});
+
+// Devices for the export tests below go straight into the table: the eight-device cap above applies to the route only.
+const exportDevice = (objectId, name = objectId) => {
+  const deviceId = Number(db.prepare("INSERT INTO esphome_devices (name, host, enabled) VALUES ('Export unit', '127.0.0.1', 0)").run().lastInsertRowid);
+  const entityId = Number(db.prepare("INSERT INTO esphome_entities (device_id, object_id, kind, name) VALUES (?, ?, 'sensor', ?)")
+    .run(deviceId, objectId, name).lastInsertRowid);
+  return { deviceId, entityId };
+};
+
+test('#506 export keeps negative numbers as numbers and still neutralises text that could be a formula', async () => {
+  const { deviceId, entityId } = exportDevice('signed', '-cmd');
+  db.prepare('INSERT INTO esphome_readings (entity_id, bucket, last, mean, min, max, n) VALUES (?, ?, -3.5, -3.5, -4, -3, 2)')
+    .run(entityId, Math.floor(Date.parse('2026-10-03T08:00:00Z') / 60000));
+  const res = await api(`/export?device=${deviceId}&from=2026-10-03T00:00:00Z&to=2026-10-04T00:00:00Z`, { token: admin });
+  assert.equal(res.status, 200);
+  assert.ok(String(res.body).includes(`"'-cmd",,"-3.5","-3.5","-4","-3","2","0"`), String(res.body));
+});
+
+test('#506 export from/to without a Z or offset are read as UTC, whatever zone the server runs in', async () => {
+  const previous = process.env.TZ;
+  // UTC+14: a time read in the server's zone would move the window by 14 hours and miss the row.
+  process.env.TZ = 'Pacific/Kiritimati';
+  try {
+    assert.equal(new Date(2026, 9, 5, 12).getTimezoneOffset(), -840,
+      'this Node cannot change its zone at runtime, so the test cannot tell UTC from local time');
+    const { deviceId, entityId } = exportDevice('zoned');
+    db.prepare('INSERT INTO esphome_readings (entity_id, bucket, last, mean, min, max, n) VALUES (?, ?, 1, 1, 1, 1, 1)')
+      .run(entityId, Math.floor(Date.parse('2026-10-05T12:34:00Z') / 60000));
+    const bare = await api(`/export?device=${deviceId}&from=2026-10-05T12:00:00&to=2026-10-05T13:00`, { token: admin });
+    assert.equal(bare.status, 200);
+    assert.match(String(bare.body), /2026-10-05T12:34:00\.000Z/, 'a time without a zone was not read as UTC');
+    // An explicit offset still counts (+10:00, written %2B10:00 in a URL), and other formats are refused.
+    const offset = await api(`/export?device=${deviceId}&from=2026-10-05T22:00:00%2B10:00&to=2026-10-05T23:00:00%2B10:00`, { token: admin });
+    assert.match(String(offset.body), /2026-10-05T12:34:00\.000Z/);
+    assert.equal((await api(`/export?device=${deviceId}&from=Oct 5 2026&to=2026-10-06`, { token: admin })).status, 400);
+  } finally {
+    if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous;
+  }
+});
+
+test('#506 a stalled CSV download leaves the database writable, and the pages return every row once, in order', async () => {
+  const { deviceId, entityId } = exportDevice('paged_a');
+  const add = db.prepare("INSERT INTO esphome_entities (device_id, object_id, kind, name) VALUES (?, ?, 'sensor', ?)");
+  const entities = [entityId, ...['paged_b', 'paged_c'].map((o) => Number(add.run(deviceId, o, o).lastInsertRowid))];
+  const names = ['paged_a', 'paged_b', 'paged_c'];
+  const first = Math.floor(Date.parse('2026-09-01T00:00:00Z') / 60000);
+  // 3 x 20,000 = 60,000 rows, about 4 MB of CSV: far more than the socket buffers hold, so a client that stops reading
+  // stalls the server. 2,000-row pages end part-way through a minute, which exercises the (minute, entity) cursor.
+  const MINUTES = 20000;
+  const reading = db.prepare('INSERT INTO esphome_readings (entity_id, bucket, last, mean, min, max, n) VALUES (?, ?, 1, 1, 1, 1, 1)');
+  db.transaction(() => { for (let m = 0; m < MINUTES; m++) for (const e of entities) reading.run(e, first + m); })();
+  const req = http.get(`${base}/api/esphome/export?device=${deviceId}&from=2026-09-01T00:00:00Z&to=2026-09-15T00:00:00Z`,
+    { headers: { authorization: `Bearer ${admin}` } });
+  try {
+    const res = await new Promise((resolve, reject) => { req.once('response', resolve); req.once('error', reject); });
+    assert.equal(res.statusCode, 200);
+    res.pause();
+    const deadline = Date.now() + 20000;
+    while (!lastResponse?.writableNeedDrain && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(lastResponse?.writableNeedDrain, true, 'the download never stalled, so this test proves nothing about one that does');
+    // The writes the app makes all the time (session touch, activity samples, the ESPHome minute flush) must still work.
+    const days = db.prepare("SELECT esphome_retention_days AS d FROM settings WHERE id = 'app'").get().d;
+    db.prepare("UPDATE settings SET esphome_retention_days = ? WHERE id = 'app'").run(days === 7 ? 8 : 7);
+    db.prepare("UPDATE settings SET esphome_retention_days = ? WHERE id = 'app'").run(days);
+    const chunks = [];
+    res.on('data', (chunk) => chunks.push(chunk));
+    await new Promise((resolve, reject) => { res.once('end', resolve); res.once('error', reject); res.resume(); });
+    const got = Buffer.concat(chunks).toString('utf8').split('\r\n').filter(Boolean).slice(1)
+      .map((line) => line.split(',').slice(0, 3).join(','));
+    const want = [];
+    for (let m = 0; m < MINUTES; m++) for (const name of names)
+      want.push(`"${new Date((first + m) * 60000).toISOString()}","#${deviceId}","${name}"`);
+    assert.equal(got.length, want.length, 'the export lost or repeated rows across pages');
+    const wrong = got.findIndex((row, i) => row !== want[i]);
+    assert.equal(wrong, -1, `row ${wrong} is ${got[wrong]}, expected ${want[wrong]}`);
+  } finally {
+    req.destroy();
+  }
 });

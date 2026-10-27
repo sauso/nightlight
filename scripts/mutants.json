@@ -23870,10 +23870,28 @@
   {
     "label": "#506 device control sent from telemetry adapter",
     "file": "backend/src/lib/esphomeTransport.js",
-    "find": "    stopTelemetry = client.on('telemetry', (event) => {",
-    "replace": "    client.command('light-lamp', { state: true });\r\n    stopTelemetry = client.on('telemetry', (event) => {",
+    "find": "    stopTelemetry = client.on('telemetry', onTelemetry);",
+    "replace": "    client.command('light-lamp', { state: true });\r\n    stopTelemetry = client.on('telemetry', onTelemetry);",
     "expect": "killed",
     "tests": ["esphome-transport.test.js"],
     "namePattern": "#506 read only telemetry"
+  },
+  {
+    "label": "#506 absent state (a real zero or false) recorded as missing",
+    "file": "backend/src/lib/esphomeTransport.js",
+    "find": "const raw = event.state === undefined ? (entity.kind === 'binary_sensor' ? false : 0) : event.state;",
+    "replace": "const raw = event.state;",
+    "expect": "killed",
+    "tests": ["esphome-transport.test.js"],
+    "namePattern": "#506 an update with no state"
+  },
+  {
+    "label": "#506 paged export skips the rest of a minute at a page boundary",
+    "file": "backend/src/routes/esphome.js",
+    "find": "after = [rows.at(-1).bucket, rows.at(-1).entity_id];",
+    "replace": "after = [rows.at(-1).bucket + 1, 0];",
+    "expect": "killed",
+    "tests": ["esphome-routes.test.js"],
+    "namePattern": "#506 a stalled CSV download"
   }
 ]

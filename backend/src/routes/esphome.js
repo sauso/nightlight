@@ -135,37 +135,68 @@ router.put('/settings', (req, res) => {
   res.json({ retention_days: days });
 });
 
+// #506 review (L3): only TEXT cells (entity names, child ids) can carry a spreadsheet formula, so only they are
+// neutralised. The first version prefixed every cell, which turned a negative reading such as -3.5 into the text '-3.5.
 const csvCell = (value) => {
   if (value == null) return '';
   let s = String(value);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  if (typeof value === 'string' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return `"${s.replaceAll('"', '""')}"`;
 };
+// #506 review (L7): an ISO date or date-time. A time with no Z or offset is read as UTC, as the file's own times are:
+// Date.parse reads "2026-10-01T00:00" in the SERVER's zone, so the same link exported a different window on each
+// install. A date alone is already UTC in JavaScript. Other formats are refused rather than guessed.
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})?)?$/;
+function parseUtc(raw) {
+  const match = typeof raw === 'string' ? ISO_TIME.exec(raw) : null;
+  if (!match) return NaN;
+  return Date.parse(raw.includes('T') && !match[1] ? `${raw}Z` : raw);
+}
+// Rows per query. A judgment, not a measurement: big enough that a 31-day export of a busy device is a few hundred
+// short queries, small enough that one page (about 150 KB of CSV) is never a long write or a large allocation.
+const EXPORT_PAGE_ROWS = 2000;
 router.get('/export', asyncHandler(async (req, res) => {
   const id = idOf(req.query.device);
   if (!id || !db.prepare('SELECT id FROM esphome_devices WHERE id = ?').get(id))
     return res.status(404).json({ error: 'Device not found.' });
-  const from = typeof req.query.from === 'string' ? Date.parse(req.query.from) : NaN;
-  const to = typeof req.query.to === 'string' ? Date.parse(req.query.to) : NaN;
+  const from = parseUtc(req.query.from);
+  const to = parseUtc(req.query.to);
   if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to || to - from > 31 * 86400000)
     return bad(res, 'Enter valid from and to dates no more than 31 days apart.');
   res.type('text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="esphome-${id}.csv"`);
   res.write('minute_utc,device,entity,child,last,mean,min,max,n,nmiss\r\n');
-  const rows = db.prepare(`SELECT r.bucket, e.name, e.object_id, e.child_id, r.last, r.mean, r.min, r.max, r.n, r.nmiss
+  // #506 review (H1): keyset pages, never one open statement. The first version streamed a single `.iterate()` and
+  // awaited 'drain' inside it; better-sqlite3 keeps the ONE connection busy while an iterator is open and refuses every
+  // write meanwhile ("This database connection is busy executing a query"). A download that stalled (a slow or paused
+  // client) therefore failed every write in the app: requireAuth's session touch, activity samples, camera events and
+  // the ESPHome minute flush. Each page is a finished `.all()`, and the wait for 'drain' happens only between pages.
+  // (bucket, entity_id) is the order and the cursor: unique per row, and the covering `bucket` index already holds it.
+  const page = db.prepare(`SELECT r.bucket, r.entity_id, e.name, e.object_id, e.child_id, r.last, r.mean, r.min, r.max, r.n, r.nmiss
     FROM esphome_readings r JOIN esphome_entities e ON e.id = r.entity_id
-    WHERE e.device_id = ? AND r.bucket >= ? AND r.bucket < ? ORDER BY r.bucket, e.id`)
-    .iterate(id, Math.floor(from / 60000), Math.ceil(to / 60000));
-  for (const row of rows) {
-    if (res.destroyed) break;
-    const fields = [new Date(row.bucket * 60000).toISOString(), `#${id}`, row.name || row.object_id,
-      row.child_id, row.last, row.mean, row.min, row.max, row.n, row.nmiss];
-    if (!res.write(fields.map(csvCell).join(',') + '\r\n')) {
+    WHERE e.device_id = ? AND r.bucket >= ? AND r.bucket < ? AND (r.bucket, r.entity_id) > (?, ?)
+    ORDER BY r.bucket, r.entity_id LIMIT ${EXPORT_PAGE_ROWS}`);
+  const first = Math.floor(from / 60000);
+  const end = Math.ceil(to / 60000);
+  // Any row in range has bucket >= first, so the starting cursor (first - 1, 0) excludes nothing.
+  let after = [first - 1, 0];
+  while (!res.destroyed) {
+    const rows = page.all(id, first, end, after[0], after[1]);
+    if (!rows.length) break;
+    let text = '';
+    for (const row of rows) {
+      const fields = [new Date(row.bucket * 60000).toISOString(), `#${id}`, row.name || row.object_id,
+        row.child_id, row.last, row.mean, row.min, row.max, row.n, row.nmiss];
+      text += fields.map(csvCell).join(',') + '\r\n';
+    }
+    after = [rows.at(-1).bucket, rows.at(-1).entity_id];
+    if (!res.write(text) && !res.destroyed) {
       await new Promise((resolve) => {
         const done = () => { res.off('drain', done); res.off('close', done); resolve(); };
         res.once('drain', done); res.once('close', done);
       });
     }
+    if (rows.length < EXPORT_PAGE_ROWS) break;
   }
   res.end();
 }));

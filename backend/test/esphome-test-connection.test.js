@@ -13,7 +13,7 @@ test('#506 connection test fails closed for an absent encryption flag and stores
   let closed = false;
   let subscribed = false;
   const fake = { health: () => ({}), entitiesByDevice: () => [],
-    on: () => { subscribed = true; return () => {}; }, disconnect: () => { closed = true; } };
+    on: () => { subscribed = true; return { [Symbol.dispose]() {} }; }, disconnect: () => { closed = true; } };
   const result = await testEsphomeDevice({ host: '127.0.0.1', port: 6053, key: KEY },
     { open: (config, options) => openDevice(config, { ...options, open: async () => fake }) });
   assert.deepEqual(result, { ok: false, error_code: 'NOT_ENCRYPTED', error: 'The device did not encrypt the connection.' });

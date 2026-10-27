@@ -19,6 +19,23 @@ function client(encrypted = true) {
   return mock;
 }
 
+// A hand-built client for what MockClient cannot hold: it keys entities by `type-objectId`, so two entities sharing an
+// object_id replace each other there, while the real registry keeps both (entity-registry.js `register`). `on()` returns
+// the real shape, a Disposable (esphome-client event-bus.js `on`), not a function.
+function fakeClient(entities) {
+  const handlers = new Set();
+  return {
+    handlers,
+    health: () => ({ encrypted: true }),
+    entitiesByDevice: () => entities,
+    snapshot: () => new Map(),
+    on: (_event, handler) => { handlers.add(handler); return { [Symbol.dispose]: () => handlers.delete(handler) }; },
+    lifecycle: () => (async function* () {})(),
+    disconnect() {},
+    send(event) { for (const handler of [...handlers]) handler(event); },
+  };
+}
+
 test('#506 malformed key refuses before opening the library', async () => {
   let calls = 0;
   await assert.rejects(openDevice({ host: '127.0.0.1', port: 6053, key: 'bad' },
@@ -32,7 +49,7 @@ test('#506 a configured key needs an affirmative encryption result before teleme
     let subscribed = false;
     let closed = false;
     const fake = { health: () => health, entitiesByDevice: () => [sensor],
-      on: () => { subscribed = true; return () => {}; }, disconnect: () => { closed = true; } };
+      on: () => { subscribed = true; return { [Symbol.dispose]() {} }; }, disconnect: () => { closed = true; } };
     await assert.rejects(openDevice({ host: '127.0.0.1', port: 6053, key: KEY },
       { open: async () => fake }), { code: 'NOT_ENCRYPTED' });
     assert.equal(subscribed, false);
@@ -65,6 +82,82 @@ test('#506 read only telemetry, missing flag, ignored kind and no reported devic
     { objectId: 'presence', kind: 'binary_sensor', value: 1, missing: false },
   ]);
   assert.deepEqual(mock.commands, []);
+  handle.close();
+});
+
+test('#506 an update with no state is a real 0 or false; only the missing flag, NaN or a wrong type is missing', async () => {
+  const mock = client();
+  const states = [];
+  const handle = await openDevice({ host: '127.0.0.1', port: 6053, key: KEY },
+    { open: async () => mock, onState: (s) => states.push(s) });
+  // The REAL shape of a zero or false: ESPHome leaves default values off the wire and esphome-client copies only the fields
+  // that are present, so `state` is absent. MockClient always sends `state`, which is what hid this.
+  mock.emit('telemetry', { entity: 'Heart Rate', key: 1, type: 'sensor' });
+  mock.emit('telemetry', { entity: 'Presence', key: 2, type: 'binary_sensor' });
+  mock.emit('telemetry', { entity: 'Heart Rate', key: 1, type: 'sensor', missingState: true });
+  mock.emit('telemetry', { entity: 'Presence', key: 2, type: 'binary_sensor', missingState: true });
+  mock.emit('telemetry', { entity: 'Heart Rate', key: 1, type: 'sensor', state: NaN });
+  mock.emit('telemetry', { entity: 'Heart Rate', key: 1, type: 'sensor', state: 'high' });
+  assert.deepEqual(states, [
+    { objectId: 'heart_rate', kind: 'sensor', value: 0, missing: false },
+    { objectId: 'presence', kind: 'binary_sensor', value: 0, missing: false },
+    { objectId: 'heart_rate', kind: 'sensor', missing: true },
+    { objectId: 'presence', kind: 'binary_sensor', missing: true },
+    { objectId: 'heart_rate', kind: 'sensor', missing: true },
+    { objectId: 'heart_rate', kind: 'sensor', missing: true },
+  ]);
+  handle.close();
+});
+
+test('#506 entities sharing an object_id: the first is recorded, a later key is ignored and flagged', async () => {
+  const first = { key: 1, type: 'sensor', objectId: 'temp_1', name: 'Temp 1' };
+  const second = { key: 4, type: 'sensor', objectId: 'temp_1', name: 'Temp.1' };
+  // The library appends a re-listed key to its list again; that is the same entity, not a duplicate to report.
+  const fake = fakeClient([first, second, first]);
+  const states = [];
+  const handle = await openDevice({ host: '127.0.0.1', port: 6053, key: KEY },
+    { open: async () => fake, onState: (s) => states.push(s) });
+  assert.deepEqual(handle.entities.map((e) => [e.object_id, e.ignored, e.duplicate]),
+    [['temp_1', false, false], ['temp_1', true, true], ['temp_1', true, false]]);
+  fake.send({ entity: 'Temp 1', key: 1, type: 'sensor', state: 20 });
+  fake.send({ entity: 'Temp.1', key: 4, type: 'sensor', state: 30 });
+  assert.deepEqual(states, [{ objectId: 'temp_1', kind: 'sensor', value: 20, missing: false }],
+    'the second entity\'s value reached the first one\'s series');
+  handle.close();
+});
+
+test('#506 close() removes the telemetry listener: on() returns a Disposable, not a function', async () => {
+  const fake = fakeClient([sensor]);
+  const handle = await openDevice({ host: '127.0.0.1', port: 6053, key: KEY }, { open: async () => fake });
+  assert.equal(fake.handlers.size, 1);
+  handle.close();
+  assert.equal(fake.handlers.size, 0, 'the telemetry listener outlived close()');
+});
+
+test('#506 states the client already holds are recorded on open and on every accepted reconnect', async () => {
+  const mock = client(true);
+  // Arrived before openDevice attached its listener; the library's latest-state cache (snapshot()) holds them.
+  mock.emitState({ entity: 'Presence', key: 2, type: 'binary_sensor', state: true });
+  mock.emitState({ entity: 'Heart Rate', key: 1, type: 'sensor', state: 64 });
+  const seen = [];
+  const handle = await openDevice({ host: '127.0.0.1', port: 6053, key: KEY }, {
+    open: async () => mock,
+    onState: (s) => seen.push(['state', s.objectId, s.value]),
+    onConnection: (c) => seen.push(['connection', c.state]),
+  });
+  assert.deepEqual(seen, [['connection', 'connected'], ['state', 'presence', 1], ['state', 'heart_rate', 64]],
+    'the states held before the listener existed were not recorded (or came before the connected report)');
+  seen.length = 0;
+  await new Promise((resolve) => setImmediate(resolve));
+  mock.emit('lifecycle', { kind: 'disconnect' });
+  await new Promise((resolve) => setImmediate(resolve));
+  // The real client clears its cache at connect. This one arrives after the library reconnected but before our side has
+  // seen the 'connect' event, so the listener drops it; only the replay can record it.
+  mock.snapshot().clear();
+  mock.emitState({ entity: 'Presence', key: 2, type: 'binary_sensor' });
+  mock.emit('lifecycle', { kind: 'connect', encrypted: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(seen, [['connection', 'disconnected'], ['connection', 'connected'], ['state', 'presence', 0]]);
   handle.close();
 });
 

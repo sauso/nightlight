@@ -54,7 +54,17 @@ export function publicEsphomeEntity(entity) {
     state_class: entity.stateClass ?? null, entity_category: entity.entityCategory ?? null,
     ignored: !['sensor', 'binary_sensor'].includes(entity.type) ||
       entity.entityCategory === 2 || entity.disabledByDefault === true,
+    // Set by openDevice when a later entity repeats an earlier one's object_id (see `refreshEntities`).
+    duplicate: false,
   };
+}
+
+// esphome-client 2.0.0's `client.on()` returns a Disposable (`{ [Symbol.dispose]() }`, event-bus.js `on`), on the real
+// client and on its MockClient alike, not a function. The first version called it as a function, which threw (swallowed)
+// and left the telemetry listener attached after close (#506 review, L4). Accept both shapes.
+function dispose(subscription) {
+  if (typeof subscription === 'function') subscription();
+  else subscription?.[Symbol.dispose]?.();
 }
 
 // The only library boundary. The returned handle can close and report metadata; it never exposes the client.
@@ -75,7 +85,24 @@ export async function openDevice({ host, port, key }, {
   const refreshEntities = () => {
     const raw = client.entitiesByDevice(undefined).slice(0, 201);
     const list = raw.map(publicEsphomeEntity);
-    known = new Map(raw.flatMap((r, i) => (!list[i].ignored && Number.isInteger(r.key) ? [[r.key, list[i]]] : [])));
+    // #506 review (M2): ESPHome derives object_id from the entity's name lossily and does not enforce unique names, so two
+    // entities with different keys can share an object_id ("Temp 1" and "Temp.1" both become temp_1; esphome-client's
+    // entity-registry.js `register` says so and keeps both reachable by key). Both used to map to one object_id here, so
+    // their values were averaged into one series. The FIRST recorded entity with an object_id keeps it; a later one with a
+    // different key is ignored and flagged so the manager can log it. A repeat of the SAME key is the library re-listing
+    // one entity (it appends repeats to its ordered list), not a second entity, so it is skipped without the flag.
+    const firstKey = new Map();
+    known = new Map();
+    raw.forEach((r, i) => {
+      const entity = list[i];
+      if (entity.ignored || !Number.isInteger(r.key)) return;
+      if (!firstKey.has(entity.object_id)) {
+        firstKey.set(entity.object_id, r.key);
+        known.set(r.key, entity);
+        return;
+      }
+      list[i] = { ...entity, ignored: true, duplicate: firstKey.get(entity.object_id) !== r.key };
+    });
     return list;
   };
   const controller = new AbortController();
@@ -87,11 +114,47 @@ export async function openDevice({ host, port, key }, {
     closed = true;
     controller.abort();
     signal?.removeEventListener('abort', abort);
-    try { stopTelemetry?.(); } catch { /* a hostile callback cannot escape shutdown */ }
+    try { dispose(stopTelemetry); } catch { /* a hostile callback cannot escape shutdown */ }
     try { client?.disconnect(); } catch { /* immediate teardown is best effort */ }
   };
   const report = (state, error = null, encrypted = false) => {
     try { onConnection({ state, encrypted, error_code: error?.code || null, error: error?.message || null }); } catch { /* observer isolation */ }
+  };
+  const onTelemetry = (event) => {
+    try {
+      if (closed || !accepted) return;
+      const entity = known.get(event.key);
+      if (!entity) return;
+      // #506 review (H2): an absent `state` is a real 0 or false, not a missing reading. ESPHome leaves default values off
+      // the wire (protobuf: a float 0.0 and a bool false are not serialised), and esphome-client copies a field onto the
+      // event only when it is present (telemetry.js `decodeStateFromSchema`: `if (value !== undefined)`). The first version,
+      // and the probe that informed this design, treated an absent `state` as NaN and so discarded every zero: a heart rate
+      // of 0, 0 lx in a dark room, a target number of 0 when nobody is detected, presence false. The library's MockClient
+      // always puts `state` on its events, which is what hid this. "Missing" is now only the device's own `missingState`
+      // flag, a non-finite number, or a value that is present with the wrong type.
+      const raw = event.state === undefined ? (entity.kind === 'binary_sensor' ? false : 0) : event.state;
+      const missing = event.missingState === true ||
+        (typeof raw === 'number' && !Number.isFinite(raw)) ||
+        (entity.kind === 'sensor' && typeof raw !== 'number') ||
+        (entity.kind === 'binary_sensor' && typeof raw !== 'boolean');
+      if (missing) onState({ objectId: entity.object_id, kind: entity.kind, missing: true });
+      else if (entity.kind === 'binary_sensor' && typeof raw === 'boolean')
+        onState({ objectId: entity.object_id, kind: entity.kind, value: raw ? 1 : 0, missing: false });
+      else if (entity.kind === 'sensor')
+        onState({ objectId: entity.object_id, kind: entity.kind, value: raw, missing: false });
+    } catch { /* no device frame can throw into the library's event bus */ }
+  };
+  // #506 review (L6): states that arrive before the listener exists (the first open) or while `accepted` is false (between
+  // the library's reconnect and our lifecycle loop seeing it) were dropped, so a presence flag could stay unknown until it
+  // next changed. `client.snapshot()` holds the latest event per entity (esphome-client: a live ReadonlyMap, updated before
+  // listeners run and cleared at each connect), so replaying it through the same handler recovers them. It runs only after
+  // the 'connected' report, because the manager discards states for a device it does not yet see as connected. Nothing
+  // can arrive twice: the replay is synchronous, so no telemetry event is delivered between accepting and replaying.
+  const seedFromSnapshot = () => {
+    let latest;
+    try { latest = client.snapshot?.(); } catch { return; }
+    if (!latest || typeof latest.values !== 'function') return;
+    for (const event of [...latest.values()]) onTelemetry(event);
   };
   try {
     // #506: a missing encryption flag is a downgrade. Check before the telemetry listener exists.
@@ -114,23 +177,7 @@ export async function openDevice({ host, port, key }, {
     accepted = true;
     const discovered = refreshEntities();
     try { onEntities(discovered); } catch { /* observer isolation */ }
-    stopTelemetry = client.on('telemetry', (event) => {
-      try {
-        if (closed || !accepted) return;
-        const entity = known.get(event.key);
-        if (!entity) return;
-        const raw = event.state;
-        const missing = event.missingState === true ||
-          (typeof raw === 'number' && !Number.isFinite(raw)) ||
-          (entity.kind === 'sensor' && typeof raw !== 'number') ||
-          (entity.kind === 'binary_sensor' && typeof raw !== 'boolean');
-        if (missing) onState({ objectId: entity.object_id, kind: entity.kind, missing: true });
-        else if (entity.kind === 'binary_sensor' && typeof raw === 'boolean')
-          onState({ objectId: entity.object_id, kind: entity.kind, value: raw ? 1 : 0, missing: false });
-        else if (entity.kind === 'sensor')
-          onState({ objectId: entity.object_id, kind: entity.kind, value: raw, missing: false });
-      } catch { /* no device frame can throw into the library's event bus */ }
-    });
+    stopTelemetry = client.on('telemetry', onTelemetry);
     // Lifecycle is observed separately because reconnect can change the encryption result.
     void (async () => {
       try {
@@ -150,12 +197,14 @@ export async function openDevice({ host, port, key }, {
               accepted = true;
               try { onEntities(refreshEntities()); } catch { /* observer isolation */ }
               report('connected', null, psk ? true : false);
+              seedFromSnapshot();
             }
           } catch { report('failed', esphomeError('OTHER')); close(); break; }
         }
       } catch { if (!closed) { report('failed', esphomeError('OTHER')); close(); } }
     })();
     report('connected', null, psk ? true : false);
+    seedFromSnapshot();
     return { close, entities: discovered.slice(0, 200), encrypted: psk ? true : false };
   } catch (error) {
     close();
