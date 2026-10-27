@@ -12,11 +12,11 @@ Built for parents. Friendly to self-hosters. Open source.
 
 ## See Nightlight in action
 
-| Live dashboard | Camera setup | Settings |
+| Live view | A child's last night | Morning check |
 | --- | --- | --- |
-| ![Nightlight nursery dashboard on a phone](docs/screenshots/dashboard-mobile.png) | ![Nightlight camera setup on a phone](docs/screenshots/add-camera-mobile.png) | ![Nightlight settings on a phone](docs/screenshots/settings-mobile.png) |
+| ![Live view of two cameras on a phone](docs/screenshots/live-mobile.png) | ![A child's overview with last night's sleep summary on a phone](docs/screenshots/child-mobile.png) | ![The morning check asking whether the wake time is right, on a phone](docs/screenshots/review-mobile.png) |
 
-[See the full walkthrough, including desktop screens](docs/README.md). These are test captures, not live camera footage, and may lag behind the latest UI.
+[See the full walkthrough](docs/README.md#visual-walkthrough), from first-run setup to a caregiver's view. These are captures of a made-up household with a synthetic camera picture, not live footage or real data, and they may lag behind the latest UI.
 
 ## Why Nightlight?
 

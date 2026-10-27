@@ -16,7 +16,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 
 ## Everyday features
 
-- [Visual walkthrough](#visual-walkthrough) — dashboard, camera setup and settings
+- [Visual walkthrough](#visual-walkthrough) — setup, live view, sleep, alerts, notifications and a caregiver's view
 - [Camera controls](camera-controls.md) — PTZ and offline alerts
 - [Sleep tracking](sleep-tracking.md) — how nights are estimated, corrected and reviewed, and its known limits
 - [Recording](recording.md) — clips, wake events, manual recordings and retention
@@ -37,24 +37,64 @@ New here? Start with the [main README](../README.md), then choose the guide that
 
 ## Visual walkthrough
 
-These screenshots are captured by automated tests but committed manually, so they may lag behind the latest UI. They show a synthetic camera rather than real footage.
+A short tour of Nightlight with a made-up household: two children, Avery and Riley, one camera each, and two weeks of invented nights. Nothing here is real footage or real data. The video is a plain synthetic picture, and the sleep, alerts and recordings are generated, so none of it was recorded in a real home. Notifications show as "Not set up" because that is how a fresh install looks. The images may lag behind the latest screens.
 
-### Nursery dashboard
+### 1. Create the admin account
 
-![Nightlight dashboard on a phone](screenshots/dashboard-mobile.png)
+The first time you open Nightlight it asks you to create the admin account. This is the only time you see this screen.
 
-![Nightlight dashboard on desktop](screenshots/dashboard-desktop.png)
+![First-run setup on a phone](screenshots/setup-mobile.png)
 
-### Adding a camera
+### 2. Watch live
+
+The Live tab shows every camera. On a wide screen the navigation moves from the bottom of the screen to a side bar on the left.
+
+![Live view on a phone](screenshots/live-mobile.png)
+
+![Live view on desktop](screenshots/live-desktop.png)
+
+### 3. A child's overview
+
+Each child has a page showing last night's sleep, a prompt to check it, the nightly timelapse, recordings and recent alerts. See [Sleep tracking](sleep-tracking.md) for how nights are estimated and what the limits are.
+
+![A child's overview on a phone](screenshots/child-mobile.png)
+
+![A child's overview on desktop](screenshots/child-desktop.png)
+
+### 4. Last night in detail
+
+Tap the summary to see the night as a timeline, with each wake-up. The numbers are an estimate from movement and sound, not a medical measurement.
+
+![A night's detail on a phone](screenshots/sleep-mobile.png)
+
+### 5. Check the estimate
+
+The morning check asks one question: is the wake time right? Choose **That's right**, or **Not quite** and enter the right time. Changing the bedtime, or saying no one was in the bed, is below it.
+
+![The morning check on a phone](screenshots/review-mobile.png)
+
+### 6. Recent alerts
+
+Motion and sound alerts are listed on the child's page, each with a snapshot from the camera. Here the snapshots are the synthetic picture.
+
+![Recent alerts on a phone](screenshots/alerts-mobile.png)
+
+### 7. Add a camera
+
+Enter the camera's address and stream details, or use the ONVIF button to fill them in. This form holds example values and was not saved. See [Cameras and caregivers](cameras.md).
 
 ![Add camera on a phone](screenshots/add-camera-mobile.png)
 
-![Add camera on desktop](screenshots/add-camera-desktop.png)
+### 8. Set up notifications
 
-### Settings
+Settings → Push notifications lists the providers. An alert goes to every provider you turn on. See [Push notifications](notifications.md).
 
-![Settings on a phone](screenshots/settings-mobile.png)
+![Push notification providers on a phone](screenshots/notifications-mobile.png)
 
-![Settings on desktop](screenshots/settings-desktop.png)
+### 9. What a caregiver sees
 
-For refreshing these captures, see [the e2e guide](../e2e/README.md#refreshing-the-documentation-screenshots).
+A caregiver can watch and check on the children, but the camera, user and notification settings are for admins. A caregiver's Settings page shows only their own account and About. See [Adding caregivers](caregivers.md) for the full list.
+
+![A caregiver's Settings page on a phone](screenshots/caregiver-settings-mobile.png)
+
+To refresh these images, see [the e2e guide](../e2e/README.md#refreshing-the-documentation-screenshots).
