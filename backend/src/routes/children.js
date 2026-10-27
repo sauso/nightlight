@@ -19,6 +19,7 @@ import { TRANSITION } from '../lib/bedTransitions.js';
 import { getNightReview, saveNightReview, previewNightReview, inBedAfterOnset, asleepAfterWake, reviewCorrectsNight,
   reviewCardState, localHmToUtcSql, applyVerdicts, applyCorrection, applyCorrections, transitionInstant,
   parseTransitionId, reviewForBrowser } from '../lib/sleepReviews.js';
+import { wakeRange } from '../lib/wakeRange.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -575,7 +576,19 @@ router.get('/:id/review/:date', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
   if (!DATE_ONLY.test(req.params.date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
-  res.json(getNightReview(req.params.id, req.params.date));
+  const review = getNightReview(req.params.id, req.params.date);
+  // `wake_range` (additive, lib/wakeRange.js) for the review screen's "Up between X and Y" question, and ONLY
+  // here: the hold-out check of 2026-10-27 showed the range on 3 of 9 RIGHT nights (33%, above the 25% bar
+  // set beforehand), so it is not put on the child card, the sleep page or the push, where a range on a night
+  // that was fine would just be noise. On this screen the person is already being asked, so a range costs one
+  // tap and cannot mislead. getNightReview returns only a few computed fields (no `wake_at_algo`) and lives in
+  // sleepReviews.js, a test:core module that is not edited, so the night is worked out once more here with the
+  // SAME settings the page was shown (displayContextFor) and the parent's answer laid over it (so an answered
+  // night reads null). Both computes run in this one synchronous handler, so the range and the
+  // `computed.wake_at` beside it cannot drift apart between them.
+  const shown = displayContextFor(req.params.id, req.params.date);
+  const night = computeNight(req.params.id, req.params.date, { context: shown?.context ?? null });
+  res.json({ ...review, wake_range: wakeRange(applyCorrection(req.params.id, night)) });
 });
 
 // Save the night's true times (or "no one was in the bed" instead of them), any per-transition
