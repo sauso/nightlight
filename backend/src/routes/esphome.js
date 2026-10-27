@@ -165,14 +165,22 @@ router.get('/export', asyncHandler(async (req, res) => {
     return bad(res, 'Enter valid from and to dates no more than 31 days apart.');
   res.type('text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="esphome-${id}.csv"`);
-  res.write('minute_utc,device,entity,child,last,mean,min,max,n,nmiss\r\n');
+  res.write('minute_utc,device,entity,child,last,mean,min,max,n,nzero,nmiss\r\n');
   // #506 review (H1): keyset pages, never one open statement. The first version streamed a single `.iterate()` and
   // awaited 'drain' inside it; better-sqlite3 keeps the ONE connection busy while an iterator is open and refuses every
   // write meanwhile ("This database connection is busy executing a query"). A download that stalled (a slow or paused
   // client) therefore failed every write in the app: requireAuth's session touch, activity samples, camera events and
   // the ESPHome minute flush. Each page is a finished `.all()`, and the wait for 'drain' happens only between pages.
-  // (bucket, entity_id) is the order and the cursor: unique per row, and the covering `bucket` index already holds it.
-  const page = db.prepare(`SELECT r.bucket, r.entity_id, e.name, e.object_id, e.child_id, r.last, r.mean, r.min, r.max, r.n, r.nmiss
+  // (bucket, entity_id) is the order and the cursor: unique per row, and the `bucket` index keeps its entries in that
+  // order (an index on a WITHOUT ROWID table carries the primary key). SQLite does NOT seek on the row-value comparison,
+  // though: the plan is `SEARCH r USING INDEX idx_esphome_readings_bucket (bucket>? AND bucket<?)`, so the walk starts at
+  // the `r.bucket >= ?` bound and every index entry from there up to the cursor is read and thrown away, other devices'
+  // rows included. That bound is therefore the cursor's bucket, not the start of the range (#506 review, round 2): the
+  // first paged version bound `first` on every page, so page k re-read everything before it and an export cost O(n^2).
+  // Measured through this route with 2 devices x 10 entities x 31 days: 52 s in total and a worst event-loop stall of
+  // 3.07 s, against 2.3 s and 56 ms (about 3 ms per page, flat) with the cursor's bucket. The row value stays as the
+  // tie-break inside that one bucket.
+  const page = db.prepare(`SELECT r.bucket, r.entity_id, e.name, e.object_id, e.child_id, r.last, r.mean, r.min, r.max, r.n, r.nzero, r.nmiss
     FROM esphome_readings r JOIN esphome_entities e ON e.id = r.entity_id
     WHERE e.device_id = ? AND r.bucket >= ? AND r.bucket < ? AND (r.bucket, r.entity_id) > (?, ?)
     ORDER BY r.bucket, r.entity_id LIMIT ${EXPORT_PAGE_ROWS}`);
@@ -181,12 +189,13 @@ router.get('/export', asyncHandler(async (req, res) => {
   // Any row in range has bucket >= first, so the starting cursor (first - 1, 0) excludes nothing.
   let after = [first - 1, 0];
   while (!res.destroyed) {
-    const rows = page.all(id, first, end, after[0], after[1]);
+    // Never below `first`: the starting cursor sits one minute before the range.
+    const rows = page.all(id, Math.max(first, after[0]), end, after[0], after[1]);
     if (!rows.length) break;
     let text = '';
     for (const row of rows) {
       const fields = [new Date(row.bucket * 60000).toISOString(), `#${id}`, row.name || row.object_id,
-        row.child_id, row.last, row.mean, row.min, row.max, row.n, row.nmiss];
+        row.child_id, row.last, row.mean, row.min, row.max, row.n, row.nzero, row.nmiss];
       text += fields.map(csvCell).join(',') + '\r\n';
     }
     after = [rows.at(-1).bucket, rows.at(-1).entity_id];

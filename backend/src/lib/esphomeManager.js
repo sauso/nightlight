@@ -20,8 +20,8 @@ let pruning = false;
 let stopPrune = false;
 
 const insert = db.prepare(`INSERT OR IGNORE INTO esphome_readings
-  (entity_id, bucket, last, mean, min, max, n, nmiss) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-const zero = (bucket = null) => ({ bucket, n: 0, nmiss: 0, sum: 0, min: Infinity, max: -Infinity, last: null });
+  (entity_id, bucket, last, mean, min, max, n, nzero, nmiss) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+const zero = (bucket = null) => ({ bucket, n: 0, nzero: 0, nmiss: 0, sum: 0, min: Infinity, max: -Infinity, last: null });
 const minute = (now) => Math.floor(now / MINUTE_MS);
 
 function changed(entry, state) {
@@ -47,13 +47,20 @@ function acceptEntities(entry, discovered) {
       entry.capLogged = true;
       logger.warn(`[esphome] device #${entry.id} entity limit reached`);
     }
+    const capped = discovered.slice(0, MAX_ENTITIES);
+    // #506 review, round 2 (L-a): when two kinds share one key the transport ignores BOTH (`shared_key`), so this has its
+    // own line rather than the duplicate line below, which means "the first is still recorded". Once per device, no names.
+    if (!entry.sharedKeyLogged && capped.some((e) => e.shared_key === true)) {
+      entry.sharedKeyLogged = true;
+      logger.warn(`[esphome] device #${entry.id} entity id shared by two kinds, ignored`);
+    }
     // #506 review (M2): the transport keeps the first entity with an object_id and flags a later one with another key.
     // Logged once per device (like the cap above) and without names: entity names are the user's own labels.
-    if (!entry.duplicateLogged && discovered.slice(0, MAX_ENTITIES).some((e) => e.duplicate === true)) {
+    if (!entry.duplicateLogged && capped.some((e) => e.duplicate === true && e.shared_key !== true)) {
       entry.duplicateLogged = true;
       logger.warn(`[esphome] device #${entry.id} duplicate entity id ignored`);
     }
-    const usable = discovered.slice(0, MAX_ENTITIES).filter((e) => !e.ignored);
+    const usable = capped.filter((e) => !e.ignored);
     db.transaction(() => {
       const seen = new Set();
       for (const e of usable) {
@@ -111,8 +118,16 @@ function acceptState(entry, state, now = Date.now()) {
     const a = item.aggregate;
     if (state.missing || !Number.isFinite(state.value)) { a.nmiss++; return; }
     const value = state.kind === 'binary_sensor' ? (state.value ? 1 : 0) : state.value;
-    a.n++; a.sum += value; a.min = Math.min(a.min, value); a.max = Math.max(a.max, value);
     a.last = value; item.value = value; item.updatedAt = now;
+    // #506 review, round 2: a numeric reading of exactly 0 is counted apart, in `nzero`, and kept out of n, mean, min and
+    // max. On the sensors this was built for, a heart rate or breathing rate of 0 means "no reading": over the probe
+    // nights 52-80% of heart-rate updates were 0. Once an absent `state` became a real 0 (round 1, H2), those zeros pulled
+    // the minute's mean and min down with no record of how many there were (4 updates of 70 bpm and 6 zeros stored
+    // mean 28, min 0). Nothing is lost for a sensor where 0 is an ordinary value (0 lx, nobody detected, 0 degrees):
+    // all readings = n + nzero, the overall mean = mean * n / (n + nzero), and the overall min is 0 when nzero > 0
+    // (docs/esphome.md says so). `last` includes zeros. For a binary sensor a 0 ("off") is data and stays in n and mean.
+    if (item.kind === 'sensor' && value === 0) { a.nzero++; return; }
+    a.n++; a.sum += value; a.min = Math.min(a.min, value); a.max = Math.max(a.max, value);
   } catch { /* per-frame work cannot escape into a device callback */ }
 }
 
@@ -140,8 +155,9 @@ export function flushEsphomeMinute(now = Date.now()) {
           for (const item of entry.entities.values()) {
             const a = item.pending?.bucket === bucket ? item.pending
               : item.aggregate.bucket === bucket ? item.aggregate : zero(bucket);
-            if (a.n) insert.run(item.id, bucket, a.last, a.sum / a.n, a.min, a.max, a.n, a.nmiss);
-            else if (item.kind === 'sensor' && a.nmiss) insert.run(item.id, bucket, null, null, null, null, 0, a.nmiss);
+            if (a.n) insert.run(item.id, bucket, a.last, a.sum / a.n, a.min, a.max, a.n, a.nzero, a.nmiss);
+            // A numeric minute of only zeros and/or missing updates: `last` is 0 when a zero came in, otherwise NULL.
+            else if (item.kind === 'sensor' && (a.nzero || a.nmiss)) insert.run(item.id, bucket, a.last, null, null, null, 0, a.nzero, a.nmiss);
             else if (item.kind === 'binary_sensor') {
               // A state received just AFTER the boundary cannot rewrite the prior minute's carry.
               const carried = item.pending?.bucket === bucket ? item.pending.carry
@@ -149,8 +165,8 @@ export function flushEsphomeMinute(now = Date.now()) {
               // #506 review (M1): the minute's missing updates are kept on the binary row too. The first version wrote
               // the carry with nmiss 0, and wrote nothing at all for a missing-only minute with no earlier value, so a
               // binary sensor's missing flags were never stored. A missing flag does not clear the carried value.
-              if (carried !== null) insert.run(item.id, bucket, carried, carried, carried, carried, 0, a.nmiss);
-              else if (a.nmiss) insert.run(item.id, bucket, null, null, null, null, 0, a.nmiss);
+              if (carried !== null) insert.run(item.id, bucket, carried, carried, carried, carried, 0, 0, a.nmiss);
+              else if (a.nmiss) insert.run(item.id, bucket, null, null, null, null, 0, 0, a.nmiss);
             }
           }
         }
@@ -258,6 +274,11 @@ export function msToNextMinute(now) {
 // setInterval(60000), which drifts later by the time each tick takes; once the drift passed a minute, one tick saw two
 // ended minutes, and the stall rule in flushEsphomeMinute (current - bucket > 1) dropped both without a word. A tick that
 // runs late now re-arms for the NEXT boundary, not for 60 s after itself.
+// Accepted limit (#506 review, round 2, L-d): the stop is only partly guarded by tests. suite-exits-cleanly.test.js's
+// source scan cannot see a self re-arming setTimeout (that file's own "known limit" test says so), and its child-process
+// probe catches a missing clearTimeout in stopEsphomeSampler only when the probe starts more than 20 s (its exit
+// deadline) before a minute boundary. If the clear were lost, the worst effect is one stray tick within 60 s after
+// stop: samplerRunning is already false, so that tick does not re-arm.
 function armMinuteTick(clock) {
   samplerTimer = setTimeout(() => {
     samplerTimer = null;

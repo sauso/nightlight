@@ -13,8 +13,10 @@ let server;
 let base;
 let admin;
 let caregiver;
-// The server side of the latest request: the stalled-download test watches it to know when the export is waiting.
+// The server side of the latest request: the stalled-download tests watch it to know when the export is waiting.
 let lastResponse = null;
+// Per response: its listener counts before any route ran, whether the handler called res.end(), and any write after it.
+const trace = new WeakMap();
 const KEY = Buffer.alloc(32, 3).toString('base64');
 const KEY2 = Buffer.alloc(32, 4).toString('base64');
 
@@ -26,7 +28,15 @@ before(async () => {
   db.prepare("INSERT INTO children (id, name) VALUES ('child-a', 'Sample A'), ('child-b', 'Sample B')").run();
   const app = express();
   app.use(express.json(), demoGuard);
-  app.use((req, res, next) => { lastResponse = res; next(); });
+  app.use((req, res, next) => {
+    lastResponse = res;
+    const t = { drain: res.listenerCount('drain'), close: res.listenerCount('close'), ended: false, writesAfterEnd: 0 };
+    trace.set(res, t);
+    const { write, end } = res;
+    res.write = function traceWrite(...args) { if (t.ended) t.writesAfterEnd++; return write.apply(this, args); };
+    res.end = function traceEnd(...args) { t.ended = true; return end.apply(this, args); };
+    next();
+  });
   app.use('/api/esphome', router);
   server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
   base = `http://127.0.0.1:${server.address().port}`;
@@ -141,11 +151,13 @@ const exportDevice = (objectId, name = objectId) => {
 
 test('#506 export keeps negative numbers as numbers and still neutralises text that could be a formula', async () => {
   const { deviceId, entityId } = exportDevice('signed', '-cmd');
-  db.prepare('INSERT INTO esphome_readings (entity_id, bucket, last, mean, min, max, n) VALUES (?, ?, -3.5, -3.5, -4, -3, 2)')
+  db.prepare('INSERT INTO esphome_readings (entity_id, bucket, last, mean, min, max, n, nzero, nmiss) VALUES (?, ?, -3.5, -3.5, -4, -3, 2, 5, 1)')
     .run(entityId, Math.floor(Date.parse('2026-10-03T08:00:00Z') / 60000));
   const res = await api(`/export?device=${deviceId}&from=2026-10-03T00:00:00Z&to=2026-10-04T00:00:00Z`, { token: admin });
   assert.equal(res.status, 200);
-  assert.ok(String(res.body).includes(`"'-cmd",,"-3.5","-3.5","-4","-3","2","0"`), String(res.body));
+  // The zero count (#506 review, round 2) sits between n and nmiss, as the header says.
+  assert.equal(String(res.body).split('\r\n')[0], 'minute_utc,device,entity,child,last,mean,min,max,n,nzero,nmiss');
+  assert.ok(String(res.body).includes(`"'-cmd",,"-3.5","-3.5","-4","-3","2","5","1"`), String(res.body));
 });
 
 test('#506 export from/to without a Z or offset are read as UTC, whatever zone the server runs in', async () => {
@@ -208,4 +220,91 @@ test('#506 a stalled CSV download leaves the database writable, and the pages re
   } finally {
     req.destroy();
   }
+});
+
+// #506 review, round 2: SQLite seeks on the page query's plain `r.bucket >= ?` bound and only FILTERS on the row-value
+// cursor, so a page whose bound is the start of the range re-reads every earlier index entry, other devices' rows
+// included. That made a 31-day export O(n^2) (52 s and a 3.07 s event-loop stall, measured). Deterministic rather than
+// timed: it records the value the route binds to `r.bucket >= ?` on each page and counts, from the database, how many
+// index entries lie between that bound and the previous page's last row, which is the work a page does before its
+// first row.
+test('#506 each export page starts its index walk where the previous page ended, not at the start of the range', async () => {
+  const { deviceId, entityId } = exportDevice('walk_a');
+  const other = exportDevice('walk_x');
+  const add = db.prepare("INSERT INTO esphome_entities (device_id, object_id, kind, name) VALUES (?, ?, 'sensor', ?)");
+  const mine = [entityId, Number(add.run(deviceId, 'walk_b', 'walk_b').lastInsertRowid)];
+  const theirs = [other.entityId, Number(add.run(other.deviceId, 'walk_y', 'walk_y').lastInsertRowid)];
+  const first = Math.floor(Date.parse('2026-08-01T00:00:00Z') / 60000);
+  // 2 x 6,000 = 12,000 rows of this device (six full pages), with another device's rows in the same minutes.
+  const MINUTES = 6000;
+  const PER_MINUTE = mine.length + theirs.length;
+  const reading = db.prepare('INSERT INTO esphome_readings (entity_id, bucket, last, mean, min, max, n) VALUES (?, ?, 1, 1, 1, 1, 1)');
+  db.transaction(() => { for (let m = 0; m < MINUTES; m++) for (const e of [...mine, ...theirs]) reading.run(e, first + m); })();
+  // Record each query the export runs on the readings table: its SQL, the values bound and the rows returned.
+  const pages = [];
+  const realPrepare = db.prepare;
+  db.prepare = function prepareAndRecord(sql) {
+    const stmt = realPrepare.call(this, sql);
+    if (!/FROM esphome_readings/.test(sql)) return stmt;
+    const all = stmt.all;
+    stmt.all = (...args) => { const rows = all.apply(stmt, args); pages.push({ sql, args, rows }); return rows; };
+    return stmt;
+  };
+  let res;
+  try {
+    res = await api(`/export?device=${deviceId}&from=2026-08-01T00:00:00Z&to=2026-08-06T00:00:00Z`, { token: admin });
+  } finally {
+    delete db.prepare;
+  }
+  assert.equal(res.status, 200);
+  assert.equal(String(res.body).split('\r\n').filter(Boolean).length - 1, MINUTES * mine.length, 'the export lost or repeated rows');
+  assert.ok(pages.length >= 6, `the export ran ${pages.length} page queries, so it never paged and this proves nothing`);
+  const sql = pages[0].sql;
+  assert.ok(pages.every((p) => p.sql === sql), 'the export ran more than one kind of query on the readings table');
+  assert.ok(sql.includes('r.bucket >= ?'), 'the page query no longer has an `r.bucket >= ?` bound; update this test');
+  // The premise: the walk starts at that bound and the cursor is only a filter. If SQLite ever seeks on the row value,
+  // this fails and says so, rather than the count below quietly measuring the wrong thing.
+  const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...pages[1].args).map((step) => step.detail).join(' | ');
+  assert.match(plan, /SEARCH r USING (?:COVERING )?INDEX idx_esphome_readings_bucket \(bucket>\? AND bucket<\?\)/, plan);
+  const lowerAt = sql.slice(0, sql.indexOf('r.bucket >= ?')).split('?').length - 1;
+  const before = db.prepare('SELECT COUNT(*) AS n FROM esphome_readings WHERE bucket >= ? AND (bucket, entity_id) <= (?, ?)');
+  for (let k = 1; k < pages.length; k++) {
+    const previous = pages[k - 1].rows.at(-1);
+    const walked = before.get(pages[k].args[lowerAt], previous.bucket, previous.entity_id).n;
+    assert.ok(walked <= PER_MINUTE, `page ${k} reads ${walked} index entries before its first row; at most one minute's ` +
+      `${PER_MINUTE} is constant work, more grows with every page (O(n^2) over the export)`);
+  }
+});
+
+// #506 review, round 2: 'drain' never fires once the client has gone, so the export's wait also ends on 'close'. Without
+// that, a download cancelled while the server waited left the handler suspended for good, its 'drain' listener attached.
+test('#506 a client that disconnects while the export waits for drain ends the handler, with no listener left behind', async () => {
+  const { deviceId, entityId } = exportDevice('gone_a');
+  const add = db.prepare("INSERT INTO esphome_entities (device_id, object_id, kind, name) VALUES (?, ?, 'sensor', ?)");
+  const entities = [entityId, ...['gone_b', 'gone_c'].map((o) => Number(add.run(deviceId, o, o).lastInsertRowid))];
+  const first = Math.floor(Date.parse('2026-07-01T00:00:00Z') / 60000);
+  // About 4 MB of CSV, as in the stalled-download test above: more than the socket buffers hold.
+  const reading = db.prepare('INSERT INTO esphome_readings (entity_id, bucket, last, mean, min, max, n) VALUES (?, ?, 1, 1, 1, 1, 1)');
+  db.transaction(() => { for (let m = 0; m < 20000; m++) for (const e of entities) reading.run(e, first + m); })();
+  const req = http.get(`${base}/api/esphome/export?device=${deviceId}&from=2026-07-01T00:00:00Z&to=2026-07-15T00:00:00Z`,
+    { headers: { authorization: `Bearer ${admin}` } });
+  req.on('error', () => {});
+  const res = await new Promise((resolve, reject) => { req.once('response', resolve); req.once('error', reject); });
+  assert.equal(res.statusCode, 200);
+  res.on('error', () => {});
+  res.pause();
+  const served = lastResponse;
+  const t = trace.get(served);
+  const waiting = () => served.writableNeedDrain && served.listenerCount('drain') > t.drain;
+  let deadline = Date.now() + 20000;
+  while (!waiting() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(waiting(), 'the export never waited for drain, so this test proves nothing about a client leaving then');
+  assert.equal(t.ended, false);
+  req.destroy();
+  deadline = Date.now() + 5000;
+  while (!t.ended && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(t.ended, true, 'the handler is still waiting for a drain that cannot come');
+  assert.equal(served.listenerCount('drain'), t.drain, "the export's 'drain' listener outlived the request");
+  assert.equal(served.listenerCount('close'), t.close, "the export's 'close' listener outlived the request");
+  assert.equal(t.writesAfterEnd, 0, 'the export wrote after ending the response');
 });

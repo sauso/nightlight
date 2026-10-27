@@ -199,9 +199,14 @@ db.exec(`
   );
   CREATE UNIQUE INDEX IF NOT EXISTS idx_esphome_entity_active
     ON esphome_entities(device_id, object_id) WHERE active = 1;
-  -- bucket is a UTC epoch minute. last/mean/min/max describe valid updates only;
-  -- n counts those updates, with n=0 reserved for a binary carry-over or a
-  -- missing-only minute. nmiss counts updates flagged without a valid reading.
+  -- bucket is a UTC epoch minute. last is the last valid update, a zero included.
+  -- For a numeric sensor, mean/min/max describe the valid NON-ZERO updates and n
+  -- counts them; nzero counts the updates of exactly 0, which on the sensors this
+  -- was built for usually mean "no reading" (#506 review, round 2; see
+  -- esphomeManager.js acceptState). For a binary sensor a 0 is data: it counts in
+  -- n and mean, and nzero stays 0. n=0 marks a binary carry-over, or a numeric
+  -- minute of only zeros and/or missing updates. nmiss counts updates flagged
+  -- without a valid reading.
   CREATE TABLE IF NOT EXISTS esphome_readings (
     entity_id INTEGER NOT NULL,
     bucket INTEGER NOT NULL,
@@ -210,6 +215,7 @@ db.exec(`
     min REAL,
     max REAL,
     n INTEGER NOT NULL,
+    nzero INTEGER NOT NULL DEFAULT 0,
     nmiss INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (entity_id, bucket)
   ) WITHOUT ROWID;

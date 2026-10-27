@@ -23861,7 +23861,7 @@
   {
     "label": "#506 sensor silent minute fabricated",
     "file": "backend/src/lib/esphomeManager.js",
-    "find": "else if (item.kind === 'sensor' && a.nmiss)",
+    "find": "else if (item.kind === 'sensor' && (a.nzero || a.nmiss))",
     "replace": "else if (item.kind === 'sensor')",
     "expect": "killed",
     "tests": ["esphome-manager.test.js"],
@@ -23893,5 +23893,14 @@
     "expect": "killed",
     "tests": ["esphome-routes.test.js"],
     "namePattern": "#506 a stalled CSV download"
+  },
+  {
+    "label": "#506 a numeric zero counted into mean, min and n",
+    "file": "backend/src/lib/esphomeManager.js",
+    "find": "if (item.kind === 'sensor' && value === 0) { a.nzero++; return; }",
+    "replace": "if (item.kind === 'sensor' && value === 0) a.nzero++;",
+    "expect": "killed",
+    "tests": ["esphome-manager.test.js"],
+    "namePattern": "#506 numeric zeros are counted in nzero"
   }
 ]

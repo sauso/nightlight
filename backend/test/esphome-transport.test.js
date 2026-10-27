@@ -126,6 +126,31 @@ test('#506 entities sharing an object_id: the first is recorded, a later key is 
   handle.close();
 });
 
+// #506 review, round 2 (L-a): ESPHome derives the key from the name, not the type, so a binary sensor and a sensor with one
+// name share a key, and the library decodes both entities' frames with one of the two types. Nothing can tell them apart.
+test('#506 two kinds sharing one key: neither is recorded and no frame for that key produces a reading', async () => {
+  const shared = [{ key: 7, type: 'binary_sensor', objectId: 'presence', name: 'Presence' },
+    { key: 7, type: 'sensor', objectId: 'presence', name: 'Presence' }];
+  const fake = fakeClient([...shared, sensor]);
+  const states = [];
+  const handle = await openDevice({ host: '127.0.0.1', port: 6053, key: KEY },
+    { open: async () => fake, onState: (s) => states.push(s) });
+  assert.deepEqual(handle.entities.map((e) => [e.kind, e.object_id, e.ignored, e.duplicate, e.shared_key]), [
+    ['binary_sensor', 'presence', true, true, true],
+    ['sensor', 'presence', true, true, true],
+    ['sensor', 'heart_rate', false, false, false],
+  ]);
+  // What the library delivers for key 7, labelled with whichever type it registered last: a number, nothing (a zero
+  // left off the wire), true. Each would otherwise be a made-up 0, "off" or a missing flag on the wrong entity.
+  for (const event of [{ type: 'sensor', state: 1 }, { type: 'sensor' }, { type: 'binary_sensor', state: true }, { type: 'binary_sensor' }])
+    fake.send({ entity: 'Presence', key: 7, ...event });
+  assert.deepEqual(states, [], 'a frame for the shared key was recorded');
+  // The listener itself works: another entity's frame still arrives.
+  fake.send({ entity: 'Heart Rate', key: 1, type: 'sensor', state: 61 });
+  assert.deepEqual(states, [{ objectId: 'heart_rate', kind: 'sensor', value: 61, missing: false }]);
+  handle.close();
+});
+
 test('#506 close() removes the telemetry listener: on() returns a Disposable, not a function', async () => {
   const fake = fakeClient([sensor]);
   const handle = await openDevice({ host: '127.0.0.1', port: 6053, key: KEY }, { open: async () => fake });

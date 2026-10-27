@@ -17,4 +17,9 @@ test('#506 an existing populated database gets the new tables and default withou
   assert.equal(upgraded.prepare("SELECT esphome_retention_days FROM settings WHERE id = 'app'").get().esphome_retention_days, 30);
   for (const table of ['esphome_readings', 'esphome_entities', 'esphome_devices'])
     assert.ok(upgraded.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
+  // The minute row counts zeros apart from n and nmiss (#506 review, round 2), and a row written without it means none.
+  assert.deepEqual(upgraded.prepare('PRAGMA table_info(esphome_readings)').all().map((c) => c.name),
+    ['entity_id', 'bucket', 'last', 'mean', 'min', 'max', 'n', 'nzero', 'nmiss']);
+  const nzero = upgraded.prepare('PRAGMA table_info(esphome_readings)').all().find((c) => c.name === 'nzero');
+  assert.deepEqual([nzero.type, nzero.notnull, nzero.dflt_value], ['INTEGER', 1, '0']);
 });

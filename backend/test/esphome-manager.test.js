@@ -269,6 +269,41 @@ test('#506 entities sharing an object_id are not merged: the first is stored and
   manager.stopEsphome();
 });
 
+test('#506 two kinds sharing one key are both left out, and the log says so once', async () => {
+  const deviceId = onlyDevice('Shared key unit');
+  let now = 6500000 * 60000;
+  const handlers = new Set();
+  // The lifecycle repeats discovery once, as a reconnect does, so the line must still appear only once.
+  const client = {
+    health: () => ({ encrypted: false }),
+    entitiesByDevice: () => [{ key: 7, type: 'binary_sensor', objectId: 'presence', name: 'Presence' },
+      { key: 7, type: 'sensor', objectId: 'presence', name: 'Presence' },
+      { key: 8, type: 'sensor', objectId: 'distance', name: 'Distance' }],
+    snapshot: () => new Map(),
+    on: (_event, handler) => { handlers.add(handler); return { [Symbol.dispose]: () => handlers.delete(handler) }; },
+    lifecycle: () => (async function* () { yield { kind: 'connect', encrypted: false }; })(),
+    disconnect() {},
+  };
+  const send = (event) => { for (const handler of [...handlers]) handler(event); };
+  const count = (text) => logger.getRecent().filter((line) => line.includes(`device #${deviceId} ${text}`)).length;
+  const before = { shared: count('entity id shared by two kinds, ignored'), duplicate: count('duplicate entity id ignored') };
+  manager.refreshEsphome({ open: (config, options) => openDevice(config, { ...options, open: async () => client }),
+    clock: () => now });
+  for (let i = 0; i < 5; i++) await turn();
+  assert.deepEqual(db.prepare('SELECT object_id FROM esphome_entities WHERE device_id = ? AND active = 1').all(deviceId)
+    .map((e) => e.object_id), ['distance'], 'an entity whose key is shared by two kinds was recorded');
+  send({ entity: 'Presence', key: 7, type: 'sensor' });
+  send({ entity: 'Presence', key: 7, type: 'sensor', state: 1 });
+  send({ entity: 'Distance', key: 8, type: 'sensor', state: 40 });
+  now += 60000;
+  manager.flushEsphomeMinute(now);
+  assert.deepEqual(read().filter((r) => r.bucket === 6500000).map((r) => [r.object_id, r.last, r.n]), [['distance', 40, 1]]);
+  assert.equal(count('entity id shared by two kinds, ignored') - before.shared, 1);
+  assert.equal(count('duplicate entity id ignored') - before.duplicate, 0,
+    'the line for a first-wins duplicate was logged, but neither entity here is recorded');
+  manager.stopEsphome();
+});
+
 // Guard (passes on the old query too): the status query was rewritten for speed (#506 review, L7) and must still find the
 // newest row across ALL of a device's entities, a retired one included, and report none for a device with no rows.
 test('#506 status reports the newest row across a device\'s entities, and none for a device without rows', () => {
@@ -323,4 +358,78 @@ test('#506 the minute tick re-aims at the next boundary, so a late tick does not
   // A tick already due when the sampler stopped does not re-arm.
   capture(() => asked[2].callback());
   assert.equal(asked.length, 3, 'the minute loop re-armed after stop');
+});
+
+// #506 review, round 2: on these sensors a heart rate or breathing rate of 0 means "no reading", and most of a night's
+// updates can be zeros. They are counted in `nzero` and kept out of mean, min, max and n, so nothing is lost and the
+// non-zero readings are not dragged down. A binary 0 ("off") is data and is unchanged.
+const zeroRow = (r) => [r.object_id, r.last, r.mean, r.min, r.max, r.n, r.nzero, r.nmiss];
+test('#506 numeric zeros are counted in nzero, apart from mean, min, max and n; last keeps them; a binary 0 is still data', async () => {
+  onlyDevice('Zero unit');
+  const B = 9000000;
+  let now = B * 60000;
+  const { hooks, open } = fakeOpen([entity('heart', 'sensor'), entity('blank', 'sensor'), entity('patchy', 'sensor'),
+    entity('mixed', 'sensor'), entity('lux', 'sensor'), entity('occupied', 'binary_sensor')]);
+  manager.refreshEsphome({ open, clock: () => now });
+  await turn();
+  const send = (objectId, kind, value) => hooks.onState({ objectId, kind, value, missing: false });
+  const missing = (objectId) => hooks.onState({ objectId, kind: 'sensor', missing: true });
+  // Four beats of 70 bpm and six "no reading" zeros, ending on a zero.
+  for (const v of [70, 0, 0, 70, 0, 70, 0, 0, 70, 0]) send('heart', 'sensor', v);
+  // Only zeros; then zeros with a missing update after them.
+  send('blank', 'sensor', 0); send('blank', 'sensor', 0); send('blank', 'sensor', 0);
+  send('patchy', 'sensor', 0); missing('patchy'); send('patchy', 'sensor', 0); missing('patchy');
+  // Readings that end on a zero, and 0 lx in a dark room.
+  send('mixed', 'sensor', 12); send('mixed', 'sensor', 0); send('mixed', 'sensor', 8); send('mixed', 'sensor', 0);
+  send('lux', 'sensor', 0);
+  // A binary sensor: on, off, off. The mean is the fraction of updates that were on.
+  send('occupied', 'binary_sensor', 1); send('occupied', 'binary_sensor', 0); send('occupied', 'binary_sensor', 0);
+  now += 60000;
+  manager.flushEsphomeMinute(now);
+  assert.deepEqual(read().filter((r) => r.bucket === B).map(zeroRow), [
+    ['heart', 0, 70, 70, 70, 4, 6, 0],
+    ['blank', 0, null, null, null, 0, 3, 0],
+    ['patchy', 0, null, null, null, 0, 2, 2],
+    ['mixed', 0, 10, 8, 12, 2, 2, 0],
+    ['lux', 0, null, null, null, 0, 1, 0],
+    ['occupied', 0, 1 / 3, 0, 1, 3, 0, 0],
+  ]);
+  // Nothing is lost: every reading is n + nzero, and the overall mean can be rebuilt (docs/esphome.md).
+  const heart = read().find((r) => r.bucket === B && r.object_id === 'heart');
+  assert.equal(heart.mean * heart.n / (heart.n + heart.nzero), 28);
+  // The rules that did not change: a minute with only missing updates is a row with no value, and a silent one is a gap.
+  missing('lux');
+  now += 60000;
+  manager.flushEsphomeMinute(now);
+  assert.deepEqual(read().filter((r) => r.bucket === B + 1 && r.object_id !== 'occupied').map(zeroRow),
+    [['lux', null, null, null, null, 0, 0, 1]]);
+  manager.stopEsphome();
+});
+
+test('#506 zeros reach nzero end to end: an update with no state, through the real adapter, into the stored minute', async () => {
+  onlyDevice('Rate unit');
+  const B = 9100000;
+  let now = B * 60000;
+  const handlers = new Set();
+  const client = {
+    health: () => ({ encrypted: false }),
+    entitiesByDevice: () => [{ key: 9, type: 'sensor', objectId: 'heart_rate', name: 'Heart rate' }],
+    snapshot: () => new Map(),
+    on: (_event, handler) => { handlers.add(handler); return { [Symbol.dispose]: () => handlers.delete(handler) }; },
+    lifecycle: () => (async function* () {})(),
+    disconnect() {},
+  };
+  manager.refreshEsphome({ open: (config, options) => openDevice(config, { ...options, open: async () => client }),
+    clock: () => now });
+  for (let i = 0; i < 5; i++) await turn();
+  // The real shape of a zero: ESPHome leaves 0.0 off the wire and the library leaves `state` off the event.
+  for (let i = 0; i < 10; i++) {
+    const event = i < 4 ? { entity: 'Heart rate', key: 9, type: 'sensor', state: 70 } : { entity: 'Heart rate', key: 9, type: 'sensor' };
+    for (const handler of [...handlers]) handler(event);
+  }
+  now += 60000;
+  manager.flushEsphomeMinute(now);
+  assert.deepEqual(read().filter((r) => r.bucket === B).map(zeroRow), [['heart_rate', 0, 70, 70, 70, 4, 6, 0]],
+    'zeros were averaged into the heart rate (the first version stored mean 28, min 0, n 10)');
+  manager.stopEsphome();
 });

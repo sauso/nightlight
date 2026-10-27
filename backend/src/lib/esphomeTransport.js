@@ -54,8 +54,10 @@ export function publicEsphomeEntity(entity) {
     state_class: entity.stateClass ?? null, entity_category: entity.entityCategory ?? null,
     ignored: !['sensor', 'binary_sensor'].includes(entity.type) ||
       entity.entityCategory === 2 || entity.disabledByDefault === true,
-    // Set by openDevice when a later entity repeats an earlier one's object_id (see `refreshEntities`).
+    // Set by openDevice when a later entity repeats an earlier one's object_id, or when two kinds share one key
+    // (`shared_key`; see `refreshEntities`).
     duplicate: false,
+    shared_key: false,
   };
 }
 
@@ -83,8 +85,23 @@ export async function openDevice({ host, port, key }, {
   // the stable identity, so it is rebuilt from every discovery, including after a reconnect.
   let known = new Map();
   const refreshEntities = () => {
-    const raw = client.entitiesByDevice(undefined).slice(0, 201);
+    const listed = client.entitiesByDevice(undefined);
+    const raw = listed.slice(0, 201);
     const list = raw.map(publicEsphomeEntity);
+    // #506 review, round 2 (L-a): ESPHome derives the numeric key from the object_id, not from the type, so a binary_sensor
+    // and a sensor both named "Presence" share one key. esphome-client keeps ONE entity per key (entity-registry.js
+    // `entitiesByKey`: the later registration wins) and decodes every state frame for that key with that entity's type and
+    // schema (esphome-client.js `handleTelemetry`), so nothing on the event says which of the two sent it. Driven through
+    // the real client with the binary sensor recorded, the sensor's 0.0 came through with no state and was stored as the
+    // binary sensor's "off" (H2 below), and the binary sensor's own "on" came through as a number and was stored as
+    // missing: made-up readings. So when one key is listed with two different kinds, BOTH are ignored, flagged `duplicate`
+    // and `shared_key` so the manager can log it. The whole list is checked, not only the first 200, because an entity
+    // past the cap still sends frames under its key. The same key listed again with the SAME kind is the library
+    // re-listing one entity, handled below.
+    const kindsByKey = new Map();
+    for (const r of listed) {
+      if (Number.isInteger(r?.key)) kindsByKey.set(r.key, (kindsByKey.get(r.key) || new Set()).add(r.type));
+    }
     // #506 review (M2): ESPHome derives object_id from the entity's name lossily and does not enforce unique names, so two
     // entities with different keys can share an object_id ("Temp 1" and "Temp.1" both become temp_1; esphome-client's
     // entity-registry.js `register` says so and keeps both reachable by key). Both used to map to one object_id here, so
@@ -95,7 +112,12 @@ export async function openDevice({ host, port, key }, {
     known = new Map();
     raw.forEach((r, i) => {
       const entity = list[i];
-      if (entity.ignored || !Number.isInteger(r.key)) return;
+      if (!Number.isInteger(r.key)) return;
+      if (kindsByKey.get(r.key).size > 1) {
+        list[i] = { ...entity, ignored: true, duplicate: true, shared_key: true };
+        return;
+      }
+      if (entity.ignored) return;
       if (!firstKey.has(entity.object_id)) {
         firstKey.set(entity.object_id, r.key);
         known.set(r.key, entity);
