@@ -6,7 +6,7 @@ default**. Everything else (including the in-app **Recent alerts** list — on e
 the combined view under **Settings → Logs** for admins) works without it.
 
 There are **several providers** — set up one or more; an alert is sent to **every** provider you
-enable, all managed under **Settings → Push notifications** (a row per provider):
+enable, all managed under **Settings → Integrations → Push notifications** (a row per provider):
 
 - **Pushover (simplest, works on iOS)** — a small paid third-party app. No Firebase project, no Apple
   Developer account. See **[Option A: Pushover](#option-a-pushover)**.
@@ -17,7 +17,7 @@ enable, all managed under **Settings → Push notifications** (a row per provide
 - **Gotify (self-hosted)** — a lightweight self-hosted push server. Text alerts. See
   **[Option D: Gotify](#option-d-gotify)**.
 
-Each row on **Settings → Push notifications** carries a badge, so you can see at a glance which are live:
+Each row on **Settings → Integrations → Push notifications** carries a badge, so you can see at a glance which are live:
 
 | Badge | Means |
 |---|---|
@@ -84,7 +84,7 @@ call to Pushover — nothing to bake into an app.
    screen). For alerting several caregivers, create a **Delivery Group** instead and use its group key.
 2. At [pushover.net/apps/build](https://pushover.net/apps/build), create an application (name it
    "Nightlight"). Copy its **API Token/Key**.
-3. In Nightlight, go to **Settings → Push notifications → Pushover**: paste the **application API
+3. In Nightlight, go to **Settings → Integrations → Push notifications → Pushover**: paste the **application API
    token** and your **user/group key**, tick **Enable Pushover notifications**, and **Save** (it
    verifies the tokens with Pushover). Use **Send test** to confirm it reaches your phone.
    **Device** (optional, default blank) narrows alerts to one Pushover device — its name as shown in
@@ -176,8 +176,8 @@ see `no Firebase credentials … push notifications disabled`, the service-accou
 server expects it.
 
 ### 5. Enable push on the server (admin, one-time)
-- In the web app, go to **Settings → Notifications (push)** and turn on **"Enable push
-  notifications."**
+- In the web app, go to **Settings → Integrations → Push notifications → Firebase** and turn on
+  **"Enable Firebase notifications."**
 - Saving **validates both files above are present and valid** — if one is missing it tells you
   exactly which, and nothing is enabled. This is a deliberate server-level switch: motion detection
   and the in-app **Recent alerts** list work regardless; only phone notifications wait on this.
@@ -204,7 +204,7 @@ your own server (e.g. on the same NAS).
    so choose a long, hard-to-guess name (e.g. `nightlight-alerts-3f9a2c`). On your own server you can
    also require auth.
 2. Subscribe to that topic in the **ntfy** app (or `https://ntfy.sh/<topic>` in a browser).
-3. In Nightlight: **Settings → Push notifications → ntfy**. Set the **Server URL** (`https://ntfy.sh`
+3. In Nightlight: **Settings → Integrations → Push notifications → ntfy**. Set the **Server URL** (`https://ntfy.sh`
    or your own), the **Topic**, and — if your server requires it — an **access token** *or*
    **username/password**. Tick **Enable**, **Save**, and **Send test**.
 
@@ -242,7 +242,7 @@ credential]`.
 1. Run a Gotify server and open its web UI. Under **Apps**, create an **application** (name it
    "Nightlight") and copy its **application token**.
 2. Install the **Gotify** Android app and point it at your server (or use the web UI).
-3. In Nightlight: **Settings → Push notifications → Gotify**. Set the **Server URL**, paste the
+3. In Nightlight: **Settings → Integrations → Push notifications → Gotify**. Set the **Server URL**, paste the
    **application token**, optionally adjust **Priority** (0–10, default **5**), tick **Enable**,
    **Save**, and **Send test**. Higher priorities show more prominently in the Gotify app and can
    bypass its quiet settings; **0 still delivers**, just quietly — it is a valid choice here, not

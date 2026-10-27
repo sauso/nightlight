@@ -229,7 +229,7 @@ function MotionForm({ d, apply, cameraId, cam }) {
           </div>
           <div className="camera-tile__sub" style={{ marginTop: 6 }}>
             {d.source === 'mqtt'
-              ? 'The camera detects motion itself and publishes it over MQTT (needs Settings → MQTT connected). Uses almost no server CPU.'
+              ? 'The camera detects motion itself and publishes it over MQTT (needs Settings → Integrations → MQTT connected). Uses almost no server CPU.'
               : d.source === 'onvif'
               ? 'The camera detects motion itself and reports it over ONVIF — no MQTT broker needed. Uses almost no server CPU.'
               : 'Nightlight watches the stream and diffs frames. Works on any camera; uses some server CPU.'}

@@ -24,7 +24,7 @@ small or too jumpy on your camera, adjust it and see how it feels.
 | Notify when a camera goes offline | Off | — |
 | Offline for longer than (minutes) | 5 | 1–1440 |
 
-Sends a push notification (through whichever providers you've set up under **Settings → Push
+Sends a push notification (through whichever providers you've set up under **Settings → Integrations → Push
 notifications**) when a camera stops delivering video for longer than the threshold, and a
 second notification when it recovers. A brief blip that clears on its own — shorter than the
 threshold — never alerts, and each outage produces exactly one "went offline" notification, not
@@ -86,7 +86,7 @@ camera that has been silenced again and again does not go unnoticed.
   (`59.5`, `1e3` or `60abc` is refused, not rounded), and the switch only takes on or off (`true`,
   `false`, `1`, `0`); this is stricter than the older settings on this page, on purpose.
 
-**Who receives it depends on the channel** (the providers are set up under **Settings → Push
+**Who receives it depends on the channel** (the providers are set up under **Settings → Integrations → Push
 notifications**):
 
 | Channel | Who gets it |

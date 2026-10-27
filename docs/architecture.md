@@ -697,7 +697,7 @@ a new deploy has replaced, the reload is what fixes it too (the app also reloads
 
 **Unsaved form edits survive the background reload (#377).** `App.jsx` reloads the page after 15 s in the
 background to repair stale media connections, and that empties React state. The child form, the camera form
-Settings → Recording, General and MQTT, the Gotify, ntfy and Pushover pages and the caregiver form therefore store what is different from the saved values in `sessionStorage`
+Settings → Recording, Settings → General, Settings → Integrations → MQTT, the Gotify, ntfy and Pushover pages and the caregiver form therefore store what is different from the saved values in `sessionStorage`
 (`lib/formDraft.js`, kept in step by `lib/useFormDraft.js`) and restore it on mount. Rules that must hold:
 **no secret is ever written** (each form passes an allow-list of fields, credential-named keys are dropped
 even if allowed, a value that is a URL with credentials in it is dropped whatever its key, and a camera

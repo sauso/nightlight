@@ -153,7 +153,7 @@ manual:
 - **JWT signing secret** (`private/.jwt_secret` in the data volume): deleting it and restarting the
   container generates a new one and signs everyone out, forcing a fresh login everywhere.
 - **Notification-provider tokens** (Pushover, Firebase, Gotify, ntfy): regenerate/revoke the
-  token or key at the provider and re-enter it in Settings → Push notifications.
+  token or key at the provider and re-enter it in Settings → Integrations → Push notifications.
 - **MQTT broker credentials**: rotate on the broker and update the camera's MQTT settings.
 
 ## Camera streams are untrusted input (media isolation)

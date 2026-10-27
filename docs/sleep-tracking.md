@@ -154,7 +154,7 @@ Known limits. For the first three, use **Show with today's settings**, or have a
 ### Room temperature (optional)
 
 If a camera reports temperature/humidity over **MQTT** (set
-up under **Settings → MQTT**, e.g. via Zigbee2MQTT — the readings also show on the camera
+up under **Settings → Integrations → MQTT**, e.g. via Zigbee2MQTT — the readings also show on the camera
 tile), the sleep detail overlays the night's room temperature beneath the timeline, aligned to
 the same time axis. A **"Sleep & room temperature"** card compares wake-ups on the child's warmer
 vs cooler nights, so you can spot whether a warm room tends to mean more waking — a pattern, not

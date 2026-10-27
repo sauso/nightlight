@@ -4,7 +4,7 @@ import { useLater } from '../lib/useLater.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
 
-const BACK = { to: '/settings/push', label: 'Push notifications' };
+const BACK = { to: '/settings/integrations/notifications', label: 'Push notifications' };
 
 export default function SettingsPushFirebase() {
   const [pushStatus, setPushStatus] = useState(null); // { push_enabled, configured } | null

@@ -1,4 +1,4 @@
-// Settings → MQTT, the TLS controls (#537): off by default, a CA field and a verify switch (on by default) once it
+// Settings → Integrations → MQTT, the TLS controls (#537): off by default, a CA field and a verify switch (on by default) once it
 // is on, a refusal of the CA text shown next to the field, and the reason for a failed connection shown in words.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';

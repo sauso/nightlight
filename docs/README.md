@@ -87,7 +87,7 @@ Enter the camera's address and stream details, or use the ONVIF button to fill t
 
 ### 8. Set up notifications
 
-Settings → Push notifications lists the providers. An alert goes to every provider you turn on. See [Push notifications](notifications.md).
+Settings → Integrations → Push notifications lists the providers. An alert goes to every provider you turn on. See [Push notifications](notifications.md).
 
 ![Push notification providers on a phone](screenshots/notifications-mobile.png)
 
