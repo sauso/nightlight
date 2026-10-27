@@ -1738,16 +1738,6 @@
     "note": "Survived the original 5 mutants above — every existing exit fixture used nonzero seconds, so a bucket_start (always :00) could never land exactly on exit.created_at. Found by an adversarial pre-merge review (a Claude subagent), 2026-09-14."
   },
   {
-    "label": "lingering motion: overlapping flags render two prompts",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "(t) => t.lingering_motion_minutes != null && t.quick_reversal_of == null",
-    "replace": "(t) => t.lingering_motion_minutes != null",
-    "expect": "killed",
-    "tests": [
-      "MorningReview.test.jsx"
-    ]
-  },
-  {
     "label": "lingering motion: leading lookback is dropped",
     "file": "backend/src/lib/sleepReviews.js",
     "find": "Date.parse(`${startSql.replace(' ', 'T')}Z`) - LINGERING_WINDOW_MS",
@@ -1768,16 +1758,6 @@
     ]
   },
   {
-    "label": "lingering motion: collapsed-list save gate ignores the new prompt",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "(showEvents || quickReversals.length > 0 || lingeringOnly.length > 0)",
-    "replace": "(showEvents || quickReversals.length > 0)",
-    "expect": "killed",
-    "tests": [
-      "MorningReview.test.jsx"
-    ]
-  },
-  {
     "label": "lingering motion: boundary continuation is treated as a fresh run",
     "file": "backend/src/lib/bedTransitionRules.js",
     "find": "boundaryTypeByCamera?.get(cameraId) === 'out_of_bed'",
@@ -1785,16 +1765,6 @@
     "expect": "killed",
     "tests": [
       "morning-review.test.js"
-    ]
-  },
-  {
-    "label": "lingering motion: frontend runner control (comment only)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "// but ask only once per event; both cards write into the same shared verdict.",
-    "replace": "// but ask only once per event; both cards use the shared verdict state.",
-    "expect": "survives",
-    "tests": [
-      "MorningReview.test.jsx"
     ]
   },
   {
@@ -3336,124 +3306,12 @@
     "tests": ["sleepDetail.test.jsx"]
   },
   {
-    "label": "#501 before bedtime: 16:00 itself is grouped",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "hour < EARLY_CUTOFF_HOUR",
-    "replace": "hour <= EARLY_CUTOFF_HOUR",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 before bedtime: next morning's events are grouped too (night date ignored)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "return localDate === date && hour < EARLY_CUTOFF_HOUR;",
-    "replace": "return hour < EARLY_CUTOFF_HOUR;",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 before bedtime: grouped even with no bedtime anchor",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "data.computed?.in_bed_at || onsetFrame || inBedFrame || data.computed?.onset_at || data.review?.true_onset_at",
-    "replace": "true",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 before bedtime: the one-tap answer overwrites answers already given",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "for (const t of bulkable) if (next[t.id] == null) next[t.id] = 'wrong';",
-    "replace": "for (const t of bulkable) next[t.id] = 'wrong';",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 before bedtime: the one-tap answer includes quick check-in events",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "const hasOwnCard = (t) => t.quick_reversal_of != null || t.lingering_motion_minutes != null;",
-    "replace": "const hasOwnCard = (t) => t.lingering_motion_minutes != null;",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 reason chips: leaving 'No' keeps the reason",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "if (next !== 'wrong' && reasons[id] != null) setReasons((r) => ({ ...r, [id]: null }));",
-    "replace": "",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 reason chips: shown under every event, not only a 'No'",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "{verdicts[t.id] === 'wrong' && !hasOwnCard(t) && (",
-    "replace": "{true && !hasOwnCard(t) && (",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 reason chips: reasons never sent",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "        reasons,",
-    "replace": "",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
     "label": "#501 in_bed_at: the base object's default is deleted, so every early return crashes the store",
     "file": "backend/src/lib/sleepAnalysis.js",
     "find": "    in_bed_at: null,",
     "replace": "",
     "expect": "killed",
     "tests": ["morning-review.test.js", "sleepAnalysis.test.js"]
-  },
-  {
-    "label": "#501 before bedtime: the one-tap answer works without the group ever being opened",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "disabled={!earlyOpened || bulkLeft === 0}",
-    "replace": "disabled={bulkLeft === 0}",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 before bedtime: opening the group never unlocks the one-tap answer",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "onClick={() => { setShowEarly((v) => !v); setEarlyOpened(true); }}",
-    "replace": "onClick={() => setShowEarly((v) => !v)}",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 before bedtime: a typed onset correction is not a bedtime anchor",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": " || data.review?.true_onset_at",
-    "replace": "",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 reason chips: 'That was me' does not record reason 'adult'",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "setReasons((r) => ({ ...r, [oob.id]: 'adult' }));",
-    "replace": "",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 reason chips: un-tapping 'That was me' re-adds 'adult' to a cleared verdict",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "if (key === 'wrong' && verdicts[oob.id] !== 'wrong') {",
-    "replace": "if (key === 'wrong') {",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 reason chips: a second picker under an event that has its own card",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "{verdicts[t.id] === 'wrong' && !hasOwnCard(t) && (",
-    "replace": "{verdicts[t.id] === 'wrong' && (",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
   },
   {
     "label": "#501 in bed: a corrected onset still shows the computed put-down",
@@ -6222,14 +6080,6 @@
     "note": "This is the change the #369 review round proposed (Fix 1), held back because it silences the audio watchdog. If it is ever made DELIBERATELY, delete this entry and flip A5 (and A3) in the same commit."
   },
   {
-    "label": "0.34.0 review F1: Before bedtime groups on the placeholder timezone (the loaded gate removed)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "  const groupEarly = settingsLoaded && hasBedtime;",
-    "replace": "  const groupEarly = hasBedtime;",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
     "label": "0.34.0 review F1: NightReview gates on !loading, which a FAILED settings load also satisfies",
     "file": "frontend/src/pages/NightReview.jsx",
     "find": "  const { settings, loaded: settingsLoaded, loading: settingsLoading } = useSettings();",
@@ -6570,37 +6420,10 @@
     "namePattern": "no one was in the bed"
   },
   {
-    "label": "nobody-in-bed frontend R5: the seed effect ignores the stored flag on reopen",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "if (!nobodyTouched) setNobody(!!data.review?.nobody_in_bed);",
-    "replace": "if (!nobodyTouched) setNobody(false);",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "reopening a flagged night seeds the flag view"
-  },
-  {
     "label": "nobody-in-bed frontend R5: the flag view loses render priority over confirm/edit",
     "file": "frontend/src/pages/NightReview.jsx",
     "find": "{nobody ? (",
     "replace": "{false ? (",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "no one was in the bed"
-  },
-  {
-    "label": "nobody-in-bed frontend: saveNobody attaches a stale time alongside the flag",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "await api.put(`/children/${id}/review/${date}`, { nobody_in_bed: flag, note: note.trim() || null });",
-    "replace": "await api.put(`/children/${id}/review/${date}`, { nobody_in_bed: flag, note: note.trim() || null, true_onset_local: onset || null });",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "no one was in the bed"
-  },
-  {
-    "label": "nobody-in-bed frontend: NightReview's bottom \"Save review\" reappears while the flag view is showing",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "editing && !nobody ?",
-    "replace": "editing ?",
     "expect": "killed",
     "tests": ["MorningReview.test.jsx"],
     "namePattern": "no one was in the bed"
@@ -6622,24 +6445,6 @@
     "expect": "killed",
     "tests": ["MorningReview.test.jsx"],
     "namePattern": "does NOT claim the flag was set"
-  },
-  {
-    "label": "nobody-in-bed fix round #4: saveNobody drops the typed note again",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "await api.put(`/children/${id}/review/${date}`, { nobody_in_bed: flag, note: note.trim() || null });",
-    "replace": "await api.put(`/children/${id}/review/${date}`, { nobody_in_bed: flag });",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "note typed in edit mode is NOT discarded"
-  },
-  {
-    "label": "nobody-in-bed fix round #5: the nobodyTouched guard drops out again (mutation-killing strengthener)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "if (!nobodyTouched) setNobody(!!data.review?.nobody_in_bed);",
-    "replace": "setNobody(!!data.review?.nobody_in_bed);",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "touched flag survives a late reseed"
   },
   {
     "label": "#493 L00: control, a comment edit in activityTracker.js must change nothing",
@@ -8174,60 +7979,6 @@
     "namePattern": "not a minute before asleep"
   },
   {
-    "label": "in-bed/lock F3: \"Put down here\" fills \"Fell asleep\" again (the original bug, client side)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "onClick={() => tapMoment('inBed', t)}",
-    "replace": "onClick={() => tapMoment('onset', t)}",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "fills IN BED"
-  },
-  {
-    "label": "in-bed/lock F4: the in-bed time is sent even when untouched (R3)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "true_in_bed_local: withTimes && inBedTouched ? (inBed || null) : undefined,",
-    "replace": "true_in_bed_local: withTimes ? (inBed || null) : undefined,",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "sends NOTHING about in bed"
-  },
-  {
-    "label": "in-bed/lock F5: the In bed field is seeded from the detector's put-down (R3)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "setInBed(toLocalHhmm(data.review?.true_in_bed_at, tz));",
-    "replace": "setInBed(toLocalHhmm(data.review?.true_in_bed_at || data.computed?.in_bed_at, tz));",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "sends NOTHING about in bed"
-  },
-  {
-    "label": "in-bed/lock F6: the picked put-down frame is never sent",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "true_in_bed_transition_id: withTimes && inBedTouched ? inBedFrame : undefined,",
-    "replace": "true_in_bed_transition_id: undefined,",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "fills IN BED"
-  },
-  {
-    "label": "in-bed/lock F7: a got-into-bed row loses its \"Put down here\" button",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "          {t.type === 'into_bed' && (",
-    "replace": "          {false && (",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "TWO moments"
-  },
-  {
-    "label": "in-bed/lock F8: the receipt drops its in-bed line",
-    "file": "frontend/src/components/ReviewReceipt.jsx",
-    "find": "              : inBedAt",
-    "replace": "              : false",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx", "sleepDetail.test.jsx"],
-    "namePattern": "reads back as|IN-BED-ONLY"
-  },
-  {
     "label": "in-bed/lock F9: SleepDetail's receipt gate forgets an in-bed-only answer (R1)",
     "file": "frontend/src/pages/SleepDetail.jsx",
     "find": "rev.true_wake_at || rev.true_in_bed_at || rev.nobody_in_bed)",
@@ -8235,24 +7986,6 @@
     "expect": "killed",
     "tests": ["sleepDetail.test.jsx"],
     "namePattern": "IN-BED-ONLY"
-  },
-  {
-    "label": "in-bed/lock F10: SleepDetail's receipt reads the raw typed asleep time (\"asleep — to …\")",
-    "file": "frontend/src/pages/SleepDetail.jsx",
-    "find": "shown_onset_at: rev.true_onset_at || r.computed?.onset_at || null,",
-    "replace": "shown_onset_at: rev.true_onset_at || null,",
-    "expect": "killed",
-    "tests": ["sleepDetail.test.jsx"],
-    "namePattern": "IN-BED-ONLY"
-  },
-  {
-    "label": "in-bed/lock F11: the morning card's receipt reads the raw typed asleep time",
-    "file": "frontend/src/components/MorningReviewCard.jsx",
-    "find": "onsetAt={card.onset_at ?? card.true_onset_at}",
-    "replace": "onsetAt={card.true_onset_at}",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "reads back as"
   },
   {
     "label": "in-bed/lock F12: RecomputeNight ignores the server's `locked`",
@@ -8372,60 +8105,6 @@
     "namePattern": "only a got-into-bed event"
   },
   {
-    "label": "in-bed/lock fix Fc: the In bed re-seed keys on the shared `touched`, so a late timezone freezes it in the wrong zone",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "    if (!inBedTouched) {",
-    "replace": "    if (!touched) {",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "keeps re-seeding"
-  },
-  {
-    "label": "in-bed/lock fix Fe1: an in-bed time on record is not a bedtime anchor for \"Before bedtime\"",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "\r\n    || data.review?.true_in_bed_at",
-    "replace": "",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "an in-bed time the person gave"
-  },
-  {
-    "label": "in-bed/lock fix Fe2: a put-down frame picked on this screen is not a bedtime anchor",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "onsetFrame || inBedFrame || data.computed?.onset_at",
-    "replace": "onsetFrame || data.computed?.onset_at",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "put-down FRAME picked on this screen"
-  },
-  {
-    "label": "in-bed/lock fix U1: un-picking a frame leaves its time in the field",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "      m.setValue(prev.value);",
-    "replace": "      // mutant: the value is not restored",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "un-pick"
-  },
-  {
-    "label": "in-bed/lock fix U2: un-picking \"Put down here\" leaves inBedTouched set, so an empty in-bed is still sent",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "      if (key === 'inBed') setInBedTouched(prev.inBedTouched);",
-    "replace": "      // mutant: inBedTouched stays set",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "then un-picking"
-  },
-  {
-    "label": "in-bed/lock fix U3: un-pressing a put-down already on record keeps its time",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "      setInBed('');\r\n      setInBedFrame(null);",
-    "replace": "      setInBedFrame(null);",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "ON RECORD removes it"
-  },
-  {
     "label": "in-bed/lock fix2 T1: the time form no longer waits for the real timezone (Codex P1: a chip tap before /settings freezes asleep/wake in the placeholder zone and Save sends them)",
     "file": "frontend/src/pages/NightReview.jsx",
     "find": "  const timesReady = settingsLoaded;",
@@ -8469,62 +8148,6 @@
     "expect": "killed",
     "tests": ["nightReviewTimezoneGate.test.jsx"],
     "namePattern": "the error appears only once the request has settled"
-  },
-  {
-    "label": "in-bed/lock fix2 T2: \"That's right\" is usable before the real timezone arrives",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "disabled={busy || !timesReady}\r\n                    onClick={() => save(true, shownOnset, shownWake)}",
-    "replace": "disabled={busy}\r\n                    onClick={() => save(true, shownOnset, shownWake)}",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "nothing that sends a time"
-  },
-  {
-    "label": "in-bed/lock fix2 T3: \"Put down here\" is offered before the real timezone arrives",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "              disabled={!timesReady}\r\n              onClick={() => tapMoment('inBed', t)}",
-    "replace": "              onClick={() => tapMoment('inBed', t)}",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "nothing that sends a time"
-  },
-  {
-    "label": "in-bed/lock fix2 T4: the note field takes typing before the real timezone arrives (a keystroke sets `touched`)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "                  disabled={!timesReady}\r\n                  placeholder=\"e.g. put back on the bed to get dressed at 5:45\"",
-    "replace": "                  placeholder=\"e.g. put back on the bed to get dressed at 5:45\"",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "reopened into its times"
-  },
-  {
-    "label": "in-bed/lock fix2 T5: \"Save review\" is usable before the real timezone arrives",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "disabled={busy || !timesReady} onClick={() => save(true)}",
-    "replace": "disabled={busy} onClick={() => save(true)}",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "reopened into its times"
-  },
-  {
-    "label": "in-bed/lock fix2 T6: save() sends times without the real timezone (defence in depth behind the disabled buttons)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "    if (withTimes && !timesReady) return;",
-    "replace": "    // mutant: no timezone guard in save()",
-    "expect": "equivalent",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "placeholder zone|nothing that sends a time|reopened into its times",
-    "note": "Every button that calls save(true) (\"That's right\", \"Save review\") is disabled until settingsLoaded, and save(false) sends no time, so no UI path reaches this guard with withTimes && !timesReady. It is kept so a future caller cannot bypass the gate."
-  },
-  {
-    "label": "in-bed/lock fix2 T7: tapMoment acts before the real timezone arrives (defence in depth behind the disabled chips)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "    if (!timesReady) return;\r\n    const m = {",
-    "replace": "    const m = {",
-    "expect": "equivalent",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "placeholder zone|nothing that sends a time",
-    "note": "tapMoment's only callers are the moment chips, which are disabled until settingsLoaded; a disabled button fires no click. Kept so a future caller cannot bypass the gate."
   },
   {
     "label": "in-bed/lock fix2 O1: the route stores an asleep time after the wake (no asleep <= wake check)",
@@ -14201,17 +13824,6 @@
       "twoFactorAndEvents.test.jsx"
     ],
     "namePattern": "a person caused names them"
-  },
-  {
-    "label": "#552 PR2 M22: the review shows an \"Answered by\" line with no name",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "{data.review?.answered_by_username && (",
-    "replace": "{data.review && (",
-    "expect": "killed",
-    "tests": [
-      "MorningReview.test.jsx"
-    ],
-    "namePattern": "no \"Answered by\" line at all"
   },
   {
     "label": "#552 PR2 M23: reboot reads the actor AFTER the await (an account renamed then deleted mid-reboot is named by its stale claim)",
@@ -22648,15 +22260,6 @@
     "expect": "killed",
     "tests": ["review-stored-context.test.js"],
     "namePattern": "settings_changed"
-  },
-  {
-    "label": "#361 PR4b: \"Before bedtime\" is judged in today's zone, not the zone the list was built in",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "  const groupTz = data.settings?.tz ?? tz;",
-    "replace": "  const groupTz = tz;",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "judged in that zone"
   },
   {
     "label": "#589 M1: the sweep never disarms a silent camera whose window closed",

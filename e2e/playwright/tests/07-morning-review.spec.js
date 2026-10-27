@@ -34,33 +34,29 @@ test.use({ locale: 'en-GB' });
 test('the card offers last night for review', async ({ page }) => {
   await page.goto(childPage);
   await expect(page.getByText('Was last night right?')).toBeVisible();
-  // The card carries the times it is asking about, so a person can answer without opening anything.
-  await expect(page.getByText(/We think they fell asleep at .* and got up at /)).toBeVisible();
+  // The card carries the one thing it is asking about (when they got up), so a person can answer without
+  // opening anything. It no longer quotes the fell-asleep time or an event count.
+  await expect(page.getByText(/We think they got up at /)).toBeVisible();
 });
 
 test('correcting a night records MY times and shows them back', async ({ page }) => {
   await page.goto(childPage);
   await page.getByText('Was last night right?').click();
 
-  await expect(page.getByText('What we recorded')).toBeVisible();
+  // ⚠️ The CARD shows the STORED night, while this screen RECOMPUTES from camera activity. The seeded night
+  // has no activity behind it (see seed-review-night.mjs for why one cannot), so the recompute returns
+  // status 'no_data' and the screen has nothing to confirm: it opens straight into its time field, with the
+  // bedtime disclosure already open so both times can be given. On a real night the detector has a wake,
+  // the screen asks "Up at … Is that right?" with "That's right" / "Not quite", and that path is covered by
+  // the unit tests (frontend/test/MorningReview.test.jsx) and, over the wire, by the wake-only test below.
+  // Pinning one of the two screens here would make this a statement about the fixture, not the flow.
+  await expect(page.getByText(/didn.t work out when they got up/)).toBeVisible();
 
-  // ⚠️ Either label is legitimate here, and the reason is worth knowing: the CARD shows the STORED
-  // night, while this screen RECOMPUTES from camera activity. The seeded night has no activity behind
-  // it, so the recompute returns status 'no_data', the screen has no opinion to confirm, and the
-  // button reads "Add the times". On a real night the detector does have one and it reads "Not
-  // quite…". Pinning a single label would make this a statement about the fixture, not the flow.
-  await page.getByRole('button', { name: /Not quite…|Add the times/ }).click();
-
-  // The form appears only once you ask for it. Confirming and correcting are deliberately separate
-  // acts, so a time the app guessed is never one reflex tap from being recorded as ground truth.
-  await expect(page.getByText('Fell asleep')).toBeVisible();
-
-  // By LABEL, not position (2026-09-30): an "In bed" field now sits above "Fell asleep", so the first
-  // time input on the form is no longer the asleep time. Positional locators would have typed the
-  // asleep time into "In bed".
+  // By LABEL, not position: "In bed" sits above "Fell asleep" in the disclosure, so positional locators
+  // would type the asleep time into "In bed".
   await page.getByLabel('Fell asleep', { exact: true }).fill('20:15');
   await page.getByLabel('Got up for the day', { exact: true }).fill('06:05');
-  await page.getByRole('button', { name: 'Save review' }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
 
   // ★ The prompt must become a RECEIPT, not simply vanish. A save that shows nothing is
   // indistinguishable from one that failed — exactly what was reported before the receipt existed.
@@ -76,7 +72,8 @@ test('correcting a night records MY times and shows them back', async ({ page })
   // so a single-digit hour loses its leading zero on the way to the screen even though the value the
   // person typed and the value stored are both 06:05. Asserting the padded form fails against a
   // perfectly correct app.
-  await expect(page.getByText(/You said 20:15 to 6:05/)).toBeVisible();
+  // The receipt says only what was answered, in the order it happens: asleep, then up.
+  await expect(page.getByText(/You said asleep 20:15, up at 6:05/)).toBeVisible();
 
   // ⚠️ And the CHILD page must have changed too. Asserting the prompt is absent from the sleep screen
   // would be trivially true — it never appears there — so the check goes where it means something: back
@@ -92,7 +89,7 @@ test('the correction survives a reload, so it really reached the server', async 
   // load proves the round trip completed and the server is the one telling us these times.
   await page.goto(childPage);
   await expect(page.getByText('Thanks — that’s recorded')).toBeVisible();
-  await expect(page.getByText(/You said 20:15 to 6:05/)).toBeVisible();
+  await expect(page.getByText(/You said asleep 20:15, up at 6:05/)).toBeVisible();
 });
 
 test('the times came back unconverted, not shifted by the browser timezone', async ({ page }) => {
@@ -127,7 +124,8 @@ test('a recorded night can be corrected again — a mistake is not final', async
   // Reopening a night you have already answered goes straight into the form with YOUR times already
   // in it — there is nothing left to "confirm", you are changing an answer you gave. This is also a
   // second round trip worth asserting: the correction has to come back out of the server and into the
-  // form fields, not merely be displayed on the card.
+  // form fields, not merely be displayed on the card. The asleep time sits in the disclosure, which opens
+  // by itself because an answer to it is on record.
   const onset = page.getByLabel('Fell asleep', { exact: true });
   const wake = page.getByLabel('Got up for the day', { exact: true });
   await expect(onset).toHaveValue('20:15');
@@ -135,10 +133,10 @@ test('a recorded night can be corrected again — a mistake is not final', async
 
   await onset.fill('19:45');
   await wake.fill('05:30');
-  await page.getByRole('button', { name: 'Save review' }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
 
-  await expect(page.getByText(/You said 19:45 to 5:30/)).toBeVisible();
-  await expect(page.getByText(/You said 20:15 to 6:05/)).toHaveCount(0);
+  await expect(page.getByText(/You said asleep 19:45, up at 5:30/)).toBeVisible();
+  await expect(page.getByText(/You said asleep 20:15, up at 6:05/)).toHaveCount(0);
 });
 
 // ⚠️ ADDED IN THE nobody-in-bed FIX ROUND (2026-09-29) — the plan required e2e coverage for the "No one
@@ -153,11 +151,11 @@ test('a recorded night can be corrected again — a mistake is not final', async
 // actually pass. Run it for real before relying on it.
 test('"no one was in the bed" replaces the correction, and undoing it restores the detector\'s night', async ({ page }) => {
   await page.goto(childPage);
-  await page.getByText(/You said 19:45 to 5:30/).click();
-  await expect(page.getByText('What we recorded')).toBeVisible();
+  await page.getByText(/You said asleep 19:45, up at 5:30/).click();
+  await expect(page.getByLabel('Got up for the day', { exact: true })).toBeVisible();
 
-  // Already-answered, so this opens straight into edit mode with the previous times filled in — the
-  // flag button sits under the note field there too, not just in the fresh confirm-mode view.
+  // Already-answered, so this opens straight into the time field with the previous times filled in, and
+  // the disclosure (which holds the note) is open — the flag link sits under it.
   const flag = page.getByRole('button', { name: 'No one was in the bed' });
 
   // Layout, measured rather than read from the stylesheet (#754; replaces frontend/test/reviewFieldSpacing.test.js):
@@ -178,7 +176,7 @@ test('"no one was in the bed" replaces the correction, and undoing it restores t
   await expect(page.getByText('You said no one was in the bed. Tap to change it.')).toBeVisible();
   // The times just corrected are gone — the flag nulls them server-side, by design (README's stated
   // limit: undoing brings the detector's night back, not whatever was typed before the flag was set).
-  await expect(page.getByText(/You said 19:45 to 5:30/)).toHaveCount(0);
+  await expect(page.getByText(/You said asleep 19:45, up at 5:30/)).toHaveCount(0);
 
   // Reload — the assertion that matters. Everything above could pass on client-side state alone; only
   // a fresh load proves the flag reached the server and is what is now being read back.
@@ -195,13 +193,13 @@ test('"no one was in the bed" replaces the correction, and undoing it restores t
 // ⚠️ ADDED 2026-09-30 with "in bed" separate from "asleep". The night of 2026-09-29 is why: a child put
 // down at 18:49 for a bedtime story fell asleep at 19:13, and the review had no way to say both — its
 // only put-down button overwrote the asleep time. This proves the two answers travel separately through
-// the real client and server, and both come back on the receipt.
+// the real client and server, and both come back on the receipt. Since the one-question review (2026-10-27)
+// the frame buttons are gone from the screen and the two times live behind the "Change bedtime or fell-asleep
+// time" disclosure; this is the typed path.
 //
 // NOT RUN when it was written, for the same reason as the test above: no `:dev` stack in that
 // environment. Checked by hand against NightReview.jsx / ReviewReceipt.jsx / SleepDetail.jsx copy and
-// against the unit tests; run it for real before relying on it. The seeded night has no recorded
-// transitions, so the frame buttons ("Put down here" / "Asleep here") are covered by the frontend unit
-// tests (MorningReview.test.jsx) and the typed path is what runs here.
+// against the unit tests; run it for real before relying on it.
 test('"in bed" and "asleep" are separate answers, and both come back on the receipt', async ({ page }) => {
   await page.goto('/');
   const token = await page.evaluate(() => localStorage.getItem('nightlight_token'));
@@ -211,19 +209,71 @@ test('"in bed" and "asleep" are separate answers, and both come back on the rece
   const nights = await (await page.request.get(`/api/children/${CHILD.id}/sleep?nights=1`, { headers })).json();
   const date = nights.nights[0].night_date;
   await page.goto(`/#/children/${CHILD.id}/review/${date}`);
-  await page.getByRole('button', { name: /Not quite…|Add the times/ }).click();
-
+  // No activity behind the seeded night, so the screen opens on its time field with the disclosure open.
   await page.getByLabel('In bed', { exact: true }).fill('19:40');
   await page.getByLabel('Fell asleep', { exact: true }).fill('20:15');
   await page.getByLabel('Got up for the day', { exact: true }).fill('06:05');
-  await page.getByRole('button', { name: 'Save review' }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
 
   await expect(page).toHaveURL(/\/sleep\?date=.*saved=1/);
-  await expect(page.getByText(/You said in bed 19:40, asleep 20:15 to 6:05/)).toBeVisible();
+  await expect(page.getByText(/You said in bed 19:40, asleep 20:15, up at 6:05/)).toBeVisible();
 
   // Stored as two answers, not one: the put-down never lands in the asleep time.
   const card = await (await page.request.get(`/api/children/${CHILD.id}/review/pending`, { headers })).json();
   expect(card.state).toBe('done');
   expect(card.true_in_bed_at.slice(11)).toBe('19:40:00');
   expect(card.true_onset_at.slice(11)).toBe('20:15:00');
+});
+
+// ⚠️ ADDED 2026-10-27 with the one-question review: the screen's "That's right" and its "Not quite" save sent
+// ONLY a wake, plus the two `computed_*_at` echoes and the settings key, and every other key is omitted
+// (omitted means "keep what is stored" to the server; null would clear). Unit tests fake the server, so this
+// is the layer that proves the REAL server accepts that body, stores just the wake, and that both receipts
+// (the child's page and the sleep page) say only what was answered.
+//
+// WHY THE REQUEST IS MADE DIRECTLY INSTEAD OF BY CLICKING "That's right": that button appears only when the
+// live recompute finds a wake, which needs an enabled camera with activity samples for the child, and a
+// camera row would break the first-run spec's "No cameras yet" (seed-review-night.mjs explains). The body
+// below is exactly the one frontend/test/MorningReview.test.jsx asserts the button sends. The re-save at the
+// end IS a real click, on the screen a night with a wake opens into.
+//
+// NOT RUN where it was written (no `:dev` stack): unproven until CI is green.
+test('a wake-only answer is stored as just the wake, and both receipts say only that', async ({ page }) => {
+  await page.goto('/');
+  const token = await page.evaluate(() => localStorage.getItem('nightlight_token'));
+  const headers = { Authorization: `Bearer ${token}` };
+  const kid = 'e2e-wakeonly-kid';
+  const nights = await (await page.request.get(`/api/children/${kid}/sleep?nights=1`, { headers })).json();
+  const date = nights.nights[0].night_date;
+  const view = await (await page.request.get(`/api/children/${kid}/review/${date}`, { headers })).json();
+
+  const res = await page.request.put(`/api/children/${kid}/review/${date}`, {
+    headers,
+    data: {
+      true_wake_local: '06:05',
+      computed_onset_at: view.computed.onset_at ?? null,
+      computed_wake_at: view.computed.wake_at ?? null,
+      settings_key: view.settings.key,
+    },
+  });
+  expect(res.ok(), await res.text()).toBeTruthy();
+
+  const card = await (await page.request.get(`/api/children/${kid}/review/pending`, { headers })).json();
+  expect(card.state).toBe('done');
+  // The wake alone: no asleep or in-bed time was sent, so none is on record as the parent's.
+  expect(card.true_wake_at.slice(11)).toBe('06:05:00');
+  expect(card.true_onset_at).toBeNull();
+  expect(card.true_in_bed_at).toBeNull();
+
+  // The child's page receipt says only what was answered (exact line, so an asleep time cannot hide in it).
+  await page.goto(`/#/children/${kid}`);
+  await expect(page.getByText('You said up at 6:05. Tap to change it.', { exact: true })).toBeVisible();
+
+  // Reopen, change nothing, save: the screen opens on the stored wake and a re-save sends the wake only, so
+  // the receipt on the sleep page is unchanged and still quotes no asleep time.
+  await page.getByText('You said up at 6:05. Tap to change it.', { exact: true }).click();
+  await expect(page.getByLabel('Got up for the day', { exact: true })).toHaveValue('06:05');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page).toHaveURL(/\/sleep\?date=.*saved=1/);
+  await expect(page.getByText('You said up at 6:05. Tap to change it.', { exact: true })).toBeVisible();
 });

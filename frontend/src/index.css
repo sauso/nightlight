@@ -2784,14 +2784,6 @@ input[type='range'] {
   /* The sheet caps the video at 60vh so it can't push the controls off a phone screen; centred in a
      desktop dialog there's room to let it use the height it's given. */
   .modal-overlay--wide .clip-player { max-height: 74vh; }
-  .modal-overlay--wide .image-preview { max-height: 78vh; }
-}
-
-/* The enlarged snapshot in ImagePreviewModal. object-fit:contain (not cover, unlike the thumbnail) —
-   this view exists to see the whole frame clearly, so nothing should be cropped off it. */
-.image-preview {
-  display: block; width: 100%; max-height: 60vh; object-fit: contain;
-  border-radius: 10px; background: var(--bg-elevated); margin: 0 auto;
 }
 
 /* Morning review — the "was last night right?" card and the screen behind it.
@@ -2819,74 +2811,36 @@ input[type='range'] {
 }
 .review-card__dismiss:hover { color: var(--text-primary); }
 
-.review-event {
-  display: flex; gap: 12px; padding: 12px 0;
-  border-top: 1px solid var(--border);
+/* The review screen (pages/NightReview.jsx): one question, one primary action, everything else quiet.
+   Tokens only; the focus ring is the global :focus-visible one. */
+.review-question { font-size: 17px; font-weight: 600; line-height: 1.35; margin: 2px 0 14px; }
+
+/* The disclosure for the two rarely-wrong times. A plain text button with a chevron, like the sleep
+   page's wake rows; aria-expanded carries the state for assistive tech, the chevron for the eye. */
+.review-more { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 6px; }
+.review-more__toggle {
+  display: inline-flex; align-items: center; gap: 6px; padding: 8px 0;
+  background: none; border: 0; cursor: pointer; font: inherit; font-size: 13.5px; color: var(--text-secondary);
 }
-.review-event:first-of-type { border-top: 0; }
+.review-more__toggle:hover { color: var(--text-primary); }
+.review-more__chev { transition: transform 0.18s ease; flex: none; }
+.review-more__chev.is-open { transform: rotate(180deg); }
+.review-more__body { padding-top: 6px; }
 
-.review-event__frame {
-  width: 160px; height: 120px; flex-shrink: 0;
-  object-fit: cover; border-radius: 8px; background: var(--bg-elevated);
+/* "No one was in the bed": a small text link, not a button, so it reads as the exception it is. */
+.review-link {
+  display: block; margin: 6px 0 0; padding: 8px 0; background: none; border: 0; cursor: pointer;
+  font: inherit; font-size: 13.5px; color: var(--text-secondary); text-decoration: underline;
 }
-.review-event__frame--none {
-  display: flex; align-items: center; justify-content: center;
-  font-size: 11px; color: var(--text-secondary); border: 1px dashed var(--border);
-}
-/* Frames were 96x72 — clear enough to tell a still frame is there, too small to actually make out
-   what's in it (the whole point of showing one at all). Bumped ~1.7x; still fits two-up on a 400px
-   phone with the review-event__body text beside it. */
-@media (max-width: 420px) {
-  .review-event__frame { width: 120px; height: 90px; }
-}
+.review-link:hover { color: var(--text-primary); }
+.review-link:disabled { opacity: 0.55; cursor: default; }
 
-/* The thumbnail itself is still capped at 160x120 above — even bumped once already, some snapshots
-   (dim rooms, night IR grain) stay hard to read at that size. This wraps it in a plain, unstyled
-   button so a tap opens ImagePreviewModal's full-size view instead of raising the size further and
-   crowding review-event__body off a phone screen. line-height:0 kills the inline-image descender
-   gap a <button><img></button> otherwise leaves under the frame. */
-.review-event__frame-btn {
-  flex-shrink: 0; padding: 0; border: 0; background: none; cursor: zoom-in;
-  border-radius: 8px; line-height: 0;
-}
-.review-event__frame-btn:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
-
-.review-event__body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.review-event__when { font-size: 13.5px; color: var(--text-primary); }
-.review-event__verdicts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
-
-.review-chip {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 12px; line-height: 1; padding: 6px 11px;
-  border-radius: 999px; border: 1px solid var(--border);
-  background: var(--bg-elevated); color: var(--text-secondary); cursor: pointer;
-}
-.review-chip:hover { color: var(--text-primary); border-color: var(--peri-soft); }
-.review-chip--on { background: var(--peri); border-color: var(--peri); color: #fff; }
-.review-chip:disabled { opacity: 0.45; cursor: default; }
-
-/* WHO it was, under a "No" in the full event list. Its own wrapper, deliberately NOT a second
-   .review-event__verdicts: tests count that container to prove each event asks exactly once, and the
-   follow-up is a different question. Same chips, just labelled so it reads as a follow-up. */
-.review-event__reasons { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.review-event__reasons-label { font-size: 12px; color: var(--text-secondary); margin-right: 2px; }
-
-/* The one line of help above the open event list: what "Put down here" and "Asleep here" each record. */
-.review-events__help { margin: 6px 0 8px; font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
-
-/* "Before bedtime (N)" — early-afternoon events grouped at the top of the full list. */
-.review-early { border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 4px; }
-.review-early__bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 6px; }
+@media (prefers-reduced-motion: reduce) { .review-more__chev { transition: none; } }
 
 /* The review card's answered state, and the confirm-or-correct block on the review screen. */
 .review-card--done .review-card__body { padding-right: 4px; }
 
 .review-card__icon--done { color: var(--live); background: rgba(127, 191, 163, 0.14); }
-
-.review-shown { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 14px; }
-.review-shown > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.review-shown__label { color: var(--text-secondary); font-size: 13.5px; }
-.review-shown strong { font-size: 17px; font-variant-numeric: tabular-nums; }
 
 .review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .review-actions .btn { flex: 1 1 auto; }
@@ -2898,18 +2852,7 @@ input[type='range'] {
   background: rgba(124, 131, 219, 0.12); padding: 2px 9px; border-radius: 999px;
 }
 
-.review-events__toggle {
-  display: flex; align-items: center; gap: 12px; width: 100%;
-  padding: 4px 0; background: none; border: 0; cursor: pointer; text-align: left;
-}
-.review-events__toggle-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-
 .sleep-detail__recompute-note {
   margin-top: 8px; font-size: 12.5px; line-height: 1.5;
   color: var(--text-secondary);
 }
-
-/* "Up for the day here" — naming the moment, as distinct from judging the event. Given the accent
-   rather than the periwinkle chrome because it is the one action on this row that changes the night. */
-.review-chip--moment { border-color: var(--accent-dim); color: var(--text-primary); }
-.review-chip--moment.review-chip--on { background: var(--accent); border-color: var(--accent); color: #2b2118; }
