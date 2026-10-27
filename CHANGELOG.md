@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.44.2] - 2026-10-27
+
 ### Changed
 
 - **Corrected the media-isolation limits about MediaMTX's API (#553 follow-up).** The docs said a taken-over media
@@ -50,6 +52,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   affected. `:latest` keeps its label through a rebuild once a release contains this and the Monday after it has run; see
   [docs/operations.md](docs/operations.md#the-weekly-rebuild).
 
+- **A recording that is still being saved when the container stops or updates is no longer lost by chance (#867).**
+  When you stop or update the container while a recording is being saved, Nightlight now waits **up to 20 seconds**
+  for the clip (it used to give up after 6 seconds, which was shorter than the save usually takes on a NAS, so the
+  clip was kept or lost depending on timing). The 20 seconds fits inside the 30-second stop timeout the Compose file,
+  the Unraid template and the quick-start command already set (worst case for the whole stop is about 23 seconds). The
+  limit is fixed, so a larger stop timeout does not extend it: a recording that takes longer than 20 seconds to save
+  (a long recording with a large pre-roll on a slow CPU) is still marked **failed** the next time Nightlight starts.
+
 ### Security
 
 - **Updated `body-parser` to 1.20.9 (GHSA-27r3-jxmh-p828, high).** `body-parser` is the part of Express that reads
@@ -71,16 +81,6 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   `GET /api/about` (which every signed-in user can read) show one of a fixed set of sentences, never a file or folder
   name from your host; the full reason stays in the container log. `GET /api/about` gains `mediaIsolationReason` and
   `mediaIsolationDetail`; nothing existing changes.
-
-### Fixed
-
-- **A recording that is still being saved when the container stops or updates is no longer lost by chance (#867).**
-  When you stop or update the container while a recording is being saved, Nightlight now waits **up to 20 seconds**
-  for the clip (it used to give up after 6 seconds, which was shorter than the save usually takes on a NAS, so the
-  clip was kept or lost depending on timing). The 20 seconds fits inside the 30-second stop timeout the Compose file,
-  the Unraid template and the quick-start command already set (worst case for the whole stop is about 23 seconds). The
-  limit is fixed, so a larger stop timeout does not extend it: a recording that takes longer than 20 seconds to save
-  (a long recording with a large pre-roll on a slow CPU) is still marked **failed** the next time Nightlight starts.
 
 ## [0.44.0] - 2026-10-26
 
