@@ -11,6 +11,7 @@ import settingsRoutes from './routes/settings.js';
 import manifestRoutes from './routes/manifest.js';
 import logsRoutes from './routes/logs.js';
 import diagnosticsRoutes from './routes/diagnostics.js';
+import esphomeRoutes from './routes/esphome.js';
 import eventsRoutes from './routes/events.js';
 import aboutRoutes from './routes/about.js';
 import pushRoutes from './routes/push.js';
@@ -45,6 +46,7 @@ import { startMediamtxApiWatchdog, stopMediamtxApiWatchdog } from './lib/mediamt
 import { recordCameraEvent, EVENT } from './lib/cameraEvents.js';
 import { parseStunServers, writeMediamtxConfig } from './lib/stunServers.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
+import { refreshEsphome, stopEsphome, startEsphomeSampler, stopEsphomeSampler } from './lib/esphomeManager.js';
 import { startSensorSampler, stopSensorSampler } from './lib/sensorSampler.js';
 import { startActivityTracker, stopActivityTracker } from './lib/activityTracker.js';
 import { startSleepJob, stopSleepJob } from './lib/sleepAnalysis.js';
@@ -238,6 +240,7 @@ app.use('/api/cameras', camerasRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/diagnostics', diagnosticsRoutes);
+app.use('/api/esphome', esphomeRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/about', aboutRoutes);
 app.use('/api/push', pushRoutes);
@@ -308,6 +311,8 @@ const server = app.listen(PORT, () => {
   // start, and the guards exit non-zero instead of leaving a healthy-looking container with no server
   // bound — see the boot/steady-state note in lib/processGuards.js.
   markBootComplete();
+  refreshEsphome();
+  startEsphomeSampler();
   // Run the clip-storage guard + retention sweeper BEFORE reconcile, so reconcile only starts
   // segmenters once storage is known usable (startClipCapture gates on it).
   startClipStorage();
@@ -554,6 +559,7 @@ async function shutdown() {
   await stopAllTranscoders();
   stopMediaMTX();
   stopMqtt();
+  stopEsphome();
   // Grouped with the other background stops, and placed AFTER the detector stops on purpose: the
   // detectors feed recordMotion/recordSound, so clearing the flusher earlier would only widen the
   // window in which activity is accumulated and never written. Placing it here preserves exactly the
@@ -580,6 +586,7 @@ async function shutdown() {
   //     would have said so was a hand-typed array that nobody extended. It is derived now
   //     (suite-exits-cleanly.test.js), which is what surfaced this.
   stopSensorSampler();
+  stopEsphomeSampler();
   stopClipStorage();
   stopSleepJob();
   stopTimelapseSampler();

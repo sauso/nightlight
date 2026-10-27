@@ -23,6 +23,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 - [Your home screen and the mobile apps](mobile.md) — install as an app, Android and iOS, push on the apps
 - [Push notifications](notifications.md) — supported providers and event delivery
 - [MQTT](mqtt.md) — broker setup and sensor data
+- [ESPHome data collection](esphome.md) — direct device connection, raw minute readings and retention
 - [Multi-factor authentication](mfa.md) — enrollment and recovery
 
 ## Run and develop

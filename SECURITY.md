@@ -91,6 +91,7 @@ with a "privacy check" error and nothing is sent; please report it.
 - The contents of `.jwt_secret`, or any session/JWT token value
 - Firebase service-account JSON or any push-provider API key/token
 - MQTT broker credentials
+- ESPHome Native API encryption keys
 - TOTP secrets or MFA backup codes
 - Recordings, snapshots, or clips you aren't comfortable making public — these can show your
   child and your home

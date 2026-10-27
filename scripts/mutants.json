@@ -23821,5 +23821,59 @@
     "tests": ["sleep-early-exit-lead.test.js"],
     "namePattern": "#700 T8h3",
     "note": "Round 3, Opus M13b: 46 non-matching rows then 14 matching; a 50-row scan finds only 4 and turns the rule off."
+  },
+  {
+    "label": "#506 device key returned in the admin list",
+    "file": "backend/src/routes/esphome.js",
+    "find": "key_set: !!row.encryption_key, status",
+    "replace": "key_set: row.encryption_key, status",
+    "expect": "killed",
+    "tests": ["esphome-routes.test.js"],
+    "namePattern": "#506 key save"
+  },
+  {
+    "label": "#506 blank edit clears the saved key",
+    "file": "backend/src/routes/esphome.js",
+    "find": "let key = previous?.encryption_key || null;",
+    "replace": "let key = null;",
+    "expect": "killed",
+    "tests": ["esphome-routes.test.js"],
+    "namePattern": "#506 key save"
+  },
+  {
+    "label": "#506 admin gate removed",
+    "file": "backend/src/routes/esphome.js",
+    "find": "router.use(requireAuth, requireAdmin);",
+    "replace": "router.use(requireAuth);",
+    "expect": "killed",
+    "tests": ["esphome-routes.test.js"],
+    "namePattern": "#506 settings"
+  },
+  {
+    "label": "#506 missing encryption flag accepted",
+    "file": "backend/src/lib/esphomeTransport.js",
+    "find": "psk && client.health()?.encrypted !== true",
+    "replace": "psk && client.health()?.encrypted === false",
+    "expect": "killed",
+    "tests": ["esphome-transport.test.js"],
+    "namePattern": "#506 a configured key"
+  },
+  {
+    "label": "#506 sensor silent minute fabricated",
+    "file": "backend/src/lib/esphomeManager.js",
+    "find": "else if (item.kind === 'sensor' && a.nmiss)",
+    "replace": "else if (item.kind === 'sensor')",
+    "expect": "killed",
+    "tests": ["esphome-manager.test.js"],
+    "namePattern": "#506 numeric buckets"
+  },
+  {
+    "label": "#506 device control sent from telemetry adapter",
+    "file": "backend/src/lib/esphomeTransport.js",
+    "find": "    stopTelemetry = client.on('telemetry', (event) => {",
+    "replace": "    client.command('light-lamp', { state: true });\r\n    stopTelemetry = client.on('telemetry', (event) => {",
+    "expect": "killed",
+    "tests": ["esphome-transport.test.js"],
+    "namePattern": "#506 read only telemetry"
   }
 ]

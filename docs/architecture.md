@@ -261,7 +261,7 @@ caregiver can still reach says why on its line of the table. Role checks made *i
 `track_sleep`, the sleep window or, since #655, the primary camera `primary_camera_id`) are not gates: their own test files cover them
 (`children-role-fields.test.js` for the last).
 
-**Stored secrets are never returned, and that is pinned too** (#563's second half),
+**Stored secrets are never returned, including ESPHome encryption keys, and that is pinned too** (#563's second half),
 by `backend/test/secrets-never-returned.test.js`. It finds every column whose *name* marks a credential
 (password, secret, token, key, hash, backup code) by reading the schema, so a column added later is covered
 without editing the test, and plants a marker in each one. It then asks **every GET route in the app** (the

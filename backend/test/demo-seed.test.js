@@ -80,10 +80,18 @@ test('demo seed is deterministic, timezone-native, safe and stable throughout a 
   assertCompletedNightsAreOk(midWindow);
   assertSeededThroughDeadline(midWindow);
 
+  // A public demo re-seed must erase raw ESPHome history and its connection secret.
+  const deviceId = midWindow.db.prepare("INSERT INTO esphome_devices (name, host, encryption_key) VALUES ('Neutral sensor', '127.0.0.1', 'fixture-key')").run().lastInsertRowid;
+  const entityId = midWindow.db.prepare("INSERT INTO esphome_entities (device_id, object_id, kind) VALUES (?, 'rate', 'sensor')").run(deviceId).lastInsertRowid;
+  midWindow.db.prepare('INSERT INTO esphome_readings (entity_id, bucket, n) VALUES (?, 1, 0)').run(entityId);
+
   const justAfterMidnight = Date.parse('2026-01-16T05:05:00.000Z'); // 00:05 in the configured test zone
   t.mock.timers.setTime(justAfterMidnight);
   process.env.DEMO_ENDS_AT = new Date(justAfterMidnight + 20 * 60_000).toISOString();
   const midnight = await seedDemo(() => new Date(justAfterMidnight));
+  for (const table of ['esphome_devices', 'esphome_entities', 'esphome_readings']) {
+    assert.equal(midnight.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0, `${table} survived the public demo seed`);
+  }
   assertCompletedNightsAreOk(midnight);
   assertSeededThroughDeadline(midnight);
 

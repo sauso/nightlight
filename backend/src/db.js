@@ -171,6 +171,50 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_sensor_readings_cam_time ON sensor_readings(camera_id, created_at);
 
+  -- #506: independent raw ESPHome history; none of the sleep or camera readers use these tables.
+  CREATE TABLE IF NOT EXISTS esphome_devices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 6053,
+    encryption_key TEXT,
+    child_id TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS esphome_entities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id INTEGER NOT NULL,
+    object_id TEXT NOT NULL,
+    child_id TEXT,
+    kind TEXT NOT NULL,
+    name TEXT,
+    device_class TEXT,
+    unit TEXT,
+    state_class INTEGER,
+    entity_category INTEGER,
+    first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at TEXT,
+    active INTEGER NOT NULL DEFAULT 1
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_esphome_entity_active
+    ON esphome_entities(device_id, object_id) WHERE active = 1;
+  -- bucket is a UTC epoch minute. last/mean/min/max describe valid updates only;
+  -- n counts those updates, with n=0 reserved for a binary carry-over or a
+  -- missing-only minute. nmiss counts updates flagged without a valid reading.
+  CREATE TABLE IF NOT EXISTS esphome_readings (
+    entity_id INTEGER NOT NULL,
+    bucket INTEGER NOT NULL,
+    last REAL,
+    mean REAL,
+    min REAL,
+    max REAL,
+    n INTEGER NOT NULL,
+    nmiss INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (entity_id, bucket)
+  ) WITHOUT ROWID;
+  CREATE INDEX IF NOT EXISTS idx_esphome_readings_bucket ON esphome_readings(bucket);
+
   -- Per-minute activity timeline for sleep tracking (see lib/activityTracker.js). The motion and
   -- sound DETECTORS already compute a continuous signal each ~5/s (motion = fraction of the zone that
   -- changed; sound = dB above a rolling ambient baseline), but detection_events are cooldown-throttled
@@ -489,6 +533,9 @@ if (!sleepReviewColumns.includes('nobody_in_bed')) {
 }
 
 const settingsColumns = db.prepare('PRAGMA table_info(settings)').all().map((c) => c.name);
+if (!settingsColumns.includes('esphome_retention_days')) {
+  db.exec('ALTER TABLE settings ADD COLUMN esphome_retention_days INTEGER NOT NULL DEFAULT 30');
+}
 if (!settingsColumns.includes('timezone')) {
   db.exec("ALTER TABLE settings ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'");
 }

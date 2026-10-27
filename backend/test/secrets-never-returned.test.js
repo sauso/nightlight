@@ -182,13 +182,17 @@ const ROW_MAKERS = {
     makeCamera(db, { id: 'cam-1', name: 'Planted Cam', extra: { disabled: 1 } });
     return [{ where: 'id = ?', params: ['cam-1'], label: 'cameras' }];
   },
+  esphome_devices: () => {
+    db.prepare("INSERT INTO esphome_devices (name, host, port, enabled) VALUES ('Neutral sensor', '127.0.0.1', 6053, 0)").run();
+    return [{ where: "name = 'Neutral sensor'", params: [], label: 'esphome_devices' }];
+  },
   push_tokens: () => {
     db.prepare("INSERT INTO push_tokens (token, user_id, platform, session_id) VALUES ('placeholder', 'u-admin', 'android', NULL)").run();
     return [{ where: "token = 'placeholder'", params: [], label: 'push_tokens' }];
   },
 };
 // Order matters only for push_tokens' user_id; derived tables are planted in this order when present.
-const PLANT_ORDER = ['settings', 'users', 'cameras', 'push_tokens'];
+const PLANT_ORDER = ['settings', 'users', 'cameras', 'esphome_devices', 'push_tokens'];
 
 describe('the secret columns are derived from the schema', () => {
   test('the derivation still finds every credential that existed when this was written', () => {
@@ -513,6 +517,7 @@ describe('every API response, for every role', () => {
         'GET /api/settings', 'GET /api/settings/mqtt', 'GET /api/ntfy/config', 'GET /api/pushover/config',
         'GET /api/gotify/config', 'GET /api/auth/users', 'GET /api/auth/me', 'GET /api/auth/me/mfa',
         'GET /api/cameras', 'GET /api/diagnostics', 'GET /api/logs', 'GET /api/auth/sessions/all',
+        'GET /api/esphome/devices', 'GET /api/esphome/settings',
       ],
     };
 

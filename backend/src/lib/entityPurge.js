@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import db from '../db.js';
+import { reconcileEsphomeChildDeletion } from './esphomeManager.js';
 import { logger } from './logger.js';
 import { CLIPS_DIR } from './clipRecorder.js';
 import { removeLeafDir, unlinkMediaFile } from './mediaFiles.js';
@@ -292,6 +293,13 @@ export function purgeChild(childId) {
   for (const parts of folders) removeDirUnderClips(parts);
 
   db.transaction(() => {
+    // #506: entity rows hold the child at recording time, even after a device is reassigned.
+    const removeEspHome = db.prepare(`DELETE FROM esphome_readings WHERE (entity_id, bucket) IN
+      (SELECT r.entity_id, r.bucket FROM esphome_readings r JOIN esphome_entities e ON e.id = r.entity_id
+       WHERE e.child_id = ? LIMIT 1000)`);
+    while (removeEspHome.run(childId).changes) { /* bounded statement */ }
+    db.prepare('DELETE FROM esphome_entities WHERE child_id = ?').run(childId);
+    db.prepare('UPDATE esphome_devices SET child_id = NULL WHERE child_id = ?').run(childId);
     for (const camId of cameraIds) db.prepare('DELETE FROM activity_samples WHERE camera_id = ?').run(camId);
     db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(childId);
     db.prepare('DELETE FROM sleep_reviews WHERE child_id = ?').run(childId);
@@ -305,5 +313,6 @@ export function purgeChild(childId) {
     }
     db.prepare('DELETE FROM children WHERE id = ?').run(childId);
   })();
+  reconcileEsphomeChildDeletion(childId);
   return cameraIds;
 }

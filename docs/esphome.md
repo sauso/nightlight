@@ -1,0 +1,21 @@
+# ESPHome data collection
+
+Nightlight can connect directly to an ESPHome device through its Native API and collect its numeric and binary sensor updates. This first version is for collecting data to see whether it is useful. It does not show a chart, send an alert, or use the data in sleep tracking or any other computed number. It does not connect through Home Assistant or discover devices on the network.
+
+An admin can configure a device through `/api/esphome` until the settings screen is added. The server connects to the device's IP address on port **6053** by default. Give the device a fixed IP address and use that address; names ending in `.local` do not resolve inside the container. Up to **8 devices** and **200 discovered entities per device** are supported. Only numeric `sensor` and `binary_sensor` entities are recorded. Diagnostic and disabled entities are skipped. Other kinds, including lights and switches, are ignored. Nightlight sends no control instructions to the device.
+
+With an admin session, `POST /api/esphome/devices` accepts `name` (your own label), `host`, optional `port`, optional `key`, optional `child_id`, and `enabled`. `GET /api/esphome/devices` shows connection and collection status; `GET /api/esphome/devices/<id>/entities` shows discovered entities and their latest live values. `PUT /api/esphome/devices/<id>` changes a device; `DELETE` at the same address removes its history. `POST /api/esphome/test` checks a `host`, optional `port` and `key`, or an existing `device_id`, without storing readings. Only one test runs at a time, for at most 10 seconds.
+
+If the device uses Native API encryption, find its key in the device's YAML configuration or `secrets.yaml`, under `api: encryption: key:`. Paste the base64 key when adding the device. A blank key field when editing keeps the stored key; `clear_key: true` removes it. The key is never returned by the API. When a key is set, Nightlight refuses a connection unless the client confirms that it is encrypted. Without a key, a plaintext connection is allowed. **Plaintext traffic can be read on the network**; use it only on a network you trust. As with MQTT and cameras, an admin can point the server at any host and port.
+
+## What is stored
+
+For each active entity, Nightlight combines valid updates into a UTC minute row. `last` is the last valid value in that minute; `mean`, `min` and `max` describe the valid values; `n` counts them. `nmiss` counts updates the device flagged as having no valid reading. A missing update, including a zero with the missing flag, never becomes a value. A numeric sensor that sends only missing updates gets a row with `n = 0`, `nmiss > 0` and no value. A numeric sensor that sends nothing has no row: the gap means unknown.
+
+A binary sensor carries its last known 0 or 1 into later minutes while the device stays connected. Such a row has `n = 0`, `nmiss = 0`. A disconnect clears the last known value; no rows are carried across it. The device's presence flag is stored as reported, even if it changes often or stays on after someone leaves. A respiratory rate of **1.0** is stored raw even when the device uses it as a placeholder. The values are **reported by the sensor, not interpreted by Nightlight, not a medical measurement**. Nightlight is not a medical or safety device.
+
+If the server is paused past a minute boundary, it leaves a gap rather than guessing what happened during the pause.
+
+The default retention is **30 days**, adjustable from **1 to 365 days** through `/api/esphome/settings`. Old minute rows are pruned in batches. Deleting a device deletes its readings; deleting a child deletes readings attributed to that child. Moving a device to another child leaves earlier readings attributed to the previous child. An admin can download up to **31 days** at a time as CSV from `/api/esphome/export?device=<id>&from=<ISO>&to=<ISO>`. Times in the file are UTC with a `Z` suffix.
+
+A probe of two units over one night suggests roughly **5,000 rows per day per device**, about **0.25 MB per day**. This is an estimate from that night, not a capacity guarantee. The database and its backups contain the raw readings and the stored encryption key; protect the data directory.
