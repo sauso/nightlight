@@ -153,6 +153,8 @@ test('the stored scoring_context string is byte-identical to step 1, key order i
 // on the source BEFORE this PR (dev 848b69e) with the clock frozen at NOON_AFTER. Both cameras' sensors feed
 // climate (19.8 is the rounded average of 21.5 and 18), which pins `cams` to today's cameras on the plain path.
 // If a deliberate scoring change moves this, update it AND bump SCORING_ALGO (see its comment in sleepAnalysis.js).
+// #700 added `wake_unconfirmed: null` (an added key; this night has no early exit and no earlier stored nights, so
+// nothing else about it moves) and bumped SCORING_ALGO to '2'.
 const GOLDEN = {
   night_date: '2026-07-01',
   window_start: '2026-07-01 09:30:00',
@@ -174,6 +176,7 @@ const GOLDEN = {
   wake_count: 0,
   longest_stretch_minutes: 620,
   coverage_minutes: 690,
+  wake_unconfirmed: null,
   climate: {
     temp_avg: 19.8, temp_min: 18, temp_max: 21.5, temp_samples: 2,
     humidity_avg: 54, humidity_min: 48, humidity_max: 60, humidity_samples: 2,
@@ -183,7 +186,10 @@ const GOLDEN = {
 // The same call with includeTimeline (the detail page's shape, segments, wakes, alerts and all), too long for a
 // literal, so its JSON's sha256, captured on the same source at the same frozen instant. If it fails, diff the
 // output against the parent commit's: the hash says only THAT the plain path's output moved.
-const GOLDEN_TIMELINE_SHA256 = '113fd4973ca3976b34b33eb9cded2b55cea0c093b6a7a2ea6639abc18d11a17d';
+// Re-captured for #700: the JSON gained `"wake_unconfirmed":null` (after `coverage_minutes`). With that key removed it
+// hashes to the previous value, 113fd4973ca3976b34b33eb9cded2b55cea0c093b6a7a2ea6639abc18d11a17d (checked when this
+// was updated), so the added key is the whole of the change.
+const GOLDEN_TIMELINE_SHA256 = '048ae90a712bbc6c58305f80c2e2e12f453463bd821840e52a6e286bc5b786e1';
 
 test('golden: without a context computeNight returns exactly what it did before #361 PR 2, with no scoring key', (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: NOON_AFTER });

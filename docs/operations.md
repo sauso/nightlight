@@ -200,7 +200,7 @@ docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}'
 ```
 
 (Empty if the image was built manually rather than by CI — that label only exists on images
-built through this repo's `docker-publish.yml` workflow.)
+built through this repo's `docker-publish.yml` workflow or its weekly rebuild.)
 
 Images published by that workflow (and by the weekly rebuild) also carry an **SBOM** and a **build provenance**
 attestation (#566). `docker buildx imagetools inspect sauso/nightlight:latest` lists them; a registry page may
@@ -234,8 +234,12 @@ What the test does not cover:
 - The synthetic camera (`bluenviron/mediamtx:latest-ffmpeg`) and the test's HTTPS proxy
   (`caddy:2-alpine`) are not pinned, so a change in either can fail a rebuild that is fine. The tag
   then stays on the previous image until the cause is fixed.
-- A rebuilt image has no `org.opencontainers.image.revision` label (only `docker-publish.yml` sets
-  it), so the command above prints nothing for it. **Settings → About** still shows the commit.
+- Rebuilds carry the same `org.opencontainers.image.revision` label as a normal publish (#864), set to
+  the commit that was rebuilt. Rebuilds from before that change did not, so the command above prints
+  nothing for them. A Monday run uses the workflow file on `main`, so `:latest` keeps its label through
+  a rebuild only after a release that contains the fix and the Monday after it (the release's own
+  publish labels `:latest` in between, until that Monday). **Settings → About** shows the commit
+  either way.
 
 Each run's summary on the repository's Actions page lists the digest the tag had before. To go back
 to that image, pull it by digest (`docker pull sauso/nightlight@sha256:<digest>`) or pin a release
@@ -694,9 +698,17 @@ make the container a sandbox, and it does not stop everything:
   at a compromised app.
 - **All the media programs share one user.** One taken-over FFmpeg can signal or inspect the others, MediaMTX and
   other cameras' FFmpeg included.
-- **MediaMTX's control API on `127.0.0.1:9997` has no password.** A taken-over media program can ask it for the
-  cameras' addresses and passwords. Nothing here closes that yet.
-- **Camera passwords are on FFmpeg's command line,** visible to every process in the container.
+- **MediaMTX's control API (`127.0.0.1:9997`) and its RTSP port (`127.0.0.1:8554`) have no password.** A taken-over
+  media program can add, change or remove stream paths, and read or publish a camera's stream. It cannot get a camera's
+  address or password from them: MediaMTX is never told them (FFmpeg connects to the camera itself). A password on the
+  API would not help while all the media programs share one user, which can already signal or inspect MediaMTX. The
+  passwords that can be read are the ones on FFmpeg's command line, next.
+- **Camera passwords are on FFmpeg's command line,** visible to every process in the container, and they are in that
+  FFmpeg's memory too. Whether another media program can read that memory depends on your host's kernel: where Yama's
+  `ptrace_scope` is 1 or higher it cannot, and only the command line leaks. On a kernel without Yama, as on Unraid
+  (`cat /proc/sys/kernel/yama/ptrace_scope` says "No such file"), it can, so hiding the command line alone would not
+  help and nothing here closes this. Only a separate user for each camera would, which is a large change that is not
+  planned. This is why the advice to keep cameras on their own network matters.
 - **Other accounts can no longer read new recordings** (see "What changes for you" above). A backup job or file manager
   running as a non-root user needs read access to files owned by uid `1700`, group `1700`; root (Unraid's CA Appdata
   Backup, `docker exec`) is unaffected. Give such a job the group, or turn isolation off.

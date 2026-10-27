@@ -213,6 +213,49 @@ describe('#361 sleep_nights.scoring_context', () => {
   });
 });
 
+describe('#700 sleep_nights.wake_unconfirmed_at', () => {
+  // The same shape as the #361 test above: the column is in the literal CREATE TABLE (fresh installs) AND a guarded
+  // ALTER (upgrades). Rewinding a real database proves the ALTER path, that a night stored before the upgrade reads
+  // NULL (never flagged: whether an old night would have been depends on the history it had then, so nothing is
+  // backfilled) and that a second boot changes nothing. NULL is what the lead test's history reads as "use wake_at".
+  test('an existing install gains the column on upgrade, TEXT, nullable, no default, old rows NULL, twice harmless', () => {
+    const dir = freshDir();
+    assert.equal(bootDbJs(dir).status, 0);
+    const full = columnsOf(dir, 'sleep_nights');
+    assert.ok(full.includes('wake_unconfirmed_at'), 'a fresh install has wake_unconfirmed_at');
+    {
+      const db = new Database(dbFile(dir));
+      try {
+        db.exec('ALTER TABLE sleep_nights DROP COLUMN wake_unconfirmed_at');
+        db.exec(`INSERT INTO sleep_nights (child_id, night_date, window_start, window_end, status, wake_at, asleep_minutes)
+                 VALUES ('old-kid', '2026-09-01', '2026-09-01 09:30:00', '2026-09-01 21:00:00', 'ok', '2026-09-01 10:30:00', 50)`);
+      } finally {
+        db.close();
+      }
+    }
+    assert.ok(!columnsOf(dir, 'sleep_nights').includes('wake_unconfirmed_at'), 'setup: rewound');
+
+    for (let bootNumber = 1; bootNumber <= 2; bootNumber++) {
+      const boot = bootDbJs(dir);
+      assert.equal(boot.status, 0, `upgrade/reboot ${bootNumber}: ${boot.stderr}`);
+      assert.deepEqual(columnsOf(dir, 'sleep_nights').sort(), [...full].sort(), `sleep_nights after boot ${bootNumber}`);
+      const db = new Database(dbFile(dir));
+      try {
+        const def = db.prepare('PRAGMA table_info(sleep_nights)').all().find((c) => c.name === 'wake_unconfirmed_at');
+        assert.equal(def.type, 'TEXT');
+        assert.equal(def.notnull, 0, 'nullable: NULL is "not flagged", the honest answer for every older night');
+        assert.equal(def.dflt_value, null, 'no default: a default would flag old nights');
+        const old = db.prepare("SELECT wake_unconfirmed_at, wake_at, asleep_minutes FROM sleep_nights WHERE child_id = 'old-kid'").get();
+        assert.equal(old.wake_unconfirmed_at, null, 'no backfill');
+        assert.equal(old.wake_at, '2026-09-01 10:30:00', 'and the old night is otherwise untouched');
+        assert.equal(old.asleep_minutes, 50);
+      } finally {
+        db.close();
+      }
+    }
+  });
+});
+
 describe('sleep_reviews.nobody_in_bed ("no one was in the bed")', () => {
   // Plan review R6. The loop beside this migration adds its columns as a bare INTEGER, which leaves every
   // EXISTING review NULL — a third state that `nobody_in_bed = 1` / `= 0` in SQL silently fails to match.

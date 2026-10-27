@@ -24,8 +24,9 @@ default, opt-in per camera.**
 For every camera with recording on, Nightlight keeps a small rolling buffer of that camera's stream
 (pulled from the stream it already transcodes — no extra load on the camera, no second RTSP session).
 When a detection fires it cuts a clip spanning a few seconds **before** the trigger through the moments
-**after**, remuxes it to a browser-playable MP4, and links it to the alert. Video is copied (no
-re-encode); only the clip's short audio track is re-encoded, once.
+**after**, turns it into a browser-playable MP4, and links it to the alert. The rolling buffer is a plain
+copy of the stream, but the clip itself is re-encoded once (video with x264 `veryfast`, audio to AAC),
+because a straight copy can only cut on a keyframe and the clip has to be exactly as long as you set.
 
 **Turning it on**
 
@@ -355,10 +356,12 @@ Parameters*) is for. Stopping takes a few seconds and the container exits as soo
 that setting Docker may kill it part-way, and the recording is marked **failed** instead — see
 [Quick start](../README.md#quick-start) and [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
 
-Nightlight waits **up to 6 seconds** for that final step, which is enough for the recordings this is
-for. It's a fixed limit: **raising the stop timeout past 30 seconds won't buy a long recording more
-time**, because the wait isn't derived from it. A recording still being assembled after 6 seconds is
-given up on, and marked **failed** the next time Nightlight starts — a bounded wait, not a promise.
+Nightlight waits **up to 20 seconds** for that final step, which is enough for the recordings this is
+for (assembling one takes a few seconds on a NAS, longer for a large pre-roll). It's a fixed limit:
+**raising the stop timeout past 30 seconds won't buy a long recording more time**, because the wait isn't
+derived from it. A recording still being assembled after 20 seconds is given up on, and marked **failed**
+the next time Nightlight starts — a bounded wait, not a promise. *(Older versions waited only 6 seconds,
+which was often too short, so a recording in progress at a stop could be lost.)*
 
 **When a recording can't be saved, it says so.** A recording that fails — the camera was offline and
 the buffer had no frames in it, the clip couldn't be assembled, or a restart interrupted it — appears
@@ -504,6 +507,10 @@ Each kind ages out differently — this is the part most worth reading twice:
     month) cannot get a timelapse any more, because its frames are gone first. A clock set far into the
     future makes every folder look old and deletes it, as it would the activity history. A partial video
     left by a failed timelapse is not deleted by this rule; it stays until the child is removed.
+  - A night whose timelapse keeps failing is retried up to 3 times (one try per 30 minutes), then left
+    alone. The count is not saved, so each time Nightlight starts it tries that night 3 more times, until
+    the frames are deleted at about 32 days. That is deliberate: a restart is usually an update, and an
+    update is when a fixed problem should get another go. The cost is a few wasted video encodes per start.
 
 **A stuck timelapse is given up on.** If the assembly's frames, time and bytes written stop moving for
 **2 minutes plus 1 second per 2 MB already written**, Nightlight stops it and marks that night failed.

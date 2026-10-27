@@ -107,9 +107,11 @@ configured in either. `backend/` has a unit test suite (Node's built-in runner, 
 coverage lives separately in `e2e/` (Playwright, needs Docker).
 
 **Node 24.** CI, the Docker image and `.nvmrc` are all on Node 24, and `engines` in both `package.json`
-files says `>=24` (npm only warns). Only 24 is tested: on Node 22 three backend suites fail
+files says `>=24` (npm only warns). Only 24 is supported and gated: on Node 22 three backend suites fail
 (`detector-observation-wiring`, `transcoder-log-redaction`, `sleepInsights`; the cause was never
-established, #565). `backend/test/node-version-pin.test.js` fails if the five places drift apart.
+established, #565). `backend/test/node-version-pin.test.js` fails if the five places drift apart. One workflow,
+`.github/workflows/node-next.yml`, runs both suites on the NEXT major (26, #751) after merges, weekly and on demand: a
+preview that changes nothing about what is supported, and the only file allowed to pin another major.
 
 **Sandbox with an older Node (the cloud builders came with 22).** Before `npm ci` or any test run, `node -v`;
 if the major is below `.nvmrc`'s, run `. scripts/use-node.sh` (sourced, so it can change PATH). It uses nvm,
@@ -282,4 +284,5 @@ Deploys are **not** automated — after CI publishes an image, pull it and recre
 container on Unraid (prod pulls `:latest`, staging pulls `:dev`). A push/merge does NOT mean the
 change is live. Verify via the Actions tab / Docker Hub tag, then the running container's
 `NIGHTLIGHT_GIT_SHA` environment variable (`docker inspect`). Not the
-`org.opencontainers.image.revision` label: it exists only on CI-built images.
+`org.opencontainers.image.revision` label: it exists only on CI-built images, and the weekly rebuild
+dropped it until #864 (an image rebuilt before that fix is unlabelled although CI built it).

@@ -1,0 +1,136 @@
+name: Next Node major preview
+
+# Runs the backend and front-end suites on the NEXT Node major (26 today), beside the Node 24 the project
+# supports, so that what breaks on the move is known well before anyone makes it (#751, step 1 of its plan).
+# This is a preview, not a gate: nothing about what is supported changes, `engines`, `.nvmrc`, the Docker image
+# and every other workflow stay on the supported major, and backend/test/node-version-pin.test.js says so.
+#
+# HOW TO READ IT. A failure here that ALSO fails on the supported Node is an ordinary bug. A failure that appears
+# only here is a Node-26 incompatibility: file it as its own issue and link it from #751. The run summary lists
+# the first 60 failing tests (and the suite's own totals), so a red run can usually be triaged without opening the
+# log; a run that fails with no failing test (an unhandled error) says so in the log, and is red either way.
+#
+# WHY A SEPARATE WORKFLOW, AND WHEN IT RUNS
+#   * Not a matrix entry in test.yml: that would run the extra Node on every PR, and a Node-26-only failure
+#     would redden a PR that touched nothing near it, which is how a check gets clicked past.
+#   * It runs after a merge to dev or main, weekly (so a new Node 26 patch release is seen even in a quiet
+#     week), on demand, and on a PR that changes this file or the pin test, so neither can rot unnoticed.
+#   * On a push, schedule or dispatch the job is NOT continue-on-error: `gh run list` then tells the truth
+#     about Node 26. Only on the PR trigger is it, so that proving this file works does not leave that PR red.
+# WHAT IT DOES NOT PROVE: the production image (Alpine/musl native modules, the ffmpeg and MediaMTX children, the
+# HEALTHCHECK, memory over days) is #751 step 2, a staging container on node:26-alpine. Coverage thresholds stay
+# on the supported Node only: they say nothing about the runtime, and the numbers can differ between versions.
+on:
+  push:
+    branches: [dev, main]
+  schedule:
+    - cron: '43 5 * * 3'
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - '.github/workflows/node-next.yml'
+      - 'backend/test/node-version-pin.test.js'
+
+# Least privilege (#566 bullet 5): this workflow only reads the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: node-next-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend suite on the next Node
+    runs-on: ubuntu-latest
+    # The same suite takes about 12 minutes on the supported Node (test.yml); 30 leaves room for a slower start
+    # and still stops a hung run well before GitHub's six-hour default.
+    timeout-minutes: 30
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      # The first thing a failure needs is what actually ran: the Node patch version, the native-module ABI and the
+      # SQLite driver the native build produced for it.
+      - name: Which Node and native module this is
+        working-directory: backend
+        run: |
+          node -v
+          node -p "'module ABI ' + process.versions.modules + ', V8 ' + process.versions.v8"
+          node -p "'better-sqlite3 ' + require('better-sqlite3/package.json').version"
+      # The same command as `npm test` (backend/package.json), written out so a second reporter can write TAP to a
+      # file for the summary. No coverage flags: see the header.
+      - name: Run the backend suite
+        working-directory: backend
+        run: |
+          node --experimental-test-module-mocks --test \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination="$RUNNER_TEMP/backend.tap" \
+            test/*.test.js
+      - name: List the failing tests
+        if: always()
+        run: |
+          {
+            echo "### Backend suite on Node $(node -v)"
+            if [ -s "$RUNNER_TEMP/backend.tap" ]; then
+              FAILED=$(grep -E '^\s*not ok' "$RUNNER_TEMP/backend.tap" | head -60 || true)
+              if [ -n "$FAILED" ]; then
+                echo "Failing tests (first 60):"; echo; echo '```'; echo "$FAILED"; echo '```'
+              else
+                echo "No failing tests reported."
+              fi
+              tail -9 "$RUNNER_TEMP/backend.tap" | sed 's/^/    /'
+            else
+              echo "The suite produced no report: it did not start. See the log."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  frontend:
+    name: Front-end suite on the next Node
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install front-end dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Which Node this is
+        run: node -v
+      # `npm test` (vitest run), not the coverage gate (test:coverage): see the header.
+      - name: Run the front-end suite
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee "$RUNNER_TEMP/frontend.log"
+      - name: List the failing tests
+        if: always()
+        run: |
+          {
+            echo "### Front-end suite on Node $(node -v)"
+            if [ -s "$RUNNER_TEMP/frontend.log" ]; then
+              FAILED=$(grep -E '^\s*(FAIL|×|✗)' "$RUNNER_TEMP/frontend.log" | head -60 || true)
+              if [ -n "$FAILED" ]; then
+                echo "Failing tests (first 60):"; echo; echo '```'; echo "$FAILED"; echo '```'
+              else
+                echo "No failing tests reported."
+              fi
+              # Vitest can fail a run for an unhandled error while every assertion passed; its `Errors` line is the only
+              # place that says so, so it is kept with the totals.
+              grep -E '^\s*(Test Files|Tests|Errors)\s' "$RUNNER_TEMP/frontend.log" | sed 's/^/    /' || true
+            else
+              echo "The suite produced no output: it did not start. See the log."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

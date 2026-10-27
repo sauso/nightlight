@@ -344,9 +344,18 @@ with `scoring.problem: 'camera_deleted'`, never a fallback to today's main camer
 no `scoring` key (golden test). `currentScoringContext(childId)` is the one definition of today's settings, and the
 stored JSON is built from it, byte for byte what step 1 wrote. What a context does **not** replay: the rules (one
 implementation runs, today's; `algo_differs` marks a night saved under other rules), tracking on/off (`off` still
-comes first), room climate and the alert list (today's cameras), and who owned the camera when (samples are read by
+comes first), room climate and the alert list (today's cameras), who owned the camera when (samples are read by
 camera id and time, so a camera moved to another child inside the span a night reads, window start - 3 h to window
-end + 3 h, replays with that child's activity).
+end + 3 h, replays with that child's activity), and the child's EARLIER stored nights. Since #700 (`SCORING_ALGO`
+'2') the departure scan's lead test reads those live: the newest 14 `sleep_nights` rows with an earlier `night_date`,
+`status = 'ok'`, a departure candidate (`COALESCE(wake_unconfirmed_at, wake_at)` not NULL; so `empty`/`no_data` rows
+never count), and a `window_end` that shows the same local HH:MM (in the night's timezone) as this night's. Never the
+night's own row or a later one. So back-filling, recomputing or deleting an earlier night can change a later night's
+replay while its samples, transitions and context are identical. Its finding is the additive result key
+`wake_unconfirmed` (`{ at, lead_min, threshold_min }`); only `at` is stored, as the nullable
+`sleep_nights.wake_unconfirmed_at` (a guarded `ALTER TABLE`, NULL on older rows, written by `upsertNight`), which is
+that night's departure candidate in later nights' history: a skipped night still teaches the rule. The column is an
+added key on the endpoints that return the raw stored row (above).
 
 **The admin Recompute is one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the
 dialog in `frontend/src/components/RecomputeNight.jsx`). `GET /api/children/:id/sleep/:date?context=stored` reads the
@@ -593,9 +602,20 @@ which the six-capability hardening does not grant).
   camera-facing programs, not the app.
 - **One uid for all media processes.** A taken-over ffmpeg can signal or `ptrace` the others (MediaMTX, other
   cameras' ffmpeg); there is no per-camera separation.
-- **MediaMTX's API on `127.0.0.1:9997` is unauthenticated** and returns each camera's credentials, so a taken-over media
-  process can still read them. Authenticating that API is a follow-up.
-- **Camera passwords are on ffmpeg's command line** (`/proc/<pid>/cmdline`), readable by anything in the container.
+- **MediaMTX's API on `127.0.0.1:9997` and its RTSP port `127.0.0.1:8554` have no password.** A taken-over media process
+  can add, change or remove stream paths and read or publish a camera's stream. It cannot learn a camera's address or
+  password from them: MediaMTX is never given one (every path is registered as publisher-only and FFmpeg pulls the
+  camera itself; `backend/test/mediamtx-never-given-credentials.test.js` pins that, and it was read back from a real
+  MediaMTX). A password on the API would not close this while the media programs share one user, because a process of
+  that user can already signal or `ptrace` MediaMTX, and MediaMTX needs the check material in a file it can read.
+- **Camera passwords are on ffmpeg's command line** (`/proc/<pid>/cmdline`), readable by anything in the container, and
+  they are in that ffmpeg's memory. Whether another media process can read that memory depends on the host kernel: with
+  Yama's `ptrace_scope` at 1 or higher (the default on many Linux distributions) it cannot (measured: `/proc/<pid>/mem`
+  of a sibling answered `EACCES`), so only the command line leaks; on a kernel without Yama, such as Unraid's
+  (`/proc/sys/kernel/yama/ptrace_scope` does not exist there), the kernel rules for processes of one user allow the read
+  (not tried on that host). So moving the password off the command line (#883: FFmpeg can take its input from a list on
+  stdin, tried) would not close the exposure on such a host, and is not done. The real fix would be a separate user for
+  each camera's ffmpeg, a large change that is not planned.
 - **Some hosts cannot do it** (rootless Docker/Podman, SMB/ACL shares that ignore `chmod`, NFS `root_squash`, PUID/PGID
   1700, missing capabilities) and run with isolation off and a warning.
 - **The camera VLAN advice stands**: isolation limits what a bad stream can reach; it does not make an exposed camera safe.

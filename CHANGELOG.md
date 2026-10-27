@@ -9,6 +9,65 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.44.2] - 2026-10-27
+
+### Changed
+
+- **Corrected the media-isolation limits about MediaMTX's API (#553 follow-up).** The docs said a taken-over media
+  program could read your cameras' addresses and passwords from MediaMTX's control API. It cannot: Nightlight never gives
+  MediaMTX a camera address or password (every stream path is registered publisher-only, and FFmpeg connects to the
+  camera itself). What a taken-over media program can do through the loopback API and RTSP port, which have no password,
+  is change or remove stream paths and read or publish a camera's stream. The passwords visible on FFmpeg's command line
+  are unchanged and still documented. No behaviour changes; a new test now fails if a camera address or password is ever
+  sent to MediaMTX. See [docs/operations.md](docs/operations.md#media-isolation).
+- **Documented why camera passwords on FFmpeg's command line are not hidden (#883).** On a host kernel without Yama's
+  `ptrace_scope` (Unraid's, for one) a taken-over media program can read another camera's FFmpeg memory anyway, so moving
+  the password off the command line would not close the exposure; only a separate user per camera would, and that is not
+  planned. On a kernel with `ptrace_scope` 1 or higher only the command line leaks. No behaviour changes.
+  See [docs/operations.md](docs/operations.md#media-isolation).
+
+### Fixed
+
+- **A false "got out of bed" far earlier than the child usually gets up is no longer taken as the wake on its own
+  (#700).** A sleeping child and an empty bed can look the same to the camera, so one false exit in the evening
+  followed by a still child could end a ten-hour night after an hour, and the morning notification said so ("asleep
+  58 min"). Such an exit (more than twice the child's usual time before the window ends, never less than an hour) is
+  now set aside, and a later one can still be the wake. With none, the night keeps the wake worked out from movement,
+  which can be none at all: the night may then show "still asleep" and the notification no "up" time. Limits, all
+  in the guide: it needs 10 earlier saved nights with the same wake-time setting (a new install, a child's first ten
+  nights, the ten after a wake-time change, and the ten after a timezone change that moves the local wake time are
+  unchanged). A child who really is up that early, or was
+  carried to a parent's bed, is set aside the same way: a new routine is learnt after about 4 nights of it (each set
+  aside night still counts, with its early time), during which up to 4 nights can show no wake time or a late one,
+  but an early wake on fewer than about 1 night in 4 is set aside every time. 4 or more false exits inside 14 nights
+  switch the rule off until they age out. A night's answer now depends on the nights saved before it. An improvement,
+  not a fix, fitted to four nights in one house: their wake errors of -450, -197, -215 and -580 minutes became a
+  blank, +90, -1 and +96. Nights already saved keep their figures (a wake time already notified is never cleared).
+  Saved nights gain a `wake_unconfirmed_at` column (empty on older nights; an added key wherever the API returns a
+  saved row), a night worked out fresh gains `wake_unconfirmed`, and the detection-rules version is now `2`. See
+  [docs/sleep-tracking.md](docs/sleep-tracking.md#an-exit-far-earlier-than-usual-does-not-end-the-night).
+- **The weekly image rebuild now keeps the `org.opencontainers.image.revision` label (#864).** `:latest` and `:dev`
+  lost it every Monday, so `docker inspect` printed nothing after a rebuild. Rebuilt images now carry the revision
+  (the commit that was rebuilt), created-time and source labels, like a normal publish. Settings → About was never
+  affected. `:latest` keeps its label through a rebuild once a release contains this and the Monday after it has run; see
+  [docs/operations.md](docs/operations.md#the-weekly-rebuild).
+
+- **A recording that is still being saved when the container stops or updates is no longer lost by chance (#867).**
+  When you stop or update the container while a recording is being saved, Nightlight now waits **up to 20 seconds**
+  for the clip (it used to give up after 6 seconds, which was shorter than the save usually takes on a NAS, so the
+  clip was kept or lost depending on timing). The 20 seconds fits inside the 30-second stop timeout the Compose file,
+  the Unraid template and the quick-start command already set (worst case for the whole stop is about 23 seconds). The
+  limit is fixed, so a larger stop timeout does not extend it: a recording that takes longer than 20 seconds to save
+  (a long recording with a large pre-roll on a slow CPU) is still marked **failed** the next time Nightlight starts.
+
+### Security
+
+- **Updated `body-parser` to 1.20.9 (GHSA-27r3-jxmh-p828, high).** `body-parser` is the part of Express that reads
+  request bodies. In 1.20.8 and earlier, one request whose body was compressed and followed by extra bytes could crash
+  the application (a denial of service), per the advisory. Nightlight reads request bodies before it checks who is
+  asking, so this applied to any request that reached the server, signed in or not; it matters most on an install that
+  is reachable from outside your home network. Nothing else changes.
+
 ## [0.44.1] - 2026-10-26
 
 ### Changed
