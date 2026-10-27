@@ -20,9 +20,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   Differences to know about: the event list, photos, per-event answers, **Quick check-in?**, **Still moving?** and
   **Before bedtime** are gone from this screen, and so is the **Answered by** line (the app still records who answered).
   Answers already saved are kept. A save now records only what you answered, so a wake-only answer no longer also stores
-  the app's guessed asleep time as yours, and the receipt reads back only that (**You said up at 6:37.**). The review
-  screen can no longer empty a time to remove a correction: use **Remove my correction** in the admin's Recompute dialog.
-  The server also now refuses a wake-up time saved on its own that is earlier than the night's stored asleep time (it
+  the app's guessed asleep time as yours, and the receipt reads back only that (**You said up at 6:37.**). You can still
+  clear a time on the review (clear the field and **Save**) to remove it, as before. The server also now refuses a wake-up time saved on its own that is earlier than the night's stored asleep time (it
   used to save a night that ended before it began). See [docs/sleep-tracking.md](docs/sleep-tracking.md#correcting-a-night).
 
 ### Security

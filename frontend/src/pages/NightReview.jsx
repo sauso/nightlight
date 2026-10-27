@@ -171,9 +171,15 @@ export default function NightReview() {
     computed?.onset_at && `asleep ${readable(computed.onset_at)}`,
   ].filter(Boolean);
 
+  // Something to save: a wake to send, or something the person typed (an emptied wake clears it, a lone
+  // asleep time on a night with no wake is a valid answer). Save is NOT tied to the wake alone: the old screen
+  // let a caregiver empty a time to remove a correction, and a night the app found no wake for can still be
+  // given just an asleep time (restored in the PR #897 fix round, the owner's decision).
+  const canSave = Boolean(wakeShown) || Object.keys(typed).length > 0;
+
   const save = async () => {
     // Never a time read in the placeholder zone, whichever button asked (see `timesReady`).
-    if (!timesReady || !wakeShown) return;
+    if (!timesReady || !canSave) return;
     setBusy(true);
     setError(null);
     // ⚠️ THE PAYLOAD IS THE WAKE ANSWER PLUS WHAT WAS ON SCREEN, AND NOTHING ELSE (plan amendment 3,
@@ -183,7 +189,6 @@ export default function NightReview() {
     // parent's answer (the old "That's right" sent the detector's fell-asleep time as the owner's own).
     // ★ A time reaches the body only if the person typed in that field — `typed` holds a key only then.
     const body = {
-      true_wake_local: wakeShown,
       // ⚠️ WHAT WE SHOWED THIS PERSON, sent back so the server records it beside their answer. The
       // server deliberately does not recompute it: a night's answer drifts while the page is open
       // (05:51 at 08:16 → 08:31 at 09:50), so recomputing at save time filed a confirmation as a
@@ -197,6 +202,10 @@ export default function NightReview() {
       // other ones. Not sent by `saveNobody`: "No one was in the bed" carries no time.
       settings_key: data.settings?.key,
     };
+    // The wake: a time to send, else — only if the person emptied the field themselves — null, which clears
+    // it (exactly as the old screen did). An untouched empty wake (a night with none) omits the key.
+    if (wakeShown) body.true_wake_local = wakeShown;
+    else if ('wake' in typed) body.true_wake_local = null;
     if ('onset' in typed) body.true_onset_local = typed.onset || null;
     if ('inBed' in typed) body.true_in_bed_local = typed.inBed || null;
     if ('note' in typed) body.note = typed.note.trim() || null;
@@ -325,7 +334,7 @@ export default function NightReview() {
                     <input type="time" value={wakeShown} disabled={!timesReady} onChange={onType('wake')} />
                   </label>
                   <div className="review-actions">
-                    <button type="button" className="btn btn-primary" disabled={busy || !timesReady || !wakeShown} onClick={save}>
+                    <button type="button" className="btn btn-primary" disabled={busy || !timesReady || !canSave} onClick={save}>
                       {busy ? 'Saving…' : 'Save'}
                     </button>
                   </div>

@@ -156,3 +156,14 @@ test('with no stored night, or no stored asleep time, there is nothing to check 
   plantNight(finishedNight({ onset_at: null }));
   assert.equal((await put(thatsRight('18:00'))).status, 200, 'a stored night with no asleep time');
 });
+
+test('★ the comparison allows 60 s of slack and not a second less: a stored asleep time WITH seconds, 30 s and 90 s after the wake', async () => {
+  // Every case above is minute-aligned, so a slack of 30 s (or 0) passes them all. A frame keeps its seconds
+  // (asleep 19:13:30) while a typed wake is to the minute, so 19:13 is 30 s before: the same breath, accepted.
+  // 19:12 is 90 s before: refused. Kills a mutation of ASLEEP_AFTER_WAKE_SLACK_MS in sleepReviews.js.
+  plantNight(finishedNight({ onset_at: sql(new Date(at(19, 13).getTime() + 30000)) }));
+  const refused = await put(thatsRight('19:12'));
+  assert.equal(refused.status, 400, '90 s before the stored asleep time');
+  assert.equal(reviewRow(), undefined, 'nothing stored');
+  assert.equal((await put(thatsRight('19:13'))).status, 200, '30 s before the stored asleep time');
+});

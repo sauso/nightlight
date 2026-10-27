@@ -586,11 +586,11 @@ Either:
   - for a night you marked "No one was in the bed", anyone opens the review (**Change what you told us
     about this night**) and presses **Someone was in the bed**.
 
-  The review screen can't be used to empty a time any more (it used to, by clearing all three
-  fields): **Save** stays greyed out until **Got up for the day** has a time. So removing a time
-  answer is an admin's job, through **Remove my correction**; a caregiver can change a time but not
-  remove it. (A save sent straight to the API that empties all three times still removes the
-  correction, as it always did.)
+  The review can still empty a time, for an admin or a caregiver: clear **Got up for the day** (and
+  **Fell asleep** and **In bed** under **Change bedtime or fell-asleep time**), then **Save**. A
+  cleared time is removed; one you leave alone is kept. Emptying all three removes the correction.
+  **Remove my correction** is the admin's other route, and a save sent straight to the API that
+  empties all three times does the same.
 
   The button **removes** the times you entered (or your "No one was in the bed" answer); it does not
   hide them, and nothing brings them back. Your answers to the individual events (and their reasons)
@@ -721,10 +721,9 @@ Either:
     It is not checked when the app has no stored night yet, or a stored night with no asleep time:
     there is nothing to compare with, and a mistyped wake-up is saved. If last night's summary is
     still being refined when you save, the comparison uses the version stored before your save.
-  - Through the API only: a save that empties just the wake-up time, beside an asleep time already in
-    your review, is not checked against the app's wake-up time, so an asleep time after it can be left
-    standing. The review screen cannot send that save (its **Save** is greyed out until the wake-up
-    field has a time).
+  - A save that empties just the wake-up time, beside an asleep time already in your review, is not
+    checked against the app's wake-up time, so an asleep time after it can be left standing. The
+    review screen can send that save (clear **Got up for the day** and **Save**).
   - Only just after updating to 0.35.0: a review page that was already open before the update has no **In
     bed** field. If it saves an asleep time earlier than an in-bed time someone else has since saved
     from an updated page, the save is refused ("In bed can't be after Fell asleep") and that old page

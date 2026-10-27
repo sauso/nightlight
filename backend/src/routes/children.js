@@ -804,8 +804,9 @@ router.put('/:id/review/:date', (req, res) => {
   // reproduced by a test): asleep "07:30" (by the noon rule, the morning after) saved fine beside a stored
   // 06:30 wake, and every screen then showed a night ending before it began, its total floored to 0. Only for
   // a save that GIVES an asleep time. No stored night, or no stored wake yet: nothing to check against.
-  // Still NOT checked: an API save that ONLY clears the wake beside an asleep time in the review (the old
-  // edit card always resent its asleep field with it, so from the screen that save was checked above).
+  // Still NOT checked: a save that ONLY clears the wake beside an asleep time in the review (the old edit card
+  // always resent its asleep field with it, so that save was checked above; the one-question screen can clear
+  // the wake on its own, so it now reaches here unchecked. Documented in docs/sleep-tracking.md).
   if (patch.trueOnsetAt != null && !merged.true_wake_at) {
     if (asleepAfterWake({ true_onset_at: merged.true_onset_at, true_wake_at: storedNight()?.wake_at })) {
       return res.status(400).json({

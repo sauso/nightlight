@@ -298,14 +298,41 @@ describe('the review screen', () => {
     expect(keysOf(lastBody())).toEqual(WAKE_ONLY_KEYS);
   });
 
-  test('Save cannot send an emptied wake: it is disabled until there is a time', async () => {
+  test('Save is disabled while there is nothing to save: no wake on the night and nothing typed (a)', async () => {
+    api.get.mockResolvedValue({ ...NIGHT, computed: { status: 'empty', onset_at: null, in_bed_at: null, wake_at: null } });
     const { user } = at();
-    await user.click(await screen.findByRole('button', { name: 'Not quite' }));
-    const wake = await screen.findByLabelText(/Got up for the day/);
-    await user.clear(wake);
+    await screen.findByLabelText(/Got up for the day/);
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
-    await user.type(wake, '06:10');
+    await user.type(screen.getByLabelText(/Got up for the day/), '06:10');
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  });
+
+  test('★ (b) only "Fell asleep" typed on a night with no wake enables Save and sends NO wake key', async () => {
+    // The old screen could save an asleep time on its own; the wake key is omitted (not null) because the person
+    // never touched that field, so a stored wake elsewhere is not cleared.
+    api.get.mockResolvedValue({ ...NIGHT, computed: { status: 'empty', onset_at: null, in_bed_at: null, wake_at: null } });
+    const { user } = at();
+    await screen.findByLabelText(/Got up for the day/);
+    await user.type(screen.getByLabelText(/Fell asleep/), '19:40');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    expect(lastBody()).toMatchObject({ true_onset_local: '19:40' });
+    expect(lastBody()).not.toHaveProperty('true_wake_local');
+  });
+
+  test('★ (c) clearing an answered wake enables Save and sends true_wake_local: null (a caregiver can remove a time)', async () => {
+    api.get.mockResolvedValue({
+      ...NIGHT, review: { true_wake_at: '2026-08-29 19:40:00', true_onset_at: null, note: null },
+    });
+    const { user } = at();
+    const wake = await screen.findByLabelText(/Got up for the day/);
+    await waitFor(() => expect(wake).toHaveValue('05:40'));
+    await user.clear(wake);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+    expect(lastBody().true_wake_local).toBeNull();
   });
 
   test('typing survives the timezone arriving — the form must not reset under you', async () => {

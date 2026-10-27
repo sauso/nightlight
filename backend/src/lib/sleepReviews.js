@@ -549,8 +549,9 @@ export function inBedAfterOnset(r) {
 // The same minute of slack for the same reason: a wake FRAME keeps its second (up 06:29:30) and a typed asleep
 // time is to the minute ("06:30" is 06:30:00). It judges whatever pair it is given. The route calls it on the
 // merged review, and again (fix round 3, Codex #1) with an asleep time saved while the review has no wake
-// against the night's STORED wake, the one the card shows beside it. Still not checked anywhere: a wake saved
-// while the review has no asleep time, against the stored asleep time (README, "Known limits").
+// against the night's STORED wake, the one the card shows beside it. The route ALSO calls it with a wake
+// saved while the review has no asleep time, against the night's STORED asleep time (PR #897, found in the
+// Codex plan review of the one-question review, where nearly every save is wake-only).
 export const ASLEEP_AFTER_WAKE_SLACK_MS = IN_BED_AFTER_ASLEEP_SLACK_MS;
 export function asleepAfterWake(r) {
   if (!r?.true_onset_at || !r?.true_wake_at) return false;
