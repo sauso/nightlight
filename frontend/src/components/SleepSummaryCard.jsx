@@ -107,6 +107,11 @@ export default function SleepSummaryCard({ childId }) {
       range = night.wake_at
         ? `awake since ${fmtTime(night.wake_at)}`
         : `asleep since ${fmtTime(night.onset_at)}`;
+    } else if (night.wake_at && night.wake_range?.from && night.wake_range?.to) {
+      // "Up between" (server's wake_range, lib/wakeRange.js): the app has two wake estimates 10+ minutes
+      // apart, so it says so instead of naming one. The server leaves it null for a night the parent
+      // corrected (their single time shows, as below) and for tonight, so no check for either is needed here.
+      range = `from ${fmtTime(night.onset_at)} · up between ${fmtTime(night.wake_range.from)} and ${fmtTime(night.wake_range.to)}`;
     } else {
       range = night.wake_at
         ? `${fmtTime(night.onset_at)} – ${fmtTime(night.wake_at)}`

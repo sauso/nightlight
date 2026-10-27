@@ -55,7 +55,7 @@ What each message says. Names are the names as you typed them:
 | **Camera offline** | `<camera name> — offline` | `No video from "<camera name>" for 5+ minutes.` | None |
 | **Back online** | `<camera name> — back online` | `"<camera name>" is back online after about 7 minutes offline.` | None |
 | **Long silence** | `Alerts silenced on <camera name>` | `Alerts from "<camera name>" have been silenced on and off for 2 h 5 min. Camera history shows who set each silence.` No username | None |
-| **Sleep report** | `Sleep report — <child's name>` for one child; `Sleep reports ready` when several close in the same check. With **Show this child's name in the report** off: `Sleep report — a child` | One line per child: `<child's name>: asleep 8h12, 2 wakes, up 06:47`, or `<child's name>: no one in the bed`, or `<child's name>: no sleep data`. With the name hidden the line starts `A child:` instead. Tapping opens the sleep page | None |
+| **Sleep report** | `Sleep report — <child's name>` for one child; `Sleep reports ready` when several close in the same check. With **Show this child's name in the report** off: `Sleep report — a child` | One line per child: `<child's name>: asleep 8h12, 2 wakes, up 06:47` (or `up between 06:10 and 06:50` when the app's two wake estimates are 10+ minutes apart), or `<child's name>: no one in the bed`, or `<child's name>: no sleep data`. With the name hidden the line starts `A child:` instead. Tapping opens the sleep page | None |
 | **Sleep report updated** | `Sleep report updated — <child's name>` (or `Sleep reports updated`); `Sleep report updated — a child` with the name hidden | The same lines, now with the wake time | None |
 | **Test message** | `Nightlight` | `Test notification — … is working.` | None |
 
@@ -558,6 +558,12 @@ remedy.
 Separate from the motion/sound alerts above: once a tracked child's sleep window closes for the night,
 a one-line summary ("asleep 8h12, 2 wakes, up 06:47") is sent through every provider enabled above,
 using the same 10-second-timeout fan-out.
+
+On a night where the app has two different wake-up times, 10 minutes or more apart, the line says
+"up between 06:10 and 06:50" instead of naming one. The "Sleep report updated" follow-up uses the same
+wording, and a range that later changes does not send another message (the follow-up only goes out when
+a wake time that was unknown becomes known). How often this appears, and why it is not shown on every
+late night, is in [Up between](sleep-tracking.md#up-between-when-the-app-has-two-answers-for-the-wake-up-time).
 
 **Two switches, per child** (child's page under **Track sleep**; admin only, a caregiver sees them
 greyed out; the same switches apply to the "Sleep report updated" follow-up):

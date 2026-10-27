@@ -440,9 +440,14 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
     ? night.wake_at
       ? `${fmtTime(night.onset_at)} – awake since ${fmtTime(night.wake_at)}`
       : `asleep since ${fmtTime(night.onset_at)} (ongoing)`
-    : night.wake_at
-      ? `${fmtTime(night.onset_at)} – ${fmtTime(night.wake_at)}`
-      : `from ${fmtTime(night.onset_at)} · still asleep at ${fmtTime(night.window_end)}`;
+    : night.wake_at && night.wake_range?.from && night.wake_range?.to
+      // "Up between" (the server's wake_range, lib/wakeRange.js): two wake estimates 10+ minutes apart. The
+      // server leaves it null for a corrected night (the parent's single time shows) and for a night in
+      // progress (handled above), so nothing here re-checks either.
+      ? `${fmtTime(night.onset_at)} – up between ${fmtTime(night.wake_range.from)} and ${fmtTime(night.wake_range.to)}`
+      : night.wake_at
+        ? `${fmtTime(night.onset_at)} – ${fmtTime(night.wake_at)}`
+        : `from ${fmtTime(night.onset_at)} · still asleep at ${fmtTime(night.window_end)}`;
   const wakes = night.wakes || [];
   const visits = night.visits || [];
   const hasChildOut = visits.some((v) => v.type === 'child_out');

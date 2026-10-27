@@ -50,6 +50,32 @@ you corrected in the morning review is locked against that until the correction 
 its **In bed** time yourself in the review). The detail page works the night out fresh each time, so
 it shows the time straight away.
 
+### "Up between": when the app has two answers for the wake-up time
+
+The app works out when a child got up in two ways: from movement alone, and from the camera seeing
+them leave the bed. Usually they agree. When they differ by **10 minutes or more**, the card, the
+sleep page and the morning report say **Up between 6:10 and 6:50** instead of picking one. It is the
+same 10 minutes the app counts as "right" when it checks a wake time against your answers.
+
+- **It is only shown for a finished night you have not corrected.** Once you give the real time in the
+  morning review, your single time is shown (and a night you marked "No one was in the bed" has none).
+  Tonight, while it is still in progress, there is no range either, because the wake time is not final
+  until the window closes. Nothing is saved: the range appears and disappears as the two estimates do,
+  and the wake time the app reports is the same one as before.
+- **The review asks differently.** On a night with a range the screen reads **Up between 6:10 and
+  6:50. When did they get up?** with **Around 6:10**, **Around 6:50** and **Another time**. Each
+  "Around" button records that exact time as your answer. There is no "That's right", because a range
+  cannot be right or wrong as a whole; you pick a time.
+- **The morning report** reads `asleep 8h12, 2 wakes, up between 06:10 and 06:50` on those nights.
+  When the report was sent before a wake time was known, the "Sleep report updated" follow-up uses the
+  same wording. A range that later moves does not send another message.
+
+**Known limits.** This is a modest help, not a fix for late wake times. On 26 nights from one house,
+a range appeared on about a quarter of them (7), and the true time lay inside it on 3 of the 5 nights
+where the app's single answer had been late. On the nights that matter most the range often does not
+appear: a child who stays still has no movement-only estimate, so there is only one time to show. The
+10 minutes was set on one house's two cameras and may suit another room less well.
+
 ### The detail view
 
 Tap the sleep summary for the full **night timeline**: a to-scale bar of
@@ -429,6 +455,9 @@ up. Tap it and the screen reads **Up at 6:37. Is that right?**
 - **That's right** records that time as your answer. Two taps from the child's page.
 - **Not quite** shows one time field, **Got up for the day**, to type the real time into, and
   **Save**.
+- On a night where the app has two different answers, the question is instead **Up between 6:10 and
+  6:50. When did they get up?**, with **Around** each time and **Another time**
+  (see ["Up between"](#up-between-when-the-app-has-two-answers-for-the-wake-up-time)).
 - **No one was in the bed** (a small link under the buttons) says the whole night was wrong. See
   ["No one was in the bed" says the whole night was wrong](#no-one-was-in-the-bed-says-the-whole-night-was-wrong-not-just-a-time).
 - **Change bedtime or fell-asleep time** (a collapsed section) holds **In bed**, **Fell asleep** and a

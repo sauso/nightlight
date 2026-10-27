@@ -142,7 +142,18 @@ export default function NightReview() {
   // detector's put-down (plan review R3, 2026-09-30: seeding it would store the detector's put-down as the
   // parent's own answer on a save that never touched it; the sent-only-once-typed rule below makes that
   // impossible, and showing nothing keeps the field honest about what is on record).
-  const wakeShown = typed.wake ?? toLocalHhmm(review?.true_wake_at || computed?.wake_at, tz);
+  // ★ "UP BETWEEN" MODE (server's `wake_range`, lib/wakeRange.js): the app has two wake estimates 10+ minutes
+  // apart, so it asks "Up between A and B. When did they get up?" and offers each end, or another time. It is
+  // never a confirmation: the review stores ONE true wake, and "That's right" on a pair would record a time
+  // nobody checked (plan amendment 1). So there is no "That's right" here. The server sends no range for a
+  // night already answered or corrected; `review?.true_wake_at` is checked too so a stale page cannot offer to
+  // overwrite an answer as if it were a first one. Without a range nothing on this screen changes.
+  const range = computed?.wake_at && !review?.true_wake_at && data.wake_range?.from && data.wake_range?.to
+    ? data.wake_range
+    : null;
+  // In range mode the wake field starts EMPTY: "Another time" means neither estimate was right, so
+  // pre-filling one of them would put a time the person just rejected one reflex-tap from becoming their answer.
+  const wakeShown = typed.wake ?? (range ? '' : toLocalHhmm(review?.true_wake_at || computed?.wake_at, tz));
   const onsetShown = typed.onset ?? toLocalHhmm(review?.true_onset_at || computed?.onset_at, tz);
   const inBedShown = typed.inBed ?? toLocalHhmm(review?.true_in_bed_at, tz);
   const noteShown = typed.note ?? (review?.note || '');
@@ -177,9 +188,12 @@ export default function NightReview() {
   // given just an asleep time (restored in the PR #897 fix round, the owner's decision).
   const canSave = Boolean(wakeShown) || Object.keys(typed).length > 0;
 
-  const save = async () => {
+  // `wakeOverride`: the 'HH:MM' of an "Around ..." button in range mode, sent as the wake answer through the
+  // SAME payload as every other wake save (so the server's checks, the store-first step and the lock are the
+  // ones "That's right" already goes through). Absent for every other caller.
+  const save = async (wakeOverride) => {
     // Never a time read in the placeholder zone, whichever button asked (see `timesReady`).
-    if (!timesReady || !canSave) return;
+    if (!timesReady || !(canSave || wakeOverride)) return;
     setBusy(true);
     setError(null);
     // ⚠️ THE PAYLOAD IS THE WAKE ANSWER PLUS WHAT WAS ON SCREEN, AND NOTHING ELSE (plan amendment 3,
@@ -204,7 +218,8 @@ export default function NightReview() {
     };
     // The wake: a time to send, else — only if the person emptied the field themselves — null, which clears
     // it (exactly as the old screen did). An untouched empty wake (a night with none) omits the key.
-    if (wakeShown) body.true_wake_local = wakeShown;
+    if (wakeOverride) body.true_wake_local = wakeOverride;
+    else if (wakeShown) body.true_wake_local = wakeShown;
     else if ('wake' in typed) body.true_wake_local = null;
     if ('onset' in typed) body.true_onset_local = typed.onset || null;
     if ('inBed' in typed) body.true_in_bed_local = typed.inBed || null;
@@ -303,13 +318,38 @@ export default function NightReview() {
                   pre-filled form puts the app's own answer one tap from becoming "ground truth" — and
                   that answer is sometimes badly wrong (a drifted wake of 08:29 against a real 06:00).
                   The confirm is one deliberate button, and correcting is a separate act. */}
-              {!editing ? (
+              {!editing && range ? (
+                <>
+                  {timesReady && (
+                    <div className="review-question">
+                      Up between {readable(range.from)} and {readable(range.to)}. When did they get up?
+                    </div>
+                  )}
+                  {/* Two equal choices, so both use the secondary style: `--accent` is for the ONE primary
+                      action, and a pair of estimates has no favourite (design-language.md). Each saves that
+                      end as the wake answer, minute-precise like any typed time. No "That's right": a range
+                      cannot be confirmed (see `range`). */}
+                  <div className="review-actions">
+                    <button type="button" className="btn btn-secondary" disabled={busy || !timesReady}
+                      onClick={() => save(toLocalHhmm(range.from, tz))}>
+                      Around {readable(range.from)}
+                    </button>
+                    <button type="button" className="btn btn-secondary" disabled={busy || !timesReady}
+                      onClick={() => save(toLocalHhmm(range.to, tz))}>
+                      Around {readable(range.to)}
+                    </button>
+                    <button type="button" className="btn btn-secondary" disabled={busy || !timesReady} onClick={() => setEditToggled(true)}>
+                      Another time
+                    </button>
+                  </div>
+                </>
+              ) : !editing ? (
                 <>
                   {timesReady && (
                     <div className="review-question">Up at {readable(computed.wake_at)}. Is that right?</div>
                   )}
                   <div className="review-actions">
-                    <button type="button" className="btn btn-primary" disabled={busy || !timesReady} onClick={save}>
+                    <button type="button" className="btn btn-primary" disabled={busy || !timesReady} onClick={() => save()}>
                       {busy ? 'Saving…' : 'That’s right'}
                     </button>
                     <button type="button" className="btn btn-secondary" disabled={busy || !timesReady} onClick={() => setEditToggled(true)}>
@@ -323,9 +363,11 @@ export default function NightReview() {
                     <div className="camera-tile__sub">
                       {review?.true_wake_at
                         ? `You said up at ${readable(review.true_wake_at)}. `
-                        : hasComputedWake
-                          ? `We said up at ${readable(computed.wake_at)}. `
-                          : 'We didn’t work out when they got up. '}
+                        : range
+                          ? `We said up between ${readable(range.from)} and ${readable(range.to)}. `
+                          : hasComputedWake
+                            ? `We said up at ${readable(computed.wake_at)}. `
+                            : 'We didn’t work out when they got up. '}
                       Put in what actually happened — your time is what {kid?.name || 'their'}’s card will show.
                     </div>
                   )}
@@ -334,7 +376,7 @@ export default function NightReview() {
                     <input type="time" value={wakeShown} disabled={!timesReady} onChange={onType('wake')} />
                   </label>
                   <div className="review-actions">
-                    <button type="button" className="btn btn-primary" disabled={busy || !timesReady || !canSave} onClick={save}>
+                    <button type="button" className="btn btn-primary" disabled={busy || !timesReady || !canSave} onClick={() => save()}>
                       {busy ? 'Saving…' : 'Save'}
                     </button>
                   </div>

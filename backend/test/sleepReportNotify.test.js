@@ -11,7 +11,7 @@
 // at runtime, not at module load — so mocking THOSE and driving the real `runNightlySleepJob()` end to
 // end lets these tests see the actual message reaching the SDK boundary, the same technique
 // push.test.js already uses for a different question.
-import { test, before, beforeEach, mock } from 'node:test';
+import { test, describe, before, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -642,4 +642,43 @@ test('★ a child whose NAME is hidden is reported as "a child" through the real
   const followup = sendEach.mock.calls[0].arguments[0][0];
   assert.equal(followup.notification.title, 'Sleep report updated — a child');
   assert.ok(!JSON.stringify(followup).includes('Notify Kid'), 'the name is in the follow-up');
+});
+
+// "Up between X and Y" (lib/wakeRange.js). Driven through the real alert with a hand-built summary: the range
+// rule's own thresholds are pinned in wake-range.test.js; what only THIS file can show is the words a parent
+// receives. Melbourne in July is UTC+10, so 20:10Z the evening before is 06:10 the next morning.
+describe('the sleep report line names a range when the two wake estimates disagree', () => {
+  const NIGHT = { status: 'ok', asleep_minutes: 600, wake_count: 1 };
+  const sentBody = async (summary) => {
+    sendEach.mock.resetCalls();
+    notifySleepReportUpdates([{ name: 'Range Kid', summary: { ...NIGHT, ...summary }, childId: KID, nightDate: NIGHT_DATE }]);
+    await new Promise((r) => setImmediate(r)); // the send is fire-and-forget
+    assert.equal(sendEach.mock.callCount(), 1);
+    return sendEach.mock.calls[0].arguments[0][0].notification.body;
+  };
+
+  test('★ 40 minutes apart: "up between 06:10 and 06:50", the earlier time first whichever field holds it', async () => {
+    const early = '2026-06-30 20:10:00';
+    const late = '2026-06-30 20:50:00';
+    assert.equal(await sentBody({ wake_at_algo: early, wake_at: late }), 'Range Kid: asleep 10h00, 1 wake, up between 06:10 and 06:50');
+    assert.equal(await sentBody({ wake_at_algo: late, wake_at: early }), 'Range Kid: asleep 10h00, 1 wake, up between 06:10 and 06:50');
+  });
+
+  test('★ single-time wording is unchanged when there is no range: agreeing, no movement-only estimate, or under 10 minutes', async () => {
+    const wake = '2026-06-30 20:50:00';
+    assert.equal(await sentBody({ wake_at_algo: wake, wake_at: wake }), 'Range Kid: asleep 10h00, 1 wake, up 06:50');
+    assert.equal(await sentBody({ wake_at_algo: null, wake_at: wake }), 'Range Kid: asleep 10h00, 1 wake, up 06:50');
+    assert.equal(await sentBody({ wake_at_algo: '2026-06-30 20:41:00', wake_at: wake }), 'Range Kid: asleep 10h00, 1 wake, up 06:50',
+      '9 minutes apart is not a range');
+    assert.equal(await sentBody({ wake_at: wake }), 'Range Kid: asleep 10h00, 1 wake, up 06:50', 'a summary with no wake_at_algo field at all');
+  });
+
+  test('a corrected night names the parent\'s single time, never a range', async () => {
+    // The real job sends no follow-up for a corrected night (see runNightlySleepJob), so this
+    // pins the rule at the one place the wording is built.
+    assert.equal(
+      await sentBody({ wake_at_algo: '2026-06-30 20:10:00', wake_at: '2026-06-30 20:50:00', corrected: true }),
+      'Range Kid: asleep 10h00, 1 wake, up 06:50',
+    );
+  });
 });

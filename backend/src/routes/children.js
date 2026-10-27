@@ -19,9 +19,20 @@ import { TRANSITION } from '../lib/bedTransitions.js';
 import { getNightReview, saveNightReview, previewNightReview, inBedAfterOnset, asleepAfterWake, reviewCorrectsNight,
   reviewCardState, localHmToUtcSql, applyVerdicts, applyCorrection, applyCorrections, transitionInstant,
   parseTransitionId, reviewForBrowser } from '../lib/sleepReviews.js';
+import { wakeRange } from '../lib/wakeRange.js';
 
 const router = Router();
 router.use(requireAuth);
+
+// "Up between 6:10 and 6:50" (lib/wakeRange.js): lay the additive `wake_range` field on a night the response
+// returns beside `wake_at`. It is done HERE, in the route layer, on the answer AFTER the parent's correction
+// was applied, for two reasons: the rule needs `corrected` (a corrected night shows the parent's single time,
+// and that flag only exists once applyCorrection has run), and wakeRange.js must stay out of the `test:core`
+// modules (sleepReviews.js is one, so the overlay itself is deliberately not edited). The night is COPIED, not
+// mutated: a stored row or a fresh compute may be shared. `wake_at` and every other field pass through
+// byte-identical; a null night stays null. Never used on the raw reads (`?stored=1`, `raw=1`, a store's own
+// response): those answer "what did the detector save", and a display rule has no place in them.
+const withWakeRange = (night) => (night ? { ...night, wake_range: wakeRange(night) } : night);
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
@@ -279,7 +290,7 @@ router.get('/:id/sleep/live', (req, res) => {
   if (!childTracksSleep(req.params.id)) return res.json({ scope: 'off', night: null });
   const current = currentNightDate(req.params.id);
   if (current) {
-    return res.json({ scope: 'tonight', night: computeNight(req.params.id, current) });
+    return res.json({ scope: 'tonight', night: withWakeRange(computeNight(req.params.id, current)) });
   }
   // "Last night" must mean the last COMPLETED night, not "the newest row we happen to have saved" (#683).
   // The row for the night that just ended is only written by the nightly job, a 30-minute timer that
@@ -301,7 +312,7 @@ router.get('/:id/sleep/live', (req, res) => {
     // applyCorrection. A night somebody has told us the truth about must not keep showing the
     // algorithm's version of it.
     const nights = applyCorrections(req.params.id, [stored]);
-    return res.json({ scope: 'last', night: nights[0] || null });
+    return res.json({ scope: 'last', night: withWakeRange(nights[0] || null) });
   }
   // No saved row for it yet: compute that night fresh, exactly like the `tonight` branch above and
   // GET /:id/sleep/:date do. READ-ONLY: nothing is stored here (storing stays the nightly job's and the
@@ -309,7 +320,7 @@ router.get('/:id/sleep/live', (req, res) => {
   // fresh night too, so a night a parent has already corrected is not shown as the detector's version. A
   // fresh `no_data` is returned as it is (the card has wording for it) rather than falling back to an
   // older night, which is the very bug.
-  return res.json({ scope: 'last', night: applyCorrection(req.params.id, computeNight(req.params.id, last)) });
+  return res.json({ scope: 'last', night: withWakeRange(applyCorrection(req.params.id, computeNight(req.params.id, last))) });
 });
 
 // Phase 5: does room temperature correlate with this child's sleep across their recent nights? A
@@ -326,7 +337,7 @@ router.get('/:id/sleep', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
   const nights = Math.min(60, Math.max(1, parseInt(req.query.nights, 10) || 14));
-  res.json({ nights: applyCorrections(req.params.id, getStoredNights(req.params.id, nights)) });
+  res.json({ nights: applyCorrections(req.params.id, getStoredNights(req.params.id, nights)).map(withWakeRange) });
 });
 
 // Compute one night on demand for a specific LOCAL start date ('YYYY-MM-DD'). ?detail=1 includes the
@@ -449,7 +460,8 @@ router.get('/:id/sleep/:date', (req, res) => {
     // whose saved row is missing or unscored is still recompute-eligible: comparing the saved row against an
     // overlaid preview would show the parent's times as what Save would store.
     const raw = contextChoice !== undefined && req.query.raw === '1';
-    return res.json(raw ? night : applyCorrection(req.params.id, night));
+    // `raw=1` is the detector's own answer for the Recompute preview: no correction and no display field.
+    return res.json(raw ? night : withWakeRange(applyCorrection(req.params.id, night)));
   }
   // Storing a recompute can only ever improve or re-score a night, never un-score one — see the
   // allowDowngrade guard in computeAndStoreNight. A refusal is not a server fault (the night is too old,
@@ -568,14 +580,36 @@ router.get('/:id/sleep/:date', (req, res) => {
 router.get('/:id/review/pending', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
-  res.json(reviewCardState(req.params.id));
+  const card = reviewCardState(req.params.id);
+  // `wake_range` (additive) for the card's night, from that night's SAVED row laid under the parent's answer.
+  // reviewCardState selects only status/onset/wake (it lives in sleepReviews.js, a test:core module, and is
+  // not edited), so the algo wake is read here. State `ask` has no review row yet (never corrected); `done` is
+  // corrected by definition, so it reads null; `none` has no night. Also set inside `pending`, which repeats
+  // the card's fields for pages loaded before `state` existed (see reviewCardState).
+  let wake_range = null;
+  if (card.night_date) {
+    const row = db
+      .prepare('SELECT * FROM sleep_nights WHERE child_id = ? AND night_date = ?')
+      .get(req.params.id, card.night_date);
+    wake_range = wakeRange(applyCorrection(req.params.id, row));
+  }
+  res.json({ ...card, wake_range, pending: card.pending ? { ...card.pending, wake_range } : card.pending });
 });
 
 router.get('/:id/review/:date', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
   if (!DATE_ONLY.test(req.params.date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
-  res.json(getNightReview(req.params.id, req.params.date));
+  const review = getNightReview(req.params.id, req.params.date);
+  // `wake_range` (additive) for the screen's "Up between X and Y" question. getNightReview returns only a
+  // handful of the night's computed fields (no `wake_at_algo`) and lives in sleepReviews.js, a test:core
+  // module that is not edited, so the night is worked out once more here with the SAME settings the page was
+  // shown (displayContextFor) and the parent's answer laid over it (so an already-answered night reads null,
+  // like every other screen). Both computes run in this one synchronous handler, so the range and the
+  // `computed.wake_at` beside it cannot drift apart between them.
+  const shown = displayContextFor(req.params.id, req.params.date);
+  const night = computeNight(req.params.id, req.params.date, { context: shown?.context ?? null });
+  res.json({ ...review, wake_range: wakeRange(applyCorrection(req.params.id, night)) });
 });
 
 // Save the night's true times (or "no one was in the bed" instead of them), any per-transition
