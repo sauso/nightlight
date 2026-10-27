@@ -77,6 +77,14 @@ test('#506 moving a child keeps old readings with the old child; export is UTC a
   assert.match(String(exported.body), /#1/);
   assert.match(String(exported.body), /'=formula/);
   assert.match(String(exported.body), /child-a/);
+  // The device is named only as #id: neither the admin's label ("Renamed", set above) nor the stored key may reach the file.
+  db.prepare('UPDATE esphome_devices SET encryption_key = ? WHERE id = ?').run(KEY, id);
+  const again = await api(`/export?device=${id}&from=2026-10-01T00:00:00Z&to=2026-10-02T00:00:00Z`, { token: admin });
+  assert.ok(!String(again.body).includes('Renamed'), 'the admin label reached the CSV');
+  assert.ok(!String(again.body).includes(KEY), 'the stored key reached the CSV');
+  // The range cap is 31 days: exactly 31 is allowed, one second more is refused.
+  assert.equal((await api(`/export?device=${id}&from=2026-10-01T00:00:00Z&to=2026-11-01T00:00:00Z`, { token: admin })).status, 200);
+  assert.equal((await api(`/export?device=${id}&from=2026-10-01T00:00:00Z&to=2026-11-01T00:00:01Z`, { token: admin })).status, 400);
   assert.equal((await api(`/export?device=${id}`, { token: admin })).status, 400);
   assert.equal((await api(`/export?device=${id}&from=2026-01-01&to=2026-03-01`, { token: admin })).status, 400);
 });

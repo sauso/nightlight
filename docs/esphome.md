@@ -10,11 +10,11 @@ If the device uses Native API encryption, find its key in the device's YAML conf
 
 ## What is stored
 
-For each active entity, Nightlight combines valid updates into a UTC minute row. `last` is the last valid value in that minute; `mean`, `min` and `max` describe the valid values; `n` counts them. `nmiss` counts updates the device flagged as having no valid reading. A missing update, including a zero with the missing flag, never becomes a value. A numeric sensor that sends only missing updates gets a row with `n = 0`, `nmiss > 0` and no value. A numeric sensor that sends nothing has no row: the gap means unknown.
+For each active entity, Nightlight combines valid updates into a UTC minute row. `last` is the last valid value in that minute; `mean`, `min` and `max` describe the valid values; `n` counts them. `nmiss` counts updates the device flagged as having no valid reading. It is reliable for numeric sensors only: a binary sensor that sends nothing but missing updates in a minute records no count, and no row at all if it has no earlier value. A missing update, including a zero with the missing flag, never becomes a value. A numeric sensor that sends only missing updates gets a row with `n = 0`, `nmiss > 0` and no value. A numeric sensor that sends nothing has no row: the gap means unknown.
 
 A binary sensor carries its last known 0 or 1 into later minutes while the device stays connected. Such a row has `n = 0`, `nmiss = 0`. A disconnect clears the last known value; no rows are carried across it. The device's presence flag is stored as reported, even if it changes often or stays on after someone leaves. A respiratory rate of **1.0** is stored raw even when the device uses it as a placeholder. The values are **reported by the sensor, not interpreted by Nightlight, not a medical measurement**. Nightlight is not a medical or safety device.
 
-If the server is paused past a minute boundary, it leaves a gap rather than guessing what happened during the pause.
+If the server is paused for a minute or more (for example the process is suspended), it leaves a gap rather than guessing what happened during the pause.
 
 The default retention is **30 days**, adjustable from **1 to 365 days** through `/api/esphome/settings`. Old minute rows are pruned in batches. Deleting a device deletes its readings; deleting a child deletes readings attributed to that child. Moving a device to another child leaves earlier readings attributed to the previous child. An admin can download up to **31 days** at a time as CSV from `/api/esphome/export?device=<id>&from=<ISO>&to=<ISO>`. Times in the file are UTC with a `Z` suffix.
 
