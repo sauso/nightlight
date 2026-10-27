@@ -148,7 +148,18 @@ export default function NightReview() {
   // nobody checked (plan amendment 1). So there is no "That's right" here. The server sends no range for a
   // night already answered or corrected; `review?.true_wake_at` is checked too so a stale page cannot offer to
   // overwrite an answer as if it were a first one. Without a range nothing on this screen changes.
+  // ⚠️ ...AND ONLY WHEN BOTH ENDS FALL ON THE SAME SIDE OF NOON (home time) as the wake the server echoes back.
+  // The server turns a typed "HH:MM" into a day by the noon rule (lib/sleepReviews.js localHmToUtcSql: before 12:00
+  // is the morning after the night's date, otherwise the night's start date), and honours the exact echoed
+  // `computed_wake_at` as the one exception. An "Around" button sends only HH:MM, so the end that is NOT the echoed
+  // wake would resolve to the wrong day if the two ends straddle noon (possible when a household's sleep window
+  // runs past midday). Found in the Codex gpt-6-sol review of this change (verified by running localHmToUtcSql).
+  // The server file is in test:core and is not edited; the screen asks the ordinary single-time question instead,
+  // which sends the echoed wake and so always resolves correctly.
+  const beforeNoon = (utc) => Number(toLocalHhmm(utc, tz).slice(0, 2)) < 12;
   const range = computed?.wake_at && !review?.true_wake_at && data.wake_range?.from && data.wake_range?.to
+    && beforeNoon(data.wake_range.from) === beforeNoon(computed.wake_at)
+    && beforeNoon(data.wake_range.to) === beforeNoon(computed.wake_at)
     ? data.wake_range
     : null;
   // In range mode the wake field starts EMPTY: "Another time" means neither estimate was right, so

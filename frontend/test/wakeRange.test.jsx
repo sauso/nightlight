@@ -182,3 +182,47 @@ describe('the review screen without a range is unchanged', () => {
   });
 });
 
+
+// Codex gpt-6-sol review of this change: the server resolves a typed 'HH:MM' to a day by the noon rule (before
+// 12:00 = the morning after, otherwise the night's start date) and only the echoed `computed_wake_at` is exempt.
+// An "Around" button sends just 'HH:MM', so with the two ends on opposite sides of noon the end that is not the
+// echoed wake would land on the wrong day. The screen then asks the ordinary question instead.
+describe('the review screen when the two ends straddle noon (home time)', () => {
+  // Melbourne is UTC+10 in August: 01:00Z is 11:00 and 03:00Z is 13:00.
+  const NOON_BEFORE = '2026-08-28 01:00:00';
+  const NOON_AFTER = '2026-08-28 03:00:00';
+  const night = (from, to) => ({
+    ...RANGE_NIGHT,
+    computed: { ...RANGE_NIGHT.computed, wake_at: from },
+    wake_range: { from, to },
+  });
+
+  test('★ ends either side of noon: the ordinary "Up at ... Is that right?" question, no "Around" buttons', async () => {
+    mountReview(night(NOON_BEFORE, NOON_AFTER));
+    const q = await screen.findByText(/Is that right\?/);
+    expect(q.textContent).toMatch(/Up at .*11:00/);
+    expect(screen.getByRole('button', { name: /That.s right/ })).toBeInTheDocument();
+    expect(buttons().join('|')).not.toMatch(/Around|Another time/);
+    expect(screen.queryByText(/Up between/)).not.toBeInTheDocument();
+  });
+
+  test('★ the same straddle with the echoed wake on the later end behaves the same', async () => {
+    const n = night(NOON_BEFORE, NOON_AFTER);
+    n.computed.wake_at = NOON_AFTER;
+    mountReview(n);
+    expect(await screen.findByText(/Is that right\?/)).toBeInTheDocument();
+    expect(buttons().join('|')).not.toMatch(/Around/);
+  });
+
+  test('both ends after noon is still range mode (only a straddle is excluded)', async () => {
+    mountReview(night('2026-08-28 03:00:00', '2026-08-28 04:30:00')); // 13:00 and 14:30
+    expect(await screen.findByText(/Up between/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Around .*1:00/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Around .*2:30/ })).toBeInTheDocument();
+  });
+
+  test('both ends before noon is range mode (the normal morning)', async () => {
+    mountReview(RANGE_NIGHT);
+    expect(await screen.findByText(/Up between/)).toBeInTheDocument();
+  });
+});

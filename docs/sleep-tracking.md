@@ -75,7 +75,8 @@ answers.
 designed on, a range appeared on 7, and the true time lay inside it on 3 of the 5 late nights where it
 appeared. On the 18 kept-aside nights it lay inside on 4 of the 5 where it appeared. On the nights that
 matter most it often does not appear: a child who stays still has no movement-only estimate, so there is
-only one time to show. All of this was measured on one house's two cameras, and the 10 minutes may suit
+only one time to show. When a night's two estimates fall either side of noon (possible if your sleep
+window ends after midday), the screen asks the normal single-time question instead. All of this was measured on one house's two cameras, and the 10 minutes may suit
 another room less well.
 
 ### The detail view
