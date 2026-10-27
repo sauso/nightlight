@@ -1,10 +1,11 @@
 const { test, expect } = require('@playwright/test');
 const { CAMERA, ensureSyntheticCamera } = require('./helpers');
 
-// Documentation screenshots, generated as a byproduct of the suite so they stay in sync with the real
-// UI. Written to ./screenshots (gitignored); CI uploads them as the `docs-screenshots` artifact, and
-// the good ones are committed under docs/screenshots/. Also a light smoke test — each shot asserts the
-// screen actually rendered before capturing.
+// Screenshots of the main screens, taken as a byproduct of the suite. Written to ./screenshots
+// (gitignored); CI uploads them as the `docs-screenshots` artifact. These are NOT what the docs show any more:
+// the committed walkthrough in docs/screenshots/ comes from e2e/walkthrough/ (a seeded household), because
+// this suite's empty install has no children, sleep nights or alerts to show. Kept as a light smoke test —
+// each shot asserts the screen actually rendered before capturing.
 //
 // Captured at TWO form factors, because the layout genuinely differs: below 1200px the navigation is a
 // bottom tab bar, and at 1200px and up the same component becomes a 220px left sidebar rail (see

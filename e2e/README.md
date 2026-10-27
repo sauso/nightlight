@@ -131,14 +131,21 @@ on each run; the exact Playwright pin determines the package versions.
 
 ## Refreshing the documentation screenshots
 
-`playwright/tests/05-screenshots.spec.js` captures the app's main screens (as a byproduct
-of the suite) into `playwright/screenshots/` (gitignored). CI uploads them as the
-**`docs-screenshots`** artifact. To refresh the images used in [docs/](../docs/README.md):
+The walkthrough in [docs/](../docs/README.md#visual-walkthrough) is captured from the real image running a
+made-up household, by a script you run on your own machine (no CI run needed):
 
-1. Trigger an e2e run (a dev → main PR, the nightly, or a manual dispatch once the workflow
-   is on the default branch).
-2. Download the **`docs-screenshots`** artifact from that run
-   (`gh run download <run-id> --name docs-screenshots --dir docs/screenshots`).
-3. Commit the updated PNGs under `docs/screenshots/`.
+```
+cd e2e/playwright && npm ci && cd ../..     # once: installs Playwright
+sh e2e/walkthrough/run.sh                   # default image sauso/nightlight:dev; pass another image as the argument
+```
 
-They're committed (not generated at doc-view time) so they render on GitHub.
+It needs Docker. `run.sh` starts two throwaway containers (nothing touches a real database): one seeded with the
+fictional demo household (`backend/src/lib/demoSeed.js`) and turned into a normal writable install by
+`walkthrough/prepare.mjs`, and one empty, for the first-run screen. `walkthrough/capture.mjs` drives them and
+writes the PNGs into `docs/screenshots/`. Look at the images, update the captions in `docs/README.md` if a screen
+changed, and commit the PNGs. If Playwright's own browser is not installed, set `WALK_CHROMIUM` to a Chromium
+executable. The video is synthetic (`walkthrough/make-loop.sh`); the image ships no fonts, so it has no caption.
+
+`playwright/tests/05-screenshots.spec.js` still captures a few screens into `playwright/screenshots/` (uploaded by
+CI as the `docs-screenshots` artifact), but only as a smoke test that those screens render. The committed images
+come from the walkthrough, not from that artifact.

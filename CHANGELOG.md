@@ -27,6 +27,13 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- **The documentation walkthrough shows the current app (#405).** The six screenshots from August showed setup and
+  chrome only. The walkthrough in `docs/README.md` now follows a made-up household through first-run setup, the live
+  view, a child's overview, a night in detail, the morning check, recent alerts, adding a camera, notification
+  providers and a caregiver's Settings page, and the front-page README shows three of them. They come from the real
+  image running the demo household, refreshed by `sh e2e/walkthrough/run.sh` (see `e2e/README.md`); the video is a
+  synthetic picture and says so.
+
 - **The sleep report says when the night may have ended earlier than it shows (#700).** When the app sets aside a
   *got out of bed* because it is far earlier than this child usually gets up (v0.44.2), the night can report no "up"
   time, or one later than the real wake. The report notification, and its "Sleep report updated" follow-up, now end
