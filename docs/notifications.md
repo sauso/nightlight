@@ -176,8 +176,8 @@ see `no Firebase credentials … push notifications disabled`, the service-accou
 server expects it.
 
 ### 5. Enable push on the server (admin, one-time)
-- In the web app, go to **Settings → Integrations → Push notifications** and turn on **"Enable push
-  notifications."**
+- In the web app, go to **Settings → Integrations → Push notifications → Firebase** and turn on
+  **"Enable Firebase notifications."**
 - Saving **validates both files above are present and valid** — if one is missing it tells you
   exactly which, and nothing is enabled. This is a deliberate server-level switch: motion detection
   and the in-app **Recent alerts** list work regardless; only phone notifications wait on this.
