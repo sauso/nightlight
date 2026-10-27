@@ -27,6 +27,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- **The sleep report says when the night may have ended earlier than it shows (#700).** When the app sets aside a
+  *got out of bed* because it is far earlier than this child usually gets up (v0.44.2), the night can report no "up"
+  time, or one later than the real wake. The report notification, and its "Sleep report updated" follow-up, now end
+  with **The night may have ended earlier than this.** on exactly those nights; every other report reads as before.
+  The sentence has no time in it, because a possible earlier exit is a guess. It is about 2% of nights on the owner's
+  two databases (3 of 144, all already known to be wrong), and a genuine early wake that was set aside by mistake
+  gets the sentence too. Not shown on the child's card or the night's page. See
+  [docs/notifications.md](docs/notifications.md) and [docs/sleep-tracking.md](docs/sleep-tracking.md#an-exit-far-earlier-than-usual-does-not-end-the-night).
 - **The morning review asks one question: when they got up.** The screen behind "Was last night right?" used to ask
   for three times and then for a verdict on every recorded bed event, with photos, a "What was it?" follow-up and a
   "Before bedtime" group, and it was skipped most mornings. It now reads **Up at 6:37. Is that right?** with **That's

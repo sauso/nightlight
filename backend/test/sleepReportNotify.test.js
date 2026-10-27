@@ -28,7 +28,7 @@ mock.module('firebase-admin/messaging', { namedExports: { getMessaging: () => ({
 
 const { default: db } = await import('../src/db.js');
 const { initPush } = await import('../src/lib/push.js');
-const { notifySleepReportUpdates } = await import('../src/lib/sleepReportAlert.js');
+const { notifySleepReports, notifySleepReportUpdates } = await import('../src/lib/sleepReportAlert.js');
 const { runNightlySleepJob, lastCompletedNightDate, computeAndStoreNight, nightIsLocked } = await import('../src/lib/sleepAnalysis.js');
 const { saveNightReview } = await import('../src/lib/sleepReviews.js');
 const { default: childrenRouter } = await import('../src/routes/children.js');
@@ -517,6 +517,55 @@ test('reportTag guard: a report missing its nightDate never produces a tag', asy
   assert.equal(sendEach.mock.callCount(), 1);
   const msg = sendEach.mock.calls[0].arguments[0][0];
   assert.ok(!('tag' in msg.android.notification), 'an incomplete entry must never produce a tag key at all, not even a broken one containing the literal word "undefined"');
+});
+
+// #700 push caveat (owner's wording, 2026-10-27): a night where the app set aside an earlier "got out of bed" says so.
+// Driven through the two real send functions with a summary shaped like computeNight's; the key being present on
+// the summary the real job hands over is pinned in sleep-early-exit-lead.test.js (computeAndStoreNight's return).
+const CAVEAT = 'The night may have ended earlier than this.';
+const flaggedExit = { at: '2026-07-01 03:12:20', lead_min: 228, threshold_min: 80 };
+
+async function bodyOf(send, reports) {
+  sendEach.mock.resetCalls();
+  send(reports);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(sendEach.mock.callCount(), 1);
+  return sendEach.mock.calls[0].arguments[0][0].notification.body;
+}
+
+test('★ a night whose earlier exit was set aside says the night may have ended earlier, with and without an "up" time', async () => {
+  const withWake = { status: 'ok', wake_at: '2026-07-01 20:45:00', asleep_minutes: 685, wake_count: 2, wake_unconfirmed: flaggedExit };
+  const noWake = { status: 'ok', wake_at: null, asleep_minutes: 675, wake_count: 2, wake_unconfirmed: flaggedExit };
+  const a = await bodyOf(notifySleepReports, [{ name: 'Notify Kid', summary: withWake, childId: KID, nightDate: NIGHT_DATE }]);
+  assert.equal(a, `Notify Kid: asleep 11h25, 2 wakes, up 06:45. ${CAVEAT}`);
+  const b = await bodyOf(notifySleepReports, [{ name: 'Notify Kid', summary: noWake, childId: KID, nightDate: NIGHT_DATE }]);
+  assert.equal(b, `Notify Kid: asleep 11h15, 2 wakes. ${CAVEAT}`, 'a skipped night often has no wake: the sentence is then the only hint');
+});
+
+test('...the follow-up push carries it too, and a night nothing was set aside on is exactly what it always was', async () => {
+  const flagged = { status: 'ok', wake_at: '2026-07-01 20:45:00', asleep_minutes: 685, wake_count: 2, wake_unconfirmed: flaggedExit };
+  const plain = { status: 'ok', wake_at: '2026-07-01 20:45:00', asleep_minutes: 685, wake_count: 2, wake_unconfirmed: null };
+  const noKey = { status: 'ok', wake_at: '2026-07-01 20:45:00', asleep_minutes: 685, wake_count: 2 };
+  assert.equal(await bodyOf(notifySleepReportUpdates, [{ name: 'Notify Kid', summary: flagged, childId: KID, nightDate: NIGHT_DATE }]),
+    `Notify Kid: asleep 11h25, 2 wakes, up 06:45. ${CAVEAT}`);
+  assert.equal(await bodyOf(notifySleepReports, [{ name: 'Notify Kid', summary: plain, childId: KID, nightDate: NIGHT_DATE }]),
+    'Notify Kid: asleep 11h25, 2 wakes, up 06:45');
+  assert.equal(await bodyOf(notifySleepReports, [{ name: 'Notify Kid', summary: noKey, childId: KID, nightDate: NIGHT_DATE }]),
+    'Notify Kid: asleep 11h25, 2 wakes, up 06:45', 'a summary without the key (nights saved before #700) is unchanged');
+});
+
+test('in a combined message only the child whose exit was set aside gets the sentence', async () => {
+  const flagged = { status: 'ok', wake_at: null, asleep_minutes: 675, wake_count: 1, wake_unconfirmed: flaggedExit };
+  const plain = { status: 'ok', wake_at: '2026-07-01 20:30:00', asleep_minutes: 660, wake_count: 1 };
+  // A report names a REAL child (the per-child choices decide whether it is sent at all); the second one is
+  // inserted here and removed again by the file's own beforeEach (it deletes KID2).
+  db.prepare(`INSERT INTO children (id, name, track_sleep, sleep_window_start, sleep_window_end)
+              VALUES (?, 'Second Kid', 1, '19:00', '07:00')`).run(KID2);
+  const body = await bodyOf(notifySleepReports, [
+    { name: 'Notify Kid', summary: flagged, childId: KID, nightDate: NIGHT_DATE },
+    { name: 'Second Kid', summary: plain, childId: KID2, nightDate: NIGHT_DATE },
+  ]);
+  assert.equal(body, `Notify Kid: asleep 11h15, 1 wake. ${CAVEAT}\nSecond Kid: asleep 11h00, 1 wake, up 06:30`);
 });
 
 test('a report that names no child at all is not sent: there is no choice of theirs to honour', async () => {

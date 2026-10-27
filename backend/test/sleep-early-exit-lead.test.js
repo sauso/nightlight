@@ -196,7 +196,11 @@ describe('#700 a far-early exit is not the night\'s departure', () => {
     assert.deepEqual(night.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80 });
     assert.ok(night.wake_unconfirmed.lead_min > night.wake_unconfirmed.threshold_min);
     // The STORED row is what the card and the push read, so the stored fields are pinned exactly.
-    computeAndStoreNight(CHILD, DATE, { allowDowngrade: false });
+    const handedToThePush = computeAndStoreNight(CHILD, DATE, { allowDowngrade: false });
+    // The nightly job gives THIS return value to the sleep-report push, which says "the night may have ended earlier"
+    // when it carries `wake_unconfirmed` (sleepReportAlert.js lineFor). Pinned here because the push tests use a
+    // fake summary: if the store ever stopped returning the key, the push caveat would silently never appear.
+    assert.deepEqual(handedToThePush.wake_unconfirmed, { at: FALSE_EXIT_AT, lead_min: 630, threshold_min: 80 });
     assert.deepEqual(storedFigures(storedRow()), {
       status: 'ok', wake_at: null, asleep_minutes: 680, awake_minutes: 0, unknown_minutes: 0, wake_count: 0,
       longest_stretch_minutes: 680, // 19:40 to 07:00
@@ -774,7 +778,8 @@ describe('#700 wake_unconfirmed is an added key; only its time is stored', () =>
     });
     const line = info.mock.calls.map((c) => String(c.arguments[0])).find((m) => m.startsWith('[sleep-alert]'));
     // On dev before #700 this read "Lead Kid: asleep 0h50, 0 wakes, up 20:30".
-    assert.equal(line, '[sleep-alert] Sleep report — Lead Kid: Lead Kid: asleep 11h20, 0 wakes');
+    // The push carries the owner's caveat on exactly this kind of night (sleepReportAlert.js lineFor, 2026-10-27).
+    assert.equal(line, '[sleep-alert] Sleep report — Lead Kid: Lead Kid: asleep 11h20, 0 wakes. The night may have ended earlier than this.');
     assert.ok(!line.includes('lead_min') && !line.includes('unconfirmed'), 'the diagnostic is not in the push');
   });
 

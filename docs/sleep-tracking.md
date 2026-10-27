@@ -373,7 +373,9 @@ than that is not taken as the morning wake on its own.
 - **What the night shows instead:** a later *got out of bed* can still be the wake, found the usual
   way. If there is none, the night keeps the wake worked out from movement alone, which is often none:
   the card and the detail page then say "still asleep at" the window's end, and the morning
-  notification has no "up" time. Not right either, but closer than a night that ended in the evening:
+  notification has no "up" time and ends with the sentence **The night may have ended earlier than this.**
+  (only on a night where an exit was set aside; every other report reads as before, and the follow-up
+  "Sleep report updated" carries the sentence too). Not right either, but closer than a night that ended in the evening:
   on the four measured nights, wake errors of 3 to 10 hours became a blank on one night and under
   2 hours on the other three. An improvement, not a fix, fitted to those four nights in one house.
 - **For developers:** a night worked out fresh (`GET /api/children/:id/sleep/:date`, the Recompute
@@ -384,8 +386,9 @@ than that is not taken as the morning wake on its own.
   (`null` when nothing was set aside, and on nights saved before this). Because some readers return the
   whole saved row (`GET /api/children/:id/sleep`, `?stored=1`, and `/sleep/live` when it serves the saved
   last night), `wake_unconfirmed_at` appears in those answers as an **added** key: a fresh night carries
-  `wake_unconfirmed`, a saved row carries `wake_unconfirmed_at`. Neither is in the notification or shown
-  on the page.
+  `wake_unconfirmed`, a saved row carries `wake_unconfirmed_at`. Neither is shown on the page; the
+  sleep-report notification reads `wake_unconfirmed` and adds the sentence above, with no time in it
+  (a possible earlier exit is a guess, and a time in a notification reads as a fact).
 
 **Known limits:**
 - A child who **really is up for the day** that early, or who was **carried to a parent's bed**, in a
