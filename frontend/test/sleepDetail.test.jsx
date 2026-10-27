@@ -202,9 +202,11 @@ describe('which night it opens on', () => {
   });
 
   // ★ Plan review R1 (2026-09-30). An in-bed-only save has neither true_onset_at nor true_wake_at, so the
-  // old gate showed no receipt at all, and reading the raw times would have said "asleep — to —". It must
-  // read back the put-down they gave, with the detector's asleep and wake times from the same response.
-  test('★ arriving from an IN-BED-ONLY save shows "in bed …, asleep … to …" with the resolved times', async () => {
+  // old gate showed no receipt at all, and a receipt that read the missing times would have said "— to —".
+  // It reads back the put-down they gave. Since the one-question review (2026-10-27) the receipt says ONLY
+  // what the person answered, so the detector's asleep and wake times in the same response are planted here
+  // as the markers that must NOT appear.
+  test('★ arriving from an IN-BED-ONLY save shows "in bed …" and nothing the person did not say', async () => {
     const get = vi.fn((path) => {
       if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'tonight', night: { night_date: '2026-08-30' } });
       if (path.includes('/sleep/insights')) return Promise.resolve(null);
@@ -221,9 +223,10 @@ describe('which night it opens on', () => {
     mountAt('/children/kid-1/sleep?date=2026-08-24&saved=1');
 
     expect(await screen.findByText('Thanks — that’s recorded')).toBeVisible();
-    // 08:49Z / 09:28Z / 20:14Z are 6:49 pm, 7:28 pm and 6:14 am in Melbourne (the locale is pinned to
-    // en-AU in test/setup.js, so this exact string is deterministic).
-    expect(screen.getByText('You said in bed 6:49 pm, asleep 7:28 pm to 6:14 am. Tap to change it.')).toBeInTheDocument();
+    // 08:49Z is 6:49 pm in Melbourne (the locale is pinned to en-AU in test/setup.js, so this exact string is
+    // deterministic). The detector's 09:28Z / 20:14Z (7:28 pm, 6:14 am) are in the response and not said.
+    expect(screen.getByText('You said in bed 6:49 pm. Tap to change it.')).toBeInTheDocument();
+    expect(screen.queryByText(/7:28 pm|6:14 am/)).not.toBeInTheDocument();
   });
 
   // ★ A RECEIPT MUST NOT OUTLIVE THE CORRECTION IT QUOTES. Arriving from a save and pressing "Recompute this
@@ -643,10 +646,11 @@ describe('★ the empty states each say a different thing', () => {
       { kids: [KID], settings: { timezone: 'Australia/Melbourne' }, route: '/children/kid-1/sleep' }
     );
     await user.click(await screen.findByRole('button', { name: /was this night right/i }));
-    // A night with no times opens on "Add the times" (NightReview's no-opinion branch), which shows both.
-    await user.click(await screen.findByRole('button', { name: /add the times/i }));
+    // A night with no times opens straight into the time field (NightReview's no-opinion branch) and opens the
+    // bedtime disclosure by itself, so both times are offered: a lone wake would leave the night "no one in the
+    // bed", and both are what make it a scored night.
+    expect(await screen.findByLabelText('Got up for the day')).toBeEnabled();
     expect(screen.getByLabelText('Fell asleep')).toBeEnabled();
-    expect(screen.getByLabelText('Got up for the day')).toBeEnabled();
   });
 
   test('…but not while that empty night is still in progress (the same rule as an `ok` night)', async () => {

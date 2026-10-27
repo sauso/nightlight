@@ -9,6 +9,21 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- **The morning review asks one question: when they got up.** The screen behind "Was last night right?" used to ask
+  for three times and then for a verdict on every recorded bed event, with photos, a "What was it?" follow-up and a
+  "Before bedtime" group, and it was skipped most mornings. It now reads **Up at 6:37. Is that right?** with **That's
+  right** (two taps from the child's page) and **Not quite**, which shows one time field. **No one was in the bed** is a
+  small link underneath, and **Change bedtime or fell-asleep time** is a collapsed section for the rare night one of those
+  is wrong (it opens by itself when the app found no wake-up time, so such a night can still be given both times).
+  Differences to know about: the event list, photos, per-event answers, **Quick check-in?**, **Still moving?** and
+  **Before bedtime** are gone from this screen, and so is the **Answered by** line (the app still records who answered).
+  Answers already saved are kept. A save now records only what you answered, so a wake-only answer no longer also stores
+  the app's guessed asleep time as yours, and the receipt reads back only that (**You said up at 6:37.**). You can still
+  clear a time on the review (clear the field and **Save**) to remove it, as before. The server also now refuses a wake-up time saved on its own that is earlier than the night's stored asleep time (it
+  used to save a night that ended before it began). See [docs/sleep-tracking.md](docs/sleep-tracking.md#correcting-a-night).
+
 ### Security
 
 - **Saving a very long notification server address no longer freezes the server for seconds (CodeQL alerts #12 and #13).**

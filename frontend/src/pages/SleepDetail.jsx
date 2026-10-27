@@ -189,16 +189,12 @@ export default function SleepDetail() {
         // An in-bed-only answer (2026-09-30) is an answer too, and gets a receipt of its own: the gate is
         // no longer "raw onset or wake present" (plan review R1).
         //
-        // The receipt reads back RESOLVED times: the parent's where they gave one, otherwise `computed`,
-        // the detector's own answer from this same response (what the review screen showed, and what this
-        // page's night is computed from). Without that an in-bed-only save read "asleep — to —".
+        // The receipt reads back ONLY what the parent answered (the review's own `true_*` times), never the
+        // detector's: the review now asks one question, and a wake-only answer must not be read back with an
+        // asleep time the person never gave (2026-10-27; see ReviewReceipt).
         const rev = r?.review;
         setReceipt(rev && (rev.true_onset_at || rev.true_wake_at || rev.true_in_bed_at || rev.nobody_in_bed)
-          ? {
-            ...rev,
-            shown_onset_at: rev.true_onset_at || r.computed?.onset_at || null,
-            shown_wake_at: rev.true_wake_at || r.computed?.wake_at || null,
-          }
+          ? rev
           : null);
       })
       .catch(() => { /* the receipt is confirmation, not function — never block the night on it */ });
@@ -250,7 +246,7 @@ export default function SleepDetail() {
         </div>
 
         {receipt && (
-          <ReviewReceipt onsetAt={receipt.shown_onset_at} wakeAt={receipt.shown_wake_at} inBedAt={receipt.true_in_bed_at}
+          <ReviewReceipt onsetAt={receipt.true_onset_at} wakeAt={receipt.true_wake_at} inBedAt={receipt.true_in_bed_at}
             nobodyInBed={!!receipt.nobody_in_bed}
             fmtTime={fmtTime} onOpen={() => navigate(`/children/${id}/review/${date}`)} />
         )}
@@ -413,8 +409,8 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
             time turns it into a scored night (sleepReviews.js, asScoredFromEmpty). Before #355 this was shown
             only on a `corrected` night, so that correction was unreachable from the app (PR #721 review): the
             morning card never asks about an empty night (pendingReview offers `ok` nights only, on purpose),
-            and this was the one other way in. The review page opens on "Add the times" for a night with no
-            times, so both are offered. Same rule as on an `ok` night: not while the night is in progress
+            and this was the one other way in. The review page opens on its time field with the bedtime
+            disclosure already open for a night with no times, so both are offered. Same rule as on an `ok` night: not while the night is in progress
             (nothing is promoted until it is over). Deliberately not added to a morning prompt for every
             empty night. */}
         {!night.in_progress && (

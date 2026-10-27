@@ -804,15 +804,33 @@ router.put('/:id/review/:date', (req, res) => {
   // reproduced by a test): asleep "07:30" (by the noon rule, the morning after) saved fine beside a stored
   // 06:30 wake, and every screen then showed a night ending before it began, its total floored to 0. Only for
   // a save that GIVES an asleep time. No stored night, or no stored wake yet: nothing to check against.
-  // NOT checked: a wake saved while the review has no asleep time, against the stored asleep time (the other
-  // way round), and an API save that ONLY clears the wake beside an asleep time in the review (the edit card
-  // always resends its asleep field with it, so from the screen that save is checked here). Neither was in the
-  // round-3 findings; README, "Known limits".
+  // Still NOT checked: a save that ONLY clears the wake beside an asleep time in the review (the old edit card
+  // always resent its asleep field with it, so that save was checked above; the one-question screen can clear
+  // the wake on its own, so it now reaches here unchecked. Documented in docs/sleep-tracking.md).
   if (patch.trueOnsetAt != null && !merged.true_wake_at) {
     if (asleepAfterWake({ true_onset_at: merged.true_onset_at, true_wake_at: storedNight()?.wake_at })) {
       return res.status(400).json({
         error: '"Fell asleep" can\'t be after the time they got up for the day. Check "Fell asleep", '
           + 'or give "Got up for the day" too.',
+      });
+    }
+  }
+  // The other way round, which used to be a documented gap: a WAKE saved while the review has no asleep time
+  // is compared with the night's STORED asleep time, same one minute of slack, same rule (asleepAfterWake).
+  // It matters now because the review screen asks ONLY for the wake (the one-question screen, 2026-10-27), so
+  // this is the check nearly every save meets: before, "That's right" always sent the asleep time too and the
+  // merged-review check above covered it. Found in the Codex gpt-6-sol plan review (verified): a typed wake
+  // earlier than the stored asleep time saved fine, and every screen then showed a night ending before it
+  // began, its total floored to 0. A time typed before 12:00 is the morning after (localHmToUtcSql's noon
+  // rule), so a mistyped "18:37" for "06:37" is what this catches. Only for a save that GIVES a wake
+  // (`!= null`, like its sibling above): a note, a dismissal or an event answer is never refused over a stored
+  // night that has since moved. The message names the screen's own labels, because this save no longer
+  // carries an asleep time for the person to look at.
+  if (patch.trueWakeAt != null && !merged.true_onset_at) {
+    if (asleepAfterWake({ true_onset_at: storedNight()?.onset_at, true_wake_at: merged.true_wake_at })) {
+      return res.status(400).json({
+        error: '"Got up for the day" can\'t be before the time they fell asleep, which this night already has. '
+          + 'Check the time, or open "Change bedtime or fell-asleep time" and fix "Fell asleep" too.',
       });
     }
   }
