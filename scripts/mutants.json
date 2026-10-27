@@ -21243,8 +21243,8 @@
   {
     "label": "#564 gotify: a trailing slash on the server URL is no longer trimmed (//message)",
     "file": "backend/src/lib/gotify.js",
-    "find": ".replace(/\\/+$/, '')",
-    "replace": "",
+    "find": "stripTrailingSlashes((s.gotify_server_url || '').trim())",
+    "replace": "(s.gotify_server_url || '').trim()",
     "expect": "killed",
     "tests": ["push-provider-payloads.test.js"],
     "namePattern": "trailing slash on the server URL"
