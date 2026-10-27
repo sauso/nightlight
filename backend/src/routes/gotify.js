@@ -5,6 +5,7 @@ import { logger } from '../lib/logger.js';
 import { getGotifyConfig, gotifyConfigured, sendGotify } from '../lib/gotify.js';
 import { maskSecret } from '../lib/secretMask.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { stripTrailingSlashes } from '../lib/stripTrailingSlashes.js';
 
 const router = Router();
 
@@ -40,7 +41,7 @@ const GOTIFY_TOKEN_INVALID =
 
 router.put('/config', requireAuth, requireAdmin, (req, res) => {
   const enabled = !!(req.body && req.body.enabled);
-  const serverUrl = (req.body?.server_url || '').trim().replace(/\/+$/, '');
+  const serverUrl = stripTrailingSlashes((req.body?.server_url || '').trim());
   const existing = getGotifyConfig();
   const rawToken = req.body?.app_token;
   // Any falsy value already meant "keep the saved one" (`|| ''` below), so only a truthy non-string is refused;

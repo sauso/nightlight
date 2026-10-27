@@ -36,7 +36,7 @@ out += failed === 0 ? '✅ ' : '❌ ';
 out += `**${passed} passed**, **${failed} failed** — ${total.toFixed(1)}s\n\n`;
 out += '| | Test | Time |\n|:--:|:--|--:|\n';
 for (const r of rows) {
-  out += `| ${r.ok ? '✅' : '❌'} | ${r.title.replace(/\|/g, '\\|')} | ${(r.duration / 1000).toFixed(1)}s |\n`;
+  out += `| ${r.ok ? '✅' : '❌'} | ${r.title.replace(/\\/g, '\\\\').replace(/\|/g, '\\|')} | ${(r.duration / 1000).toFixed(1)}s |\n`;
 }
 out += '\n_Full report (with traces/screenshots on failure) is the `playwright-report` artifact._';
 
