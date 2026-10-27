@@ -11,8 +11,6 @@
 //   * SettingsRecording mixes an IMMEDIATE-APPLY switch (on-demand recording, which starts and stops
 //     per-camera buffering the moment it is flipped) with SAVE-ON-SUBMIT numeric fields. The control
 //     shapes promise that difference, so the switch must not wait for Save and the numbers must.
-//   * The Settings hub's MQTT badge has three states — connected, enabled-but-not-connected, and off —
-//     and the middle one is the only signal a broker has gone away.
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
@@ -38,7 +36,7 @@ describe('the Settings hub', () => {
   const hub = pathAware;
 
   test('shows the signed-in person, their role and the app version', async () => {
-    hub({ '/about': { version: '0.29.0' }, '/settings/mqtt/status': { enabled: false } });
+    hub({ '/about': { version: '0.29.0' } });
     renderAsAdmin(<Settings />);
     expect(screen.getByText('Nacho')).toBeInTheDocument();
     expect(screen.getByText('admin · Account')).toBeInTheDocument();
@@ -60,14 +58,14 @@ describe('the Settings hub', () => {
   test('ONLY an admin sees the system configuration rows', () => {
     hub({});
     const { unmount } = renderAsAdmin(<Settings />);
-    for (const label of ['General', 'Camera controls', 'Recording', 'Caregivers', 'MQTT', 'Push notifications', 'Clip management', 'Logs']) {
+    for (const label of ['General', 'Camera controls', 'Recording', 'Caregivers', 'Integrations', 'Clip management', 'Logs']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     unmount();
 
     hub({});
     renderAsCaregiver(<Settings />);
-    for (const label of ['General', 'Caregivers', 'MQTT', 'Logs', 'Clip management']) {
+    for (const label of ['General', 'Caregivers', 'Integrations', 'Logs', 'Clip management']) {
       expect(screen.queryByText(label)).not.toBeInTheDocument();
     }
     // A caregiver still gets their own account and About.
@@ -75,36 +73,12 @@ describe('the Settings hub', () => {
     expect(screen.getByText('caregiver · Account')).toBeInTheDocument();
   });
 
-  test('a caregiver is never even asked for the MQTT status', async () => {
+  test('Settings never asks for MQTT status', async () => {
     const spy = pathAware({});
-    renderAsCaregiver(<Settings />);
-    await waitFor(() => expect(spy).toHaveBeenCalledWith('/about'));
-    // Not a cosmetic saving: the endpoint is admin-only, so calling it would log a 403 on every
-    // caregiver's visit to Settings.
-    expect(spy.mock.calls.some(([p]) => String(p).includes('mqtt'))).toBe(false);
-  });
-
-  test('the MQTT badge distinguishes connected, disconnected and off', async () => {
-    for (const [status, text, cls] of [
-      [{ enabled: true, connected: true }, 'Connected', 'status-badge--ok'],
-      [{ enabled: true, connected: false }, 'Disconnected', 'status-badge--bad'],
-      [{ enabled: false, connected: false }, 'Off', 'status-badge--off'],
-    ]) {
-      hub({ '/settings/mqtt/status': status });
-      const { unmount } = renderAsAdmin(<Settings />);
-      // ⚠️ "Disconnected" is the whole point of the badge: enabled but not connected is a broker that
-      // has gone away, and this row is the only place in the app that says so.
-      expect(await screen.findByText(text)).toHaveClass(cls);
-      unmount();
-    }
-  });
-
-  test('no badge at all when the status cannot be read', async () => {
-    vi.spyOn(api, 'get').mockRejectedValue(new Error('nope'));
     renderAsAdmin(<Settings />);
-    await waitFor(() => expect(screen.getByText('MQTT')).toBeInTheDocument());
-    // Better silent than a confident "Off" for a broker that might be running fine.
-    for (const t of ['Connected', 'Disconnected', 'Off']) expect(screen.queryByText(t)).not.toBeInTheDocument();
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('/about'));
+    // The request belongs to Integrations, after an admin opens it.
+    expect(spy.mock.calls.some(([p]) => String(p).includes('mqtt'))).toBe(false);
   });
 
   test('rows navigate, carrying a Settings back-link', async () => {
@@ -181,7 +155,7 @@ describe('the Settings hub', () => {
 
 // --- MQTT ---------------------------------------------------------------------------------------
 
-describe('Settings → MQTT', () => {
+describe('Settings → Integrations → MQTT', () => {
   const SETTINGS = {
     mqtt_enabled: 1,
     mqtt_host: '192.0.2.50',

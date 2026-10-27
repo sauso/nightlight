@@ -11,7 +11,7 @@ Neither requires the other — use one, both, or neither.
 
 ## Connecting to a broker
 
-**Settings → MQTT** (admin only):
+**Settings → Integrations → MQTT** (admin only):
 
 | Field | Notes |
 |---|---|
@@ -32,7 +32,7 @@ same machine or a network you trust, and it is not something to expose across th
 
 1. On the broker, enable a TLS listener (Mosquitto: a `listener 8883` with `certfile`, `keyfile`
    and, if you use your own authority, `cafile`).
-2. In **Settings → MQTT** turn on **Use TLS**, set the port (8883 if you left it blank), and, if the
+2. In **Settings → Integrations → MQTT** turn on **Use TLS**, set the port (8883 if you left it blank), and, if the
    certificate is not from a public authority, paste the **CA certificate**.
 3. Save. Under the form Nightlight says **Connected over TLS**, or **Not connected** with the reason.
 
@@ -58,7 +58,7 @@ protects the connection to the broker; it does **not** change who may publish to
 still your broker's access rules (see [Camera-native motion](#camera-native-motion)).
 
 Saving reconnects automatically (retry every 5 seconds while down) — no restart needed. The
-**Settings** hub shows a status badge next to MQTT:
+**Settings → Integrations** shows a status badge next to MQTT:
 
 - **Connected** (green) — broker handshake succeeded.
 - **Disconnected** (red) — MQTT is enabled but the broker isn't reachable (wrong host/port,
@@ -67,9 +67,9 @@ Saving reconnects automatically (retry every 5 seconds while down) — no restar
 
 If a broker host or port, or a CA certificate, that is not usable is **already stored** (saved by an older
 version, or edited into the database by hand), Nightlight no longer fails to start: it logs
-`[mqtt] Not connecting: <reason>`, leaves MQTT off (the badge shows Disconnected, and **Settings → MQTT** says
+`[mqtt] Not connecting: <reason>`, leaves MQTT off (the badge shows Disconnected, and **Settings → Integrations → MQTT** says
 **Not connected** with which value cannot be used, without repeating it) and keeps running. Correct the value
-under **Settings → MQTT**.
+under **Settings → Integrations → MQTT**.
 
 A green "Connected" badge only means the broker connection itself is up — it says nothing about
 whether any camera's topic is actually being published to. See "Troubleshooting" below.

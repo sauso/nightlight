@@ -121,7 +121,7 @@ for (const [suffix, form] of [['mobile', PHONE], ['desktop', DESKTOP]]) {
   await shot('alerts-mobile');
 
   // The notification providers. Nothing is configured: a fresh install looks exactly like this.
-  await go('/settings/push');
+  await go('/settings/integrations/notifications');
   await page.getByText('Pushover').first().waitFor();
   await shot('notifications-mobile');
 

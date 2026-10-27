@@ -27,6 +27,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- **Settings → Integrations now holds Push notifications and MQTT**, previously two separate rows on Settings. Old links and bookmarks still work through redirects. How either integration works has not changed.
+
 - **The documentation walkthrough shows the current app (#405).** The six screenshots from August showed setup and
   chrome only. The walkthrough in `docs/README.md` now follows a made-up household through first-run setup, the live
   view, a child's overview, a night in detail, the morning check, recent alerts, adding a camera, notification

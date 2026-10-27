@@ -122,7 +122,7 @@ export default function SettingsMqtt() {
 
   return (
     <>
-      <AppHeader title="MQTT" back={{ to: '/settings', label: 'Settings' }} />
+      <AppHeader title="MQTT" back={{ to: '/settings/integrations', label: 'Integrations' }} />
       <main className="app-main">
         {error && <div className="error-banner">{error}</div>}
         {saved && <div className="saved-banner">Saved ✓</div>}

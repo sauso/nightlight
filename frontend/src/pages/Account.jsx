@@ -276,7 +276,7 @@ export default function Account() {
               ) : serverPush && !serverPush.push_enabled ? (
                 <div className="camera-tile__sub" style={{ padding: 12 }}>
                   Push notifications are set up but not enabled on this server yet. An admin can turn
-                  them on under <strong>Settings → Push notifications</strong>.
+                  them on under <strong>Settings → Integrations → Push notifications</strong>.
                 </div>
               ) : (
                 <>

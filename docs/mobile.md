@@ -86,7 +86,7 @@ What the native apps add over the browser/PWA:
 Get a **phone notification** when a camera with motion detection sees movement — even when the app is
 closed. It's off by default, and the in-app **Recent alerts** list — on each child's page, or the
 combined view under **Settings → Logs** (admin only) — works with or without it. There are two
-ways to set it up (pick one), both configured under **Settings → Push notifications**:
+ways to set it up (pick one), both configured under **Settings → Integrations → Push notifications**:
 
 **Pushover (recommended — simplest, and works on iOS).** A small notification service (the same one
 Sonarr/Radarr use). No Firebase project, no Apple Developer account.
@@ -95,14 +95,14 @@ Sonarr/Radarr use). No Firebase project, no Apple Developer account.
    alert several caregivers).
 2. Create a Pushover application at [pushover.net/apps/build](https://pushover.net/apps/build) and copy
    its **API Token**.
-3. In **Settings → Push notifications → Pushover**, paste the token + your user/group key, **Enable**,
+3. In **Settings → Integrations → Push notifications → Pushover**, paste the token + your user/group key, **Enable**,
    **Save** (it verifies with Pushover), and **Send test**. Then enable **Motion detection** on a
    camera. Alerts arrive with a **snapshot** of what triggered them.
 
 **Firebase / FCM (Android app only).** Delivers straight to the Nightlight Android app via your own
 Firebase project: drop `google-services.json` + a `firebase-service-account.json` service-account key
 into your data dir (e.g. `/mnt/user/appdata/nightlight`; the next start moves them into its owner-only
-`private/` folder), then enable it under **Settings → Push notifications**. Each phone opts in under
+`private/` folder), then enable it under **Settings → Integrations → Push notifications**. Each phone opts in under
 **Account → Notifications**.
 
 Full walkthrough for both, with troubleshooting: **[docs/notifications.md](notifications.md)**.

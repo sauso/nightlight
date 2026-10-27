@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  SlidersHorizontal, Bell, ScrollText, Users, Camera,
+  SlidersHorizontal, Plug, ScrollText, Users, Camera,
   Info, Server, ChevronRight, Clapperboard,
 } from 'lucide-react';
 import { api } from '../lib/api.js';
@@ -9,10 +9,9 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import { isNativeApp, changeServer } from '../lib/nativeBridge.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
-import MqttIcon from '../components/icons/MqttIcon.jsx';
 
 // Settings is a hub. Account sits at the top in its own card (like the mockup); system config
-// (General / Camera controls / MQTT / Push / Logs) is admin-only; About + Change server share the
+// (General / Camera controls / Integrations / Logs) is admin-only; About + Change server share the
 // last card. Sign out lives on the Account page, not here. Rows that stay under Settings pass
 // state.from so their back button returns here.
 const BACK = { state: { from: { to: '/settings', label: 'Settings' } } };
@@ -57,8 +56,7 @@ const ADMIN_ITEMS = [
   { key: 'camera', to: '/settings/camera', Icon: Camera, label: 'Camera controls', desc: 'PTZ step size and offline-camera alerts' },
   { key: 'recording', to: '/settings/recording', Icon: Clapperboard, label: 'Recording', desc: 'Automatic clips, on-demand recording, retention and storage' },
   { key: 'caregivers', to: '/settings/users', Icon: Users, label: 'Caregivers', desc: 'Manage caregiver logins and active sessions' },
-  { key: 'mqtt', to: '/settings/mqtt', Icon: MqttIcon, iconSize: 22, label: 'MQTT', desc: 'Connect your MQTT broker' },
-  { key: 'push', to: '/settings/push', Icon: Bell, label: 'Push notifications', desc: 'Enable phone alerts for motion detection' },
+  { key: 'integrations', to: '/settings/integrations', Icon: Plug, label: 'Integrations', desc: 'Notifications and MQTT' },
   { key: 'clips', to: '/settings/clips', Icon: Clapperboard, label: 'Clip management', desc: 'Browse recorded clips by date; bulk-delete' },
   { key: 'logs', to: '/settings/logs', Icon: ScrollText, label: 'Logs', desc: 'Camera history and server logs' },
 ];
@@ -68,22 +66,10 @@ export default function Settings() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [version, setVersion] = useState(null);
-  const [mqtt, setMqtt] = useState(null);
 
   useEffect(() => {
     api.get('/about').then((info) => setVersion(info?.version)).catch(() => {});
-    if (isAdmin) api.get('/settings/mqtt/status').then(setMqtt).catch(() => {});
-  }, [isAdmin]);
-
-  // Filled status badge: green when the broker is connected, red when it's enabled but not
-  // connected, grey when MQTT is switched off entirely.
-  const mqttBadge = mqtt
-    ? (mqtt.connected
-        ? { text: 'Connected', cls: 'status-badge--ok' }
-        : mqtt.enabled
-          ? { text: 'Disconnected', cls: 'status-badge--bad' }
-          : { text: 'Off', cls: 'status-badge--off' })
-    : null;
+  }, []);
 
   return (
     <>
@@ -116,7 +102,6 @@ export default function Settings() {
               <Row
                 key={it.key}
                 {...it}
-                trailing={it.key === 'mqtt' && mqttBadge ? <span className={`status-badge ${mqttBadge.cls}`}>{mqttBadge.text}</span> : undefined}
                 onClick={() => navigate(it.to, BACK)}
               />
             ))}
