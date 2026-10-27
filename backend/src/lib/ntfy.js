@@ -1,6 +1,7 @@
 import db from '../db.js';
 import { logger } from './logger.js';
 import { postWithTimeout, redactSecrets, describeErrorReply, REPLY_FIELDS } from './httpNotify.js';
+import { stripTrailingSlashes } from './stripTrailingSlashes.js';
 
 const NTFY_REPLY_FIELDS = [...REPLY_FIELDS, 'code', 'http'];
 
@@ -16,7 +17,7 @@ export function getNtfyConfig() {
     .get('app') || {};
   return {
     enabled: !!s.ntfy_enabled,
-    serverUrl: (s.ntfy_server_url || 'https://ntfy.sh').trim().replace(/\/+$/, ''),
+    serverUrl: stripTrailingSlashes((s.ntfy_server_url || 'https://ntfy.sh').trim()),
     topic: (s.ntfy_topic || '').trim(),
     token: (s.ntfy_token || '').trim(),
     username: (s.ntfy_username || '').trim(),

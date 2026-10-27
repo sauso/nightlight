@@ -9,6 +9,17 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Security
+
+- **Saving a very long notification server address no longer freezes the server for seconds (CodeQL alerts #12 and #13).**
+  The ntfy and Gotify settings (and the stored push server addresses) removed trailing slashes with a pattern that
+  gets slow on a long run of slashes: about 6 seconds for 100,000 of them, during which nothing else was served. It is
+  now a plain loop (about 0.06 milliseconds for the same input) with the same result for every address. Only an
+  administrator can send that field. The end-to-end test summary also escapes a backslash in a test title (alert #15,
+  test tooling only). Also dismissed on the security tab, after re-reading the code, as test-only or false positives:
+  12 "missing rate limiting" alerts on test servers and 2 "command injection" alerts on the media-process spawn
+  (a fixed program with an argument list, no shell).
+
 ## [0.44.2] - 2026-10-27
 
 ### Changed

@@ -1,6 +1,7 @@
 import db from '../db.js';
 import { logger } from './logger.js';
 import { postWithTimeout, redactSecrets, describeErrorReply } from './httpNotify.js';
+import { stripTrailingSlashes } from './stripTrailingSlashes.js';
 
 // Gotify notifications (self-hosted, https://gotify.net). The server POSTs to a Gotify application's
 // message endpoint with that application's token; the recipient runs the Gotify server + app. Text
@@ -13,7 +14,7 @@ export function getGotifyConfig() {
     .get('app') || {};
   return {
     enabled: !!s.gotify_enabled,
-    serverUrl: (s.gotify_server_url || '').trim().replace(/\/+$/, ''),
+    serverUrl: stripTrailingSlashes((s.gotify_server_url || '').trim()),
     appToken: (s.gotify_app_token || '').trim(),
     priority: Number.isFinite(s.gotify_priority) ? s.gotify_priority : 5,
   };

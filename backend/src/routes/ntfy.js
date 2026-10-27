@@ -5,6 +5,7 @@ import { logger } from '../lib/logger.js';
 import { getNtfyConfig, ntfyConfigured, sendNtfy } from '../lib/ntfy.js';
 import { maskSecret } from '../lib/secretMask.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
+import { stripTrailingSlashes } from '../lib/stripTrailingSlashes.js';
 
 const router = Router();
 
@@ -28,7 +29,7 @@ router.get('/config', requireAuth, requireAdmin, (req, res) => {
 
 router.put('/config', requireAuth, requireAdmin, (req, res) => {
   const enabled = !!(req.body && req.body.enabled);
-  const serverUrl = (req.body?.server_url || 'https://ntfy.sh').trim().replace(/\/+$/, '');
+  const serverUrl = stripTrailingSlashes((req.body?.server_url || 'https://ntfy.sh').trim());
   const topic = (req.body?.topic || '').trim();
   const username = (req.body?.username || '').trim();
   const existing = getNtfyConfig();
