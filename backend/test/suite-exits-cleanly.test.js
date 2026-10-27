@@ -211,6 +211,7 @@ describe('starting the activity tracker does not pin the process open', () => {
 // simply false. Asserting it anyway would be asserting something untrue about correct code.
 // wakeWatcher, clipStorage and timelapse all unref; the other three do not, which is why they were the risk.
 const PERIODIC = [
+  { module: 'src/lib/esphomeManager.js', start: 'startEsphomeSampler', stop: 'stopEsphomeSampler', pinsLoop: true },
   { module: 'src/lib/activityTracker.js', start: 'startActivityTracker', stop: 'stopActivityTracker', pinsLoop: true },
   { module: 'src/lib/sensorSampler.js', start: 'startSensorSampler', stop: 'stopSensorSampler', pinsLoop: true },
   { module: 'src/lib/sleepAnalysis.js', start: 'startSleepJob', stop: 'stopSleepJob', pinsLoop: true },

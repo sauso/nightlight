@@ -74,6 +74,10 @@ export function demoGuard(req, res, next) {
 
   const method = req.method.toUpperCase();
   const path = normalizeRequestPath(req.path);
+  // The demo account is an admin; even GET /export contains private raw readings.
+  if (path === '/api/esphome' || path.startsWith('/api/esphome/')) {
+    return res.status(403).json({ error: BLOCKED_MESSAGE });
+  }
 
   // HEAD is covered alongside GET: Express serves HEAD via the GET handler when no explicit HEAD
   // route exists, so without this a HEAD request would still run the full (expensive, internals-

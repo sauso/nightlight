@@ -209,6 +209,9 @@ describe('deleting a child deletes everything for it', () => {
     const keptId = randomUUID();
     const gone = seedEntity('child', goneId);
     const kept = seedEntity('child', keptId);
+    const goneEsp = db.prepare('SELECT id FROM esphome_entities WHERE child_id = ?').get(goneId).id;
+    const keptEsp = db.prepare('SELECT id FROM esphome_entities WHERE child_id = ?').get(keptId).id;
+    db.prepare('INSERT INTO esphome_readings (entity_id, bucket, n) VALUES (?, 1, 0), (?, 1, 0)').run(goneEsp, keptEsp);
 
     // Anti-vacuous: every referencing column really got a row before we delete, files really exist.
     for (const [k, n] of Object.entries(gone.counts)) assert.ok(n >= 1, `fixture put nothing in ${k}`);
@@ -229,6 +232,8 @@ describe('deleting a child deletes everything for it', () => {
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM children WHERE id = ?').get(goneId).n, 0, 'the child row itself survived');
     assert.ok(db.prepare('SELECT 1 FROM children WHERE id = ?').get(keptId), 'the control child row was deleted');
     for (const [k, n] of Object.entries(countsFor('child', goneId))) assert.equal(n, 0, `${k} still names the deleted child`);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM esphome_readings WHERE entity_id = ?').get(goneEsp).n, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM esphome_readings WHERE entity_id = ?').get(keptEsp).n, 1);
     for (const f of gone.files) assert.ok(!fs.existsSync(f), `file survived the child: ${f}`);
 
     // Rows recorded by the child's cameras (the bed they slept in) go too; the cameras themselves stay.

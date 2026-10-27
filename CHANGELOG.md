@@ -11,6 +11,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- **ESPHome Native API collection (#506).** Admins can configure direct device connections and export per-minute raw sensor readings. The readings are kept separately from sleep tracking, default to 30 days of retention (range 1–365), and are not interpreted or shown to caregivers. See [ESPHome data collection](docs/esphome.md).
+
 - **The morning review asks "Up between 6:10 and 6:50" when the app has two different answers for when a child got
   up.** The app works the wake-up time out two ways (from movement alone, and from the camera seeing them leave the
   bed). When the two differ by 10 minutes or more, the review reads **Up between 6:10 and 6:50. When did they get

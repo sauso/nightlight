@@ -23821,5 +23821,86 @@
     "tests": ["sleep-early-exit-lead.test.js"],
     "namePattern": "#700 T8h3",
     "note": "Round 3, Opus M13b: 46 non-matching rows then 14 matching; a 50-row scan finds only 4 and turns the rule off."
+  },
+  {
+    "label": "#506 device key returned in the admin list",
+    "file": "backend/src/routes/esphome.js",
+    "find": "key_set: !!row.encryption_key, status",
+    "replace": "key_set: row.encryption_key, status",
+    "expect": "killed",
+    "tests": ["esphome-routes.test.js"],
+    "namePattern": "#506 key save"
+  },
+  {
+    "label": "#506 blank edit clears the saved key",
+    "file": "backend/src/routes/esphome.js",
+    "find": "let key = previous?.encryption_key || null;",
+    "replace": "let key = null;",
+    "expect": "killed",
+    "tests": ["esphome-routes.test.js"],
+    "namePattern": "#506 key save"
+  },
+  {
+    "label": "#506 admin gate removed",
+    "file": "backend/src/routes/esphome.js",
+    "find": "router.use(requireAuth, requireAdmin);",
+    "replace": "router.use(requireAuth);",
+    "expect": "killed",
+    "tests": ["esphome-routes.test.js"],
+    "namePattern": "#506 settings"
+  },
+  {
+    "label": "#506 missing encryption flag accepted",
+    "file": "backend/src/lib/esphomeTransport.js",
+    "find": "psk && client.health()?.encrypted !== true",
+    "replace": "psk && client.health()?.encrypted === false",
+    "expect": "killed",
+    "tests": ["esphome-transport.test.js"],
+    "namePattern": "#506 a configured key"
+  },
+  {
+    "label": "#506 sensor silent minute fabricated",
+    "file": "backend/src/lib/esphomeManager.js",
+    "find": "else if (item.kind === 'sensor' && (a.nzero || a.nmiss))",
+    "replace": "else if (item.kind === 'sensor')",
+    "expect": "killed",
+    "tests": ["esphome-manager.test.js"],
+    "namePattern": "#506 numeric buckets"
+  },
+  {
+    "label": "#506 device control sent from telemetry adapter",
+    "file": "backend/src/lib/esphomeTransport.js",
+    "find": "    stopTelemetry = client.on('telemetry', onTelemetry);",
+    "replace": "    client.command('light-lamp', { state: true });\r\n    stopTelemetry = client.on('telemetry', onTelemetry);",
+    "expect": "killed",
+    "tests": ["esphome-transport.test.js"],
+    "namePattern": "#506 read only telemetry"
+  },
+  {
+    "label": "#506 absent state (a real zero or false) recorded as missing",
+    "file": "backend/src/lib/esphomeTransport.js",
+    "find": "const raw = event.state === undefined ? (entity.kind === 'binary_sensor' ? false : 0) : event.state;",
+    "replace": "const raw = event.state;",
+    "expect": "killed",
+    "tests": ["esphome-transport.test.js"],
+    "namePattern": "#506 an update with no state"
+  },
+  {
+    "label": "#506 paged export skips the rest of a minute at a page boundary",
+    "file": "backend/src/routes/esphome.js",
+    "find": "after = [rows.at(-1).bucket, rows.at(-1).entity_id];",
+    "replace": "after = [rows.at(-1).bucket + 1, 0];",
+    "expect": "killed",
+    "tests": ["esphome-routes.test.js"],
+    "namePattern": "#506 a stalled CSV download"
+  },
+  {
+    "label": "#506 a numeric zero counted into mean, min and n",
+    "file": "backend/src/lib/esphomeManager.js",
+    "find": "if (item.kind === 'sensor' && value === 0) { a.nzero++; return; }",
+    "replace": "if (item.kind === 'sensor' && value === 0) a.nzero++;",
+    "expect": "killed",
+    "tests": ["esphome-manager.test.js"],
+    "namePattern": "#506 numeric zeros are counted in nzero"
   }
 ]
