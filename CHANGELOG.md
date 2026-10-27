@@ -11,17 +11,19 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
-- **"Up between 6:10 and 6:50" when the app has two different answers for when a child got up.** The app works the
-  wake-up time out two ways (from movement alone, and from the camera seeing them leave the bed). When the two differ
-  by 10 minutes or more, the child's card, the sleep page and the morning report now say **Up between** and give both
-  times instead of naming one. The review screen asks **Up between 6:10 and 6:50. When did they get up?** with **Around
-  6:10**, **Around 6:50** and **Another time**; each "Around" button records that exact time as your answer, and there
-  is no "That's right" because a range cannot be confirmed as a whole. The wake time the app reports and every stored
-  number are unchanged: this is an extra `wake_range` field (`null` when there is no range) on the night responses.
-  A night you corrected shows your single time. It is a modest help: measured on 26 nights from one house, it
-  appeared on about a quarter, and the true time lay inside it on 3 of the 5 late nights where it appeared. It is
-  not shown when the child stayed still (there is no movement-only estimate), so the worst nights still show one
-  time. See [docs/sleep-tracking.md](docs/sleep-tracking.md#up-between-when-the-app-has-two-answers-for-the-wake-up-time).
+- **The morning review asks "Up between 6:10 and 6:50" when the app has two different answers for when a child got
+  up.** The app works the wake-up time out two ways (from movement alone, and from the camera seeing them leave the
+  bed). When the two differ by 10 minutes or more, the review reads **Up between 6:10 and 6:50. When did they get
+  up?** with **Around 6:10**, **Around 6:50** and **Another time**. Each "Around" button records that exact time as
+  your answer, and there is no "That's right" because a range cannot be confirmed as a whole. A night you already
+  answered shows your single time. The wake time the app reports and every stored number are unchanged; the review
+  response just gains an extra `wake_range` field (`null` when there is no range). **It is deliberately not on the
+  child's card, the sleep page or the morning report**: on 18 nights kept aside for the check, a range would have
+  appeared on 3 of the 9 nights where the single time was right (33%, over the 25% limit set beforehand), so there it
+  would mostly be noise. It is a modest help even in the review: on the 26 design nights it appeared on 7, with the
+  true time inside it on 3 of the 5 late nights where it appeared (4 of 5 on the kept-aside nights), and a child who
+  stays still has no movement-only estimate, so the worst nights still show one time. Measured on one house. See
+  [docs/sleep-tracking.md](docs/sleep-tracking.md#up-between-in-the-morning-review-when-the-app-has-two-answers).
 
 ### Changed
 

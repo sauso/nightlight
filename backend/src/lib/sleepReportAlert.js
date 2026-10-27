@@ -4,7 +4,6 @@ import { sendToAll, pushEnabled, getPublicBaseUrl } from './push.js';
 import { pushoverEnabled, sendPushover } from './pushover.js';
 import { ntfyEnabled, sendNtfy } from './ntfy.js';
 import { gotifyEnabled, sendGotify } from './gotify.js';
-import { wakeRange } from './wakeRange.js';
 
 // Push notification fired once when a child's nightly sleep report is computed (the sleep window has
 // closed and runNightlySleepJob has stored the row). Same multi-provider fan-out as cameraStatusAlert.js.
@@ -75,18 +74,7 @@ function lineFor(name, summary, tz) {
   if (!summary || summary.status !== 'ok') return `${name}: no sleep data`;
   const wake = localHm(summary.wake_at, tz);
   const parts = [`asleep ${fmtDur(summary.asleep_minutes)}`, `${summary.wake_count} wake${summary.wake_count === 1 ? '' : 's'}`];
-  // When the app's two wake estimates disagree by 10+ minutes (lib/wakeRange.js) say so rather than naming
-  // one of them: "up between 06:10 and 06:50". Same `localHm` as the single time, so both are in the home zone.
-  // The "Sleep report updated" follow-up reuses this line. It is only sent when the wake goes from none to a
-  // real time (runNightlySleepJob in sleepAnalysis.js), so a range changing between two values cannot cause
-  // extra pushes: this only rewords a push that was going out anyway. `summary` is the detector's own night
-  // (computeNight), which has both estimates and no `corrected`, so the range is judged on the detector's
-  // night, as the push always was.
-  const range = wakeRange(summary);
-  const from = range && localHm(range.from, tz);
-  const to = range && localHm(range.to, tz);
-  if (from && to) parts.push(`up between ${from} and ${to}`);
-  else if (wake) parts.push(`up ${wake}`);
+  if (wake) parts.push(`up ${wake}`);
   return `${name}: ${parts.join(', ')}`;
 }
 

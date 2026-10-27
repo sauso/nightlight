@@ -365,9 +365,6 @@ test('the stored-night endpoints carry scoring_context as one additive string ke
   const list = (await call(`${server.url}/api/children/${CHILD}/sleep?nights=14`, { token: adminToken })).body.nights;
   assert.equal(list.length, 1);
   assert.equal(typeof list[0].scoring_context, 'string');
-  // `wake_range` is the route's additive "up between" field (lib/wakeRange.js); the stored row has none.
-  const { wake_range: listRange, ...listRest } = list[0];
-  assert.equal(listRange, null, 'this night has one estimate, so no range');
-  assert.deepEqual(listRest, row, 'GET /sleep (getStoredNights) gains the key and changes nothing else');
+  assert.deepEqual(list[0], row, 'GET /sleep (getStoredNights) gains the key and changes nothing else');
   assert.deepEqual(getStoredNights(CHILD)[0], row);
 });

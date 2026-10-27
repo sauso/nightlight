@@ -19,6 +19,13 @@
 // wake lay inside it (+-5 min) on 3 of those 5 late nights. That is honest, modest coverage: roughly a
 // quarter of the late nights get a range that helps, and the rest still show one time.
 //
+// HOLD-OUT, SCORED ONCE against a bar written before it was looked at (2026-10-27, 18 frozen nights): a range
+// on 5 of 18 nights, 3 of them on the 9 RIGHT nights (33%, over the 25% limit), and the true wake inside it on
+// 4 of the 5 shown (passed). The false-alarm rate failed, so by the plan the range is used ONLY inside the
+// morning review's question (routes/children.js, GET /:id/review/:date), where the person is being asked
+// anyway. It is deliberately NOT on the child card, the sleep page or the push: there a range on a night that
+// was fine is noise nobody asked for. Do not wire it into those without a new measurement.
+//
 // KNOWN LIMITS (also in docs/sleep-tracking.md):
 //   - A child who stays still has no movement-only estimate (`wake_at_algo` is null), so the worst nights,
 //     the ones with no logged exit at the true time, show a single time. 5 of the 12 late nights were like

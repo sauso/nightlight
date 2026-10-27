@@ -1,4 +1,4 @@
-// "Up between X and Y" on the three screens that show a wake time (server field `wake_range`, set by
+// "Up between X and Y" on the morning review screen (server field `wake_range`, set by
 // backend/src/lib/wakeRange.js; its rules and routes are tested in backend/test/wake-range*.test.js).
 //
 // What matters here is what the PERSON is asked and what is SENT:
@@ -9,8 +9,8 @@
 //      the two echoes of what was on screen, the settings key, and nothing else), with that end's time.
 //   3. Without a range nothing changes: the single-time question and its buttons are exactly as before.
 //   4. The timezone gate applies to the new buttons: nothing that sends a time works before /settings arrives.
-//   5. The child card and the sleep detail header say "up between" only when the server sent a range, and the
-//      server sends none for a corrected night, so the owner's single time is what they show.
+// The range is deliberately NOT on the child card or the sleep page (the hold-out put it on 33% of right nights);
+// backend/test/wake-range-routes.test.js pins that those responses carry no such field.
 //
 // Melbourne is the fixture zone (UTC+10 in August; the browser is pinned to Pacific/Auckland by vite.config.js,
 // so a time converted in the wrong zone is wrong in a way the assertions see).
@@ -21,8 +21,6 @@ import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin } from './helpers/render.jsx';
 import NightReview from '../src/pages/NightReview.jsx';
-import SleepSummaryCard from '../src/components/SleepSummaryCard.jsx';
-import SleepDetail from '../src/pages/SleepDetail.jsx';
 import { api } from '../src/lib/api.js';
 
 // A successful save navigates away; as in MorningReview.test.jsx, keep the screen mounted for the assertions.
@@ -184,87 +182,3 @@ describe('the review screen without a range is unchanged', () => {
   });
 });
 
-// --- the child card -------------------------------------------------------------------------------
-
-describe('the child page sleep card', () => {
-  const OK_NIGHT = {
-    status: 'ok',
-    night_date: '2026-08-28',
-    onset_at: '2026-08-28 09:10:00', // 19:10
-    wake_at: EARLY, // 05:31 the next morning
-    asleep_minutes: 637,
-    wake_count: 2,
-    longest_stretch_minutes: 300,
-  };
-  const show = (night) => {
-    vi.spyOn(api, 'get').mockResolvedValue({ scope: 'last', night });
-    renderAsAdmin(<SleepSummaryCard childId="kid-1" />, { settings: { timezone: 'Australia/Melbourne' } });
-  };
-  const soon = () => document.querySelector('.night__soon').textContent;
-
-  test('★ a night with a range says "up between A and B" in the app timezone, and not the single wake', async () => {
-    show({ ...OK_NIGHT, wake_range: { from: EARLY, to: LATE } });
-    await screen.findByText('10h 37m asleep');
-    expect(soon()).toMatch(/up between .*5:31.* and .*6:25/);
-    expect(soon()).toMatch(at(7, '10'));
-    expect(soon()).toMatch(/2 wake-ups · longest 5h 0m/);
-  });
-
-  test('★ a night with no range (or a corrected one, which the server sends none for) shows the single time as before', async () => {
-    show({ ...OK_NIGHT, wake_range: null, corrected: true });
-    await screen.findByText('10h 37m asleep');
-    expect(soon()).not.toMatch(/up between/);
-    expect(soon()).toMatch(/7:10.* – .*5:31/);
-    expect(screen.getByText('You corrected this')).toBeInTheDocument();
-  });
-
-  test('a response from a server that predates the field is unchanged', async () => {
-    show(OK_NIGHT);
-    await screen.findByText('10h 37m asleep');
-    expect(soon()).toMatch(/7:10.* – .*5:31/);
-  });
-});
-
-// --- the sleep detail header ----------------------------------------------------------------------
-
-describe('the sleep detail header', () => {
-  const NIGHT = {
-    night_date: '2026-08-28',
-    status: 'ok',
-    in_progress: false,
-    onset_at: '2026-08-28 09:30:00', // 19:30
-    wake_at: EARLY,
-    window_start: '2026-08-28 09:00:00',
-    window_end: '2026-08-28 21:00:00',
-    asleep_minutes: 600,
-    wake_count: 1,
-    longest_stretch_minutes: 300,
-    coverage_minutes: 720,
-    wakes: [], visits: [], alerts: [], wakeClips: [],
-  };
-  const open = (night) => {
-    vi.spyOn(api, 'get').mockImplementation((path) => {
-      if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'last', night: { night_date: '2026-08-28' } });
-      if (path.includes('/sleep/insights')) return Promise.resolve(null);
-      if (path.includes('/sleep/')) return Promise.resolve(night);
-      return Promise.resolve(null);
-    });
-    renderAsAdmin(
-      <Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes>,
-      { kids: [{ id: 'kid-1', name: 'Child B' }], settings: { timezone: 'Australia/Melbourne' }, route: '/children/kid-1/sleep?date=2026-08-28' },
-    );
-  };
-
-  test('★ a night with a range says "up between A and B" under "Asleep from → to"', async () => {
-    open({ ...NIGHT, wake_range: { from: EARLY, to: LATE } });
-    const value = await screen.findByText(/up between/);
-    expect(value.textContent).toMatch(/7:30.* – up between .*5:31.* and .*6:25/);
-  });
-
-  test('★ a night with no range keeps the single wake time', async () => {
-    open({ ...NIGHT, wake_range: null });
-    const value = await screen.findByText(/7:30.* – .*5:31/);
-    expect(value.textContent).not.toMatch(/up between/);
-    expect(screen.queryByText(/up between/)).not.toBeInTheDocument();
-  });
-});

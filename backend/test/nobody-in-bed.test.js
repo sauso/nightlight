@@ -45,9 +45,7 @@ const exactSql = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
 // detector-`empty` night carries. `nobody_in_bed` is added post-review (code-review finding: a time
 // correction on an already-`empty` night also sets `corrected`, so the frontend needs a field that's
 // true ONLY on this path) — it does not appear on a time-corrected night, see the test below.
-// `wake_range` is the "up between" field the ROUTE adds to every night it returns (routes/children.js withWakeRange,
-// lib/wakeRange.js); it is null on a flagged night, which has no wake.
-const OVERLAY_KEYS = ['corrected', 'algo_status', 'algo_onset_at', 'algo_wake_at', 'nobody_in_bed', 'wake_range'];
+const OVERLAY_KEYS = ['corrected', 'algo_status', 'algo_onset_at', 'algo_wake_at', 'nobody_in_bed'];
 
 let server;
 let adminToken;

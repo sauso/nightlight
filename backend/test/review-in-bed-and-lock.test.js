@@ -165,7 +165,7 @@ test('★ the put-down night: "in bed" 18:49 lands on in_bed_at ONLY — asleep 
   assert.equal(res.body.review.true_onset_at, null, 'the asleep time is untouched: that was the bug');
 
   const shown = (await get('/sleep?nights=60')).body.nights.find((n) => n.night_date === DATE);
-  const OVERLAY = ['corrected', 'algo_onset_at', 'algo_wake_at', 'algo_in_bed_at', 'in_bed_corrected', 'wake_range']; // wake_range: the route's additive "up between" field (null here)
+  const OVERLAY = ['corrected', 'algo_onset_at', 'algo_wake_at', 'algo_in_bed_at', 'in_bed_corrected'];
   const names = nightsCols().map((c) => c.name);
   assert.deepEqual(Object.keys(shown).sort(), [...names, ...OVERLAY].sort(), 'the row keeps its columns and gains only the overlay fields');
   for (const c of names) {
