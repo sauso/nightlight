@@ -12672,16 +12672,16 @@
     "note": "Opus review: only the helper's own unit test pinned the lower bound; M-509-10 drops it entirely. Real data matters here: in 5 of 19 vetoed nights the bed was already quiet 10-66 minutes before A. C9b's third case (stretch of 19 from A, quiet before A)."
   },
   {
-    "label": "#509 M-509-22: the settling-tail fallback records its gap start 20 minutes late",
+    "label": "#509 M-509-22: EQUIVALENT since #618: the settling-tail fallback records its gap start 20 minutes late",
     "file": "backend/src/lib/sleepAnalysis.js",
     "find": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i };",
     "replace": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i + 20 };",
-    "expect": "killed",
+    "expect": "equivalent",
     "tests": [
       "sleepAnalysis.test.js"
     ],
     "namePattern": "#509",
-    "note": "Opus review: survived while C10 only killed gapStart 0. The stretch search then finds the gap's own quiet minutes. C10 at the 20/21 trailing boundary."
+    "note": "Killed by C10 before #618 (the veto then found the gap's own quiet minutes and fell back to the movement-only wake). Since #618 the veto's hand-back finds the SAME skip (its gap lies in that stretch) and returns the same exit, so the wake, the metrics and the marker are unchanged: the first #618 head survived it in the #509 mutation run, while the same entry is killed on dev (run 41141098105). selectedGapStart is read by nothing after the veto. Not proven for every contrived shape; a gap that opens before A cannot exist (A starts an active run)."
   },
   {
     "label": "#509 M-509-23: the settling-tail fallback records its gap start one minute early",
