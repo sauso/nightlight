@@ -68,3 +68,71 @@ describe('Integrations hub', () => {
     expect(mqttRow().queryByText(/Connected|Disconnected|Off/)).toBeNull();
   });
 });
+
+describe('Integrations hub: the ESPHome row (#506)', () => {
+  const espRow = () => within(screen.getByText('ESPHome').closest('.list-row'));
+  const dev = (state, enabled = true) => ({ id: 1, enabled, status: { state } });
+  // Answers by address: the MQTT status and the ESPHome list are two different requests.
+  const mockApis = (esphome) => vi.spyOn(api, 'get').mockImplementation(async (path) => {
+    if (path === '/esphome/devices') return typeof esphome === 'function' ? esphome() : esphome;
+    return { enabled: false, connected: false };
+  });
+
+  test('the row carries the ESPHome icon and opens the ESPHome page', async () => {
+    mockApis([]);
+    const Probe = () => <div>at {useLocation().pathname}</div>;
+    const { user } = renderAsAdmin(
+      <Routes>
+        <Route path="/settings/integrations" element={<SettingsIntegrations />} />
+        <Route path="*" element={<Probe />} />
+      </Routes>,
+      { route: '/settings/integrations' }
+    );
+    expect(espRow().getByText('Collect readings from ESPHome sensors')).toBeInTheDocument();
+    // The house icon (a mask, so the "E" is cut out), in the same colour as the other rows' icons.
+    const icon = screen.getByText('ESPHome').closest('.list-row').querySelector('svg mask');
+    expect(icon).not.toBeNull();
+    expect(screen.getByText('ESPHome').closest('.list-row').querySelector('svg path[fill="var(--peri)"]')).not.toBeNull();
+    await user.click(screen.getByText('ESPHome'));
+    expect(await screen.findByText('at /settings/integrations/esphome')).toBeInTheDocument();
+  });
+
+  test.each([
+    [[dev('connected')], 'Connected', 'status-badge--ok'],
+    [[dev('connected'), dev('failed')], 'Disconnected', 'status-badge--bad'],
+    [[dev('connecting')], 'Disconnected', 'status-badge--bad'],
+    [[], 'Off', 'status-badge--off'],
+    [[dev('disabled', false)], 'Off', 'status-badge--off'],
+  ])('devices %j show %s on the row', async (devices, label, cls) => {
+    mockApis(devices);
+    renderAsAdmin(<SettingsIntegrations />);
+    await waitFor(() => expect(espRow().getByText(label)).toHaveClass(cls));
+    expect(api.get).toHaveBeenCalledWith('/esphome/devices');
+  });
+
+  test('★ the MQTT badge is still its own: an ESPHome answer never leaks onto it, and the reverse', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (path) => (path === '/esphome/devices'
+      ? [dev('failed')]
+      : { enabled: true, connected: true }));
+    renderAsAdmin(<SettingsIntegrations />);
+    await waitFor(() => expect(espRow().getByText('Disconnected')).toBeInTheDocument());
+    expect(mqttRow().getByText('Connected')).toBeInTheDocument();
+  });
+
+  test('★ a failed or non-list answer leaves the row usable with no badge', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (path) => {
+      if (path === '/esphome/devices') throw new Error('offline');
+      return { enabled: false, connected: false };
+    });
+    renderAsAdmin(<SettingsIntegrations />);
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/esphome/devices'));
+    expect(screen.getByText('ESPHome')).toBeInTheDocument();
+    expect(espRow().queryByText(/Connected|Disconnected|Off/)).toBeNull();
+
+    vi.restoreAllMocks();
+    mockApis({ unexpected: 'object' });
+    renderAsAdmin(<SettingsIntegrations />);
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/esphome/devices'));
+    expect(within(screen.getAllByText('ESPHome').at(-1).closest('.list-row')).queryByText(/Connected|Disconnected|Off/)).toBeNull();
+  });
+});

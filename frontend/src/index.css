@@ -2882,3 +2882,18 @@ input[type='range'] {
   margin-top: 8px; font-size: 12.5px; line-height: 1.5;
   color: var(--text-secondary);
 }
+
+/* ESPHome settings page (#506). `.btn` is width:100%, so a wrapping group of buttons needs `.btn { width: auto }` or
+   each one takes a whole line (the same trap as the bed-zone buttons). The head wraps its badge under a long name
+   rather than widening the page on a phone. */
+.esphome-device__head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 4px; }
+.esphome-device__title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.esphome-device .camera-tile__sub { overflow-wrap: anywhere; }
+.esphome-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.esphome-actions .btn { width: auto; }
+.esphome-warn { color: var(--offline); }
+.esphome-entities { list-style: none; margin: 10px 0 0; padding: 8px 0 0; border-top: 1px dashed var(--border); display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.esphome-entities li { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.esphome-entities__name { min-width: 0; overflow-wrap: anywhere; }
+.esphome-dates { display: flex; gap: 10px; flex-wrap: wrap; }
+.esphome-dates .field { flex: 1 1 140px; min-width: 0; }
