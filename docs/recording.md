@@ -9,7 +9,7 @@ which is which.
 | **Automatic clips** | A motion/sound **alert** | Yes — it's an alert | 14 days / 5 GB (both configurable) | On the alert, in the Alerts feed |
 | **Wake clips** | Your child **waking up** | **No — silent by design** | 14 days (configurable) | On the wake-up, in the night's sleep detail |
 | **On-demand recordings** | You pressing **Record** | No | **Forever, until you delete them** | The **Recordings** card on the child's page |
-| **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days — **or forever once you judge one** (either way, gone when the camera or child is removed) | The **Room activity** list in the night's sleep detail, as a picture icon (signed-in users only) |
+| **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days — **or forever once you judge one** (either way, gone when the camera or child is removed) | The **Room activity** list in the night's sleep detail, under a row you open (signed-in users only) |
 
 All three are configured under **Settings → Recording** (admin only), and all three write to the same
 place on disk — see [Where recordings are stored](#where-recordings-are-stored).
@@ -221,13 +221,14 @@ saved alongside that decision. These are not clips and never notify you. They ex
 timeline which looks wrong can be *looked at* rather than guessed about.
 
 - **Where you see them.** On a night's sleep detail page, a **Room activity** row that has a saved frame
-  within a minute of it shows a small picture icon. Tap it to see the frame, with the time and whether the
-  camera decided your child got into or out of bed. A row with no frame nearby shows no icon, and a row
-  near two frames shows two icons.
+  within a minute of it has a down arrow, like a wake-up row. Tap the row to open it: the frame appears
+  underneath as a small picture with the time and whether the camera decided your child got into or out of
+  bed, and tapping the picture enlarges it. A row with no frame nearby is a plain line with no arrow, and a
+  row near two frames lists two.
 - **Who sees them.** Anyone signed in who can open the sleep page. A frame is never put in a notification,
   an email or an export, and it can't be opened without signing in.
-- **Older nights may have none.** The icon appears only where the picture still exists: a night older than
-  the retention below, or one whose folder was cleared, simply has no icon. That is not a fault.
+- **Older nights may have none.** The arrow appears only where the picture still exists: a night older than
+  the retention below, or one whose folder was cleared, simply has no arrow. That is not a fault.
 - **The picture is the camera's decision, not the row's cause.** A row shows every frame close in time, even
   one that belongs to a different event. Frames that fall between rows can't be opened from this page.
 

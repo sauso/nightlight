@@ -1356,7 +1356,7 @@ describe('#907 framesForVisit: which saved frames belong on a Room activity row'
   });
 });
 
-describe('#907 the picture button on a Room activity row', () => {
+describe('#907 the saved frame on a Room activity row (expands like a wake-up row)', () => {
   // Two rows in one night: 15:00 (Melbourne 01:00) with a frame, 17:00 (03:00) without. Melbourne is UTC+10.
   const withFrames = (transition_frames) => ({
     ...NIGHT,
@@ -1368,19 +1368,36 @@ describe('#907 the picture button on a Room activity row', () => {
   });
   // The same words are also in the timeline legend, so pick the row's own tag.
   const rowOf = (text) => screen.getAllByText(text).find((el) => el.classList.contains('sleep-visit-tag')).closest('li');
+  // A row with a frame is a button (aria-expanded) and the frame lies underneath it once open.
+  const expand = async (user, text) => user.click(within(rowOf(text)).getByRole('button', { expanded: false }));
 
-  test('★ a row with a frame shows the button, a row without shows nothing; the button opens that frame', async () => {
+  test('★ only a row with a frame expands; its frame shows once opened and opens that frame', async () => {
     mockSleep({ night: withFrames([{ id: 42, type: 'out_of_bed', at: '2026-08-30 15:00:20' }]) });
     const { user } = mount();
     await screen.findByText(/Room activity/);
 
-    const button = await screen.findByRole('button', { name: /Show the frame from 1:00 am \(got out of bed\)/ });
-    expect(within(rowOf('Out of bed')).getByRole('button', { name: /Show the frame/ })).toBe(button);
-    expect(within(rowOf('Movement outside the bed')).queryByRole('button', { name: /Show the frame/ }), 'the row with no frame').toBeNull();
+    // Closed: nothing to click but the head, and the frame is not even rendered (so no image is fetched).
+    expect(screen.queryByRole('button', { name: /Show the frame/ })).toBeNull();
+    expect(rowOf('Out of bed').querySelector('img')).toBeNull();
+    const head = within(rowOf('Out of bed')).getByRole('button');
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    // The row with no frame is a plain line: no button, no arrow.
+    expect(within(rowOf('Movement outside the bed')).queryByRole('button'), 'the row with no frame').toBeNull();
+    expect(rowOf('Movement outside the bed').querySelector('svg.sleep-wakes__chev')).toBeNull();
+
+    await user.click(head);
+    expect(head.getAttribute('aria-expanded')).toBe('true');
+    expect(within(rowOf('Out of bed')).getByRole('button', { name: /Show the frame from 1:00 am \(got out of bed\)/ })).toBeTruthy();
     expect(screen.getAllByRole('button', { name: /Show the frame/ })).toHaveLength(1);
     expect(screen.queryByRole('dialog')).toBeNull();
 
-    await user.click(button);
+    // Closing the row hides it again.
+    await user.click(head);
+    expect(screen.queryByRole('button', { name: /Show the frame/ })).toBeNull();
+    await user.click(head);
+
+    // Re-queried: closing the row unmounted the first button.
+    await user.click(within(rowOf('Out of bed')).getByRole('button', { name: /Show the frame/ }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText(/Bed transition · 1:00 am/)).toBeTruthy();
     expect(within(dialog).getByText(/Got out of bed/)).toBeTruthy();
@@ -1395,20 +1412,26 @@ describe('#907 the picture button on a Room activity row', () => {
     vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}?token=media-token`);
     mockSleep({ night: withFrames([{ id: 42, type: 'out_of_bed', at: '2026-08-30 15:00:20' }]) });
     const { user } = mount();
+    await screen.findByText(/Room activity/);
+    await expand(user, 'Out of bed');
+    // The thumbnail under the row goes through api.url() as well, for the same reason.
+    expect(rowOf('Out of bed').querySelector('img').getAttribute('src'))
+      .toBe('http://host/cameras/bed-transitions/42/snapshot?token=media-token');
     await user.click(await screen.findByRole('button', { name: /Show the frame/ }));
     const dialog = await screen.findByRole('dialog');
     expect(dialog.querySelector('img.image-preview').getAttribute('src'))
       .toBe('http://host/cameras/bed-transitions/42/snapshot?token=media-token');
   });
 
-  test('★ a "Movement outside the bed" row gets its button too, not only an "Out of bed" row', async () => {
-    // WHY: the issue wants the picture on both kinds of row. The other tests put the frame on the child_out row, so
-    // a rule that only drew buttons there would pass them. Here the frame sits within 60 s of the room-kind row
+  test('★ a "Movement outside the bed" row expands too, not only an "Out of bed" row', async () => {
+    // WHY: the issue wants the frame on both kinds of row. The other tests put the frame on the child_out row, so
+    // a rule that only made those expandable would pass them. Here the frame sits within 60 s of the room-kind row
     // (17:00 to 17:02; the frame is 30 s after its end) and nowhere near the child_out row.
     mockSleep({ night: withFrames([{ id: 77, type: 'into_bed', at: '2026-08-30 17:02:30' }]) });
     const { user } = mount();
     await screen.findByText(/Room activity/);
-    expect(within(rowOf('Out of bed')).queryByRole('button', { name: /Show the frame/ })).toBeNull();
+    expect(within(rowOf('Out of bed')).queryByRole('button'), 'the other row is a plain line').toBeNull();
+    await expand(user, 'Movement outside the bed');
     const button = within(rowOf('Movement outside the bed')).getByRole('button', { name: /Show the frame from 3:02 am \(got into bed\)/ });
 
     await user.click(button);
@@ -1431,6 +1454,8 @@ describe('#907 the picture button on a Room activity row', () => {
     mount(TZ);
     await settle();
 
+    // Open the row, then the viewer. The row's own open state must survive the refresh too (checked below).
+    fireEvent.click(within(rowOf('Out of bed')).getByRole('button', { expanded: false }));
     fireEvent.click(screen.getByRole('button', { name: /Show the frame/ }));
     await settle();
     const img = () => screen.getByRole('dialog').querySelector('img.image-preview').getAttribute('src');
@@ -1443,11 +1468,14 @@ describe('#907 the picture button on a Room activity row', () => {
     expect(detailCalls(), 'the page refreshed its night').toBeGreaterThan(callsBefore);
     expect(screen.getByRole('dialog'), 'the viewer is still open').toBeTruthy();
     expect(img()).toBe(srcBefore);
+    expect(within(rowOf('Out of bed')).getByRole('button', { expanded: true }), 'and so is the row').toBeTruthy();
   });
 
   test('★ Escape closes the viewer and focus goes back to the button that opened it', async () => {
     mockSleep({ night: withFrames([{ id: 42, type: 'out_of_bed', at: '2026-08-30 15:00:20' }]) });
     const { user } = mount();
+    await screen.findByText(/Room activity/);
+    await expand(user, 'Out of bed');
     const button = await screen.findByRole('button', { name: /Show the frame/ });
     await user.click(button);
     await screen.findByRole('dialog');
@@ -1457,7 +1485,7 @@ describe('#907 the picture button on a Room activity row', () => {
     expect(document.activeElement).toBe(button);
   });
 
-  test('a row spanning two frames shows two buttons, and each opens its own', async () => {
+  test('a row spanning two frames lists two, and each opens its own', async () => {
     mockSleep({
       night: withFrames([
         { id: 5, type: 'out_of_bed', at: '2026-08-30 15:00:20' },
@@ -1466,6 +1494,7 @@ describe('#907 the picture button on a Room activity row', () => {
     });
     const { user } = mount();
     await screen.findByText(/Room activity/);
+    await expand(user, 'Out of bed');
     const buttons = within(rowOf('Out of bed')).getAllByRole('button', { name: /Show the frame/ });
     expect(buttons).toHaveLength(2);
     await user.click(buttons[1]);
@@ -1474,13 +1503,13 @@ describe('#907 the picture button on a Room activity row', () => {
     expect(within(dialog).getByText(/Got into bed/)).toBeTruthy();
   });
 
-  test('★ a payload without transition_frames (an older server) renders the rows with no buttons and no error', async () => {
+  test('★ a payload without transition_frames (an older server) renders plain rows and no error', async () => {
     mockSleep({ night: withFrames(undefined) });
     mount();
     await screen.findByText(/Room activity/);
     expect(rowOf('Out of bed')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /Show the frame/ })).toBeNull();
-    expect(screen.queryByText(/picture icon/i), 'and no explanation of an icon that is not there').toBeNull();
+    expect(within(rowOf('Out of bed')).queryByRole('button')).toBeNull();
+    expect(screen.queryByText(/the row opens to show it/i), 'and no explanation of an arrow that is not there').toBeNull();
     expect(screen.queryByText(/could not load|couldn.t load/i)).toBeNull();
   });
 
@@ -1488,6 +1517,6 @@ describe('#907 the picture button on a Room activity row', () => {
     mockSleep({ night: withFrames([]) });
     mount();
     await screen.findByText(/Room activity/);
-    expect(screen.queryByRole('button', { name: /Show the frame/ })).toBeNull();
+    expect(within(rowOf('Out of bed')).queryByRole('button')).toBeNull();
   });
 });
