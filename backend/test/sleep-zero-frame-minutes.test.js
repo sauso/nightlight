@@ -566,7 +566,8 @@ describe('#508 hostile fixture: an unwatched row carries NOTHING, whatever it cl
       path.join(path.dirname(fileURLToPath(import.meta.url)), '../src/lib/sleepAnalysis.js'), 'utf8'
     );
     const selects = [...src.matchAll(/SELECT([\s\S]*?)FROM activity_samples/g)].map((m) => m[1]);
-    assert.equal(selects.length, 3, 'expected three readers (main timeline, extRows, extraRows)');
+    // Four since #904: the faulty-microphone guard's post-window read (postRows), which uses motionSeen too.
+    assert.equal(selects.length, 4, 'expected four readers (main timeline, the #904 post-window read, extRows, extraRows)');
     for (const cols of selects) assert.match(cols, /\bmotion_frames\b/, `a reader selects ${cols.trim()} without motion_frames`);
   });
 });

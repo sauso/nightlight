@@ -659,6 +659,9 @@ export function applyVerdicts(childId, nightDate, verdicts, reasons, shown = und
 // real recompute against them — a materially bigger change than this fix's scope. Not attempted here.
 // The result is floored at zero.
 //
+// `sound_discounted_minutes` (#904, a fresh compute only; no column) is kept as measured over the ORIGINAL span too,
+// for the same reason as awake_minutes: which of its minutes fall inside a corrected span is not known here.
+//
 // "NO ONE WAS IN THE BED" (sleep_reviews.nobody_in_bed) is checked BEFORE the times. It carries no
 // times at all — saving it nulls them — so the old "no true_onset_at and no true_wake_at, so nothing to
 // do" early return would have swallowed it whole and the flag would have done nothing anywhere (plan
@@ -771,7 +774,10 @@ export function applyCorrection(childId, night) {
 //   - longest_stretch_minutes = the span: no wake splits it, so it is one stretch, and it equals the total
 //     (a longest stretch above the total is the contradiction issue #355 reported on ok nights).
 // NOT produced: timeline, segments, wakes, visits, transitions. An `empty` night never had them, and
-// corrected timestamps alone must not manufacture an observed timeline (#355 acceptance).
+// corrected timestamps alone must not manufacture an observed timeline (#355 acceptance). Nor
+// `sound_discounted_minutes` (#904): it stays as the empty night had it (null on a fresh compute, absent on a
+// stored row), because computeNight never returns `empty` for a night with a discounted minute in its span, so
+// there is no count to carry, and none is invented for the parent's span.
 //
 // ⚠️ Only when BOTH times exist and the span is positive (span > 0, so a one-minute span promotes and a zero
 // or negative one does not), and only once the night is over (nightNotOverYet, which reads `in_progress` on a
@@ -826,6 +832,13 @@ const EMPTY_NIGHT_NULLS = [
   'onset_at_shadow', 'wake_at_shadow', 'onset_at_algo', 'wake_at_algo',
   'asleep_minutes', 'awake_minutes', 'unknown_minutes', 'wake_count', 'longest_stretch_minutes',
 ];
+// Sleep claims computeNight returns that are NOT sleep_nights columns, so a stored row never has them. Nulled ONLY
+// when present: setting one on a stored row would give the flagged row a key a detector-empty stored row does not
+// have (the PRAGMA shape test in nobody-in-bed.test.js). `sound_discounted_minutes` (#904) counts minutes of the
+// night's sleep span whose sound the faulty-microphone guard ignored; a night the parent says nobody slept in has no
+// such span, and a real detector-empty night carries null, so a fresh `ok` night flagged here must not keep a count
+// (pinned by the #904 "no one was in the bed" test in sleep-faulty-mic.test.js).
+const COMPUTED_ONLY_EMPTY_NULLS = ['sound_discounted_minutes'];
 // The detail view's per-minute extras (`?detail=1`). computeNight builds these only AFTER it has decided
 // the night is `ok`, so a detector-empty night never has them. Removed rather than nulled, so a flagged
 // night's response has the same keys as a detector-empty one, not the same keys with nulls in them.
@@ -851,6 +864,7 @@ const SCORED_NIGHT_DETAIL = [
 function asNobodyInBed(night) {
   const out = { ...night };
   for (const k of EMPTY_NIGHT_NULLS) out[k] = null;
+  for (const k of COMPUTED_ONLY_EMPTY_NULLS) if (k in out) out[k] = null;
   for (const k of SCORED_NIGHT_DETAIL) delete out[k];
   out.status = 'empty';
   out.corrected = true;

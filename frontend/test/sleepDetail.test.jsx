@@ -576,6 +576,35 @@ describe('what it shows for a night', () => {
     await screen.findByText('Wake-ups');
     expect(screen.queryByText('In bed')).toBeNull();
   });
+
+  // #904: the faulty-microphone guard's one line. Both sides: shown with the duration when minutes were discounted,
+  // and nothing at all for 0, null (an unscored night) or a server from before the key existed.
+  test('a night whose microphone looked faulty says so, with how long', async () => {
+    mockSleep({ night: { ...NIGHT, sound_discounted_minutes: 540 } });
+    mount();
+    expect(await screen.findByText(
+      'The microphone looked faulty for 9h 0m, so its sound was not counted as awake time. Movement still was.'
+    )).toBeTruthy();
+  });
+
+  test('...in minutes when it was under an hour', async () => {
+    mockSleep({ night: { ...NIGHT, sound_discounted_minutes: 45 } });
+    mount();
+    expect(await screen.findByText(/^The microphone looked faulty for 45m,/)).toBeTruthy();
+  });
+
+  test.each([
+    ['nothing was discounted', 0],
+    ['the night carries null', null],
+    ['a server from before the key existed sends none', undefined],
+  ])('no microphone line when %s', async (_why, minutes) => {
+    const night = { ...NIGHT };
+    if (minutes !== undefined) night.sound_discounted_minutes = minutes;
+    mockSleep({ night });
+    mount();
+    await screen.findByText('Wake-ups');
+    expect(screen.queryByText(/microphone looked faulty/)).toBeNull();
+  });
 });
 
 describe('★ the empty states each say a different thing', () => {

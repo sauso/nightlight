@@ -11,6 +11,20 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- **A faulty microphone no longer turns a still night into hours awake (#904).** Some camera microphones develop
+  a fault that makes a short, loud click every few seconds in a silent room, and sleep tracking read every one of
+  those minutes as awake. Now, when a night is worked out, the sound of a minute that was loud only in brief spikes
+  is ignored when such minutes make up at least 70% of the watched minutes of an 8-hour stretch (fixed numbers, not
+  settings). Movement still counts, and a cry or noise that lasts is never ignored. The night's sleep detail page
+  then says *"The microphone looked faulty for 9h 40m, so its sound was not counted as awake time"*, and the night's
+  API answer gains a `sound_discounted_minutes` field (0 on an ordinary night). A night with ignored sound is never
+  reported as "no one was in the bed" (that answer also deletes the night's frames), so an empty bed on a camera
+  with a faulty microphone now reads as a night slept. Limits: tonight's live figures get no help until about 5
+  hours into the window; a sleep window that includes the middle of the day can have daytime noise ignored; the
+  child's card and the morning report don't show the note; sound alerts and wake clips are unchanged; and the
+  numbers were measured in one house on one faulty microphone. The sleep scoring version moves to `3`. See
+  [docs/sleep-tracking.md](docs/sleep-tracking.md#a-microphone-that-looks-faulty).
+
 - **See the frame the camera saved at a bed transition, from the sleep page (#907).** A **Room activity** row on a night's sleep detail now has a small picture icon when a saved frame is within a minute of it; tap it to see the frame, with its time and whether the camera decided your child got into or out of bed. A row with no frame shows nothing, and a row near two frames shows two icons. This is for checking a time the page calls "out of bed" against what the camera actually saw. The frames were already being saved (45 days, or kept once judged) and have been shown nowhere since the morning review became wake-only. They stay behind sign-in as before and are never in a notification, email or export; a night older than the retention has no icon. A frame that falls between rows can't be opened from this page, and a row near a frame shows it even when the frame belongs to a different event. The sleep detail response gains a `transition_frames` list (`[{ id, type, at }]`, only on `detail=1`/`debug=1` reads); nothing existing changes and no sleep number moves. See [Bed-transition frames](docs/recording.md#bed-transition-frames-diagnostic-shown-only-in-a-nights-sleep-detail).
 
 - **Copy and paste a bed zone (#905).** On a camera's Motion screen, **Copy / paste zone** shows the painted zone as text you can keep as a backup or paste on another camera. Pasting snaps the shape to the painted squares, saves straight away and asks first if a zone is already painted. Text that is not a zone (not valid, outside the frame, an empty list, too long) is refused with a reason and nothing changes. A zone is a share of the picture, so on a camera with a different view it lands in the same place of a different picture; the screen asks you to check it. Where the browser blocks copying (an install on plain `http`), the text is still there to select and copy by hand. There is no undo. See [Cameras](docs/cameras.md).

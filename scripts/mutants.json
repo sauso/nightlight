@@ -7412,8 +7412,8 @@
   {
     "label": "#508 A09: only the minute's STATE is gated; every other channel of an unwatched row leaks",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE;\r\n    const moved = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || out;\r\n    const heard = r.sound_peak != null && r.sound_peak > SOUND_ACTIVE;\r\n    const active = isActiveRow(r);\r\n    state[i] = state[i] === null ? active : state[i] || active;",
-    "replace": "    const out = r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE;\r\n    const moved = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || out;\r\n    const heard = r.sound_peak != null && r.sound_peak > SOUND_ACTIVE;\r\n    const active = isActiveRow(r);\r\n    if (motionSeen(r)) state[i] = state[i] === null ? active : state[i] || active;",
+    "find": "    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE;\r\n    const moved = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || out;\r\n    const heard = soundCounts(r, i);\r\n    const active = isActiveRow(r, i);\r\n    state[i] = state[i] === null ? active : state[i] || active;",
+    "replace": "    const out = r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE;\r\n    const moved = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || out;\r\n    const heard = soundCounts(r, i);\r\n    const active = isActiveRow(r, i);\r\n    if (motionSeen(r)) state[i] = state[i] === null ? active : state[i] || active;",
     "expect": "killed",
     "tests": ["sleep-zero-frame-minutes.test.js"],
     "namePattern": "#508 T9"
@@ -7548,7 +7548,7 @@
     "label": "#508 A27: the metrics extension skips an unwatched row for stateMetrics but lets its SOUND mark the minute active",
     "file": "backend/src/lib/sleepAnalysis.js",
     "find": "        if (!motionSeen(r)) continue;\r\n        const rowActive",
-    "replace": "        if (!motionSeen(r)) { if (isActiveRow(r)) activeMetrics[i] = true; continue; }\r\n        const rowActive",
+    "replace": "        if (!motionSeen(r)) { if (isActiveRow(r, i)) activeMetrics[i] = true; continue; }\r\n        const rowActive",
     "expect": "killed",
     "tests": ["sleep-zero-frame-minutes.test.js"],
     "namePattern": "#508 T4b"
@@ -23902,5 +23902,104 @@
     "expect": "killed",
     "tests": ["esphome-manager.test.js"],
     "namePattern": "#506 numeric zeros are counted in nzero"
+  },
+  {
+    "label": "#904 a minute whose p75 is exactly SPIKE_P75_MAX is no longer spike-only (<= becomes <)",
+    "file": "backend/src/lib/micGuard.js",
+    "find": "  return soundPeak != null && soundPeak > soundActive && soundP75 != null && soundP75 <= SPIKE_P75_MAX;",
+    "replace": "  return soundPeak != null && soundPeak > soundActive && soundP75 != null && soundP75 < SPIKE_P75_MAX;",
+    "expect": "killed",
+    "tests": ["micGuard.test.js"],
+    "namePattern": "p75 boundary"
+  },
+  {
+    "label": "#904 a window exactly WINDOW_FRACTION spike-only no longer qualifies (< becomes <=)",
+    "file": "backend/src/lib/micGuard.js",
+    "find": "    if ((spikeBefore[i + WINDOW_MIN] - spikeBefore[i]) / watched < WINDOW_FRACTION) continue;",
+    "replace": "    if ((spikeBefore[i + WINDOW_MIN] - spikeBefore[i]) / watched <= WINDOW_FRACTION) continue;",
+    "expect": "killed",
+    "tests": ["micGuard.test.js"],
+    "namePattern": "WINDOW_FRACTION boundary"
+  },
+  {
+    "label": "#904 a window watched for exactly MIN_WATCHED minutes no longer counts (< becomes <=)",
+    "file": "backend/src/lib/micGuard.js",
+    "find": "    if (watched < MIN_WATCHED) continue;",
+    "replace": "    if (watched <= MIN_WATCHED) continue;",
+    "expect": "killed",
+    "tests": ["micGuard.test.js"],
+    "namePattern": "MIN_WATCHED boundary"
+  },
+  {
+    "label": "#904 a window that exactly fits the timeline is never judged (<= n becomes < n)",
+    "file": "backend/src/lib/micGuard.js",
+    "find": "  for (let i = 0; i + WINDOW_MIN <= n; i++) {",
+    "replace": "  for (let i = 0; i + WINDOW_MIN < n; i++) {",
+    "expect": "killed",
+    "tests": ["micGuard.test.js"],
+    "namePattern": "WINDOW_MIN boundary"
+  },
+  {
+    "label": "#904 the window shrinks to 20 minutes (watched floor 16): a 20-minute motionless cry is taken for a fault",
+    "file": "backend/src/lib/micGuard.js",
+    "find": "  for (let i = 0; i + WINDOW_MIN <= n; i++) {\r\n    const watched = watchedBefore[i + WINDOW_MIN] - watchedBefore[i];\r\n    if (watched < MIN_WATCHED) continue;\r\n    if ((spikeBefore[i + WINDOW_MIN] - spikeBefore[i]) / watched < WINDOW_FRACTION) continue;\r\n    cover[i]++;\r\n    cover[i + WINDOW_MIN]--;\r\n  }",
+    "replace": "  for (let i = 0; i + 20 <= n; i++) {\r\n    const watched = watchedBefore[i + 20] - watchedBefore[i];\r\n    if (watched < 16) continue;\r\n    if ((spikeBefore[i + 20] - spikeBefore[i]) / watched < WINDOW_FRACTION) continue;\r\n    cover[i]++;\r\n    cover[i + 20]--;\r\n  }",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "motionless, intermittent cry"
+  },
+  {
+    "label": "#904 every minute inside a qualifying window is discounted, a real cry included",
+    "file": "backend/src/lib/micGuard.js",
+    "find": "    out[k] = inside > 0 && minutes[k] != null && minutes[k].spikeOnly === true;",
+    "replace": "    out[k] = inside > 0 && minutes[k] != null;",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "inside a faulty stretch still counts"
+  },
+  {
+    "label": "#904 windows of 480 WATCHED minutes instead of elapsed ones: spikes either side of an outage are joined",
+    "file": "backend/src/lib/micGuard.js",
+    "find": "  const n = minutes.length;\r\n  const out = new Array(n).fill(false);",
+    "replace": "  minutes = minutes.filter((m) => m != null);\r\n  const n = minutes.length;\r\n  const out = new Array(n).fill(false);",
+    "expect": "killed",
+    "tests": ["micGuard.test.js"],
+    "namePattern": "the window is ELAPSED minutes"
+  },
+  {
+    "label": "#904 the never-empty rule removed: a discounted still night becomes `empty` (and loses its frames)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  if (maxBedPeak < EMPTY_BED_MAX_PEAK && wakeCount === 0 && awake === 0 && discountedIn(onset, sleepEnd) === 0) {",
+    "replace": "  if (maxBedPeak < EMPTY_BED_MAX_PEAK && wakeCount === 0 && awake === 0) {",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "a still child, a quiet zone"
+  },
+  {
+    "label": "#904 the metrics extension classifies without the minute index: the fault's post-window sound is awake again",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "        const rowActive = isActiveRow(r, i);",
+    "replace": "        const rowActive = isActiveRow(r);",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "qualifies only through the post-window minutes"
+  },
+  {
+    "label": "#904 the guard never reads the post-window minutes: an in-window fault that needs them is not discounted",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  const postRows = evidenceEndMin > totalMin",
+    "replace": "  const postRows = false",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "qualifies only through the post-window minutes"
+  },
+  {
+    "label": "#904 the onset view still hears a discounted spike (`heard` ignores the discount)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    const heard = soundCounts(r, i);",
+    "replace": "    const heard = r.sound_peak != null && r.sound_peak > SOUND_ACTIVE;",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "the onset and post-onset view reads the discount"
   }
 ]
