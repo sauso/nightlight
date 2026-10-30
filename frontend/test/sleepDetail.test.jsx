@@ -1358,6 +1358,64 @@ describe('#907 the picture button on a Room activity row', () => {
     expect(dialog.querySelector('img.image-preview').getAttribute('src')).toContain('/cameras/bed-transitions/42/snapshot');
   });
 
+  test('★ the viewer image is the URL api.url() builds for the snapshot path, not the bare path', async () => {
+    // WHY: a bare <img src="/cameras/..."> carries no media token, so on a real install the browser would be
+    // refused (401) and the person would see a broken picture; the sign-in protection is exactly what makes the
+    // frame unreachable without it. The earlier test only checked the path is CONTAINED in src, which a bare path
+    // also satisfies. Here api.url returns a recognisable token URL and the src must be exactly that.
+    vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}?token=media-token`);
+    mockSleep({ night: withFrames([{ id: 42, type: 'out_of_bed', at: '2026-08-30 15:00:20' }]) });
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: /Show the frame/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.querySelector('img.image-preview').getAttribute('src'))
+      .toBe('http://host/cameras/bed-transitions/42/snapshot?token=media-token');
+  });
+
+  test('★ a "Movement outside the bed" row gets its button too, not only an "Out of bed" row', async () => {
+    // WHY: the issue wants the picture on both kinds of row. The other tests put the frame on the child_out row, so
+    // a rule that only drew buttons there would pass them. Here the frame sits within 60 s of the room-kind row
+    // (17:00 to 17:02; the frame is 30 s after its end) and nowhere near the child_out row.
+    mockSleep({ night: withFrames([{ id: 77, type: 'into_bed', at: '2026-08-30 17:02:30' }]) });
+    const { user } = mount();
+    await screen.findByText(/Room activity/);
+    expect(within(rowOf('Out of bed')).queryByRole('button', { name: /Show the frame/ })).toBeNull();
+    const button = within(rowOf('Movement outside the bed')).getByRole('button', { name: /Show the frame from 3:02 am \(got into bed\)/ });
+
+    await user.click(button);
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.querySelector('img.image-preview').getAttribute('src')).toContain('/cameras/bed-transitions/77/snapshot');
+  });
+
+  test('★ an open viewer survives the live night\'s 2-minute refresh (a new night object, same content)', async () => {
+    // WHY: only the latest night is polled, and the refresh replaces `night` with a fresh object. The viewer's state
+    // is the frame itself, kept in NightContent; if it were reset when `night` changes, a picture someone is
+    // looking at would vanish every two minutes. The mock returns a NEW object per call so the refresh really
+    // changes identity, and the request count proves a refresh happened.
+    vi.useFakeTimers();
+    const TZ = 'Australia/Melbourne';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const fresh = () => ({ ...withFrames([{ id: 42, type: 'out_of_bed', at: '2026-08-30 15:00:20' }]), night_date: today, in_progress: true });
+    const get = mockSleep({ live: { scope: 'tonight', night: { night_date: today } }, night: fresh });
+    const detailCalls = () => get.mock.calls.filter(([p]) => p.includes('/sleep/') && !p.includes('live') && !p.includes('insights')).length;
+    const settle = async () => { for (let i = 0; i < 6; i += 1) await vi.advanceTimersByTimeAsync(1); };
+    mount(TZ);
+    await settle();
+
+    fireEvent.click(screen.getByRole('button', { name: /Show the frame/ }));
+    await settle();
+    const img = () => screen.getByRole('dialog').querySelector('img.image-preview').getAttribute('src');
+    const srcBefore = img();
+    expect(srcBefore).toContain('/cameras/bed-transitions/42/snapshot');
+    const callsBefore = detailCalls();
+
+    await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+    await settle();
+    expect(detailCalls(), 'the page refreshed its night').toBeGreaterThan(callsBefore);
+    expect(screen.getByRole('dialog'), 'the viewer is still open').toBeTruthy();
+    expect(img()).toBe(srcBefore);
+  });
+
   test('★ Escape closes the viewer and focus goes back to the button that opened it', async () => {
     mockSleep({ night: withFrames([{ id: 42, type: 'out_of_bed', at: '2026-08-30 15:00:20' }]) });
     const { user } = mount();
