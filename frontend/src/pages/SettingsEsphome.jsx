@@ -76,6 +76,7 @@ export default function SettingsEsphome() {
   const [childrenFailed, setChildrenFailed] = useState(false);
   const [dialog, setDialog] = useState(null); // { kind: 'form', device? } | { kind: 'delete', device } | { kind: 'export', device }
   const [saved, setSaved] = useState('');
+  const [cardVersion, setCardVersion] = useState({}); // device id -> how many times it was edited; part of its card's key
   const later = useLater();
 
   useEffect(() => {
@@ -90,8 +91,11 @@ export default function SettingsEsphome() {
     setSaved(message);
     later(() => setSaved(''), 2500);
   }
-  function afterSave() {
+  // `editedId` is the device that was edited (null for an add). Its card is rebuilt: a Test result describes the
+  // address and key it ran against, and after an edit it would sit beside a status for something else (Codex review).
+  function afterSave(editedId) {
     setDialog(null);
+    if (editedId) setCardVersion((v) => ({ ...v, [editedId]: (v[editedId] || 0) + 1 }));
     devices.reload();
     flash('Saved ✓');
   }
@@ -136,7 +140,7 @@ export default function SettingsEsphome() {
           <div className="card camera-tile__sub">No devices yet. Add one to start collecting readings.</div>
         )}
         {list && list.map((device) => (
-          <DeviceCard key={device.id} device={device} childName={childName(device.child_id)}
+          <DeviceCard key={`${device.id}:${cardVersion[device.id] || 0}`} device={device} childName={childName(device.child_id)}
             onEdit={() => setDialog({ kind: 'form', device })}
             onDelete={() => setDialog({ kind: 'delete', device })}
             onExport={() => setDialog({ kind: 'export', device })} />
@@ -279,6 +283,9 @@ function DeviceFormModal({ device, childOptions, childrenFailed, onClose, onSave
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [test, setTest] = useState(null);
+  // Set at once, not on the next render: two clicks in the same tick (before `busy` has disabled the button) must not
+  // send two POSTs and make two devices (Codex review).
+  const submitting = useRef(false);
 
   // The port is left out when blank, so the server uses 6053 (or keeps the saved one when editing).
   function portProblem() {
@@ -300,16 +307,19 @@ function DeviceFormModal({ device, childOptions, childrenFailed, onClose, onSave
     if (!host.trim()) return setError("Enter the device's IP address.");
     const problem = portProblem();
     if (problem) return setError(problem);
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     setError('');
     try {
       const payload = { name: name.trim(), enabled, child_id: childId || null, ...body() };
       if (editing) await api.put(`/esphome/devices/${device.id}`, payload);
       else await api.post('/esphome/devices', payload);
-      onSaved();
+      onSaved(editing ? device.id : null);
     } catch (err) {
       setError(err.message);
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -473,7 +483,7 @@ function ExportModal({ device, onClose }) {
       </div>
       {range.ok && (
         <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
-          {range.days} day{range.days === 1 ? '' : 's'}, at most about {mb(range.bytes)}.
+          {range.days} day{range.days === 1 ? '' : 's'}, roughly {mb(range.bytes)}.
         </div>
       )}
       {!range.ok && <div className="camera-tile__sub" role="status" style={{ marginBottom: 10 }}>{range.error}</div>}

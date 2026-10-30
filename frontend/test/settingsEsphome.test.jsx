@@ -263,6 +263,33 @@ describe('refreshing while the page is open', () => {
 });
 
 describe('adding a device', () => {
+  test('a port that was entered is the port that is sent', async () => {
+    const { user } = renderAsAdmin(<SettingsEsphome />);
+    await user.click(await screen.findByRole('button', { name: 'Add a device' }));
+    await user.type(screen.getByLabelText('Name'), 'Device Z');
+    await user.type(screen.getByLabelText('IP address'), '10.0.0.9');
+    await user.type(screen.getByLabelText('Port'), '6054');
+    await user.click(saveButton());
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    expect(postSpy.mock.calls[0][1]).toMatchObject({ host: '10.0.0.9', port: 6054 });
+  });
+
+  test('★ two clicks on Save in the same tick make ONE device, and Save is disabled while it is saving', async () => {
+    // WHY: the button is disabled by `busy`, but that only takes effect on the next render. Two clicks inside one
+    // tick (a fast double tap on a phone) would both pass and make two devices; the synchronous guard stops the second.
+    const slow = deferred();
+    mockApi({ post: () => slow.promise });
+    const { user } = renderAsAdmin(<SettingsEsphome />);
+    await user.click(await screen.findByRole('button', { name: 'Add a device' }));
+    await user.type(screen.getByLabelText('Name'), 'Device Z');
+    await user.type(screen.getByLabelText('IP address'), '10.0.0.9');
+    const save = saveButton();
+    await act(async () => { fireEvent.click(save); fireEvent.click(save); });
+    expect(postSpy).toHaveBeenCalledTimes(1);
+    expect(save).toBeDisabled();
+    await act(async () => { slow.resolve({}); });
+  });
+
   test('★ the request carries exactly what was entered; the key only when typed, the port only when given', async () => {
     const { user } = renderAsAdmin(<SettingsEsphome />);
     await user.click(await screen.findByRole('button', { name: 'Add a device' }));
@@ -445,6 +472,22 @@ describe('testing a connection', () => {
     expect(await screen.findByText(sentence)).toBeInTheDocument();
   });
 
+  test('★ editing a device clears its earlier test result, which described the old address and key', async () => {
+    let host = '10.0.0.5';
+    mockApi({
+      onDevices: async () => [device({ host })],
+      post: async () => ({ ok: true, encrypted: true, entities: [] }),
+      put: async () => { host = '10.0.0.6'; return {}; },
+    });
+    const { user } = renderAsAdmin(<SettingsEsphome />);
+    await user.click(await screen.findByRole('button', { name: 'Test' }));
+    expect(await screen.findByText(/Connected and encrypted/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    await user.click(saveButton());
+    await waitFor(() => expect(screen.getByText(/10\.0\.0\.6:6053/)).toBeInTheDocument());
+    expect(screen.queryByText(/Connected and encrypted/)).toBeNull();
+  });
+
   test('inside the Add form the values typed so far are tested (no port, no key when blank)', async () => {
     mockApi({ post: async () => ({ ok: true, encrypted: false, entities: [] }) });
     const { user } = renderAsAdmin(<SettingsEsphome />);
@@ -571,7 +614,7 @@ describe('downloading a CSV', () => {
     await openExport();
     setDates('2026-10-01', '2026-10-31');
     expect(screen.getByRole('button', { name: 'Download' })).toBeEnabled();
-    expect(screen.getByText(/31 days, at most about/)).toBeInTheDocument();
+    expect(screen.getByText(/31 days, roughly/)).toBeInTheDocument();
   });
 
   test('★ a 200-sensor device is held to what fits: no request, and the message names the longest range', async () => {

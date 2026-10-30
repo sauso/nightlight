@@ -78,9 +78,11 @@ export const EXPORT_MAX_DAYS = 31;
 
 // A size guard, client-side only. The route streams but has no row cap, a device may have up to 200 entities
 // (esphomeTransport.js: `discovered.slice(0, 200)`), and this page holds the whole text in memory (and a second copy
-// when it is saved), so 200 entities x 31 days would be about 8.9 million rows. The estimate is an UPPER bound: a
-// row per entity per minute, ~75 bytes a row (a minute_utc timestamp, `#<id>`, a quoted entity name, a child id and
-// eight numbers: 60-90 bytes measured on the shape of the file, not on a real export). The budget is a judgment,
+// when it is saved), so 200 entities x 31 days would be about 8.9 million rows. The estimate assumes a row per entity
+// per minute (a device never writes more) at ~75 bytes a row (a minute_utc timestamp, `#<id>`, a quoted entity name,
+// a child id and eight numbers: 60-90 bytes measured on the shape of the file, not on a real export). It is an
+// ESTIMATE, not a bound, and it counts the sensors the device has NOW: the export also holds the readings of sensors
+// it no longer reports (retired when a firmware change dropped them), which are not counted. The budget is a judgment,
 // not a measurement: a phone has to hold the text and its copy for the save. A typical device (7 entities) is about
 // 0.75 MB a day, so all 31 days fit. A script calling the API is not bound by any of this.
 export const EXPORT_BYTES_PER_ROW = 75;
