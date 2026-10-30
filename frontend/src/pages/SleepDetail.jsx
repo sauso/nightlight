@@ -529,8 +529,10 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
           <div className="sleep-detail__section-title"><DoorOpen size={15} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 6 }} />Room activity · {visits.length}</div>
           <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement the camera saw away from the bed. Before your child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.{frames.length > 0 && ' Where the camera saved a frame when it decided the bed was entered or left, the row opens to show it. Older nights have none.'}</div>
           <ul className="sleep-wakes">
-            {visits.map((v, i) => (
-              <VisitItem key={i} visit={v} frames={framesForVisit(frames, v)} fmtTime={fmtTime} onShowFrame={setFrameFor} />
+            {/* Keyed by when the row starts, not its position: each row keeps its own open/closed state, and the live
+                night is re-read every two minutes, so a row inserted before an open one must not hand it over. */}
+            {visits.map((v) => (
+              <VisitItem key={`${v.start_at}|${v.type}`} visit={v} frames={framesForVisit(frames, v)} fmtTime={fmtTime} onShowFrame={setFrameFor} />
             ))}
           </ul>
         </div>
@@ -616,7 +618,7 @@ function WakeItem({ wake, hits, clip, fmtTime, onPlay, onPlayWake }) {
 // empty state. It lists ALL the frames near it, never one picked for the row: a row can span two bed events,
 // and choosing between them here would hide the very frame someone is looking for. The head may wrap onto a
 // second line on a narrow screen rather than push the page sideways.
-function VisitItem({ visit, frames, fmtTime, onShowFrame }) {
+export function VisitItem({ visit, frames, fmtTime, onShowFrame }) {
   const [open, setOpen] = useState(false);
   const expandable = frames.length > 0;
   const isOut = visit.type === 'child_out';
@@ -639,7 +641,8 @@ function VisitItem({ visit, frames, fmtTime, onShowFrame }) {
       ) : (
         <div className="sleep-wakes__head sleep-wakes__head--visit">{head}</div>
       )}
-      {open && (
+      {/* `expandable` too: a refresh can leave an open row with no frames, and it must not keep an empty detail box. */}
+      {open && expandable && (
         <ul className="sleep-wakes__alerts">
           {frames.map((f) => {
             const what = f.type === 'out_of_bed' ? 'Got out of bed' : 'Got into bed';

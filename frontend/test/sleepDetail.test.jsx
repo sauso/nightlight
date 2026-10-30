@@ -20,10 +20,10 @@
 // "no sleep detected" and "nobody in the bed" mean quite different things, and collapsing them would
 // send someone to check the wrong thing.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor, within, fireEvent, act } from '@testing-library/react';
+import { screen, waitFor, within, fireEvent, act, render } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver, renderAs, forEachRole } from './helpers/render.jsx';
-import SleepDetail, { addDays, framesForVisit } from '../src/pages/SleepDetail.jsx';
+import SleepDetail, { addDays, framesForVisit, VisitItem } from '../src/pages/SleepDetail.jsx';
 import NightReview from '../src/pages/NightReview.jsx';
 import { api } from '../src/lib/api.js';
 
@@ -1511,6 +1511,57 @@ describe('#907 the saved frame on a Room activity row (expands like a wake-up ro
     expect(within(rowOf('Out of bed')).queryByRole('button')).toBeNull();
     expect(screen.queryByText(/the row opens to show it/i), 'and no explanation of an arrow that is not there').toBeNull();
     expect(screen.queryByText(/could not load|couldn.t load/i)).toBeNull();
+  });
+
+  test('★ an open row whose frames disappear in a refresh keeps no empty detail box', () => {
+    // WHY: the live night is re-read every two minutes and a frame can vanish (retention, a cleared folder). The
+    // row's own open state lives in VisitItem, so without the `expandable` guard it would stay "open" and draw an
+    // empty bordered list under a head that is no longer a button.
+    const visit = { start_at: '2026-08-30 15:00:00', end_at: '2026-08-30 15:05:00', minutes: 5, type: 'child_out' };
+    const fmtTime = () => '1:00 am';
+    const frame = { id: 42, type: 'out_of_bed', at: '2026-08-30 15:00:20' };
+    const { container, rerender } = render(<VisitItem visit={visit} frames={[frame]} fmtTime={fmtTime} onShowFrame={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+    expect(container.querySelector('.sleep-wakes__alerts')).not.toBeNull();
+
+    rerender(<VisitItem visit={visit} frames={[]} fmtTime={fmtTime} onShowFrame={() => {}} />);
+    expect(container.querySelector('.sleep-wakes__alerts'), 'no empty detail list').toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  test('★ a row inserted BEFORE an open one does not take over its open state (rows keep their own)', async () => {
+    // WHY: rows were keyed by position, so when a refresh put a new earlier row at index 0 the open state stayed at
+    // index 0 and moved onto the new row, closing the one the person was looking at. They are now keyed by start
+    // time and type. The first call returns one row; every later call returns an extra earlier row as well.
+    vi.useFakeTimers();
+    const TZ = 'Australia/Melbourne';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    let phase = 1;
+    const fresh = () => ({
+      ...NIGHT,
+      night_date: today,
+      in_progress: true,
+      visits: [
+        ...(phase === 2 ? [{ start_at: '2026-08-30 14:00:00', end_at: '2026-08-30 14:02:00', minutes: 2, type: 'room' }] : []),
+        { start_at: '2026-08-30 15:00:00', end_at: '2026-08-30 15:05:00', minutes: 5, type: 'child_out' },
+      ],
+      transition_frames: [
+        ...(phase === 2 ? [{ id: 41, type: 'into_bed', at: '2026-08-30 14:01:00' }] : []),
+        { id: 42, type: 'out_of_bed', at: '2026-08-30 15:00:20' },
+      ],
+    });
+    mockSleep({ live: { scope: 'tonight', night: { night_date: today } }, night: fresh });
+    const settle = async () => { for (let i = 0; i < 6; i += 1) await vi.advanceTimersByTimeAsync(1); };
+    mount(TZ);
+    await settle();
+    fireEvent.click(within(rowOf('Out of bed')).getByRole('button', { expanded: false }));
+    expect(within(rowOf('Out of bed')).getByRole('button', { expanded: true })).toBeTruthy();
+
+    phase = 2;
+    await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+    await settle();
+    expect(within(rowOf('Movement outside the bed')).getByRole('button', { expanded: false }), 'the new row is closed').toBeTruthy();
+    expect(within(rowOf('Out of bed')).getByRole('button', { expanded: true }), 'the row being looked at stays open').toBeTruthy();
   });
 
   test('an empty list is the same as none', async () => {
