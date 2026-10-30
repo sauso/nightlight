@@ -523,6 +523,10 @@ describe('parseZoneText', () => {
   test('tolerates the float noise that makes x + w a hair over 1, but not a real overshoot', () => {
     // 0.5 + 0.5000000000000002 is 1.0000000000000002 in floating point (0.5000000000000001 would round back to 1).
     expect(parseZoneText('[{"x":0.5,"y":0,"w":0.5000000000000002,"h":1}]').ok).toBe(true);
+    // The tolerance is 1e-6 and no wider or narrower: just inside it is kept, just outside it is refused (a review
+    // found the bound itself was unpinned, so 1e-7 and 1e-5 both passed every other test).
+    expect(parseZoneText('[{"x":0.5,"y":0,"w":0.5000005,"h":1}]').ok).toBe(true);
+    expect(parseZoneText('[{"x":0.5,"y":0,"w":0.5000015,"h":1}]')).toMatchObject({ ok: false });
     expect(parseZoneText('[{"x":0.5,"y":0,"w":0.50001,"h":1}]')).toMatchObject({ ok: false });
     expect(parseZoneText('[{"x":0,"y":0.5,"w":1,"h":0.50001}]')).toMatchObject({ ok: false });
   });
