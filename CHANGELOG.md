@@ -18,9 +18,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   settings). Movement still counts, and a cry or noise that lasts is never ignored. The night's sleep detail page
   then says *"The microphone looked faulty for 9h 40m, so its sound was not counted as awake time"*, and the night's
   API answer gains a `sound_discounted_minutes` field (0 on an ordinary night). A night with ignored sound is never
-  reported as "no one was in the bed" (that answer also deletes the night's frames), so an empty bed on a camera
-  with a faulty microphone now reads as a night slept. Limits: tonight's live figures get no help until about 5
-  hours into the window; a sleep window that includes the middle of the day can have daytime noise ignored; the
+  reported as "no one was in the bed" (that answer also deletes the night's frames; "no data" for a night watched
+  too little is unchanged), so an empty bed on a camera with a faulty microphone now usually reads as a night slept.
+  Limits: tonight's live figures get no help until about 5 hours into the window, and a sleep window shorter than
+  2 hours never does; last night's figures can still change either way until about 3 hours after the window; a
+  sleep window that includes the middle of the day can have daytime noise ignored; the
   child's card and the morning report don't show the note; sound alerts and wake clips are unchanged; and the
   numbers were measured on one two-camera installation, on one faulty microphone. The sleep scoring version moves to `3`. See
   [docs/sleep-tracking.md](docs/sleep-tracking.md#a-microphone-that-looks-faulty).

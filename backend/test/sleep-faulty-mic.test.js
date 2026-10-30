@@ -266,6 +266,28 @@ describe('#904 the faulty-microphone guard, through computeNight', () => {
     assert.equal(hhmm(night.wake_at), hhmm(absent.wake_at));
   });
 
+  test('quiet WATCHED minutes count in a window\'s share: 10 spike-only minutes in every 16 is not a fault', (t) => {
+    // #904 review round 2. From 21:00 to 10:00 a repeating 16-minute cycle: 10 spike-only minutes, 3 loud minutes with
+    // a raised p75 (real sound) and 3 quiet ones, all watched. Every 8-hour window holds exactly 30 cycles: 300
+    // spike-only of 480 watched = 62.5%, under 70%, so nothing is discounted and the night is exactly the one with the
+    // guard off. If quiet minutes stopped counting as watched (the guard's per-minute loop, noteSound, creating a
+    // minute's entry only for a LOUD row), each window would read 300 of 390 = 77% and the guard would fire.
+    const sound = [];
+    for (let c = at(21, 0); c < at(10, 0, 1); c = new Date(c.getTime() + 16 * 60000)) {
+      const plus = (min) => new Date(c.getTime() + min * 60000);
+      sound.push([[c, plus(10)], FAULT], [[plus(10), plus(13)], REAL]); // plus(13) to plus(16): QUIET (the default)
+    }
+    t.mock.timers.enable({ apis: ['Date'], now: noon() });
+    layNight({ move: [PUT_DOWN, MORNING], sound, p75Null: true });
+    const off = json(computeNight(CHILD, DATE, { includeTimeline: true }));
+    clearNight();
+    layNight({ move: [PUT_DOWN, MORNING], sound });
+    const night = json(computeNight(CHILD, DATE, { includeTimeline: true }));
+    assert.equal(night.status, 'ok', 'precondition');
+    assert.equal(night.sound_discounted_minutes, 0);
+    assert.deepEqual(night, off);
+  });
+
   test('a still child, a quiet zone and a faulty microphone stays ok: the guard never makes a night `empty`', (t) => {
     // The bed never moves over EMPTY_BED_MAX_PEAK (a quiet zone and a still child), so the only awake time the old
     // rule found was the fault's: a seven-hour "wake-up" from 21:00 to 04:00. With the guard that is gone, and
@@ -297,21 +319,108 @@ describe('#904 the faulty-microphone guard, through computeNight', () => {
   });
 
   test('KNOWN LIMIT (a deliberate decision): an EMPTY bed with a faulty microphone now reads as a night slept', (t) => {
-    // The other side of the never-empty rule. A bed nobody is in, on a camera whose microphone is faulty, with the
-    // fault running to the morning. The old rule read the fault as the child up from 21:00, measured no awake time
-    // before it, and (the bed never moved) called the night `empty`: right, by accident. The guard turns the fault
-    // quiet, the never-empty rule then refuses `empty` because minutes were discounted, and the night is `ok`, 690
-    // minutes asleep. The rule prefers a wrong `ok` (reversible: frames kept, a parent can answer "no one was in the
-    // bed") to a wrong `empty` (irreversible). Stated in KNOWN-ISSUES.md; pinned so a change to it is deliberate.
+    // The other side of the never-empty rule. A bed nobody is in, on a camera whose microphone is faulty. The rule
+    // prefers a wrong `ok` (reversible: frames kept, a parent can answer "no one was in the bed") to a wrong `empty`
+    // (irreversible). What the old rule said depended on when the fault started and how much was watched; each shape
+    // below, before and after. Stated in KNOWN-ISSUES.md; pinned so a change to it is deliberate.
     t.mock.timers.enable({ apis: ['Date'], now: noon() });
-    layNight({ sound: [FAULT_FROM_21], p75Null: true, still: () => STILL_EMPTY });
-    assert.equal(computeNight(CHILD, DATE).status, 'empty', 'precondition: the old rule said nobody was there');
+    const both = (opts) => {
+      clearNight();
+      layNight({ ...opts, p75Null: true, still: () => STILL_EMPTY });
+      if (opts.gap) db.prepare('DELETE FROM activity_samples WHERE bucket_start >= ? AND bucket_start < ?').run(sqlTime(opts.gap[0]), sqlTime(opts.gap[1]));
+      const old = computeNight(CHILD, DATE);
+      clearNight();
+      layNight({ ...opts, still: () => STILL_EMPTY });
+      if (opts.gap) db.prepare('DELETE FROM activity_samples WHERE bucket_start >= ? AND bucket_start < ?').run(sqlTime(opts.gap[0]), sqlTime(opts.gap[1]));
+      return { old, night: computeNight(CHILD, DATE) };
+    };
+
+    // (1) The fault runs from 21:00 to the morning. The old rule read it as the child up from 21:00, measured no awake
+    // time before it, and (the bed never moved) called the night `empty`: right, by accident. Now `ok`, 690 asleep.
+    let r = both({ sound: [FAULT_FROM_21] });
+    assert.equal(r.old.status, 'empty', 'before: nobody was there');
+    assert.equal(r.night.status, 'ok');
+    assert.equal(r.night.asleep_minutes, 690);
+    assert.equal(r.night.sound_discounted_minutes, 600);
+
+    // (2) The fault runs all evening and night (from 16:30). The old rule never found 15 quiet minutes: `no_sleep`, a
+    // child who never fell asleep. Now `ok`, 690 asleep.
+    r = both({ sound: [[[at(16, 30), at(10, 0, 1)], FAULT]] });
+    assert.equal(r.old.status, 'no_sleep', 'before: no clear sleep');
+    assert.equal(r.night.status, 'ok');
+    assert.equal(r.night.asleep_minutes, 690);
+    assert.equal(r.night.sound_discounted_minutes, 690);
+
+    // (3) The same, with three unwatched hours (20:00-23:00, 510 of 690 watched, under the 90% `empty` needs): the old
+    // rule's `no_sleep` becomes `no_data`, "we could not see", which deletes nothing. Not `ok`: the coverage
+    // `no_data` is kept whatever was discounted.
+    r = both({ sound: [[[at(16, 30), at(10, 0, 1)], FAULT]], gap: [at(20, 0), at(23, 0)] });
+    assert.equal(r.old.status, 'no_sleep');
+    assert.equal(r.night.status, 'no_data');
+    assert.equal(r.night.coverage_minutes, 510);
+  });
+
+  test('a 74%-watched empty bed is still no_data: the never-empty rule blocks only `empty`, not the coverage no_data', (t) => {
+    // #904 review round 2 (verified on the first version): a bed that never moves, a faulty microphone from 23:30 to
+    // the morning, and no rows at all from 20:00 to 23:00, so 510 of the 690 window minutes are watched (74%, under
+    // EMPTY_MIN_COVERAGE_FRAC). The empty-bed signals all hold, so the answer is "we could not see" (`no_data`), as it
+    // always was. The first version tested the discount on the OUTER condition, skipped this `no_data` with the
+    // `empty`, and reported `ok`: onset 19:30, 510 asleep, 180 unknown, 450 discounted. `no_data` deletes nothing, so
+    // the reason for the never-empty rule does not reach it. Expected: exactly the night with the guard off.
+    const gap = [at(20, 0), at(23, 0)];
+    const lay = (p75Null) => {
+      clearNight();
+      layNight({ sound: [[[at(23, 30), at(10, 0, 1)], FAULT]], p75Null, still: () => STILL_EMPTY });
+      db.prepare('DELETE FROM activity_samples WHERE bucket_start >= ? AND bucket_start < ?').run(sqlTime(gap[0]), sqlTime(gap[1]));
+    };
+    t.mock.timers.enable({ apis: ['Date'], now: noon() });
+    lay(true);
+    const off = json(computeNight(CHILD, DATE));
+    assert.equal(off.status, 'no_data', 'precondition: with the guard off the night is no_data');
+    assert.equal(off.coverage_minutes, 510);
+    lay(false);
+    const night = json(computeNight(CHILD, DATE));
+    assert.equal(night.status, 'no_data');
+    assert.equal(night.sound_discounted_minutes, null);
+    assert.deepEqual(night, off);
+  });
+
+  test('a night whose discounted minutes all lie before its onset can still be `empty`: the rule counts the measured span only', (t) => {
+    // An empty bed. The microphone is faulty from 16:30 to 23:00 (discounted: 368 of 480 in the 8 hours from 16:30),
+    // and a real noise every 10 minutes from 19:30 to 22:59 keeps 15 quiet minutes from forming, so the night's
+    // onset is 23:00, after every discounted minute. Its measured span [23:00, 07:00) has nothing discounted and
+    // nothing awake, so the night is `empty`, exactly as with the guard off: the never-empty rule asks about the span
+    // it protects, not the whole timeline.
+    const sound = [];
+    for (let m = at(19, 30); m < at(23, 0); m = new Date(m.getTime() + 10 * 60000)) sound.push([[m, new Date(m.getTime() + 60000)], REAL]);
+    sound.push([[at(22, 59), at(23, 0)], REAL]);
+    sound.push([[at(16, 30), at(23, 0)], FAULT]);
+    t.mock.timers.enable({ apis: ['Date'], now: noon() });
+
+    // Precondition, on the same night with one stir in the bed at 03:00 (so it is `ok` and has a timeline): the
+    // evening's fault minutes read quiet with the guard and active without it, and the onset is 23:00 either way.
+    const withStir = (p75Null) => {
+      clearNight();
+      layNight({ sound, p75Null, move: [[at(3, 0, 1), at(3, 6, 1)]], still: () => STILL_EMPTY });
+      return computeNight(CHILD, DATE, { includeTimeline: true });
+    };
+    const stirOff = withStir(true);
+    const stirOn = withStir(false);
+    const stateAt = (n, d) => n.timeline.find((m) => m.t === sqlTime(d)).state;
+    assert.equal(stateAt(stirOff, at(21, 5)), 'active', 'precondition: without the guard the evening fault is active');
+    assert.equal(stateAt(stirOn, at(21, 5)), 'quiet', 'precondition: the guard discounts the evening');
+    assert.equal(hhmm(stirOn.onset_at), '23:00', 'precondition: after every discounted minute');
+    assert.equal(hhmm(stirOff.onset_at), '23:00');
+
     clearNight();
-    layNight({ sound: [FAULT_FROM_21], still: () => STILL_EMPTY });
-    const night = computeNight(CHILD, DATE);
-    assert.equal(night.status, 'ok');
-    assert.equal(night.asleep_minutes, 690);
-    assert.equal(night.sound_discounted_minutes, 600);
+    layNight({ sound, p75Null: true, still: () => STILL_EMPTY });
+    const off = json(computeNight(CHILD, DATE));
+    assert.equal(off.status, 'empty', 'precondition: with the guard off the night is empty');
+    clearNight();
+    layNight({ sound, still: () => STILL_EMPTY });
+    const night = json(computeNight(CHILD, DATE));
+    assert.equal(night.status, 'empty');
+    assert.deepEqual(night, off);
   });
 
   test('a fault that qualifies only through the post-window minutes: the extension and the window agree', (t) => {
@@ -358,7 +467,8 @@ describe('#904 the faulty-microphone guard, through computeNight', () => {
     assert.equal(night.sound_discounted_minutes, 390, '03:00 to the 09:30 wake, the extension included');
 
     // Evidence that has not arrived yet cannot count: at 07:30 the timeline ends then, the fault holds 270 minutes,
-    // and nothing is discounted. The discounted set only grows as the morning's minutes arrive.
+    // and nothing is discounted. A provisional answer like this one can change as the morning's minutes arrive, in
+    // either direction, until the evidence is final (sleepAnalysis.js, the guard's wiring).
     t.mock.timers.reset();
     t.mock.timers.enable({ apis: ['Date'], now: at(7, 30, 1).getTime() });
     const early = computeNight(CHILD, DATE);
@@ -421,6 +531,28 @@ describe('#904 the faulty-microphone guard, through computeNight', () => {
     assert.equal(night.sound_discounted_minutes, 0);
     assert.equal(night.wake_count, 3, 'precondition: the old rule reads the three runs as wake-ups');
     assert.deepEqual(night, old);
+  });
+
+  test('KNOWN LIMIT: a completed night whose window is under 2 hours never gets the guard (its timeline is under 8 hours)', (t) => {
+    // A night's timeline is the 3 hours before its window, the window, and at most 3 hours after it, so a window of
+    // W minutes gives at most 180 + W + 180, and an 8-hour window of the guard (480) fits only from W = 120 on. A
+    // microphone faulty all day: 01:00-03:00 gets the guard, 01:00-02:59 never does, however long ago it ended.
+    const NIGHT_02 = '2026-07-02'; // the window starts after midnight, so it is that day's night
+    const setWindow = (s, e) => db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(s, e, CHILD);
+    t.mock.timers.enable({ apis: ['Date'], now: at(12, 0, 1).getTime() });
+    layNight({ sound: [[[at(16, 30), at(10, 0, 1)], FAULT]] });
+    try {
+      setWindow('01:00', '03:00');
+      const two = computeNight(CHILD, NIGHT_02);
+      assert.equal(two.status, 'ok');
+      assert.equal(two.sound_discounted_minutes, 120);
+      setWindow('01:00', '02:59');
+      const under = computeNight(CHILD, NIGHT_02);
+      assert.equal(under.status, 'no_sleep', 'the fault still reads as a child who never slept');
+      assert.equal(under.sound_discounted_minutes, null);
+    } finally {
+      setWindow('19:30', '07:00');
+    }
   });
 
   test('a night in progress gets no discount until 480 minutes of its timeline exist (5 h into a window, here)', (t) => {

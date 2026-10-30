@@ -49,10 +49,13 @@ export const SPIKE_P75_MAX = 4;
 // (one ordinary night on the other camera of that installation, 2026-10-08: noise from elsewhere in the home while
 // the child was confirmed asleep, with no movement and no alert), and the longest cluster of real alerted sound was 74 minutes. 480 is
 // 5.8x and 6.5x those, and the fault filled it.
-// For everyone else, two costs. (a) A night IN PROGRESS gets no discount until its timeline holds 480 minutes: the
+// For everyone else, these costs. (a) A night IN PROGRESS gets no discount until its timeline holds 480 minutes: the
 // timeline starts 3 hours before the window, so that is about 5 hours into the window when the camera was
 // recording in the evening (later when it was not), and until then the live "tonight so far" view still reads the
-// fault as awake; a completed night is worked out with the guard. (b) The night's timeline runs from 3 hours
+// fault as awake; a completed night is worked out with the guard, (a') unless its window is shorter than 2 hours:
+// a completed night's timeline is at most 180 + window + 180 minutes (sleepAnalysis.js ONSET_LOOKBEHIND_MS and
+// WAKE_LOOKAHEAD_MS), which reaches 480 only from a 120-minute window on (#904 review round 2; pinned by "a completed
+// night whose window is under 2 hours" in sleep-faulty-mic.test.js). (b) The night's timeline runs from 3 hours
 // before the window to up to 3 hours after it, so a sleep window that includes the middle of the day can qualify
 // on ordinary daytime noise: Phase 0 found the non-fault cameras reaching 0.85-0.91 in some 8-hour windows when
 // every hour of the day was looked at. Known limit, in KNOWN-ISSUES.md.

@@ -1279,14 +1279,20 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   //
   // ⚠️ THE ONE EXCEPTION TO "STATUS IS DECIDED FROM WINDOW-BOUNDED DATA" (issue #352, see the empty-bed check):
   // through the discount, post-window sound can now change how in-window minutes read. It can only turn
-  // sound-active minutes quiet, and the discounted set can only GROW as the morning's evidence arrives (a window
-  // that fits a shorter timeline is identical in a longer one, and rows do not change once written), so between
-  // the nightly job's provisional passes a night can gain discounted minutes, never lose them. A `no_sleep` night
-  // can become `ok` that way; the never-empty rule keeps a night with a discounted minute in its span from ever
-  // becoming `empty`. Pinned by the #904 test "a fault that qualifies only through the post-window minutes".
+  // sound-active minutes quiet, but WHICH minutes it turns quiet can change in EITHER direction until the night's
+  // evidence is final (3 hours after the window). More evidence adds windows, which can only add discounted
+  // minutes; but a minute already inside the timeline can still be waiting for its row (the last index is usually
+  // the minute in progress, and a row is written only after its minute closes), and a missing row counts as
+  // unwatched, outside a window's share. When it arrives quiet, the share falls: 280 spike-only minutes with 79
+  // unwatched and that last minute missing qualify at 280/400, and with it present and quiet (280/401) they do not,
+  // so 280 discounted minutes become 0 (found by the #904 review, round 2). So between the nightly job's provisional
+  // passes a `no_sleep` night can become `ok`, and, rarely, an `ok` kept from `empty` only by the never-empty rule
+  // can later become `empty`; a night in progress can change its mind either way. Once the evidence is final, the
+  // answer is fixed. Pinned by the #904 test "a fault that qualifies only through the post-window minutes".
   //
   // An in-progress night has no lookahead and no post-window minutes: its timeline ends now, so it gets no
-  // discount until 480 minutes of it exist (micGuard.js WINDOW_MIN, cost (a)).
+  // discount until 480 minutes of it exist (micGuard.js WINDOW_MIN, cost (a)). A completed night whose window is
+  // under 120 minutes never gets one (preMin + window + at most 180 stays under 480: cost (a')).
   //
   // Hoisted, unchanged, from the transitions read and the departure scan further down, which still use them: the
   // lookahead, and issue #350's evidence cutoff (see the departure scan for why it is bounded by `nowMs`).
@@ -2403,24 +2409,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // essentially no in-bed movement all night, no awakenings, and not one awake minute. A real child —
   // however still a sleeper — stirs: the quietest occupied night on record still peaked at 0.2883 with
   // 1 awakening and 10 awake minutes.
-  //
-  // ★ #904 — NEVER `empty` ON A NIGHT WHOSE SOUND WAS DISCOUNTED. The fourth condition: no minute of this span had
-  // its sound ignored by the faulty-microphone guard. A final `empty` is irreversible (it sends the "no one was in
-  // the bed" report and deletes the night's raw timelapse frames, timelapse.js discardFinalEmptyNightFrames, #419),
-  // and on a fault night the minutes the guard has just turned quiet may have been the only awake time, and so the
-  // only thing that kept the night `ok`: a still child in a bed zone that barely registers movement then reads
-  // "nobody slept here" because the microphone was broken. So such a night stays `ok`, with the discounted figures
-  // (and says so: sound_discounted_minutes > 0). Counted over the same window-bounded span as the three signals
-  // above, before the metrics extension. The 2026-10-29 fault night is nowhere near this (its in-bed peak was
-  // ~0.97-0.99, the line is 0.1), but a quiet-zone install with the same fault would reach it. Pinned by the #904
-  // test "a still child, a quiet zone and a faulty microphone stays ok".
-  // ⚠️ THE COST, a deliberate decision (KNOWN-ISSUES.md): the rule cannot tell that still child from an EMPTY bed on a
-  // camera with the same fault. Where the fault runs to the morning, the old rule read it as the child up from when
-  // it began, measured no awake time before that, and called the night `empty` (right, by accident); now the fault
-  // is quiet and this condition refuses `empty`, so the night reads `ok`, the whole window asleep. A wrong `ok` is
-  // reversible (frames kept; a parent can answer "no one was in the bed"), a wrong `empty` is not. Pinned by the
-  // #904 test "KNOWN LIMIT (a deliberate decision): an EMPTY bed with a faulty microphone".
-  if (maxBedPeak < EMPTY_BED_MAX_PEAK && wakeCount === 0 && awake === 0 && discountedIn(onset, sleepEnd) === 0) {
+  if (maxBedPeak < EMPTY_BED_MAX_PEAK && wakeCount === 0 && awake === 0) {
     // ...but only on a night we actually WATCHED almost all of (see EMPTY_MIN_COVERAGE_FRAC for why this
     // is stricter than the no_data gate, and why 0.9 is a hypothesis). A night that looks empty in the
     // part we saw, with too much of it unseen, is "we could not see", never "no one was there".
@@ -2439,12 +2428,39 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     // protected by the downgrade guard when it closes: pre-existing, not specific to `empty` or to #508.)
     // Pinned by the #508 tests T6g/T6h.
     if (coverage < winMin * EMPTY_MIN_COVERAGE_FRAC) return { ...result, status: 'no_data' };
-    return {
-      ...result,
-      status: 'empty',
-      // Deliberately no onset/wake/duration: reporting "11h06m asleep, 0 wakes" for a bed nobody was in
-      // is the bug being fixed. The night is a real observation, it just isn't a sleep.
-    };
+    // ★ #904 — NEVER `empty` ON A NIGHT WHOSE SOUND WAS DISCOUNTED: when a minute of this span had its sound ignored
+    // by the faulty-microphone guard, the `empty` return below is skipped and the night falls through to `ok`, with
+    // the discounted figures (and says so: sound_discounted_minutes > 0). ONLY that return: the coverage `no_data`
+    // just above fires exactly as before, whatever was discounted, because "we could not see" deletes nothing and is
+    // still the honest answer for a night watched too little (#904 review round 2: the first version put this test
+    // on the outer `if` and so also skipped that `no_data`, turning a 74%-watched empty bed into `ok`). For a night
+    // with nothing discounted the flow is exactly the pre-#904 one.
+    //
+    // Why: a final `empty` is irreversible (it sends the "no one was in the bed" report and deletes the night's raw
+    // timelapse frames, timelapse.js discardFinalEmptyNightFrames, #419), and on a fault night the minutes the guard
+    // has just turned quiet may have been the only awake time, and so the only thing that kept the night `ok`: a
+    // still child in a bed zone that barely registers movement would read "nobody slept here" because the microphone
+    // was broken. Counted over the same window-bounded span as the three signals above, before the metrics
+    // extension. The 2026-10-29 fault night is nowhere near this (its in-bed peak was ~0.97-0.99, the line is 0.1),
+    // but a quiet-zone install with the same fault would reach it. Pinned by the #904 tests "a still child, a quiet
+    // zone and a faulty microphone stays ok" and "...a 74%-watched empty bed is still no_data".
+    //
+    // ⚠️ THE COST, a deliberate decision (KNOWN-ISSUES.md): this cannot tell that still child from an EMPTY bed on a
+    // camera with the same fault. On the pre-#904 rule such a night read `empty` (the fault ran to the morning, read
+    // as the child up from when it began, with no awake time before that), `no_sleep` (the fault ran all evening, so
+    // no 15 quiet minutes were ever found) or `no_data` (too little watched), depending on when the fault started and
+    // how much was watched. Now the coverage `no_data` is kept, a `no_sleep` night watched for less than
+    // EMPTY_MIN_COVERAGE_FRAC becomes `no_data` too, and every other such night reads `ok` with the whole window
+    // asleep. A wrong `ok` is reversible (frames kept; a parent can answer "no one was in the bed"), a wrong `empty`
+    // is not. Pinned by the #904 tests "KNOWN LIMIT (a deliberate decision): an EMPTY bed with a faulty microphone".
+    if (discountedIn(onset, sleepEnd) === 0) {
+      return {
+        ...result,
+        status: 'empty',
+        // Deliberately no onset/wake/duration: reporting "11h06m asleep, 0 wakes" for a bed nobody was in
+        // is the bug being fixed. The night is a real observation, it just isn't a sleep.
+      };
+    }
   }
 
   // ⚠️ ONLY NOW, AFTER STATUS IS SETTLED (issue #352). A real, transition-confirmed post-window wake IS

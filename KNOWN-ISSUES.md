@@ -1014,6 +1014,15 @@ so it is a first estimate for every other home.
   window, and no 8-hour stretch can be judged until 8 hours of it exist: about 5 hours into the window (later if
   the camera was not recording in the evening). Until then "Tonight so far" still reads a faulty microphone as
   awake. The finished night, the stored summary and the morning report use the guard.
+- **A sleep window shorter than 2 hours never gets the guard**, even long after it ended. Its timeline is the 3
+  hours before the window, the window, and at most the 3 hours after it, so it reaches the 8 hours a stretch needs
+  only when the window is at least 2 hours long (480 - 180 - 180 = 120 minutes): 01:00-03:00 is guarded, 01:00-02:59
+  never is.
+- **Last night's figures can still change, either way, until about 3 hours after its window.** A minute whose row
+  has not been written yet (the minute in progress, for one) counts as unwatched, and when it arrives it can tip an
+  8-hour stretch over or under the 70%. So a provisional night can gain or lose ignored minutes between the nightly
+  update's passes and, rarely, a night that was kept `ok` only by the rule below can later become "no one was in the
+  bed". The figures are fixed once the evidence is final.
 - **A sleep window that includes the middle of the day** can have ordinary daytime noise ignored: measured on
   the same cameras, ordinary days reached 85-91% in some 8-hour stretches.
 - **A microphone that is faulty only part of the time** (spikes in fewer than about 70% of minutes) is not caught
@@ -1031,8 +1040,13 @@ so it is a first estimate for every other home.
 - **A ticking clock, or any spiky noise that runs all night, is treated as a fault** on purpose.
 - **Never "no one was in the bed" when sound was ignored.** That answer also deletes the night's timelapse frames,
   and on a still child in a bed zone that barely registers movement the ignored minutes may have been the only
-  awake time. The cost: an **empty** bed on a camera with a faulty microphone now reads as a night slept (before,
-  the fault happened to make such a night "no one in the bed"). Answer **No one was in the bed** in the review.
+  awake time. "We could not see" (a night watched for less than 90% of its window, "no data") is still given as
+  before, because it deletes nothing. The cost: an **empty** bed on a camera with a faulty microphone now usually
+  reads as a night slept. Before this change such a night read "no one was in the bed" (a fault that started during
+  the night and ran to the morning), "no clear sleep" (a fault that ran all evening, so the child seemed never to
+  settle) or "no data" (too little watched), depending on when the fault started and how much was watched. Now a
+  night watched for less than 90% reads "no data" (also where it used to read "no clear sleep"), and every other one
+  reads as slept for the whole window. Answer **No one was in the bed** in the review.
 - **Only the sleep detail page shows the note.** The child's card, the stored-night list and the morning report
   have the corrected numbers but not the note (it is not stored).
 - **Sound alerts and wake clips are unchanged.** The faulty camera in the incident still sent sound alerts, and a

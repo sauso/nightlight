@@ -365,7 +365,10 @@ minutes (at least 384 watched, at least 70% of those spike-only) is discounted. 
 view), `isActiveRow` (so `state`, the wake runs and the metrics) and the metrics extension all read that one array. It
 covers window start - 3 h to the departure scan's evidence cutoff (window end + up to 3 h, never past now), read
 before the main loop, so post-window minutes can decide whether in-window ones are discounted: the one exception to
-"status is decided from window-bounded data". A night with a discounted minute in its span is never `empty`. The
+"status is decided from window-bounded data" (and, until the evidence is final, a minute whose row arrives late can
+move a provisional night's discount either way). A night with a discounted minute in its span is never `empty`: only
+the `empty` return is skipped (it falls through to `ok`), while the coverage `no_data` inside the same empty-bed test
+fires as before. The
 additive result key `sound_discounted_minutes` (the discounted minutes in the span the detector measured, which a
 parent's time correction does not change: `applyCorrection` keeps the detector's count; an integer on `ok`,
 `null` on every other status, nulled by "no one was in the bed") is not stored: there is no column.

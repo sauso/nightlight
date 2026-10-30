@@ -337,6 +337,13 @@ Known limits:
   before the sleep window, so that is about 5 hours into the window (later if the camera was not
   recording in the evening). Until then a faulty microphone still reads as awake in "Tonight so far";
   the finished night is worked out with the guard.
+- **A sleep window shorter than 2 hours never gets the guard**, even after it has ended: the night's
+  timeline (3 hours before the window, the window, at most 3 hours after it) only reaches 8 hours when
+  the window is at least 2 hours long. A 01:00-03:00 window is guarded; 01:00-02:59 never is.
+- **Last night's figures can still change, either way, until about 3 hours after the window.** A minute
+  whose reading has not been saved yet counts as unwatched, and when it arrives it can tip an 8-hour
+  stretch over or under 70%, so between the nightly updates a night can gain or lose ignored minutes.
+  The figures are fixed once that evidence is final.
 - **A sleep window that includes the middle of the day** (a day sleeper, a nap window) can have
   ordinary daytime noise ignored: daytime noise can be spiky enough to look like a fault.
 - **The numbers come from one installation.** A microphone that is faulty only some of the time (in fewer
@@ -354,7 +361,11 @@ Known limits:
   saved summary, which has the corrected numbers but not the note.
 - **A night is never reported as "no one was in the bed" when sound was ignored**, because that answer
   also deletes the night's timelapse frames and the ignored minutes may have been the only sign of a very
-  still child. The cost: an empty bed on a camera with a faulty microphone reads as a night slept. If that
+  still child. A night watched for less than 90% of its window still reads "no data", as before, because
+  that answer deletes nothing. The cost: an empty bed on a camera with a faulty microphone now usually
+  reads as a night slept. Before, depending on when the fault started and how much was watched, such a
+  night read "no one was in the bed", "no clear sleep" (the fault ran all evening) or "no data"; now a
+  night watched for less than 90% reads "no data" and any other reads as the whole window asleep. If that
   happens, answer **No one was in the bed** in the night's review.
 - **Sound alerts and wake clips are unchanged.** A faulty microphone can still set off sound alerts, and a
   wake clip can exist for noise the night's timeline no longer counts as a wake-up.

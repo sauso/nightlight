@@ -23969,11 +23969,38 @@
   {
     "label": "#904 the never-empty rule removed: a discounted still night becomes `empty` (and loses its frames)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "  if (maxBedPeak < EMPTY_BED_MAX_PEAK && wakeCount === 0 && awake === 0 && discountedIn(onset, sleepEnd) === 0) {",
-    "replace": "  if (maxBedPeak < EMPTY_BED_MAX_PEAK && wakeCount === 0 && awake === 0) {",
+    "find": "    if (discountedIn(onset, sleepEnd) === 0) {",
+    "replace": "    if (true) {",
     "expect": "killed",
     "tests": ["sleep-faulty-mic.test.js"],
     "namePattern": "a still child, a quiet zone"
+  },
+  {
+    "label": "#904 the never-empty test moved back onto the outer condition: a 74%-watched empty bed reads ok instead of no_data",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  if (maxBedPeak < EMPTY_BED_MAX_PEAK && wakeCount === 0 && awake === 0) {",
+    "replace": "  if (maxBedPeak < EMPTY_BED_MAX_PEAK && wakeCount === 0 && awake === 0 && discountedIn(onset, sleepEnd) === 0) {",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "a 74%-watched empty bed is still no_data"
+  },
+  {
+    "label": "#904 the never-empty rule counts the whole window instead of the measured span: an evening-only fault blocks `empty`",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (discountedIn(onset, sleepEnd) === 0) {",
+    "replace": "    if (discountedIn(preMin, totalMin) === 0) {",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "discounted minutes all lie before its onset"
+  },
+  {
+    "label": "#904 the guard records a minute only for a LOUD row: quiet watched minutes drop out of a window's share",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    const m = soundSeen[i] || (soundSeen[i] = { spike: false, real: false });\r\n    if (!(r.sound_peak != null && r.sound_peak > SOUND_ACTIVE)) return;",
+    "replace": "    if (!(r.sound_peak != null && r.sound_peak > SOUND_ACTIVE)) return;\r\n    const m = soundSeen[i] || (soundSeen[i] = { spike: false, real: false });",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "quiet WATCHED minutes count"
   },
   {
     "label": "#904 the metrics extension classifies without the minute index: the fault's post-window sound is awake again",
