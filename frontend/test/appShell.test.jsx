@@ -299,6 +299,7 @@ describe('the route table', () => {
       ['/settings/camera', 'Camera controls'],
       ['/settings/integrations', 'Integrations'],
       ['/settings/integrations/mqtt', 'MQTT'],
+      ['/settings/integrations/esphome', 'ESPHome'],
       ['/settings/integrations/notifications', 'Push notifications'],
       ['/settings/logs', 'Logs'],
       ['/about', 'About'],
@@ -410,6 +411,7 @@ describe('the route table', () => {
   test.each([
     ['/settings/integrations', 'Integrations'],
     ['/settings/integrations/mqtt', 'MQTT'],
+    ['/settings/integrations/esphome', 'ESPHome'],
   ])('admin-only %s sends a CAREGIVER home without showing it', async (route, heading) => {
     setToken('a-token');
     mockApi(CAREGIVER);
