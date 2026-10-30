@@ -2803,14 +2803,14 @@ input[type='range'] {
   border-radius: 10px; background: var(--bg-elevated); margin: 0 auto;
 }
 
-/* The picture button on a Room activity row (#907). A real button with its own focus ring. The padding makes the
-   tap area larger than the 15px icon, and the negative vertical margin gives it back so the row is no taller. */
-.sleep-visit-frame {
-  display: inline-flex; align-items: center; justify-content: center; padding: 6px; margin: -6px 0;
-  border: none; border-radius: 8px; background: none; color: var(--text-secondary); cursor: pointer;
-}
-.sleep-visit-frame:hover { color: var(--text-primary); }
-.sleep-visit-frame:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
+/* A Room activity row (#907, reshaped to expand like a wake-up row). The head is time on the left and tag + duration + arrow on the
+   right; "Movement outside the bed" is a long non-breaking tag, so on a narrow phone the right group drops under
+   the time instead of pushing the page sideways. margin-left:auto keeps it right-aligned on either line. */
+.sleep-wakes__head--visit { flex-wrap: wrap; row-gap: 4px; }
+.sleep-wakes__head--visit .sleep-visit-right { margin-left: auto; }
+/* The saved frame inside an expanded row: larger than an alert's 56x40 thumbnail, because the point is to see
+   what the camera saw. Same 16:9-ish shape as the camera stream. */
+.sleep-wakes__thumb--frame { width: 96px; height: 54px; }
 
 /* Morning review — the "was last night right?" card and the screen behind it.
    Chrome is --peri (this is something to interact with), not --accent: it is an invitation, not the

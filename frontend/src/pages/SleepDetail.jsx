@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play, Video, Image as ImageIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play, Video } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
@@ -527,29 +527,13 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
       {visits.length > 0 && (
         <div className="card">
           <div className="sleep-detail__section-title"><DoorOpen size={15} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 6 }} />Room activity · {visits.length}</div>
-          <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement the camera saw away from the bed. Before your child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.{frames.length > 0 && ' A picture icon opens the frame the camera saved when it decided the bed was entered or left. Older nights have none.'}</div>
+          <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement the camera saw away from the bed. Before your child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.{frames.length > 0 && ' Where the camera saved a frame when it decided the bed was entered or left, the row opens to show it. Older nights have none.'}</div>
           <ul className="sleep-wakes">
-            {visits.map((v, i) => {
-              const isOut = v.type === 'child_out';
-              return (
-                <li key={i} className="sleep-wakes__row">
-                  <span className="sleep-wakes__time">{fmtTime(v.start_at)}{v.minutes > 1 ? ` – ${fmtTime(v.end_at)}` : ''}</span>
-                  <span className="sleep-visit-right">
-                    {/* One button per saved frame near this row: ALL of them, never one picked for the row. A row can
-                        span two bed events, and choosing between them here would hide the very frame someone is
-                        looking for. A row with none shows nothing (no icon, no empty state). */}
-                    {framesForVisit(frames, v).map((f) => (
-                      <button key={f.id} type="button" className="sleep-visit-frame" onClick={() => setFrameFor(f)}
-                        aria-label={`Show the frame from ${fmtTime(f.at)} (${f.type === 'out_of_bed' ? 'got out of bed' : 'got into bed'})`}>
-                        <ImageIcon size={15} aria-hidden="true" />
-                      </button>
-                    ))}
-                    <span className={`sleep-visit-tag${isOut ? ' sleep-visit-tag--out' : ''}`}>{isOut ? 'Out of bed' : 'Movement outside the bed'}</span>
-                    <span className={`sleep-wakes__dur ${isOut ? 'sleep-wakes__dur--out' : 'sleep-wakes__dur--visit'}`}>{fmtDur(v.minutes)}</span>
-                  </span>
-                </li>
-              );
-            })}
+            {/* Keyed by when the row starts, not its position: each row keeps its own open/closed state, and the live
+                night is re-read every two minutes, so a row inserted before an open one must not hand it over. */}
+            {visits.map((v) => (
+              <VisitItem key={`${v.start_at}|${v.type}`} visit={v} frames={framesForVisit(frames, v)} fmtTime={fmtTime} onShowFrame={setFrameFor} />
+            ))}
           </ul>
         </div>
       )}
@@ -619,6 +603,62 @@ function WakeItem({ wake, hits, clip, fmtTime, onPlay, onPlayWake }) {
         <ul className="sleep-wakes__alerts">
           {clip && <WakeClipRow clip={clip} fmtTime={fmtTime} onPlay={onPlayWake} />}
           {hits.map((a) => <AlertRow key={a.id} a={a} fmtTime={fmtTime} onPlay={onPlay} />)}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+// One Room activity row. Same shape as a wake-up row (a head that expands, the detail underneath), because
+// that is where people already look for "what did the camera see here": the first version put one picture
+// button per frame in the row's header, and with two or three frames plus the tag and the duration the header
+// no longer fitted a phone (owner's screenshot, 2026-10-31).
+//
+// Expandable only when a saved frame lies near the row; a row with none is a plain line, with no arrow and no
+// empty state. It lists ALL the frames near it, never one picked for the row: a row can span two bed events,
+// and choosing between them here would hide the very frame someone is looking for. The head may wrap onto a
+// second line on a narrow screen rather than push the page sideways.
+export function VisitItem({ visit, frames, fmtTime, onShowFrame }) {
+  const [open, setOpen] = useState(false);
+  const expandable = frames.length > 0;
+  const isOut = visit.type === 'child_out';
+  const head = (
+    <>
+      <span className="sleep-wakes__time">{fmtTime(visit.start_at)}{visit.minutes > 1 ? ` – ${fmtTime(visit.end_at)}` : ''}</span>
+      <span className="sleep-visit-right">
+        <span className={`sleep-visit-tag${isOut ? ' sleep-visit-tag--out' : ''}`}>{isOut ? 'Out of bed' : 'Movement outside the bed'}</span>
+        <span className={`sleep-wakes__dur ${isOut ? 'sleep-wakes__dur--out' : 'sleep-wakes__dur--visit'}`}>{fmtDur(visit.minutes)}</span>
+        {expandable && <ChevronDown size={16} className={`sleep-wakes__chev${open ? ' is-open' : ''}`} aria-hidden="true" />}
+      </span>
+    </>
+  );
+  return (
+    <li className={`sleep-wakes__item${expandable ? ' sleep-wakes__item--expandable' : ''}`}>
+      {expandable ? (
+        <button type="button" className="sleep-wakes__head sleep-wakes__head--visit" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          {head}
+        </button>
+      ) : (
+        <div className="sleep-wakes__head sleep-wakes__head--visit">{head}</div>
+      )}
+      {/* `expandable` too: a refresh can leave an open row with no frames, and it must not keep an empty detail box. */}
+      {open && expandable && (
+        <ul className="sleep-wakes__alerts">
+          {frames.map((f) => {
+            const what = f.type === 'out_of_bed' ? 'Got out of bed' : 'Got into bed';
+            return (
+              <li key={f.id} className="sleep-wakes__alert">
+                <button type="button" className="sleep-wakes__thumbwrap" onClick={() => onShowFrame(f)}
+                  aria-label={`Show the frame from ${fmtTime(f.at)} (${what.toLowerCase()})`}>
+                  <img className="sleep-wakes__thumb sleep-wakes__thumb--frame" src={api.url(`/cameras/bed-transitions/${f.id}/snapshot`)} alt="" loading="lazy" />
+                </button>
+                <div className="sleep-wakes__alert-body">
+                  <span className="sleep-wakes__alert-label">{what}</span>
+                  <span className="sleep-wakes__alert-meta">{fmtTime(f.at)} · the frame the camera saved when it decided this</span>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </li>

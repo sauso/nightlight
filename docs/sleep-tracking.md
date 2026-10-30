@@ -89,7 +89,7 @@ roughly the last month of nights. Two moment markers sit on the bar — **got in
 the morning departure the night's times were actually derived from. A single camera can see
 that something crossed the edge of the bed, but not *who*, so movement in between is reported
 as exactly that and never attributed to a person. Where the camera saved a still frame near a
-**Room activity** row, the row has a small picture icon that opens it, so you can see what the
+**Room activity** row, the row has a down arrow and opens to show it, so you can see what the
 camera saw (older nights have none; see [Bed-transition frames](recording.md#bed-transition-frames-diagnostic-shown-only-in-a-nights-sleep-detail)). A stretch the camera has no data for at
 all — a detector restart, a dead connection — shows as its own striped **"No data"** segment
 rather than being folded into asleep or awake; it isn't counted toward the reported sleep
