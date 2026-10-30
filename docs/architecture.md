@@ -373,6 +373,17 @@ additive result key `sound_discounted_minutes` (the discounted minutes in the sp
 parent's time correction does not change: `applyCorrection` keeps the detector's count; an integer on `ok`,
 `null` on every other status, nulled by "no one was in the bed") is not stored: there is no column.
 
+**The morning veto's hand-back** (#618, a sibling of its §2; `SCORING_ALGO` '4'; tests in
+`backend/test/sleepAnalysis.test.js` under "#618"). The departure scan keeps, per gap, every exit the settling-tail
+guard set aside within 5 minutes of the gap's start (`settlingSkips`; the single `settlingFallback` is unchanged).
+When the #509 veto then discards the adopted exit, it hands back the one of those whose gap starts inside the quiet
+stretch it found (smallest distance to the gap start, not far earlier than usual per #700) instead of falling back to
+the movement-only wake; the wake, the metrics span, the timeline marker and the child-out interval move with it, and
+`wake_at_shadow` still keeps the discarded exit. No result key is added. The stored scoring-context rules version
+becomes `'4'` (so re-storing even an unchanged night writes `4`, and an older stored night is marked as first
+worked out under earlier rules where the saved settings differ); only nights where the veto fires can change
+their numbers.
+
 **The admin Recompute is one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the
 dialog in `frontend/src/components/RecomputeNight.jsx`). `GET /api/children/:id/sleep/:date?context=stored` reads the
 row's `scoring_context` and parses it (no row, `NULL` or unparseable: `400` with `reason: 'no_stored_context'`, never a

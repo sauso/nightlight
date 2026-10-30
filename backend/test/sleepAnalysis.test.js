@@ -2889,6 +2889,259 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
     }
   });
 
+  // ==========================================================================================================
+  // #618 (a sibling of its §2): when the veto discards the later exit and the quiet stretch it found is the gap of
+  // an exit the settling-tail guard had set aside, THAT exit is the wake, not the movement-only one.
+  //
+  // The shape is the night of 2026-10-30 (staging, one child), laid per minute from what the snapshot read on
+  // 2026-10-31 held (times, levels and witness positions only). A (the movement-only wake) is 06:13: from then the
+  // room is audible. The child moves in the bed 06:22-06:29, an `into_bed` is logged at 06:29:05 and the real exit at
+  // 06:29:56, 51 s later: the child had LEFT. The bed then reads empty apart from faint noise on ten minutes (06:32,
+  // 06:35, 06:48, 06:51, 06:58, 07:04, 07:05, 07:19, 08:15, 08:16), which the settling-tail guard counts as a still
+  // sleeper: the sixth is 07:04 (5 at the 07:01 run, 7 at 07:08), so the 06:29:56 exit is set aside as the tail of a
+  // return. One active
+  // bed minute at 06:57 and an `out_of_bed` at 06:57:12 (the child back in the room, after the wake), then quiet;
+  // that exit's gap (06:58) has its 20 quiet minutes from 07:18. Before #618 the wake read 06:29 until then (the
+  // scan's fallback) and 06:13 after (the veto discarded 06:57 and fell back to A). The owner saw 06:29.
+  //
+  // Each twin differs from that night in ONE parameter:
+  //   shiftMin    — every MORNING instant moves by this many minutes (the #700 test needs the exit far from 07:00)
+  //   soundFrom   — offset in minutes from 06:00 where the final awake run starts: A (13 = 06:13)
+  //   activeFrom  — offset where the child's movement in the bed before the exit starts (22 = 06:22)
+  //   stray       — the `into_bed` 51 s before the exit (false: nothing for the settling-tail guard to skip)
+  //   skippedExit — the 06:29:56 exit itself
+  //   witness     — 'measured' (the ten noisy minutes), or 'sleeper' (a child still in the bed: a still sleeper's
+  //                 micro-motion on every minute of 06:30-06:56)
+  //   blipAt      — offsets that read one isolated ACTIVE bed minute
+  //   returnAt    — [minute offset, second] of an `into_bed` AFTER the exit (a return the reversal guard believes)
+  //   eveningTail — the 2026-09-09 evening cluster (out, back in, out again 40 s later) over a still sleeper
+  //   outZone     — [from, to) offsets with movement OUTSIDE the bed zone (somebody in the room)
+  describe('★★★ #618: the veto hands back the exit the settling-tail guard set aside in its stretch', () => {
+    const MEASURED_WITNESS = [32, 35, 48, 51, 58, 64, 65, 79, 135, 136];
+    //   strayAt / exitAt — [minute offset, second] of that `into_bed` and that exit (default 06:29:05 and 06:29:56)
+    //   extraExits  — more `out_of_bed` markers, [minute offset, second] each
+    //   preActive   — [from, to) offsets before 06:30 that are bed-ACTIVE, in place of [activeFrom, 30)
+    function layHandBack({ shiftMin = 0, soundFrom = 13, activeFrom = 22, stray = true, skippedExit = true,
+      witness = 'measured', blipAt = [], returnAt = null, eveningTail = false, outZone = [],
+      strayAt = [29, 5], exitAt = [29, 56], extraExits = [], preActive = null } = {}) {
+      const m0 = plus(at(6, 0, 1), shiftMin); // 06:00 of the (shifted) morning
+      const om = (k, s = 0) => plus(m0, k, s);
+      const moving = preActive ?? [[activeFrom, 30]];
+      laySamples(at(19, 30), om(-30), [[at(19, 30), at(19, 40)], ...(eveningTail ? [[at(20, 41), at(20, 45)]] : [])], STILL_OCCUPIED);
+      for (let k = -30; om(k) < at(10, 30, 1); k++) {
+        let motion;
+        if (k < 30) motion = moving.some(([a, b]) => k >= a && k < b) ? 0.15 : STILL_OCCUPIED; // in the bed and still, then moving, then out
+        else if (k === 57 || blipAt.includes(k)) motion = 0.15;
+        else if (witness === 'sleeper' ? k < 57 : MEASURED_WITNESS.includes(k)) motion = STILL_OCCUPIED;
+        else motion = STILL_EMPTY;
+        const out = outZone.some(([a, b]) => k >= a && k < b) ? 0.99 : 0;
+        // The room stays audible to 07:30 whatever the shift, so the final awake run always reaches the 07:00 window
+        // end and A exists (without it the veto never runs: #509 C5).
+        const sound = k >= soundFrom && om(k) < at(7, 30, 1) ? 10 : 0;
+        insertTrace.run(CAM, sqlTime(om(k)), motion, motion, sound, out);
+      }
+      if (eveningTail) {
+        insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(20, 41, 0, 30)));
+        insertTransition.run(CAM, 'into_bed', 0.05, sqlTime(at(20, 44, 0, 20)));
+        insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(20, 45))); // 40 s after the return, on its gap's first minute (dt 0)
+      }
+      if (stray) insertTransition.run(CAM, 'into_bed', 0.05, sqlTime(om(...strayAt)));
+      if (skippedExit) insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(om(...exitAt)));
+      for (const e of extraExits) insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(om(...e)));
+      if (returnAt) insertTransition.run(CAM, 'into_bed', 0.05, sqlTime(om(returnAt[0], returnAt[1])));
+      insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(om(57, 12)));
+      return { exitAt: sqlTime(om(...exitAt)), clock: (h, m) => plus(at(h, m, 1), shiftMin).getTime() };
+    }
+    const nightAt = (t, clockMs, opts) => {
+      t.mock.timers.enable({ apis: ['Date'], now: clockMs });
+      try { return computeNight(CHILD, DATE, opts); } finally { t.mock.timers.reset(); }
+    };
+    // The clocks of the nightly job's re-runs that morning (07:08, 07:38, 08:08) plus the boundary (07:17 / 07:18,
+    // where 06:58's gap gets its 20 quiet minutes), the end of the evidence (10:00) and long after it (12:00).
+    const EARLY = [[7, 1], [7, 8], [7, 17]];
+    const LATE = [[7, 18], [7, 38], [8, 8], [9, 0], [10, 0], [12, 0]];
+
+    test('#618 H1: the 2026-10-30 shape reads the skipped exit at every clock, before AND after the later exit qualifies', (t) => {
+      // Fails without #618 at every LATE clock (06:13, the movement-only wake). The EARLY clocks are the guard's own
+      // fallback, unchanged (07:01: the witness has only 5 minutes yet, so the exit is simply taken).
+      const { clock } = layHandBack();
+      for (const [h, m] of [...EARLY, ...LATE]) {
+        const night = nightAt(t, clock(h, m));
+        assert.equal(night.status, 'ok');
+        assert.equal(hhmm(night.wake_at), '06:29', `clock ${h}:${m}: the wake must not move`);
+      }
+      const late = nightAt(t, clock(7, 38));
+      assert.equal(hhmm(late.wake_at_algo), '06:13', 'precondition: A is 06:13');
+      assert.equal(hhmm(late.wake_at_shadow), '06:57', 'precondition: the scan adopted the later exit (and the veto discarded it)');
+    });
+
+    test('#618 H2: the wake, the metrics span, the marker and the child-out interval all move to the handed-back exit', (t) => {
+      // Somebody outside the bed zone at 06:15-06:18 (BEFORE the exit: the child is still in the bed, so 'room') and
+      // at 06:40-06:44 (after it: 'child_out'). Read the old way (the wake at A, 06:13) both would be 'child_out'.
+      const { clock, exitAt } = layHandBack({ outZone: [[15, 19], [40, 45]] });
+      const night = nightAt(t, clock(7, 38), { includeTimeline: true });
+      assert.equal(hhmm(night.wake_at), '06:29');
+      assert.equal(hhmm(night.wake_at_shadow), '06:57', 'the shadow keeps the raw exit the veto discarded');
+      assert.deepEqual(night.transitions.filter((x) => x.type === 'out_of_bed').map((x) => x.at), [exitAt],
+        'the marker is the handed-back exit, to the second');
+      // The exit is at :56 s: its minute is 06:29 by txIdx (a floor), 06:30 by Math.round. The span ends at 06:29.
+      assert.equal(night.asleep_minutes + night.awake_minutes + night.unknown_minutes, (utcMs(night.wake_at) - utcMs(night.onset_at)) / 60000,
+        'the metrics span ends at the handed-back exit\'s own minute');
+      assert.equal(night.awake_minutes, 16, 'awake 06:13-06:28: the final awake run up to the exit');
+      assert.equal(night.wake_count, 1);
+      assert.deepEqual(night.visits.map((v) => [hhmm(v.start_at), v.type]), [['06:15', 'room'], ['06:40', 'child_out']]);
+    });
+
+    test('#618 H3: an evening tail is never what comes back, even holding the smaller dt (the 2026-09-09 shape)', (t) => {
+      // The evening cluster's tail sits exactly on its gap's first minute (dt 0), the morning exit 4 s from its gap: the
+      // night-wide `settlingFallback` holds the EVENING one, and the scan's own fallback hands it back at 07:08 (an
+      // existing limit, #598's KNOWN-ISSUES entry; unchanged here). Only a skip inside the veto's stretch comes back.
+      const { clock } = layHandBack({ eveningTail: true });
+      assert.equal(hhmm(nightAt(t, clock(7, 8)).wake_at), '20:45', 'precondition: the night-wide fallback is the evening tail');
+      assert.equal(hhmm(nightAt(t, clock(7, 38)).wake_at), '06:29', 'the veto hands back the skip in ITS stretch, not the night-wide one');
+      wipe();
+      // The same evening, and no skipped exit in the morning: nothing inside the stretch, so the veto falls back to A
+      // exactly as before #618. A rule that handed back any skip would report 20:45, an evening.
+      const only = layHandBack({ eveningTail: true, stray: false, skippedExit: false });
+      assert.equal(hhmm(nightAt(t, only.clock(7, 38)).wake_at), '06:13');
+    });
+
+    test('#618 H4: the lead test (#700) still refuses a far-early exit at the hand-back, and wake_unconfirmed is untouched', (t) => {
+      // The whole morning one hour earlier: the skipped exit is 05:29:56, 91 minutes before the 07:00 window end; the
+      // later exit (05:57:12) is 63. Fourteen earlier nights up 5-55 minutes before the window end: p75 40, threshold
+      // 80, so 05:29 is far early and 05:57 is not.
+      const insertNight = db.prepare(`INSERT INTO sleep_nights (child_id, night_date, window_start, window_end, status, wake_at)
+                                      VALUES (?, ?, ?, ?, 'ok', ?)`);
+      const leads = [5, 10, 15, 20, 20, 25, 30, 30, 35, 40, 40, 45, 50, 55];
+      try {
+        const { clock } = layHandBack({ shiftMin: -60 });
+        const without = nightAt(t, clock(8, 38));
+        assert.equal(hhmm(without.wake_at), '05:29', 'twin: with too little history the rule is off and the exit comes back');
+        leads.forEach((lead, i) => {
+          const d = -(i + 1);
+          const end = at(7, 0, d + 1);
+          insertNight.run(CHILD, new Date(Date.UTC(2026, 6, 1 + d)).toISOString().slice(0, 10), sqlTime(at(19, 30, d)), sqlTime(end),
+            sqlTime(new Date(end.getTime() - lead * 60000)));
+        });
+        const night = nightAt(t, clock(8, 38));
+        assert.equal(hhmm(night.wake_at_shadow), '05:57', 'precondition: the later exit was adopted, so the veto ran');
+        assert.equal(hhmm(night.wake_at), '05:13', 'the far-early exit is not handed back: the movement-only wake, as before');
+        assert.equal(night.wake_unconfirmed, null, 'the scan recorded nothing (a later exit won) and the veto records nothing either');
+      } finally {
+        db.prepare('DELETE FROM sleep_nights WHERE child_id = ?').run(CHILD);
+      }
+    });
+
+    test('#618 H5: no skip in the stretch, or a reversed exit, or no veto: the night reads exactly as before', (t) => {
+      // (a) No exit at 06:29 at all: the veto falls back to A, as #509 has it.
+      let n = layHandBack({ stray: false, skippedExit: false });
+      assert.equal(hhmm(nightAt(t, n.clock(7, 38)).wake_at), '06:13', 'no skip: A');
+      // (b) The same exit, but a return after it that the bed corroborates (06:35:10): the REVERSAL guard rejects it
+      // before the settling-tail guard is asked, so it is no skip and does not come back.
+      wipe();
+      n = layHandBack({ returnAt: [35, 10] });
+      assert.equal(hhmm(nightAt(t, n.clock(7, 38)).wake_at), '06:13', 'a reversed exit is not handed back');
+      // (c) One isolated active minute at 06:37: 7 + 19 strictly quiet minutes, no stretch of 20, no veto. The later
+      // exit stands; a skip is handed back only by the veto, never on its own.
+      wipe();
+      n = layHandBack({ blipAt: [37] });
+      assert.equal(hhmm(nightAt(t, n.clock(7, 38)).wake_at), '06:57', 'no veto: the later exit stands');
+      // (d) A night in progress (06:58, the window closes at 07:00): no departure scan, no veto, the movement-only wake.
+      wipe();
+      n = layHandBack();
+      const live = nightAt(t, n.clock(6, 58));
+      assert.equal(live.in_progress, true);
+      assert.equal(hhmm(live.wake_at), '06:13');
+    });
+
+    test('#618 H6: the stretch must open on the skip\'s own gap: a blip within 5 minutes still does, one further on does not', (t) => {
+      // One isolated active minute at 06:33: the strictly quiet stretch is 06:34-06:57. The scan also opens a gap at
+      // 06:34 (after the blip) and the exit is 4 min 4 s from it, inside WAKE_SNAP_MS: that gap's record is in the
+      // stretch, so the exit comes back. This is what "the gap start inside [start, end)" needs on a real night.
+      const { clock } = layHandBack({ blipAt: [33] });
+      assert.equal(hhmm(nightAt(t, clock(7, 38)).wake_at), '06:29');
+      wipe();
+      // At 06:36 the stretch is 06:37-06:57 (exactly 20) and the exit is 7 minutes from its start, outside the snap
+      // window: no record there, so the veto falls back to A as before. A known limit of the rule, not a guess.
+      const far = layHandBack({ blipAt: [36] });
+      assert.equal(hhmm(nightAt(t, far.clock(7, 38)).wake_at), '06:13');
+    });
+
+    test('#618 H7: KNOWN LIMIT, pinned: a child STILL IN THE BED behind a false settling pair is handed back too', (t) => {
+      // The same stream with a still sleeper's micro-motion on every minute of 06:30-06:56: the child never left at
+      // 06:29:56 (a stray `into_bed` + `out_of_bed` pair while the child moved), and got up at 06:57. From the bed's readings
+      // this cannot be told from an empty bed with faint noise, and the scan's fallback already hands such an exit back
+      // when nothing later qualifies (07:08 here); #618 extends that to a later exit the veto discards. If a future
+      // rule tells the two apart, change this test on purpose.
+      const { clock } = layHandBack({ witness: 'sleeper' });
+      assert.equal(hhmm(nightAt(t, clock(7, 8)).wake_at), '06:29', 'the fallback, before the later exit qualifies (unchanged)');
+      assert.equal(hhmm(nightAt(t, clock(7, 38)).wake_at), '06:29', 'handed back after it, where the movement-only wake was read before');
+    });
+
+    test('#618 H8: KNOWN LIMIT, pinned: the handed-back exit is not put through the veto again', (t) => {
+      // A from 05:50, the bed strictly quiet 05:50-06:09 (20 minutes) and active 06:10-06:29 (20), then the evidence
+      // night. Judged against the later exit, that first stretch has 21 non-quiet minutes after it (too many) and the
+      // 06:30-06:57 stretch is found: the 06:29:56 skip comes back. Judged against the skip itself (as the scan's own
+      // fallback is judged at 07:08) the first stretch has exactly 20, and the veto fires: A. So the wake now moves
+      // later with the clock on this shape (05:50, then 06:29) where it read 05:50 throughout before #618. The result
+      // is never later than the exit the veto discarded (and at most 5 minutes before A: H10).
+      const { clock } = layHandBack({ soundFrom: -10, activeFrom: 10 });
+      assert.equal(hhmm(nightAt(t, clock(7, 8)).wake_at), '05:50', 'the fallback is vetoed on its own gap');
+      assert.equal(hhmm(nightAt(t, clock(7, 38)).wake_at), '06:29', 'handed back, and not re-vetoed');
+    });
+
+    test('#618 H9: of two skipped exits in the stretch\'s gap, the one nearest its start comes back, as the scan\'s fallback chooses', (t) => {
+      // One `into_bed` at 06:28:50 and TWO exits within a minute of it (06:28:55 and 06:29:45): both are tails of the
+      // same return, both are recorded for the 06:30 gap (65 s and 15 s from its start). The scan's own fallback takes
+      // the nearer one, 06:29:45, before the later exit qualifies; the hand-back must take the same one after, or the
+      // wake moves by a minute with the clock (06:29, then 06:28).
+      const { clock, exitAt } = layHandBack({ strayAt: [28, 50], exitAt: [29, 45], extraExits: [[28, 55]] });
+      for (const [h, m] of [[7, 8], [7, 38], [10, 0]]) {
+        const night = nightAt(t, clock(h, m), { includeTimeline: true });
+        assert.equal(hhmm(night.wake_at), '06:29', `clock ${h}:${m}`);
+        assert.deepEqual(night.transitions.filter((x) => x.type === 'out_of_bed').map((x) => x.at), [exitAt], `clock ${h}:${m}: the marker`);
+      }
+    });
+
+    test('#618 H8b: a skipped exit in a stretch BETWEEN the veto\'s stretch and the discarded exit\'s own gap is not handed back', (t) => {
+      // H8's twin with 19 active minutes (06:11-06:29) where H8 has 20. The veto now finds the EARLY stretch
+      // (05:50-06:10, 20 trailing non-quiet minutes after it, within the allowance), which is not the stretch the
+      // 06:29:56 skip's gap opens in; that gap lies after it and before the discarded exit's. Only a hand-back bound
+      // by the stretch ([start, end)) leaves the wake at A; one bound by T's gap (a looser upper bound) would hand the
+      // skip back and move this night from 05:50 to 06:29. dev reads 05:50 at 07:38 and at 10:00, and so does this.
+      const { clock } = layHandBack({ soundFrom: -10, preActive: [[11, 30]] });
+      assert.equal(hhmm(nightAt(t, clock(7, 38)).wake_at), '05:50');
+      assert.equal(hhmm(nightAt(t, clock(10, 0)).wake_at), '05:50');
+    });
+
+    test('#618 H9b: with both skipped exits AFTER the gap\'s start, the one nearest it comes back, not the last', (t) => {
+      // H9's mirror. There both exits sit before the gap's start, where the nearest exit is also the latest, so a
+      // choice of "the last recorded" passes it. Here the `into_bed` is 06:30:05 and the exits 06:30:10 and 06:31:00,
+      // the gap opens at 06:30 and the nearer exit (10 s) is the first one; "the last" would read 06:31 from the
+      // moment the later exit qualifies, a clock drift the scan's own fallback does not have (06:30 at 07:08).
+      const { clock } = layHandBack({ strayAt: [30, 5], exitAt: [30, 10], extraExits: [[31, 0]] });
+      for (const [h, m] of [[7, 8], [7, 38], [10, 0]]) {
+        assert.equal(hhmm(nightAt(t, clock(h, m)).wake_at), '06:30', `clock ${h}:${m}`);
+      }
+    });
+
+    test('#618 H10: pinned: the handed-back exit can be up to 5 minutes BEFORE the movement-only wake (its gap cannot)', (t) => {
+      // The skip's gap opens at or after A (the stretch is cut at A), but an exit may sit up to WAKE_SNAP_MS before
+      // its gap, exactly as a `best` exit may (#509 C3: an exit earlier than A is the designed benefit). Here the room
+      // wakes at 06:27 (sound, and the bed moving 06:27-06:29), the stray return and the exit are 06:24:40 and
+      // 06:25:20 on minutes the bed reads still, and the gap opens at 06:30, 4 min 40 s after the exit. The scan's own
+      // fallback already reports 06:25 at 07:08; after the later exit qualifies the hand-back reports the same 06:25,
+      // two minutes before A. Never more than 5 minutes before it, and never later than the discarded exit.
+      const { clock } = layHandBack({ soundFrom: 27, preActive: [[27, 30]], strayAt: [24, 40], exitAt: [25, 20] });
+      const early = nightAt(t, clock(7, 8));
+      const late = nightAt(t, clock(7, 38));
+      assert.equal(hhmm(late.wake_at_algo), '06:27', 'precondition: A is 06:27');
+      assert.equal(hhmm(late.wake_at_shadow), '06:57', 'precondition: the later exit was adopted, and vetoed');
+      assert.equal(hhmm(early.wake_at), '06:25', 'the fallback, before the later exit qualifies (unchanged)');
+      assert.equal(hhmm(late.wake_at), '06:25', 'handed back: 2 minutes before A');
+    });
+  });
+
   describe('quietStretchBeforeExit (the pure rule)', () => {
     const arr = (n, v = false) => new Array(n).fill(v);
     test('length, bounds, blips, nulls and trailing minutes, each one boundary at a time', () => {

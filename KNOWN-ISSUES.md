@@ -1431,7 +1431,11 @@ real 07:12 exit set that exit aside, so the night reported 09:27 instead.
   result is the same for any threshold from 4 to 11.) Any threshold from 4 to 10 gives identical results
   there; 6 sits in the middle. Scaling every reading by a third to three times (a tighter or looser detection zone)
   kept those groups at 5 or fewer and 7 or more, so the zone's size matters only a little. Nothing checks
-  the number against your camera.
+  the number against your camera. **One later night contradicts it:** on 2026-10-30 (one child, staging, the day
+  after that bed's camera was replaced) the *got out of bed* that was set aside was the real wake, and the bed
+  showed 8 such minutes in the first hour after the window and 10 by nearly two hours, every one after the child
+  had left: an empty bed reading faint noise (see "The opposite camera" below). One night is not a measurement,
+  so 6 is unchanged.
 - **A very still sleeper loses the benefit.** A child who climbs back in and then lies so still that the bed
   shows fewer than 6 such minutes in 2½ hours is treated as having left at that last marker: the wake is too
   early. In that house, a 2½-hour stretch of real sleep showed fewer than 6 in about 1-5% of stretches,
@@ -1445,7 +1449,9 @@ real 07:12 exit set that exit aside, so the night reported 09:27 instead.
   never sets a marker aside there: the same early wake. Draw the zone over a real picture of the child
   asleep and look at what it covers.
 - **It never leaves a night without a wake.** If no later *got out of bed* backs up a departure, the marker
-  that was set aside is still used, as before. The result is a wrong time at worst, never "still asleep".
+  that was set aside is still used, as before. Since #618 it is also used when the later one is then discarded
+  because the bed was strictly quiet for 20 minutes in between (see "A morning wake that changed by itself"
+  below). The result is a wrong time at worst, never "still asleep".
   One exception since #700: a marker far earlier than the child usually gets up is not handed back either, so
   such a night can read "still asleep" (docs/sleep-tracking.md, "An exit far earlier than usual does not end the
   night", which also says when that rule is off).
@@ -1456,7 +1462,13 @@ real 07:12 exit set that exit aside, so the night reported 09:27 instead.
 - **The opposite camera: an empty bed that reads faint noise.** If the camera's picture of an EMPTY bed
   flickers between 0.0005 and 0.01 (infrared noise, a moving shadow), the empty bed looks like a still
   sleeper, so the stray return is believed as it was before and this fix does not help on that camera. It is
-  never worse than before the change there: the old rule would have believed the same return.
+  never worse than before the change there: the old rule would have believed the same return. **Seen on
+  2026-10-30** (one child, staging, a camera fitted the day before): from half an hour after the wake that empty
+  bed read like a still sleeper on 4.0% of its quiet minutes that morning, against 0.6% over the 19 nights before;
+  production, watching the same camera with its own detector, read 5.0% that morning and 4.0% over its 20 nights
+  before (a median night 0%: a few noisy nights). Production got that wake right only because its *got into
+  bed* was logged 2 minutes before the *got out of bed*, not within one. Since #618 the wrong skip on that night
+  no longer costs the morning (A morning wake that changed by itself, below); the skip itself is not fixed.
 - **Wake times can move either way, and wake counts and asleep/awake minutes move with them.** On the
   measured nights every night that changed moved earlier, and the stretch after the new wake stopped counting
   as sleep (on production nights the wake count went from 8 to 5, 6 to 4 and 3 to 1). That is not a rule: a
@@ -1510,8 +1522,11 @@ quiet for **at most 20 minutes** before that exit's own gap began. "Strictly qui
 minutes was observed and under the movement threshold: **a single minute of movement, or a single minute with
 no reading, breaks the stretch** (unlike the empty-bed scan, which bridges one isolated minute: this rule
 removes an exit, so it asks for stricter evidence). The wake is then the start of the activity; the exit that
-was set aside is still stored in the night's shadow wake. Nothing is set aside on a night where no run of
-activity reaches the end of the window (a child already quiet then keeps the exit), on a night still in
+was set aside is still stored in the night's shadow wake. **One exception (#618):** if that quiet stretch starts
+where an earlier *got out of bed* had been set aside as the tail of a climb back into bed (one logged within a
+minute after a *got into bed*, see the entry above), that earlier *got out of bed* is the wake instead. It had only
+been set aside in favour of the later exit, which this rule has just discarded. Nothing is set aside on a night
+where no run of activity reaches the end of the window (a child already quiet then keeps the exit), on a night still in
 progress, when the exit is earlier than the start of the activity, or on a night the bed barely moved
 (peak under 0.1: those are the empty-bed check's, and discarding the exit there would turn a real wake into
 "nobody slept here").
@@ -1554,13 +1569,45 @@ progress, when the exit is earlier than the start of the activity, or on a night
   wake still moved by more than 15 minutes with the clock fell from 12 to 5 on staging and from 17 to 10 on
   production; it did not fall to none, and nights that gain a wake only later (none at first) are counted
   separately and unchanged. Examples on production: 2026-10-01 (one child: 06:09, then 06:55, then 06:09
-  again) and 2026-09-19 (the other: 06:34, then 05:49).
+  again) and 2026-09-19 (the other: 06:34, then 05:49). This shape is still open (#618).
+- **The exception (#618) rests on one night.** 2026-10-30, one child, staging: the child got up at 06:29 (the
+  owner saw it), a *got into bed* was logged 51 seconds before the *got out of bed*, and the empty bed then read
+  faint noise that the climb-back-in check took for a still sleeper (see the entry above). The night read 06:29
+  until about 07:18, when a later *got out of bed* (06:57, the child back in the room) had its 20 quiet minutes,
+  and 06:13, the start of the activity, after it. With the exception it reads 06:29 throughout. Replayed on both
+  databases (every night still on record, eight clocks), it is the only night the exception changes. No number
+  was added or tuned. What it costs, stated rather than hidden:
+  - **It can expire.** The scan drops a quiet gap once more than 20 bed-active minutes follow it (a parent at the
+    bed later in the morning, the same thing the second shape of #618 describes). No exit is then recorded for
+    that gap, and the wake falls back to the start of the activity, as it did before. Seen on a constructed night
+    (the early stretch is exactly 20 minutes, eight restless minutes follow, a parent at the bed 07:30-07:42): the
+    wake reads 06:29 at 07:38 and the start of the activity by 10:00, where before #618 it read the start of the
+    activity from 07:38 on. It is not worse than before at any clock.
+  - **A false pair is handed back too.** If the child never left (a stray *got into bed* and *got out of bed*
+    while they moved, then lay still), that *got out of bed* becomes the wake where the start of the activity
+    may have been the better answer. The bed's readings cannot tell a still child from an empty bed with faint
+    noise. The climb-back-in check already hands such an exit back whenever no later one qualifies, so this
+    only extends it to a later exit this rule discards.
+  - **It can make the wake move later with the clock** on one shape: when the bed was also strictly quiet for
+    20 minutes between the start of the activity and that earlier *got out of bed*. Early in the morning the
+    wake then reads the start of the activity, and once the later exit qualifies it reads the earlier *got out
+    of bed* (it is not checked against this rule a second time). The wake is never later than the exit that was
+    discarded, and never more than 5 minutes before the start of the activity (a *got out of bed* can be logged
+    up to 5 minutes before the empty stretch it starts, as any morning exit can).
+  - **One minute of movement in the bed more than about 5 minutes after that *got out of bed*** starts the quiet
+    stretch too late to count as its gap, and the wake falls back to the start of the activity, as before.
+  - **It does not fix the climb-back-in check itself**, which read an empty bed as a still sleeper that night.
+    It only limits what that costs when this rule runs. A night with no later exit, or one this rule leaves
+    alone, is unchanged.
 - **Where it shows:** the "Woke <earlier time> <later time>" comparison on a night's detail page appears
   only when the two differ, so it disappears on a night where the exit was set aside; the "got out of bed"
   marker is not drawn for it; the child counts as out of the bed from the start of the activity, so a parent
   at the bed afterwards is drawn as the child being out rather than someone in the room; and the morning
   row of the detail page ends at the window end, so an alert or a wake clip between the window end and the
-  exit that was set aside is no longer listed there.
+  exit that was set aside is no longer listed there. On a night where the exception hands an earlier exit back,
+  the comparison shows the start of the activity and that exit, the marker is drawn at that exit, the child
+  counts as out of the bed from it, and the morning review asks **Up between …** when the two are 10 minutes or
+  more apart.
 - **The window end matters.** The start of the activity can never be later than the window end, and an exit
   is looked for up to 3 hours past it, so the same night can read differently under a 07:00 and a 07:30
   window.

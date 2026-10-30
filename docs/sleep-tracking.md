@@ -381,6 +381,14 @@ reaching in for a toy or a blanket) does not restart that count; several minutes
 that is a person at the bed rather than a passing arm. The wake is only accepted where a recorded
 **got out of bed** backs it up, so a quiet spell alone can never end the night early.
 
+A *got out of bed* that comes after the morning's activity has started does not move the wake later
+when the bed was strictly quiet for **20 minutes or more** in between: the child most likely left
+during that quiet stretch, and the later exit is someone at the bed. The wake is then the start of the
+activity. If a *got out of bed* at the start of that quiet stretch had been set aside as part of
+climbing back into bed (next section), that one is the wake instead. Both rules, the nights they come
+from and their limits are in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "A morning wake that changed by
+itself as the morning went on".
+
 ### A child who gets out and climbs straight back in has not got up
 
 If a *got into bed* follows a
@@ -402,14 +410,22 @@ when the bed then shows a still sleeper (6 or more of those minutes), because th
 distinguishable from what the cameras record. Where that is the only *got out of bed* of the night it
 is still used, so the night is not left with no wake time (unless it is far earlier than your child
 usually gets up: see [the next section](#an-exit-far-earlier-than-usual-does-not-end-the-night)); where
-a later one exists, the later one is reported instead. A genuine departure followed only by a parent
-at the bed (bigger movement) is no longer set aside: it is found.
+a later one exists, the later one is reported instead, unless that later one is itself set aside
+because the bed was strictly quiet for 20 minutes in between (previous section): then this one is used,
+but only when it sits at the start of that quiet stretch and is not far earlier than your child usually
+gets up. Otherwise the start of the activity is reported, as before.
+A genuine departure followed only by a parent at the bed (bigger movement) is no longer set aside: it is found.
 **Known limit:** a child who climbs back in and then lies stiller than that (fewer than 6 minutes of
 slight movement in those 2½ hours), or a camera whose detection zone only ever registers bigger
 movement, is treated as having left at that second *got out of bed*: the wake is reported too
 **early**, not left blank (again unless it is far earlier than usual, next section). The 6 was
 measured on two cameras in one house, where the second exits that were the real wake showed 0-3 such
 minutes and the ones a review confirmed were not showed 10 or more; see KNOWN-ISSUES.
+**Known limit:** a camera whose picture of an **empty** bed flickers with faint noise can look like a
+still sleeper, and then a real exit is set aside. One night after a camera was replaced did exactly
+this: the child had left, and the empty bed still showed 8-10 such minutes. The wake is then the real
+exit if nothing later qualifies, or if the later *got out of bed* is set aside as described above;
+otherwise it is that later one.
 
 ### An exit far earlier than usual does not end the night
 
