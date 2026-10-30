@@ -11,6 +11,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- **Copy and paste a bed zone (#905).** On a camera's Motion screen, **Copy / paste zone** shows the painted zone as text you can keep as a backup or paste on another camera. Pasting snaps the shape to the painted squares, saves straight away and asks first if a zone is already painted. Text that is not a zone (not valid, outside the frame, an empty list, too long) is refused with a reason and nothing changes. A zone is a share of the picture, so on a camera with a different view it lands in the same place of a different picture; the screen asks you to check it. Where the browser blocks copying (an install on plain `http`), the text is still there to select and copy by hand. There is no undo. See [Cameras](docs/cameras.md).
+
 - **ESPHome Native API collection (#506).** Admins can configure direct device connections and export per-minute raw sensor readings. The readings are kept separately from sleep tracking, default to 30 days of retention (range 1–365), and are not interpreted or shown to caregivers. See [ESPHome data collection](docs/esphome.md).
 
 - **The morning review asks "Up between 6:10 and 6:50" when the app has two different answers for when a child got
@@ -28,6 +30,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   [docs/sleep-tracking.md](docs/sleep-tracking.md#up-between-in-the-morning-review-when-the-app-has-two-answers).
 
 ### Changed
+
+- **"Whole frame" asks before it clears a painted bed zone (#906).** The zone saves as you paint, so one stray tap on **Whole frame** used to wipe it and restart the camera's detector with no way back. It now asks first (Cancel is the default; Escape or tapping outside also cancels and changes nothing). With nothing painted the button is still disabled, as before.
 
 - **Settings → Integrations now holds Push notifications and MQTT**, previously two separate rows on Settings. Old links and bookmarks still work through redirects. How either integration works has not changed.
 
