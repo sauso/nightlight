@@ -19,9 +19,10 @@ const POLL_MS = 10000;
 // Single-flight, and stale replies are dropped: the default request timeout is 30 s and the interval is 10 s, so
 // without this two reads can overlap, and an older answer arriving after a newer one would put old status back on
 // screen, or bring back a device that had just been deleted (Codex plan review of this page). Each read takes a
-// number; only the newest read's answer is used. A tick while a read is in flight does nothing. `invalidate` marks
-// anything in flight as stale (after a delete or a save) and lets the next read start at once. A failed read keeps
-// the last good data: `error` is set beside it, so the page never turns a hiccup into "no devices".
+// number; only the newest read's answer is used. A tick while a read is in flight does nothing, but a forced
+// `reload` (after a save or a delete) starts at once and takes a new number, which is also what makes the read it
+// overtook stale. A failed read keeps the last good data: `error` is set beside it, so the page never turns a hiccup
+// into "no devices".
 function usePolled(path) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -62,9 +63,8 @@ function usePolled(path) {
     };
   }, [load]);
 
-  const invalidate = useCallback(() => { seq.current += 1; inFlight.current = false; }, []);
   const reload = useCallback(() => load(true), [load]);
-  return { data, error, setData, reload, invalidate };
+  return { data, error, setData, reload };
 }
 
 // An IPv6 address is shown and edited in brackets, the form the server's host check expects (routes/esphome.js).
@@ -92,15 +92,13 @@ export default function SettingsEsphome() {
   }
   function afterSave() {
     setDialog(null);
-    devices.invalidate();
     devices.reload();
     flash('Saved ✓');
   }
   function afterDelete(id) {
     setDialog(null);
-    // Gone from the screen at once, and anything still in flight is stale: it was started before the delete and
-    // would put the device back.
-    devices.invalidate();
+    // Gone from the screen at once. A read that was already in flight started before the delete and would put the
+    // device back; the reload below takes a newer number, so that answer is dropped (tested).
     devices.setData((d) => (Array.isArray(d) ? d.filter((x) => x.id !== id) : d));
     devices.reload();
     flash('Device deleted');
