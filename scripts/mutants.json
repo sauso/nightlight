@@ -12792,6 +12792,30 @@
     "note": "A double tail (two exits within a minute of one into_bed, 06:28:55 and 06:29:45): the scan's fallback takes 06:29:45 at 07:08, so the hand-back must too, or the wake moves from 06:29 to 06:28 with the clock."
   },
   {
+    "label": "#618 M-618-09: a skip in a stretch BETWEEN the veto's stretch and the discarded exit's own gap is handed back (the stretch's upper bound loosened to T's gap start)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const [stretchStart, stretchEnd] = vetoStretch;",
+    "replace": "const [stretchStart] = vetoStretch; const stretchEnd = selectedGapStart;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H8b",
+    "note": "Opus review of #618: H8 with 19 active minutes instead of 20. The veto finds the early stretch (05:50-06:10); a bound by T's gap would hand back the 06:29:56 skip that lies after it and move the night from 05:50 to 06:29, a night the PR says must not move."
+  },
+  {
+    "label": "#618 M-618-10: of two skips in the stretch's gap, the LAST recorded comes back, not the nearest to the gap's start",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (handBack != null && skip.dt >= handBack.dt) continue;",
+    "replace": "void 0;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H9b",
+    "note": "Opus review of #618: H9's two exits both sit before the gap's start, where the nearest is also the latest; H9b puts both after it (exits 06:30:10 and 06:31:00), so 'the last' reads 06:31 from the moment the later exit qualifies where the scan's fallback reads 06:30."
+  },
+  {
     "label": "#564 startSleepJob: a second start arms a second interval",
     "file": "backend/src/lib/sleepAnalysis.js",
     "find": "  if (jobTimer) return;",

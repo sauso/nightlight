@@ -411,7 +411,9 @@ distinguishable from what the cameras record. Where that is the only *got out of
 is still used, so the night is not left with no wake time (unless it is far earlier than your child
 usually gets up: see [the next section](#an-exit-far-earlier-than-usual-does-not-end-the-night)); where
 a later one exists, the later one is reported instead, unless that later one is itself set aside
-because the bed was strictly quiet for 20 minutes in between (previous section): then this one is used.
+because the bed was strictly quiet for 20 minutes in between (previous section): then this one is used,
+but only when it sits at the start of that quiet stretch and is not far earlier than your child usually
+gets up. Otherwise the start of the activity is reported, as before.
 A genuine departure followed only by a parent at the bed (bigger movement) is no longer set aside: it is found.
 **Known limit:** a child who climbs back in and then lies stiller than that (fewer than 6 minutes of
 slight movement in those 2½ hours), or a camera whose detection zone only ever registers bigger

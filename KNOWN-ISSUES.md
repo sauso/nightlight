@@ -1577,6 +1577,12 @@ progress, when the exit is earlier than the start of the activity, or on a night
   and 06:13, the start of the activity, after it. With the exception it reads 06:29 throughout. Replayed on both
   databases (every night still on record, eight clocks), it is the only night the exception changes. No number
   was added or tuned. What it costs, stated rather than hidden:
+  - **It can expire.** The scan drops a quiet gap once more than 20 bed-active minutes follow it (a parent at the
+    bed later in the morning, the same thing the second shape of #618 describes). No exit is then recorded for
+    that gap, and the wake falls back to the start of the activity, as it did before. Seen on a constructed night
+    (the early stretch is exactly 20 minutes, eight restless minutes follow, a parent at the bed 07:30-07:42): the
+    wake reads 06:29 at 07:38 and the start of the activity by 10:00, where before #618 it read the start of the
+    activity from 07:38 on. It is not worse than before at any clock.
   - **A false pair is handed back too.** If the child never left (a stray *got into bed* and *got out of bed*
     while they moved, then lay still), that *got out of bed* becomes the wake where the start of the activity
     may have been the better answer. The bed's readings cannot tell a still child from an empty bed with faint

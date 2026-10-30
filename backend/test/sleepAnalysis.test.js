@@ -3103,6 +3103,28 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
       }
     });
 
+    test('#618 H8b: a skipped exit in a stretch BETWEEN the veto\'s stretch and the discarded exit\'s own gap is not handed back', (t) => {
+      // H8's twin with 19 active minutes (06:11-06:29) where H8 has 20. The veto now finds the EARLY stretch
+      // (05:50-06:10, 20 trailing non-quiet minutes after it, within the allowance), which is not the stretch the
+      // 06:29:56 skip's gap opens in; that gap lies after it and before the discarded exit's. Only a hand-back bound
+      // by the stretch ([start, end)) leaves the wake at A; one bound by T's gap (a looser upper bound) would hand the
+      // skip back and move this night from 05:50 to 06:29. dev reads 05:50 at 07:38 and at 10:00, and so does this.
+      const { clock } = layHandBack({ soundFrom: -10, preActive: [[11, 30]] });
+      assert.equal(hhmm(nightAt(t, clock(7, 38)).wake_at), '05:50');
+      assert.equal(hhmm(nightAt(t, clock(10, 0)).wake_at), '05:50');
+    });
+
+    test('#618 H9b: with both skipped exits AFTER the gap\'s start, the one nearest it comes back, not the last', (t) => {
+      // H9's mirror. There both exits sit before the gap's start, where the nearest exit is also the latest, so a
+      // choice of "the last recorded" passes it. Here the `into_bed` is 06:30:05 and the exits 06:30:10 and 06:31:00,
+      // the gap opens at 06:30 and the nearer exit (10 s) is the first one; "the last" would read 06:31 from the
+      // moment the later exit qualifies, a clock drift the scan's own fallback does not have (06:30 at 07:08).
+      const { clock } = layHandBack({ strayAt: [30, 5], exitAt: [30, 10], extraExits: [[31, 0]] });
+      for (const [h, m] of [[7, 8], [7, 38], [10, 0]]) {
+        assert.equal(hhmm(nightAt(t, clock(h, m)).wake_at), '06:30', `clock ${h}:${m}`);
+      }
+    });
+
     test('#618 H10: pinned: the handed-back exit can be up to 5 minutes BEFORE the movement-only wake (its gap cannot)', (t) => {
       // The skip's gap opens at or after A (the stretch is cut at A), but an exit may sit up to WAKE_SNAP_MS before
       // its gap, exactly as a `best` exit may (#509 C3: an exit earlier than A is the designed benefit). Here the room

@@ -379,8 +379,10 @@ guard set aside within 5 minutes of the gap's start (`settlingSkips`; the single
 When the #509 veto then discards the adopted exit, it hands back the one of those whose gap starts inside the quiet
 stretch it found (smallest distance to the gap start, not far earlier than usual per #700) instead of falling back to
 the movement-only wake; the wake, the metrics span, the timeline marker and the child-out interval move with it, and
-`wake_at_shadow` still keeps the discarded exit. No result key is added and nothing is stored differently; only
-nights where the veto fires can change.
+`wake_at_shadow` still keeps the discarded exit. No result key is added. The stored scoring-context rules version
+becomes `'4'` (so re-storing even an unchanged night writes `4`, and an older stored night is marked as first
+worked out under earlier rules where the saved settings differ); only nights where the veto fires can change
+their numbers.
 
 **The admin Recompute is one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the
 dialog in `frontend/src/components/RecomputeNight.jsx`). `GET /api/children/:id/sleep/:date?context=stored` reads the
