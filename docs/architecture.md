@@ -366,7 +366,8 @@ view), `isActiveRow` (so `state`, the wake runs and the metrics) and the metrics
 covers window start - 3 h to the departure scan's evidence cutoff (window end + up to 3 h, never past now), read
 before the main loop, so post-window minutes can decide whether in-window ones are discounted: the one exception to
 "status is decided from window-bounded data". A night with a discounted minute in its span is never `empty`. The
-additive result key `sound_discounted_minutes` (the discounted minutes in the measured span; an integer on `ok`,
+additive result key `sound_discounted_minutes` (the discounted minutes in the span the detector measured, which a
+parent's time correction does not change: `applyCorrection` keeps the detector's count; an integer on `ok`,
 `null` on every other status, nulled by "no one was in the bed") is not stored: there is no column.
 
 **The admin Recompute is one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the

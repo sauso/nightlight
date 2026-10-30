@@ -81,7 +81,7 @@ const WRITTEN = SAMPLE_COLUMNS.filter((c) => !AUTO_COLUMNS.has(c));
 const insertRow = db.prepare(
   `INSERT INTO activity_samples (${WRITTEN.join(', ')}) VALUES (${WRITTEN.map((c) => `@${c}`).join(', ')})`
 );
-function writeMinute(t, { move = false, sound = QUIET, p75Null = false, still = STILL_OCCUPIED }) {
+function writeMinute(t, { move = false, sound = QUIET, p75Null = false, still = STILL_OCCUPIED, frames = 300 }) {
   const [peak, p75] = sound;
   const spiky = peak > 6 && p75 <= 4;
   insertRow.run({
@@ -91,7 +91,7 @@ function writeMinute(t, { move = false, sound = QUIET, p75Null = false, still = 
     motion_out_peak: 0.0004,
     sound_peak: peak,
     sound_p75: p75Null ? null : p75,
-    motion_frames: 300,
+    motion_frames: frames, // 0 = no video in the minute (an UNWATCHED row: sleepAnalysis.js motionSeen)
     // Decoys: the opposite of the truth for every sound statistic the guard must NOT use, and a mean motion that
     // would read a still minute as moving.
     motion_level: move ? 0 : 0.5,
@@ -104,8 +104,9 @@ function writeMinute(t, { move = false, sound = QUIET, p75Null = false, still = 
 }
 const inAny = (t, ranges) => ranges.some(([a, b]) => t >= a && t < b);
 // One row per minute across [from, to). `sound` is a list of [range, [peak, p75]] (first match wins); `p75Null`
-// makes every p75 NULL (the old-rule twin), or only inside the ranges it lists.
-function layNight({ from = at(16, 30), to = at(10, 0, 1), move = [], sound = [], p75Null = false, still = () => STILL_OCCUPIED } = {}) {
+// makes every p75 NULL (the old-rule twin), or only inside the ranges it lists. `unwatched` lists ranges whose rows
+// are written with motion_frames = 0: the row exists and carries its sound, but the camera delivered no video.
+function layNight({ from = at(16, 30), to = at(10, 0, 1), move = [], sound = [], p75Null = false, still = () => STILL_OCCUPIED, unwatched = [] } = {}) {
   for (let t = from; t < to; t = new Date(t.getTime() + 60000)) {
     const hit = sound.find(([[a, b]]) => t >= a && t < b);
     writeMinute(t, {
@@ -113,6 +114,7 @@ function layNight({ from = at(16, 30), to = at(10, 0, 1), move = [], sound = [],
       sound: hit ? hit[1] : QUIET,
       p75Null: p75Null === true || (Array.isArray(p75Null) && inAny(t, p75Null)),
       still: still(t),
+      frames: inAny(t, unwatched) ? 0 : 300,
     });
   }
 }
@@ -233,6 +235,37 @@ describe('#904 the faulty-microphone guard, through computeNight', () => {
     assert.equal(night.sound_discounted_minutes, 380, '19:40 to 02:00');
   });
 
+  test('rows with no video (motion_frames 0) are not watched minutes: loud spikes in them are neither a fault nor discounted', (t) => {
+    // 340 minutes (21:30-03:10) of rows that carry exactly the fault's sound but no video, among watched quiet minutes.
+    // Counted as WATCHED spike-only minutes they fill 340/480 = 0.708 of an 8-hour window and the guard fires; read
+    // as the unwatched minutes they are, the best window holds 140 watched minutes (under the 384 floor) and the
+    // others hold none of them, so nothing is discounted and the night is the one with those rows absent. Fails if
+    // the guard's per-minute loop drops its motionSeen check (sleepAnalysis.js, noteSound).
+    const gap = [at(21, 30), at(3, 10, 1)];
+    t.mock.timers.enable({ apis: ['Date'], now: noon() });
+
+    // Precondition: the same rows WITH video are a fault, so the fixture can make the guard fire.
+    layNight({ move: [PUT_DOWN, MORNING], sound: [[gap, FAULT]] });
+    const watched = computeNight(CHILD, DATE);
+    assert.equal(watched.status, 'ok');
+    assert.equal(watched.sound_discounted_minutes, 340, 'precondition: with video the guard fires on these rows');
+
+    clearNight();
+    layNight({ move: [PUT_DOWN, MORNING], sound: [[gap, FAULT]], unwatched: [gap] });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(night.sound_discounted_minutes, 0, 'no video, no discount');
+
+    // The same night with those rows absent altogether.
+    db.prepare('DELETE FROM activity_samples WHERE bucket_start >= ? AND bucket_start < ?').run(sqlTime(gap[0]), sqlTime(gap[1]));
+    const absent = computeNight(CHILD, DATE);
+    assert.equal(absent.sound_discounted_minutes, 0);
+    assert.equal(night.awake_minutes, absent.awake_minutes);
+    assert.equal(night.wake_count, absent.wake_count);
+    assert.equal(night.asleep_minutes, absent.asleep_minutes);
+    assert.equal(hhmm(night.wake_at), hhmm(absent.wake_at));
+  });
+
   test('a still child, a quiet zone and a faulty microphone stays ok: the guard never makes a night `empty`', (t) => {
     // The bed never moves over EMPTY_BED_MAX_PEAK (a quiet zone and a still child), so the only awake time the old
     // rule found was the fault's: a seven-hour "wake-up" from 21:00 to 04:00. With the guard that is gone, and
@@ -263,7 +296,7 @@ describe('#904 the faulty-microphone guard, through computeNight', () => {
     assert.equal(computeNight(CHILD, DATE).status, 'empty', 'control: the rule is what keeps the fault night ok');
   });
 
-  test('KNOWN LIMIT (an owner decision): an EMPTY bed with a faulty microphone now reads as a night slept', (t) => {
+  test('KNOWN LIMIT (a deliberate decision): an EMPTY bed with a faulty microphone now reads as a night slept', (t) => {
     // The other side of the never-empty rule. A bed nobody is in, on a camera whose microphone is faulty, with the
     // fault running to the morning. The old rule read the fault as the child up from 21:00, measured no awake time
     // before it, and (the bed never moved) called the night `empty`: right, by accident. The guard turns the fault
@@ -370,7 +403,7 @@ describe('#904 the faulty-microphone guard, through computeNight', () => {
   });
 
   test('the worst ordinary night Phase 0 found (82 spike-only minutes in a row, half of an 8-hour window) does not trigger', (t) => {
-    // Shaped like the 2026-10-08 night of one camera: household noise while the child slept, 82 consecutive
+    // Shaped like the worst ordinary night Phase 0 measured (2026-10-08): noise from elsewhere in the home while the child slept, 82 consecutive
     // spike-only minutes and, with two more runs of 80, a worst 8-hour window of 242/480 = 0.504, the highest share
     // any ordinary night reached. It stays exactly as the old rule read it (three long wake-ups: the guard is not a
     // fix for that night, and must not change it).
@@ -443,6 +476,15 @@ describe('#904 sound_discounted_minutes after computeNight: the route, a correct
     const corrected = applyCorrection(CHILD, fresh);
     assert.equal(corrected.corrected, true, 'precondition');
     assert.equal(corrected.sound_discounted_minutes, 540, 'kept as measured over the original span, like awake_minutes');
+    // Not the corrected span's own count: a wake corrected to 06:30 would hold 570 discounted minutes (the fault runs on
+    // to 10:00), and a night corrected to 19:40-20:30, wholly before the fault, would hold none. The count stays the
+    // detector's (docs/sleep-tracking.md, "A microphone that looks faulty").
+    db.prepare('DELETE FROM sleep_reviews').run();
+    insertReview({ true_onset_at: sqlTime(at(19, 40)), true_wake_at: sqlTime(at(20, 30)) });
+    const before = applyCorrection(CHILD, fresh);
+    assert.equal(before.corrected, true, 'precondition');
+    assert.equal(hhmm(before.wake_at), '20:30', 'precondition: the displayed span ends before the fault starts (21:00)');
+    assert.equal(before.sound_discounted_minutes, 540, 'still the detector\'s count, over the span it worked out');
   });
 
   test('storing the night works and stores no count (there is no column); the stored row and its overlay never gain the key', (t) => {

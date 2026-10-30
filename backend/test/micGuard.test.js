@@ -153,12 +153,61 @@ describe('#904 discountedMinutes: spike-only minutes inside a qualifying 8-hour 
     // short noise, or a short motionless cry) at 659, 719, 779, ... The faulty half is discounted. In the clean half
     // only the spike-only minutes that an 8-hour window still reaching back into the fault covers are: 719 sits in
     // [240, 720), 362 of 480 spike-only, so it is; 779 needs a window starting at 300 or later, at most 303 of 480,
-    // so from 779 on the sound counts. The stated cost of an 8-hour window (micGuard.js, discountedMinutes): for up
-    // to (1 - 0.70) x 480 = 144 minutes either side of a fault, a spike-only minute can still be discounted. A
-    // minute that is not spike-only never is.
+    // so from 779 on the sound counts. The stated cost of an 8-hour window (micGuard.js, discountedMinutes): with no
+    // gap in watching, up to (1 - 0.70) x 480 = 144 minutes either side of a fault; a gap lets it reach further (the
+    // next test). A minute that is not spike-only never is.
     const pieces = ['600S'];
     for (let h = 0; h < 10; h++) pieces.push('59q', '1S');
     const d = discountedMinutes(tl(...pieces));
     assert.deepEqual(runs(d), [[0, 600], [659, 660], [719, 720]]);
+  });
+
+  // The documented bound (micGuard.js, discountedMinutes, "HOW FAR, derived"): a window must hold >= 384 watched
+  // minutes of which >= 70% are spike-only, i.e. >= 269 spike-only (the minute itself among them), so at most 211
+  // minutes of it are quiet or unwatched: 115 quiet watched (3/7 of 269, the 0.70 share) plus 96 unwatched (480 - 384).
+  // Unwatched minutes do not count against a window's share, so a camera gap lets a spike-only minute be discounted
+  // up to 212 minutes after the fault's last minute, not the 144 of the no-gap case. Each limit is tested at its
+  // edge and one past it, so a change to MIN_WATCHED or WINDOW_FRACTION (or to a window that counts the gap as
+  // quiet) turns exactly one of them.
+  describe('how far past a fault a lone spike-only minute is still discounted', () => {
+    // 600 faulty minutes, then `between` (the pieces between the fault and the minute), then one spike-only minute.
+    // The fault itself is discounted either way (a whole window of it); only the last minute is under test.
+    const lastIsDiscounted = (...between) => {
+      const tail = tl('600S', ...between, '1S');
+      const d = discountedMinutes(tail);
+      assert.equal(d.slice(0, 600).every(Boolean), true, 'precondition: the fault itself is discounted');
+      return d[tail.length - 1];
+    };
+
+    test('at the edge: 115 quiet + 96 unwatched minutes between (212 after the fault) is discounted', () => {
+      assert.equal(lastIsDiscounted('115q', '96.'), true);
+      // The order inside the gap does not matter, only the counts.
+      assert.equal(lastIsDiscounted('96.', '115q'), true);
+    });
+
+    test('one past on WINDOW_FRACTION: a 116th quiet minute (268/384 = 0.698) is not', () => {
+      assert.equal(lastIsDiscounted('116q', '96.'), false);
+    });
+
+    test('one past on the unwatched allowance: a 97th unwatched minute leaves the window under 384 watched', () => {
+      assert.equal(lastIsDiscounted('115q', '97.'), false);
+    });
+
+    test('one past on MIN_WATCHED alone: 114 quiet + 97 unwatched is 383 watched, enough share (269/383) but too few', () => {
+      assert.equal(lastIsDiscounted('114q', '97.'), false);
+    });
+
+    test('with no gap in watching the bound is the 144 quiet minutes: 144 is discounted, 145 is not', () => {
+      assert.equal(lastIsDiscounted('144q'), true);
+      assert.equal(lastIsDiscounted('145q'), false);
+    });
+
+    test('a 269-minute fault, a 96-minute gap, 110 quiet minutes, then a 5-minute spike-only run (the reviewer\'s case)', () => {
+      // The run begins 207 minutes after the fault's last minute and is discounted whole (S = 274 of 384 watched =
+      // 0.714). The same five minutes with a raised p75 (`q`) are never discounted, whatever window holds them.
+      const d = discountedMinutes(tl('269S', '96.', '110q', '5S'));
+      assert.deepEqual(runs(d), [[0, 269], [475, 480]]);
+      assert.deepEqual(runs(discountedMinutes(tl('269S', '96.', '110q', '5q'))), [[0, 269]], 'a real cry there still counts');
+    });
   });
 });

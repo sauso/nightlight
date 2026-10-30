@@ -2414,12 +2414,12 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // above, before the metrics extension. The 2026-10-29 fault night is nowhere near this (its in-bed peak was
   // ~0.97-0.99, the line is 0.1), but a quiet-zone install with the same fault would reach it. Pinned by the #904
   // test "a still child, a quiet zone and a faulty microphone stays ok".
-  // ⚠️ THE COST, an owner decision (KNOWN-ISSUES.md): the rule cannot tell that still child from an EMPTY bed on a
+  // ⚠️ THE COST, a deliberate decision (KNOWN-ISSUES.md): the rule cannot tell that still child from an EMPTY bed on a
   // camera with the same fault. Where the fault runs to the morning, the old rule read it as the child up from when
   // it began, measured no awake time before that, and called the night `empty` (right, by accident); now the fault
   // is quiet and this condition refuses `empty`, so the night reads `ok`, the whole window asleep. A wrong `ok` is
   // reversible (frames kept; a parent can answer "no one was in the bed"), a wrong `empty` is not. Pinned by the
-  // #904 test "KNOWN LIMIT (an owner decision): an EMPTY bed with a faulty microphone".
+  // #904 test "KNOWN LIMIT (a deliberate decision): an EMPTY bed with a faulty microphone".
   if (maxBedPeak < EMPTY_BED_MAX_PEAK && wakeCount === 0 && awake === 0 && discountedIn(onset, sleepEnd) === 0) {
     // ...but only on a night we actually WATCHED almost all of (see EMPTY_MIN_COVERAGE_FRAC for why this
     // is stricter than the no_data gate, and why 0.9 is a hypothesis). A night that looks empty in the

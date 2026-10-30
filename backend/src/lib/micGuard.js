@@ -4,8 +4,8 @@
 // WHAT IT IS FOR. The nightly sleep analysis counts a minute as active when its `sound_peak` is over SOUND_ACTIVE,
 // and `sound_peak` is the loudest single ~200 ms window of the minute (activityTracker.js). So a microphone that
 // makes one short loud spike every few seconds, in a silent room, makes EVERY minute active, and a still bed
-// reports hours of awake time. Real incident, 2026-10-29: one of the two cameras in the house the app is developed
-// in was moved, and from then on its microphone banged every few seconds (a known fault of that camera model).
+// reports hours of awake time. Real incident, 2026-10-29: one camera in the developer's own two-camera installation
+// was moved, and from then on its microphone banged every few seconds (a known fault of that camera model).
 // Its per-minute `sound_peak` median went from ~1.5 dB over ambient to 10-20 dB, 100% of its minutes were over
 // SOUND_ACTIVE for 9+ hours, and the night read "awake from 19:34" on both databases while the bed was still. The
 // sound ALERT path is a separate detector, unchanged by this (it did alert on that night).
@@ -23,7 +23,7 @@
 // a real cry or a sustained noise raises p75 and keeps counting.
 //
 // WHERE THE NUMBERS CAME FROM (Phase 0 of #904, 2026-10-30): a read-only measurement over 124 camera-nights on
-// fresh copies of the production and staging databases of that one house (two cameras, 30 days). The rule below
+// fresh copies of the production and staging databases of that one installation (two cameras, 30 days). The rule below
 // was the only shape found that qualified every fault night and NO other camera-night on either database. A first
 // design (a window of 60-120 minutes, and "no movement" as part of a spike-only minute) was measured and rejected:
 // one ordinary night (below) could not be told apart from the fault at any window of 120 minutes or less, and a
@@ -31,7 +31,7 @@
 // of the invented awake time (719 awake minutes become 159-179, which is the movement alone).
 //
 // ⚠️ CALIBRATED NUMBERS (workspace rule: a number tuned on one room is a hypothesis about every other). The margin
-// rests on ONE fault and ONE outlier night in 30 days of data from two cameras in one house; the guard has not been
+// rests on ONE fault and ONE outlier night in 30 days of data from two cameras in one installation; the guard has not been
 // seen on a second faulty microphone. What that means for everyone else is stated beside each constant, and in
 // docs/sleep-tracking.md and KNOWN-ISSUES.md.
 
@@ -46,8 +46,8 @@ export const SPIKE_P75_MAX = 4;
 // The window, in ELAPSED minutes (8 hours), never in watched minutes: a gap in watching (the daily camera reboot,
 // a video stall) does not shrink it, so a few spike-only minutes either side of a long outage cannot be joined
 // into one faulty stretch. Phase 0: the longest run of spike-only minutes on any non-fault camera-night was 82
-// (one camera, call it camera A, on the night of 2026-10-08: household noise while the owner confirmed the child
-// was asleep, with no movement and no alert), and the longest cluster of real alerted sound was 74 minutes. 480 is
+// (one ordinary night on the other camera of that installation, 2026-10-08: noise from elsewhere in the home while
+// the child was confirmed asleep, with no movement and no alert), and the longest cluster of real alerted sound was 74 minutes. 480 is
 // 5.8x and 6.5x those, and the fault filled it.
 // For everyone else, two costs. (a) A night IN PROGRESS gets no discount until its timeline holds 480 minutes: the
 // timeline starts 3 hours before the window, so that is about 5 hours into the window when the camera was
@@ -59,11 +59,11 @@ export const SPIKE_P75_MAX = 4;
 export const WINDOW_MIN = 480;
 
 // The share of a window's WATCHED minutes that must be spike-only. Phase 0: the worst non-fault window reached
-// 0.504 (camera A, 2026-10-08, the same on both databases; the next worst night 0.39), and the fault's weakest
+// 0.504 (that same ordinary night, 2026-10-08, the same on both databases; the next worst night 0.39), and the fault's weakest
 // qualifying window 0.888 (production) and 0.902 (staging). 0.70 sits between the two.
 // For everyone else: a microphone that is faulty only part of the time (spikes in fewer than about 70% of the
 // minutes of every 8 hours) is not caught and keeps inventing wake-ups, as before; and a home whose ordinary night
-// noise is spikier than that house's could have real sound discounted. A ticking clock or a steady, spiky noise
+// noise is spikier than that installation's could have real sound discounted. A ticking clock or a steady, spiky noise
 // that runs all night IS treated like a fault, by design: its sound is not a child.
 export const WINDOW_FRACTION = 0.70;
 
@@ -106,10 +106,23 @@ export function isSpikeOnlyMinute({ soundPeak, soundP75 }, soundActive) {
 // (computed as that division, the arithmetic Phase 0 measured with).
 //
 // Recovery is automatic: once a microphone is fixed or replaced, the windows after it stop qualifying, and its
-// sound counts again. Not at once: a window that still reaches back into the faulty stretch can qualify, so for up
-// to (1 - WINDOW_FRACTION) x WINDOW_MIN = 144 minutes either side of a fault a spike-only minute (a short noise, or
-// a short motionless cry) can still be discounted. A minute that is not spike-only never is. Pinned by the recovery
-// test in micGuard.test.js.
+// sound counts again. Not at once: a window that still reaches back into the faulty stretch can qualify, so a
+// spike-only minute (a short noise, or a short motionless cry) just after a fault can still be discounted. A minute
+// that is not spike-only never is.
+//
+// HOW FAR, derived (the bound is on WATCHED minutes, plus the unwatched ones a window may hold). A discounted
+// spike-only minute sits in a window with >= MIN_WATCHED watched minutes of which >= WINDOW_FRACTION are spike-only:
+// at least 269 spike-only minutes (ceil(0.70 x 384) = 269; the minute itself is one of them). The rest of the 480,
+// at most 480 - 269 = 211 minutes, is quiet or unwatched, and it can sit between the fault's last minute and the
+// discounted one: at most 96 unwatched (480 - MIN_WATCHED; unwatched minutes do not count against a window's share,
+// the "elapsed, not watched" rule above) and, of the watched ones, at most 3/7 of the spike-only count (0.30 of the
+// watched), 115 at 269 spike-only. So after a fault of 268+ spike-only minutes, a spike-only minute can be
+// discounted up to 211 + 1 = 212 minutes after the fault's last minute (115 quiet + 96 unwatched in between), and
+// by symmetry up to 212 before its first. WITHOUT any gap in watching the window is all watched, needs 336
+// spike-only, and the bound is 480 - 336 = 144 quiet minutes in between (1 - WINDOW_FRACTION) x WINDOW_MIN. Checked
+// against a run: 269 fault minutes, a 96-minute camera gap, 110 quiet minutes, a 5-minute motionless cry: S = 274 of
+// 384 watched = 0.714, so the cry, which begins 207 minutes after the fault's last minute, is discounted.
+// Pinned at the edge, and one past it on each of the three limits, by "how far past a fault" in micGuard.test.js.
 // O(n) with prefix sums and a difference array; a night's timeline is about 1,500 minutes.
 export function discountedMinutes(minutes) {
   if (!Array.isArray(minutes)) throw new TypeError('discountedMinutes: minutes must be an array');

@@ -1000,8 +1000,8 @@ of the stretch's watched minutes and the camera watched at least **384** of its 
 | Wake clips | Unchanged | As before | As before |
 | Shown on the sleep detail page | One line under the summary | Nothing new | Nothing new |
 
-**Where the numbers came from, and what they assume:** measured in one house, with two cameras, over 124
-camera-nights (30 days, on copies of both of that house's databases), on **one** faulty microphone. The worst
+**Where the numbers came from, and what they assume:** measured on one two-camera installation, over 124
+camera-nights (30 days, on copies of that installation's production and staging databases), on **one** faulty microphone. The worst
 ordinary night reached 50% (household noise, 82 spike-only minutes in a row while the child slept), the next
 worst 39%, and the faulty night's weakest 8-hour stretch 89%. The 8 hours are almost six times the longest
 spike-only run any ordinary night had, and six times the longest cluster of real, alerted sound on record (74
@@ -1018,8 +1018,16 @@ so it is a first estimate for every other home.
   the same cameras, ordinary days reached 85-91% in some 8-hour stretches.
 - **A microphone that is faulty only part of the time** (spikes in fewer than about 70% of minutes) is not caught
   and still adds wake-ups, and a home whose night-time noise is spikier could have real sound ignored.
-- **For up to about 2½ hours either side of a faulty stretch** (30% of 8 hours), a brief sound with no movement,
-  such as a short call-out, can still be ignored: an 8-hour stretch reaching back into the fault still qualifies.
+- **Just before and after a faulty stretch**, a brief sound with no movement, such as a short call-out, can still be
+  ignored: an 8-hour stretch reaching into the fault still qualifies. The bound is on *watched* minutes. A
+  qualifying stretch needs at least 269 spike-only minutes (70% of at least 384 watched), so with no gap in watching at
+  most 144 quiet minutes (30% of 8 hours) fit between the fault and the sound, about 2½ hours. Minutes with no video
+  do not count against a stretch, so it can also hold up to 96 of them: with 115 quiet and 96 unwatched minutes
+  in between, a sound 212 minutes (about 3½ hours) after the fault's last minute is still ignored. A sound that
+  lasts (a raised 75th percentile) is never ignored, at any distance.
+- **A parent's corrected times do not change the count.** `sound_discounted_minutes` stays the detector's own, over
+  the span it worked out, so on a night corrected to times that lie outside the faulty stretch the sleep page's
+  "microphone looked faulty" line can still appear.
 - **A ticking clock, or any spiky noise that runs all night, is treated as a fault** on purpose.
 - **Never "no one was in the bed" when sound was ignored.** That answer also deletes the night's timelapse frames,
   and on a still child in a bed zone that barely registers movement the ignored minutes may have been the only

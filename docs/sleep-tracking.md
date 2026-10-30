@@ -320,12 +320,15 @@ goes, is normally far shorter than that; the fault this was built for ran all ni
 - The night's detail page says so under the summary, for example *"The microphone looked faulty for
   9h 40m, so its sound was not counted as awake time. Movement still was."* The night's API answer
   carries the count as `sound_discounted_minutes`: the minutes between falling asleep and waking whose
-  sound was ignored (0 on an ordinary night, `null` on a night with no sleep to count).
+  sound was ignored (0 on an ordinary night, `null` on a night with no sleep to count). On a night
+  whose times you corrected in the review the count does not change: it stays the count for the
+  stretch the detector worked out, not for your corrected times, so the line can mention a faulty
+  stretch that lies outside the times shown.
 
 There is no setting. The fixed numbers: a minute counts as spikes only when it rose more than 6 dB
 over the room's usual level but its 75th-percentile loudness stayed within **4 dB** of it, and an
 8-hour stretch is only judged when the camera watched at least **384** of its minutes (80%). They were
-measured in one house, with two cameras, on one faulty microphone and 30 days of ordinary nights: no
+measured on one two-camera installation, on one faulty microphone and 30 days of ordinary nights: no
 ordinary night came close (the worst reached 50%), and on the faulty night the guard removed nearly all
 of the invented awake time.
 
@@ -336,11 +339,15 @@ Known limits:
   the finished night is worked out with the guard.
 - **A sleep window that includes the middle of the day** (a day sleeper, a nap window) can have
   ordinary daytime noise ignored: daytime noise can be spiky enough to look like a fault.
-- **The numbers come from one house.** A microphone that is faulty only some of the time (in fewer
+- **The numbers come from one installation.** A microphone that is faulty only some of the time (in fewer
   than about 70% of minutes) still adds wake-ups, and a home whose night-time noise is spikier than
-  that one's could have real sound ignored.
-- **For up to about 2½ hours either side of a faulty stretch**, a brief sound without movement (a short
-  call-out) can still be ignored.
+  that installation's could have real sound ignored.
+- **Just before and after a faulty stretch**, a brief sound without movement (a short call-out) can
+  still be ignored, because an 8-hour stretch reaching into the fault still counts as faulty. That is
+  for up to about 2½ hours (144 minutes) when the camera watched throughout. Minutes with no video
+  don't count against the 8 hours, so if the camera also lost video for up to 96 of them (a reboot or a
+  stall inside that stretch), it can reach up to about 3½ hours (212 minutes). A sound that lasts is
+  never ignored.
 - **A ticking clock, or any spiky noise that runs all night, is treated like a fault**, on purpose: it
   isn't your child.
 - **Only the detail page shows the note.** The child's card and the morning sleep report show the

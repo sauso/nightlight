@@ -669,7 +669,9 @@ function Stat({ label, value }) {
 // night does not count them as awake time; a parent seeing "asleep" over a night the microphone was banging needs to
 // know why. `sound_discounted_minutes` is an ADDED key: a server from before it (no key), an unscored night (null)
 // and an ordinary night (0) all show nothing. The detail page only: the child's card and the morning push read the
-// stored night, which has no such column (docs/sleep-tracking.md, "A microphone that looks faulty").
+// stored night, which has no such column (docs/sleep-tracking.md, "A microphone that looks faulty"). On a night a
+// parent corrected, the count stays the detector's own (over the span it worked out, see applyCorrection), so the line
+// is about the microphone during that night, not about the corrected times shown: the wording claims no span.
 function FaultyMicNote({ night }) {
   const minutes = night.sound_discounted_minutes;
   if (!(typeof minutes === 'number' && minutes > 0)) return null;

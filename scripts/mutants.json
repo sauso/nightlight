@@ -24001,5 +24001,14 @@
     "expect": "killed",
     "tests": ["sleep-faulty-mic.test.js"],
     "namePattern": "the onset and post-onset view reads the discount"
+  },
+  {
+    "label": "#904 the guard counts a row with no video (motion_frames 0) as a watched spike-only minute",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  const noteSound = (r, i) => {\r\n    if (!motionSeen(r)) return;\r\n",
+    "replace": "  const noteSound = (r, i) => {\r\n",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "rows with no video"
   }
 ]

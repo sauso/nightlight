@@ -660,7 +660,12 @@ export function applyVerdicts(childId, nightDate, verdicts, reasons, shown = und
 // The result is floored at zero.
 //
 // `sound_discounted_minutes` (#904, a fresh compute only; no column) is kept as measured over the ORIGINAL span too,
-// for the same reason as awake_minutes: which of its minutes fall inside a corrected span is not known here.
+// for the same reason as awake_minutes: which of its minutes fall inside a corrected span is not known here. So on a
+// corrected night it is the DETECTOR's count, over the span the detector worked out ([its onset, its sleepEnd)), not
+// over the corrected span the night now shows: an original 540 stays 540 when the corrected times lie wholly before
+// the fault, or run past the original wake (both pinned by "a time correction keeps it" in sleep-faulty-mic.test.js).
+// What the sleep page's "microphone looked faulty for ..." line then means is "while the detector was working the night
+// out", not "inside the times shown above it".
 //
 // "NO ONE WAS IN THE BED" (sleep_reviews.nobody_in_bed) is checked BEFORE the times. It carries no
 // times at all — saving it nulls them — so the old "no true_onset_at and no true_wake_at, so nothing to
