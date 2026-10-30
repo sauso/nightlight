@@ -976,6 +976,88 @@ section).
 **What to do:** nothing. If a camera's history shows long stretches of exactly 0 sound and its level line
 says `peak=?dB`, its microphone is delivering silence: check whether it is muted in the camera's own settings.
 
+## A faulty microphone (a click every few seconds) is ignored in the sleep numbers
+
+**What you see:** a night's sleep detail page says *"The microphone looked faulty for 9h 40m, so its sound was
+not counted as awake time. Movement still was."*, and the night shows the child asleep through that stretch
+unless the camera saw movement. The night's API answer carries the count as `sound_discounted_minutes`.
+
+**Why:** some camera microphones develop a fault that makes a short, loud spike every few seconds in a silent
+room. A minute's loudness for sleep tracking is its loudest moment, so one spike makes the whole minute noisy,
+and the night was reported as hours awake for a child lying still. Seen for real on 2026-10-29 (issue #904): a
+camera's per-minute loudness went from a median of about 1.5 dB over the room's usual level to 10-20 dB, with every
+minute over the line for 9 hours, and the night read "awake from 19:34". Now, when a night is worked out, a minute that rose more than 6 dB over the
+room's usual level but whose 75th-percentile loudness stayed within **4 dB** of it is "spikes only", and the
+sound of every such minute inside an **8-hour** stretch is ignored when spikes-only minutes are at least **70%**
+of the stretch's watched minutes and the camera watched at least **384** of its minutes. Nothing is a setting.
+
+**Differs from the neighbouring cases** — the part that is easy to get wrong:
+
+| | A faulty microphone (spikes in most minutes for hours) | A real cry or noise | A muted or silent microphone (previous section) |
+|---|---|---|---|
+| Sleep numbers | Its sound is ignored; movement still counts | Counts as awake, also during a fault, when it fills more than a quarter of a minute | Quiet |
+| Sound alerts | Unchanged: can still alert | Alerts as before | Never on its own |
+| Wake clips | Unchanged | As before | As before |
+| Shown on the sleep detail page | One line under the summary | Nothing new | Nothing new |
+
+**Where the numbers came from, and what they assume:** measured on one two-camera installation, over 124
+camera-nights (30 days, on copies of that installation's production and staging databases), on **one** faulty microphone. The worst
+ordinary night reached 50% (household noise, 82 spike-only minutes in a row while the child slept), the next
+worst 39%, and the faulty night's weakest 8-hour stretch 89%. The 8 hours are almost six times the longest
+spike-only run any ordinary night had, and six times the longest cluster of real, alerted sound on record (74
+minutes). On the
+faulty night it removed 96-98% of the invented awake time. That margin rests on one fault and one outlier night,
+so it is a first estimate for every other home.
+
+**Limits, stated rather than hidden:**
+- **Tonight's live figures get no help for the first hours.** A night's timeline starts 3 hours before the sleep
+  window, and no 8-hour stretch can be judged until 8 hours of it exist: about 5 hours into the window (later if
+  the camera was not recording in the evening). Until then "Tonight so far" still reads a faulty microphone as
+  awake. The finished night, the stored summary and the morning report use the guard.
+- **A sleep window shorter than 2 hours never gets the guard**, even long after it ended. Its timeline is the 3
+  hours before the window, the window, and at most the 3 hours after it, so it reaches the 8 hours a stretch needs
+  only when the window is at least 2 hours long (480 - 180 - 180 = 120 minutes): 01:00-03:00 is guarded, 01:00-02:59
+  never is.
+- **Last night's figures can still change, either way, until about 3 hours after its window.** A minute whose row
+  has not been written yet (the minute in progress, for one) counts as unwatched, and when it arrives it can tip an
+  8-hour stretch over or under the 70%. So a provisional night can gain or lose ignored minutes between the nightly
+  update's passes and, rarely, a night that was kept `ok` only by the rule below can later become "no one was in the
+  bed". The figures are fixed once the evidence is final.
+- **A sleep window that includes the middle of the day** can have ordinary daytime noise ignored: measured on
+  the same cameras, ordinary days reached 85-91% in some 8-hour stretches.
+- **A microphone that is faulty only part of the time** (spikes in fewer than about 70% of minutes) is not caught
+  and still adds wake-ups, and a home whose night-time noise is spikier could have real sound ignored.
+- **Just before and after a faulty stretch**, a brief sound with no movement, such as a short call-out, can still be
+  ignored: an 8-hour stretch reaching into the fault still qualifies. The bound is on *watched* minutes. A
+  qualifying stretch needs at least 269 spike-only minutes (70% of at least 384 watched), so with no gap in watching at
+  most 144 quiet minutes (30% of 8 hours) fit between the fault and the sound, about 2½ hours. Minutes with no video
+  do not count against a stretch, so it can also hold up to 96 of them: with 115 quiet and 96 unwatched minutes
+  in between, a sound 212 minutes (about 3½ hours) after the fault's last minute is still ignored. A sound that
+  lasts (a raised 75th percentile) is never ignored, at any distance.
+- **A parent's corrected times do not change the count.** `sound_discounted_minutes` stays the detector's own, over
+  the span it worked out, so on a night corrected to times that lie outside the faulty stretch the sleep page's
+  "microphone looked faulty" line can still appear.
+- **A ticking clock, or any spiky noise that runs all night, is treated as a fault** on purpose.
+- **Never "no one was in the bed" when sound was ignored.** That answer also deletes the night's timelapse frames,
+  and on a still child in a bed zone that barely registers movement the ignored minutes may have been the only
+  awake time. "We could not see" (a night watched for less than 90% of its window, "no data") is still given as
+  before, because it deletes nothing. The cost: an **empty** bed on a camera with a faulty microphone now usually
+  reads as a night slept. Before this change such a night read "no one was in the bed" (a fault that started during
+  the night and ran to the morning), "no clear sleep" (a fault that ran all evening, so the child seemed never to
+  settle) or "no data" (too little watched), depending on when the fault started and how much was watched. Now a
+  night watched for less than 90% reads "no data" (also where it used to read "no clear sleep"), and every other one
+  reads as slept for the whole window. Answer **No one was in the bed** in the review.
+- **Only the sleep detail page shows the note.** The child's card, the stored-night list and the morning report
+  have the corrected numbers but not the note (it is not stored).
+- **Sound alerts and wake clips are unchanged.** The faulty camera in the incident still sent sound alerts, and a
+  wake clip can exist for noise that the night's timeline no longer counts as a wake-up. (On that night the live
+  wake watcher never armed, so it made no clips; that is not guaranteed for every fault.)
+- **Nights already stored keep their numbers** until they are worked out again (the nightly job re-saves only
+  last night, for about 3 hours after the window; an admin can Recompute). The detail page works a night out
+  fresh, so it shows the guarded numbers at once, also on a night a parent has corrected.
+
+**What to do:** replace or repair the camera's microphone. Until then, the camera's movement still tracks the night.
+
 ## A detector was restarted: `[detector-watchdog]` in the log and in Camera history
 
 **What you see:** a `restart` in **Settings → Logs → Camera history** reading *motion detector getting no

@@ -1359,20 +1359,30 @@ const insertFull = db.prepare(
      sound_peak, motion_frames, sound_windows, motion_out_level, motion_out_peak)
    VALUES (?, ?, ?, ?, 0, ?, 1, 1, 0, ?)`
 );
+// insertFull plus `sound_p75` (#904), for layNight only, so every other caller of insertFull is untouched.
+const insertFullP75 = db.prepare(
+  `INSERT INTO activity_samples (camera_id, bucket_start, motion_level, motion_peak, sound_level,
+     sound_peak, motion_frames, sound_windows, motion_out_level, motion_out_peak, sound_p75)
+   VALUES (?, ?, ?, ?, 0, ?, 1, 1, 0, ?, ?)`
+);
 
 // One sample per minute across [from, to), driving each channel independently — which `laySamples`
 // can't do, since it moves motion and sound together and every interesting case here pulls them apart.
 //   move  = real movement in the bed        noise = a clear sound with NOTHING moving
 //   out   = movement outside the bed (someone in the room, or the child out of it)
-function layNight(from, to, { move = [], noise = [], out = [], still = STILL_OCCUPIED } = {}) {
+// `noiseP75` (#904) is the noise minutes' `sound_p75`; NULL by default, so every older fixture writes exactly the
+// row it always did. A low one (at or under 4 dB) makes each noise minute "spike-only" in the faulty-microphone
+// guard's sense (lib/micGuard.js).
+function layNight(from, to, { move = [], noise = [], out = [], still = STILL_OCCUPIED, noiseP75 = null } = {}) {
   const within = (t, ranges) => ranges.some(([a, b]) => t >= a && t < b);
   for (let t = from; t < to; t = new Date(t.getTime() + 60000)) {
-    insertFull.run(
+    insertFullP75.run(
       CAM, sqlTime(t),
       within(t, move) ? 0.4 : still,
       within(t, move) ? 0.4 : still,
       within(t, noise) ? 20 : 0.5,
-      within(t, out) ? 0.3 : 0.0004
+      within(t, out) ? 0.3 : 0.0004,
+      within(t, noise) ? noiseP75 : null
     );
   }
 }
@@ -1408,12 +1418,19 @@ test('a child who cries without moving still counts as an awakening', () => {
   // The discount is deliberately confined to onset. Mid-night the house is quiet, so noise in a bedroom
   // is most likely the child's own — and a cry with no movement is precisely the wake-up a parent wants
   // counted. If this ever fails, the rule has leaked out of the onset search into wake detection.
-  layNight(at(18, 20), at(7, 0, 1), { noise: [[at(2, 0, 1), at(2, 10, 1)]] });
+  //
+  // #904: the cry carries a REAL p75, and a low one (1.5 dB: a child calling out for under 15 s of each minute),
+  // so every cry minute is "spike-only" to the faulty-microphone guard (lib/micGuard.js). Expected: still one
+  // wake-up of at least 10 minutes, and nothing discounted, because 10 minutes cannot fill 70% of an 8-hour window.
+  // With the old NULL p75 this test could not see the guard at all (a NULL p75 is never spike-only); now it fails
+  // if the guard's window is made short enough to swallow a crying episode.
+  layNight(at(18, 20), at(7, 0, 1), { noise: [[at(2, 0, 1), at(2, 10, 1)]], noiseP75: 1.5 });
   insertTransition.run(CAM, 'into_bed', 0.5, sqlTime(at(18, 38)));
 
   const night = computeNight(CHILD, DATE);
   assert.equal(night.wake_count, 1, 'a sound-only cry is still a wake-up');
   assert.ok(night.awake_minutes >= 10);
+  assert.equal(night.sound_discounted_minutes, 0, 'and none of it was taken for a faulty microphone');
 });
 
 // --- What the timeline is allowed to claim ---------------------------------------------------------

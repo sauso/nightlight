@@ -479,6 +479,7 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
             Measured from <strong>{night.analysis_camera_name}</strong>
           </div>
         )}
+        <FaultyMicNote night={night} />
         {/* The way into a review for any night, not just the one the card is offering. Without it a
             mistake is permanent. Its own component because `navigate` belongs to whichever component
             calls the hook — inline here it was out of scope and the button silently did nothing. */}
@@ -660,6 +661,23 @@ function Stat({ label, value }) {
     <div className="sleep-stat">
       <div className="sleep-stat__label">{label}</div>
       <div className="sleep-stat__value">{value}</div>
+    </div>
+  );
+}
+
+// #904: the faulty-microphone guard (backend lib/micGuard.js) ignored this many minutes of the night's sound, so the
+// night does not count them as awake time; a parent seeing "asleep" over a night the microphone was banging needs to
+// know why. `sound_discounted_minutes` is an ADDED key: a server from before it (no key), an unscored night (null)
+// and an ordinary night (0) all show nothing. The detail page only: the child's card and the morning push read the
+// stored night, which has no such column (docs/sleep-tracking.md, "A microphone that looks faulty"). On a night a
+// parent corrected, the count stays the detector's own (over the span it worked out, see applyCorrection), so the line
+// is about the microphone during that night, not about the corrected times shown: the wording claims no span.
+function FaultyMicNote({ night }) {
+  const minutes = night.sound_discounted_minutes;
+  if (!(typeof minutes === 'number' && minutes > 0)) return null;
+  return (
+    <div className="sleep-detail__source">
+      The microphone looked faulty for {fmtDurBig(minutes)}, so its sound was not counted as awake time. Movement still was.
     </div>
   );
 }

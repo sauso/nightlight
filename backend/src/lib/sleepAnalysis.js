@@ -4,6 +4,7 @@ import { notifySleepReports, notifySleepReportUpdates, sleepAlertChannelsConfigu
 import { getBedTransitions, TRANSITION } from './bedTransitions.js';
 import { listChildWakeClips } from './recordings.js';
 import { primaryCameraRowFor } from './primaryCamera.js';
+import { isSpikeOnlyMinute, discountedMinutes } from './micGuard.js';
 
 // A computed night is "fresh" (worth notifying about) only if its window closed within this long — so a
 // mid-day container restart that re-computes an already-seen night does NOT re-send the report push.
@@ -45,7 +46,10 @@ const REPORT_FRESH_MS = 2 * 60 * 60 * 1000;
 // '2' (#700): the lead test in the departure scan (see LEAD_FACTOR). From '2' on, the "same inputs" above also
 // include the child's EARLIER stored nights: a night's answer can change when an earlier stored night is
 // back-filled, recomputed or deleted, while its own samples, transitions and saved context stay identical.
-export const SCORING_ALGO = '2';
+// '3' (#904): the faulty-microphone guard (lib/micGuard.js). A night whose microphone spiked in most minutes of an
+// 8-hour stretch now reads that sound as quiet, so its awake minutes, wake-ups, onset and wake can all move; every
+// other night's output is unchanged apart from the added `sound_discounted_minutes` key.
+export const SCORING_ALGO = '3';
 
 const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = real movement (sleeping room ~0)
 // Outside-bed changed-fraction above this = real activity outside the bed (someone in the room, or the
@@ -1188,6 +1192,12 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     // is that night's departure candidate in later nights' history; the object itself is not in the scoring
     // context, the push text or the morning review's `computed`.
     wake_unconfirmed: null,
+    // #904: how many minutes of the night's measured span had their sound ignored by the faulty-microphone guard
+    // (lib/micGuard.js; set on the `ok` return, where it says exactly which span). ADDED to the response shape.
+    // Null on every other status, like awake_minutes: an `off`, `no_data`, `no_sleep` or `empty` night has no span
+    // to count over, and an `empty` night can never have a discounted minute in it (the never-empty rule below).
+    // Not a sleep_nights column, so the child's card, the stored-night lists and the morning push never carry it.
+    sound_discounted_minutes: null,
     climate,
     // #361: present ONLY when a context was passed, so a plain compute's output keeps its exact shape (every
     // API response is built from it). In `base`, so every return below carries it, early ones included.
@@ -1225,9 +1235,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   if (winMin === 0) return { ...base, status: 'no_data' };
   const totalMin = preMin + winMin;
 
+  // `sound_p75` is read for the faulty-microphone guard only (#904, below); nothing else here uses it.
   const rows = db
     .prepare(
-      `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak, motion_frames FROM activity_samples
+      `SELECT bucket_start AS t, motion_peak, sound_peak, sound_p75, motion_out_peak, motion_frames FROM activity_samples
          WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
     )
     .all(...scoreCams, analysisStartSql, asOfSql);
@@ -1250,14 +1261,97 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // Moved up from further down in this function (issue #352's metrics extension needs it earlier than
   // the rest of the output-construction code that originally motivated it).
   const minuteTime = (i) => toSqlUtc(new Date(analysisStartUtc.getTime() + i * 60000));
+
+  // ★ #904 — THE FAULTY-MICROPHONE GUARD. Which minutes' SOUND the whole analysis below ignores, decided ONCE,
+  // before anything is classified. The rule, the measurements behind its four numbers and what they mean for
+  // other houses are in lib/micGuard.js; this is only the wiring.
+  //
+  // ONE PASS OVER THE WHOLE TIMELINE, and the order is load-bearing. A window is 8 hours, so whether a minute
+  // inside the configured window is discounted can depend on minutes AFTER it (the morning the departure scan
+  // and the metrics extension read): a fault from 03:00 to 10:00 fills an 8-hour window only once its
+  // post-window half is counted. The extension's own rows (extraRows, further down) are fetched only after onset
+  // and the departure are known, and onset itself depends on this discount, so they cannot be what decides it.
+  // Instead the post-window minutes are read HERE, up to the same evidence cutoff the departure scan uses (#350:
+  // never past "now", at most WAKE_LOOKAHEAD_MS after the window), which is the furthest the extension can ever
+  // reach (its metricsEnd is capped at totalMinExt, which is this same cutoff). The main loop, the onset view and
+  // the extension then all read this one array, so a minute cannot be discounted in one place and not another.
+  // It is also the timeline Phase 0 measured on (3 hours before the window to 3 hours after it).
+  //
+  // ⚠️ THE ONE EXCEPTION TO "STATUS IS DECIDED FROM WINDOW-BOUNDED DATA" (issue #352, see the empty-bed check):
+  // through the discount, post-window sound can now change how in-window minutes read. It can only turn
+  // sound-active minutes quiet, but WHICH minutes it turns quiet can change in EITHER direction until the night's
+  // evidence is final (3 hours after the window). More evidence adds windows, which can only add discounted
+  // minutes; but a minute already inside the timeline can still be waiting for its row (the last index is usually
+  // the minute in progress, and a row is written only after its minute closes), and a missing row counts as
+  // unwatched, outside a window's share. When it arrives quiet, the share falls: 280 spike-only minutes with 79
+  // unwatched and that last minute missing qualify at 280/400, and with it present and quiet (280/401) they do not,
+  // so 280 discounted minutes become 0 (found by the #904 review, round 2). So between the nightly job's provisional
+  // passes a `no_sleep` night can become `ok`, and, rarely, an `ok` kept from `empty` only by the never-empty rule
+  // can later become `empty`; a night in progress can change its mind either way. Once the evidence is final, the
+  // answer is fixed. Pinned by the #904 test "a fault that qualifies only through the post-window minutes".
+  //
+  // An in-progress night has no lookahead and no post-window minutes: its timeline ends now, so it gets no
+  // discount until 480 minutes of it exist (micGuard.js WINDOW_MIN, cost (a)). A completed night whose window is
+  // under 120 minutes never gets one (preMin + window + at most 180 stays under 480: cost (a')).
+  //
+  // Hoisted, unchanged, from the transitions read and the departure scan further down, which still use them: the
+  // lookahead, and issue #350's evidence cutoff (see the departure scan for why it is bounded by `nowMs`).
+  const lookahead = inProgress ? 0 : WAKE_LOOKAHEAD_MS;
+  const txEndSql = toSqlUtc(new Date(endUtc.getTime() + lookahead));
+  const evidenceCutoffMs = Math.min(nowMs, endUtc.getTime() + lookahead);
+  const evidenceEndMin = inProgress
+    ? totalMin
+    : Math.max(totalMin, Math.round((evidenceCutoffMs - analysisStartUtc.getTime()) / 60000));
+  // The post-window rows, from the window end (asOfSql, the main query's exclusive end, so the two never share a
+  // row) to the lookahead, as the departure scan reads them; a minute past the cutoff is dropped by index below.
+  const postRows = evidenceEndMin > totalMin
+    ? db
+      .prepare(
+        `SELECT bucket_start AS t, sound_peak, sound_p75, motion_frames FROM activity_samples
+           WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
+      )
+      .all(...scoreCams, asOfSql, txEndSql)
+    : [];
+  // Per minute: null when no row in it was WATCHED (motionSeen, the rule every reader in this file uses, so an
+  // unwatched minute counts neither as spike-only nor as quiet in a window's share), else whether a watched row was
+  // loud in spikes only and whether one was loud with a raised p75 (a real sound). Two rows for one minute are real
+  // (see the OR-merge note in the departure scan), so a minute is spike-only only when it has a loud spike-only row
+  // and NO loud real one: a real sound in either row keeps the minute's sound, the safe direction.
+  const soundSeen = new Array(evidenceEndMin).fill(null);
+  const noteSound = (r, i) => {
+    if (!motionSeen(r)) return;
+    const m = soundSeen[i] || (soundSeen[i] = { spike: false, real: false });
+    if (!(r.sound_peak != null && r.sound_peak > SOUND_ACTIVE)) return;
+    if (isSpikeOnlyMinute({ soundPeak: r.sound_peak, soundP75: r.sound_p75 }, SOUND_ACTIVE)) m.spike = true;
+    else m.real = true;
+  };
+  // The same index ranges the two classifying loops keep: [0, totalMin) for the main loop's rows, and from
+  // totalMin to the cutoff for the extension's (which stops at its own metricsEnd, never later than the cutoff).
+  for (const r of rows) { const i = idxOf(r.t); if (i >= 0 && i < totalMin) noteSound(r, i); }
+  for (const r of postRows) { const i = idxOf(r.t); if (i >= totalMin && i < evidenceEndMin) noteSound(r, i); }
+  const soundDiscounted = discountedMinutes(soundSeen.map((m) => m && { spikeOnly: m.spike && !m.real }));
+  // Does this row's SOUND count? Over SOUND_ACTIVE and not discounted. The one definition every sound reader below
+  // uses: the main loop's `heard` (which feeds the onset view) and isActiveRow (which feeds `state`, so the wake
+  // runs, the metrics, the timeline, and the metrics extension). `i` is the row's minute index; every caller passes
+  // it (a missing one reads `undefined`, which would quietly let the sound count again: the #904 extension test
+  // fails if the extension's call drops it).
+  const soundCounts = (r, i) => r.sound_peak != null && r.sound_peak > SOUND_ACTIVE && !soundDiscounted[i];
+  // How many discounted minutes lie in [from, to): `sound_discounted_minutes`, and the never-empty rule below.
+  const discountedIn = (from, to) => {
+    let n = 0;
+    for (let i = Math.max(0, from); i < to; i++) if (soundDiscounted[i]) n++;
+    return n;
+  };
+
   // A minute is active if the main camera saw in-bed movement, a clear noise, OR movement outside the
   // bed. Factored out (issue #352) so the post-window metrics extension below classifies a minute
   // exactly the same way the main population loop does — a future threshold change updating one site
   // and missing the other would otherwise silently make the two disagree at the window boundary.
-  const isActiveRow = (r) =>
+  // Since #904 "a clear noise" is soundCounts: a sound the faulty-microphone guard discounted is not one.
+  const isActiveRow = (r, i) =>
     (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) ||
     (r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE) ||
-    (r.sound_peak != null && r.sound_peak > SOUND_ACTIVE);
+    soundCounts(r, i);
   // Strongest in-bed movement seen anywhere in the WINDOW — the empty-bed test below reads this.
   let maxBedPeak = 0;
   // Strongest in-bed movement per MINUTE, over the whole timeline including the lookbehind. The
@@ -1275,8 +1369,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     if (!motionSeen(r)) continue;
     const out = r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE;
     const moved = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || out;
-    const heard = r.sound_peak != null && r.sound_peak > SOUND_ACTIVE;
-    const active = isActiveRow(r);
+    const heard = soundCounts(r, i);
+    const active = isActiveRow(r, i);
     state[i] = state[i] === null ? active : state[i] || active;
     if (out) outAt[i] = true;
     if (moved) motionAt[i] = true;
@@ -1319,9 +1413,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
 
   // Bed transitions across the whole timeline (lookbehind included, plus a lookahead past the window end
   // for the morning exit on a completed night). Fetched once here because BOTH the early-bedtime guard
-  // below and the shadow wake block further down need them.
-  const lookahead = inProgress ? 0 : WAKE_LOOKAHEAD_MS;
-  const txEndSql = toSqlUtc(new Date(endUtc.getTime() + lookahead));
+  // below and the shadow wake block further down need them. (`lookahead` and `txEndSql` are defined above,
+  // hoisted for #904's faulty-microphone guard.)
   const transitions = getBedTransitions(scoreCams, analysisStartSql, txEndSql);
   const txMs = (t) => new Date(t.replace(' ', 'T') + 'Z').getTime();
   // FLOOR, not round (issue #260) — a transition carries a real second (`bed_transitions.created_at`),
@@ -1665,8 +1758,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     // being allocated at all, but by itself is NOT the fix: see the cribActExt tri-state change below,
     // which is what stops an unsampled minute INSIDE the bound (a camera outage, or evidence that just
     // hasn't been flushed to activity_samples yet) from reading as confirmed-quiet.
-    const evidenceCutoffMs = Math.min(nowMs, endUtc.getTime() + lookahead);
-    totalMinExt = Math.max(totalMin, Math.round((evidenceCutoffMs - analysisStartUtc.getTime()) / 60000));
+    // `evidenceCutoffMs` and its index `evidenceEndMin` are computed once, above the main loop (hoisted
+    // unchanged for #904: the faulty-microphone guard reads the same span), so the scan and the guard cannot
+    // disagree about where the evidence ends.
+    totalMinExt = evidenceEndMin;
     const extRows = db
       .prepare(
         `SELECT bucket_start AS t, motion_peak, motion_frames FROM activity_samples
@@ -2333,12 +2428,39 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     // protected by the downgrade guard when it closes: pre-existing, not specific to `empty` or to #508.)
     // Pinned by the #508 tests T6g/T6h.
     if (coverage < winMin * EMPTY_MIN_COVERAGE_FRAC) return { ...result, status: 'no_data' };
-    return {
-      ...result,
-      status: 'empty',
-      // Deliberately no onset/wake/duration: reporting "11h06m asleep, 0 wakes" for a bed nobody was in
-      // is the bug being fixed. The night is a real observation, it just isn't a sleep.
-    };
+    // ★ #904 — NEVER `empty` ON A NIGHT WHOSE SOUND WAS DISCOUNTED: when a minute of this span had its sound ignored
+    // by the faulty-microphone guard, the `empty` return below is skipped and the night falls through to `ok`, with
+    // the discounted figures (and says so: sound_discounted_minutes > 0). ONLY that return: the coverage `no_data`
+    // just above fires exactly as before, whatever was discounted, because "we could not see" deletes nothing and is
+    // still the honest answer for a night watched too little (#904 review round 2: the first version put this test
+    // on the outer `if` and so also skipped that `no_data`, turning a 74%-watched empty bed into `ok`). For a night
+    // with nothing discounted the flow is exactly the pre-#904 one.
+    //
+    // Why: a final `empty` is irreversible (it sends the "no one was in the bed" report and deletes the night's raw
+    // timelapse frames, timelapse.js discardFinalEmptyNightFrames, #419), and on a fault night the minutes the guard
+    // has just turned quiet may have been the only awake time, and so the only thing that kept the night `ok`: a
+    // still child in a bed zone that barely registers movement would read "nobody slept here" because the microphone
+    // was broken. Counted over the same window-bounded span as the three signals above, before the metrics
+    // extension. The 2026-10-29 fault night is nowhere near this (its in-bed peak was ~0.97-0.99, the line is 0.1),
+    // but a quiet-zone install with the same fault would reach it. Pinned by the #904 tests "a still child, a quiet
+    // zone and a faulty microphone stays ok" and "...a 74%-watched empty bed is still no_data".
+    //
+    // ⚠️ THE COST, a deliberate decision (KNOWN-ISSUES.md): this cannot tell that still child from an EMPTY bed on a
+    // camera with the same fault. On the pre-#904 rule such a night read `empty` (the fault ran to the morning, read
+    // as the child up from when it began, with no awake time before that), `no_sleep` (the fault ran all evening, so
+    // no 15 quiet minutes were ever found) or `no_data` (too little watched), depending on when the fault started and
+    // how much was watched. Now the coverage `no_data` is kept, a `no_sleep` night watched for less than
+    // EMPTY_MIN_COVERAGE_FRAC becomes `no_data` too, and every other such night reads `ok` with the whole window
+    // asleep. A wrong `ok` is reversible (frames kept; a parent can answer "no one was in the bed"), a wrong `empty`
+    // is not. Pinned by the #904 tests "KNOWN LIMIT (a deliberate decision): an EMPTY bed with a faulty microphone".
+    if (discountedIn(onset, sleepEnd) === 0) {
+      return {
+        ...result,
+        status: 'empty',
+        // Deliberately no onset/wake/duration: reporting "11h06m asleep, 0 wakes" for a bed nobody was in
+        // is the bug being fixed. The night is a real observation, it just isn't a sleep.
+      };
+    }
   }
 
   // ⚠️ ONLY NOW, AFTER STATUS IS SETTLED (issue #352). A real, transition-confirmed post-window wake IS
@@ -2356,6 +2478,11 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
       // `stateMetrics` is the tri-state twin that lets accumulateMetrics tell that default apart from
       // a real confirmed-quiet row (issue #442 — this block used to default an unsampled minute to
       // quiet here too; see the now-rewritten test in sleepAnalysis.test.js).
+      //
+      // #904: the faulty-microphone guard's verdict for these minutes was decided above the main loop, from the
+      // same post-window rows (postRows, with `sound_p75`), so isActiveRow only needs each row's index here and
+      // this query needs no p75 of its own. The minutes fetched here are a subset of postRows': both start at the
+      // window end, and metricsEnd never passes the evidence cutoff postRows was read to.
       const extraRows = db
         .prepare(
           `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak, motion_frames FROM activity_samples
@@ -2370,7 +2497,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
         // The same rule as the main loop (issue #508): an unwatched row is skipped, never merged, so a
         // post-window stall between window end and the departure counts as unknown, not asleep.
         if (!motionSeen(r)) continue;
-        const rowActive = isActiveRow(r);
+        const rowActive = isActiveRow(r, i);
         if (rowActive) activeMetrics[i] = true;
         // OR-merge, matching the main population loop's own rule for `state` (line ~646) — TWO rows for
         // one minute are real (activity_samples has no uniqueness constraint on camera_id+bucket_start:
@@ -2438,6 +2565,12 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     wake_unconfirmed: earlyExitFlagged
       ? { at: earlyExitFlagged.at, lead_min: earlyExitFlagged.lead_min, threshold_min: earlyExitFlagged.threshold_min }
       : null,
+    // #904 (see `base`): the discounted minutes in [onset, sleepEnd), the span asleep + awake + unknown add up over,
+    // including the post-window extension when the wake came after the window. A minute counts here when its sound
+    // was ignored, whatever else it was: one with movement, or one bridged into a wake run, is still awake time. 0
+    // when the guard found nothing. Not counted: discounted minutes before onset (they can move the onset, but no
+    // awake time is measured there) and after the wake. The key keeps its place from `base`.
+    sound_discounted_minutes: discountedIn(onset, sleepEnd),
   };
 
   // Periods the child is OUT of the bed — from an out_of_bed event until the next into_bed — used below

@@ -357,6 +357,22 @@ replay while its samples, transitions and context are identical. Its finding is 
 that night's departure candidate in later nights' history: a skipped night still teaches the rule. The column is an
 added key on the endpoints that return the raw stored row (above).
 
+**The faulty-microphone guard** (#904, `SCORING_ALGO` '3'; the rule in `backend/src/lib/micGuard.js`, tests in
+`backend/test/micGuard.test.js` and `backend/test/sleep-faulty-mic.test.js`). Before anything is classified,
+`computeNight` decides which minutes' sound to ignore: a watched minute whose `sound_peak` is over `SOUND_ACTIVE` while
+its `sound_p75` is at or under 4 dB is spike-only, and every spike-only minute inside an 8-hour window of elapsed
+minutes (at least 384 watched, at least 70% of those spike-only) is discounted. The main loop's `heard` (the onset
+view), `isActiveRow` (so `state`, the wake runs and the metrics) and the metrics extension all read that one array. It
+covers window start - 3 h to the departure scan's evidence cutoff (window end + up to 3 h, never past now), read
+before the main loop, so post-window minutes can decide whether in-window ones are discounted: the one exception to
+"status is decided from window-bounded data" (and, until the evidence is final, a minute whose row arrives late can
+move a provisional night's discount either way). A night with a discounted minute in its span is never `empty`: only
+the `empty` return is skipped (it falls through to `ok`), while the coverage `no_data` inside the same empty-bed test
+fires as before. The
+additive result key `sound_discounted_minutes` (the discounted minutes in the span the detector measured, which a
+parent's time correction does not change: `applyCorrection` keeps the detector's count; an integer on `ok`,
+`null` on every other status, nulled by "no one was in the bed") is not stored: there is no column.
+
 **The admin Recompute is one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the
 dialog in `frontend/src/components/RecomputeNight.jsx`). `GET /api/children/:id/sleep/:date?context=stored` reads the
 row's `scoring_context` and parses it (no row, `NULL` or unparseable: `400` with `reason: 'no_stored_context'`, never a
