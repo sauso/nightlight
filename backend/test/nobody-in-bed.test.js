@@ -281,7 +281,11 @@ test('★ a flagged detail response has exactly the keys a detector-empty one ha
   assert.equal((await put({ nobody_in_bed: true })).status, 200);
   const shown = (await get(`/sleep/${DATE}?detail=1`)).body;
 
-  const shownKeys = Object.keys(shown).filter((k) => !OVERLAY_KEYS.includes(k)).sort();
+  // `transition_frames` (#907) is added by the ROUTE to every timeline read, after the overlay, and is [] here (no
+  // timeline is drawn, so no row can show a frame; sleep-detail-frames.test.js pins that). It is neither the
+  // detector's nor the overlay's, so it is set aside before the shape comparison and checked on its own.
+  assert.deepEqual(shown.transition_frames, [], 'a flagged night offers no frames');
+  const shownKeys = Object.keys(shown).filter((k) => !OVERLAY_KEYS.includes(k) && k !== 'transition_frames').sort();
   assert.deepEqual(shownKeys, Object.keys(realEmpty).sort(), 'the same keys as a real detector-empty night');
   for (const k of Object.keys(realEmpty)) {
     if (k === 'status') assert.equal(shown.status, 'empty');

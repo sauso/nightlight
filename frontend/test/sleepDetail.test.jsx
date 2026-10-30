@@ -23,7 +23,7 @@ import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within, fireEvent, act } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver, renderAs, forEachRole } from './helpers/render.jsx';
-import SleepDetail, { addDays } from '../src/pages/SleepDetail.jsx';
+import SleepDetail, { addDays, framesForVisit } from '../src/pages/SleepDetail.jsx';
 import NightReview from '../src/pages/NightReview.jsx';
 import { api } from '../src/lib/api.js';
 
@@ -1274,5 +1274,191 @@ describe('★ the temperature insight with too few nights in a group (#365)', ()
       unmount();
       vi.restoreAllMocks();
     });
+  });
+});
+
+// --- #907: the saved frame of a bed transition, from a Room activity row ------------------------------------------
+//
+// Pictures here are never real photographs. The viewer is only ever pointed at a URL; jsdom does not load images, so
+// what is asserted is WHICH url the viewer was given, not what it shows.
+describe('#907 framesForVisit: which saved frames belong on a Room activity row', () => {
+  // A row from 15:00 to 15:05 (naive UTC, as the server sends it). The slack is 60 s at each end, both inclusive.
+  const VISIT = { start_at: '2026-08-30 15:00:00', end_at: '2026-08-30 15:05:00', minutes: 5, type: 'room' };
+  const frame = (id, at, type = 'out_of_bed') => ({ id, type, at });
+  const ids = (frames) => frames.map((f) => f.id);
+
+  test('★ a frame exactly 60 s before the start and exactly 60 s after the end match; 61 s either side do not', () => {
+    // Each edge on its own, so a slack changed to 59 s fails on the "60 s matches" half and one changed to
+    // 61 s fails on the "61 s does not" half, at BOTH ends.
+    expect(ids(framesForVisit([frame(1, '2026-08-30 14:59:00')], VISIT))).toEqual([1]);
+    expect(ids(framesForVisit([frame(2, '2026-08-30 14:58:59')], VISIT))).toEqual([]);
+    expect(ids(framesForVisit([frame(3, '2026-08-30 15:06:00')], VISIT))).toEqual([3]);
+    expect(ids(framesForVisit([frame(4, '2026-08-30 15:06:01')], VISIT))).toEqual([]);
+  });
+
+  test('a row with no end_at is matched around its start_at alone', () => {
+    const open = { start_at: '2026-08-30 15:00:00', minutes: 1, type: 'room' };
+    expect(ids(framesForVisit([frame(1, '2026-08-30 15:01:00')], open))).toEqual([1]);
+    expect(ids(framesForVisit([frame(2, '2026-08-30 15:01:01')], open))).toEqual([]);
+    expect(ids(framesForVisit([frame(3, '2026-08-30 14:59:00')], open))).toEqual([3]);
+  });
+
+  test('★ a row that spans two frames gets both, earliest first, whatever order they arrive in', () => {
+    const got = framesForVisit([frame(9, '2026-08-30 15:04:10', 'into_bed'), frame(8, '2026-08-30 15:01:30')], VISIT);
+    expect(ids(got)).toEqual([8, 9]);
+  });
+
+  test('★ several frames around one visit: only the ones near it, so a wrong match is visible', () => {
+    const around = [
+      frame(1, '2026-08-30 14:40:00'), // long before
+      frame(2, '2026-08-30 14:58:00'), // 2 min before: outside
+      frame(3, '2026-08-30 14:59:30'), // inside the slack
+      frame(4, '2026-08-30 15:03:00'), // inside the row
+      frame(5, '2026-08-30 15:06:30'), // just past the slack
+      frame(6, '2026-08-30 16:30:00'), // long after
+    ];
+    expect(ids(framesForVisit(around, VISIT))).toEqual([3, 4]);
+  });
+
+  test('a row with none, an empty list, or no list at all, returns an empty list', () => {
+    expect(framesForVisit([frame(1, '2026-08-30 12:00:00')], VISIT)).toEqual([]);
+    expect(framesForVisit([], VISIT)).toEqual([]);
+    expect(framesForVisit(undefined, VISIT)).toEqual([]);
+  });
+});
+
+describe('#907 the picture button on a Room activity row', () => {
+  // Two rows in one night: 15:00 (Melbourne 01:00) with a frame, 17:00 (03:00) without. Melbourne is UTC+10.
+  const withFrames = (transition_frames) => ({
+    ...NIGHT,
+    visits: [
+      { start_at: '2026-08-30 15:00:00', end_at: '2026-08-30 15:05:00', minutes: 5, type: 'child_out' },
+      { start_at: '2026-08-30 17:00:00', end_at: '2026-08-30 17:02:00', minutes: 2, type: 'room' },
+    ],
+    ...(transition_frames === undefined ? {} : { transition_frames }),
+  });
+  // The same words are also in the timeline legend, so pick the row's own tag.
+  const rowOf = (text) => screen.getAllByText(text).find((el) => el.classList.contains('sleep-visit-tag')).closest('li');
+
+  test('★ a row with a frame shows the button, a row without shows nothing; the button opens that frame', async () => {
+    mockSleep({ night: withFrames([{ id: 42, type: 'out_of_bed', at: '2026-08-30 15:00:20' }]) });
+    const { user } = mount();
+    await screen.findByText(/Room activity/);
+
+    const button = await screen.findByRole('button', { name: /Show the frame from 1:00 am \(got out of bed\)/ });
+    expect(within(rowOf('Out of bed')).getByRole('button', { name: /Show the frame/ })).toBe(button);
+    expect(within(rowOf('Movement outside the bed')).queryByRole('button', { name: /Show the frame/ }), 'the row with no frame').toBeNull();
+    expect(screen.getAllByRole('button', { name: /Show the frame/ })).toHaveLength(1);
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    await user.click(button);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/Bed transition · 1:00 am/)).toBeTruthy();
+    expect(within(dialog).getByText(/Got out of bed/)).toBeTruthy();
+    expect(dialog.querySelector('img.image-preview').getAttribute('src')).toContain('/cameras/bed-transitions/42/snapshot');
+  });
+
+  test('★ the viewer image is the URL api.url() builds for the snapshot path, not the bare path', async () => {
+    // WHY: a bare <img src="/cameras/..."> carries no media token, so on a real install the browser would be
+    // refused (401) and the person would see a broken picture; the sign-in protection is exactly what makes the
+    // frame unreachable without it. The earlier test only checked the path is CONTAINED in src, which a bare path
+    // also satisfies. Here api.url returns a recognisable token URL and the src must be exactly that.
+    vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}?token=media-token`);
+    mockSleep({ night: withFrames([{ id: 42, type: 'out_of_bed', at: '2026-08-30 15:00:20' }]) });
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: /Show the frame/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.querySelector('img.image-preview').getAttribute('src'))
+      .toBe('http://host/cameras/bed-transitions/42/snapshot?token=media-token');
+  });
+
+  test('★ a "Movement outside the bed" row gets its button too, not only an "Out of bed" row', async () => {
+    // WHY: the issue wants the picture on both kinds of row. The other tests put the frame on the child_out row, so
+    // a rule that only drew buttons there would pass them. Here the frame sits within 60 s of the room-kind row
+    // (17:00 to 17:02; the frame is 30 s after its end) and nowhere near the child_out row.
+    mockSleep({ night: withFrames([{ id: 77, type: 'into_bed', at: '2026-08-30 17:02:30' }]) });
+    const { user } = mount();
+    await screen.findByText(/Room activity/);
+    expect(within(rowOf('Out of bed')).queryByRole('button', { name: /Show the frame/ })).toBeNull();
+    const button = within(rowOf('Movement outside the bed')).getByRole('button', { name: /Show the frame from 3:02 am \(got into bed\)/ });
+
+    await user.click(button);
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.querySelector('img.image-preview').getAttribute('src')).toContain('/cameras/bed-transitions/77/snapshot');
+  });
+
+  test('★ an open viewer survives the live night\'s 2-minute refresh (a new night object, same content)', async () => {
+    // WHY: only the latest night is polled, and the refresh replaces `night` with a fresh object. The viewer's state
+    // is the frame itself, kept in NightContent; if it were reset when `night` changes, a picture someone is
+    // looking at would vanish every two minutes. The mock returns a NEW object per call so the refresh really
+    // changes identity, and the request count proves a refresh happened.
+    vi.useFakeTimers();
+    const TZ = 'Australia/Melbourne';
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const fresh = () => ({ ...withFrames([{ id: 42, type: 'out_of_bed', at: '2026-08-30 15:00:20' }]), night_date: today, in_progress: true });
+    const get = mockSleep({ live: { scope: 'tonight', night: { night_date: today } }, night: fresh });
+    const detailCalls = () => get.mock.calls.filter(([p]) => p.includes('/sleep/') && !p.includes('live') && !p.includes('insights')).length;
+    const settle = async () => { for (let i = 0; i < 6; i += 1) await vi.advanceTimersByTimeAsync(1); };
+    mount(TZ);
+    await settle();
+
+    fireEvent.click(screen.getByRole('button', { name: /Show the frame/ }));
+    await settle();
+    const img = () => screen.getByRole('dialog').querySelector('img.image-preview').getAttribute('src');
+    const srcBefore = img();
+    expect(srcBefore).toContain('/cameras/bed-transitions/42/snapshot');
+    const callsBefore = detailCalls();
+
+    await vi.advanceTimersByTimeAsync(2 * 60 * 1000);
+    await settle();
+    expect(detailCalls(), 'the page refreshed its night').toBeGreaterThan(callsBefore);
+    expect(screen.getByRole('dialog'), 'the viewer is still open').toBeTruthy();
+    expect(img()).toBe(srcBefore);
+  });
+
+  test('★ Escape closes the viewer and focus goes back to the button that opened it', async () => {
+    mockSleep({ night: withFrames([{ id: 42, type: 'out_of_bed', at: '2026-08-30 15:00:20' }]) });
+    const { user } = mount();
+    const button = await screen.findByRole('button', { name: /Show the frame/ });
+    await user.click(button);
+    await screen.findByRole('dialog');
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(document.activeElement).toBe(button);
+  });
+
+  test('a row spanning two frames shows two buttons, and each opens its own', async () => {
+    mockSleep({
+      night: withFrames([
+        { id: 5, type: 'out_of_bed', at: '2026-08-30 15:00:20' },
+        { id: 6, type: 'into_bed', at: '2026-08-30 15:04:40' },
+      ]),
+    });
+    const { user } = mount();
+    await screen.findByText(/Room activity/);
+    const buttons = within(rowOf('Out of bed')).getAllByRole('button', { name: /Show the frame/ });
+    expect(buttons).toHaveLength(2);
+    await user.click(buttons[1]);
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.querySelector('img.image-preview').getAttribute('src')).toContain('/cameras/bed-transitions/6/snapshot');
+    expect(within(dialog).getByText(/Got into bed/)).toBeTruthy();
+  });
+
+  test('★ a payload without transition_frames (an older server) renders the rows with no buttons and no error', async () => {
+    mockSleep({ night: withFrames(undefined) });
+    mount();
+    await screen.findByText(/Room activity/);
+    expect(rowOf('Out of bed')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Show the frame/ })).toBeNull();
+    expect(screen.queryByText(/picture icon/i), 'and no explanation of an icon that is not there').toBeNull();
+    expect(screen.queryByText(/could not load|couldn.t load/i)).toBeNull();
+  });
+
+  test('an empty list is the same as none', async () => {
+    mockSleep({ night: withFrames([]) });
+    mount();
+    await screen.findByText(/Room activity/);
+    expect(screen.queryByRole('button', { name: /Show the frame/ })).toBeNull();
   });
 });

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play, Video } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play, Video, Image as ImageIcon } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
+import ImagePreviewModal from '../components/ImagePreviewModal.jsx';
 import MediaPlayerModal from '../components/MediaPlayerModal.jsx';
 import RecomputeNight from '../components/RecomputeNight.jsx';
 import ReviewNightButton from '../components/ReviewNightButton.jsx';
@@ -340,6 +341,9 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
   // 2-min live refresh of `night` without tearing the modal down mid-watch.
   const [clipFor, setClipFor] = useState(null);
   const [wakeClip, setWakeClip] = useState(null);
+  // The saved bed-transition frame open in the viewer (or null), kept as the frame itself and not an index so it
+  // also survives the 2-minute refresh (#907).
+  const [frameFor, setFrameFor] = useState(null);
   // #361 PR 4a: the page's settings view travels into every Recompute below, so its re-reads keep (or, after a
   // save, reset) the view the page is in.
   const viewProps = { settingsView, onSettingsViewChange: onSettingsView };
@@ -450,6 +454,8 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
   const hasGap = (night.segments || []).some((s) => s.state === 'gap');
   const alerts = night.alerts || [];
   const wakeClips = night.wakeClips || [];
+  // #907. Absent on a server from before the field existed (and on a night with no camera): no buttons, no error.
+  const frames = night.transition_frames || [];
   // Coverage is measured against elapsed time so far for a live night, not the full window.
   const covEnd = night.in_progress && night.as_of ? night.as_of : night.window_end;
   const covPct = Math.round((night.coverage_minutes / Math.max(1, Math.round((utcMs(covEnd) - utcMs(night.window_start)) / 60000))) * 100);
@@ -520,7 +526,7 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
       {visits.length > 0 && (
         <div className="card">
           <div className="sleep-detail__section-title"><DoorOpen size={15} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 6 }} />Room activity · {visits.length}</div>
-          <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement the camera saw away from the bed. Before your child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.</div>
+          <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement the camera saw away from the bed. Before your child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.{frames.length > 0 && ' A picture icon opens the frame the camera saved when it decided the bed was entered or left. Older nights have none.'}</div>
           <ul className="sleep-wakes">
             {visits.map((v, i) => {
               const isOut = v.type === 'child_out';
@@ -528,6 +534,15 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
                 <li key={i} className="sleep-wakes__row">
                   <span className="sleep-wakes__time">{fmtTime(v.start_at)}{v.minutes > 1 ? ` – ${fmtTime(v.end_at)}` : ''}</span>
                   <span className="sleep-visit-right">
+                    {/* One button per saved frame near this row: ALL of them, never one picked for the row. A row can
+                        span two bed events, and choosing between them here would hide the very frame someone is
+                        looking for. A row with none shows nothing (no icon, no empty state). */}
+                    {framesForVisit(frames, v).map((f) => (
+                      <button key={f.id} type="button" className="sleep-visit-frame" onClick={() => setFrameFor(f)}
+                        aria-label={`Show the frame from ${fmtTime(f.at)} (${f.type === 'out_of_bed' ? 'got out of bed' : 'got into bed'})`}>
+                        <ImageIcon size={15} aria-hidden="true" />
+                      </button>
+                    ))}
                     <span className={`sleep-visit-tag${isOut ? ' sleep-visit-tag--out' : ''}`}>{isOut ? 'Out of bed' : 'Movement outside the bed'}</span>
                     <span className={`sleep-wakes__dur ${isOut ? 'sleep-wakes__dur--out' : 'sleep-wakes__dur--visit'}`}>{fmtDur(v.minutes)}</span>
                   </span>
@@ -539,6 +554,14 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
       )}
 
       {clipFor && <ClipPlayerModal ev={clipFor} onClose={() => setClipFor(null)} />}
+      {frameFor && (
+        <ImagePreviewModal
+          title={`Bed transition · ${fmtTime(frameFor.at)}`}
+          imagePath={`/cameras/bed-transitions/${frameFor.id}/snapshot`}
+          meta={`${frameFor.type === 'out_of_bed' ? 'Got out of bed' : 'Got into bed'} · the frame the camera saved when it decided this`}
+          onClose={() => setFrameFor(null)}
+        />
+      )}
       {wakeClip && (
         <MediaPlayerModal
           title={`Wake-up · ${fmtTime(wakeClip.started_at)}`}
@@ -968,6 +991,31 @@ function WakeClipRow({ clip, fmtTime, onPlay }) {
       </div>
     </li>
   );
+}
+
+// #907. The saved bed-transition frames that belong on one Room activity row: those whose time falls within
+// [start_at - 60 s, end_at + 60 s], both ends INCLUSIVE, ascending. Returns ALL matches (a row spanning two
+// frames gets two) and [] for a row with none.
+//
+// By TIME, not by transition id, because a row is a block of movement and the night's transitions carry no link
+// to it: the frame that matters most is often one the analysis did NOT adopt (a weak burst taken as the wake,
+// the true exit later), so no id on the adopted pair could point at it. The minute of slack is because a row is
+// drawn to whole minutes (end_at is the minute AFTER the last active one) while a frame keeps its real second.
+// `end_at` falls back to `start_at` for a row without one. The server lists only frames within this same slack
+// of the drawn range (FRAME_ROW_SLACK_MS in backend/src/lib/bedTransitions.js): change both together.
+// A known limit, stated in the docs: a row near a frame always shows it, even when the frame belongs to a
+// different cause.
+export const FRAME_MATCH_SLACK_MS = 60000;
+export function framesForVisit(frames, visit) {
+  if (!Array.isArray(frames) || !visit) return [];
+  const s = utcMs(visit.start_at) - FRAME_MATCH_SLACK_MS;
+  const e = utcMs(visit.end_at || visit.start_at) + FRAME_MATCH_SLACK_MS;
+  return frames
+    .filter((f) => {
+      const t = utcMs(f.at);
+      return t >= s && t <= e;
+    })
+    .sort((a, b) => utcMs(a.at) - utcMs(b.at));
 }
 
 // The automatic clip belonging to a wake, if one was captured. Matched on time like the alerts are:

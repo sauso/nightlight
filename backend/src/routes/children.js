@@ -15,7 +15,7 @@ import { startMotionDetector } from '../lib/motionDetector.js';
 import { reconcileClipRing } from '../lib/clipCapture.js';
 import { purgeChild, purgeFailureReason } from '../lib/entityPurge.js';
 import { isRecording } from '../lib/recordings.js';
-import { TRANSITION } from '../lib/bedTransitions.js';
+import { TRANSITION, framesForNight } from '../lib/bedTransitions.js';
 import { getNightReview, saveNightReview, previewNightReview, inBedAfterOnset, asleepAfterWake, reviewCorrectsNight,
   reviewCardState, localHmToUtcSql, applyVerdicts, applyCorrection, applyCorrections, transitionInstant,
   parseTransitionId, reviewForBrowser } from '../lib/sleepReviews.js';
@@ -450,7 +450,15 @@ router.get('/:id/sleep/:date', (req, res) => {
     // whose saved row is missing or unscored is still recompute-eligible: comparing the saved row against an
     // overlaid preview would show the parent's times as what Save would store.
     const raw = contextChoice !== undefined && req.query.raw === '1';
-    return res.json(raw ? night : applyCorrection(req.params.id, night));
+    const shown = raw ? night : applyCorrection(req.params.id, night);
+    // `transition_frames` (#907, ADDED to the shape; every existing key is unchanged): the saved bed-transition
+    // pictures the sleep detail page may offer on its Room activity rows, [{ id, type, at }]. Built HERE from the
+    // finished night, not inside computeNight: it moves no computed number, and `transitions` (the two adopted
+    // markers, which carry no id) stays exactly as it was. Present on every timeline read (`detail=1`/`debug=1`),
+    // `[]` when the night has no camera or no timeline, and ABSENT otherwise so the live card and the lists do not
+    // grow. After the correction on purpose: a "nobody was in the bed" night has no timeline left, so it gets
+    // `[]` rather than frames for rows that are not drawn. A page from before this field existed ignores it.
+    return res.json(includeTimeline ? { ...shown, transition_frames: framesForNight(shown) } : shown);
   }
   // Storing a recompute can only ever improve or re-score a night, never un-score one — see the
   // allowDowngrade guard in computeAndStoreNight. A refusal is not a server fault (the night is too old,
