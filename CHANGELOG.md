@@ -81,6 +81,22 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   clear a time on the review (clear the field and **Save**) to remove it, as before. The server also now refuses a wake-up time saved on its own that is earlier than the night's stored asleep time (it
   used to save a night that ended before it began). See [docs/sleep-tracking.md](docs/sleep-tracking.md#correcting-a-night).
 
+### Fixed
+
+- **A morning wake no longer slips back to the start of the morning's activity when the real exit had been set
+  aside (#618).** A later *got out of bed* is not taken as the wake when the bed was strictly quiet for 20 minutes
+  or more before it (#509), and the wake then falls back to the start of the morning's activity. When that quiet
+  stretch began at a *got out of bed* the app had set aside as part of climbing back into bed (one logged within a
+  minute after a *got into bed*), the wake now goes back to that earlier *got out of bed* instead. On the night this
+  came from, a child up at 06:29 read 06:29 at first and 06:13 from about 07:18 on; it now reads 06:29 throughout.
+  Only a night where both rules apply can change (one night on the owner's two databases); its sleep totals, the
+  "got out of bed" marker and the child-out time move with the wake, and the morning review can then ask **Up
+  between …**. Limits: a stray *got into bed* and *got out of bed* while the child stayed in bed is handed back
+  too; on one rare shape the wake can still move later as the morning goes on; it rests on one night in one house,
+  with no new number. A night already saved keeps its wake until it is worked out again. The sleep scoring version
+  moves to `4`. See [KNOWN-ISSUES.md](KNOWN-ISSUES.md) ("A morning wake that changed by itself as the morning went
+  on").
+
 ### Security
 
 - **Saving a very long notification server address no longer freezes the server for seconds (CodeQL alerts #12 and #13).**

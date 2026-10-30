@@ -49,7 +49,10 @@ const REPORT_FRESH_MS = 2 * 60 * 60 * 1000;
 // '3' (#904): the faulty-microphone guard (lib/micGuard.js). A night whose microphone spiked in most minutes of an
 // 8-hour stretch now reads that sound as quiet, so its awake minutes, wake-ups, onset and wake can all move; every
 // other night's output is unchanged apart from the added `sound_discounted_minutes` key.
-export const SCORING_ALGO = '3';
+// '4' (#618, a sibling of its §2): when the #509 veto discards a later exit and the quiet stretch it found is the gap
+// of an exit the settling-tail guard had set aside, that exit is handed back instead of the movement-only wake. Only
+// a night where the veto fires can change; its wake, metrics, marker and child-out interval move together.
+export const SCORING_ALGO = '4';
 
 const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = real movement (sleeping room ~0)
 // Outside-bed changed-fraction above this = real activity outside the bed (someone in the room, or the
@@ -349,6 +352,19 @@ const JITTER_REENTRY_MS = 60 * 1000;
 // simply have been empty. Scaling every reading by 1/3x to 3x (a tighter or looser zone) kept the wrong
 // skips at 5 quiet minutes or fewer and the right ones at 7 or more, so the zone's size matters only
 // mildly.
+//
+// ⚠️ CONTRADICTED ONCE: 2026-10-30, one child, staging (measured 2026-10-31 on snapshots of both databases). The
+// skipped exit (06:29:56, an `into_bed` 51 s before it) WAS the real wake (the owner saw it), and the witness counted
+// 8 quiet minutes by 31 and 61 minutes after the window end and 10 by 109: every one of them after the child had
+// left, an empty bed reading faint noise. That is a wrong skip with a count the measurement above only ever saw on
+// right ones. The camera on that bed had been replaced the day before. From 30 minutes after the wake its empty bed
+// read like a still sleeper on 4.0% of minutes that morning on staging, against 0.6% over the 19 nights before;
+// production, watching the same camera, read 5.0% against 4.0% before (a per-night median of 0%: a few noisy nights).
+// One night is not a measurement, so 6 is unchanged. The skip alone cost nothing while no later exit qualified (the
+// fallback handed it back: 06:29 at 07:08); once one did (06:57:12), the #509 veto discarded it and the wake fell to
+// the movement-only 06:13. That second step is what #618's hand-back undoes (see the veto); the skip itself is not
+// fixed. Production read the same morning right only because its `into_bed` was logged 124 s before the exit,
+// outside JITTER_REENTRY_MS.
 const SETTLING_WITNESS_MIN_QUIET = 6;
 // A bedtime is never a rigid clock time — a tired child can be asleep well before the window opens, and
 // clipping onset to window_start silently loses that sleep (and misreports the night's length). So the
@@ -869,6 +885,9 @@ export function detectMidnightEpisodes(transitions, cribActExt, bedOccupiedFrom,
 // (the scan later drops it once more than 20 bed-active minutes follow, and the rule then falls back to A
 // instead of to that exit); and a corroborated RETURN to bed after the stretch (the scan's own reversal
 // guard would reject such an absence) is not consulted. Neither was measured, so neither is guessed at.
+// A sibling of the first IS handled, by the caller and not here (#618, measured on 2026-10-30): when the stretch is
+// the gap of an exit the settling-tail guard set aside, the caller hands that exit back instead of falling back to A
+// (it reads the returned stretch's [start, end) for that).
 export function quietStretchBeforeExit(cribAct, fromIdx, gapStart, minLen, maxTrailing) {
   for (let s = Math.max(fromIdx, 0); s < gapStart; s++) {
     if (cribAct[s] !== false) continue;
@@ -1747,6 +1766,18 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // reason as the two above (set only inside the block below); stays null on a night in progress, where no
   // departure is looked for at all.
   let earlyExitFlagged = null;
+  // #618 (a sibling of its §2): EVERY exit the settling-tail guard set aside within WAKE_SNAP_MS of a gap's start, one
+  // record per gap it was asked about ({ gapStart, dt, ms, at }), for the #509 veto after the scan to hand back. Not
+  // `settlingFallback`: that is ONE exit, the smallest `dt` over ALL gaps of the night (an evening tail can hold it,
+  // the 2026-09-09 shape), and it also feeds #700's `wake_unconfirmed` attribution, so it is left exactly as it was.
+  // Hoisted out of the `!inProgress` block like the four above (filled only there; empty on a night in progress,
+  // where the veto never runs anyway). `farEarlyAt` is the #700 lead test for an exit's time, set inside the block
+  // (it needs the window end and the lazily read history the scan sets up) and asked by the veto, NOT when a record
+  // is made: so the scan's own calls, and with them #700's skip bookkeeping and its history-read count, are exactly
+  // what they were, and an exit is judged only when it is about to be handed back (an ordinary morning exit, within
+  // LEAD_FACTOR x LEAD_FLOOR_MIN of the window end, never reads the history: farEarly's own shortcut).
+  const settlingSkips = [];
+  let farEarlyAt = null;
   if (!inProgress) {
     // Indices here share the timeline origin (analysisStartUtc) used by idxOf, so the lookbehind is
     // included at the front and the lookahead past the window end at the back.
@@ -1982,6 +2013,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
       if (threshold == null || leadMin <= threshold) return null;
       return { ms: exitMs, at: t.created_at, lead_min: leadMin, threshold_min: threshold };
     };
+    // #618: the same test by an exit's time, for the veto after the scan (see `settlingSkips` above). A yes/no only:
+    // the veto records nothing (see there for why `wake_unconfirmed` is left as the scan set it).
+    farEarlyAt = (at) => farEarly({ created_at: at }) != null;
     // The EARLIEST recorded skip is the one reported (and stored). The scan meets exits roughly in time order, but
     // one exit can be asked about for two gaps and a later gap can snap to an earlier exit, so it is compared, not
     // assumed.
@@ -2154,7 +2188,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
             // Tightening the witness window was tried and does not work: on the real nights the false
             // tail and a REAL exit both show exactly 3 occupied minutes in the following 30. So the
             // guard keeps its reach and gives up its veto instead — it may SKIP an exit in favour of a
-            // later one, but if there is no later one it hands this one back.
+            // later one, but if there is no later one it hands this one back. (#618: and if the later one
+            // is then discarded by the #509 veto after the scan, the veto hands this one back too, when
+            // the quiet stretch it found is this exit's own gap: see `settlingSkips` and the veto.)
             //
             // ...unless the lead test skips it (#700): the hand-back exists so that this guard is never the
             // reason a night has no wake, and an exit hours earlier than this child ever gets up is not one
@@ -2167,6 +2203,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
                 if (fallbackSkipped == null || earlyFallback.ms < fallbackSkipped.ms) fallbackSkipped = earlyFallback;
               } else settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i };
             }
+            // #618: and every such skip, per gap, for the #509 veto below the scan. Recorded whatever `settlingFallback`
+            // already holds and whatever the lead test would say (that is asked at the veto): this list only says
+            // "this gap's departure was set aside as the tail of a return"; the veto decides whether it comes back.
+            if (dt <= WAKE_SNAP_MS) settlingSkips.push({ gapStart: i, dt, ms: txMs(t.created_at), at: t.created_at });
             continue;
           }
           // #700: asked last, so the history is consulted only for an exit that would otherwise become `best`.
@@ -2313,8 +2353,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // inside the departure scan. A corroborated exit T that is later than A is discarded when the bed was
   // strictly quiet for MORNING_ABSENCE_MIN minutes in between (see quietStretchBeforeExit for the nights
   // and the evidence); the wake, the metrics span, the timeline marker and the child-out interval then
-  // all fall back to A together, because they all read these three variables. `wake_at_shadow` keeps the
-  // raw exit (it is documented as "recorded whether or not adopted").
+  // all fall back to A together, because they all read these three variables, unless the stretch is the gap of
+  // an exit the settling-tail guard set aside: then they all move to THAT exit together (#618, the hand-back
+  // below). `wake_at_shadow` keeps the raw exit T either way (it is documented as "recorded whether or not
+  // adopted").
   //
   // Reached only when: the night is complete (the scan ran), A exists (`< totalMin`: a child quiet at the
   // window end has no A and keeps T, "knowing they got up beats still asleep"), an exit was adopted, and
@@ -2325,7 +2367,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   //
   // What this means for someone else's house: the rule trusts "a strictly quiet bed inside the final awake
   // run is an absence". A mic that hears the whole house starts that run early, and the later, correct exit
-  // is then set aside: the wake is EARLY (the start of the activity), never missing. A zone painted so a
+  // is then set aside: the wake is EARLY (the start of the activity, or a skipped exit inside the stretch,
+  // #618), never missing. A zone painted so a
   // departure never reads quiet has the opposite effect: no stretch exists, so the rule does nothing and
   // the later exit stands, as before. A child who fusses, falls back asleep and is carried out later is
   // reported at the fuss, and so is one who got out, was logged back in bed, and left again later (the scan's
@@ -2337,12 +2380,82 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // direction (pinned by the '#509 known limit' test; measured on 2026-10-01 and 2026-09-19). Calibrated
   // on two children in one house over 30 nights (no untouched validation set); see KNOWN-ISSUES.
   const rawExitMs = transitionExitMs;
-  if (USE_TRANSITION_TIMES && transitionExitIdx != null && !inProgress && algoSleepEnd < totalMin
+  // The stretch [start, end, trailing] when the veto fires, else a falsy value (false, or quietStretchBeforeExit's null).
+  const vetoStretch = USE_TRANSITION_TIMES && transitionExitIdx != null && !inProgress && algoSleepEnd < totalMin
       && selectedGapStart != null && maxBedPeak >= EMPTY_BED_MAX_PEAK
-      && quietStretchBeforeExit(cribActExt, algoSleepEnd, selectedGapStart, MORNING_ABSENCE_MIN, MAX_POST_EXIT_ACTIVE_MIN)) {
-    transitionExitMs = null;
-    exitTransitionAt = null;
-    transitionExitIdx = null;
+      && quietStretchBeforeExit(cribActExt, algoSleepEnd, selectedGapStart, MORNING_ABSENCE_MIN, MAX_POST_EXIT_ACTIVE_MIN);
+  if (vetoStretch) {
+    // ★ #618 (a sibling of its §2, not §2 as the issue describes it): THE HAND-BACK. When the stretch the veto found is
+    // the gap of an exit the settling-tail guard set aside (a `settlingSkips` record whose gap starts inside
+    // [start, end)), that exit is the wake instead of A. The stretch is, in quietStretchBeforeExit's own words, the
+    // departure "had an out_of_bed happened to land beside it": here one did, and the guard set it aside only in
+    // favour of a later exit, which this rule has just discarded. "No later exit survived" is exactly when the guard
+    // hands its exit back (the fallback in the scan), so this adds no new rule and no new number; it applies the
+    // guard's own contract to a discard that happens after the scan.
+    //
+    // ★ Measured: 2026-10-30, one child, staging. True wake 06:29 (the owner saw it). The exit 06:29:56 had an
+    // `into_bed` 51 s before it and was skipped on a witness of 8-10 quiet minutes that all came after the child had
+    // left (see SETTLING_WITNESS_MIN_QUIET); the stretch was 06:30-06:57 and the later exit 06:57:12 (the child back
+    // in the room: a real event, after the wake). The wake read 06:29 at 07:08 (the fallback: nothing later had its
+    // 20 quiet minutes yet) and 06:13, the movement-only wake, from about 07:18 on. With this it is 06:29 at every
+    // clock. On snapshots of both databases (2026-10-31, every child-night with samples, eight clocks) it is the only
+    // child-night where the veto fires with such a skip (within WAKE_SNAP_MS, not far early) in its stretch: ONE
+    // night of evidence.
+    //
+    // The conditions, and why each:
+    //   * the record's gap start inside [start, end). In a strictly quiet stretch that is the stretch's own start (the
+    //     scan opens a gap only on the first quiet minute after one that is not), and on the measured night the
+    //     skip's gap start (06:30) is the stretch's start. A skip whose gap opened before A, in another stretch, or in
+    //     T's own gap (the exit just discarded, or its tail: the '#509 C10' night) is not this departure. Nor is an
+    //     evening tail, which can hold the smaller `dt` and so `settlingFallback` (the 2026-09-09 shape).
+    //   * not far earlier than this child gets up (#700), for the reason the scan's fallback refuses one too: the
+    //     hand-back exists so a night is never left without a wake, not to revive an exit the lead test rejects.
+    //     `wake_unconfirmed` is NOT touched: the scan already decided what it records, and what stands instead is A,
+    //     the wake the night then stores, so #700's history (it reads the stored wake when nothing was flagged) learns
+    //     exactly what it learnt before #618.
+    //   * the smallest `dt`, the scan's own choice between candidate exits.
+    //   * the exit's minute by txIdx, the helper the scan uses, never a longhand conversion (an exit at :56 s, like
+    //     the measured one, is a minute later under Math.round, and the metrics span would end there).
+    //
+    // ⚠️ Deliberately NOT re-checked: the exit handed back is not put through the veto again. Its own gap can have a
+    // strictly quiet stretch before it, one this call skipped because more than MAX_POST_EXIT_ACTIVE_MIN non-quiet
+    // minutes lay between it and T, though not between it and this exit. The result is still bounded: before T (its gap
+    // ends at least MORNING_ABSENCE_MIN before T's opens), no more than WAKE_SNAP_MS before A (its gap opens at or
+    // after A, and an exit may sit up to WAKE_SNAP_MS before its gap, exactly as a `best` exit may: pinned by '#618
+    // H10'; the plan said "never earlier than A", which is true of the gap, not of the exit), and never a wake from
+    // nothing. The cost, pinned by '#618 H8': on such a night the scan's own fallback IS vetoed early in the morning
+    // (the wake reads A), and the same exit comes back once a later exit qualifies, so the wake moves later with the
+    // clock where it used to stay at A.
+    //
+    // ⚠️ KNOWN LIMIT: a FALSE settling pair is handed back as readily as a real one. If the exit set aside was itself
+    // a classifier error (the child still in the bed: a stray `into_bed` + `out_of_bed` pair, quiet micro-motion as
+    // the witness), it becomes the wake where A was the better answer. The scan's fallback already does this whenever
+    // no later exit qualifies (the 07:08 run on the measured night did); this extends it to a later exit the veto
+    // discards. An empty bed reading faint noise and a still child read the same here, so it is pinned by a test,
+    // not excluded.
+    //
+    // For someone else's house: nothing new was measured or tuned. It rests on one night of two cameras in one house,
+    // and on the settling-tail guard's witness, which that night read an empty bed as a still sleeper. It changes only
+    // a night where the veto fires AND the guard set aside an exit whose gap opens the stretch; every other night is
+    // computed exactly as before (KNOWN-ISSUES, #509 and #598).
+    const [stretchStart, stretchEnd] = vetoStretch;
+    let handBack = null;
+    for (const skip of settlingSkips) {
+      if (skip.gapStart < stretchStart || skip.gapStart >= stretchEnd) continue;
+      if (handBack != null && skip.dt >= handBack.dt) continue;
+      if (farEarlyAt(skip.at)) continue;
+      handBack = skip;
+    }
+    if (handBack) {
+      transitionExitMs = handBack.ms;
+      exitTransitionAt = handBack.at;
+      transitionExitIdx = txIdx(handBack.at);
+      selectedGapStart = handBack.gapStart; // read by nothing below; kept true to what was adopted
+    } else {
+      transitionExitMs = null;
+      exitTransitionAt = null;
+      transitionExitIdx = null;
+    }
   }
   if (USE_TRANSITION_TIMES && transitionExitIdx != null) {
     // Clamped because the metrics can only count minutes we hold per-minute state for, while the
@@ -2612,8 +2725,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
 
     // The transition-derived times, recorded whether or not they were adopted. When USE_TRANSITION_TIMES
     // is on these match onset_at/wake_at (except on a night where #509 set the exit aside: the headline is
-    // then the movement-only wake and the shadow keeps the raw exit); the pair worth comparing is then
-    // *_algo vs the headline.
+    // then the movement-only wake, or the exit #618 handed back in its place, and the shadow keeps the raw
+    // exit); the pair worth comparing is then *_algo vs the headline.
     out.onset_at_shadow = transitionOnset != null ? minuteTime(transitionOnset) : minuteTime(algoOnset);
     out.wake_at_shadow = (rawExitMs != null ? toSqlUtc(new Date(rawExitMs)) : null) || algoWakeAt; // raw exit even when #509 discarded it
 

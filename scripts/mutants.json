@@ -12434,8 +12434,8 @@
   {
     "label": "#509 M-509-01: the veto is removed entirely (the whole fix reverted)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "&& quietStretchBeforeExit(cribActExt, algoSleepEnd, selectedGapStart, MORNING_ABSENCE_MIN, MAX_POST_EXIT_ACTIVE_MIN)) {",
-    "replace": "&& false) {",
+    "find": "&& quietStretchBeforeExit(cribActExt, algoSleepEnd, selectedGapStart, MORNING_ABSENCE_MIN, MAX_POST_EXIT_ACTIVE_MIN);",
+    "replace": "&& false;",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
@@ -12694,6 +12694,102 @@
     ],
     "namePattern": "#509",
     "note": "Opus review: one minute shifts the trailing count by one, which only the 20/21 boundary in C10 can see."
+  },
+  {
+    "label": "#618 M-618-01: the hand-back is disabled (the veto falls back to the movement-only wake, as before #618)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (handBack) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H1",
+    "note": "The 2026-10-30 shape: from 07:18 on the wake reads 06:13 (A) instead of the skipped 06:29:56 exit."
+  },
+  {
+    "label": "#618 M-618-02: a skip from an EARLIER gap is handed back (the stretch's lower bound dropped; also what the night-wide settlingFallback would hand back)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (skip.gapStart < stretchStart || skip.gapStart >= stretchEnd) continue;",
+    "replace": "if (skip.gapStart >= stretchEnd) continue;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H3",
+    "note": "The evening tail (dt 0, the night-wide fallback's choice) comes back as the morning wake: 20:45 instead of A, or instead of the 06:29 skip in the stretch. With the smallest-dt choice, using settlingFallback itself is this same mutant."
+  },
+  {
+    "label": "#618 M-618-03: a skip in the discarded exit's own gap (or later) is handed back (the stretch's upper bound dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (skip.gapStart < stretchStart || skip.gapStart >= stretchEnd) continue;",
+    "replace": "if (skip.gapStart < stretchStart) continue;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509 C10|#618 H8",
+    "note": "C10: the exit the veto just discarded was itself a settling-tail skip in its own gap, and would undo the veto. H8: the fallback's own gap lies after the stretch it is vetoed on."
+  },
+  {
+    "label": "#618 M-618-04: the #700 lead test is not asked at the hand-back (a far-early exit comes back)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (farEarlyAt(skip.at)) continue;",
+    "replace": "void 0;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H4",
+    "note": "With 14 earlier nights (threshold 80 min) the 05:29:56 skip, 91 min before the window end, must not come back: 05:13 (A), not 05:29."
+  },
+  {
+    "label": "#618 M-618-05: the handed-back exit's minute is Math.round, not txIdx (an exit at :56 s lands a minute late)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "transitionExitIdx = txIdx(handBack.at);",
+    "replace": "transitionExitIdx = Math.round((handBack.ms - analysisStartUtc.getTime()) / 60000);",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H2",
+    "note": "The metrics span would end at 06:30 while the wake reads 06:29: the span sum and awake_minutes (16) are off by one."
+  },
+  {
+    "label": "#618 M-618-06: the timeline marker does not move with the handed-back exit",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "exitTransitionAt = handBack.at;",
+    "replace": "exitTransitionAt = null;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H2",
+    "note": "The wake reads 06:29 but no out_of_bed marker is drawn for it."
+  },
+  {
+    "label": "#618 M-618-07: a skip is recorded however far its exit is from the gap's start (the WAKE_SNAP_MS bound dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (dt <= WAKE_SNAP_MS) settlingSkips.push(",
+    "replace": "if (true) settlingSkips.push(",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H6",
+    "note": "A blip at 06:36 opens the stretch at 06:37, 7 min after the exit: no skip may be recorded for that gap, so the wake is A (06:13), not 06:29."
+  },
+  {
+    "label": "#618 M-618-08: of two skips in the stretch's gap the FARTHER one from its start comes back",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (handBack != null && skip.dt >= handBack.dt) continue;",
+    "replace": "if (handBack != null && skip.dt <= handBack.dt) continue;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H9",
+    "note": "A double tail (two exits within a minute of one into_bed, 06:28:55 and 06:29:45): the scan's fallback takes 06:29:45 at 07:08, so the hand-back must too, or the wake moves from 06:29 to 06:28 with the clock."
   },
   {
     "label": "#564 startSleepJob: a second start arms a second interval",
