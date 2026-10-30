@@ -1377,7 +1377,12 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--peri); ou
    take the pointer, which the stage handles for the whole picker. */
 .crib__canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .crib__row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
-.crib__btns { display: flex; gap: 8px; flex-shrink: 0; }
+/* Wraps and is capped at the row's width: with three buttons (Refresh frame, Copy / paste zone, Whole frame) the group
+   is wider than a phone, and `flex-shrink: 0` alone let it push the whole page sideways instead of dropping the last
+   button onto a second line (#905 follow-up, seen on a phone). */
+.crib__btns { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; max-width: 100%; }
+/* `.btn` is `width: 100%`, which on a wrapping row makes every button a full line of its own. Size them to their label. */
+.crib__btns .btn { width: auto; }
 /* The copy and paste boxes of the bed-area dialog (#905). `.field input` styles inputs but no rule covers a
    <textarea>, which would otherwise render as the browser's light default box in the dark theme. Monospace
    because the text is JSON a person may need to read; vertical resize only so it cannot widen the card. */
