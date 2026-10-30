@@ -170,6 +170,56 @@ export function getBedTransitions(cameraIds, startSql, endSql) {
     .all(...cameraIds, startSql, endSql);
 }
 
+// #907. How far outside a Room activity row a saved frame may sit and still be offered on it. The sleep
+// detail page applies the same figure in `framesForVisit` (frontend/src/pages/SleepDetail.jsx): the two are
+// ONE rule in two places, and the page can only match what this list contains, so changing one means
+// changing the other. A minute because a visit is drawn to the minute (start_at/end_at are whole minutes)
+// while a transition keeps its real second, so a frame fired 40 s after the minute a row "ends" at is still
+// that row's frame.
+export const FRAME_ROW_SLACK_MS = 60000;
+
+// UTC 'YYYY-MM-DD HH:MM:SS' <-> ms. Local to this file on purpose: sleepAnalysis.js has the same helpers but
+// imports THIS module, so importing back would be a cycle. The strings are the shape every created_at,
+// window_* and display_* field in the sleep payload already has.
+const sqlToMs = (s) => new Date(`${s.replace(' ', 'T')}Z`).getTime();
+const msToSql = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+
+// #907. The saved bed-transition frames the sleep detail page can offer for one night, as
+// [{ id, type, at }] ascending by `at` (`at` is the transition's own created_at, real second included).
+// Takes a night as the sleep route is about to send it (after any parent correction), and returns ONLY
+// what an <img> can show:
+//   - From the night's ANALYSIS camera and no other. A child's second camera, or another child's, may have
+//     frames in the same hours; they are not what the night's numbers were worked out from.
+//   - `snapshot = 1` AND the file is on disk. The flag alone is not enough: the age sweep deletes the file
+//     with the row, but a data folder restored from a backup, or a hand-cleared folder, leaves flags with no
+//     file, and the page would draw a broken picture. A missing frame shows no button instead.
+//   - Over the range the timeline is DRAWN (display_start..display_end, else the window), widened by
+//     FRAME_ROW_SLACK_MS at each end so a frame just past the last row's edge is not dropped before the page
+//     can match it. Every Room activity row lies inside that range.
+//   - ALL transitions in range, not only the two the analysis adopted (night.transitions). The case this
+//     exists for is a weak burst adopted as the wake while the true exit, 40 minutes later, is NOT adopted:
+//     a list built from the adopted pair would leave out the very frame someone needs to see. For the same
+//     reason the page links a row to frames by TIME, not by transition id.
+// [] (never undefined) for a night that has no camera or no timeline to attach to (off, empty, no_data,
+// "nobody in bed"), so a client can read the key without checking the night's status first. Read-only; the
+// frame itself is still served by GET /cameras/bed-transitions/:id/snapshot behind sign-in, unchanged.
+export function framesForNight(night) {
+  if (!night || night.status !== 'ok' || !night.analysis_camera_id) return [];
+  const start = night.display_start || night.window_start;
+  const end = night.display_end || night.window_end;
+  if (!start || !end) return [];
+  // getBedTransitions' end is EXCLUSIVE and the slack is INCLUSIVE (a frame exactly 60 s past the edge still
+  // matches a row), hence the extra second.
+  const rows = getBedTransitions(
+    [night.analysis_camera_id],
+    msToSql(sqlToMs(start) - FRAME_ROW_SLACK_MS),
+    msToSql(sqlToMs(end) + FRAME_ROW_SLACK_MS + 1000),
+  );
+  return rows
+    .filter((r) => r.snapshot === 1 && transitionSnapshotPath(r.id))
+    .map((r) => ({ id: r.id, type: r.type, at: r.created_at }));
+}
+
 // Activity for the given cameras within [startSql, endSqlExclusive), in the order the pure
 // lingering-motion rule expects. Keep morning-review work bounded to this night's evidence.
 export function getActivitySamples(cameraIds, startSql, endSqlExclusive) {
