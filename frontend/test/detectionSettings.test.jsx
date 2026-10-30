@@ -484,6 +484,28 @@ describe('the motion screen', () => {
     expect(hint.textContent).toMatch(/only enforces the lower ends/i);
   });
 
+  test('★ #905: a pasted bed area reaches the detector as a PUT carrying ONLY the zone, snapped to the grid', async () => {
+    // A picker-state test would pass even if a paste never left the component. The zone only counts when it
+    // goes out the same way a painted one does (onChange -> apply({zone}) -> queuePatch -> PUT /detection),
+    // as a one-key patch (the #444 invariant: nothing else on the screen is resent).
+    const { user } = mount('motion'); // CAM has a painted zone, so the paste asks before replacing it
+    await user.click(await screen.findByRole('button', { name: 'Copy / paste zone' }));
+    // A hand-written rect that is NOT on the grid: x 0.1..0.5, y 0.2..0.6.
+    fireEvent.change(screen.getByLabelText('Paste a bed area'), {
+      target: { value: '[{"x":0.1,"y":0.2,"w":0.4,"h":0.4}]' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(putSpy, 'asked first: nothing is written before Replace').not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Replace' }));
+
+    const body = await sentBody();
+    expect(Object.keys(body)).toEqual(['zone']);
+    // Grid edges, not the typed 0.1/0.2: columns 3..15 (x 0.09375, w 0.40625), rows 4..10 (y 0.22222, h 0.38889).
+    expect(body.zone).toEqual([{ x: 0.09375, y: 0.22222, w: 0.40625, h: 0.38889 }]);
+    expect(putSpy).toHaveBeenCalledTimes(1);
+    expect(putSpy.mock.calls[0][0]).toBe('/cameras/cam-1/detection');
+  });
+
   test('switching source writes it', async () => {
     mount('motion');
     fireEvent.click(await screen.findByRole('button', { name: 'Camera via MQTT' }));

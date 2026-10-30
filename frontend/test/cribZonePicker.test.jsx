@@ -16,7 +16,7 @@
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import { screen, waitFor, fireEvent } from '@testing-library/react';
 import { renderAsAdmin } from './helpers/render.jsx';
-import CribZonePicker, { rectsToCells, cellsToRects, COLS, ROWS } from '../src/components/CribZonePicker.jsx';
+import CribZonePicker, { rectsToCells, cellsToRects, parseZoneText, MAX_ZONE_TEXT, COLS, ROWS } from '../src/components/CribZonePicker.jsx';
 import { api } from '../src/lib/api.js';
 
 afterEach(() => vi.restoreAllMocks());
@@ -234,7 +234,7 @@ describe('CribZonePicker', () => {
     expect(screen.getByText(/Covering 13% of the view/)).toBeInTheDocument();
   });
 
-  test('"Whole frame" is dead when nothing is painted, and clears the zone when it is', async () => {
+  test('"Whole frame" is dead when nothing is painted, and clears the zone once confirmed when it is', async () => {
     vi.spyOn(api, 'url').mockReturnValue('http://host/snap');
     const onChange = vi.fn();
     const { unmount } = show({ onChange });
@@ -245,8 +245,12 @@ describe('CribZonePicker', () => {
     const clear = screen.getByRole('button', { name: 'Whole frame' });
     expect(clear).toBeEnabled();
     await user.click(clear);
+    // #906: the click only asks. Nothing is cleared or saved until Confirm.
+    expect(onChange).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Use whole frame' }));
     // ⚠️ NULL, not []. The backend reads "no zone" as "watch the whole frame"; an empty array is a
     // zone covering nothing, which would mean the detector sees nothing at all.
+    expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith(null);
     expect(screen.getByText(/Drag across the squares covering the bed/)).toBeInTheDocument();
   });
@@ -420,6 +424,322 @@ describe('CribZonePicker', () => {
       fireEvent.pointerCancel(stage);
       expect(onChange).toHaveBeenCalledTimes(1);
       expect(cellCount(rectsToCells(onChange.mock.calls[0][0]))).toBe(1);
+    });
+  });
+});
+
+// --- #906: "Whole frame" asks first ----------------------------------------------------------------
+// The zone autosaves and each save restarts the detector, so a stray tap used to wipe a painted bed area
+// for good. The claim under test is that NOTHING is cleared or saved until the person confirms, however
+// they leave the dialog.
+
+// 8 of 32 columns by 9 of 18 rows = 13% of the view.
+const ZONE_A = [{ x: 0, y: 0, w: 0.25, h: 0.5 }];
+// The ragged two-blob zone from the round-trip test: awkward on purpose (disjoint, ragged, both corners).
+function raggedCells() {
+  const cells = paint([3, 4, 5, 6], [2, 3, 4]);
+  for (const c of [10, 11]) for (const r of [4, 5, 6, 7]) cells[r * COLS + c] = 1;
+  cells[7 * COLS + 12] = 1;
+  cells[0] = 1;
+  cells[ROWS * COLS - 1] = 1;
+  return cells;
+}
+
+const showZone = (props = {}) => {
+  vi.spyOn(api, 'url').mockReturnValue('http://host/snap');
+  return renderAsAdmin(<CribZonePicker cameraId="cam-a" zone={null} onChange={vi.fn()} {...props} />);
+};
+const wholeFrameBtn = () => screen.getByRole('button', { name: 'Whole frame' });
+const copyPasteBtn = () => screen.getByRole('button', { name: 'Copy / paste zone' });
+const copyBox = () => screen.getByLabelText(/^This camera/);
+const pasteBox = () => screen.getByLabelText('Paste a bed area');
+const typeZone = (text) => fireEvent.change(pasteBox(), { target: { value: text } });
+const hasDialog = (name) => screen.queryByRole('dialog', { name }) !== null;
+
+describe('"Whole frame" asks before it clears a painted zone (#906)', () => {
+  /** What the picker would save for these rects, read back through the Copy box (the real cell state). */
+  const savedText = (rects) => JSON.stringify(cellsToRects(rectsToCells(rects)));
+  /** Open Copy / paste, read the box, close again. Reads the picker's CELLS, not just its hint. */
+  async function copyBoxNow(user) {
+    await user.click(copyPasteBtn());
+    const text = copyBox().value;
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    return text;
+  }
+
+  test('the click opens a confirmation with Cancel focused, and clears nothing yet', async () => {
+    const onChange = vi.fn();
+    const { user } = showZone({ zone: ZONE_A, onChange });
+    await user.click(wholeFrameBtn());
+    expect(hasDialog('Use the whole frame?')).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+    // Cancel holds the focus so Enter on the dialog is the safe answer.
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(screen.getByText(/Covering 13% of the view/)).toBeInTheDocument();
+  });
+
+  test.each([
+    ['Cancel', async (user) => user.click(screen.getByRole('button', { name: 'Cancel' }))],
+    ['Escape', async (user) => user.keyboard('{Escape}')],
+    ['a click on the overlay', async () => fireEvent.click(document.querySelector('.modal-overlay'))],
+  ])('%s leaves the zone and onChange exactly as they were, and focus returns to the button', async (_name, leave) => {
+    const onChange = vi.fn();
+    const { user } = showZone({ zone: ZONE_A, onChange });
+    await user.click(wholeFrameBtn());
+    await leave(user);
+
+    expect(hasDialog('Use the whole frame?')).toBe(false);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByText(/Covering 13% of the view/)).toBeInTheDocument();
+    expect(wholeFrameBtn()).toHaveFocus();
+    // The cells themselves, not only the hint, are untouched.
+    expect(await copyBoxNow(user)).toBe(savedText(ZONE_A));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  test('Confirm clears once, with null (not an empty list)', async () => {
+    const onChange = vi.fn();
+    const { user } = showZone({ zone: ZONE_A, onChange });
+    await user.click(wholeFrameBtn());
+    await user.click(screen.getByRole('button', { name: 'Use whole frame' }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(null);
+    expect(hasDialog('Use the whole frame?')).toBe(false);
+    expect(wholeFrameBtn()).toBeDisabled();
+  });
+});
+
+// --- #905: copy and paste a zone -------------------------------------------------------------------
+
+describe('parseZoneText', () => {
+  test('accepts the legacy single object and ignores extra keys', () => {
+    // rectsToCells still reads the single-rect shape the backend still reads, so a paste does too.
+    const res = parseZoneText('{"x":0,"y":0,"w":0.5,"h":0.5,"label":"bed","extra":[1]}');
+    expect(res.ok).toBe(true);
+    expect(res.rects).toEqual(cellsToRects(rectsToCells([{ x: 0, y: 0, w: 0.5, h: 0.5 }])));
+    for (const r of res.rects) expect(Object.keys(r).sort()).toEqual(['h', 'w', 'x', 'y']);
+  });
+
+  test('tolerates the float noise that makes x + w a hair over 1, but not a real overshoot', () => {
+    // 0.5 + 0.5000000000000002 is 1.0000000000000002 in floating point (0.5000000000000001 would round back to 1).
+    expect(parseZoneText('[{"x":0.5,"y":0,"w":0.5000000000000002,"h":1}]').ok).toBe(true);
+    expect(parseZoneText('[{"x":0.5,"y":0,"w":0.50001,"h":1}]')).toMatchObject({ ok: false });
+    expect(parseZoneText('[{"x":0,"y":0.5,"w":1,"h":0.50001}]')).toMatchObject({ ok: false });
+  });
+
+  test('snaps to the grid: a sliver becomes one whole cell, which survives the backend drop rule', () => {
+    // serializeZone silently drops any rect with w or h <= 0.02. A grid rect is at least 1/32 x 1/18.
+    const res = parseZoneText('[{"x":0.04,"y":0.01,"w":0.01,"h":0.03}]');
+    expect(res.ok).toBe(true);
+    expect(res.rects).toEqual(cellsToRects(paint([1], [0])));
+    for (const r of res.rects) {
+      expect(r.w).toBeGreaterThan(0.02);
+      expect(r.h).toBeGreaterThan(0.02);
+    }
+  });
+
+  test('the size cap is checked, and the cap itself is accepted', () => {
+    const atCap = '[{"x":0,"y":0,"w":1,"h":1}]'.padEnd(MAX_ZONE_TEXT, ' ');
+    expect(atCap).toHaveLength(MAX_ZONE_TEXT);
+    expect(parseZoneText(atCap).ok).toBe(true);
+    expect(parseZoneText(`${atCap} `)).toMatchObject({ ok: false, reason: expect.stringMatching(/too long/) });
+  });
+
+  test('exactly one rect per cell is the most allowed', () => {
+    const cell = '{"x":0,"y":0,"w":0.1,"h":0.1}';
+    expect(parseZoneText(`[${Array(COLS * ROWS).fill(cell).join(',')}]`).ok).toBe(true);
+    expect(parseZoneText(`[${Array(COLS * ROWS + 1).fill(cell).join(',')}]`)).toMatchObject({ ok: false });
+  });
+});
+
+describe('Copy / paste zone (#905)', () => {
+  test('round trip: what Copy shows, pasted into a fresh picker, gives the SAME zone cell by cell', async () => {
+    const original = raggedCells();
+    const rects = cellsToRects(original);
+    const first = showZone({ zone: rects });
+    await first.user.click(copyPasteBtn());
+    const text = copyBox().value;
+    expect(JSON.parse(text)).toEqual(rects);
+    first.unmount();
+
+    const onChange = vi.fn();
+    const { user } = showZone({ zone: null, onChange });
+    await user.click(copyPasteBtn());
+    typeZone(text);
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+
+    // Nothing was painted, so there was nothing to lose: no confirmation.
+    expect(hasDialog('Replace the bed area?')).toBe(false);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0][0]).toEqual(rects);
+    // Cell by cell, not by count (two zones can cover as many cells and be in different places).
+    expect([...rectsToCells(onChange.mock.calls[0][0])]).toEqual([...original]);
+    // The modal closes so the zone shows over the frame, and the hint asks for the check nothing else does.
+    expect(hasDialog('Copy or paste the bed area')).toBe(false);
+    expect(screen.getByText(/Pasted zone applied\. Check it covers the bed\./)).toBeInTheDocument();
+  });
+
+  test('Copy is dead and the box says so when nothing is painted', async () => {
+    const { user } = showZone({ zone: null });
+    await user.click(copyPasteBtn());
+    expect(copyBox().value).toMatch(/whole frame/);
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeDisabled();
+  });
+
+  test('Apply is dead while the paste box is blank', async () => {
+    const { user } = showZone({ zone: ZONE_A });
+    await user.click(copyPasteBtn());
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
+    typeZone('   ');
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
+    typeZone('[]');
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
+  });
+
+  // Each of these is text a person could really paste, and each must leave the zone, the saved value and
+  // the hint exactly as they were, with a reason in the dialog. The zone is PAINTED so a wrongly accepted
+  // paste would show up as a confirmation dialog or an onChange call.
+  test.each([
+    ['not JSON', 'hello', /does not look like a bed area/],
+    ['null', 'null', /does not look like a bed area/],
+    ['a bare number', '5', /does not look like a bed area/],
+    ['a bare string', '"abc"', /does not look like a bed area/],
+    ['an empty list', '[]', /whole frame/],
+    ['577 rects', `[${Array(COLS * ROWS + 1).fill('{"x":0,"y":0,"w":0.1,"h":0.1}').join(',')}]`, /more than 576/],
+    ['a missing field', '[{"x":0,"y":0,"w":0.5}]', /numbers for x, y, w and h/],
+    ['a string field', '[{"x":"0","y":0,"w":0.5,"h":0.5}]', /numbers for x, y, w and h/],
+    ['an infinite field (1e999)', '[{"x":0,"y":0,"w":1e999,"h":0.5}]', /numbers for x, y, w and h/],
+    ['a null rect in the list', '[null]', /numbers for x, y, w and h/],
+    ['a negative x', '[{"x":-0.1,"y":0,"w":0.5,"h":0.5}]', /inside the frame/],
+    ['a value over 1', '[{"x":0,"y":0,"w":0.5,"h":1.5}]', /inside the frame/],
+    ['x + w over 1', '[{"x":0.6,"y":0,"w":0.5,"h":0.5}]', /inside the frame/],
+    ['y + h over 1', '[{"x":0,"y":0.6,"w":0.5,"h":0.5}]', /inside the frame/],
+    ['a zero width', '[{"x":0,"y":0,"w":0,"h":0.5}]', /above 0/],
+    ['a zero height', '[{"x":0,"y":0,"w":0.5,"h":0}]', /above 0/],
+    ['text over the size cap', `${' '.repeat(MAX_ZONE_TEXT)}[{"x":0,"y":0,"w":1,"h":1}]`, /too long/],
+    ['a rect that covers no cell centre', '[{"x":0.001,"y":0.001,"w":0.01,"h":0.01}]', /covers no squares/],
+  ])('refuses %s, with a reason, and changes nothing', async (_name, text, reason) => {
+    const onChange = vi.fn();
+    const { user } = showZone({ zone: ZONE_A, onChange });
+    await user.click(copyPasteBtn());
+    const before = copyBox().value;
+    typeZone(text);
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+
+    expect(screen.getByRole('alert').textContent).toMatch(reason);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(hasDialog('Replace the bed area?')).toBe(false);
+    expect(copyBox().value).toBe(before);
+    expect(screen.getByText(/Covering 13% of the view/)).toBeInTheDocument();
+    expect(screen.queryByText(/Pasted zone applied/)).toBeNull();
+  });
+
+  test('the reason goes away as soon as the text is edited', async () => {
+    const { user } = showZone({ zone: null });
+    await user.click(copyPasteBtn());
+    typeZone('hello');
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    typeZone('[]');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  describe('over a painted zone it asks first', () => {
+    const NEW_ZONE = [{ x: 0.5, y: 0.5, w: 0.25, h: 0.25 }];
+    async function pasteNew(props = {}) {
+      const ctx = showZone({ zone: ZONE_A, ...props });
+      await ctx.user.click(copyPasteBtn());
+      typeZone(JSON.stringify(NEW_ZONE));
+      await ctx.user.click(screen.getByRole('button', { name: 'Apply' }));
+      return ctx;
+    }
+
+    test('Apply opens the confirmation and saves nothing yet', async () => {
+      const onChange = vi.fn();
+      await pasteNew({ onChange });
+      expect(hasDialog('Replace the bed area?')).toBe(true);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    });
+
+    test('Cancel and Escape leave the old zone and keep the paste dialog open with the text', async () => {
+      const onChange = vi.fn();
+      const { user } = await pasteNew({ onChange });
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(hasDialog('Replace the bed area?')).toBe(false);
+      expect(hasDialog('Copy or paste the bed area')).toBe(true);
+      expect(pasteBox().value).toBe(JSON.stringify(NEW_ZONE));
+
+      await user.click(screen.getByRole('button', { name: 'Apply' }));
+      expect(hasDialog('Replace the bed area?')).toBe(true);
+      // Escape belongs to the dialog on top: it closes the confirmation, not the paste dialog under it.
+      await user.keyboard('{Escape}');
+      expect(hasDialog('Replace the bed area?')).toBe(false);
+      expect(hasDialog('Copy or paste the bed area')).toBe(true);
+
+      expect(onChange).not.toHaveBeenCalled();
+      expect(copyBox().value).toBe(JSON.stringify(cellsToRects(rectsToCells(ZONE_A))));
+    });
+
+    test('Confirm replaces the zone with ONE onChange and closes both dialogs', async () => {
+      const onChange = vi.fn();
+      const { user } = await pasteNew({ onChange });
+      await user.click(screen.getByRole('button', { name: 'Replace' }));
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange).toHaveBeenCalledWith(cellsToRects(rectsToCells(NEW_ZONE)));
+      expect(hasDialog('Replace the bed area?')).toBe(false);
+      expect(hasDialog('Copy or paste the bed area')).toBe(false);
+      // 8 columns x 5 rows = 40 of 576 cells = 6.9%, shown as 7%, where the old zone read 13%.
+      expect(screen.getByText(/Covering 7% of the view/)).toBeInTheDocument();
+    });
+  });
+
+  describe('without clipboard access (plain http has no navigator.clipboard)', () => {
+    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const setClipboard = (value) => Object.defineProperty(navigator, 'clipboard', { value, configurable: true });
+    afterEach(() => {
+      if (original) Object.defineProperty(navigator, 'clipboard', original);
+      else delete navigator.clipboard;
+      delete document.execCommand;
+    });
+
+    test('the dialog still opens with the text in a box, and Copy falls back without throwing', async () => {
+      const { user } = showZone({ zone: ZONE_A });
+      setClipboard(undefined);
+      await user.click(copyPasteBtn());
+      expect(copyBox().value).toBe(JSON.stringify(cellsToRects(rectsToCells(ZONE_A))));
+
+      // No execCommand either (jsdom has none): the person is told to copy by hand.
+      await user.click(screen.getByRole('button', { name: 'Copy' }));
+      expect(screen.getByRole('status').textContent).toMatch(/Select the text and copy it yourself/);
+    });
+
+    test('and execCommand("copy") is used when it works', async () => {
+      const { user } = showZone({ zone: ZONE_A });
+      setClipboard(undefined);
+      document.execCommand = vi.fn(() => true);
+      await user.click(copyPasteBtn());
+      await user.click(screen.getByRole('button', { name: 'Copy' }));
+      expect(document.execCommand).toHaveBeenCalledWith('copy');
+      expect(screen.getByRole('status').textContent).toBe('Copied.');
+    });
+
+    test('a clipboard that refuses (permission denied) falls back instead of failing', async () => {
+      const { user } = showZone({ zone: ZONE_A });
+      setClipboard({ writeText: vi.fn().mockRejectedValue(new Error('denied')) });
+      await user.click(copyPasteBtn());
+      await user.click(screen.getByRole('button', { name: 'Copy' }));
+      await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/copy it yourself/));
+    });
+
+    test('with a working clipboard, Copy writes exactly the box text', async () => {
+      const { user } = showZone({ zone: ZONE_A });
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      setClipboard({ writeText });
+      await user.click(copyPasteBtn());
+      await user.click(screen.getByRole('button', { name: 'Copy' }));
+      expect(writeText).toHaveBeenCalledWith(copyBox().value);
+      await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Copied.'));
     });
   });
 });
