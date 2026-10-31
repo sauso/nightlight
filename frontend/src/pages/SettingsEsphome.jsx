@@ -118,7 +118,8 @@ export default function SettingsEsphome() {
           <div className="camera-tile__sub">
             Connects straight to an ESPHome device (its Native API, port 6053 unless you change it) and records what
             its sensors report, so you can see whether the readings are useful. Nightlight only reads: it never sends
-            anything to the device, and the readings are not used in any sleep number or alert. They are what the
+            anything to the device. A sensor-based wake time is stored beside each night for comparison only; it
+            changes no wake time, figure, notification or alert. The readings are what the
             sensor reports, not a medical measurement, and Nightlight is not a medical or safety device. Give the
             device a fixed IP address; names ending in <code>.local</code> do not work from inside the container.
           </div>

@@ -1554,13 +1554,13 @@
   {
     "label": "jitter: the settling-tail guard deleted outright",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "if (settlingTail) {",
-    "replace": "if (false) {",
+    "find": "if (settlingTail || sensorRejects) {",
+    "replace": "if (false || sensorRejects) {",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
     ],
-    "note": "This is the whole fix. Without it prod 2026-09-09 reports Child B's night as 1h15m."
+    "note": "This is the whole fix. Without it prod 2026-09-09 reports Child B's night as 1h15m. (#917 re-anchored it: the line now also carries the sensor shadow's `sensorRejects`, always false on the real night.)"
   },
   {
     "label": "jitter: the window boundary is inclusive",
@@ -24258,5 +24258,334 @@
     "expect": "killed",
     "tests": ["sleep-faulty-mic.test.js"],
     "namePattern": "rows with no video"
+  },
+  {
+    "label": "#917 M-917-01: a heart-rate minute needs MORE than 3 updates (the boundary moved)",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "const hrOk = !!hr && hr.n >= VITALS_HR_MIN_N;",
+    "replace": "const hrOk = !!hr && hr.n > VITALS_HR_MIN_N;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "each threshold at its boundary",
+    "note": "Minute 1 has exactly 3 non-zero heart-rate updates: valid by the frozen definition (HR n >= 3)."
+  },
+  {
+    "label": "#917 M-917-02: the 1.0 breathing-rate placeholder counts as a breath",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "const rrOk = !!rr && rr.n >= VITALS_RR_MIN_N && !(rr.mean != null && rr.mean < RR_PLACEHOLDER_BELOW);",
+    "replace": "const rrOk = !!rr && rr.n >= VITALS_RR_MIN_N;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "each threshold at its boundary",
+    "note": "Minute 4: 30 breathing-rate updates averaging 1.9, the placeholder some sensors send."
+  },
+  {
+    "label": "#917 M-917-03: the 1 m distance cut excludes exactly 100 cm",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "return cm != null && cm <= MAX_DISTANCE_CM;",
+    "replace": "return cm != null && cm < MAX_DISTANCE_CM;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "each threshold at its boundary",
+    "note": "Minute 6 reads 100 cm: inside the owner's 1 m rule."
+  },
+  {
+    "label": "#917 M-917-04: a distance in an unknown unit (or none) passes the cut",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "return cm != null && cm <= MAX_DISTANCE_CM;",
+    "replace": "return cm == null || cm <= MAX_DISTANCE_CM;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "the distance unit contract",
+    "note": "The unit contract: 'in', NULL and '' must make the minute not valid (the safe direction, it can only fail to reject)."
+  },
+  {
+    "label": "#917 M-917-05: vital signs and distance paired per CHILD, not per device",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "      let d = devices.get(e.device_id);\r\n      if (!d) devices.set(e.device_id, (d = {}));",
+    "replace": "      let d = devices.get(0);\r\n      if (!d) devices.set(0, (d = {}));",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "paired PER DEVICE",
+    "note": "Plan review: a far device must not borrow a bedside device's 50 cm (and a device with no distance must not be cut by another's 150 cm)."
+  },
+  {
+    "label": "#917 M-917-06: rows of roles the rule never uses (illuminance, occupancy, ...) are read",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "    if (!key) continue; // not a role the rule reads: its rows are never queried (above)\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "each threshold at its boundary|no sensor: null when",
+    "note": "Code review of #917 (Codex): only heart-rate, breathing-rate and distance rows are queried. An illuminance-only minute is unknown, and a child with only other kinds is no sensor."
+  },
+  {
+    "label": "#917 M-917-07: only ACTIVE entities are read (a retired epoch of the child is lost)",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "'SELECT id, device_id, name, object_id, device_class, unit FROM esphome_entities WHERE child_id = ?'",
+    "replace": "'SELECT id, device_id, name, object_id, device_class, unit FROM esphome_entities WHERE child_id = ? AND active = 1'",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "a retired entity of this child still counts",
+    "note": "A re-assignment retires the entity and clones it with new ids; the earlier rows are still this child's."
+  },
+  {
+    "label": "#917 M-917-08: a minute is read before its row is written (the 10 ms flush ignored)",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "Math.floor((nowMs - ROW_READABLE_DELAY_MS) / MINUTE_MS)",
+    "replace": "Math.floor(nowMs / MINUTE_MS)",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "the replay clock",
+    "note": "At 9 ms past a minute boundary the previous minute's row is not written yet: a replay must not read it."
+  },
+  {
+    "label": "#917 M-917-09: a child with only presence or distance rows has a 'sensor'",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "if (key !== 'dist') vitalsSeen = true;",
+    "replace": "vitalsSeen = true;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "no sensor: null when",
+    "note": "No heart-rate or breathing-rate row means no shadow pass and NULL, not a shadow from a sensor that cannot measure the rule."
+  },
+  {
+    "label": "#917 M-917-10: the rule's window includes the exit's own minute ([e, e+9])",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "for (let k = 1; k <= SENSOR_REJECT_WINDOW_MIN; k++) if (minutes[exitIdx + k] === true) n++;",
+    "replace": "for (let k = 0; k < SENSOR_REJECT_WINDOW_MIN; k++) if (minutes[exitIdx + k] === true) n++;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "the window edges and the count|S4 ",
+    "note": "As measured: the minutes [e+1, e+10] after the exit's own minute (the child is still climbing out in it)."
+  },
+  {
+    "label": "#917 M-917-11: an unknown minute (no rows) counts as vital signs",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "if (minutes[exitIdx + k] === true) n++;",
+    "replace": "if (minutes[exitIdx + k] !== false) n++;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "the window edges and the count",
+    "note": "A disconnect must only ever fail to reject, never reject."
+  },
+  {
+    "label": "#917 M-917-12: the rule needs MORE than 6 of the 10 minutes",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "return vitalsAfterExit(minutes, exitIdx) >= SENSOR_REJECT_MIN_VITALS;",
+    "replace": "return vitalsAfterExit(minutes, exitIdx) > SENSOR_REJECT_MIN_VITALS;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "the window edges and the count|S4 ",
+    "note": "Exactly 6 rejects (x = 6, y = 10 as measured)."
+  },
+  {
+    "label": "#917 M-917-13: the shadow's wake leaks into the reported wake",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "night.wake_at_sensor = shadow.status === 'ok' ? shadow.wake_at : null;",
+    "replace": "night.wake_at = night.wake_at_sensor = shadow.status === 'ok' ? shadow.wake_at : null;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S1 |S2 ",
+    "note": "Owner decision 2026-10-31: SHADOW only. The 2026-10-28 shape reports 06:05 (the camera's) beside a 06:30 shadow."
+  },
+  {
+    "label": "#917 M-917-14: the rule reads the exit's minute by Math.round (idxOf), not txIdx",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const sensorExitIdx = txIdx(t.created_at);",
+    "replace": "const sensorExitIdx = idxOf(t.created_at);",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S4 ",
+    "note": "S4's exit is at 06:30:45: minute 06:30 by txIdx (a floor), 06:31 by Math.round, which shifts the whole window by one."
+  },
+  {
+    "label": "#917 M-917-15: a rejected exit is dropped outright, not handed back like a settling-tail skip",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (settlingTail || sensorRejects) {",
+    "replace": "if (sensorRejects) continue; if (settlingTail) {",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S7 |S3 ",
+    "note": "The standing rule: the shadow is never the reason a night has no wake. With the only exit rejected, the hand-back keeps it."
+  },
+  {
+    "label": "#917 M-917-16: the rule is asked before the reversal guard (a reversed exit counted)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "          if (reversedBy(t)) continue;",
+    "replace": "          if (reversedBy(t)) { if (run.sensor != null && sensorContradictsExit(run.sensor.minutes, txIdx(t.created_at))) run.sensor.rejected.add(t); continue; }",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S5 ",
+    "note": "As measured: the rule sits after the onset bound and the reversal guard, at the settling guard (mes914 patchmes.mjs)."
+  },
+  {
+    "label": "#917 M-917-17: sensor_rejects counts examinations, not distinct exit rows",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (sensorRejects && !settlingTail) run.sensor.rejected.add(t);",
+    "replace": "if (sensorRejects && !settlingTail) run.sensor.rejected.add({});",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S18 ",
+    "note": "#917 plan review: the 06:04:30 exit is a candidate for the gaps at 06:03 and 06:05; it is one row."
+  },
+  {
+    "label": "#917 M-917-18: the shadow pass's #700 history reads are counted",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "priorWakeLeadReads = historyReads;",
+    "replace": "void historyReads;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S6 ",
+    "note": "#917 plan review: the counter means reads by the real night."
+  },
+  {
+    "label": "#917 M-917-19: the shadow runs on a night in progress",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (night.in_progress || run.originMs === undefined) return;",
+    "replace": "if (run.originMs === undefined) return;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S8 ",
+    "note": "Only completed nights: a night in progress has no departure scan, and the live card must not pay for a second pass."
+  },
+  {
+    "label": "#917 M-917-20: a failing second pass breaks the real night",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "logger.warn('[sleep] sensor shadow skipped: the second pass failed');",
+    "replace": "throw new Error('second pass failed');",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S10 ",
+    "note": "#917 plan review: any error leaves the two keys null and never affects the real result or its store."
+  },
+  {
+    "label": "#917 M-917-21: the shadow pass ignores the stored context (scores with today's settings)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "computeNightPass(childId, nightDate, { includeTimeline: false, context }, shadowRun);",
+    "replace": "computeNightPass(childId, nightDate, { includeTimeline: false, context: null }, shadowRun);",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S12 ",
+    "note": "#917 plan review: both passes get the same stored context."
+  },
+  {
+    "label": "#917 M-917-22: a provisional re-store keeps the first pass's sensor columns (conflict update drops them)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "     wake_at_sensor=excluded.wake_at_sensor, sensor_rejects=excluded.sensor_rejects,\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "insert and conflict-update round trips",
+    "note": "Readings that arrive after the first store are picked up by the next provisional store."
+  },
+  {
+    "label": "#917 M-917-23: \"no one was in the bed\" keeps the sensor wake",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  'wake_at_sensor', 'sensor_rejects',\r\n];",
+    "replace": "];",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js", "sleep-sensor-shadow.test.js"],
+    "namePattern": "a flagged stored row reads exactly like a detector-empty row|a corrected WAKE and a",
+    "note": "#917 plan review: a night shown as empty must not carry a sensor wake. The PRAGMA marker test classifies every new column as a claim."
+  },
+  {
+    "label": "#917 M-917-24: a corrected wake keeps the sensor wake beside the parent's time",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (wakeChanged) for (const k of SENSOR_SHADOW_KEYS) if (k in out) out[k] = null;\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "a corrected WAKE and a",
+    "note": "#917 plan review: a corrected wake must not leave a misleading shadow."
+  },
+  {
+    "label": "#917 M-917-25: every correction (in bed, onset, an unchanged wake) hides the sensor wake",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (wakeChanged) for (const k of SENSOR_SHADOW_KEYS) if (k in out) out[k] = null;",
+    "replace": "  if (true) for (const k of SENSOR_SHADOW_KEYS) if (k in out) out[k] = null;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js", "review-in-bed-and-lock.test.js"],
+    "namePattern": "a corrected WAKE and a|the put-down night",
+    "note": "An in-bed-only correction keeps every stored field exactly as stored (review-in-bed-and-lock's schema-driven check); the shadow beside the detector's own wake keeps its meaning."
+  },
+  {
+    "label": "#917 M-917-26: a rejected exit that was never a candidate (far from every gap) is counted",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "            if (dt <= WAKE_SNAP_MS) {\n              if (sensorWindowReadable(run.sensor.minutes, sensorExitIdx)) run.sensor.readable = true;\n              if (sensorRejects && !settlingTail) run.sensor.rejected.add(t);\n",
+    "replace": "            if (sensorRejects && !settlingTail) run.sensor.rejected.add(t);\n            if (dt <= WAKE_SNAP_MS) {\n              if (sensorWindowReadable(run.sensor.minutes, sensorExitIdx)) run.sensor.readable = true;\n",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S16 ",
+    "note": "Code review of #917 (Opus P6): an adult at the bed at a post-wake exit is not a reject; only candidates can change the shadow."
+  },
+  {
+    "label": "#917 M-917-27: a candidate the settling-tail guard already set aside is counted as a sensor reject",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (sensorRejects && !settlingTail) run.sensor.rejected.add(t);",
+    "replace": "if (sensorRejects) run.sensor.rejected.add(t);",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S17 ",
+    "note": "sensor_rejects counts what the rule ALONE set aside."
+  },
+  {
+    "label": "#917 M-917-28: a shadow is stored though the sensor read none of the candidates' minutes",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (shadowRun.sensor.readable) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S14 |S16 ",
+    "note": "Code review of #917 (Opus P1): rows only 19:00-20:00 stored \"the sensor agreed\" (the camera's wake, 0 rejects)."
+  },
+  {
+    "label": "#917 M-917-29: a weak sensor's zeros count as unknown (only vital signs make a window readable)",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "if (minutes[exitIdx + k] != null) return true;",
+    "replace": "if (minutes[exitIdx + k] === true) return true;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S15 |sensorWindowReadable",
+    "note": "A run of zeros is a known \"no vital signs\": such a night is stored, and can only fail to reject."
+  },
+  {
+    "label": "#917 M-917-30: any examined exit's readable minutes count, not only a candidate's",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "            if (dt <= WAKE_SNAP_MS) {\n              if (sensorWindowReadable(run.sensor.minutes, sensorExitIdx)) run.sensor.readable = true;\n",
+    "replace": "            if (sensorWindowReadable(run.sensor.minutes, sensorExitIdx)) run.sensor.readable = true;\n            if (dt <= WAKE_SNAP_MS) {\n",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S16 ",
+    "note": "A sensor that read only a post-wake visit's minutes says nothing about the wake: nothing is stored."
+  },
+  {
+    "label": "#917 M-917-31: an exit the sensor rule set aside is not recorded for the #618 hand-back",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (dt <= WAKE_SNAP_MS) settlingSkips.push(",
+    "replace": "if (dt <= WAKE_SNAP_MS && settlingTail) settlingSkips.push(",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#917 S13",
+    "note": "Code review of #917 (Opus A16, probe P2): without the record the shadow reads A (06:13) from 07:18, where the measured rule hands the rejected 06:29:56 exit back."
+  },
+  {
+    "label": "#917 M-917-32: the sensor read runs an hour past the night's evidence cutoff",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "minutes = sensorMinutesFor(childId, run.originMs, run.cutoffMs, { nowMs: run.nowMs });",
+    "replace": "minutes = sensorMinutesFor(childId, run.originMs, run.cutoffMs + 3600000, { nowMs: run.nowMs });",
+    "expect": "equivalent",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "note": "Code review of #917 (Opus A13) asked for a test; none can exist. Only candidates are judged, and a candidate sits at most 5 min after the start of a gap that needs 20 observed minutes, so its ten minutes end at least 5 min before the evidence cutoff. The bound is defensive (sensorMinutesFor never hands back the future)."
+  },
+  {
+    "label": "#917 M-917-33: of two rows of one role on one device in one minute, the one with FEWER updates is kept",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "if (!d[key] || r.n > d[key].n) d[key] = { n: r.n, mean: r.mean, unit: e.unit };",
+    "replace": "if (!d[key] || r.n < d[key].n) d[key] = { n: r.n, mean: r.mean, unit: e.unit };",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "two entities of one role",
+    "note": "Code review of #917 (Opus S31): a retired entity and its clone in the minute of a move."
   }
 ]

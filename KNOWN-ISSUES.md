@@ -1717,6 +1717,48 @@ changed (3 minutes, 2½ hours, 0.0005), and there is no setting.
 **What to do:** nothing, there is no setting for this. If a bedtime looks wrong, correct it in the morning
 review ("Was last night right?"): the reviewed nights are what this change was checked against.
 
+## An ESPHome radar sensor does not correct a wrong wake time; its answer is only stored (#917)
+
+**What you see:** nothing changes. A child with an ESPHome sensor that reports a heart rate or a breathing rate
+gets two extra fields on each finished night, `wake_at_sensor` and `sensor_rejects`, in the saved row and the API
+answers. The wake time shown, the other figures, the morning notification and the alerts ignore them.
+
+**Why it only shadows:** the rule sets a camera *got out of bed* aside when the sensor measured a person in at
+least 6 of the 10 minutes after it ([docs/esphome.md](docs/esphome.md#the-sleep-shadow-for-comparison-only)).
+**The sensor cannot tell a child from an adult.** In a test on six recorded mornings, a parent's readings were put
+at the bed for six minutes starting two to four minutes after the real wake (constructed, not a recorded event). On
+four of them the shadow wake moved 56, 83, 88 and 91 minutes later; on the other two it did not change (the exit
+was not the one the scan used, or nothing later qualified). The 1 m distance limit does not help:
+after most real wakes the distance read a steady 57-75 cm over the empty bed. So it would make some nights worse in
+exactly the case a parent cares about, and it is kept as evidence until enough reviewed nights show otherwise.
+
+**What else is known about it:**
+- **One house:** two children, one sensor each, three reviewed nights. It would have fixed two wake times there
+  (they had been 25 and 38 minutes early), both for the same child and sensor, and made none worse. The other sensor read
+  only zeros for stretches of 12 to over 200 minutes while the child was in bed; such a sensor sets nothing aside,
+  which is the safe direction but says nothing.
+- **It behaves like the existing "climbed straight back in" check, on purpose:** an exit it sets aside is used after
+  all when nothing later qualifies, so the shadow time can read the real wake early in the morning and a later
+  *got out of bed* (the child back in the room) once that one has 20 quiet minutes after it. Those behaviours were
+  measured, not redesigned, and are pinned by tests.
+- **It is the readings at the time of saving:** a night is saved again for about 3 hours after its window, and
+  readings that arrive within that time are picked up. A night already final, or locked by a morning-review
+  correction, keeps what it had. The raw readings are deleted after the ESPHome retention (30 days by default); the
+  saved value stays, while a fresh look at that night (the detail page) no longer has one.
+- **A corrected wake shows it empty.** A night whose wake time you corrected, or marked "no one was in the bed",
+  shows both fields as `null` (correcting only the in-bed or asleep time leaves them); the saved row keeps them for
+  the comparison, and so do the admin views of the detector's own answer (`?stored=1`, a `raw=1` preview, the reply
+  to a Recompute save).
+- **Empty means "the sensor could not say", not "no sensor" alone.** Both fields stay `null` when the sensor had no
+  reading in the 10 minutes after any exit that could have been the wake (it was off, or disconnected, at those
+  times), so a sensor on only in the evening is not counted as agreeing. A sensor reading only zeros does fill them
+  in, but can never set an exit aside. `sensor_rejects` counts only the possible wakes the sensor alone set aside.
+- **Sensor names and update rates matter:** only sensors named "heart rate", "respiratory rate", "respiration rate"
+  or "breath rate" are used, and a sensor that reports less than a few times a minute never counts.
+
+**What to do:** nothing. To help decide whether it should ever act, review your mornings ("Was last night right?")
+and compare the three answers with the query in [docs/esphome.md](docs/esphome.md#the-sleep-shadow-for-comparison-only).
+
 ## The Bed area editor's picture says it couldn't grab a frame, and keeps saying so (`[snapshot] still frame` in the log)
 
 **What you see:** On one camera's **Bed area** editor, *Couldn't grab a frame* every time, including after

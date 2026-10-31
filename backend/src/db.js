@@ -171,7 +171,9 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_sensor_readings_cam_time ON sensor_readings(camera_id, created_at);
 
-  -- #506: independent raw ESPHome history; none of the sleep or camera readers use these tables.
+  -- #506: independent raw ESPHome history. The camera readers never use these tables; the one sleep-side reader is
+  -- lib/sleepSensor.js (#917, SELECT only), whose result is stored as a SHADOW beside each night
+  -- (sleep_nights.wake_at_sensor / sensor_rejects) and changes no wake, figure, push or alert.
   CREATE TABLE IF NOT EXISTS esphome_devices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -268,6 +270,8 @@ db.exec(`
     in_bed_at TEXT,
     scoring_context TEXT,
     wake_unconfirmed_at TEXT,
+    wake_at_sensor TEXT,
+    sensor_rejects INTEGER,
     computed_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (child_id, night_date)
   );
@@ -1035,6 +1039,21 @@ if (!sleepNightsColumns.includes('scoring_context')) {
 // installs; this guard is the upgrade path.
 if (!sleepNightsColumns.includes('wake_unconfirmed_at')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN wake_unconfirmed_at TEXT');
+}
+
+// #917 (follow-up to #506): the ESPHome sensor SHADOW of the night (sleepAnalysis.js, addSensorShadow). `wake_at_sensor`
+// is the wake (UTC 'YYYY-MM-DD HH:MM:00', like wake_at) a second pass with the sensor rule would have reported, and
+// `sensor_rejects` how many distinct camera exits that rule rejected. Both NULL means the night had no heart-rate or
+// breathing-rate rows when it was stored, and on every row stored before these columns: no backfill, because the raw
+// readings behind an old night may already be pruned. Written by upsertNight with the other computed columns. NOTHING
+// reads them for a wake, a figure, a push or an alert; they are kept so the sensor rule can be judged against reviewed
+// nights after the raw readings are gone (docs/esphome.md). Also in the CREATE TABLE above for fresh installs; these
+// are the upgrade path, one guard per column so neither can be skipped because the other exists.
+if (!sleepNightsColumns.includes('wake_at_sensor')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN wake_at_sensor TEXT');
+}
+if (!sleepNightsColumns.includes('sensor_rejects')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN sensor_rejects INTEGER');
 }
 
 // Quick-silence: a per-camera temporary mute of ALL alerts (motion/sound/ONVIF/MQTT), for when you're

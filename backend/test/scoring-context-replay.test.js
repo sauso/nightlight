@@ -158,7 +158,9 @@ test('the stored scoring_context string is byte-identical to step 1, key order i
 // the faulty-microphone guard finds nothing on this night) and bumped SCORING_ALGO to '3'. #618 (the #509 veto's
 // hand-back) bumped it to '4' with no change here: no exit is adopted on this night, so the veto never runs on it.
 // #914 (the settling-tail witness stops at the next departure) bumped it to '5' with no change here: the night has no
-// `into_bed`, so no exit is a settling tail and that guard's witness is never asked.
+// `into_bed`, so no exit is a settling tail and that guard's witness is never asked. #917 (the ESPHome sensor shadow)
+// added `wake_at_sensor: null` and `sensor_rejects: null` (added keys: this child has no ESPHome rows, so no shadow
+// runs and nothing else moves) and bumped SCORING_ALGO to '6'.
 const GOLDEN = {
   night_date: '2026-07-01',
   window_start: '2026-07-01 09:30:00',
@@ -182,6 +184,8 @@ const GOLDEN = {
   coverage_minutes: 690,
   wake_unconfirmed: null,
   sound_discounted_minutes: 0,
+  wake_at_sensor: null,
+  sensor_rejects: null,
   climate: {
     temp_avg: 19.8, temp_min: 18, temp_max: 21.5, temp_samples: 2,
     humidity_avg: 54, humidity_min: 48, humidity_max: 60, humidity_samples: 2,
@@ -197,7 +201,10 @@ const GOLDEN = {
 // Re-captured for #904: the JSON gained `"sound_discounted_minutes":0` (after `wake_unconfirmed`). With that key removed
 // it hashes to the #700 value, 048ae90a712bbc6c58305f80c2e2e12f453463bd821840e52a6e286bc5b786e1 (checked when this was
 // updated), so again the added key is the whole of the change.
-const GOLDEN_TIMELINE_SHA256 = '63f6a463e99c9e7d9fd5eb580059e4062bc9a62604d4f68c29ace872e342b060';
+// Re-captured for #917: the JSON gained `"wake_at_sensor":null,"sensor_rejects":null` (after `sound_discounted_minutes`).
+// With those two keys removed it hashes to the #904 value, 63f6a463e99c9e7d9fd5eb580059e4062bc9a62604d4f68c29ace872e342b060
+// (checked when this was updated), so the added keys are the whole of the change.
+const GOLDEN_TIMELINE_SHA256 = '0cbd5b0813c4ffb0b39352bef547a0876a10bfe2075ce31cd64dd9109cfb3023';
 
 test('golden: without a context computeNight returns exactly what it did before #361 PR 2, with no scoring key', (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: NOON_AFTER });

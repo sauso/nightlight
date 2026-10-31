@@ -279,6 +279,9 @@ const OVERLAY_FIELDS = [
   'asleep_minutes', 'awake_minutes', 'unknown_minutes', 'wake_count', 'longest_stretch_minutes',
   'onset_at_shadow', 'wake_at_shadow', 'onset_at_algo', 'wake_at_algo',
   'corrected', 'nobody_in_bed', 'in_bed_corrected', 'algo_status', 'algo_onset_at', 'algo_wake_at', 'algo_in_bed_at',
+  // #917: applyCorrection nulls the sensor shadow on a corrected night (and asNobodyInBed on a flagged one). Added with
+  // the golden re-written: the diff was these two keys, null in every row and overlay (this fixture has no ESPHome rows).
+  'wake_at_sensor', 'sensor_rejects',
 ];
 // Only keys the object HAS: a key the overlay newly adds (an `algo_status` on an uncorrected night) shows up.
 const pickOverlay = (o) => Object.fromEntries(OVERLAY_FIELDS.filter((k) => k in o).map((k) => [k, o[k]]));

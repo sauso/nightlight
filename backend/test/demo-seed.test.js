@@ -84,6 +84,15 @@ test('demo seed is deterministic, timezone-native, safe and stable throughout a 
   const deviceId = midWindow.db.prepare("INSERT INTO esphome_devices (name, host, encryption_key) VALUES ('Neutral sensor', '127.0.0.1', 'fixture-key')").run().lastInsertRowid;
   const entityId = midWindow.db.prepare("INSERT INTO esphome_entities (device_id, object_id, kind) VALUES (?, 'rate', 'sensor')").run(deviceId).lastInsertRowid;
   midWindow.db.prepare('INSERT INTO esphome_readings (entity_id, bucket, n) VALUES (?, 1, 0)').run(entityId);
+  // #917: and a heart-rate sensor of a seeded child measuring a person through its last completed night, which would give
+  // that night a sensor shadow if the seed kept it. The demo has no sensor: the shadow must be NULL on every seeded night.
+  const vitals = midWindow.db.prepare("INSERT INTO esphome_entities (device_id, object_id, child_id, kind) VALUES (?, 'heart_rate', ?, 'sensor')")
+    .run(deviceId, midWindow.childIds[0]).lastInsertRowid;
+  const lastEnd = Date.parse(`${midWindow.db.prepare('SELECT window_end FROM sleep_nights WHERE child_id = ? AND night_date = ?')
+    .get(midWindow.childIds[0], midWindow.lastCompleted).window_end.replace(' ', 'T')}Z`);
+  for (let m = Math.floor(lastEnd / 60000) - 900; m < Math.floor(lastEnd / 60000) + 120; m++) {
+    midWindow.db.prepare('INSERT INTO esphome_readings (entity_id, bucket, mean, n) VALUES (?, ?, 80, 10)').run(vitals, m);
+  }
 
   const justAfterMidnight = Date.parse('2026-01-16T05:05:00.000Z'); // 00:05 in the configured test zone
   t.mock.timers.setTime(justAfterMidnight);
@@ -91,6 +100,12 @@ test('demo seed is deterministic, timezone-native, safe and stable throughout a 
   const midnight = await seedDemo(() => new Date(justAfterMidnight));
   for (const table of ['esphome_devices', 'esphome_entities', 'esphome_readings']) {
     assert.equal(midnight.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0, `${table} survived the public demo seed`);
+  }
+  assert.equal(midnight.db.prepare('SELECT COUNT(*) AS n FROM sleep_nights WHERE wake_at_sensor IS NOT NULL OR sensor_rejects IS NOT NULL')
+    .get().n, 0, 'a seeded night stored a sensor shadow');
+  for (const childId of midnight.childIds) {
+    const n = midnight.sleep.computeNight(childId, midnight.lastCompleted);
+    assert.deepEqual([n.wake_at_sensor, n.sensor_rejects], [null, null], 'the demo computes no sensor shadow');
   }
   assertCompletedNightsAreOk(midnight);
   assertSeededThroughDeadline(midnight);

@@ -5,6 +5,7 @@ import { getBedTransitions, TRANSITION } from './bedTransitions.js';
 import { listChildWakeClips } from './recordings.js';
 import { primaryCameraRowFor } from './primaryCamera.js';
 import { isSpikeOnlyMinute, discountedMinutes } from './micGuard.js';
+import { sensorMinutesFor, sensorContradictsExit, sensorWindowReadable } from './sleepSensor.js';
 
 // A computed night is "fresh" (worth notifying about) only if its window closed within this long — so a
 // mid-day container restart that re-computes an already-seen night does NOT re-send the report push.
@@ -56,7 +57,17 @@ const REPORT_FRESH_MS = 2 * 60 * 60 * 1000;
 // SETTLING_WITNESS_MIN_QUIET). Only a night with a skipped settling tail AND a later departure inside the witness
 // window can change: an exit the old count set aside on an empty bed's noise is taken, and the wake, metrics, marker,
 // `wake_unconfirmed` and child-out interval move with it.
-export const SCORING_ALGO = '5';
+// '6' (#917): the ESPHome sensor SHADOW (lib/sleepSensor.js; computeNight). Every result gains `wake_at_sensor` and
+// `sensor_rejects`, null unless a completed night has the child's heart-rate or breathing-rate readings at its exits, and then the wake
+// a second pass with the sensor rule would have reported. Every OTHER key, the reported wake included, is unchanged on
+// every night (the A/B on both databases), except `scoring.current_algo` in a stored-context replay, which is this
+// label. Bumped although no reported number moves, because this rule says "what
+// computeNight returns" and the returned object changed (the goldens record #700's and #904's added keys beside their
+// bumps too), and from '6' on the readings of the child's ESPHome sensors are among the "same inputs" above: they can
+// change these two keys and nothing else. The cost of the bump, the same as every earlier one: a night saved under '5'
+// now reads `algo_differs: true` on a stored-context replay, so the sleep detail page's settings line (shown only for
+// a finished night whose saved settings differ from today's) adds "first worked out under earlier detection rules".
+export const SCORING_ALGO = '6';
 
 const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = real movement (sleeping room ~0)
 // Outside-bed changed-fraction above this = real activity outside the bed (someone in the room, or the
@@ -1129,7 +1140,100 @@ function earlyExitThresholdMin(childId, nightDate, tz, windowEndMs) {
 // built them (refinement c), never read from the saved row. ⚠️ KNOWN LIMIT: `nightDate` is a local date key; if
 // the timezone has changed since, the caller's key is replayed in the STORED zone, which is the right night for
 // a key taken from the stored row and may not be for a key derived under today's zone.
+//
+// #917: the result also carries `wake_at_sensor` and `sensor_rejects`, the ESPHome sensor SHADOW (addSensorShadow,
+// below). Null unless the night is completed and the child has heart-rate or breathing-rate rows; they change nothing
+// else in the result, and nothing reads them for any wake, figure, push or alert.
 export function computeNight(childId, nightDate, { includeTimeline = false, context = null } = {}) {
+  // ONE clock for the night and its shadow (#917): `Date.now()` is read here once and both passes use it, so the two
+  // can never see a different "now" (a minute boundary between them would hand the shadow one more minute of evidence).
+  const run = { nowMs: Date.now(), sensor: null };
+  const night = computeNightPass(childId, nightDate, { includeTimeline, context }, run);
+  addSensorShadow(childId, nightDate, context, run, night);
+  return night;
+}
+
+// ★ #917 (follow-up to #506): THE ESPHOME SENSOR SHADOW. Owner decision 2026-10-31: run the sensor rule (lib/
+// sleepSensor.js, SENSOR_REJECT_MIN_VITALS: a camera exit with a person's vital signs at the bed in at least 6 of the
+// 10 minutes after it is not a departure) as a SECOND pass of this night, and keep only its wake, as
+// `wake_at_sensor`, with `sensor_rejects`, how many distinct camera exits the rule rejected. The real night, `night`,
+// is built first and is never read back or changed except for those two keys, which `base` puts in every result as
+// null. Why it is not allowed to act: an adult at the bed right after a real exit has the same vital signs, and the
+// rule then moves a real wake 56-91 minutes later (plan review, verified; KNOWN-ISSUES.md). So it is evidence only,
+// stored beside each night so that it outlives the raw readings' retention (docs/esphome.md says how to read it).
+//
+// WHEN IT RUNS: only on a COMPLETED night (a night in progress has no departure scan at all) whose pass reached the
+// analysis (`run.originMs` is set: not `off`, not a night with no camera), and only when the child has heart-rate or
+// breathing-rate rows in the night's span (sensorMinutesFor returns null otherwise: no second pass, both keys null, the
+// night exactly as before; the cost is one entity query plus a primary-key range query per heart-rate, breathing-rate
+// or distance entity, and nothing more for an install without ESPHome). Then exactly ONCE: the pass below is the inner
+// function, not computeNight, so it cannot recurse, and it never builds a timeline (the wake is decided before the
+// timeline is drawn), whatever the caller asked for. It runs with the SAME clock (`run.nowMs`) and the SAME `context`
+// as the real night, and its sensor minutes start at the real pass's own minute origin and end at its own evidence
+// cutoff (`run.originMs`, `run.cutoffMs`), so the rule reads exactly the minutes the camera side reads.
+//
+// WHAT IS STORED, AND WHAT NULL MEANS (code review of #917, Opus): both keys are set only when the shadow ran AND the
+// sensor had at least one known minute (vital signs or a reading of none) in the ten minutes after at least one exit
+// the rule could have changed (a candidate: see `readable` in the departure scan). Then `wake_at_sensor` is the
+// shadow's `wake_at` when it scored the night `ok` (else null), and `sensor_rejects` the candidates the rule alone set
+// aside, 0 meaning "the sensor read those minutes and set nothing aside". Both NULL means no sensor data at the exits:
+// no heart-rate or breathing-rate rows in the night's span, or rows only at other times (a sensor switched on at
+// bedtime and off at 20:00 has nothing to say at 06:30, and must not read as agreeing with the camera). A weak
+// sensor's zeros are known minutes, so such a night is stored, but it can only ever fail to reject.
+//
+// ⚠️ NEVER ALLOWED TO BREAK THE REAL NIGHT (#917 plan review): the read and the pass are each wrapped, and any error
+// leaves both keys null and logs one fixed sentence, never the error's own text (which can carry a child's id or a
+// device's name). The real result was already complete before either ran. "No sensor rows" is not an error and logs
+// nothing: it is the normal state of an install without ESPHome.
+// ⚠️ #700's history counter (priorWakeLeadReads) is restored after the shadow, so the shadow's own reads of the
+// history never count: the counter keeps meaning "reads by the real night", which its tests pin.
+//
+// What the shadow pass does differently, and nothing else: see `sensorRejects` in the departure scan.
+let sensorShadowPasses = 0;
+// Test seams ONLY, like priorWakeLeadReadsForTest: how many shadow passes have run (so a test proves it runs once, and
+// never without sensor data or on a night in progress), and a switch that makes the next shadow pass throw (so a test
+// proves a failing pass leaves the real night alone; a real failure there cannot be provoked from outside).
+export function sensorShadowPassesForTest() {
+  return sensorShadowPasses;
+}
+let failNextShadowPass = false;
+export function failNextSensorShadowPassForTest() {
+  failNextShadowPass = true;
+}
+function addSensorShadow(childId, nightDate, context, run, night) {
+  if (night.in_progress || run.originMs === undefined) return;
+  let minutes;
+  try {
+    minutes = sensorMinutesFor(childId, run.originMs, run.cutoffMs, { nowMs: run.nowMs });
+  } catch {
+    logger.warn('[sleep] sensor shadow skipped: the sensor readings could not be read');
+    return;
+  }
+  if (!minutes) return;
+  const historyReads = priorWakeLeadReads;
+  try {
+    sensorShadowPasses++;
+    if (failNextShadowPass) {
+      failNextShadowPass = false;
+      throw new Error('test fault');
+    }
+    const shadowRun = { nowMs: run.nowMs, sensor: { minutes, rejected: new Set(), readable: false } };
+    const shadow = computeNightPass(childId, nightDate, { includeTimeline: false, context }, shadowRun);
+    if (shadowRun.sensor.readable) {
+      night.wake_at_sensor = shadow.status === 'ok' ? shadow.wake_at : null;
+      night.sensor_rejects = shadowRun.sensor.rejected.size;
+    }
+  } catch {
+    logger.warn('[sleep] sensor shadow skipped: the second pass failed');
+  } finally {
+    priorWakeLeadReads = historyReads;
+  }
+}
+
+// The night itself (computeNight's whole contract above), once. `run` is { nowMs, sensor } from computeNight: the clock
+// both passes share, and the shadow's sensor minutes (null on the real pass, which therefore runs exactly as before
+// #917). The pass writes `run.originMs` and `run.cutoffMs` (its minute origin and evidence cutoff) once it has them.
+function computeNightPass(childId, nightDate, { includeTimeline = false, context = null }, run) {
   const ctx = context == null ? null : parseScoringContext(context);
   if (context != null && !ctx) {
     throw new TypeError('computeNight: `context` is not a valid scoring context (see parseScoringContext)');
@@ -1144,7 +1248,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // In-progress night: the window is still open. Cap the analysis at "now" so a morning wake that's
   // happening right now resolves to a real wake time, instead of the not-yet-elapsed minutes reading as
   // quiet (= "still asleep"). A completed night uses the full window unchanged.
-  const nowMs = Date.now();
+  // The clock is computeNight's, read once there for both passes (#917).
+  const nowMs = run.nowMs;
   const inProgress = nowMs >= startUtc.getTime() && nowMs < endUtc.getTime();
   const effEndMs = inProgress ? nowMs : endUtc.getTime();
   const asOfSql = toSqlUtc(new Date(effEndMs));
@@ -1260,6 +1365,15 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     // to count over, and an `empty` night can never have a discounted minute in it (the never-empty rule below).
     // Not a sleep_nights column, so the child's card, the stored-night lists and the morning push never carry it.
     sound_discounted_minutes: null,
+    // #917: the ESPHome sensor SHADOW (addSensorShadow, above computeNightPass): the wake a second pass with the sensor
+    // rule would have reported, and how many distinct camera exits that rule rejected. Null here, on every status and
+    // on both passes; computeNight sets them on the real result only, and only when the shadow ran. ADDED to the
+    // response shape (after `sound_discounted_minutes`, as #904 added its key): every older key keeps its value and its
+    // order, which the A/B on both databases checked with the two keys removed (apart from `scoring.current_algo` in a
+    // stored-context replay, '5' to '6': the SCORING_ALGO bump). Stored as `sleep_nights.wake_at_sensor` and
+    // `sensor_rejects` (upsertNight binds them from this object). Nothing reads them for a wake, figure, push or alert.
+    wake_at_sensor: null,
+    sensor_rejects: null,
     climate,
     // #361: present ONLY when a context was passed, so a plain compute's output keeps its exact shape (every
     // API response is built from it). In `base`, so every return below carries it, early ones included.
@@ -1361,6 +1475,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   const lookahead = inProgress ? 0 : WAKE_LOOKAHEAD_MS;
   const txEndSql = toSqlUtc(new Date(endUtc.getTime() + lookahead));
   const evidenceCutoffMs = Math.min(nowMs, endUtc.getTime() + lookahead);
+  // #917: handed back to computeNight, so the sensor shadow's minutes start at THIS origin (index i is the same minute
+  // as cribActExt[i] and txIdx) and end at THIS cutoff, never re-derived from the result's text times.
+  run.originMs = analysisStartUtc.getTime();
+  run.cutoffMs = evidenceCutoffMs;
   const evidenceEndMin = inProgress
     ? totalMin
     : Math.max(totalMin, Math.round((evidenceCutoffMs - analysisStartUtc.getTime()) / 60000));
@@ -2283,8 +2401,43 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
           const settlingTail = transitions.find((back) => isSettlingPair(back, t)
             // ⚠️ txIdx, not a hand-rolled floor — same reason as the reversal guard above.
             && bedQuietlyOccupiedFrom(txIdx(back.created_at), departureCutIdx(t)));
+          // ★ #917, THE SHADOW PASS ONLY (`run.sensor` is null on the real night, so this is false there and the scan
+          // is exactly what it was): the ESPHome sensor contradicts the exit when a person's vital signs were measured
+          // at the bed in at least 6 of the 10 minutes after it (lib/sleepSensor.js has the rule, its numbers and the
+          // nights behind them). Asked here, after the onset bound and the reversal guard, exactly where the
+          // measurement asked it, and the exit is then treated EXACTLY like a settling-tail skip, through the same
+          // branch: it can come back as `settlingFallback` when nothing later qualifies, it is recorded in
+          // `settlingSkips` for the #618 hand-back, and the smaller-`dt` choice applies. So the shadow, like the guard,
+          // is never the reason a night has no wake. Because it only shadows, those behaviours are kept AS MEASURED and
+          // pinned by tests (sleep-sensor-shadow.test.js, and the #618 hand-back of a rejected exit in
+          // sleepAnalysis.test.js, "#917 S13"), including the clock-dependent one plan review found: a
+          // rejected real exit can come back as the fallback early in the morning and lose to a later exit once that
+          // one qualifies, so the shadow wake can move with the clock. Deliberately NOT asked by departureCutIdx
+          // (#914) or detectMidnightEpisodes: a contradicted exit still cuts a witness and still bounds an episode.
+          //
+          // WHAT IS COUNTED (code review of #917, Opus): only a CANDIDATE, an exit within WAKE_SNAP_MS of this gap's
+          // start (the guard is asked about every exit on every gap, most of them far from it). Into `sensor_rejects`
+          // goes a candidate the rule alone set aside (not one the settling-tail guard had already set aside), counted
+          // once by its row however many gaps it is a candidate for: an exit far from every gap (a parent's visit after
+          // the wake) is never a departure, so rejecting it changes nothing and it is not counted. And `readable`
+          // records whether any candidate's ten minutes held a known minute (sensorWindowReadable): computeNight stores
+          // no shadow at all for a night where none did, because the sensor then said nothing about any exit the rule
+          // could have changed.
+          // ⚠️ The sensor's end bound (the evidence cutoff, the replay clock) can never matter HERE: a candidate is at
+          // most WAKE_SNAP_MS after the start of a gap that needs MORNING_ABSENCE_MIN observed minutes, so its ten
+          // minutes end at least 5 minutes before the evidence does. The bound stays (sensorMinutesFor must never hand
+          // back the future), but no night can show it; the mutation catalogue lists that mutant as equivalent.
           const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
-          if (settlingTail) {
+          let sensorRejects = false;
+          if (run.sensor != null) {
+            const sensorExitIdx = txIdx(t.created_at);
+            sensorRejects = sensorContradictsExit(run.sensor.minutes, sensorExitIdx);
+            if (dt <= WAKE_SNAP_MS) {
+              if (sensorWindowReadable(run.sensor.minutes, sensorExitIdx)) run.sensor.readable = true;
+              if (sensorRejects && !settlingTail) run.sensor.rejected.add(t);
+            }
+          }
+          if (settlingTail || sensorRejects) {
             // ⚠️⚠️ THIS GUARD MUST NEVER BE THE REASON A NIGHT HAS NO WAKE AT ALL — the same rule the
             // reversal guard's corroboration exists to satisfy, and an adversarial review showed the
             // corroboration alone does not achieve it here.
@@ -3068,17 +3221,24 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
 // `wake_unconfirmed_at` (#700) is written the same way, in both halves, for the same reason: a provisional re-store
 // recomputes the night's skip, and a later pass that no longer skips anything must clear it, or a stale value would
 // stay this night's departure candidate in later nights' history (LEAD_FACTOR, HOW THE HISTORY LEARNS).
+//
+// `wake_at_sensor` and `sensor_rejects` (#917, the ESPHome sensor shadow) likewise, in both halves: a re-store writes
+// what that compute saw, so a provisional row that had no sensor rows yet gains them when they arrive, and one whose
+// shadow did not run this time (the readings pruned, the device removed) goes back to NULL. Bound from computeNight's
+// own keys (`...summary` in computeAndStoreNight). The point of storing them is that the stored values outlive the raw
+// readings' retention; a locked (reviewed) night is never re-stored, so it keeps what it had when it was locked.
 const upsertNight = db.prepare(
   `INSERT INTO sleep_nights
      (child_id, night_date, window_start, window_end, status, onset_at, wake_at,
       onset_at_shadow, wake_at_shadow, onset_at_algo, wake_at_algo,
       asleep_minutes, awake_minutes, wake_count, longest_stretch_minutes, coverage_minutes,
-      unknown_minutes, in_bed_at, avg_temperature, avg_humidity, scoring_context, wake_unconfirmed_at, computed_at)
+      unknown_minutes, in_bed_at, avg_temperature, avg_humidity, scoring_context, wake_unconfirmed_at,
+      wake_at_sensor, sensor_rejects, computed_at)
    VALUES (@child_id, @night_date, @window_start, @window_end, @status, @onset_at, @wake_at,
            @onset_at_shadow, @wake_at_shadow, @onset_at_algo, @wake_at_algo,
            @asleep_minutes, @awake_minutes, @wake_count, @longest_stretch_minutes, @coverage_minutes,
            @unknown_minutes, @in_bed_at, @avg_temperature, @avg_humidity, @scoring_context, @wake_unconfirmed_at,
-           @computed_at)
+           @wake_at_sensor, @sensor_rejects, @computed_at)
    ON CONFLICT(child_id, night_date) DO UPDATE SET
      window_start=excluded.window_start, window_end=excluded.window_end, status=excluded.status,
      onset_at=excluded.onset_at, wake_at=excluded.wake_at, in_bed_at=excluded.in_bed_at,
@@ -3091,6 +3251,7 @@ const upsertNight = db.prepare(
      avg_temperature=excluded.avg_temperature, avg_humidity=excluded.avg_humidity,
      scoring_context=excluded.scoring_context,
      wake_unconfirmed_at=excluded.wake_unconfirmed_at,
+     wake_at_sensor=excluded.wake_at_sensor, sensor_rejects=excluded.sensor_rejects,
      computed_at=excluded.computed_at`
 );
 
