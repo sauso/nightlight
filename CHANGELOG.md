@@ -93,7 +93,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
   tomorrow's night as well, so those minutes count like the 5 minutes before any other window. Only a window
   opening 00:00 to 00:04 is affected (the timelapse still records only inside the window itself), and no sleep
   figure changes. The note about this gap is removed from the sleep-tracking and notification guides and from
-  KNOWN-ISSUES.
+  KNOWN-ISSUES. Known limit: a sleep window of almost 24 hours (under 10 minutes between its end and the next
+  start) now never closes that gate between nights, as a 24-hour window already did (#922).
 
 - **A real morning exit is no longer set aside because the empty bed afterwards read faint noise (#914).** A *got
   out of bed* logged within a minute after a *got into bed* is set aside as part of climbing back into bed when the

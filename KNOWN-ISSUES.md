@@ -1400,7 +1400,9 @@ chosen for this: the morning departure is searched for, and the night's saved su
 - **The timelapse, wake watcher and wake clips are not widened to 3 hours.** The timelapse records only
   inside the sleep window itself; the live wake watcher (which also decides wake clips) uses the window plus
   5 minutes either side (also for a window that opens between 00:00 and 00:04: its 5-minute lead before
-  midnight was missing until #602).
+  midnight was missing until #602). A sleep window that leaves under 10 minutes between its end and the next
+  start (nearly 24 hours long) never lets that gate close, so the watcher's asleep state is not cleared
+  between nights, as with a true 24-hour window (#922).
 
 **What to do:** nothing. There is no setting for this span. The only ways to avoid the extra decode are to
 switch the child's sleep tracking off or to unassign the camera from the child. Turning motion alerts on
