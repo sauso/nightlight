@@ -132,6 +132,13 @@ function reset(cameraId, st) {
 }
 
 const cameraQ = db.prepare('SELECT id, name, child_id, disabled FROM cameras WHERE id = ?');
+const childCamerasQ = db.prepare('SELECT id FROM cameras WHERE child_id = ? AND disabled = 0');
+
+// #919: consult today's gate, since a stale asleep latch can survive briefly after a window closes.
+export function isChildAsleep(childId) {
+  if (!childTracksSleep(childId) || !childWindowActiveNow(childId)) return undefined;
+  return childCamerasQ.all(childId).some(({ id }) => state.get(id)?.asleep === true);
+}
 
 // 'YYYY-MM-DD HH:MM:00' (UTC, from activityTracker) -> epoch ms of the minute's START.
 function bucketMs(bucketStart) {

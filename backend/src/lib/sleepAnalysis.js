@@ -593,17 +593,21 @@ const WINDOW_MARGIN_MS = 5 * 60 * 1000;
 // `leadMs` and `trailMs` are ABSOLUTE milliseconds added to real instants from windowBoundsUtc, exactly
 // as computeNight adds ONSET_LOOKBEHIND_MS and WAKE_LOOKAHEAD_MS, so on a DST night the lead and tail
 // are 3 REAL hours (the wall clock may differ by one) - the same horizon the inference reads.
-function windowOpenNow(childId, leadMs, trailMs, nextNight = false) {
+function openWindowStartUtc(childId, leadMs, trailMs, nextNight = false) {
   const cfg = childSleepConfig(childId);
-  if (!cfg.track) return false;
+  if (!cfg.track) return null;
   const tz = appSettings().timezone || 'UTC';
   const now = Date.now();
   for (let delta = nextNight ? 1 : 0; delta >= -1; delta--) {
     const date = localDateStr(tz, delta);
     const { startUtc, endUtc } = windowBoundsUtc(date, tz, cfg.start, cfg.end);
-    if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;
+    if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return startUtc.getTime();
   }
-  return false;
+  return null;
+}
+
+function windowOpenNow(childId, leadMs, trailMs, nextNight = false) {
+  return openWindowStartUtc(childId, leadMs, trailMs, nextNight) !== null;
 }
 
 // Unchanged on purpose by #353: the window itself with a 5-minute slack each side. It gates the wake
@@ -613,6 +617,11 @@ function windowOpenNow(childId, leadMs, trailMs, nextNight = false) {
 // the window whatever this returns.
 export function childWindowActiveNow(childId) {
   return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);
+}
+
+// #919: use the watcher's exact candidate nights and margins for the hold clock, including its lead margin.
+export function childWindowKeyNow(childId) {
+  return openWindowStartUtc(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);
 }
 
 // Should the activity-only SAMPLING leg be running now? The window opened ONSET_LOOKBEHIND_MS early and

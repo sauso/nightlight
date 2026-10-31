@@ -9467,8 +9467,8 @@
   {
     "label": "#452 M14: the motion confirm comparison is > instead of >= (a run alerts one frame late; confirm 0 never alerts)",
     "file": "backend/src/lib/motionDetector.js",
-    "find": "if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera)) {",
-    "replace": "if (now - activeSince > confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera)) {",
+    "find": "if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera) && !shouldHold(camera)) {",
+    "replace": "if (now - activeSince > confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera) && !shouldHold(camera)) {",
     "expect": "killed",
     "tests": ["motion-frame-gap.test.js"]
   },
@@ -10450,8 +10450,8 @@
   {
     "label": "#454 M10: the stamp is written whenever the confirm time and cooldown allow, even when the quiet-hours schedule then suppresses the alert",
     "file": "backend/src/lib/motionDetector.js",
-    "find": "if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera)) {",
-    "replace": "if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && (motionAlertStamps.set(stampKey, now), inActiveWindow(camera))) {",
+    "find": "if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera) && !shouldHold(camera)) {",
+    "replace": "if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && (motionAlertStamps.set(stampKey, now), inActiveWindow(camera)) && !shouldHold(camera)) {",
     "expect": "killed",
     "tests": ["motion-alert-cooldown.test.js"],
     "namePattern": "^#454 C10:"
@@ -11000,8 +11000,8 @@
   {
     "label": "#353 M-353-08: the start edge is exclusive (>= becomes >)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;",
-    "replace": "if (now > startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;",
+    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return startUtc.getTime();",
+    "replace": "if (now > startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return startUtc.getTime();",
     "expect": "killed",
     "tests": ["sleep-sampling-horizon.test.js", "motion-leg-reconcile.test.js"],
     "namePattern": "^#353 (the afternoon gap|a 01:00 bedtime|childWindowActiveNow keeps|MQTT source|ONVIF source|frame-diff source)"
@@ -11009,8 +11009,8 @@
   {
     "label": "#353 M-353-09: the end edge is inclusive (< becomes <=)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;",
-    "replace": "if (now >= startUtc.getTime() - leadMs && now <= endUtc.getTime() + trailMs) return true;",
+    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return startUtc.getTime();",
+    "replace": "if (now >= startUtc.getTime() - leadMs && now <= endUtc.getTime() + trailMs) return startUtc.getTime();",
     "expect": "killed",
     "tests": ["sleep-sampling-horizon.test.js", "motion-leg-reconcile.test.js"],
     "namePattern": "^#353 (the sampling tail ends one reconcile margin|childWindowActiveNow keeps|MQTT source|ONVIF source|frame-diff source)"
@@ -11027,8 +11027,8 @@
   {
     "label": "#353 M-353-11a: the tail is computed in WALL-CLOCK terms (local end + trail as a local time), not as absolute ms: wrong by an hour across a DST change in either direction",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;",
-    "replace": "if (now >= startUtc.getTime() - leadMs && now < (() => { const w = new Date(endUtc.getTime() + tzOffsetMs(endUtc, tz) + trailMs); return zonedToUtc(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate(), w.getUTCHours(), w.getUTCMinutes(), tz).getTime(); })()) return true;",
+    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return startUtc.getTime();",
+    "replace": "if (now >= startUtc.getTime() - leadMs && now < (() => { const w = new Date(endUtc.getTime() + tzOffsetMs(endUtc, tz) + trailMs); return zonedToUtc(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate(), w.getUTCHours(), w.getUTCMinutes(), tz).getTime(); })()) return startUtc.getTime();",
     "expect": "killed",
     "tests": ["sleep-sampling-horizon.test.js"],
     "namePattern": "^#353 DST (spring-forward|fall-back): the horizon is 3 REAL hours",
@@ -11037,8 +11037,8 @@
   {
     "label": "#353 M-353-11b: the lead is computed in WALL-CLOCK terms (local start - lead as a local time), not as absolute ms",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;",
-    "replace": "if (now >= (() => { const w = new Date(startUtc.getTime() + tzOffsetMs(startUtc, tz) - leadMs); return zonedToUtc(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate(), w.getUTCHours(), w.getUTCMinutes(), tz).getTime(); })() && now < endUtc.getTime() + trailMs) return true;",
+    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return startUtc.getTime();",
+    "replace": "if (now >= (() => { const w = new Date(startUtc.getTime() + tzOffsetMs(startUtc, tz) - leadMs); return zonedToUtc(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate(), w.getUTCHours(), w.getUTCMinutes(), tz).getTime(); })() && now < endUtc.getTime() + trailMs) return startUtc.getTime();",
     "expect": "killed",
     "tests": ["sleep-sampling-horizon.test.js"],
     "namePattern": "^#353 DST (spring-forward|fall-back): a lookbehind that really crosses the change",
@@ -24587,5 +24587,95 @@
     "tests": ["sleep-sensor-shadow.test.js"],
     "namePattern": "two entities of one role",
     "note": "Code review of #917 (Opus S31): a retired entity and its clone in the minute of a move."
+  },
+  {
+    "label": "#919 cap boundary is exclusive",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "nowMs - entry.firstAt >= HOLD_CAP_MS",
+    "replace": "nowMs - entry.firstAt > HOLD_CAP_MS",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 first held alert"
+  },
+  {
+    "label": "#919 cap is doubled",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "45 * 60 * 1000",
+    "replace": "90 * 60 * 1000",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 first held alert"
+  },
+  {
+    "label": "#919 unarmed state is held",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "if (asleep !== false) return false;",
+    "replace": "if (asleep !== false) return true;",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 reads child assignment"
+  },
+  {
+    "label": "#919 option flag ignored",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "row.hold_alerts_until_asleep !== 1",
+    "replace": "false",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 off by default"
+  },
+  {
+    "label": "#919 MQTT hold checked before cooldown",
+    "file": "backend/src/lib/mqttClient.js",
+    "find": "if (now - (motionLastAlert.get(cam.id) || 0) < cooldownMs) {",
+    "replace": "if (shouldHold(cam) || now - (motionLastAlert.get(cam.id) || 0) < cooldownMs) {",
+    "expect": "killed",
+    "tests": ["mqtt-motion-payload.test.js"],
+    "namePattern": "#919"
+  },
+  {
+    "label": "#919 timer cleared on unarm",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "if (asleep !== false) return false;",
+    "replace": "if (asleep !== false) { firstHeld.delete(childId); return false; }",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 reads child assignment"
+  },
+  {
+    "label": "#919 fail open removed",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "logger.error('[alert-hold] check failed; alerts allowed');",
+    "replace": "throw new Error('hold check failed');",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 an internal database failure"
+  },
+  {
+    "label": "#919 night key from currentNightDate alone",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "import { childWindowKeyNow } from './sleepAnalysis.js';",
+    "replace": "import { currentNightDate as childWindowKeyNow } from './sleepAnalysis.js';",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 lead margin"
+  },
+  {
+    "label": "#919 frame-diff hold checked before camera schedule",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "inActiveWindow(camera) && !shouldHold(camera)",
+    "replace": "!shouldHold(camera) && inActiveWindow(camera)",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "#919 snoozed frame-diff motion"
+  },
+  {
+    "label": "#919 sound hold checked before camera schedule",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "inActiveWindow(camera) && !shouldHold(camera)",
+    "replace": "!shouldHold(camera) && inActiveWindow(camera)",
+    "expect": "killed",
+    "tests": ["sound-digital-silence.test.js"],
+    "namePattern": "#919 snoozed sound"
   }
 ]

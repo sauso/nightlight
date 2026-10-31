@@ -36,13 +36,45 @@ const { holdOwners, effectiveHold, RING_OWNER } = await import('../src/lib/ringH
 const activity = await import('../src/lib/activityTracker.js');
 const { logger } = await import('../src/lib/logger.js');
 const { WAKE_CLIP_LEAD_SEC, getWakeClipSettings } = await import('../src/lib/recordings.js');
-const { handleMinute, startWakeWatcher, stopWakeWatcher, sweepStaleRuns, firstActiveFrameMs, wakeClipAnchor, _state } =
+const { handleMinute, startWakeWatcher, stopWakeWatcher, sweepStaleRuns, firstActiveFrameMs, wakeClipAnchor, isChildAsleep, _state } =
   await import('../src/lib/wakeWatcher.js');
 
 const { MOTION_ACTIVE, SOUND_ACTIVE, ONSET_QUIET_MIN, WAKE_ACTIVE_MIN, WAKE_GAP_MIN } = SLEEP_THRESHOLDS;
 
 const CHILD = 'kid-1';
 const CAM = 'cam-1';
+
+test('#919 isChildAsleep requires an armed child and any enabled camera asleep', () => {
+  const w = windowAroundNow();
+  // This test uses its own child so it does not affect the watcher's existing fixture.
+  makeChild(db, { id: 'hold-child', start: w.start, end: w.end });
+  makeCamera(db, { id: 'hold-cam-1', childId: 'hold-child' });
+  makeCamera(db, { id: 'hold-cam-2', childId: 'hold-child', extra: { disabled: 1 } });
+  makeCamera(db, { id: 'hold-cam-3', childId: 'hold-child' });
+  try {
+    assert.equal(isChildAsleep('hold-child'), false);
+    _state().set('hold-cam-2', { asleep: true });
+    assert.equal(isChildAsleep('hold-child'), false);
+    _state().set('hold-cam-1', { asleep: true });
+    assert.equal(isChildAsleep('hold-child'), true);
+    _state().delete('hold-cam-1');
+    _state().set('hold-cam-3', { asleep: true });
+    assert.equal(isChildAsleep('hold-child'), true);
+    const pad = (n) => String(n).padStart(2, '0');
+    const hm = (ms) => { const d = new Date(ms); return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`; };
+    db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?')
+      .run(hm(Date.now() + 3 * 3600_000), hm(Date.now() + 4 * 3600_000), 'hold-child');
+    // Closing the window disarms immediately even if a stale asleep state remains.
+    assert.equal(childWindowActiveNow('hold-child'), false);
+    assert.equal(isChildAsleep('hold-child'), undefined);
+    db.prepare('UPDATE children SET track_sleep = 0 WHERE id = ?').run('hold-child');
+    assert.equal(isChildAsleep('hold-child'), undefined);
+  } finally {
+    _state().delete('hold-cam-1'); _state().delete('hold-cam-2'); _state().delete('hold-cam-3');
+    db.prepare('DELETE FROM cameras WHERE child_id = ?').run('hold-child');
+    db.prepare('DELETE FROM children WHERE id = ?').run('hold-child');
+  }
+});
 
 // The watcher only runs inside a tracked child's sleep window, so the fixture opens a window that is
 // always "now" regardless of when the suite runs.

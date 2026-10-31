@@ -1177,6 +1177,7 @@ alert cannot fire sooner than **Motion cooldown** after it, whatever happened to
   longer re-arms an alert (it did, before).
 - **An alert that was silenced** (outside the alert schedule, or by snoozing the camera) does not start a
   cooldown, so one can fire as soon as the schedule opens or the snooze ends (unchanged).
+- **Hold alerts until asleep (#919):** held live motion and sound alerts are dropped, not queued, and the hold does not stamp their cooldown. A restart resets both the watcher's quiet count and the 45-minute clock, allowing up to another 45 minutes of holding. A camera reassigned between two tracked children while both windows are open can retain its asleep latch and let the new child's alerts through early. `alerting_now` still reports true during a hold because it only reads snooze and the Alert schedule. The 45-minute cap is a design choice, not measured; a child who cries without settling can be alerted only after it. Demo sample events bypass the live alert path.
 - **A backward step of the server's clock** (a time-sync correction) silences the frame-diff alert for at most
   one cooldown, counted from the first video frame analysed after the step (at 5 frames a second that is
   immediate; if frames stop for ten minutes after the step it starts at the next frame). The ONVIF and MQTT

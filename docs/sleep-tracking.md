@@ -15,6 +15,8 @@ from (a caregiver sees them, greyed out).
 A child can have more than one camera; the night is measured from one of them (see
 [One camera does the measuring](#one-camera-does-the-measuring)).
 
+An admin can also switch on [Hold alerts until asleep](notifications.md#hold-alerts-until-asleep) under **Track sleep**. It is off by default. During the sleep window, motion and sound alerts are dropped until about 15 quiet minutes show the child is asleep, or 45 minutes after the first held alert. The 45 minutes is a design choice, not a measured safety limit. Held alerts are not sent later. Camera-offline alerts continue normally.
+
 ## What you see
 
 ### At a glance, and live
@@ -561,8 +563,9 @@ lingers 5 to 10 minutes after the closing one.
   day becomes 18 for a 19:00-07:00 window). That is a relative figure; the extra CPU was not measured.
   A frame-diff camera with motion alerts on already runs all day and costs nothing extra.
 - **What is not widened:** none of these is widened to 3 hours. The timelapse records only inside the
-  sleep window itself. The live wake watcher (which also decides wake clips) uses the window plus 5
-  minutes either side.
+  sleep window itself. The live wake watcher (which also decides wake clips) uses the window plus about 5
+  minutes either side. A window starting between 00:00 and 00:04 may have a shorter lead margin because
+  the watcher does not check the next night's window before midnight.
 - **Known limits:** a departure later than 3 hours after the window closes is not seen by any camera, and
   for a camera of this kind the morning review has no recorded *got out / into bed* events after about
   3 hours past the window's end, because nothing past that point feeds the night's numbers.
