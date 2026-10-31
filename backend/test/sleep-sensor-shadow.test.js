@@ -31,7 +31,7 @@ const {
   priorWakeLeadReadsForTest, SCORING_ALGO,
 } = sleep;
 const sensor = await import('../src/lib/sleepSensor.js');
-const { sensorMinutesFor, sensorContradictsExit, vitalsAfterExit, deviceMinuteHasVitals, distanceCm } = sensor;
+const { sensorMinutesFor, sensorContradictsExit, vitalsAfterExit, deviceMinuteHasVitals, distanceCm, sensorWindowReadable } = sensor;
 const roles = await import('../src/lib/esphomeRoles.js');
 const manager = await import('../src/lib/esphomeManager.js');
 const { applyCorrection } = await import('../src/lib/sleepReviews.js');
@@ -115,21 +115,30 @@ const inBedUntil = (end, extra = []) => (t) => t < end || extra.some(([a, b]) =>
 //   reversal       — an `into_bed` at 06:08 with the still child in the bed after it: the 06:05 exit is reversed.
 //   laterExit      — the child back in the room later: one active bed minute and an `out_of_bed` at 07:58:38.
 //   realExit       — false: the child climbs out but the camera logs no exit for it.
+//   strayReturn    — with falseExit: a stray `into_bed` at 06:05:05, 30 s before it, and the still child in the bed
+//                    after: the settling-tail guard sets the 06:05 exit aside on its own (test S17).
+//   twoGapExit     — instead of falseExit: the child moves at 06:01-06:02 and again at 06:04 alone, and the camera logs an
+//                    `out_of_bed` at 06:04:30. The lone minute is bridged, so a gap opens at 06:03 AND at 06:05, and the
+//                    exit is within 5 minutes of both: a candidate for two gaps (test S18).
 // No sound, and no morning awake run of 5 minutes, so the #509 veto never runs and the wake is the scan's own choice.
 function layNight({ falseExit = false, earlyFalseExit = false, reversal = false, laterExit = false, realExit = true,
-  exitMin = [6, 30], realSec = 17 } = {}) {
+  strayReturn = false, twoGapExit = false, exitMin = [6, 30], realSec = 17 } = {}) {
   const exitAt = at(exitMin[0], exitMin[1], 1);
+  const twoGapActive = [at(6, 1, 1), at(6, 2, 1), at(6, 4, 1)].map((d) => d.getTime());
   for (let t = at(19, 30); t < at(12, 0, 1); t = plus(t, 1)) {
     let motion;
     if (t < at(19, 40)) motion = 0.4;
     else if (falseExit && t >= at(6, 3, 1) && t < at(6, 6, 1)) motion = 0.4;
+    else if (twoGapExit && twoGapActive.includes(t.getTime())) motion = 0.4;
     else if (earlyFalseExit && t >= at(5, 3, 1) && t < at(5, 6, 1)) motion = 0.4;
     else if (t >= plus(exitAt, -4) && t < exitAt) motion = 0.4;
     else if (laterExit && t >= at(7, 58, 1) && t < at(7, 59, 1)) motion = 0.4;
     else motion = t < exitAt ? STILL_OCCUPIED : STILL_EMPTY;
     insertSample.run(CAM, sqlTime(t), motion, motion);
   }
+  if (strayReturn) insertTransition.run(CAM, 'into_bed', 0.05, sqlTime(at(6, 5, 1, 5)));
   if (falseExit) insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(at(6, 5, 1, 35)));
+  if (twoGapExit) insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(at(6, 4, 1, 30)));
   if (earlyFalseExit) insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(at(5, 5, 1, 35)));
   if (reversal) insertTransition.run(CAM, 'into_bed', 0.05, sqlTime(at(6, 8, 1)));
   if (realExit) insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(new Date(exitAt.getTime() + realSec * 1000)));
@@ -185,14 +194,26 @@ describe('#917 sensorMinutesFor: one tri-state value per UTC minute', () => {
       [6, () => { row(d.hr, m(6), 5); row(d.dist, m(6), 10, 100); }, true],
       [7, () => { row(d.hr, m(7), 5); row(d.dist, m(7), 10, 101); }, false],
       [8, () => { row(d.hr, m(8), 0, 0, 12); row(d.rr, m(8), 0, 0, 40); }, false], // a minute of zeros: connected, no vitals
-      [10, () => row(d.lux, m(10), 1, 3), false], // only a non-vital row: the device was there, so false, not null
+      [10, () => row(d.dist, m(10), 10, 60), false], // only a distance row: the device was there, so false, not null
       [11, () => { row(d.hr, m(11), 5); row(d.dist, m(11), 0, 0, 10); }, true], // vitals, distance only zeros: no cut
+      // Only an illuminance row: a role the rule never reads (code review of #917, Codex: its rows are not even
+      // queried), so the minute is unknown, exactly as if the device had sent nothing.
+      [12, () => row(d.lux, m(12), 1, 3), null],
     ];
     for (const [, lay] of cases) lay();
     const out = read();
     for (const [k, , want] of cases) assert.equal(out[k], want, `minute ${k}`);
     assert.equal(out[9], null, 'no row at all: unknown, never "no vital signs"');
     assert.equal(out.length, 20);
+  });
+
+  test('two entities of one role on one device in one minute (a retired entity and its clone): the row with more updates', () => {
+    const d = addDevice(CHILD);
+    const retired = addEntity(d.device, CHILD, 'heart_rate', 'Heart Rate', null, 'bpm', 0);
+    row(retired, m(0), 2); row(d.hr, m(0), 5); // 5 updates (valid) beside 2 (not)
+    row(retired, m(1), 5); row(d.hr, m(1), 2); // the same the other way round, so the order the rows are read in cannot decide it
+    const out = read();
+    assert.deepEqual(out.slice(0, 2), [true, true]);
   });
 
   test('the distance unit contract: cm as is, m and mm converted, any other unit or none is not valid', () => {
@@ -223,7 +244,7 @@ describe('#917 sensorMinutesFor: one tri-state value per UTC minute', () => {
     for (let k = 0; k < 20; k++) row(loose, m(k), 10);
     row(mine.hr, m(1), 0, 0, 5); // a vital-sign entity of this child, zeros only: so the child HAS a sensor
     const out = read();
-    assert.equal(out[0], false, 'non-vital roles of this child are presence, not vital signs');
+    assert.equal(out[0], null, 'non-vital roles of this child are never read: neither vital signs nor presence');
     assert.equal(out[1], false);
     for (let k = 2; k < 20; k++) assert.equal(out[k], null, `minute ${k}: only other children's rows`);
     assert.equal(read(OTHER)[5], true, 'control: the other child\'s own minutes do read as vital signs');
@@ -297,6 +318,14 @@ describe('#917 sensorContradictsExit: 6 of the 10 minutes [e+1, e+10]', () => {
     assert.equal(vitalsAfterExit(minutes(range(-3, 13)), E), 10);
     assert.equal(sensorContradictsExit(minutes(range(1, 6)).slice(0, E + 4), E), false, 'past the array end is unknown');
   });
+  test('sensorWindowReadable: one known minute (vital signs OR none) in [e+1, e+10] is enough; unknown minutes are not', () => {
+    const at = (k, v) => { const a = new Array(80).fill(null); a[E + k] = v; return a; };
+    assert.equal(sensorWindowReadable(at(1, false), E), true, 'a known "no vital signs" minute is a reading');
+    assert.equal(sensorWindowReadable(at(10, true), E), true);
+    assert.equal(sensorWindowReadable(at(0, false), E), false, 'the exit\'s own minute is not in the window');
+    assert.equal(sensorWindowReadable(at(11, false), E), false, 'nor is e+11');
+    assert.equal(sensorWindowReadable(new Array(80).fill(null), E), false);
+  });
 });
 
 // --- 3. computeNight -----------------------------------------------------------------------------------------------------
@@ -310,9 +339,71 @@ describe('#917 computeNight: the shadow moves wake_at_sensor and sensor_rejects 
     assert.equal(night.status, 'ok');
     assert.equal(hhmm(night.wake_at), '06:05', 'the reported wake is the camera\'s, as before #917');
     assert.equal(hhmm(night.wake_at_sensor), '06:30', 'the shadow: the false exit rejected, the real exit taken');
-    // The scan asks about the 06:05:35 exit for three gaps (the night-long one from 19:40, its own from 06:06, and the
-    // real exit's from 06:30); it is ONE row, so one reject (#917 plan review).
+    // The 06:05:35 exit is a candidate (within 5 minutes of a gap's start) for its own gap only; the scan also asks
+    // about it for the night-long gap from 19:40 and the real exit's from 06:30, far from both, which is not counted.
     assert.equal(night.sensor_rejects, 1);
+  });
+
+  test('S14 a sensor with no readings at the exits stores NO shadow (rows only 19:00-20:00), not "the sensor agreed"', (t) => {
+    // Code review of #917 (Opus P1): before this, a night with heart-rate rows only in the evening stored the camera's
+    // wake as the shadow with 0 rejects, which reads as the sensor confirming 06:05 when it said nothing at 06:05 or
+    // 06:30. Control: the same night with the sensor on all night is S1 (06:30, 1 reject).
+    layNight({ falseExit: true });
+    const d = addDevice(CHILD);
+    for (let tt = at(19, 0); tt < at(20, 0); tt = plus(tt, 1)) sensorMinute(d, tt.getTime(), true);
+    const p = sensorShadowPassesForTest();
+    const night = nightAt(t, NOON);
+    assert.equal(sensorShadowPassesForTest() - p, 1, 'precondition: the child has a sensor, so the shadow pass ran');
+    assert.deepEqual([night.wake_at_sensor, night.sensor_rejects], [null, null]);
+    assert.equal(hhmm(night.wake_at), '06:05');
+    // A mixed night is stored: rows 06:00-06:19 read the false exit's ten minutes (the child still in the bed: rejected)
+    // and none of the real exit's, which the rule therefore could not judge and the shadow takes.
+    for (let tt = at(6, 0, 1); tt < at(6, 20, 1); tt = plus(tt, 1)) sensorMinute(d, tt.getTime(), true);
+    const mixed = nightAt(t, NOON);
+    assert.deepEqual([hhmm(mixed.wake_at_sensor), mixed.sensor_rejects], ['06:30', 1],
+      'stored: the sensor read one candidate\'s minutes (and could not judge the other)');
+  });
+
+  test('S15 a weak sensor reading only zeros IS stored (its zeros are readings), and can only ever fail to reject', (t) => {
+    layNight({ falseExit: true });
+    laySensor(addDevice(CHILD), () => false); // connected all night, never a valid heart or breathing rate
+    const night = nightAt(t, NOON);
+    assert.deepEqual([hhmm(night.wake_at_sensor), night.sensor_rejects], ['06:05', 0], 'the camera\'s wake, nothing set aside');
+  });
+
+  test('S16 only exits the rule could have changed are counted: an adult at the bed at a post-wake exit is not a reject', (t) => {
+    // Code review of #917 (Opus P6): the real exit (06:30:17) is the wake; the child is back in the room at 07:58:38 and
+    // an adult is at the bed 07:59-08:08. That exit is never a candidate (the scan stopped at 06:30, and it is far from
+    // every earlier gap), so setting it aside changes nothing and must not show as a reject.
+    layNight({ laterExit: true });
+    const d = addDevice(CHILD);
+    laySensor(d, inBedUntil(at(6, 30, 1), [[at(7, 59, 1), at(8, 9, 1)]]));
+    const night = nightAt(t, NOON);
+    assert.equal(hhmm(night.wake_at), '06:30');
+    assert.deepEqual([hhmm(night.wake_at_sensor), night.sensor_rejects], ['06:30', 0]);
+    // And the same night with the sensor on only from 07:50 to 08:20: it read the post-wake exit's minutes and none of
+    // the real exit's, the only candidate. That says nothing about the wake, so nothing is stored.
+    db.prepare('DELETE FROM esphome_readings').run();
+    for (let tt = at(7, 50, 1); tt < at(8, 20, 1); tt = plus(tt, 1)) sensorMinute(d, tt.getTime(), tt >= at(7, 59, 1) && tt < at(8, 9, 1));
+    const partial = nightAt(t, NOON);
+    assert.deepEqual([partial.wake_at_sensor, partial.sensor_rejects], [null, null]);
+  });
+
+  test('S17 an exit the settling-tail guard already set aside is not counted, even when the sensor contradicts it too', (t) => {
+    layNight({ falseExit: true, strayReturn: true });
+    laySensor(addDevice(CHILD), inBedUntil(at(6, 30, 1)));
+    const night = nightAt(t, NOON);
+    assert.equal(hhmm(night.wake_at), '06:30', 'precondition: the guard set the 06:05 exit aside on its own');
+    assert.deepEqual([hhmm(night.wake_at_sensor), night.sensor_rejects], ['06:30', 0]);
+  });
+
+  test('S18 an exit that is a candidate for two gaps is one reject (distinct rows)', (t) => {
+    layNight({ twoGapExit: true });
+    laySensor(addDevice(CHILD), inBedUntil(at(6, 30, 1)));
+    const night = nightAt(t, NOON);
+    assert.equal(hhmm(night.wake_at), '06:04', 'precondition: the camera takes the 06:04:30 exit (gap 06:03, 90 s away)');
+    assert.equal(hhmm(night.wake_at_sensor), '06:30');
+    assert.equal(night.sensor_rejects, 1, 'set aside for the gap at 06:03 and again for the one at 06:05: one row');
   });
 
   test('S2 the real night is untouched: every older key, at eight clocks, plain, with the timeline and a stored context', (t) => {
@@ -446,17 +537,10 @@ describe('#917 computeNight: the shadow moves wake_at_sensor and sensor_rejects 
     assert.equal(sensorShadowPassesForTest() - p, 0, 'never on a night in progress or with tracking off');
   });
 
-  test('S9 the shadow reads only what was written by the compute\'s own clock (window end + 1 minute)', (t) => {
-    // An exit at 06:50:45, and a person measured at 06:51 and 06:56-07:00: six minutes of its ten, the sixth being 07:00,
-    // the last minute before the 07:01 clock. That minute's row is written 10 ms after 07:01:00, so at 07:01:00.000 the
-    // exit has five (not rejected) and at 07:01:00.010 six (rejected). A shadow that read past the clock it was given
-    // (rows a replayed database holds but a live one did not yet) would reject it at both.
-    layNight({ exitMin: [6, 50], realSec: 45 });
-    laySensor(addDevice(CHILD), inBedUntil(at(6, 50, 1), [[at(6, 51, 1), at(6, 52, 1)], [at(6, 56, 1), at(7, 1, 1)]]));
-    const clock = plus(at(7, 0, 1), 1);
-    assert.equal(nightAt(t, clock).sensor_rejects, 0, 'at 07:01:00.000 the 07:00 row is not written yet');
-    assert.equal(nightAt(t, new Date(clock.getTime() + sensor.ROW_READABLE_DELAY_MS)).sensor_rejects, 1, 'at 07:01:00.010 it is');
-  });
+  // (S9 is gone, code review of #917: since only candidates are counted, the sensor's end bound can never show in a
+  // night. A candidate sits at most 5 minutes after the start of a gap that needs 20 observed minutes, so its ten minutes
+  // end at least 5 minutes before the evidence does. The replay-clock bound is pinned on sensorMinutesFor itself, "the
+  // replay clock"; the evidence-cutoff mutant is catalogued as equivalent.)
 
   test('S10 a failing sensor read or second pass leaves the real night exactly as it is and logs one fixed sentence', (t) => {
     layNight({ falseExit: true });
@@ -582,5 +666,22 @@ describe('#917 sleep_nights.wake_at_sensor / sensor_rejects: stored beside the n
     assert.equal(hhmm(storedRow().wake_at_sensor), '06:30', 'the stored row itself is never touched');
     db.prepare('DELETE FROM sleep_reviews').run();
     assert.equal(hhmm(applyCorrection(CHILD, fresh).wake_at_sensor), '06:30', 'no review: shown as computed');
+  });
+
+  test('deleting a child deletes its stored nights, shadow and all; another child\'s shadow stays', async () => {
+    // entity-purge.test.js proves every table with a child_id is emptied for the deleted child; this pins that the two
+    // new columns go with the row (they are evidence about a child) and that the control child's are untouched.
+    const { purgeChild } = await import('../src/lib/entityPurge.js');
+    const GONE = 'ss-gone';
+    db.prepare(`INSERT INTO children (id, name, track_sleep) VALUES (?, 'Gone', 1)`).run(GONE);
+    const plant = db.prepare(`INSERT INTO sleep_nights (child_id, night_date, window_start, window_end, status, wake_at_sensor, sensor_rejects)
+      VALUES (?, ?, '2026-07-01 09:30:00', '2026-07-01 21:00:00', 'ok', ?, ?)`);
+    plant.run(GONE, DATE, 'MARK:gone', 7);
+    plant.run(CHILD, DATE, 'MARK:kept', 3);
+    purgeChild(GONE);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sleep_nights WHERE child_id = ?').get(GONE).n, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sleep_nights WHERE wake_at_sensor = 'MARK:gone' OR sensor_rejects = 7").get().n, 0);
+    assert.deepEqual({ ...db.prepare('SELECT wake_at_sensor, sensor_rejects FROM sleep_nights WHERE child_id = ?').get(CHILD) },
+      { wake_at_sensor: 'MARK:kept', sensor_rejects: 3 });
   });
 });

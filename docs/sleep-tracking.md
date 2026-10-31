@@ -536,8 +536,8 @@ if the camera had imagined it. That time is **stored for comparison only**. The 
 other figure, the morning notification and the alerts stay exactly as the camera works them out, with or
 without a sensor. The reason: the sensor cannot tell a child from a parent standing at the bed, and that
 case moved real wake times more than an hour later when it was tried. The night's API answers carry the
-two added fields `wake_at_sensor` and `sensor_rejects` (empty without a sensor, and on a night whose wake
-you corrected). How it works, how to compare it with your morning reviews, and its limits:
+two added fields `wake_at_sensor` and `sensor_rejects` (empty without a sensor, when the sensor had no
+readings around the night's possible wakes, and on a night whose wake you corrected). How it works, how to compare it with your morning reviews, and its limits:
 [The sleep shadow](esphome.md#the-sleep-shadow-for-comparison-only).
 
 ### When the motion camera samples

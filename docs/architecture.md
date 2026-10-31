@@ -404,11 +404,15 @@ paired per device. When the child has heart-rate or breathing-rate rows, ONE sec
 the same clock and `context` and no timeline, in which the departure scan also sets aside an exit with valid vital
 signs in at least 6 of the 10 minutes after it, through the settling-tail guard's own branch (fallback, `settlingSkips`
 for the #618 hand-back, smaller `dt`); `departureCutIdx` and `detectMidnightEpisodes` ignore it. The real result keeps
-every key it had and gains two (null by default, in `base`): `wake_at_sensor` (the second pass's `wake_at` when it
-scored `ok`) and `sensor_rejects` (distinct exit rows set aside), stored by `upsertNight` as nullable
-`sleep_nights` columns (guarded `ALTER`s, NULL on older rows). Nothing reads them for a wake, figure, push or alert;
-`applyCorrection` nulls them on a night whose wake a parent changed, and so does "no one was in the bed". A failing read or second pass leaves both
-null and logs a fixed sentence; #700's history-read counter is restored after the shadow. The rules version becomes
+every key it had (except `scoring.current_algo` in a stored-context replay, '5' to '6') and gains two (null by
+default, in `base`): `wake_at_sensor` (the second pass's `wake_at` when it scored `ok`) and `sensor_rejects` (distinct
+CANDIDATE exits, within 5 minutes of a gap's start, that the rule alone set aside), stored by `upsertNight` as nullable
+`sleep_nights` columns (guarded `ALTER`s, NULL on older rows). Both are written only when at least one candidate's ten
+minutes held a known sensor minute (`sensorWindowReadable`), so a sensor that was off at the exits stores NULL rather
+than "agreed". Only heart-rate, breathing-rate and distance rows are queried. Nothing reads the two for a wake,
+figure, push or alert; `applyCorrection` nulls them on a night whose wake a parent changed, and so does "no one was in
+the bed" (the raw stored row, `?stored=1`, `raw=1` and the store reply keep them). A failing read or second pass leaves
+both null and logs a fixed sentence; #700's history-read counter is restored after the shadow. The rules version becomes
 `'6'` because the returned object changed, although no reported number moved (A/B on both databases).
 
 **The admin Recompute is one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the

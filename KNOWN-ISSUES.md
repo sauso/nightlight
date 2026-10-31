@@ -1747,7 +1747,12 @@ exactly the case a parent cares about, and it is kept as evidence until enough r
   saved value stays, while a fresh look at that night (the detail page) no longer has one.
 - **A corrected wake shows it empty.** A night whose wake time you corrected, or marked "no one was in the bed",
   shows both fields as `null` (correcting only the in-bed or asleep time leaves them); the saved row keeps them for
-  the comparison.
+  the comparison, and so do the admin views of the detector's own answer (`?stored=1`, a `raw=1` preview, the reply
+  to a Recompute save).
+- **Empty means "the sensor could not say", not "no sensor" alone.** Both fields stay `null` when the sensor had no
+  reading in the 10 minutes after any exit that could have been the wake (it was off, or disconnected, at those
+  times), so a sensor on only in the evening is not counted as agreeing. A sensor reading only zeros does fill them
+  in, but can never set an exit aside. `sensor_rejects` counts only the possible wakes the sensor alone set aside.
 - **Sensor names and update rates matter:** only sensors named "heart rate", "respiratory rate", "respiration rate"
   or "breath rate" are used, and a sensor that reports less than a few times a minute never counts.
 

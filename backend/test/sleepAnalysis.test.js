@@ -3314,6 +3314,40 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
       assert.equal(hhmm(early.wake_at), '06:25', 'the fallback, before the later exit qualifies (unchanged)');
       assert.equal(hhmm(late.wake_at), '06:25', 'handed back: 2 minutes before A');
     });
+
+    test('#917 S13: the ESPHome shadow hands back an exit the sensor rule set aside, exactly as this veto hands back a settling-tail skip', (t) => {
+      // Code review of #917 (Opus probe P2). No stray return, so the camera takes the 06:29:56 exit and the real wake is
+      // 06:29 at every clock. In the SHADOW pass an adult at the bed 06:31-06:39 makes the rule set that exit aside; the
+      // later exit (06:57:12) qualifies from 07:18 and the #509 veto discards it, and the hand-back must return the rejected
+      // exit (it is in `settlingSkips` because it went through the guard's own branch). Without that record the shadow
+      // reads A (06:13) from 07:18 on. Sensor rows: the child's vital signs to 06:29, an adult's 06:31-06:39, zeros else.
+      const { clock } = layHandBack({ stray: false });
+      const dev = db.prepare("INSERT INTO esphome_devices (name, host, child_id) VALUES ('s13', '192.0.2.13', ?)").run(CHILD).lastInsertRowid;
+      const ent = (obj, name, cls, unit) => db.prepare(`INSERT INTO esphome_entities (device_id, object_id, child_id, kind, name, device_class, unit)
+        VALUES (?, ?, ?, 'sensor', ?, ?, ?)`).run(dev, obj, CHILD, name, cls, unit).lastInsertRowid;
+      const hr = ent('heart_rate', 'Heart Rate', null, 'bpm');
+      const dist = ent('distance', 'Distance', 'distance', 'cm');
+      const put = db.prepare('INSERT INTO esphome_readings (entity_id, bucket, last, mean, min, max, n, nzero, nmiss) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)');
+      try {
+        for (let tt = at(19, 0); tt < at(10, 30, 1); tt = plus(tt, 1)) {
+          const minute = Math.floor(tt.getTime() / 60000);
+          const vitals = tt < at(6, 30, 1) || (tt >= at(6, 31, 1) && tt < at(6, 40, 1));
+          put.run(dist, minute, 60, 60, 60, 60, 10, 0);
+          if (vitals) put.run(hr, minute, 80, 80, 80, 80, 10, 0); else put.run(hr, minute, 0, null, null, null, 0, 10);
+        }
+        for (const [h, mi] of [[7, 8], [7, 38], [8, 8], [10, 0]]) {
+          const night = nightAt(t, clock(h, mi));
+          assert.equal(hhmm(night.wake_at), '06:29', `clock ${h}:${mi}: the real wake, untouched`);
+          assert.equal(hhmm(night.wake_at_sensor), '06:29', `clock ${h}:${mi}: the rejected exit comes back (fallback, then the hand-back)`);
+          assert.equal(night.sensor_rejects, 1, `clock ${h}:${mi}`);
+        }
+        assert.equal(hhmm(nightAt(t, clock(7, 38)).wake_at_algo), '06:13', 'precondition: A, what the shadow would read without the record');
+      } finally {
+        db.prepare('DELETE FROM esphome_readings').run();
+        db.prepare('DELETE FROM esphome_entities').run();
+        db.prepare('DELETE FROM esphome_devices').run();
+      }
+    });
   });
 
   describe('quietStretchBeforeExit (the pure rule)', () => {

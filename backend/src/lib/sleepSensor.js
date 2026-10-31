@@ -94,6 +94,9 @@ const entitiesStmt = db.prepare(
 const readingsStmt = db.prepare(
   'SELECT bucket, mean, n FROM esphome_readings WHERE entity_id = ? AND bucket >= ? AND bucket < ?'
 );
+// The only roles read. A distance entity is recognised ONLY by its device class `distance` (esphomeRoles.js): a radar
+// whose distance sensor has no device class has no distance here, so the 1 m cut never applies to it (and the cut is
+// weak anyway, MAX_DISTANCE_CM).
 const ROLE_KEY = Object.freeze({ heart_rate: 'hr', respiratory_rate: 'rr', distance: 'dist' });
 
 // The child's sensor minutes over [startMs, endMs): one value per UTC minute, index i = the minute starting at
@@ -101,12 +104,16 @@ const ROLE_KEY = Object.freeze({ heart_rate: 'hr', respiratory_rate: 'rr', dista
 // here is the same index as its per-minute arrays and `txIdx`. `startMs` must be a whole UTC minute (that origin always
 // is); anything else THROWS, because a shifted array would silently score the wrong minutes.
 //   true  — at least one of the child's devices measured valid vital signs (deviceMinuteHasVitals);
-//   false — rows exist for the child's entities in that minute (any entity: an illuminance or distance row says the
-//           device was connected), none with valid vital signs; a row of only zeros is false, not null;
-//   null  — no row at all for any of the child's entities: a gap, a disconnect (about two minutes around a restart),
-//           a minute past `endMs`, or one not yet readable at `nowMs` (ROW_READABLE_DELAY_MS).
+//   false — a heart-rate, breathing-rate or distance row exists for the child in that minute (the device was
+//           connected), none with valid vital signs; a row of only zeros is false, not null;
+//   null  — no such row at all: a gap, a disconnect (about two minutes around a restart), a minute past `endMs`, or one
+//           not yet readable at `nowMs` (ROW_READABLE_DELAY_MS). Rows of other roles (illuminance, occupancy, target
+//           count, temperature) are never read (code review of #917, Codex): they cannot change the rule, and reading
+//           them cost a range query per entity on every completed night.
 // Returns null (no sensor) when the child has no heart-rate or breathing-rate row in the range at all: no entity, or
-// only other kinds. computeNight then runs no shadow pass and stores NULL, exactly as before this file existed.
+// only other kinds. computeNight then runs no shadow pass and stores NULL, exactly as before this file existed. What
+// that costs: one query over the child's entities, plus one primary-key range query per heart-rate, breathing-rate or
+// distance entity (none for a child whose ESPHome entities are all of other kinds).
 export function sensorMinutesFor(childId, startMs, endMs, { nowMs = Date.now() } = {}) {
   if (!Number.isInteger(startMs / MINUTE_MS)) throw new RangeError('sensorMinutesFor: startMs must be a whole UTC minute');
   const startMin = startMs / MINUTE_MS;
@@ -117,11 +124,11 @@ export function sensorMinutesFor(childId, startMs, endMs, { nowMs = Date.now() }
   const perMinute = new Map(); // minute -> Map(device id -> { hr, rr, dist })
   let vitalsSeen = false;
   for (const e of entitiesStmt.all(childId)) {
-    const key = ROLE_KEY[guessEsphomeCategory(e)] || null;
+    const key = ROLE_KEY[guessEsphomeCategory(e)];
+    if (!key) continue; // not a role the rule reads: its rows are never queried (above)
     for (const r of readingsStmt.iterate(e.id, startMin, endMin)) {
       let devices = perMinute.get(r.bucket);
-      if (!devices) perMinute.set(r.bucket, (devices = new Map())); // presence: ANY entity's row
-      if (!key) continue;
+      if (!devices) perMinute.set(r.bucket, (devices = new Map())); // presence: a row of a role the rule reads
       if (key !== 'dist') vitalsSeen = true;
       let d = devices.get(e.device_id);
       if (!d) devices.set(e.device_id, (d = {}));
@@ -151,4 +158,14 @@ export function vitalsAfterExit(minutes, exitIdx) {
 // THE RULE: is the exit in minute `exitIdx` contradicted by the sensor? See SENSOR_REJECT_MIN_VITALS.
 export function sensorContradictsExit(minutes, exitIdx) {
   return vitalsAfterExit(minutes, exitIdx) >= SENSOR_REJECT_MIN_VITALS;
+}
+
+// Could the sensor have said anything about the exit in minute `exitIdx`? True when at least one minute of its window
+// [exitIdx + 1, exitIdx + SENSOR_REJECT_WINDOW_MIN] is known (`true` OR `false`: a weak sensor's run of zeros is a known
+// "no vital signs", which can fail to reject but is still a reading). computeNight stores a shadow only for a night
+// where this held for at least one exit the rule could have changed (code review of #917, Opus): otherwise a night
+// whose sensor was off at the exits would store "the sensor agreed" when it said nothing.
+export function sensorWindowReadable(minutes, exitIdx) {
+  for (let k = 1; k <= SENSOR_REJECT_WINDOW_MIN; k++) if (minutes[exitIdx + k] != null) return true;
+  return false;
 }
