@@ -386,10 +386,10 @@ their numbers.
 
 **The settling-tail witness stops at the next departure** (#914; `SCORING_ALGO` '5'; tests in
 `backend/test/sleepAnalysis.test.js` under "#914"). The settling-tail guard's still-sleeper count
-(`bedQuietlyOccupiedFrom(from, until)`) now stops before the minute of the first later `out_of_bed` that the departure
-scan would itself take as a departure (`departureCutIdx`: strictly later than the exit being judged, not itself a
-settling tail by the time rule `isSettlingPair`, not reversed by `reversedBy`, the scan's own reversal guard, now a
-function). With no such exit the count is exactly as before. No threshold or result key changes; only a night with a
+(`bedQuietlyOccupiedFrom(from, until)`) now stops before the minute of the first later `out_of_bed` that is a departure
+(`departureCutIdx`: strictly later than the exit being judged, not itself a settling tail by the time rule
+`isSettlingPair` alone, and not reversed by `reversedBy`, the scan's own reversal guard, now a function). A later tail
+whose own witness fails is taken by the scan but never cuts. With no such exit the count is exactly as before. No threshold or result key changes; only a night with a
 skipped settling tail and a later departure inside the 150-minute window can change, and its wake, metrics, marker,
 `wake_unconfirmed` and child-out interval move together. The stored scoring-context rules version becomes `'5'`.
 

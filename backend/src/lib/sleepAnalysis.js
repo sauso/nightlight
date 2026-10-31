@@ -374,10 +374,11 @@ const JITTER_REENTRY_MS = 60 * 1000;
 //
 // THE PRINCIPLE, not a tuning: the guard's claim is "he came back and STAYED". A minute after a LATER real departure
 // cannot support a stay: by then the bed is empty or an adult is at it. So the count stops at the first later
-// `out_of_bed` the departure scan itself would take as a departure (departureCutIdx: strictly later, not itself a
-// settling tail, not reversed by a return). 6 is unchanged and no number was added. On the same population: the 9
-// real exits are never skipped (before: 2 of them, on 6 of their 64 exit-clock verdicts), no right skip is lost (3
-// labelled right, 5 more before a reviewed wake), and no verdict changes with the clock (before: 4 exits did).
+// `out_of_bed` that is a departure (departureCutIdx: strictly later, not within JITTER_REENTRY_MS after an `into_bed`
+// by the time rule only, and not reversed by a return). 6 is unchanged and no number was added. On the same
+// population: the 9 real exits are never skipped (before: 2 of them, on 6 of their 64 exit-clock verdicts), no right
+// skip is lost (3 labelled right, 5 more before a reviewed wake), and no verdict changed with the clock on these
+// nights (before: 4 exits did); it still can, see departureCutIdx.
 // Replaying computeNight on every night at those 8 clocks, with the #700 history rule on and off, only the two
 // 2026-10-30 nights above change (see the PR for the table). The cut can only take back a skip the old count made.
 //
@@ -1887,10 +1888,13 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     // real micro-motion in the OCCUPANCY_WITNESS_MIN minutes that follow; a gap in the data supplies no
     // witness either way (returns false, same as finding none).
     //
-    // ⚠️ TWO call sites, and they do NOT fail the same safe direction. (`settlingTail` was a third until
+    // ⚠️ THREE call sites, and they do NOT fail the same safe direction. (`settlingTail` was another until
     // issue #598 gave it its own witness, bedQuietlyOccupiedFrom below: see there for why it left.)
     // `reversedBy` below uses a true result to REJECT a candidate — a false `true`
     // there is a safe false-negative, exactly `bedOccupiedAfter`'s own contract.
+    // departureCutIdx (#914) asks `reversedBy` about a LATER exit, and a true result REMOVES that exit as a cut, so
+    // a false `true` (an empty bed's noise backing up a stray `into_bed`) leaves the settling-tail witness its old,
+    // uncut count: the real exit can still be set aside, exactly as before #914, never worse.
     // `detectMidnightEpisodes` (above `computeNight`) uses a true result to ADMIT an episode — a false
     // `true` there is a false POSITIVE: the 150-minute window can reach forward into an unrelated later
     // event (a parent handling an already-empty bed, or a genuinely later real return) and corroborate
@@ -1971,9 +1975,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
       // call moves with issue #260 when the round-vs-floor question is settled globally, instead
       // of quietly holding its own opinion.
       && bedOccupiedFrom(txIdx(u.created_at)));
-    // Issue #914: the minute of the first `out_of_bed` after exit `t` that the departure scan itself would take as a
-    // DEPARTURE, or Infinity when there is none (the count is then exactly what it was before #914). The settling-tail
-    // guard's witness stops there (bedQuietlyOccupiedFrom's `until`). A later `out_of_bed` cuts only when it is:
+    // Issue #914: the minute of the first `out_of_bed` after exit `t` that is a DEPARTURE by the rules below, or Infinity
+    // when there is none (the count is then exactly what it was before #914). The settling-tail guard's witness stops
+    // there (bedQuietlyOccupiedFrom's `until`). NOT exactly "what the scan would take": the scan also takes a later tail
+    // whose own witness fails (#914 W3), and that one never cuts here. A later `out_of_bed` cuts only when it is:
     //   - STRICTLY later than `t`, by the second. An exit logged at the same second as `t`, or before it, never cuts.
     //   - NOT itself a settling tail: no `into_bed` within JITTER_REENTRY_MS before it (isSettlingPair, the TIME rule
     //     only). Without this, a later tail would cut a real still sleeper's evidence: 2026-09-28 (one child, both
@@ -1984,14 +1989,18 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     //     never cuts: the cut is always later than the return's own minute.
     //   - NOT reversed: reversedBy, the scan's own reversal guard, unchanged. A child who gets out and is back in bed
     //     within MORNING_ABSENCE_MIN has not left; an injected trip of that shape on the 2026-09-09 profile moved the wake
-    //     from 05:17 to 20:44 when it cut.
+    //     from 05:17 to 20:44 when it cut. Its witness is bedOccupiedFrom (any 3 occupied minutes), so an empty bed's
+    //     noise can back up a stray `into_bed` after a REAL later departure: that departure then does not cut and the
+    //     earlier real exit can still be set aside, as before #914 (KNOWN-ISSUES; review probe P1: 07:40, not 06:29).
     // The EARLIEST qualifying exit by time, taken over all of them rather than the first in the array: getBedTransitions
     // orders by `created_at` alone, so the array order of rows logged at the same second is not defined (rows at the
     // same second share a minute, so it cannot change the answer today; the minimum states the rule).
     // Monotone in the clock, like the old count: a departure logged later can only cut minutes that had not been observed
     // when it was logged, and an exit can only BECOME reversed as more minutes are observed (bedOccupiedFrom only turns
-    // true), so a minute once counted stays counted and the witness can turn true with the clock, never back. (On the
-    // measured nights no verdict changed with the clock at all; the old count changed on 4 exits.)
+    // true), so a minute once counted stays counted and the witness can turn true with the clock, never back. It CAN turn
+    // true: a later trip whose return is backed up only later in the morning stops cutting then, and the exit is set
+    // aside from that clock on (review probe P2: 06:29 at 07:20, 07:40 at 08:30). On the measured nights no verdict
+    // changed with the clock; the old count changed on 4 exits.
     const departureCutIdx = (t) => {
       let cut = Infinity;
       for (const o of transitions) {
@@ -2244,8 +2253,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
           // the count grows with the clock (2026-10-30, one child, staging: 5, 8, 8 and 10 at window end + 1, 31, 61
           // and 109 minutes, the exit the real wake). The claim this guard makes is "he came back and STAYED", and a
           // minute after a later real departure cannot vouch for a stay: by then the bed is empty or an adult is at
-          // it. So the witness stops at the first later `out_of_bed` the scan would itself take as a departure
-          // (departureCutIdx: strictly later, not a settling tail, not reversed). No threshold moved and no number
+          // it. So the witness stops at the first later `out_of_bed` that is a departure (departureCutIdx: strictly
+          // later, not a settling tail by the time rule only, not reversed). No threshold moved and no number
           // was added. The nights, the alternatives that were measured and failed, and the limits are at
           // SETTLING_WITNESS_MIN_QUIET.
           //

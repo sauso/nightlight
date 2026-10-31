@@ -12897,6 +12897,26 @@
     "note": "getBedTransitions sorts by created_at, so the last assignment is the latest departure. 'The first in array order' is equivalent to the minimum on sorted rows (same-second rows share a minute) and is not a mutant."
   },
   {
+    "label": "#914 M-914-09: the quiet witness window is one minute short (149, its last minute dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt, until);",
+    "replace": "const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN - 1, totalMinExt, until);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W7b:",
+    "note": "#914 review: #598 C5 pinned the window's last minute until #914 moved its fixture's cut in front of the cap; W7b puts the sixth quiet minute on offset 178, the last one inside. Also kills any shorter cap (the review's from + 140)."
+  },
+  {
+    "label": "#914 M-914-10: the cut is one minute early (the minute before the departure dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "cut = Math.min(cut, txIdx(o.created_at));",
+    "replace": "cut = Math.min(cut, txIdx(o.created_at) - 1);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W5b:",
+    "note": "#914 review: W5 pins the cut's upper side (the departure's own minute is out); W5b pins the lower side with the sixth quiet minute on 06:54, the minute before a 06:55:30 departure."
+  },
+  {
     "label": "#564 startSleepJob: a second start arms a second interval",
     "file": "backend/src/lib/sleepAnalysis.js",
     "find": "  if (jobTimer) return;",

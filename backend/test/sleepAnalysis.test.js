@@ -1279,8 +1279,8 @@ describe('★★★ #598: the settling-tail guard believes a still sleeper, not 
 // (the child was seen up then), and an empty bed that read faint noise on ten minutes afterwards. The witness counted
 // that noise as a still sleeper (5, 8, 8 and 10 quiet minutes at window end + 1, 31, 61 and 109 minutes), set the real
 // exit aside and took the next exit (06:57:12, the child back in the room) instead. Since #914 the count stops at the
-// first later `out_of_bed` that the scan itself would take as a departure (not a settling tail, not reversed): a minute
-// after the child has left AGAIN cannot say "came back and stayed".
+// first later `out_of_bed` that is a departure: not within a minute after an `into_bed` (by the time rule only, W3) and
+// not reversed by a return (W4). A minute after the child has left AGAIN cannot say "came back and stayed".
 //
 // layWitnessMorning lays that morning per minute; offsets are minutes from 06:00. Up to 06:21 the child is in the bed and
 // still, 06:22-06:29 they move, and the stray return and the exit are the real night's markers to the second. From 06:30
@@ -1360,6 +1360,14 @@ describe('★★★ #914: the settling-tail witness stops at the next real depar
     assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:29');
   });
 
+  test('#914 W5b: ...but the minute just before the departure is counted (the cut is not a minute early)', () => {
+    // W5's twin, the other side of the same edge: the sixth quiet minute is 06:54, the minute before the 06:55:30
+    // departure, and the departure's own minute is empty. Six before the cut: the 06:29 tail is set aside and 06:55 is
+    // the wake. A cut one minute early counts five and reports 06:29. Passes before and after #914.
+    layWitnessMorning({ quietAt: [33, 37, 41, 45, 49, 54], activeAt: [52, 53], marks: [['out_of_bed', 55, 30]] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:55');
+  });
+
   test('#914 W6: a later `into_bed` alone does not cut', () => {
     // An `into_bed` at 07:05:00 with no exit near it (35 minutes after the exit: it does not reverse it either), three
     // quiet minutes either side of it, then the real exit at 09:20:10. Six: set aside, 09:20. Passes before and after.
@@ -1375,6 +1383,14 @@ describe('★★★ #914: the settling-tail witness stops at the next real depar
     // after #914 (this is where #598 C5 used to pin the cap).
     layWitnessMorning({ quietAt: [40, 80, 120, 150, 170, 179, 185], activeAt: REAL_LATER.activeAt, marks: [REAL_LATER.mark] });
     assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:29');
+  });
+
+  test('#914 W7b: ...and the window\'s last minute is inside it (the sixth quiet minute on 08:58)', () => {
+    // W7's twin, pinning the near side of the same edge: six quiet minutes, the sixth on offset 178, the window's last
+    // minute. Six: the tail is set aside and 09:20 is the wake. A window one minute short (149) or any shorter cap counts
+    // five and reports 06:29. (#598 C5 pinned this edge until #914 moved its fixture's cut in front of the cap.)
+    layWitnessMorning({ quietAt: [40, 80, 120, 150, 170, 178], activeAt: REAL_LATER.activeAt, marks: [REAL_LATER.mark] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '09:20');
   });
 
   for (const [secs, expected] of [[60, '07:11'], [61, '06:29']]) {

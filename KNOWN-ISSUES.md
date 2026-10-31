@@ -1425,9 +1425,9 @@ parent at the bed (stripping it, tidying, reaching in), and counting it let a pa
 real 07:12 exit set that exit aside, so the night reported 09:27 instead.
 
 Since #914 those minutes are counted only **until the child leaves the bed again**: up to the next *got
-out of bed* that sleep analysis would itself take as a departure (not one logged within a minute after a
-*got into bed*, and not one followed within 20 minutes by a *got into bed* the bed backs up). A minute after
-that cannot show the child came back and stayed: by then the bed is empty or someone else is at it.
+out of bed* that is not logged within a minute after a *got into bed* (judged by the times alone, whatever
+the bed shows afterwards) and not followed within 20 minutes by a *got into bed* the bed backs up. A minute
+after that cannot show the child came back and stayed: by then the bed is empty or someone else is at it.
 
 **What it changes, stated rather than guessed:**
 - **6 is measured on two cameras in one house.** Over every stored night of both children there (two
@@ -1441,10 +1441,12 @@ that cannot show the child came back and stayed: by then the bed is empty or som
   every one after the child had left: an empty bed reading faint noise (see "The opposite camera" below). The
   other child's real exit that morning on production was set aside at 6. Replayed over every stored night
   still on record (39 snapshots, 172 child-nights, eight clocks each), no threshold separates the two, so 6 is
-  unchanged and the count stops at the next departure instead. With that rule no exit known to be the real
-  wake is set aside, none known to be rightly set aside is lost, and no answer changes as the morning goes on;
-  only those two 2026-10-30 nights change (production 06:58 to 06:02, the right time; on staging the wake stays
-  06:29, now found directly).
+  unchanged and the count stops at the next departure instead. On the replayed nights, with that rule, no exit
+  known to be the real wake is set aside, none known to be rightly set aside is lost, and no answer changed as
+  the morning went on; only those two 2026-10-30 nights change (production 06:58 to 06:02, the right time; on
+  staging the wake stays 06:29, now found directly). An answer can still change with the clock: a later trip
+  whose return the bed only backs up later in the morning stops ending the count then, and from that moment the
+  earlier exit can be set aside (a constructed morning read 06:29 at 07:20 and 07:40 at 08:30).
 - **A very still sleeper loses the benefit.** A child who climbs back in and then lies so still that the bed
   shows fewer than 6 such minutes in 2½ hours is treated as having left at that last marker: the wake is too
   early. In that house, a 2½-hour stretch of real sleep showed fewer than 6 in about 1-5% of stretches,
@@ -1478,8 +1480,12 @@ that cannot show the child came back and stayed: by then the bed is empty or som
   date too. Since #914 only the noise before the child's next *got out of bed* counts, which was 4 minutes that
   morning, so that night's real exit is found. **What #914 does not fix:** noise that reaches 6 minutes before
   the next *got out of bed*, or a morning with no later *got out of bed* in the 2½ hours, still sets a real exit
-  aside, exactly as before #914. The wake is then the later *got out of bed* (more than 2½ hours later, in the
-  second case), or this one handed back when nothing later qualifies.
+  aside, exactly as before #914. So does a later real *got out of bed* followed within 20 minutes by a stray
+  *got into bed*: the noise also supplies the 3 minutes of movement that make that return look real, the later
+  exit counts as reversed and does not end the count (a constructed copy of the 2026-10-30 morning with a stray
+  *got into bed* at 07:00 reads 07:40, not 06:29). The wake is then a later *got out of bed* (more than 2½ hours
+  later, in the second case), or this one handed back when nothing later qualifies. None of the three is worse
+  than before #914.
 - **A false *got out of bed* inside the 2½ hours ends the count early** (#914). If the classifier logs a *got
   out of bed* that never happened, with no *got into bed* a minute before it and none it is undone by, a child
   who really did climb back in and lies very still loses the minutes after it, and the wake can land on the
