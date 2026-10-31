@@ -10964,26 +10964,17 @@
   {
     "label": "#353 M-353-04: the +1 (next) night is never tried for the sampling gate (a bedtime after midnight has no lookbehind on the previous evening)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "for (let delta = nextNight ? 1 : 0; delta >= -1; delta--) {",
-    "replace": "for (let delta = 0; delta >= -1; delta--) {",
+    "find": "for (const delta of nextNight ? [0, -1, 1] : [0, -1]) {",
+    "replace": "for (const delta of [0, -1]) {",
     "expect": "killed",
     "tests": ["sleep-sampling-horizon.test.js"],
-    "namePattern": "^#353 (a 01:00 bedtime|the \\+1 night|a 00:02 start|childWindowActiveNow does not try)"
-  },
-  {
-    "label": "#353 M-353-05: childWindowActiveNow also tries the next night (the wake watcher's input moves)",
-    "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);",
-    "replace": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS, true);",
-    "expect": "killed",
-    "tests": ["sleep-sampling-horizon.test.js"],
-    "namePattern": "^#353 childWindowActiveNow does not try the next night"
+    "namePattern": "^#353 (a 01:00 bedtime|the \\+1 night|a 00:02 start)"
   },
   {
     "label": "#353 M-353-06: yesterday's night is never tried (the morning after a window is not sampled)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "for (let delta = nextNight ? 1 : 0; delta >= -1; delta--) {",
-    "replace": "for (let delta = nextNight ? 1 : 0; delta >= 0; delta--) {",
+    "find": "for (const delta of nextNight ? [0, -1, 1] : [0, -1]) {",
+    "replace": "for (const delta of nextNight ? [0, 1] : [0]) {",
     "expect": "killed",
     "tests": ["sleep-sampling-horizon.test.js", "motion-leg-reconcile.test.js"],
     "namePattern": "^#353 (a 19:00-07:00 child is still sampled|MQTT source|ONVIF source|frame-diff source)"
@@ -11018,11 +11009,38 @@
   {
     "label": "#353 M-353-10: childWindowActiveNow's tail is the sampling tail (the wake watcher and the timelapse are widened to the horizon)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);",
-    "replace": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WAKE_LOOKAHEAD_MS + WINDOW_MARGIN_MS);",
+    "find": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS, true);",
+    "replace": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WAKE_LOOKAHEAD_MS + WINDOW_MARGIN_MS, true);",
     "expect": "killed",
     "tests": ["sleep-sampling-horizon.test.js"],
     "namePattern": "^#353 childWindowActiveNow keeps"
+  },
+  {
+    "label": "#602 M-602-01: childWindowActiveNow does not try tomorrow's night (a window opening 00:00-00:04 has no lead before midnight for the wake watcher)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS, true);",
+    "replace": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js", "alert-hold.test.js"],
+    "namePattern": "^#602 (childWindowActiveNow and childWindowKeyNow|a 00:02 window holds)"
+  },
+  {
+    "label": "#602 M-602-02: childWindowKeyNow does not try tomorrow's night (the hold has no key in the lead minutes and lets alerts through)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "return openWindowStartUtc(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS, true);",
+    "replace": "return openWindowStartUtc(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js", "alert-hold.test.js"],
+    "namePattern": "^#602 (childWindowActiveNow and childWindowKeyNow|a 00:02 window holds)"
+  },
+  {
+    "label": "#602 M-602-03: tomorrow's night is tried FIRST (a nearly 24-hour window switches its hold key to tomorrow's at the lead edge and restarts a hold in progress)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "for (const delta of nextNight ? [0, -1, 1] : [0, -1]) {",
+    "replace": "for (const delta of nextNight ? [1, 0, -1] : [0, -1]) {",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js"],
+    "namePattern": "^#602 tomorrow"
   },
   {
     "label": "#353 M-353-11a: the tail is computed in WALL-CLOCK terms (local end + trail as a local time), not as absolute ms: wrong by an hour across a DST change in either direction",

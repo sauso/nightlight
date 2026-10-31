@@ -564,8 +564,8 @@ lingers 5 to 10 minutes after the closing one.
   A frame-diff camera with motion alerts on already runs all day and costs nothing extra.
 - **What is not widened:** none of these is widened to 3 hours. The timelapse records only inside the
   sleep window itself. The live wake watcher (which also decides wake clips) uses the window plus about 5
-  minutes either side. A window starting between 00:00 and 00:04 may have a shorter lead margin because
-  the watcher does not check the next night's window before midnight.
+  minutes either side, including a window that starts between 00:00 and 00:04, whose 5 minutes before
+  midnight count too.
 - **Known limits:** a departure later than 3 hours after the window closes is not seen by any camera, and
   for a camera of this kind the morning review has no recorded *got out / into bed* events after about
   3 hours past the window's end, because nothing past that point feeds the night's numbers.

@@ -582,13 +582,21 @@ const WINDOW_MARGIN_MS = 5 * 60 * 1000;
 // yesterday's night covers it (it starts before the instant and ends after it). Do not "explain" this
 // as consecutive windows abutting: they do not, a 19:00-07:00 child has a gap every day.
 //
-// Why +1 exists, and why it is sampling-only: a window opening 00:00-02:59 local has its 3 h lookbehind
-// on the PREVIOUS calendar day, so at 22:30 the instant belongs to TOMORROW's night (issue #353; the
-// old loop never tried it). childWindowActiveNow deliberately keeps {0, -1} so the wake watcher (which has
-// no second gate, wakeWatcher.js) behaves exactly as before this fix: its 5-minute lead has a known,
-// harmless gap for a window opening 00:00-00:04 (the wake watcher only arms once sleep has begun), and
-// the leg itself is covered by the 3 h lead of the sampling gate. (The timelapse is not the reason: it
-// also needs currentNightDate non-null, true only inside the configured window, see timelapse.js.)
+// Why +1 exists: a window opening 00:00-02:59 local has its lookbehind on the PREVIOUS calendar day, so at
+// 22:30 the instant belongs to TOMORROW's night (issue #353; the old loop never tried it). The sampling gate
+// (3 h lead) got it in #353; the window gate and the hold key (5-minute lead) got it in #602, because
+// without it a window opening 00:00-00:04 had its 5-minute lead cut off at midnight (23:57-23:59 read as
+// closed). Every caller passes it now.
+//
+// Why the order is 0, -1, then +1, and not +1 first: the boolean result is an OR, so order cannot change
+// it, but childWindowKeyNow returns the START of the first night that matches, and the hold clock is keyed
+// on it. Trying +1 last keeps that key exactly what it was wherever the old range already matched, so +1 can
+// only fill in an instant that used to be closed. With +1 first, a window of nearly 24 hours (say 00:02-23:56)
+// would switch from today's key to tomorrow's at 23:57 while today's window is still open, and a hold in
+// progress would restart its 45-minute clock (pinned in sleep-sampling-horizon.test.js, "#602").
+// Known limit (#922): with +1 in, a window leaving under 10 minutes between its end and the next start never
+// lets the gate close, so the wake watcher's asleep latch (cleared only when the gate closes) carries across
+// nights, as it already did for a true 24-hour window.
 //
 // `leadMs` and `trailMs` are ABSOLUTE milliseconds added to real instants from windowBoundsUtc, exactly
 // as computeNight adds ONSET_LOOKBEHIND_MS and WAKE_LOOKAHEAD_MS, so on a DST night the lead and tail
@@ -598,7 +606,7 @@ function openWindowStartUtc(childId, leadMs, trailMs, nextNight = false) {
   if (!cfg.track) return null;
   const tz = appSettings().timezone || 'UTC';
   const now = Date.now();
-  for (let delta = nextNight ? 1 : 0; delta >= -1; delta--) {
+  for (const delta of nextNight ? [0, -1, 1] : [0, -1]) {
     const date = localDateStr(tz, delta);
     const { startUtc, endUtc } = windowBoundsUtc(date, tz, cfg.start, cfg.end);
     if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return startUtc.getTime();
@@ -610,18 +618,20 @@ function windowOpenNow(childId, leadMs, trailMs, nextNight = false) {
   return openWindowStartUtc(childId, leadMs, trailMs, nextNight) !== null;
 }
 
-// Unchanged on purpose by #353: the window itself with a 5-minute slack each side. It gates the wake
-// watcher, which has no second gate, so widening this to the sampling horizon below would move the wake
-// watcher's input (in a core module) for no benefit to #353. The timelapse also calls it, but is already
-// bounded by currentNightDate (non-null only inside the configured window), so it never captures outside
-// the window whatever this returns.
+// The window itself with a 5-minute slack each side (NOT the sampling horizon below: #353 left this gate at
+// the configured window on purpose, because it gates the wake watcher, which has no second gate). It tries
+// tomorrow's night too (#602), so a window opening 00:00-00:04 gets its 5-minute lead before midnight like
+// any other. The timelapse also calls it, but is already bounded by currentNightDate (non-null only inside
+// the configured window), so it never captures outside the window whatever this returns.
 export function childWindowActiveNow(childId) {
-  return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);
+  return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS, true);
 }
 
 // #919: use the watcher's exact candidate nights and margins for the hold clock, including its lead margin.
+// Must stay the same call as childWindowActiveNow (#602 added tomorrow's night to both): a key that is null
+// while the window gate is open would let an alert through the hold for those minutes.
 export function childWindowKeyNow(childId) {
-  return openWindowStartUtc(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);
+  return openWindowStartUtc(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS, true);
 }
 
 // Should the activity-only SAMPLING leg be running now? The window opened ONSET_LOOKBEHIND_MS early and
