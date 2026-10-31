@@ -1151,6 +1151,9 @@ if (!childrenColumns.includes('sleep_report_enabled')) {
 if (!childrenColumns.includes('sleep_report_show_name')) {
   db.exec('ALTER TABLE children ADD COLUMN sleep_report_show_name INTEGER NOT NULL DEFAULT 1');
 }
+if (!childrenColumns.includes('hold_alerts_until_asleep')) {
+  db.exec('ALTER TABLE children ADD COLUMN hold_alerts_until_asleep INTEGER NOT NULL DEFAULT 0');
+}
 
 // Ensure the single settings row always exists.
 db.prepare(

@@ -4,6 +4,7 @@ import { X509Certificate } from 'node:crypto';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { inActiveWindow } from './detectSchedule.js';
+import { shouldHold } from './alertHold.js';
 import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 
@@ -226,6 +227,10 @@ function handleMotionMessage(topic, str) {
     const cooldownMs = Math.max(1, cam.detect_cooldown_s ?? 60) * 1000;
     if (now - (motionLastAlert.get(cam.id) || 0) < cooldownMs) {
       logger.info(`[mqtt] "${cam.name}" motion (${topic}) within cooldown — not re-alerting`);
+      continue;
+    }
+    if (shouldHold(cam)) {
+      logger.info(`[mqtt] motion held for camera ${cam.id}`);
       continue;
     }
     motionLastAlert.set(cam.id, now);

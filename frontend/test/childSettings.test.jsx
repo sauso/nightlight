@@ -623,6 +623,46 @@ describe('removing a child', () => {
   });
 });
 
+describe('#919 hold alerts until asleep', () => {
+  const HOLD = /Hold alerts until asleep/;
+
+  test('legacy children default to off', async () => {
+    mount();
+    expect((await screen.findByRole('switch', { name: HOLD })).checked).toBe(false);
+  });
+
+  test('new children submit the default off value', async () => {
+    const { user } = mount({ kid: null, id: 'new' });
+    expect((await screen.findByRole('switch', { name: HOLD })).checked).toBe(false);
+    await user.type(screen.getByLabelText('Name'), 'A child');
+    await user.click(screen.getByRole('button', { name: 'Add child' }));
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    expect(postSpy.mock.calls[0][1].hold_alerts_until_asleep).toBe(false);
+  });
+
+  test('admin can save the switch', async () => {
+    const { user } = mount({ kid: { ...KID, hold_alerts_until_asleep: 1 } });
+    expect((await screen.findByRole('switch', { name: HOLD })).checked).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1].hold_alerts_until_asleep).toBe(true);
+  });
+
+  test('caregiver sees a disabled switch and does not send it', async () => {
+    const { user } = mount({ who: CAREGIVER });
+    expect(await screen.findByRole('switch', { name: HOLD })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1]).not.toHaveProperty('hold_alerts_until_asleep');
+  });
+
+  test('switch is hidden when Track sleep is off', async () => {
+    mount({ kid: { ...KID, track_sleep: 0 } });
+    await screen.findByLabelText('Name');
+    expect(screen.queryByRole('switch', { name: HOLD })).toBeNull();
+  });
+});
+
 describe('★★ the nightly sleep report choices (#397, #398)', () => {
   const SEND = /Send this child's sleep report/;
   const NAME = /Show this child's name in the report/;

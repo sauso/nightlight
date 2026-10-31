@@ -29,13 +29,13 @@ const CAREGIVER_FIELDS = ['name', 'birthday', 'color', 'photo'];
 // moment it is picked on an existing child (persistPhoto), and as a data: URL it is too big to be worth
 // keeping in storage for the new-child case. A photo chosen for a not-yet-created child is lost on reload.
 // No secret fields exist on this form; the allow-list is still explicit so a future one is not stored by default.
-const DRAFT_FIELDS = ['name', 'birthday', 'color', 'track_sleep', 'sleep_window_start', 'sleep_window_end', 'primary_camera_id', 'sleep_report_enabled', 'sleep_report_show_name'];
+const DRAFT_FIELDS = ['name', 'birthday', 'color', 'track_sleep', 'sleep_window_start', 'sleep_window_end', 'primary_camera_id', 'sleep_report_enabled', 'sleep_report_show_name', 'hold_alerts_until_asleep'];
 
 const NEW_CHILD = {
   name: '', birthday: '', color: COLORS[0], photo: null,
   track_sleep: true, sleep_window_start: '19:00', sleep_window_end: '07:00', primary_camera_id: '',
   // Both on, as the server defaults them (#397, #398): the nightly report is sent, and it names the child.
-  sleep_report_enabled: true, sleep_report_show_name: true,
+  sleep_report_enabled: true, sleep_report_show_name: true, hold_alerts_until_asleep: false,
 };
 
 export default function ChildSettings() {
@@ -88,6 +88,7 @@ export default function ChildSettings() {
       // `!= 0`, not truthiness: a server older than these columns sends neither, and that means on.
       sleep_report_enabled: kid.sleep_report_enabled !== 0 && kid.sleep_report_enabled !== false,
       sleep_report_show_name: kid.sleep_report_show_name !== 0 && kid.sleep_report_show_name !== false,
+      hold_alerts_until_asleep: kid.hold_alerts_until_asleep === 1 || kid.hold_alerts_until_asleep === true,
     };
     const draft = loadDraft(draftKey, DRAFT_FIELDS);
     setBaseline(loaded);
@@ -289,6 +290,19 @@ export default function ChildSettings() {
               </div>
               {form.track_sleep && (
                 <>
+                  <div style={{ marginTop: 12 }}>
+                    <label className="child-sleep-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>Hold alerts until asleep</span>
+                      <Switch checked={form.hold_alerts_until_asleep} disabled={!isAdmin}
+                        onChange={(e) => setForm({ ...form, hold_alerts_until_asleep: e.target.checked })} />
+                    </label>
+                    <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                      During this child's sleep window, hold motion and sound alerts until about 15 quiet minutes
+                      show they are asleep, or 45 minutes pass after the first held alert. Held alerts are not sent
+                      later. Camera-offline alerts are never held. Off by default.
+                      {!isAdmin && ' Only an admin can change this setting.'}
+                    </div>
+                  </div>
                   <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
                     <div style={{ flex: 1 }}>
                       <label htmlFor="child-bed">Bedtime</label>

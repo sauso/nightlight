@@ -11,6 +11,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- **Hold motion and sound alerts until asleep (#919).** An admin can turn this on per child under Track sleep; it is off by default. During the sleep window, alerts are dropped until the watcher sees about 15 quiet minutes or 45 minutes pass after the first held alert. Held alerts are not sent later; camera-offline alerts continue. The 45 minutes is a design choice, not measured. A server restart can allow another 45 minutes of holding. See [Notifications](docs/notifications.md#hold-alerts-until-asleep).
+
 - **A faulty microphone no longer turns a still night into hours awake (#904).** Some camera microphones develop
   a fault that makes a short, loud click every few seconds in a silent room, and sleep tracking read every one of
   those minutes as awake. Now, when a night is worked out, the sound of a minute that was loud only in brief spikes

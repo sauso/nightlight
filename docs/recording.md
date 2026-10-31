@@ -70,16 +70,16 @@ Alerts that have a clip show a **play button** on their thumbnail; tapping opens
 with a **Download** button. In the mobile app, Download saves the video into your phone's Downloads
 folder.
 
-**A silenced camera, or one outside its alert hours, saves no clip.** A clip belongs to an alert, and
+**A silenced camera, one outside its alert hours, or one under Hold alerts until asleep saves no clip.** A clip belongs to an alert, and
 is cut only when an alert actually fires. While a camera is **silenced** (**Silence alerts** on its
-tile) or outside its **Alert schedule**, motion and sound raise no alert at all (no push and no entry
+tile), outside its **Alert schedule**, or under **Hold alerts until asleep**, motion and sound raise no alert at all (no push and no entry
 in the Alerts feed), so there is nothing to attach a clip to, even with **Save a clip when triggered**
 on. The detector itself keeps watching, so sleep tracking is unaffected, but no alert clip of that
 moment is kept. This is different from having no notification provider set up, or switching one off: an
 alert that fires is still recorded in the feed and still gets its clip, whether or not anything is
 pushed. So "stop the notifications" and "stop the alert" are different things here, and there is no
 per-camera setting that mutes only the push while keeping the alert and its clip: the schedule and
-the silence both stop the alert itself. See [Alert schedule](notifications.md#alert-schedule-quiet-hours)
+the silence and the hold all stop the alert itself. See [Alert schedule](notifications.md#alert-schedule-quiet-hours), [Hold alerts until asleep](notifications.md#hold-alerts-until-asleep)
 and [Silencing a camera's alerts](camera-controls.md#silencing-a-cameras-alerts-and-who-did-what).
 
 ---

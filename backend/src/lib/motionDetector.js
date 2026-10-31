@@ -4,6 +4,7 @@ import { logger } from './logger.js';
 import { forwardProcessLines } from './processOutput.js';
 import { subPathName, getPathStatus } from './mediamtx.js';
 import { inActiveWindow } from './detectSchedule.js';
+import { shouldHold } from './alertHold.js';
 import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordMotion, recordMotionOut, excludeClone } from './activityTracker.js';
@@ -828,7 +829,7 @@ export async function startMotionDetector(camera) {
           if (fraction >= alertThreshold) {
             if (!activeSince) activeSince = now;
             lastActive = now;
-            if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera)) {
+            if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera) && !shouldHold(camera)) {
               // inActiveWindow gates the WHOLE alert: outside a camera's schedule, motion produces no
               // in-app event and no push, and the stamp is left untouched so an alert can fire promptly
               // the moment the window opens (also across a relaunch: the stamp is only written when an alert FIRES).

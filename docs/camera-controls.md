@@ -78,7 +78,7 @@ camera that has been silenced again and again does not go unnoticed.
   that leaves it. Who set a silence is on the camera's tile while it lasts (`Muted until <time> by
   <username>`) and in Camera history (admin only), below. The server log notes the notification
   without any name either.
-- **Not affected by the camera's alert schedule** (quiet hours): it is about the camera's alerts being
+- **Not affected by the camera's alert schedule** (quiet hours) or **Hold alerts until asleep**: it is about the camera's alerts being
   off, not an alert from the camera.
 - **Why the range stops at 719.** One silence can be at most 720 minutes, and the notification needs
   *more than* the threshold, so 719 is the highest value at which the longest single silence still

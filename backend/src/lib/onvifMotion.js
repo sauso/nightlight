@@ -2,6 +2,7 @@ import db from '../db.js';
 import { logger } from './logger.js';
 import { subscribeMotionEvents } from './onvif.js';
 import { inActiveWindow } from './detectSchedule.js';
+import { shouldHold } from './alertHold.js';
 import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 
@@ -91,6 +92,10 @@ function handleMotion(cameraId) {
   const cooldownMs = Math.max(1, cam.detect_cooldown_s ?? 60) * 1000;
   if (now - (lastAlert.get(cam.id) || 0) < cooldownMs) {
     logger.info(`[onvif-motion] "${cam.name}" motion within cooldown — not re-alerting`);
+    return;
+  }
+  if (shouldHold(cam)) {
+    logger.info(`[onvif-motion] motion held for camera ${cam.id}`);
     return;
   }
   lastAlert.set(cam.id, now);

@@ -39,7 +39,7 @@ choice of kind: a provider gets all of them or none. What can be switched off se
 
 | Notification | Default | Needs | Goes to |
 |---|---|---|---|
-| **Motion alert** | **Off.** Motion detection is off on a new camera | Motion detection on for that camera. Not sent while the camera is [silenced](camera-controls.md#silencing-a-cameras-alerts-and-who-did-what) or outside its [Alert schedule](#alert-schedule-quiet-hours) | Every enabled provider; with Firebase, every device that is registered and signed in, caregivers included |
+| **Motion alert** | **Off.** Motion detection is off on a new camera | Motion detection on for that camera. Not sent while the camera is [silenced](camera-controls.md#silencing-a-cameras-alerts-and-who-did-what), outside its [Alert schedule](#alert-schedule-quiet-hours), or under [Hold alerts until asleep](#hold-alerts-until-asleep) | Every enabled provider; with Firebase, every device that is registered and signed in, caregivers included |
 | **Sound alert** | **Off.** Sound detection is off on a new camera | Sound detection on for that camera. Same silence and schedule rules | The same |
 | **Camera offline**, and **back online** | **Off** | **Settings → Camera controls → Notify when a camera goes offline** (default threshold 5 minutes, 1–1440); "back online" is sent only after an offline notification was. See [Camera controls](camera-controls.md#camera-offline-alerts) | The same |
 | **Long silence** (a camera's alerts kept silenced) | **On**, 60 minutes (1–719) | **Settings → Camera controls → Long silence alerts**. See [Camera controls](camera-controls.md#long-silence-alerts) | Meant for admins: on Firebase only admins' devices, and not the person who set the silence; Pushover, ntfy and Gotify cannot address one person, so everyone on them gets it |
@@ -407,6 +407,12 @@ and entry frames, and timelapse frames are grabbed separately and are not affect
 overall limit beyond one per camera: with several cameras, each can be grabbing at the same time.
 Known limit: if a stream grab that was stopped for taking too long never exits, that camera's frame
 stays unavailable until the app restarts; see [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
+
+### Hold alerts until asleep
+
+On a child's settings page, an admin can turn on **Hold alerts until asleep** while **Track sleep** is on. It is off by default. During that child's sleep window (including five minutes on each side), motion and sound alerts from their cameras are dropped until the watcher has observed about 15 quiet minutes, or until 45 minutes have passed since the first held alert that night. Held alerts are never sent later and make no alert clip or in-app event. A child who keeps crying without settling can be alerted after the 45-minute cap; that cap is a design choice, not a measured safe duration. Camera-offline, long-silence and sleep-report alerts are never held.
+
+The hold fails open when tracking is off, the window is closed, or the check fails. A restart erases both the quiet count and the cap timer, so another 45 minutes of holding is possible. Reassigning a camera between tracked children while both windows are open can carry its existing asleep latch to the new child and allow alerts early. The recording-status field `alerting_now` still reports only the Alert schedule and silence state. Demo sample events are unaffected; the hold applies only to live alerts.
 
 ### Alert schedule (quiet hours)
 

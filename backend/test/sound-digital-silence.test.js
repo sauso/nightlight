@@ -54,6 +54,7 @@ const { flushActivity, onMinuteFlushed, _resetActivityTrackerForTests } = await 
 const { startSoundDetector, stopSoundDetector } = await import('../src/lib/soundDetector.js');
 const { _setObservationClockFactoryForTests } = await import('../src/lib/observationClock.js');
 const { handleMinute, _state } = await import('../src/lib/wakeWatcher.js');
+const { _reset: resetAlertHold } = await import('../src/lib/alertHold.js');
 const { createSoundAnalyser, marginDb } = await import('../src/lib/soundBaseline.js');
 
 // The receipt time the stub clock hands out: the mocked Date, unless a test plants another (C2's minute boundary).
@@ -159,6 +160,24 @@ function rowsFor(table, cameraId) {
 const NO_VIDEO = { motion_level: null, motion_peak: null, motion_frames: 0, motion_out_level: null, motion_out_peak: null };
 
 // ---------------------------------------------------------------------------------------------------------------
+test('#919 held sound does not consume analyser cooldown and alerts after asleep', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: T0 });
+  makeChild(db, { id: 'sound-hold-child', start: '11:00', end: '13:00' });
+  db.prepare('UPDATE children SET hold_alerts_until_asleep = 1 WHERE id = ?').run('sound-hold-child');
+  const cam = soundCam('sound-hold', { childId: 'sound-hold-child' });
+  resetAlertHold();
+  const proc = await start(cam);
+  t.after(() => stopSoundDetector(cam.id));
+  deliver(t, proc, [...rep(30, AMBIENT), ...rep(30, LOUD)], T0);
+  await settle();
+  assert.deepEqual(rowsFor('detection_events', cam.id), [], 'held sound wrote an alert');
+  _state().set(cam.id, { asleep: true });
+  deliver(t, proc, rep(10, LOUD), T0 + 60 * STEP_MS);
+  await settle();
+  assert.equal(rowsFor('detection_events', cam.id).length, 1, 'released sound remained in cooldown');
+  _state().delete(cam.id);
+});
+
 test('#453 C2: a stream of nothing but digital silence is a quiet room from its first window: stored, logged, never alerted', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: T0 });
   logger.clear();

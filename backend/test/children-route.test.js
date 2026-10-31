@@ -33,6 +33,7 @@ const { default: childrenRouter } = await import('../src/routes/children.js');
 
 let server;
 let token;
+let caregiverToken;
 const KID = 'kid-1';
 
 const CONFIGURED = {
@@ -51,6 +52,8 @@ before(async () => {
   server = await mountRouter('/api/children', childrenRouter);
   const admin = makeUser(db, { id: 'u-a', username: 'admin', role: 'admin' });
   token = signToken({ sub: admin.id, role: 'admin', sid: makeSession(db, admin.id) });
+  const caregiver = makeUser(db, { id: 'u-c', username: 'caregiver', role: 'caregiver' });
+  caregiverToken = signToken({ sub: caregiver.id, role: 'caregiver', sid: makeSession(db, caregiver.id) });
 });
 
 after(async () => {
@@ -62,6 +65,33 @@ beforeEach(() => {
   db.prepare('DELETE FROM children WHERE id = ?').run(KID);
   makeChild(db, { id: KID, name: CONFIGURED.name, track: 1, start: CONFIGURED.sleep_window_start, end: CONFIGURED.sleep_window_end });
   db.prepare('UPDATE children SET birthday = ?, color = ? WHERE id = ?').run(CONFIGURED.birthday, CONFIGURED.color, KID);
+});
+
+test('#919 hold setting defaults off, validates booleans, and is admin-only', async () => {
+  assert.equal(row().hold_alerts_until_asleep, 0);
+  const bad = await put({ hold_alerts_until_asleep: 'true' });
+  assert.equal(bad.status, 400);
+  const denied = await call(`${server.url}/api/children/${KID}`, {
+    method: 'PUT', token: caregiverToken, body: { hold_alerts_until_asleep: true },
+  });
+  assert.equal(denied.status, 403);
+  assert.equal(denied.body.reason, 'admin_only_fields');
+  assert.deepEqual(denied.body.fields, ['hold_alerts_until_asleep']);
+  assert.equal(row().hold_alerts_until_asleep, 0);
+  const allowed = await put({ hold_alerts_until_asleep: true });
+  assert.equal(allowed.status, 200);
+  assert.equal(row().hold_alerts_until_asleep, 1);
+  const get = await call(`${server.url}/api/children`, { token });
+  assert.equal(get.status, 200);
+  assert.equal(get.body.find((child) => child.id === KID).hold_alerts_until_asleep, 1);
+});
+
+test('#919 a new child defaults to hold off and rejects a non-boolean', async () => {
+  const bad = await call(`${server.url}/api/children`, { method: 'POST', token, body: { name: 'A child', hold_alerts_until_asleep: '1' } });
+  assert.equal(bad.status, 400);
+  const good = await call(`${server.url}/api/children`, { method: 'POST', token, body: { name: 'A child' } });
+  assert.equal(good.status, 201);
+  assert.equal(good.body.hold_alerts_until_asleep, 0);
 });
 
 test('★★ the photo-only write from the child screen keeps the sleep settings', async () => {

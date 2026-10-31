@@ -2,7 +2,7 @@
 import { test, mock, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { useTempDataDir, cleanupTempDataDirs, makeCamera } from './helpers/harness.js';
+import { useTempDataDir, cleanupTempDataDirs, makeCamera, makeChild } from './helpers/harness.js';
 
 useTempDataDir();
 
@@ -17,12 +17,52 @@ mock.module('../src/lib/detectionAlert.js', {
 });
 
 const { default: db } = await import('../src/db.js');
-const { isMotionPayload, refreshMqttConnection, stopMqtt, forgetMqttMotionAlert } = await import('../src/lib/mqttClient.js');
+const { isMotionPayload, refreshMqttConnection, stopMqtt, forgetMqttMotionAlert, _mqttMotionStampForTests, _setMqttMotionStampForTests } = await import('../src/lib/mqttClient.js');
+const { shouldHold, HOLD_CAP_MS, _reset } = await import('../src/lib/alertHold.js');
+const { _state } = await import('../src/lib/wakeWatcher.js');
 
 after(() => {
   stopMqtt();
   db.close();
   cleanupTempDataDirs();
+});
+
+test('#919 MQTT cooldown cannot start a hold, held motion keeps its stamp, release fires', () => {
+  const id = 'hold-mqtt';
+  const childId = 'hold-mqtt-child';
+  const topic = 'test/hold/motion';
+  const pad = (n) => String(n).padStart(2, '0');
+  const hm = (ms) => { const d = new Date(ms); return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`; };
+  const now = Date.now();
+  makeChild(db, { id: childId, start: hm(now - 3 * 3600_000), end: hm(now + 3 * 3600_000) });
+  db.prepare('UPDATE children SET hold_alerts_until_asleep = 1 WHERE id = ?').run(childId);
+  makeCamera(db, { id, childId, extra: { detect_motion_enabled: 1, detect_source: 'mqtt', motion_mqtt_topic: topic, detect_cooldown_s: 60 } });
+  db.prepare("UPDATE settings SET mqtt_enabled = 1, mqtt_host = 'broker.example', mqtt_port = 1883, timezone = 'UTC' WHERE id = 'app'").run();
+  refreshMqttConnection();
+  _reset();
+  const publish = () => broker.emit('message', topic, Buffer.from('ON'));
+  const before = alerts.length;
+  const minute = new Date().getUTCHours() * 60 + new Date().getUTCMinutes();
+  db.prepare('UPDATE cameras SET detect_schedule_enabled = 1, detect_start = ?, detect_end = ? WHERE id = ?')
+    .run((minute + 120) % 1440, (minute + 121) % 1440, id);
+  publish();
+  assert.equal(shouldHold({ id }, now + HOLD_CAP_MS), true, 'out-of-schedule motion started the cap');
+  _reset();
+  db.prepare('UPDATE cameras SET detect_schedule_enabled = 0 WHERE id = ?').run(id);
+  _setMqttMotionStampForTests(id, now);
+  publish();
+  assert.equal(alerts.length, before);
+  assert.equal(shouldHold({ id }, now + HOLD_CAP_MS), true, 'cooling message started the cap');
+  _reset();
+  _setMqttMotionStampForTests(id, now - 61_000);
+  publish();
+  assert.equal(alerts.length, before);
+  assert.equal(_mqttMotionStampForTests(id), now - 61_000, 'held message stamped cooldown');
+  _state().set(id, { asleep: true });
+  publish();
+  assert.equal(alerts.length, before + 1);
+  _state().delete(id);
+  alerts.length = 0;
 });
 
 test('payload interpretation covers plain tokens, JSON fields, overrides and rejects', () => {

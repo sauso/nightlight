@@ -3,6 +3,7 @@ import { logger } from './logger.js';
 import { forwardProcessLines } from './processOutput.js';
 import { getPathStatus } from './mediamtx.js';
 import { inActiveWindow } from './detectSchedule.js';
+import { shouldHold } from './alertHold.js';
 import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 import { recordSound } from './activityTracker.js';
@@ -236,7 +237,7 @@ export async function startSoundDetector(camera) {
       // The analyser reports that the ALERT RULES are satisfied; the quiet-hours schedule is this
       // layer's business. `markAlerted` only runs when a notification actually went out, so the
       // cooldown is never consumed by an alert that was suppressed by the schedule.
-      if (r.wouldAlert && inActiveWindow(camera)) {
+      if (r.wouldAlert && inActiveWindow(camera) && !shouldHold(camera)) {
         analyser.markAlerted(now);
         fireDetectionAlert(camera, ALERT.SOUND, `+${Math.round(r.over)} dB over ambient`, { snapshotPath: path }).catch(() => {});
       }
