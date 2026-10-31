@@ -87,6 +87,14 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **A sleep window that opens just after midnight now gets its 5 minutes of lead before midnight (#602).** For a
+  window starting between 00:00 and 00:04, the live wake watcher and the hold-alerts-until-asleep setting treated
+  23:55 to 23:59 as outside the window, because only today's and yesterday's night were tried. They now try
+  tomorrow's night as well, so those minutes count like the 5 minutes before any other window. Only a window
+  opening 00:00 to 00:04 is affected (the timelapse still records only inside the window itself), and no sleep
+  figure changes. The note about this gap is removed from the sleep-tracking and notification guides and from
+  KNOWN-ISSUES.
+
 - **A real morning exit is no longer set aside because the empty bed afterwards read faint noise (#914).** A *got
   out of bed* logged within a minute after a *got into bed* is set aside as part of climbing back into bed when the
   bed then shows a still sleeper: 6 minutes of slight movement in the next 2½ hours. An empty bed can show that

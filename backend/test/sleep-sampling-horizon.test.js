@@ -24,8 +24,9 @@
 // Date is frozen with mock.timers (apis: ['Date'] only, never the real timers) and ALWAYS reset in finally.
 //
 // KNOWN-EQUIVALENT mutants, deliberately NOT tested (no input can tell them apart): a candidate-night range of
-// +2 / -2 instead of +1 / -1 (a night two days away can never cover an instant, see windowOpenNow), and the
-// order the candidate nights are tried in (the result is an OR over them).
+// +2 / -2 instead of +1 / -1 (a night two days away can never cover an instant, see windowOpenNow). The ORDER the
+// candidate nights are tried in is equivalent for the boolean gates (an OR) but NOT for childWindowKeyNow, which
+// returns the first match: #602 pins it ("tomorrow's night is tried LAST").
 import { test, before, after, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { useTempDataDir, cleanupTempDataDirs } from './helpers/harness.js';
@@ -33,7 +34,7 @@ import { useTempDataDir, cleanupTempDataDirs } from './helpers/harness.js';
 // DATA_DIR must be set before db.js is first imported (it opens the database at module load).
 useTempDataDir();
 
-const { childWindowActiveNow, childSamplingActiveNow, reportableSpanMs, isEvidenceFinal } =
+const { childWindowActiveNow, childWindowKeyNow, childSamplingActiveNow, reportableSpanMs, isEvidenceFinal } =
   await import('../src/lib/sleepAnalysis.js');
 const { default: db } = await import('../src/db.js');
 
@@ -50,6 +51,7 @@ const atInstant = (utcMs, fn) => {
 };
 const sampling = (utcMs, id = KID) => atInstant(utcMs, () => childSamplingActiveNow(id));
 const windowActive = (utcMs, id = KID) => atInstant(utcMs, () => childWindowActiveNow(id));
+const keyAt = (utcMs, id = KID) => atInstant(utcMs, () => childWindowKeyNow(id));
 
 function setup({ tz, start, end }) {
   db.prepare('UPDATE settings SET timezone = ? WHERE id = ?').run(tz, 'app');
@@ -187,12 +189,12 @@ test('#353 a 00:02 start is sampled from 21:02 the previous evening (kills: +1 n
 });
 
 // ---------------------------------------------------------------------------------------------------
-// P5: GUARD, childWindowActiveNow is UNCHANGED on purpose
+// P5: GUARD, childWindowActiveNow keeps the configured window plus 5 minutes (it is NOT widened to the horizon)
 // ---------------------------------------------------------------------------------------------------
 // It gates the wake watcher (and is checked by the timelapse). #353 widens SAMPLING only: the wake watcher has
-// no second gate, so widening this one would have moved its input by up to 5 minutes for a window opening
-// 00:00-00:04 in a core module, for no benefit to this issue (the leg itself is covered by the sampling gate's
-// 3 h lead). The timelapse is NOT the reason: it also needs currentNightDate non-null (true only inside the
+// no second gate, so widening this one to the sampling horizon would move its input by hours. (#602 later gave
+// it tomorrow's night too, for the 5-minute lead of a window opening 00:00-00:04; see the #602 tests below.) The
+// timelapse is NOT bounded by this gate: it also needs currentNightDate non-null (true only inside the
 // configured window), so it never captures outside the window whatever this gate returns.
 
 test('#353 childWindowActiveNow keeps its 5-minute tail and lead, and stays closed at 07:06 (kills: childWindowActiveNow trail = the sampling tail)', () => {
@@ -207,14 +209,48 @@ test('#353 childWindowActiveNow keeps its 5-minute tail and lead, and stays clos
   assert.equal(windowActive(Z('2026-08-27T06:00:00Z')), false, '16:00 local: where SAMPLING opens, this gate must not');
 });
 
-test('#353 childWindowActiveNow does not try the next night (kills: childWindowActiveNow also passes nextNight)', () => {
+// #602: until this issue the window gate (and the hold key) tried today's and yesterday's night only, so for a window
+// opening 00:00-00:04 the 5-minute lead stopped at midnight: 23:58 read as closed. Hand-worked UTC literals, one per zone.
+// Melbourne winter (UTC+10): 00:02 on 08-28 = 2026-08-27T14:02Z, so the lead opens 13:57Z (23:57 local on 08-27).
+// UTC: 00:02 on 08-28 = 2026-08-28T00:02Z, lead 2026-08-27T23:57Z. Asia/Kolkata (UTC+5:30): 00:02 on 08-28 =
+// 2026-08-27T18:32Z, lead 18:27Z. The 19:00-07:00 lead and tail assertions above are the control: nothing else moved.
+for (const [zone, leadEdge, startEdge] of [
+  [MEL, '2026-08-27T13:57:00Z', '2026-08-27T14:02:00Z'],
+  ['UTC', '2026-08-27T23:57:00Z', '2026-08-28T00:02:00Z'],
+  ['Asia/Kolkata', '2026-08-27T18:27:00Z', '2026-08-27T18:32:00Z'],
+]) {
+  test(`#602 childWindowActiveNow and childWindowKeyNow get their 5-minute lead before midnight for a 00:02 window, ${zone} (kills: either call without nextNight)`, () => {
+    setup({ tz: zone, start: '00:02', end: '07:00' });
+    const lead = Z(leadEdge);
+    assert.equal(windowActive(lead - MS), false, 'one millisecond before the lead edge');
+    assert.equal(windowActive(lead), true, 'the lead edge itself (23:57 local): was false before #602');
+    assert.equal(windowActive(Z(startEdge) - MS), true, '23:59:59.999 local: was false before #602');
+    assert.equal(windowActive(Z(startEdge)), true, 'the configured start');
+    // The hold key is the same night's start both before and after midnight, so a hold clock started in the lead
+    // minutes is not restarted at 00:02.
+    assert.equal(keyAt(lead - MS), null, 'no key before the lead edge');
+    assert.equal(keyAt(lead), Z(startEdge), 'the key before midnight is the start of the night that opens at 00:02');
+    assert.equal(keyAt(Z(startEdge) + 60 * 1000), Z(startEdge), 'and it is the same key after midnight');
+  });
+}
+
+test('#602 a window opening 00:02 closes where it did before: the 5-minute tail, to the millisecond (control)', () => {
   setup({ tz: MEL, start: '00:02', end: '07:00' });
-  // 23:58 local on 08-27 = 2026-08-27T13:58Z is 4 minutes before the 00:02 start, inside the 5-minute lead, if the
-  // next night were a candidate. It is NOT: this gate keeps today's and yesterday's night only (a known, harmless
-  // gap for a window opening 00:00-00:04: the wake watcher arms only once sleep has begun). Pinned as unchanged.
-  assert.equal(windowActive(Z('2026-08-27T13:58:00Z')), false, '23:58 local: unchanged on purpose');
-  // while the SAMPLING gate does cover that instant (control: the two gates really do differ here)
-  assert.equal(sampling(Z('2026-08-27T13:58:00Z')), true, 'sampling covers it through its 3 h lead');
+  // 07:00 local on 08-28 = 2026-08-27T21:00Z; the tail is 5 minutes.
+  assert.equal(windowActive(Z('2026-08-27T21:05:00Z') - MS), true);
+  assert.equal(windowActive(Z('2026-08-27T21:05:00Z')), false);
+  // and the sampling gate still covers the whole evening before (the two gates differ here by design)
+  assert.equal(sampling(Z('2026-08-27T13:58:00Z')), true, 'sampling covers 23:58 through its 3 h lead');
+});
+
+test('#602 tomorrow\'s night is tried LAST: a nearly 24-hour window keeps today\'s key at 23:58 (kills: candidate nights tried +1 first)', () => {
+  setup({ tz: MEL, start: '00:02', end: '23:56' });
+  // Night 08-27 runs 00:02 to 23:56 local = 2026-08-26T14:02Z to 2026-08-27T13:56Z, plus its 5-minute tail to 14:01Z.
+  // Night 08-28 starts 2026-08-27T14:02Z, so its 5-minute lead opens at 13:57Z. At 13:58Z (23:58 local) BOTH nights
+  // match; the key must stay tonight's start, or a hold in progress would restart its clock at 23:57.
+  assert.equal(keyAt(Z('2026-08-27T13:56:30Z')), Z('2026-08-26T14:02:00Z'), 'before tomorrow\'s lead: today\'s key (control)');
+  assert.equal(keyAt(Z('2026-08-27T13:58:00Z')), Z('2026-08-26T14:02:00Z'), 'both nights match: today\'s key wins');
+  assert.equal(keyAt(Z('2026-08-27T14:01:00Z')), Z('2026-08-27T14:02:00Z'), 'today\'s night closed (14:01Z): tomorrow\'s key');
 });
 
 // ---------------------------------------------------------------------------------------------------

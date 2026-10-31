@@ -106,6 +106,28 @@ test('#919 lead margin and configured window share the same key and first alert 
   }
 });
 
+// #602: the same lead margin for a window that opens 00:00-00:04, where the lead falls on the previous calendar day.
+// Settings timezone is the default UTC here. 23:57 on 10-31 is 5 minutes before a 00:02 start on 11-01. The hold
+// path runs the real wake-watcher gate (isChildAsleep -> childWindowActiveNow) and the real key (childWindowKeyNow),
+// so it fails if either call loses tomorrow's night, and the cap check after midnight fails if the key changes at 00:02.
+test('#602 a 00:02 window holds from its 5-minute lead before midnight, on one key and one clock across midnight', () => {
+  mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-31T23:56:59.999Z') });
+  try {
+    db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run('00:02', '07:00', 'a');
+    flag('a', 1);
+    assert.equal(shouldHold({ id: 'ca' }, 1000), false, 'one millisecond before the lead: not held, and no clock started');
+    mock.timers.setTime(Date.parse('2026-10-31T23:57:00Z'));
+    assert.equal(shouldHold({ id: 'ca' }, 1000), true, 'at the lead edge the watcher gate is open: held');
+    mock.timers.setTime(Date.parse('2026-11-01T00:03:00Z'));
+    assert.equal(childWindowKeyNow('a'), Date.parse('2026-11-01T00:02:00Z'));
+    assert.equal(shouldHold({ id: 'ca' }, 1000 + HOLD_CAP_MS), false, 'same night, same clock: the cap from 23:57 still applies after midnight');
+  } finally {
+    mock.timers.reset();
+    const [start, end] = windowAround();
+    db.prepare('UPDATE children SET sleep_window_start = ?, sleep_window_end = ? WHERE id = ?').run(start, end, 'a');
+  }
+});
+
 test('#919 a new watcher window gives a new night clock', () => {
   mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-31T19:00:00Z') });
   try {
