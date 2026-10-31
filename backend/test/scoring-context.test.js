@@ -306,7 +306,8 @@ test('a final legacy NULL row is left alone by the nightly job, and gains a cont
 // no number in it moves) and bumped SCORING_ALGO to '2'. #904 added `sound_discounted_minutes: 0` (an added key: the
 // faulty-microphone guard finds nothing on this night, whose sound is 0 throughout) and bumped SCORING_ALGO to '3'.
 // #618 (the #509 veto's hand-back) bumped it to '4' with no change here: no exit is adopted on this night (its shadow
-// wake is the movement-only one), so the veto never runs on it.
+// wake is the movement-only one), so the veto never runs on it. #914 (the settling-tail witness stops at the next
+// departure) bumped it to '5' with no change here: the night has no `into_bed`, so that guard's witness is never asked.
 const GOLDEN = {
   night_date: '2026-07-01',
   window_start: '2026-07-01 09:30:00',

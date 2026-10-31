@@ -402,6 +402,10 @@ minutes of the slight movement a sleeping child makes (too small to count as the
 2½ hours after the return. Bigger movement at the bed does not count, because after a child has
 really got up that is a parent stripping the bed, tidying or reaching in: counting it once turned a
 real early-morning wake into one more than two hours later.
+Those minutes are only counted **until the child leaves the bed again**: up to the next *got out of
+bed* that is not itself part of climbing back in and that the child does not come straight back from
+(a *got into bed* within 20 minutes, with the bed then occupied). After that the bed is empty or
+someone else is at it, so slight movement there says nothing about whether the child stayed.
 A qualifying short trip can still be counted as a wake-up within that same continuing night — see
 [How it estimates](#how-it-estimates). It can miss a trip that's interrupted by a data gap or a stray reading,
 and it cannot tell an adult's visit to the bed from the child's own trip out of it.
@@ -419,13 +423,18 @@ A genuine departure followed only by a parent at the bed (bigger movement) is no
 slight movement in those 2½ hours), or a camera whose detection zone only ever registers bigger
 movement, is treated as having left at that second *got out of bed*: the wake is reported too
 **early**, not left blank (again unless it is far earlier than usual, next section). The 6 was
-measured on two cameras in one house, where the second exits that were the real wake showed 0-3 such
-minutes and the ones a review confirmed were not showed 10 or more; see KNOWN-ISSUES.
+measured on two cameras in one house. The count alone cannot tell a still child from an empty bed
+(see the next limit), and nothing checks the number against your camera; see KNOWN-ISSUES.
 **Known limit:** a camera whose picture of an **empty** bed flickers with faint noise can look like a
-still sleeper, and then a real exit is set aside. One night after a camera was replaced did exactly
-this: the child had left, and the empty bed still showed 8-10 such minutes. The wake is then the real
-exit if nothing later qualifies, or if the later *got out of bed* is set aside as described above;
-otherwise it is that later one.
+still sleeper. On one night after a camera was replaced, the child had left and the empty bed still
+showed 8-10 such minutes by later in the morning; all but 4 came after the child's next *got out of
+bed*, so they no longer count and the real exit is the wake. The flicker can still set a real exit
+aside when it reaches 6 minutes before the next *got out of bed*, or when no later *got out of bed*
+comes within the 2½ hours. The wake is then the real exit if nothing later qualifies, or if the later
+*got out of bed* is set aside as described above; otherwise it is that later one.
+**Known limit:** a *got out of bed* the camera logged by mistake in those 2½ hours (no *got into bed*
+just before it and none soon after) also ends the count. A child who really did climb back in and
+lies very still can then be reported up at the earlier *got out of bed*: too **early**, never blank.
 
 ### An exit far earlier than usual does not end the night
 

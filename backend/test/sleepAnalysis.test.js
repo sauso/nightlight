@@ -1148,17 +1148,16 @@ describe('★★★ #598: the settling-tail guard believes a still sleeper, not 
     assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '09:27');
   });
 
-  // ★★ The new witness's window is capped too, pinned on its last minute rather than far past it. The
-  // stray return is minute 07:11, so the window is [07:11, 09:41).
+  // ★★ The far end of the witness window. The stray return is minute 07:11, so the 150-minute cap is [07:11, 09:41).
+  // This pair pinned that cap on its last minute until issue #914, which also stops the count at the next real
+  // departure: 09:27:38 here, the nearer end. Six quiet minutes at 09:35-09:40 sat inside the cap and set the real
+  // exit aside before #914; they come after the child left AGAIN, so now they do not count and the exit stands. The
+  // cap itself is pinned where it is the nearer end, #914 W7 (a later departure here cannot be past 09:41 and still
+  // have its 20 quiet minutes before the evidence ends at 10:00).
   const sixFrom = (h, m) => Array.from({ length: 6 }, (_, k) => at(h, m + k, 1));
-  test('#598 C5: 6 quiet minutes ending on the window\'s last minute (09:35-09:40) are inside it', () => {
+  test('#598 C5: 6 quiet minutes inside the cap but after the next real departure (09:35-09:40) no longer vouch (#914)', () => {
     laySettlingTailBehindParentCluster({ quietAt: sixFrom(9, 35) });
-    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '09:27');
-  });
-
-  test('#598 C5: one minute later (09:36-09:41) only 5 are, and the exit stands', () => {
-    laySettlingTailBehindParentCluster({ quietAt: sixFrom(9, 36) });
-    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '07:12', 'a quiet minute past the window must not vouch for the return');
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '07:12', 'before #914 these made six and the night read 09:27');
   });
 
   test('#598 C7: the mid-night settling guard still believes an ACTIVE-only witness (only the departure scan changed)', () => {
@@ -1271,6 +1270,141 @@ describe('★★★ #598: the settling-tail guard believes a still sleeper, not 
     insertTransition.run(CAM, 'into_bed', 0.05, sqlTime(at(5, 52, 1, 10))); // the return
     insertTransition.run(CAM, 'out_of_bed', 0.04, sqlTime(at(7, 40, 1, 20))); // the real exit
     assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '07:40', 'the 05:50 exit was reversed by a return the bed corroborates');
+  });
+});
+
+// --- #914: the settling-tail witness stops at the next real departure ------------------------------------------------
+//
+// ★★★ The night of 2026-10-30 (staging, one child): a stray `into_bed` at 06:29:05, the REAL exit 51 s later at 06:29:56
+// (the child was seen up then), and an empty bed that read faint noise on ten minutes afterwards. The witness counted
+// that noise as a still sleeper (5, 8, 8 and 10 quiet minutes at window end + 1, 31, 61 and 109 minutes), set the real
+// exit aside and took the next exit (06:57:12, the child back in the room) instead. Since #914 the count stops at the
+// first later `out_of_bed` that the scan itself would take as a departure (not a settling tail, not reversed): a minute
+// after the child has left AGAIN cannot say "came back and stayed".
+//
+// layWitnessMorning lays that morning per minute; offsets are minutes from 06:00. Up to 06:21 the child is in the bed and
+// still, 06:22-06:29 they move, and the stray return and the exit are the real night's markers to the second. From 06:30
+// the bed reads EMPTY (STILL_EMPTY) except on:
+//   quietAt  — minutes of faint micro-motion (STILL_OCCUPIED): a still sleeper, or an empty bed's noise (each test says)
+//   activeAt — minutes of real movement (a later exit's own, a return)
+//   marks    — more bed transitions: [type, minute offset, second]
+// No sound anywhere: the #509 veto needs an awake run reaching the window end, so it never runs and the wake is the
+// departure scan's own choice: 06:29 when the exit stands, a later exit when it is set aside. The witness window runs
+// from the return's minute (06:29, offset 29) for 150 minutes: offsets 29-178. The evidence ends at 10:00 (window end +
+// 3 h, offset 240), so a later exit needs its 20 quiet minutes before then.
+const om914 = (k, s = 0) => new Date(at(6, 0, 1).getTime() + k * 60000 + s * 1000);
+function layWitnessMorning({ quietAt = [], activeAt = [], marks = [] } = {}) {
+  laySamples(at(19, 30), om914(30), [[at(19, 30), at(19, 40)], [om914(22), om914(30)]], STILL_OCCUPIED);
+  for (let k = 30; k < 240; k++) {
+    const motion = activeAt.includes(k) ? 0.4 : quietAt.includes(k) ? STILL_OCCUPIED : STILL_EMPTY;
+    insertSample.run(CAM, sqlTime(om914(k)), motion, motion);
+  }
+  insertTransition.run(CAM, 'into_bed', 0.05, sqlTime(om914(29, 5))); // the stray return
+  insertTransition.run(CAM, 'out_of_bed', 0.05, sqlTime(om914(29, 56))); // the real exit, 51 s later
+  for (const [type, k, s = 0] of marks) insertTransition.run(CAM, type, 0.05, sqlTime(om914(k, s)));
+}
+// A real exit long after the window (09:20:10, offset 200), with its own movement and 37 empty minutes after it: what a
+// still child who really did climb back in at 06:29 gets up at. Where it is the wake, the 06:29 tail was set aside.
+const REAL_LATER = { activeAt: [200, 201, 202], mark: ['out_of_bed', 200, 10] };
+
+describe('★★★ #914: the settling-tail witness stops at the next real departure', () => {
+  test('#914 W1: with no departure inside the window the count is the old one: a late sixth quiet minute is still believed', () => {
+    // The 2026-09-09 profile moved to the morning: the child climbs back in and lies very still, with quiet minutes 6,
+    // 91, 103, 109, 126 and 133 minutes after the return's minute (the founding night's own spacing), and gets up at
+    // 09:20:10, past the window, so nothing cuts. Passes before and after #914: it pins what must not change. A cut
+    // that fired with no departure (an `until` left undefined is NaN, and the count never runs) reports 06:29.
+    layWitnessMorning({ quietAt: [35, 120, 132, 138, 155, 162], activeAt: REAL_LATER.activeAt, marks: [REAL_LATER.mark] });
+    const night = computeNight(CHILD, DATE);
+    assert.equal(night.status, 'ok');
+    assert.equal(hhmm(night.wake_at), '09:20', 'the tail is set aside and the real exit found');
+  });
+
+  test('#914 W2: the 2026-10-30 night: the real exit stands at every clock, from window end + 1 to + 109 minutes', (t) => {
+    // The ten noisy minutes as measured, the next exit at 06:57:12. Only four (06:32, 06:35, 06:48, 06:51) come before
+    // that departure; any two of the six after it, leaking into the count, would make six. Fails before #914 from + 31
+    // on (8 quiet minutes, then 10: the wake read 06:57), and the verdict changed with the clock.
+    layWitnessMorning({ quietAt: [32, 35, 48, 51, 58, 64, 65, 79, 135, 136], activeAt: [57], marks: [['out_of_bed', 57, 12]] });
+    const seen = [];
+    for (const [h, m] of [[7, 1], [7, 31], [8, 1], [8, 49]]) {
+      t.mock.timers.enable({ apis: ['Date'], now: at(h, m, 1).getTime() });
+      try { seen.push(hhmm(computeNight(CHILD, DATE).wake_at)); } finally { t.mock.timers.reset(); }
+    }
+    assert.deepEqual(seen, ['06:29', '06:29', '06:29', '06:29'], 'the real exit, and the same answer at every clock');
+  });
+
+  test('#914 W3: a later exit that is itself a settling tail does not cut (the 2026-09-28 shape)', () => {
+    // A later `into_bed` at 07:10:00 and an `out_of_bed` 24 s after it: the tail of that return, which the scan never
+    // takes as a departure, so it does not cut the earlier witness. Three quiet minutes before the pair and three after
+    // (a still child): six, the 06:29 tail is set aside, and the later pair's own witness (three, from 07:10) does not
+    // believe that return, so 07:10 is the wake. Passes before and after #914. A cut at ANY later exit (the design
+    // rejected in review) counts three here and reports 06:29; on the real 2026-09-28 night it moved the reviewed wake
+    // about 7 h 50 min early.
+    layWitnessMorning({ quietAt: [35, 45, 55, 80, 95, 110], activeAt: [69, 70], marks: [['into_bed', 70, 0], ['out_of_bed', 70, 24]] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '07:10');
+  });
+
+  test('#914 W4: a later exit undone by a return does not cut (the child back in bed within 20 minutes)', () => {
+    // A later exit at 06:55:10 and the child back in at 06:59:10, the bed occupied after it (the reversal guard's own
+    // rule), still until the real exit at 09:20:10. Seven quiet minutes, three of them before that trip: the 06:29 tail is
+    // set aside, the scan rejects the trip as reversed, and 09:20 is the wake. Passes before and after #914. A cut at the
+    // reversed exit counts three and reports 06:29; an injected trip of this shape on the 2026-09-09 night gave 20:44.
+    layWitnessMorning({ quietAt: [35, 40, 44, 75, 90, 110, 130], activeAt: [54, 55, 59, 60, ...REAL_LATER.activeAt],
+      marks: [['out_of_bed', 55, 10], ['into_bed', 59, 10], REAL_LATER.mark] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '09:20');
+  });
+
+  test('#914 W5: the departure\'s own minute is not counted (the cut is exclusive)', () => {
+    // Five quiet minutes before a later exit at 06:55:30, whose own minute (06:55) reads faint noise as the bed empties.
+    // Counted, that minute would be the sixth and set the real exit aside. Fails before #914 (06:55).
+    layWitnessMorning({ quietAt: [33, 37, 41, 45, 49, 55], activeAt: [53, 54], marks: [['out_of_bed', 55, 30]] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:29');
+  });
+
+  test('#914 W6: a later `into_bed` alone does not cut', () => {
+    // An `into_bed` at 07:05:00 with no exit near it (35 minutes after the exit: it does not reverse it either), three
+    // quiet minutes either side of it, then the real exit at 09:20:10. Six: set aside, 09:20. Passes before and after.
+    layWitnessMorning({ quietAt: [35, 45, 55, 80, 100, 120], activeAt: [65, 66, ...REAL_LATER.activeAt],
+      marks: [['into_bed', 65, 0], REAL_LATER.mark] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '09:20');
+  });
+
+  test('#914 W7: the 150-minute cap still holds when the next departure is past it', () => {
+    // The window is 06:29-08:58. Five quiet minutes inside it, then 08:59 (the first minute past it) and 09:05, before the
+    // real exit at 09:20:10. The cut (09:20) is past the cap, so the cap is the nearer end: five, the exit stands. A cut
+    // that REPLACED the cap instead of tightening it, or no cap at all, counts seven and reports 09:20. Passes before and
+    // after #914 (this is where #598 C5 used to pin the cap).
+    layWitnessMorning({ quietAt: [40, 80, 120, 150, 170, 179, 185], activeAt: REAL_LATER.activeAt, marks: [REAL_LATER.mark] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:29');
+  });
+
+  for (const [secs, expected] of [[60, '07:11'], [61, '06:29']]) {
+    test(`#914 W8: a later exit ${secs} s after a later \`into_bed\` ${secs === 60 ? 'is a tail and does not cut' : 'is a departure and cuts'}`, () => {
+      // The tail bound is JITTER_REENTRY_MS, inclusive, the same test the guard applies. Three quiet minutes before the
+      // later pair (07:10:00) and three after. At 60 s the later exit is a tail: no cut, six, the 06:29 exit is set
+      // aside, and 07:11 (whose own witness has three) is the wake. At 61 s it is a departure: three, the exit stands.
+      // The 61 s case fails before #914 (07:11).
+      layWitnessMorning({ quietAt: [35, 45, 55, 80, 95, 110], activeAt: [70, 71], marks: [['into_bed', 70, 0], ['out_of_bed', 70, secs]] });
+      assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), expected);
+    });
+  }
+
+  test('#914 W9a: only a LATER exit cuts: one the evening before, and a second row at the same second, do not', () => {
+    // An `out_of_bed` at 23:00:30 the evening before (no return after it, no `into_bed` a minute before it: by the cut's
+    // other two tests a departure) and a second row for the 06:29:56 exit at the identical second. Six quiet minutes, then
+    // the real exit at 09:20:10. Neither may cut: set aside, 09:20. (The same-second row is also a tail of the 06:29:05
+    // return, so `>=` instead of `>` could not let it cut either; the evening one is what the strict test keeps out.)
+    // Passes before and after #914.
+    layWitnessMorning({ quietAt: [35, 45, 55, 80, 95, 110], activeAt: REAL_LATER.activeAt,
+      marks: [['out_of_bed', -420, 30], ['out_of_bed', 29, 56], REAL_LATER.mark] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '09:20');
+  });
+
+  test('#914 W9b: of two later departures the EARLIER cuts, whatever order the rows were written in', () => {
+    // Departures at 06:55:10 and 07:40:10, written latest first. Three quiet minutes before the first, three between the
+    // two and two after the second: a cut at the second would count six and set the exit aside. Fails before #914 (06:55).
+    layWitnessMorning({ quietAt: [35, 40, 45, 65, 75, 85, 120, 140], activeAt: [54, 55, 99, 100],
+      marks: [['out_of_bed', 100, 10], ['out_of_bed', 55, 10]] });
+    assert.equal(hhmm(computeNight(CHILD, DATE).wake_at), '06:29');
   });
 });
 
@@ -2910,19 +3044,28 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
   //   activeFrom  — offset where the child's movement in the bed before the exit starts (22 = 06:22)
   //   stray       — the `into_bed` 51 s before the exit (false: nothing for the settling-tail guard to skip)
   //   skippedExit — the 06:29:56 exit itself
-  //   witness     — 'measured' (the ten noisy minutes), or 'sleeper' (a child still in the bed: a still sleeper's
-  //                 micro-motion on every minute of 06:30-06:56)
+  //   witness     — 'noisier' (the default, below), 'measured' (the ten noisy minutes), or 'sleeper' (a child still in
+  //                 the bed: a still sleeper's micro-motion on every minute of 06:30-06:56)
+  //
+  // ⚠️ Since #914 the measured night no longer reaches the hand-back. Only four of its noisy minutes (06:32, 06:35, 06:48,
+  // 06:51) come before the 06:57:12 exit, and the witness now stops there, so the 06:29:56 exit is not set aside at all
+  // and the scan takes it (#914 H0 pins that). These tests are about the hand-back, so by default the empty bed is
+  // noisier than that night's by two minutes BEFORE the later exit (06:40 and 06:44): six before it, the sixth at 06:51,
+  // and the exit is set aside at every clock from 07:01. That is the shape #914 does not fix (an empty bed noisy enough
+  // before the next departure), and the one the hand-back still covers. Every expectation below is the one these tests
+  // had with the measured witness before #914.
   //   blipAt      — offsets that read one isolated ACTIVE bed minute
   //   returnAt    — [minute offset, second] of an `into_bed` AFTER the exit (a return the reversal guard believes)
   //   eveningTail — the 2026-09-09 evening cluster (out, back in, out again 40 s later) over a still sleeper
   //   outZone     — [from, to) offsets with movement OUTSIDE the bed zone (somebody in the room)
   describe('★★★ #618: the veto hands back the exit the settling-tail guard set aside in its stretch', () => {
     const MEASURED_WITNESS = [32, 35, 48, 51, 58, 64, 65, 79, 135, 136];
+    const NOISIER_WITNESS = [...MEASURED_WITNESS, 40, 44];
     //   strayAt / exitAt — [minute offset, second] of that `into_bed` and that exit (default 06:29:05 and 06:29:56)
     //   extraExits  — more `out_of_bed` markers, [minute offset, second] each
     //   preActive   — [from, to) offsets before 06:30 that are bed-ACTIVE, in place of [activeFrom, 30)
     function layHandBack({ shiftMin = 0, soundFrom = 13, activeFrom = 22, stray = true, skippedExit = true,
-      witness = 'measured', blipAt = [], returnAt = null, eveningTail = false, outZone = [],
+      witness = 'noisier', blipAt = [], returnAt = null, eveningTail = false, outZone = [],
       strayAt = [29, 5], exitAt = [29, 56], extraExits = [], preActive = null } = {}) {
       const m0 = plus(at(6, 0, 1), shiftMin); // 06:00 of the (shifted) morning
       const om = (k, s = 0) => plus(m0, k, s);
@@ -2932,7 +3075,7 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
         let motion;
         if (k < 30) motion = moving.some(([a, b]) => k >= a && k < b) ? 0.15 : STILL_OCCUPIED; // in the bed and still, then moving, then out
         else if (k === 57 || blipAt.includes(k)) motion = 0.15;
-        else if (witness === 'sleeper' ? k < 57 : MEASURED_WITNESS.includes(k)) motion = STILL_OCCUPIED;
+        else if (witness === 'sleeper' ? k < 57 : (witness === 'measured' ? MEASURED_WITNESS : NOISIER_WITNESS).includes(k)) motion = STILL_OCCUPIED;
         else motion = STILL_EMPTY;
         const out = outZone.some(([a, b]) => k >= a && k < b) ? 0.99 : 0;
         // The room stays audible to 07:30 whatever the shift, so the final awake run always reaches the 07:00 window
@@ -2961,9 +3104,24 @@ describe('★★★ #509: a later corroborated exit does not replace the wake be
     const EARLY = [[7, 1], [7, 8], [7, 17]];
     const LATE = [[7, 18], [7, 38], [8, 8], [9, 0], [10, 0], [12, 0]];
 
+    test('#914 H0: on the measured night itself the exit is no longer set aside, so the scan takes it at every clock', (t) => {
+      // The real 2026-10-30 stream (the measured witness). Fails before #914 at every LATE clock: the witness counted the
+      // empty bed's noise after the 06:57:12 departure, the scan adopted 06:57 (the shadow) and only #618's hand-back
+      // brought the wake back to 06:29. Now the scan itself takes 06:29:56, the veto has nothing later to discard, and the
+      // hand-back is never asked.
+      const { clock, exitAt } = layHandBack({ witness: 'measured' });
+      for (const [h, m] of [...EARLY, ...LATE]) {
+        const night = nightAt(t, clock(h, m), { includeTimeline: true });
+        assert.equal(hhmm(night.wake_at), '06:29', `clock ${h}:${m}`);
+        assert.equal(hhmm(night.wake_at_shadow), '06:29', `clock ${h}:${m}: the scan took the real exit itself`);
+        assert.deepEqual(night.transitions.filter((x) => x.type === 'out_of_bed').map((x) => x.at), [exitAt], `clock ${h}:${m}: the marker`);
+      }
+    });
+
     test('#618 H1: the 2026-10-30 shape reads the skipped exit at every clock, before AND after the later exit qualifies', (t) => {
       // Fails without #618 at every LATE clock (06:13, the movement-only wake). The EARLY clocks are the guard's own
-      // fallback, unchanged (07:01: the witness has only 5 minutes yet, so the exit is simply taken).
+      // fallback, unchanged (the exit is set aside and nothing later qualifies yet, so it is handed back; with the
+      // measured witness before #914, 07:01 had only 5 quiet minutes and simply took the exit).
       const { clock } = layHandBack();
       for (const [h, m] of [...EARLY, ...LATE]) {
         const night = nightAt(t, clock(h, m));

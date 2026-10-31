@@ -1609,13 +1609,13 @@
   {
     "label": "jitter: a settling tail is believed without an occupied bed behind it",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at)));",
+    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at), departureCutIdx(t)));",
     "replace": "&& true);",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
     ],
-    "note": "Same lesson as the reversal guard's own corroboration mutant: without it a spurious into_bed lets this guard reject a REAL departure and the night reports wake_at = null. Re-anchored by #598, which gave the guard its own quiet-only witness (bedQuietlyOccupiedFrom); the corroboration itself is unchanged in kind."
+    "note": "Same lesson as the reversal guard's own corroboration mutant: without it a spurious into_bed lets this guard reject a REAL departure and the night reports wake_at = null. Re-anchored by #598, which gave the guard its own quiet-only witness (bedQuietlyOccupiedFrom); the corroboration itself is unchanged in kind. Re-anchored again by #914 (the witness now takes the cut as a second argument)."
   },
   {
     "label": "jitter: control — a comment edit must change nothing",
@@ -1653,8 +1653,8 @@
   {
     "label": "jitter: the return is indexed with a hand-rolled round instead of txIdx",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at)));",
-    "replace": "&& bedQuietlyOccupiedFrom(Math.round((txMs(back.created_at) - analysisStartUtc.getTime()) / 60000)));",
+    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at), departureCutIdx(t)));",
+    "replace": "&& bedQuietlyOccupiedFrom(Math.round((txMs(back.created_at) - analysisStartUtc.getTime()) / 60000), departureCutIdx(t)));",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
@@ -11638,12 +11638,12 @@
   {
     "label": "#598 M-598-01: the settling-tail witness goes back to bedOccupiedFrom (any motion, active minutes included)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at)));",
+    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at), departureCutIdx(t)));",
     "replace": "&& bedOccupiedFrom(txIdx(back.created_at)));",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
     "namePattern": "#598 C1:",
-    "note": "The whole fix reverted. The 2026-10-03 shape: a parent's ACTIVE minutes an hour after a real exit vouch for a stray into_bed 51 s before it, and the wake moves 07:12 -> 09:27."
+    "note": "The whole fix reverted. The 2026-10-03 shape: a parent's ACTIVE minutes an hour after a real exit vouch for a stray into_bed 51 s before it, and the wake moves 07:12 -> 09:27. Re-anchored by #914 (the quiet witness now takes the cut as a second argument; the mutant drops both, as bedOccupiedFrom has no cut)."
   },
   {
     "label": "#598 M-598-02: the quiet witness counts active minutes too (the quiet condition dropped)",
@@ -11687,11 +11687,12 @@
   {
     "label": "#598 M-598-06: the quiet witness window is not capped",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt);",
-    "replace": "const witnessEnd = totalMinExt;",
+    "find": "const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt, until);",
+    "replace": "const witnessEnd = Math.min(totalMinExt, until);",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
-    "namePattern": "#598 C5:"
+    "namePattern": "#914 W7:",
+    "note": "Re-anchored by #914, which added the cut (`until`) to this line; the mutant keeps the cut and drops only the cap. Its test moved from #598 C5 to #914 W7: in C5's fixture the next departure (09:27:38) now comes before the cap's last minute, so the cut, not the cap, is the nearer end there."
   },
   {
     "label": "#598 M-598-07: detectMidnightEpisodes' settlingBack stops believing an ACTIVE-only witness",
@@ -11706,12 +11707,12 @@
   {
     "label": "#598 M-598-08: the settling-tail guard never believes a return (the witness is always false)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at)));",
+    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at), departureCutIdx(t)));",
     "replace": "&& false);",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
     "namePattern": "#598 C2:",
-    "note": "The over-correction C1 alone cannot see: the hostile twin (same stream, still sleeper behind it) must still skip the tail."
+    "note": "The over-correction C1 alone cannot see: the hostile twin (same stream, still sleeper behind it) must still skip the tail. Re-anchored by #914 (the witness now takes the cut as a second argument)."
   },
   {
     "label": "#598 M-598-09: the occupancy witness window is cut to 60 minutes",
@@ -12814,6 +12815,86 @@
     ],
     "namePattern": "#618 H9b",
     "note": "Opus review of #618: H9's two exits both sit before the gap's start, where the nearest is also the latest; H9b puts both after it (exits 06:30:10 and 06:31:00), so 'the last' reads 06:31 from the moment the later exit qualifies where the scan's fallback reads 06:30."
+  },
+  {
+    "label": "#914 M-914-01: the settling-tail guard is not given the cut (the pre-#914 count)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at), departureCutIdx(t)));",
+    "replace": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at)));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W2:",
+    "note": "The whole fix reverted. The 2026-10-30 night: the empty bed's noise after the 06:57:12 departure makes 8 quiet minutes by window end + 31, the real 06:29:56 exit is set aside and 06:57 is reported."
+  },
+  {
+    "label": "#914 M-914-02: the cut is inclusive (the departure's own minute counted)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt, until);",
+    "replace": "const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt, until + 1);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W5:",
+    "note": "W5 puts a quiet minute in the later exit's own minute, after five before it: counted, it is the sixth and the real exit is set aside."
+  },
+  {
+    "label": "#914 M-914-03: the cut REPLACES the 150-minute cap instead of tightening it",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt, until);",
+    "replace": "const witnessEnd = Math.min(totalMinExt, until === Infinity ? from + OCCUPANCY_WITNESS_MIN : until);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W7:",
+    "note": "The plausible wrong reading of 'stop at the next departure': with a departure past the window, the window would grow to it. W7 has two quiet minutes between the cap (08:59) and the departure (09:20)."
+  },
+  {
+    "label": "#914 M-914-04: with no qualifying departure the cut is undefined, not Infinity (the count never runs)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "let cut = Infinity;",
+    "replace": "let cut;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W1:",
+    "note": "Math.min with undefined is NaN, so every return would be disbelieved: the same trap bedOccupiedAfter's comment names. The `until = Infinity` parameter default is not a separate mutant: the only caller always passes a value, so changing the default is equivalent."
+  },
+  {
+    "label": "#914 M-914-05: a later settling tail cuts (the tail test dropped from the cut)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (transitions.some((back) => isSettlingPair(back, o))) continue;",
+    "replace": "if (false) continue;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W3:",
+    "note": "Half of the design rejected in plan review (cut at ANY later out_of_bed): on the reviewed 2026-09-28 night a later exit 24 s after an into_bed cut a still sleeper's evidence and, with #700 off, moved the wake about 7 h 50 min early."
+  },
+  {
+    "label": "#914 M-914-06: a reversed later exit cuts (the reversal test dropped from the cut)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (reversedBy(o)) continue;",
+    "replace": "if (false) continue;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W4:",
+    "note": "The other half of the rejected design: a trip the child came straight back from (into_bed 4 min later, the bed occupied) is not a departure. An injected trip of this shape on the 2026-09-09 profile moved the wake from 05:17 to 20:44."
+  },
+  {
+    "label": "#914 M-914-07: an exit before the one being judged cuts (the strictly-later test dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (!(txMs(o.created_at) > txMs(t.created_at))) continue;",
+    "replace": "if (false) continue;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W9a:",
+    "note": "W9a has an out_of_bed the evening before (a departure by the cut's other two tests): cutting there empties the window. `>=` instead of `>` is equivalent and not a mutant: an exit at the same second as the judged one is also a tail of the same return, which the tail test already excludes."
+  },
+  {
+    "label": "#914 M-914-08: the LAST qualifying departure cuts, not the earliest",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "cut = Math.min(cut, txIdx(o.created_at));",
+    "replace": "cut = txIdx(o.created_at);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W9b:",
+    "note": "getBedTransitions sorts by created_at, so the last assignment is the latest departure. 'The first in array order' is equivalent to the minimum on sorted rows (same-second rows share a minute) and is not a mutant."
   },
   {
     "label": "#564 startSleepJob: a second start arms a second interval",

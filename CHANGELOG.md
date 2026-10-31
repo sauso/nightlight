@@ -83,6 +83,24 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- **A real morning exit is no longer set aside because the empty bed afterwards read faint noise (#914).** A *got
+  out of bed* logged within a minute after a *got into bed* is set aside as part of climbing back into bed when the
+  bed then shows a still sleeper: 6 minutes of slight movement in the next 2½ hours. An empty bed can show that
+  slight movement too (camera noise), so a child who had really got up could be reported up at a later *got out of
+  bed*: on the night this came from, production read 06:58 for a child up at 06:02. Those minutes now count only
+  until the child's next *got out of bed* (one that is not itself part of climbing back in, and that the child
+  does not come straight back from), because after that the bed is empty or someone else is at it. The 6 and the
+  2½ hours are unchanged and no number was added. Replayed over every night still on record (both databases, eight
+  clocks each, with and without the "far earlier than usual" rule), two nights change: that production night
+  (06:58 to 06:02), and the staging night behind #618, whose wake stays 06:29 and is now found directly. Limits: a
+  *got out of bed* the camera logs by mistake inside those 2½ hours now ends the count, so a child who really did
+  climb back in and lies very still can be reported up too early (never blank); noise that reaches 6 minutes before
+  the next *got out of bed*, or a morning with no later one, still sets a real exit aside as before; the mid-night
+  version of this check is unchanged; measured on two cameras in one house. A night already saved keeps its wake
+  until it is worked out again. The sleep scoring version moves to `5`. See [KNOWN-ISSUES.md](KNOWN-ISSUES.md) ("A
+  wake reported too early after a child climbed back into bed") and
+  [docs/sleep-tracking.md](docs/sleep-tracking.md#a-child-who-gets-out-and-climbs-straight-back-in-has-not-got-up).
+
 - **A morning wake no longer slips back to the start of the morning's activity when the real exit had been set
   aside (#618).** A later *got out of bed* is not taken as the wake when the bed was strictly quiet for 20 minutes
   or more before it (#509), and the wake then falls back to the start of the morning's activity. When that quiet
