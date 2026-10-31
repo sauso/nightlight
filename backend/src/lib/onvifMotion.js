@@ -95,7 +95,6 @@ function handleMotion(cameraId) {
     return;
   }
   if (shouldHold(cam)) {
-    logger.info(`[onvif-motion] motion held for camera ${cam.id}`);
     return;
   }
   lastAlert.set(cam.id, now);

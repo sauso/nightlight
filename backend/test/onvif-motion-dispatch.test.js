@@ -60,13 +60,13 @@ test('#919 ONVIF cooldown cannot start a hold, held motion keeps its stamp, rele
   db.prepare('UPDATE cameras SET detect_schedule_enabled = 1, detect_start = ?, detect_end = ? WHERE id = ?')
     .run((minute + 120) % 1440, (minute + 121) % 1440, id);
   onMotion();
-  assert.equal(shouldHold({ id }, now + HOLD_CAP_MS), true, 'out-of-schedule motion started the cap');
+  assert.equal(shouldHold({ id }, now + HOLD_CAP_MS + 5_000), true, 'out-of-schedule motion started the cap');
   _reset();
   db.prepare('UPDATE cameras SET detect_schedule_enabled = 0 WHERE id = ?').run(id);
   _setOnvifAlertStampForTests(id, now);
   onMotion();
   assert.equal(alerts.length, before);
-  assert.equal(shouldHold({ id }, now + HOLD_CAP_MS), true, 'cooling edge started the cap');
+  assert.equal(shouldHold({ id }, now + HOLD_CAP_MS + 5_000), true, 'cooling edge started the cap');
   _reset();
   _setOnvifAlertStampForTests(id, now - 61_000);
   onMotion();

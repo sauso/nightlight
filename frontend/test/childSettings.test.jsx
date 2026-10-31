@@ -481,7 +481,7 @@ describe('★★ what a caregiver can change (#542)', () => {
     // A page opened by an admin who was then demoted still renders the admin form; the server's 403
     // message is what tells them why nothing was saved.
     const reason = 'Only an admin can turn sleep tracking on or off, change the sleep window or choose the camera '
-      + "a child's sleep is measured from. Your other changes were not saved.";
+      + "a child's sleep is measured from, or hold alerts until asleep. Your other changes were not saved.";
     putSpy = vi.spyOn(api, 'put').mockRejectedValue(Object.assign(new Error(reason), { status: 403 }));
     const { user } = mount({ who: CAREGIVER });
     await user.click(await screen.findByRole('button', { name: 'Save changes' }));

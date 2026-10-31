@@ -31,7 +31,7 @@ const { default: childrenRouter } = await import('../src/routes/children.js');
 const KID = 'kid-role';
 const STORED = { name: 'Original Name', start: '19:30', end: '06:45' };
 const REFUSED = 'Only an admin can turn sleep tracking on or off, change the sleep window or choose the camera '
-  + "a child's sleep is measured from. Your other changes were not saved.";
+  + "a child's sleep is measured from, or hold alerts until asleep. Your other changes were not saved.";
 
 let server;
 let adminToken;

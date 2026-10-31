@@ -230,7 +230,6 @@ function handleMotionMessage(topic, str) {
       continue;
     }
     if (shouldHold(cam)) {
-      logger.info(`[mqtt] motion held for camera ${cam.id}`);
       continue;
     }
     motionLastAlert.set(cam.id, now);

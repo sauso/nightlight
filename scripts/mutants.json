@@ -24659,5 +24659,23 @@
     "expect": "killed",
     "tests": ["alert-hold.test.js"],
     "namePattern": "#919 lead margin"
+  },
+  {
+    "label": "#919 frame-diff hold checked before camera schedule",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "inActiveWindow(camera) && !shouldHold(camera)",
+    "replace": "!shouldHold(camera) && inActiveWindow(camera)",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "#919 snoozed frame-diff motion"
+  },
+  {
+    "label": "#919 sound hold checked before camera schedule",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "inActiveWindow(camera) && !shouldHold(camera)",
+    "replace": "!shouldHold(camera) && inActiveWindow(camera)",
+    "expect": "killed",
+    "tests": ["sound-digital-silence.test.js"],
+    "namePattern": "#919 snoozed sound"
   }
 ]

@@ -16,6 +16,7 @@ export function shouldHold(camera, nowMs = Date.now()) {
     if (!row?.child_id || row.hold_alerts_until_asleep !== 1) return false;
     const childId = row.child_id;
     const asleep = isChildAsleep(childId);
+    // #919: belt and braces, fail open: an unarmed watcher also has no window key below.
     if (asleep !== false) return false;
     const key = childWindowKeyNow(childId);
     if (key === null) return false;
@@ -39,3 +40,5 @@ export function shouldHold(camera, nowMs = Date.now()) {
 }
 
 export function _reset() { firstHeld.clear(); }
+// Test-only snapshot: prove an ineligible alert never starts a child's clock.
+export function _state() { return new Map(firstHeld); }

@@ -54,7 +54,7 @@ const { flushActivity, onMinuteFlushed, _resetActivityTrackerForTests } = await 
 const { startSoundDetector, stopSoundDetector } = await import('../src/lib/soundDetector.js');
 const { _setObservationClockFactoryForTests } = await import('../src/lib/observationClock.js');
 const { handleMinute, _state } = await import('../src/lib/wakeWatcher.js');
-const { _reset: resetAlertHold } = await import('../src/lib/alertHold.js');
+const { _reset: resetAlertHold, _state: holdState } = await import('../src/lib/alertHold.js');
 const { createSoundAnalyser, marginDb } = await import('../src/lib/soundBaseline.js');
 
 // The receipt time the stub clock hands out: the mocked Date, unless a test plants another (C2's minute boundary).
@@ -176,6 +176,29 @@ test('#919 held sound does not consume analyser cooldown and alerts after asleep
   await settle();
   assert.equal(rowsFor('detection_events', cam.id).length, 1, 'released sound remained in cooldown');
   _state().delete(cam.id);
+});
+
+test('#919 snoozed sound does not start the hold clock', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: T0 });
+  const childId = 'sound-snoozed-child';
+  makeChild(db, { id: childId, start: '11:00', end: '13:00' });
+  db.prepare('UPDATE children SET hold_alerts_until_asleep = 1 WHERE id = ?').run(childId);
+  const cam = soundCam('sound-snoozed', { childId });
+  db.prepare('UPDATE cameras SET alerts_snoozed_until = ? WHERE id = ?').run(T0 + 5 * 60_000, cam.id);
+  resetAlertHold();
+  const proc = await start(cam);
+  t.after(() => stopSoundDetector(cam.id));
+  deliver(t, proc, [...rep(30, AMBIENT), ...rep(30, LOUD)], T0);
+  await settle();
+  assert.deepEqual(rowsFor('detection_events', cam.id), [], 'snoozed sound alerted');
+  assert.equal(holdState().has(childId), false, 'snoozed sound started the hold clock');
+
+  db.prepare('UPDATE cameras SET alerts_snoozed_until = NULL WHERE id = ?').run(cam.id);
+  const reopenedAt = T0 + 5 * 60_000;
+  deliver(t, proc, rep(20, LOUD), reopenedAt); // the stream gap clears the 20-window confirm history
+  await settle();
+  assert.deepEqual(rowsFor('detection_events', cam.id), [], 'first eligible sound was not held');
+  assert.equal(holdState().get(childId)?.firstAt, reopenedAt + 19 * STEP_MS, 'the hold clock did not start at the first eligible sound');
 });
 
 test('#453 C2: a stream of nothing but digital silence is a quiet room from its first window: stored, logged, never alerted', async (t) => {
