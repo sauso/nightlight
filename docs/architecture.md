@@ -393,6 +393,24 @@ whose own witness fails is taken by the scan but never cuts. With no such exit t
 skipped settling tail and a later departure inside the 150-minute window can change, and its wake, metrics, marker,
 `wake_unconfirmed` and child-out interval move together. The stored scoring-context rules version becomes `'5'`.
 
+**The ESPHome sensor shadow** (#917, follow-up to #506; `SCORING_ALGO` '6'; tests in
+`backend/test/sleep-sensor-shadow.test.js`). `computeNight` is now a thin wrapper: it reads the clock once, runs the
+night (`computeNightPass`, the old body) and then, for a completed night whose pass reached the analysis, asks
+`lib/sleepSensor.js` for the child's per-minute "a person's vital signs at the bed" values over the pass's own minute
+origin and evidence cutoff. `sensorMinutesFor` is the ONLY sleep-side reader of the `esphome_*` tables and only
+SELECTs (`esphome-boundaries.test.js` pins both). Entities are taken by `child_id` in every epoch (retired ones too),
+roles by `guessEsphomeCategory` (now `lib/esphomeRoles.js`, re-exported by the manager), vital signs and distance
+paired per device. When the child has heart-rate or breathing-rate rows, ONE second pass of the same night runs with
+the same clock and `context` and no timeline, in which the departure scan also sets aside an exit with valid vital
+signs in at least 6 of the 10 minutes after it, through the settling-tail guard's own branch (fallback, `settlingSkips`
+for the #618 hand-back, smaller `dt`); `departureCutIdx` and `detectMidnightEpisodes` ignore it. The real result keeps
+every key it had and gains two (null by default, in `base`): `wake_at_sensor` (the second pass's `wake_at` when it
+scored `ok`) and `sensor_rejects` (distinct exit rows set aside), stored by `upsertNight` as nullable
+`sleep_nights` columns (guarded `ALTER`s, NULL on older rows). Nothing reads them for a wake, figure, push or alert;
+`applyCorrection` nulls them on a night whose wake a parent changed, and so does "no one was in the bed". A failing read or second pass leaves both
+null and logs a fixed sentence; #700's history-read counter is restored after the shadow. The rules version becomes
+`'6'` because the returned object changed, although no reported number moved (A/B on both databases).
+
 **The admin Recompute is one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the
 dialog in `frontend/src/components/RecomputeNight.jsx`). `GET /api/children/:id/sleep/:date?context=stored` reads the
 row's `scoring_context` and parses it (no row, `NULL` or unparseable: `400` with `reason: 'no_stored_context'`, never a

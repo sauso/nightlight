@@ -308,6 +308,8 @@ test('a final legacy NULL row is left alone by the nightly job, and gains a cont
 // #618 (the #509 veto's hand-back) bumped it to '4' with no change here: no exit is adopted on this night (its shadow
 // wake is the movement-only one), so the veto never runs on it. #914 (the settling-tail witness stops at the next
 // departure) bumped it to '5' with no change here: the night has no `into_bed`, so that guard's witness is never asked.
+// #917 (the ESPHome sensor shadow) added `wake_at_sensor: null` and `sensor_rejects: null` (added keys: this child has
+// no ESPHome rows, so no shadow runs and nothing else moves) and bumped SCORING_ALGO to '6'.
 const GOLDEN = {
   night_date: '2026-07-01',
   window_start: '2026-07-01 09:30:00',
@@ -331,6 +333,8 @@ const GOLDEN = {
   coverage_minutes: 690,
   wake_unconfirmed: null,
   sound_discounted_minutes: 0,
+  wake_at_sensor: null,
+  sensor_rejects: null,
   climate: {
     temp_avg: 21.5, temp_min: 21.5, temp_max: 21.5, temp_samples: 1,
     humidity_avg: 48, humidity_min: 48, humidity_max: 48, humidity_samples: 1,

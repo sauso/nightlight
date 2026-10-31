@@ -2,6 +2,7 @@ import db from '../db.js';
 import { logger } from './logger.js';
 import { safeInterval, reportGuardFailure } from './processGuards.js';
 import { openDevice, classifyEsphomeError } from './esphomeTransport.js';
+import { guessEsphomeCategory } from './esphomeRoles.js';
 
 const MAX_DEVICES = 8;
 const MAX_ENTITIES = 200;
@@ -326,15 +327,9 @@ export function esphomeStatus() {
   });
 }
 
-export function guessEsphomeCategory(entity) {
-  const cls = String(entity.device_class || '').toLowerCase();
-  if (['occupancy', 'illuminance', 'distance', 'temperature', 'humidity'].includes(cls)) return cls;
-  const name = `${entity.name || ''} ${entity.object_id || ''}`.toLowerCase();
-  if (/heart.?rate/.test(name)) return 'heart_rate';
-  if (/(respirat\w*|breath).?rate/.test(name)) return 'respiratory_rate';
-  if (/target.?number|num.?targets/.test(name)) return 'target_number';
-  return null;
-}
+// Moved to lib/esphomeRoles.js (#917) so the sleep shadow can read roles without importing this module; re-exported
+// here unchanged for this file's callers and tests.
+export { guessEsphomeCategory };
 
 export function getEsphomeEntities(deviceId) {
   const live = devices.get(Number(deviceId));

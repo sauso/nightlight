@@ -527,6 +527,19 @@ than that is not taken as the morning wake on its own.
   was already sent in a notification is never cleared back to "still asleep" (a Recompute of it is
   refused, as before).
 
+### A radar sensor's opinion is stored, not used
+
+If a child has an [ESPHome](esphome.md) radar sensor that reports a heart rate or a breathing rate, each
+finished night also gets a **second wake time worked out with the sensor's help**: a *got out of bed*
+followed by a person's heartbeat or breathing at the bed for most of the next 10 minutes is set aside, as
+if the camera had imagined it. That time is **stored for comparison only**. The wake time you see, every
+other figure, the morning notification and the alerts stay exactly as the camera works them out, with or
+without a sensor. The reason: the sensor cannot tell a child from a parent standing at the bed, and that
+case moved real wake times more than an hour later when it was tried. The night's API answers carry the
+two added fields `wake_at_sensor` and `sensor_rejects` (empty without a sensor, and on a night whose wake
+you corrected). How it works, how to compare it with your morning reviews, and its limits:
+[The sleep shadow](esphome.md#the-sleep-shadow-for-comparison-only).
+
 ### When the motion camera samples
 
 The movement timeline comes from a frame-by-frame motion leg that
