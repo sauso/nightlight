@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-11-01
+
 ### Added
 
 - **Hold motion and sound alerts until asleep (#919).** An admin can turn this on per child under Track sleep; it is off by default. During the sleep window, alerts are dropped until the watcher sees about 15 quiet minutes or 45 minutes pass after the first held alert. Held alerts are not sent later; camera-offline alerts continue. The 45 minutes is a design choice, not measured. A server restart can allow another 45 minutes of holding. See [Notifications](docs/notifications.md#hold-alerts-until-asleep).

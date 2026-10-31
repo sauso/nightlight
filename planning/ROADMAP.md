@@ -942,6 +942,18 @@ no clock. Every threshold in it came from ONE house's runs (Stage 1: night, over
 - still owed: the worst-case load run (4 fakecam cameras at 30 fps, main stream only, event-loop lag p99
   and CPU with the clock on and off — the build's microbenchmark is a simulation, not this).
 
+**Open after 0.45.0 (2026-11-01):**
+- **ESPHome radar sensor, promotion decision (#917) — `HELD`.** 0.45.0 stores a shadow wake (`wake_at_sensor`,
+  `sensor_rejects`) beside each completed night and changes nothing shown. Promote it only with at least 15
+  reviewed nights, at least 5 of them with an adult at the bed right after a real exit, and none made worse
+  (the bar is in `docs/esphome.md`, "The sleep shadow"). Waits on nights and on the owner's morning reviews.
+- **Camera placement trial (#644) — `HELD`.** The docs half shipped in 0.36.0. The trial compares transition
+  accuracy and the empty-bed scan before and after a camera moves to the top-down view; both cameras of the
+  one install moved on 2026-10-29, so the earliest useful read is about three weeks later. A bed zone and the
+  room baselines change with a move, so before and after are not directly comparable: state that in the result.
+- **Late or missing morning wake (#700, #618 follow-ups) — `HELD`** until the shadow nights and reviews above exist.
+- **A sleep window of almost 24 hours never closes the wake watcher's gate (#922) — `IDEA`,** low priority.
+
 ## 2. Specced, not built
 
 ### 2.1 Sub-stream sanity check — warn when "Low" isn't actually low — `SPECCED`
