@@ -153,6 +153,7 @@ db.exec(`
     camera_name TEXT NOT NULL,
     type TEXT NOT NULL,
     detail TEXT,
+    protected INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_detection_events_created_at ON detection_events(created_at);
@@ -370,6 +371,7 @@ db.exec(`
     thumb_path TEXT,
     bytes INTEGER,
     triggered_by TEXT,
+    protected INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_recordings_child ON recordings(child_id, created_at DESC);
@@ -920,6 +922,10 @@ if (!detectionEventsColumns.includes('clip_status')) {
   db.exec('ALTER TABLE detection_events ADD COLUMN clip_duration_s INTEGER');
   db.exec('ALTER TABLE detection_events ADD COLUMN clip_bytes INTEGER');
 }
+// #932: retain a protected alert and its files through automatic history pruning.
+if (!detectionEventsColumns.includes('protected')) {
+  db.exec('ALTER TABLE detection_events ADD COLUMN protected INTEGER NOT NULL DEFAULT 0');
+}
 
 // Outside-the-bed motion channel on activity_samples (sleep tracking). When a camera has a bed zone,
 // the motion detector now also measures movement OUTSIDE that zone — a parent coming in, or the child
@@ -961,6 +967,9 @@ const recordingsColumns = db.prepare('PRAGMA table_info(recordings)').all().map(
 if (!recordingsColumns.includes('kind')) {
   db.exec("ALTER TABLE recordings ADD COLUMN kind TEXT NOT NULL DEFAULT 'manual'");
   db.exec('CREATE INDEX IF NOT EXISTS idx_recordings_kind ON recordings(kind, created_at DESC)');
+}
+if (!recordingsColumns.includes('protected')) {
+  db.exec('ALTER TABLE recordings ADD COLUMN protected INTEGER NOT NULL DEFAULT 0');
 }
 
 // Onset/wake derived from the out-of-bed / into-bed transition events (bed_transitions below). These

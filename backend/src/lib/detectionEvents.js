@@ -50,20 +50,21 @@ const insertStmt = db.prepare(
   `INSERT INTO detection_events (camera_id, camera_name, type, detail)
    VALUES (@camera_id, @camera_name, @type, @detail)`
 );
-const pruneByAgeStmt = db.prepare(`DELETE FROM detection_events WHERE created_at < datetime('now', ?)`);
+// #932: the six pruning queries must agree so a protected row never loses its MP4 or snapshot.
+const pruneByAgeStmt = db.prepare(`DELETE FROM detection_events WHERE protected = 0 AND created_at < datetime('now', ?)`);
 const pruneByCountStmt = db.prepare(
-  `DELETE FROM detection_events WHERE id NOT IN (
-     SELECT id FROM detection_events ORDER BY id DESC LIMIT ?
+  `DELETE FROM detection_events WHERE protected = 0 AND id NOT IN (
+     SELECT id FROM detection_events WHERE protected = 0 ORDER BY id DESC LIMIT ?
    )`
 );
 // The same rows the two prunes above are about to delete, restricted to ones that actually have
 // a stored image, so we can remove their JPEGs and not orphan files on disk.
 const agedWithSnapshotStmt = db.prepare(
-  `SELECT id FROM detection_events WHERE created_at < datetime('now', ?) AND snapshot = 1`
+  `SELECT id FROM detection_events WHERE protected = 0 AND created_at < datetime('now', ?) AND snapshot = 1`
 );
 const overCountWithSnapshotStmt = db.prepare(
-  `SELECT id FROM detection_events WHERE snapshot = 1 AND id NOT IN (
-     SELECT id FROM detection_events ORDER BY id DESC LIMIT ?
+  `SELECT id FROM detection_events WHERE protected = 0 AND snapshot = 1 AND id NOT IN (
+     SELECT id FROM detection_events WHERE protected = 0 ORDER BY id DESC LIMIT ?
    )`
 );
 // Same two prunes, restricted to rows that carry a recorded clip, so the (much larger) MP4 files are
@@ -77,11 +78,11 @@ const overCountWithSnapshotStmt = db.prepare(
 // what an admin controls, and this keeps a clip row and its MP4 from outliving each other whatever
 // the caps are set to.
 const agedWithClipStmt = db.prepare(
-  `SELECT clip_path FROM detection_events WHERE created_at < datetime('now', ?) AND clip_path IS NOT NULL`
+  `SELECT clip_path FROM detection_events WHERE protected = 0 AND created_at < datetime('now', ?) AND clip_path IS NOT NULL`
 );
 const overCountWithClipStmt = db.prepare(
-  `SELECT clip_path FROM detection_events WHERE clip_path IS NOT NULL AND id NOT IN (
-     SELECT id FROM detection_events ORDER BY id DESC LIMIT ?
+  `SELECT clip_path FROM detection_events WHERE protected = 0 AND clip_path IS NOT NULL AND id NOT IN (
+     SELECT id FROM detection_events WHERE protected = 0 ORDER BY id DESC LIMIT ?
    )`
 );
 
@@ -181,6 +182,17 @@ export function getEventClipFile(id) {
   return jailedMediaFile(row.clip_path, CLIPS_DIR);
 }
 
+export function isProtectedEvent(id) {
+  return db.prepare('SELECT protected FROM detection_events WHERE id = ?').get(id)?.protected === 1;
+}
+
+// The playback lookup also checks that the path names an existing, safe file.
+export function setEventProtected(id, value) {
+  if (!getEventClipFile(id)) return false;
+  return db.prepare("UPDATE detection_events SET protected = ? WHERE id = ? AND clip_status = 'ready'")
+    .run(Number(value), id).changes > 0;
+}
+
 // --- Retention accounting (lib/clipStorage.js sweeps against these). Deleting a clip clears its
 // clip_* columns but KEEPS the alert row + snapshot — the event history is preserved, only the video
 // goes. ---
@@ -188,15 +200,20 @@ const clearClipRowStmt = db.prepare(
   'UPDATE detection_events SET clip_status = NULL, clip_path = NULL, clip_duration_s = NULL, clip_bytes = NULL WHERE id = ?'
 );
 const expiredClipsStmt = db.prepare(
-  "SELECT id, clip_path FROM detection_events WHERE clip_path IS NOT NULL AND created_at < datetime('now', ?)"
+  "SELECT id, clip_path FROM detection_events WHERE protected = 0 AND clip_path IS NOT NULL AND created_at < datetime('now', ?)"
 );
 const readyClipsOldestFirstStmt = db.prepare(
-  "SELECT id, clip_path, clip_bytes FROM detection_events WHERE clip_status = 'ready' AND clip_path IS NOT NULL ORDER BY id ASC"
+  "SELECT id, clip_path, clip_bytes FROM detection_events WHERE protected = 0 AND clip_status = 'ready' AND clip_path IS NOT NULL ORDER BY id ASC"
 );
 const clipTotalsStmt = db.prepare(
-  "SELECT COUNT(*) AS count, COALESCE(SUM(clip_bytes), 0) AS bytes FROM detection_events WHERE clip_status = 'ready' AND clip_path IS NOT NULL"
+  "SELECT COUNT(*) AS count, COALESCE(SUM(clip_bytes), 0) AS bytes FROM detection_events WHERE protected = 0 AND clip_status = 'ready' AND clip_path IS NOT NULL"
 );
+// #932: protected bytes must be visible, but excluded from the cap shared with the preview.
+export function getProtectedAlertTotals() {
+  return db.prepare("SELECT COUNT(*) AS count, COALESCE(SUM(clip_bytes), 0) AS bytes FROM detection_events WHERE protected = 1 AND clip_status = 'ready' AND clip_path IS NOT NULL").get();
+}
 
+// #932: every automatic selector below excludes protected clips; the preview imports these same queries.
 // Clips whose event is older than `days`, for age-based retention. Returns [{id, clip_path}].
 export function getExpiredClips(days) {
   return expiredClipsStmt.all(`-${days} days`);
@@ -205,7 +222,7 @@ export function getExpiredClips(days) {
 export function getReadyClipsOldestFirst() {
   return readyClipsOldestFirstStmt.all();
 }
-// { count, bytes } of ready clips — for the used-storage display.
+// { count, bytes } of unprotected ready clips — for the cap and used-storage display.
 export function getClipStorageTotals() {
   return clipTotalsStmt.get();
 }
@@ -229,12 +246,21 @@ export function deleteClipForEvent(id) {
 export function getClips(limit = 2000) {
   return db
     .prepare(
-      `SELECT id, camera_id, camera_name, type, detail, created_at, snapshot, clip_duration_s, clip_bytes
+      `SELECT id, camera_id, camera_name, type, detail, created_at, snapshot, clip_duration_s, clip_bytes, protected
        FROM detection_events
        WHERE clip_status = 'ready' AND clip_path IS NOT NULL
        ORDER BY id DESC LIMIT ?`
     )
     .all(Math.min(limit, 5000));
+}
+
+// Protection outlives the recent-list limits; keep every protected alert reachable.
+export function getProtectedClips() {
+  return db.prepare(`SELECT id, camera_id, camera_name, type, detail, created_at, snapshot,
+                            clip_duration_s, clip_bytes, protected
+                       FROM detection_events
+                      WHERE protected = 1 AND clip_status = 'ready' AND clip_path IS NOT NULL
+                      ORDER BY id DESC`).all();
 }
 
 // Fire-and-forget: a logging failure must never take down the detector loop. Returns the
@@ -258,11 +284,18 @@ export function getRecentDetectionEvents(limit = 200) {
 
 // Wipe the whole "Recent alerts" history (admin action). Returns how many rows were removed.
 export function clearDetectionEvents() {
-  const changes = db.prepare('DELETE FROM detection_events').run().changes;
-  // Best-effort: remove every stored JPEG too, so a cleared history leaves no images behind.
+  // #932: only unprotected rows are cleared. Their JPEGs and old orphan JPEGs can go; a
+  // protected alert's snapshot must survive even though it shares this directory.
+  const doomed = db.prepare('SELECT id FROM detection_events WHERE protected = 0').all();
+  const changes = db.prepare('DELETE FROM detection_events WHERE protected = 0').run().changes;
+  for (const { id } of doomed) unlinkSnapshot(id);
   try {
     for (const name of fs.readdirSync(SNAPSHOT_DIR)) {
-      if (name.endsWith('.jpg')) fs.rm(path.join(SNAPSHOT_DIR, name), { force: true }, () => {}); // app-only: snapshots live in private/
+      if (!name.endsWith('.jpg')) continue;
+      const id = /^\d+\.jpg$/.test(name) ? Number(name.slice(0, -4)) : null;
+      if (!id || !db.prepare('SELECT 1 FROM detection_events WHERE id = ? AND protected = 1').get(id)) {
+        fs.rm(path.join(SNAPSHOT_DIR, name), { force: true }, () => {}); // app-only: snapshots live in private/
+      }
     }
   } catch {
     // Directory missing / unreadable — nothing to clean.

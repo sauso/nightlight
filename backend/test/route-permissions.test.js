@@ -153,7 +153,9 @@ const ROUTE_GATES = {
   'GET /api/cameras/alerts': SIGNED_IN,
   'DELETE /api/cameras/alerts': ADMIN, //                       the whole alert history
   'DELETE /api/cameras/alerts/:id/clip': ADMIN, //              #538: one alert's clip, irreversibly
+  'PUT /api/cameras/alerts/:id/protected': ADMIN,
   'GET /api/cameras/clips': SIGNED_IN,
+  'GET /api/cameras/clips/protected': ADMIN,
   'GET /api/cameras/:id/sensor-history': SIGNED_IN,
   'GET /api/cameras/:id/activity-history': SIGNED_IN,
   'GET /api/cameras/:id/recording-readiness': ADMIN, //        #394: read-only status for the camera settings page, which is admin-only
@@ -217,6 +219,7 @@ const ROUTE_GATES = {
   'GET /api/recordings/child/:childId': SIGNED_IN,
   'GET /api/recordings/:id/video': MEDIA,
   'GET /api/recordings/:id/thumb': MEDIA,
+  'PUT /api/recordings/:id/protected': ADMIN,
   'DELETE /api/recordings/:id': ADMIN, //               #552: a manual recording or a wake clip; no retention for the former
 
   'GET /manifest.webmanifest': PUBLIC, //    the PWA manifest; a browser fetches it without credentials

@@ -74,7 +74,7 @@ test('mixed ids remove exactly two clips and keep all event rows', async () => {
 
   const result = await post({ ids: [first.id, 999999999, noClipId, 'garbage', second.id, first.id] });
   assert.equal(result.status, 200);
-  assert.deepEqual(result.body, { deleted: 2 });
+  assert.deepEqual(result.body, { deleted: 2, skipped_protected: 0 });
   assertClipCleared(first);
   assertClipCleared(second);
   assert.equal(fs.existsSync(unrelated.file), true);
@@ -107,7 +107,7 @@ test('missing, non-array and empty ids are no-ops', async () => {
   ]) {
     const result = await post(body);
     assert.equal(result.status, 200);
-    assert.deepEqual(result.body, { deleted: 0 });
+    assert.deepEqual(result.body, { deleted: 0, skipped_protected: 0 });
     assert.equal(fs.existsSync(clip.file), true);
     assert.equal(fs.existsSync(clip.thumb), true);
     assert.deepEqual(row(clip.id), beforeRow);
@@ -127,9 +127,21 @@ test('a stored traversal path cannot delete a file in a sibling directory', asyn
 
   const result = await post({ ids: [id] });
   assert.equal(result.status, 200);
-  assert.deepEqual(result.body, { deleted: 1 });
+  assert.deepEqual(result.body, { deleted: 1, skipped_protected: 0 });
   assert.equal(fs.readFileSync(outsideFile, 'utf8'), 'outside clip');
   assert.equal(fs.readFileSync(outsideThumb, 'utf8'), 'outside thumbnail');
   assert.ok(row(id), 'event row must remain');
   assert.equal(row(id).clip_path, null);
+});
+
+test('bulk delete skips a protected clip and still removes an unprotected clip', async () => {
+  const locked = makeClip('protected');
+  const open = makeClip('open');
+  db.prepare('UPDATE detection_events SET protected = 1 WHERE id = ?').run(locked.id);
+  const result = await post({ ids: [locked.id, open.id] });
+  assert.deepEqual(result.body, { deleted: 1, skipped_protected: 1 });
+  assert.equal(row(locked.id).protected, 1);
+  assert.ok(fs.existsSync(locked.file));
+  assert.ok(fs.existsSync(locked.thumb));
+  assertClipCleared(open);
 });

@@ -577,8 +577,8 @@
   {
     "label": "★ pruneWakeClips: sweeps MANUAL keepsakes too",
     "file": "backend/src/lib/recordings.js",
-    "find": "        WHERE kind = 'wake' AND created_at < datetime('now', ?)",
-    "replace": "        WHERE created_at < datetime('now', ?)",
+    "find": "        WHERE kind = 'wake' AND protected = 0 AND created_at < datetime('now', ?)",
+    "replace": "        WHERE protected = 0 AND created_at < datetime('now', ?)",
     "expect": "killed",
     "tests": [
       "recordings-lifecycle.test.js"
@@ -946,8 +946,8 @@
   {
     "label": "routes/recordings: DELETE reports success for an id that does not exist",
     "file": "backend/src/routes/recordings.js",
-    "find": "  if (!row) return res.status(404).json({ error: 'No recording for this id' });\r\n  deleteRecording(req.params.id);",
-    "replace": "  deleteRecording(req.params.id);",
+    "find": "  if (!row) return res.status(404).json({ error: 'No recording for this id' });\r\n  // #932: direct deletion needs an explicit unlock; child/camera purge still removes all owned data.",
+    "replace": "  // #932: direct deletion needs an explicit unlock; child/camera purge still removes all owned data.",
     "expect": "killed",
     "tests": [
       "recordings-routes.test.js"
@@ -24695,5 +24695,104 @@
     "expect": "killed",
     "tests": ["sound-digital-silence.test.js"],
     "namePattern": "#919 snoozed sound"
+  },
+  {
+    "label": "#932 expired alert selection ignores protection",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "WHERE protected = 0 AND clip_path IS NOT NULL AND created_at < datetime('now', ?)",
+    "replace": "WHERE clip_path IS NOT NULL AND created_at < datetime('now', ?)",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "retention age skips a protected clip"
+  },
+  {
+    "label": "#932 size eviction includes protected alert",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "WHERE protected = 0 AND clip_status = 'ready' AND clip_path IS NOT NULL ORDER BY id ASC",
+    "replace": "WHERE clip_status = 'ready' AND clip_path IS NOT NULL ORDER BY id ASC",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "cap total and eviction exclude protected bytes"
+  },
+  {
+    "label": "#932 cap total includes protected alert bytes",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "WHERE protected = 0 AND clip_status = 'ready' AND clip_path IS NOT NULL\"",
+    "replace": "WHERE clip_status = 'ready' AND clip_path IS NOT NULL\"",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "cap total and eviction exclude protected bytes"
+  },
+  {
+    "label": "#932 backstop age deletes protected alert",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "DELETE FROM detection_events WHERE protected = 0 AND created_at < datetime('now', ?)",
+    "replace": "DELETE FROM detection_events WHERE created_at < datetime('now', ?)",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "backstop age keeps protected row"
+  },
+  {
+    "label": "#932 backstop count deletes protected alert",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "DELETE FROM detection_events WHERE protected = 0 AND id NOT IN (",
+    "replace": "DELETE FROM detection_events WHERE id NOT IN (",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "backstop count excludes protected rows"
+  },
+  {
+    "label": "#932 clear history deletes protected rows",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "DELETE FROM detection_events WHERE protected = 0').run().changes",
+    "replace": "DELETE FROM detection_events').run().changes",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "clear history retains protected alert"
+  },
+  {
+    "label": "#932 clear history removes protected snapshots",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "if (!id || !db.prepare('SELECT 1 FROM detection_events WHERE id = ? AND protected = 1').get(id)) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "clear history retains protected alert"
+  },
+  {
+    "label": "#932 wake retention includes protected clips",
+    "file": "backend/src/lib/recordings.js",
+    "find": "WHERE kind = 'wake' AND protected = 0 AND created_at < datetime('now', ?)",
+    "replace": "WHERE kind = 'wake' AND created_at < datetime('now', ?)",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "wake retention deletes only unprotected"
+  },
+  {
+    "label": "#932 alert single delete ignores protection",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (isProtectedEvent(req.params.id)) return res.status(409).json({ error: 'This clip is protected. Unprotect it first.' });",
+    "replace": "if (false) return res.status(409).json({ error: 'This clip is protected. Unprotect it first.' });",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "admin protect routes validate role"
+  },
+  {
+    "label": "#932 recording single delete ignores protection",
+    "file": "backend/src/routes/recordings.js",
+    "find": "if (row.protected) return res.status(409).json({ error: 'This clip is protected. Unprotect it first.' });",
+    "replace": "if (false) return res.status(409).json({ error: 'This clip is protected. Unprotect it first.' });",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "admin protect routes validate role"
+  },
+  {
+    "label": "#932 bulk delete skips protected alerts",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (isProtectedEvent(id)) { skipped_protected++; continue; }",
+    "replace": "if (false) { skipped_protected++; continue; }",
+    "expect": "killed",
+    "tests": ["clips-delete-route.test.js"],
+    "namePattern": "bulk delete skips a protected clip"
   }
 ]

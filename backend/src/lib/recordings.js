@@ -435,13 +435,32 @@ async function captureWakeClipInner(camera, wakeStartMs) {
 export function listChildWakeClips(childId, fromSqlUtc, toSqlUtc) {
   return db
     .prepare(
-      `SELECT id, camera_id, started_at, duration_s, bytes
+      `SELECT id, camera_id, started_at, duration_s, bytes, protected
          FROM recordings
         WHERE child_id = ? AND kind = 'wake' AND status = 'ready'
           AND started_at >= ? AND started_at < ?
         ORDER BY started_at ASC`
     )
     .all(childId, fromSqlUtc, toSqlUtc);
+}
+
+// #932: the protected list is unbounded by the sleep-detail time window and includes display names.
+export function listProtectedWakeClips() {
+  return db.prepare(`SELECT r.id, r.camera_id, r.child_id, r.started_at, r.created_at,
+                            r.duration_s, r.bytes, r.protected, c.name AS camera_name,
+                            ch.name AS child_name
+                       FROM recordings r
+                       LEFT JOIN cameras c ON c.id = r.camera_id
+                       LEFT JOIN children ch ON ch.id = r.child_id
+                      WHERE r.kind = 'wake' AND r.status = 'ready' AND r.protected = 1
+                      ORDER BY r.created_at DESC, r.id DESC`).all();
+}
+
+export function setWakeClipProtected(id, value) {
+  const row = db.prepare("SELECT id FROM recordings WHERE id = ? AND kind = 'wake' AND status = 'ready'").get(id);
+  if (!row || !getRecordingVideoFile(id)) return false;
+  return db.prepare("UPDATE recordings SET protected = ? WHERE id = ? AND kind = 'wake' AND status = 'ready'")
+    .run(Number(value), id).changes > 0;
 }
 
 /**
@@ -453,8 +472,9 @@ export function pruneWakeClips() {
   if (retentionDays === 0) return 0; // 0 = keep forever, same idiom as clip retention
   const rows = db
     .prepare(
+      // #932: retention is automatic, so it must leave an admin-protected wake clip alone.
       `SELECT id FROM recordings
-        WHERE kind = 'wake' AND created_at < datetime('now', ?)`
+        WHERE kind = 'wake' AND protected = 0 AND created_at < datetime('now', ?)`
     )
     .all(`-${retentionDays} days`);
   let removed = 0;
@@ -471,6 +491,11 @@ export function wakeClipStats() {
          FROM recordings WHERE kind = 'wake' AND status = 'ready'`
     )
     .get();
+}
+
+export function protectedWakeClipStats() {
+  return db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(bytes), 0) AS bytes
+                       FROM recordings WHERE kind = 'wake' AND status = 'ready' AND protected = 1`).get();
 }
 
 // The Recordings card on a child's page.
@@ -492,7 +517,7 @@ export function listChildRecordings(childId, limit = 50) {
   return db
     .prepare(
       `SELECT r.id, r.camera_id, r.child_id, r.status, r.started_at, r.ended_at, r.duration_s, r.bytes,
-              r.created_at, c.name AS camera_name
+              r.created_at, r.protected, c.name AS camera_name
          FROM recordings r LEFT JOIN cameras c ON c.id = r.camera_id
         WHERE r.child_id = ? AND r.status IN ('ready', 'failed') AND r.kind = 'manual'
         ORDER BY r.created_at DESC LIMIT ?`

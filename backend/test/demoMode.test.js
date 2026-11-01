@@ -49,6 +49,9 @@ before(async () => {
     res.json({ ok: true });
   });
   router.get('/api/cameras', record('list-cameras'));
+  router.get('/api/cameras/clips/protected', record('protected-clips'));
+  router.put('/api/cameras/alerts/:id/protected', record('protect-alert'));
+  router.put('/api/recordings/:id/protected', record('protect-wake'));
   router.get('/api/health', record('health'));
 
   // Mounted at '/' with demoGuard as global middleware, matching index.js's real registration
@@ -281,6 +284,15 @@ describe('demoGuard — DEMO_MODE=true, ordinary reads pass through', () => {
     const res = await call(`${server.url}/api/health`);
     assert.equal(res.status, 200);
     assert.equal(hits.health, 1);
+  });
+
+  test('protected clip list is a read, while both protect writes are blocked', async () => {
+    assert.equal((await call(`${server.url}/api/cameras/clips/protected`)).status, 200);
+    assert.equal(hits['protected-clips'], 1);
+    assert.equal((await call(`${server.url}/api/cameras/alerts/1/protected`, { method: 'PUT' })).status, 403);
+    assert.equal((await call(`${server.url}/api/recordings/1/protected`, { method: 'PUT' })).status, 403);
+    assert.equal(hits['protect-alert'], undefined);
+    assert.equal(hits['protect-wake'], undefined);
   });
 });
 

@@ -8,6 +8,7 @@ import {
   getExpiredClips,
   getReadyClipsOldestFirst,
   getClipStorageTotals,
+  getProtectedAlertTotals,
   deleteClip,
 } from './detectionEvents.js';
 
@@ -149,7 +150,10 @@ function getRetention() {
 
 // Used storage + where it lives, for the Settings display.
 export function clipStorageStats() {
+  // #932: usedBytes/clipCount are the cap population: only unprotected ready alert clips.
+  // Wake and protected totals are additional figures; the existing wake subtotal still includes all wake clips.
   const totals = getClipStorageTotals();
+  const protectedAlerts = getProtectedAlertTotals();
   // On-demand recordings live in their own table and are NEVER swept by the retention above, so they
   // don't appear in getClipStorageTotals() — report them separately rather than under-stating what
   // recording is actually using on disk. Queried directly rather than imported from lib/recordings.js,
@@ -166,6 +170,7 @@ export function clipStorageStats() {
   const manual = db
     .prepare("SELECT COUNT(*) n, COALESCE(SUM(bytes),0) b FROM recordings WHERE status='ready' AND kind='manual'")
     .get() || { n: 0, b: 0 };
+  const protectedWake = db.prepare("SELECT COUNT(*) n, COALESCE(SUM(bytes),0) b FROM recordings WHERE status='ready' AND kind='wake' AND protected=1").get();
   return {
     recordingCount: rec.n,
     recordingBytes: rec.b,
@@ -176,6 +181,10 @@ export function clipStorageStats() {
     ok: status.ok,
     clipCount: totals.count,
     usedBytes: totals.bytes,
+    protectedAlertClips: protectedAlerts.count,
+    protectedAlertBytes: protectedAlerts.bytes,
+    protectedWakeClips: protectedWake.n,
+    protectedWakeBytes: protectedWake.b,
     freeBytes: freeBytes(),
     ...getRetention(),
   };

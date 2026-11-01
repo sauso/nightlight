@@ -20,6 +20,7 @@ destroy or reconfigure.**
 | Add a child; turn a child's sleep tracking on or off; change their bedtime and wake time; choose the camera their sleep is measured from | No | Yes |
 | Answer the morning sleep review (the review shows who last answered it) | Yes | Yes |
 | Delete an alert clip, a recording or a wake clip | No | Yes |
+| See which clips are protected; protect or unprotect alert and wake clips | See only | Yes |
 | Delete a timelapse | No | Yes |
 | Delete a child and everything recorded for them (nights, reviews, bed transitions, recordings, timelapses) | No | Yes |
 | Change global settings (detection, notifications, providers, recording retention) | No | Yes |

@@ -14,7 +14,7 @@ import {
   releaseRing,
 } from './clipRecorder.js';
 import { effectiveHold, clipHoldOwner } from './ringHolds.js';
-import { markClipPending, setClipReady, setClipFailed } from './detectionEvents.js';
+import { markClipPending, setClipReady, setClipFailed, isProtectedEvent } from './detectionEvents.js';
 import { clipStorageReady, hasMinFreeSpace } from './clipStorage.js';
 
 // Stage 1 recording — the glue between the capture core (clipRecorder.js) and the app:
@@ -220,6 +220,12 @@ export function applyRecordingSettingsChange() {
 // must never disturb the detection/alert pipeline. `at` is the trigger time the clip centres on.
 export function enqueueClip(camera, eventId, at = Date.now()) {
   if (!camera.detect_record_clips || !eventId) return;
+  // #932: ordinary callers supply a fresh event id. A replayed id must not reach extractClip,
+  // which clears an existing MP4 and thumbnail before cutting new output.
+  if (isProtectedEvent(eventId)) {
+    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${eventId} skipped`);
+    return;
+  }
   if (!isSegmenterRunning(camera.id)) {
     // Segmenter should be up whenever recording is on; if it isn't (just enabled / mid-restart), the
     // ring has nothing to cut, so skip rather than produce an empty clip.
@@ -253,6 +259,10 @@ export function enqueueClip(camera, eventId, at = Date.now()) {
 
   queue.push(async () => {
     try {
+      if (isProtectedEvent(eventId)) {
+        if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${eventId} skipped`);
+        return;
+      }
       const res = await extractClip(camera.id, {
         preRollSec,
         postRollSec,

@@ -1,4 +1,5 @@
 import { spawnChild } from './childEnv.js';
+import db from '../db.js';
 import fs from 'fs';
 import path from 'path';
 import { logger, isNoisyMediaLine } from './logger.js';
@@ -640,6 +641,15 @@ export async function extractClip(
   cameraId,
   { preRollSec = 5, postRollSec = 15, at = Date.now(), outBase = String(Date.now()), settleMs = null } = {}
 ) {
+  // #932: this generic cutter removes an existing output name before encoding. A replayed alert id
+  // cannot overwrite a protected clip, even when extractClip is called directly.
+  const protectedOutput = () => /^\d+$/.test(String(outBase)) && !!db.prepare(
+    'SELECT 1 FROM detection_events WHERE id = ? AND camera_id = ? AND protected = 1'
+  ).get(Number(outBase), cameraId);
+  if (protectedOutput()) {
+    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${outBase} skipped`);
+    throw new Error('protected clip output');
+  }
   const entry = segmenters.get(cameraId);
   if (!entry) throw new Error(`no segmenter running for camera ${cameraId}`);
   const ringDir = entry.ringDir;
@@ -670,6 +680,11 @@ export async function extractClip(
   // app-only folder beside it, read-only to the media user (mediaLayout.js).
   const outDir = ensureClipsFolder([safeId], { leaf: true });
   const listDir = ensureClipsFolder([CONCAT_SUBDIR, safeId]);
+
+  if (protectedOutput()) {
+    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${outBase} skipped`);
+    throw new Error('protected clip output');
+  }
 
   // concat demuxer list. Absolute paths + `-safe 0`; single-quote-escape for safety. The names come from
   // selectRingSegments, i.e. only ever `seg-YYYYMMDD-HHMMSS.mkv`, so none can carry a newline or a quote.

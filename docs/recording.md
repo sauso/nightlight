@@ -8,6 +8,7 @@ which is which.
 |---|---|---|---|---|
 | **Automatic clips** | A motion/sound **alert** | Yes — it's an alert | 14 days / 5 GB (both configurable) | On the alert, in the Alerts feed |
 | **Wake clips** | Your child **waking up** | **No — silent by design** | 14 days (configurable) | On the wake-up, in the night's sleep detail |
+| **Protected clips** | An admin protects an alert or wake clip | As for the original clip | Never removed automatically | In the protected clips list |
 | **On-demand recordings** | You pressing **Record** | No | **Forever, until you delete them** | The **Recordings** card on the child's page |
 | **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days — **or forever once you judge one** (either way, gone when the camera or child is removed) | The **Room activity** list in the night's sleep detail, under a row you open (signed-in users only) |
 
@@ -459,6 +460,8 @@ image.
 three lines that never overlap — **Alert clips**, **Manual recordings** and **Wake clips** — plus the total
 of those three and the free space. The *Storage cap (GB)* and *Keep clips for* limits apply to alert clips
 only: manual recordings are kept until you delete them, and wake clips follow *Keep wake clips for*. The
+card also shows protected alert and wake clip space. Protected clips are shown separately and do not
+count toward the alert-clip storage cap. They can still fill the disk, so check the protected total.
 total leaves out timelapses, pictures and the live recording buffer, so it is lower than what the volume
 itself reports as used. If the figures cannot be loaded the card says "Storage details unavailable" and
 offers a Retry button.
@@ -468,6 +471,14 @@ offers a Retry button.
 ## Retention, and what deleting removes
 
 Each kind ages out differently — this is the part most worth reading twice:
+
+An admin can protect a ready alert clip or wake clip. Protection keeps the clip, its thumbnail and
+its alert photo through the age and storage-cap sweeps, the 30-day and 2000-event alert-history limits,
+**Clear alert history**, and wake-clip retention. Record-button recordings are already never swept;
+timelapses cannot be protected. Protected clips remain in their own list even when they are too old
+for the recent lists. Protect a clip before cleanup removes it: protection cannot restore a deleted
+clip. Unprotecting one that is already older than your retention setting lets the next cleanup remove
+it, within 15 minutes for alert clips; wake clips wait for their own cleanup schedule.
 
 - **Automatic clips** are deleted once **either** limit is passed: older than *Keep clips for (days)*,
   or total clip size over *Storage cap (GB)* (oldest first). Set either to **0** to turn that limit off.
@@ -561,7 +572,7 @@ is skipped, so recording can never be the thing that fills your disk.
 
 ### Removing a child or a camera
 
-⚠️ **This is not retention, and nothing here is kept.** Removing a child, or a camera, deletes everything
+⚠️ **This is not retention, and nothing here is kept, including protected clips.** Removing a child, or a camera, deletes everything
 that belongs to it, rows and files, and **cannot be undone**. The Remove dialog lists these before you
 confirm and asks "Are you sure?". The two are **different**, and so is what each leaves behind:
 
@@ -570,9 +581,9 @@ confirm and asks "Are you sure?". The two are **different**, and so is what each
 | Sleep nights and morning reviews (with their notes) | Deleted | Each night's saved summary, and the review's answers and notes, are kept (they belong to the child). **The night's detail and the review's photos are lost** for every night the camera recorded: both are built from its activity history and bed transitions, which go |
 | Bed transitions and their snapshot photos | Deleted, for the cameras assigned to the child | Deleted |
 | Activity history (the per-minute motion and sound the sleep summary is built from) | Deleted, for the cameras assigned to the child | Deleted |
-| Recordings and wake clips (video files included) | Deleted | Deleted |
+| Recordings and wake clips (video files included, protected or not) | Deleted | Deleted |
 | Timelapses, and frames collected for a night not yet assembled | Deleted | **Kept** (they belong to the child), including the ones made from this camera's frames |
-| Alerts, with their clips and snapshots | **Kept** (they belong to the camera) | Deleted |
+| Alerts, with their clips and snapshots (protected or not) | **Kept** (they belong to the camera) | Deleted |
 | Camera event log and temperature and humidity history | **Kept** (they belong to the camera) | Deleted |
 | The child's profile, photo and sleep-tracking settings | Deleted | Not applicable |
 | The camera itself | **Kept**, and becomes unassigned | Deleted, with its stream and its clip ring |
@@ -612,6 +623,11 @@ Things that behave in ways you might not expect:
   emptying a shared folder.
 
 ### Who can delete
+
+**Only admins can protect or unprotect alert and wake clips.** Caregivers can see which clips are
+protected. A protected clip must be unprotected before it can be deleted by hand. Removing its camera
+still removes its alert and wake clips; removing a child removes their wake clips and timelapses but
+keeps their cameras' alert clips. Reseeding demo data wipes all clips, including protected ones.
 
 **Only an admin can delete video by hand**: an alert clip, a wake clip, an on-demand recording (a failed
 one included) or a timelapse. Anyone signed in, caregivers included, can watch and download all of them,

@@ -24,7 +24,11 @@ import {
   getEventClipFile,
   deleteClipForEvent,
   getClips,
+  getProtectedClips,
+  isProtectedEvent,
+  setEventProtected,
 } from '../lib/detectionEvents.js';
+import { listProtectedWakeClips } from '../lib/recordings.js';
 import { verifyTalkCreds, talkConfigured, verifyBackchannel } from '../lib/twoWayAudio.js';
 import { getReading, subscribeAllCameraTopics, refreshMqttConnection, forgetMqttMotionAlert } from '../lib/mqttClient.js';
 import { probeOnvifCamera, ptzNudge, ptzRelativeStep, probePtzRelativeSupport, rebootCamera } from '../lib/onvif.js';
@@ -667,9 +671,22 @@ router.delete('/alerts', requireAuth, requireAdmin, (req, res) => {
 // user (GET /alerts/:id/clip above); the automatic retention sweep (lib/clipStorage.js) is not a person
 // and is not affected.
 router.delete('/alerts/:id/clip', requireAuth, requireAdmin, (req, res) => {
+  // #932: single-item deletes require an explicit unprotect; the purge uses the lower-level helper.
+  if (isProtectedEvent(req.params.id)) return res.status(409).json({ error: 'This clip is protected. Unprotect it first.' });
   const had = deleteClipForEvent(req.params.id);
   if (!had) return res.status(404).json({ error: 'No clip for this alert' });
   res.status(204).end();
+});
+
+router.put('/alerts/:id/protected', requireAuth, requireAdmin, (req, res) => {
+  if (typeof req.body?.protected !== 'boolean') return res.status(400).json({ error: 'protected must be a boolean' });
+  if (!setEventProtected(req.params.id, req.body.protected)) return res.status(404).json({ error: 'No ready clip for this alert' });
+  res.json({ protected: req.body.protected });
+});
+
+// #932: recent lists are capped; this route keeps old protected clips findable without a time limit.
+router.get('/clips/protected', requireAuth, requireAdmin, (req, res) => {
+  res.json({ alerts: getProtectedClips(), wake: listProtectedWakeClips() });
 });
 
 // List every alert that has a playable clip, for the Clip Management screen. Metadata only.
@@ -725,10 +742,13 @@ router.get('/:id/recording-readiness', requireAuth, requireAdmin, (req, res) => 
 router.post('/clips/delete', requireAdmin, (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
   let deleted = 0;
+  let skipped_protected = 0;
   for (const id of ids) {
+    // #932: a mixed selection still deletes its unprotected entries.
+    if (isProtectedEvent(id)) { skipped_protected++; continue; }
     if (deleteClipForEvent(id)) deleted++;
   }
-  res.json({ deleted });
+  res.json({ deleted, skipped_protected });
 });
 
 // Thrown inside the reorder transaction to roll it back (#675). A class of its own so that ONLY this refusal
