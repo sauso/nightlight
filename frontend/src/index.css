@@ -228,15 +228,17 @@ button {
 }
 
 /* While the Android app is floating in Picture-in-Picture, hide the on-video overlay
-   buttons - in the tiny PiP window they only obscure the video (the body gets the
+   buttons and panels - in the tiny PiP window they only obscure the video (the body gets the
    `in-pip` class from LiveMonitor via the native pipModeChanged event). */
 body.in-pip .pip-btn,
 body.in-pip .settings-btn,
 body.in-pip .mute-btn,
 body.in-pip .talk-btn,
+body.in-pip .rec-btn,
 body.in-pip .fullscreen-btn,
 body.in-pip .ptz-btn,
 body.in-pip .ptz-pad,
+body.in-pip .ptz-backdrop,
 body.in-pip .tile-menu,
 body.in-pip .tile-menu-backdrop {
   display: none !important;
@@ -1655,6 +1657,36 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   align-items: center;
   justify-content: center;
   background: #000;
+}
+
+/* With Android's bars hidden these insets are 0, so the 10px edge and 54px inner
+   spacing stay as drawn (#381). In a phone browser/PWA the insets clear cutouts;
+   Android WebView reporting non-zero insets in fullscreen is unverified. */
+.camera-tile__video-wrap:fullscreen .mute-btn,
+.camera-tile__video-wrap:fullscreen .talk-btn,
+.camera-tile__video-wrap:fullscreen .rec-btn {
+  top: max(10px, env(safe-area-inset-top, 0px));
+}
+.camera-tile__video-wrap:fullscreen .pip-btn,
+.camera-tile__video-wrap:fullscreen .settings-btn,
+.camera-tile__video-wrap:fullscreen .ptz-btn,
+.camera-tile__video-wrap:fullscreen .fullscreen-btn {
+  bottom: max(10px, env(safe-area-inset-bottom, 0px));
+}
+.camera-tile__video-wrap:fullscreen .talk-btn,
+.camera-tile__video-wrap:fullscreen .settings-btn {
+  left: max(10px, env(safe-area-inset-left, 0px));
+}
+.camera-tile__video-wrap:fullscreen .ptz-btn {
+  left: calc(max(10px, env(safe-area-inset-left, 0px)) + 44px);
+}
+.camera-tile__video-wrap:fullscreen .mute-btn,
+.camera-tile__video-wrap:fullscreen .fullscreen-btn {
+  right: max(10px, env(safe-area-inset-right, 0px));
+}
+.camera-tile__video-wrap:fullscreen .rec-btn,
+.camera-tile__video-wrap:fullscreen .pip-btn {
+  right: calc(max(10px, env(safe-area-inset-right, 0px)) + 44px);
 }
 
 .camera-tile__video-wrap:fullscreen .whep-video {

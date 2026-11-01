@@ -446,6 +446,21 @@ export function hasNativePip() {
   return !!pipPlugin();
 }
 
+// Fullscreen otherwise leaves Android's status and gesture bars painted over the camera
+// controls (owner screenshots, 11-01). The live web UI also reaches older APKs and iOS,
+// so only a native build with the matching plugin may change the system bars.
+export async function setNativeImmersive(enabled) {
+  const immersive = window.Capacitor?.Plugins?.Immersive;
+  if (!isNativeApp() || !immersive) return false;
+  try {
+    await immersive.setEnabled({ enabled });
+    return true;
+  } catch (err) {
+    console.warn('Immersive.setEnabled failed', err);
+    return false;
+  }
+}
+
 // Whether the PiP button had to enter fullscreen itself to get a clean float (i.e. the
 // tile wasn't already fullscreen). Leaving PiP uses this to return the user to where they
 // were: exit fullscreen back to the dashboard if we entered it for them, or stay in
@@ -469,7 +484,7 @@ function removeListener(handleOrPromise) {
 }
 
 // Native Android PiP enter/leave. The web app uses this to hide the on-video overlay
-// buttons (mute/settings/fullscreen) while floating - they only waste space in the tiny
+// controls and panels while floating - they only waste space in the tiny
 // window. Returns an unsubscribe fn; no-op off-native.
 export function onPipModeChanged(callback) {
   const p = pipPlugin();

@@ -308,7 +308,8 @@ Also: `@media (prefers-reduced-motion: reduce)` — see §7.
 - Heights use `100dvh` behind `@supports`, so fixed elements don't drift as mobile browser chrome
   hides. `html, body, #root` are painted `var(--bg)` so iOS elastic overscroll doesn't flash white.
 - **Every fixed edge must respect the safe area:** `env(safe-area-inset-top)` in the header,
-  `env(safe-area-inset-bottom)` in the bottom nav and sheets.
+  `env(safe-area-inset-bottom)` in the bottom nav and sheets. In fullscreen, camera controls
+  also keep clear of the safe-area insets on every edge.
 - `overscroll-behavior-y: contain` keeps the browser's own pull-to-refresh from firing under the
   app's custom one (`usePullToRefresh.js`).
 - `.app-shell` reserves `padding-bottom: 64px` for the bottom nav.
@@ -470,6 +471,11 @@ The video wrap is 16:9 (`height: 50vh` when not fullscreen) so `object-fit: cove
 rather than cropping the camera's own timestamp overlay. Stopped state is a `#0a0d1c` panel with a
 centred restart button. Controls overlay the video; identity (name, child, drag handle, live dot)
 sits in the strip below.
+
+Picture-in-Picture hides every control and panel over the video, including Record. Fullscreen
+in the updated Android app hides the system status and gesture bars so they do not cover the
+controls. Older app builds still show those bars until the app is updated. Fullscreen controls
+also stay clear of safe-area insets, including in a phone browser or home-screen install.
 
 **Touch targets (#381).** Every control on a tile is tappable over **44px**, even though it draws smaller:
 the seven over-video buttons (Mute, Talk, Record, Picture-in-Picture, PTZ, Settings, Fullscreen) are drawn
