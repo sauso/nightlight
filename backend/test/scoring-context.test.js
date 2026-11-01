@@ -303,7 +303,13 @@ test('a final legacy NULL row is left alone by the nightly job, and gains a cont
 // Nothing in it is clock- or machine-dependent at that frozen instant. If a deliberate scoring change moves
 // this, update the literal AND bump SCORING_ALGO in the same commit (see its comment in sleepAnalysis.js).
 // #700 added `wake_unconfirmed: null` (an added key: this night has no early exit and no earlier stored nights, so
-// no number in it moves) and bumped SCORING_ALGO to '2'.
+// no number in it moves) and bumped SCORING_ALGO to '2'. #904 added `sound_discounted_minutes: 0` (an added key: the
+// faulty-microphone guard finds nothing on this night, whose sound is 0 throughout) and bumped SCORING_ALGO to '3'.
+// #618 (the #509 veto's hand-back) bumped it to '4' with no change here: no exit is adopted on this night (its shadow
+// wake is the movement-only one), so the veto never runs on it. #914 (the settling-tail witness stops at the next
+// departure) bumped it to '5' with no change here: the night has no `into_bed`, so that guard's witness is never asked.
+// #917 (the ESPHome sensor shadow) added `wake_at_sensor: null` and `sensor_rejects: null` (added keys: this child has
+// no ESPHome rows, so no shadow runs and nothing else moves) and bumped SCORING_ALGO to '6'.
 const GOLDEN = {
   night_date: '2026-07-01',
   window_start: '2026-07-01 09:30:00',
@@ -326,6 +332,9 @@ const GOLDEN = {
   longest_stretch_minutes: 620,
   coverage_minutes: 690,
   wake_unconfirmed: null,
+  sound_discounted_minutes: 0,
+  wake_at_sensor: null,
+  sensor_rejects: null,
   climate: {
     temp_avg: 21.5, temp_min: 21.5, temp_max: 21.5, temp_samples: 1,
     humidity_avg: 48, humidity_min: 48, humidity_max: 48, humidity_samples: 1,

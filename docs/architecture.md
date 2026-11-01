@@ -261,7 +261,7 @@ caregiver can still reach says why on its line of the table. Role checks made *i
 `track_sleep`, the sleep window or, since #655, the primary camera `primary_camera_id`) are not gates: their own test files cover them
 (`children-role-fields.test.js` for the last).
 
-**Stored secrets are never returned, and that is pinned too** (#563's second half),
+**Stored secrets are never returned, including ESPHome encryption keys, and that is pinned too** (#563's second half),
 by `backend/test/secrets-never-returned.test.js`. It finds every column whose *name* marks a credential
 (password, secret, token, key, hash, backup code) by reading the schema, so a column added later is covered
 without editing the test, and plants a marker in each one. It then asks **every GET route in the app** (the
@@ -356,6 +356,64 @@ replay while its samples, transitions and context are identical. Its finding is 
 `sleep_nights.wake_unconfirmed_at` (a guarded `ALTER TABLE`, NULL on older rows, written by `upsertNight`), which is
 that night's departure candidate in later nights' history: a skipped night still teaches the rule. The column is an
 added key on the endpoints that return the raw stored row (above).
+
+**The faulty-microphone guard** (#904, `SCORING_ALGO` '3'; the rule in `backend/src/lib/micGuard.js`, tests in
+`backend/test/micGuard.test.js` and `backend/test/sleep-faulty-mic.test.js`). Before anything is classified,
+`computeNight` decides which minutes' sound to ignore: a watched minute whose `sound_peak` is over `SOUND_ACTIVE` while
+its `sound_p75` is at or under 4 dB is spike-only, and every spike-only minute inside an 8-hour window of elapsed
+minutes (at least 384 watched, at least 70% of those spike-only) is discounted. The main loop's `heard` (the onset
+view), `isActiveRow` (so `state`, the wake runs and the metrics) and the metrics extension all read that one array. It
+covers window start - 3 h to the departure scan's evidence cutoff (window end + up to 3 h, never past now), read
+before the main loop, so post-window minutes can decide whether in-window ones are discounted: the one exception to
+"status is decided from window-bounded data" (and, until the evidence is final, a minute whose row arrives late can
+move a provisional night's discount either way). A night with a discounted minute in its span is never `empty`: only
+the `empty` return is skipped (it falls through to `ok`), while the coverage `no_data` inside the same empty-bed test
+fires as before. The
+additive result key `sound_discounted_minutes` (the discounted minutes in the span the detector measured, which a
+parent's time correction does not change: `applyCorrection` keeps the detector's count; an integer on `ok`,
+`null` on every other status, nulled by "no one was in the bed") is not stored: there is no column.
+
+**The morning veto's hand-back** (#618, a sibling of its §2; `SCORING_ALGO` '4'; tests in
+`backend/test/sleepAnalysis.test.js` under "#618"). The departure scan keeps, per gap, every exit the settling-tail
+guard set aside within 5 minutes of the gap's start (`settlingSkips`; the single `settlingFallback` is unchanged).
+When the #509 veto then discards the adopted exit, it hands back the one of those whose gap starts inside the quiet
+stretch it found (smallest distance to the gap start, not far earlier than usual per #700) instead of falling back to
+the movement-only wake; the wake, the metrics span, the timeline marker and the child-out interval move with it, and
+`wake_at_shadow` still keeps the discarded exit. No result key is added. The stored scoring-context rules version
+becomes `'4'` (so re-storing even an unchanged night writes `4`, and an older stored night is marked as first
+worked out under earlier rules where the saved settings differ); only nights where the veto fires can change
+their numbers.
+
+**The settling-tail witness stops at the next departure** (#914; `SCORING_ALGO` '5'; tests in
+`backend/test/sleepAnalysis.test.js` under "#914"). The settling-tail guard's still-sleeper count
+(`bedQuietlyOccupiedFrom(from, until)`) now stops before the minute of the first later `out_of_bed` that is a departure
+(`departureCutIdx`: strictly later than the exit being judged, not itself a settling tail by the time rule
+`isSettlingPair` alone, and not reversed by `reversedBy`, the scan's own reversal guard, now a function). A later tail
+whose own witness fails is taken by the scan but never cuts. With no such exit the count is exactly as before. No threshold or result key changes; only a night with a
+skipped settling tail and a later departure inside the 150-minute window can change, and its wake, metrics, marker,
+`wake_unconfirmed` and child-out interval move together. The stored scoring-context rules version becomes `'5'`.
+
+**The ESPHome sensor shadow** (#917, follow-up to #506; `SCORING_ALGO` '6'; tests in
+`backend/test/sleep-sensor-shadow.test.js`). `computeNight` is now a thin wrapper: it reads the clock once, runs the
+night (`computeNightPass`, the old body) and then, for a completed night whose pass reached the analysis, asks
+`lib/sleepSensor.js` for the child's per-minute "a person's vital signs at the bed" values over the pass's own minute
+origin and evidence cutoff. `sensorMinutesFor` is the ONLY sleep-side reader of the `esphome_*` tables and only
+SELECTs (`esphome-boundaries.test.js` pins both). Entities are taken by `child_id` in every epoch (retired ones too),
+roles by `guessEsphomeCategory` (now `lib/esphomeRoles.js`, re-exported by the manager), vital signs and distance
+paired per device. When the child has heart-rate or breathing-rate rows, ONE second pass of the same night runs with
+the same clock and `context` and no timeline, in which the departure scan also sets aside an exit with valid vital
+signs in at least 6 of the 10 minutes after it, through the settling-tail guard's own branch (fallback, `settlingSkips`
+for the #618 hand-back, smaller `dt`); `departureCutIdx` and `detectMidnightEpisodes` ignore it. The real result keeps
+every key it had (except `scoring.current_algo` in a stored-context replay, '5' to '6') and gains two (null by
+default, in `base`): `wake_at_sensor` (the second pass's `wake_at` when it scored `ok`) and `sensor_rejects` (distinct
+CANDIDATE exits, within 5 minutes of a gap's start, that the rule alone set aside), stored by `upsertNight` as nullable
+`sleep_nights` columns (guarded `ALTER`s, NULL on older rows). Both are written only when at least one candidate's ten
+minutes held a known sensor minute (`sensorWindowReadable`), so a sensor that was off at the exits stores NULL rather
+than "agreed". Only heart-rate, breathing-rate and distance rows are queried. Nothing reads the two for a wake,
+figure, push or alert; `applyCorrection` nulls them on a night whose wake a parent changed, and so does "no one was in
+the bed" (the raw stored row, `?stored=1`, `raw=1` and the store reply keep them). A failing read or second pass leaves
+both null and logs a fixed sentence; #700's history-read counter is restored after the shadow. The rules version becomes
+`'6'` because the returned object changed, although no reported number moved (A/B on both databases).
 
 **The admin Recompute is one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the
 dialog in `frontend/src/components/RecomputeNight.jsx`). `GET /api/children/:id/sleep/:date?context=stored` reads the
@@ -697,7 +755,7 @@ a new deploy has replaced, the reload is what fixes it too (the app also reloads
 
 **Unsaved form edits survive the background reload (#377).** `App.jsx` reloads the page after 15 s in the
 background to repair stale media connections, and that empties React state. The child form, the camera form
-Settings → Recording, General and MQTT, the Gotify, ntfy and Pushover pages and the caregiver form therefore store what is different from the saved values in `sessionStorage`
+Settings → Recording, Settings → General, Settings → Integrations → MQTT, the Gotify, ntfy and Pushover pages and the caregiver form therefore store what is different from the saved values in `sessionStorage`
 (`lib/formDraft.js`, kept in step by `lib/useFormDraft.js`) and restore it on mount. Rules that must hold:
 **no secret is ever written** (each form passes an allow-list of fields, credential-named keys are dropped
 even if allowed, a value that is a URL with credentials in it is dropped whatever its key, and a camera

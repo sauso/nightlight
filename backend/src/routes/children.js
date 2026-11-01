@@ -15,10 +15,11 @@ import { startMotionDetector } from '../lib/motionDetector.js';
 import { reconcileClipRing } from '../lib/clipCapture.js';
 import { purgeChild, purgeFailureReason } from '../lib/entityPurge.js';
 import { isRecording } from '../lib/recordings.js';
-import { TRANSITION } from '../lib/bedTransitions.js';
+import { TRANSITION, framesForNight } from '../lib/bedTransitions.js';
 import { getNightReview, saveNightReview, previewNightReview, inBedAfterOnset, asleepAfterWake, reviewCorrectsNight,
   reviewCardState, localHmToUtcSql, applyVerdicts, applyCorrection, applyCorrections, transitionInstant,
   parseTransitionId, reviewForBrowser } from '../lib/sleepReviews.js';
+import { wakeRange } from '../lib/wakeRange.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -56,8 +57,11 @@ const primaryNotId = (v) => v !== undefined && v !== null && typeof v !== 'strin
 // decides whether a child's name leaves the house in a notification, so a mistyped value must be a 400 and never
 // silently the opposite setting. They are returned on every child as 0/1 like track_sleep (the rows are
 // SELECT *), which is the additive part: no existing key changes.
+// #919 uses the same strict values and admin comparison for alert holding, with its own 400 message.
 const REPORT_FLAGS = ['sleep_report_enabled', 'sleep_report_show_name'];
+const CHILD_FLAGS = [...REPORT_FLAGS, 'hold_alerts_until_asleep'];
 const REPORT_FLAG_INVALID = 'Sleep report settings must be on or off (true or false)';
+const HOLD_FLAG_INVALID = 'Hold alerts until asleep must be on or off (true or false)';
 const flagInvalid = (v) => v !== undefined && ![true, false, 1, 0].includes(v);
 
 // A child's sleep-tracking state or window changed — (re)evaluate the motion activity leg for each of
@@ -131,6 +135,7 @@ router.post('/', requireAdmin, (req, res) => {
   const { name, birthday, color, track_sleep, sleep_window_start, sleep_window_end } = req.body || {};
   if (isNotText(name)) return res.status(400).json({ error: NAME_NOT_TEXT });
   if (REPORT_FLAGS.some((k) => flagInvalid(req.body?.[k]))) return res.status(400).json({ error: REPORT_FLAG_INVALID });
+  if (flagInvalid(req.body?.hold_alerts_until_asleep)) return res.status(400).json({ error: HOLD_FLAG_INVALID });
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
   if (badColor(color, null)) return res.status(400).json({ error: COLOR_INVALID });
   if (badBirthday(birthday, null)) return res.status(400).json({ error: BIRTHDAY_INVALID });
@@ -151,8 +156,8 @@ router.post('/', requireAdmin, (req, res) => {
   const id = uuid();
   db.prepare(
     `INSERT INTO children (id, name, birthday, color, photo, track_sleep, sleep_window_start, sleep_window_end,
-                           sleep_report_enabled, sleep_report_show_name)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                           sleep_report_enabled, sleep_report_show_name, hold_alerts_until_asleep)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     name.trim(),
@@ -164,7 +169,8 @@ router.post('/', requireAdmin, (req, res) => {
     sleep_window_end || '07:00',
     // Not sent = on, the default every child has had (POST is admin-only, so there is no role gate to apply).
     req.body?.sleep_report_enabled === undefined ? 1 : req.body.sleep_report_enabled ? 1 : 0,
-    req.body?.sleep_report_show_name === undefined ? 1 : req.body.sleep_report_show_name ? 1 : 0
+    req.body?.sleep_report_show_name === undefined ? 1 : req.body.sleep_report_show_name ? 1 : 0,
+    req.body?.hold_alerts_until_asleep ? 1 : 0
   );
   res.status(201).json(withCameras(db.prepare('SELECT * FROM children WHERE id = ?').get(id)));
 });
@@ -181,6 +187,7 @@ router.put('/:id', (req, res) => {
   if (sleep_window_start !== undefined && !HHMM.test(sleep_window_start)) return res.status(400).json({ error: 'Bedtime must be a time like 19:00' });
   if (sleep_window_end !== undefined && !HHMM.test(sleep_window_end)) return res.status(400).json({ error: 'Wake time must be a time like 07:00' });
   if (REPORT_FLAGS.some((k) => flagInvalid(req.body?.[k]))) return res.status(400).json({ error: REPORT_FLAG_INVALID });
+  if (flagInvalid(req.body?.hold_alerts_until_asleep)) return res.status(400).json({ error: HOLD_FLAG_INVALID });
   const { primary_camera_id } = req.body || {};
   if (primaryNotId(primary_camera_id)) return res.status(400).json({ error: PRIMARY_NOT_ID });
   // The four sleep values the UPDATE below will write, computed once so the role gate and the write
@@ -191,10 +198,10 @@ router.put('/:id', (req, res) => {
   const nextEnd = sleep_window_end !== undefined ? sleep_window_end : existing.sleep_window_end;
   const nextPrimary = primary_camera_id !== undefined ? primary_camera_id || null : existing.primary_camera_id;
   const primaryChanged = nextPrimary !== existing.primary_camera_id;
-  // The sleep-report switches, computed once like the four above so the role gate and the write agree. A boolean
+  // The sleep-report and alert-hold switches, computed once like the four above so the role gate and the write agree. A boolean
   // is turned into 0/1 here, so the form re-sending `true` against a stored 1 compares equal.
   const nextReport = {};
-  for (const k of REPORT_FLAGS) nextReport[k] = req.body?.[k] === undefined ? existing[k] : req.body[k] ? 1 : 0;
+  for (const k of CHILD_FLAGS) nextReport[k] = req.body?.[k] === undefined ? existing[k] : req.body[k] ? 1 : 0;
   // Sleep tracking, the bedtime window and the primary camera are admin-only (owner decision 2026-10-10,
   // #542 and #655): a caregiver can watch and act in the moment but not reconfigure, and turning tracking
   // off stops a child's nights, wake clips and timelapses being recorded at all, while changing the
@@ -215,13 +222,13 @@ router.put('/:id', (req, res) => {
     if (nextStart !== existing.sleep_window_start) fields.push('sleep_window_start');
     if (nextEnd !== existing.sleep_window_end) fields.push('sleep_window_end');
     if (primaryChanged) fields.push('primary_camera_id');
-    // Whether a child's report is sent, and whether it names them, decide what leaves the house (#397, #398): an
-    // admin's call, and compared against the stored value for the same reason as the rest.
-    for (const k of REPORT_FLAGS) if (nextReport[k] !== existing[k]) fields.push(k);
+    // Report delivery/name and alert suppression are admin decisions (#397, #398, #919), compared with stored
+    // values so an unchanged form sent by a caregiver remains valid.
+    for (const k of CHILD_FLAGS) if (nextReport[k] !== existing[k]) fields.push(k);
     if (fields.length > 0) {
       return res.status(403).json({
         error: 'Only an admin can turn sleep tracking on or off, change the sleep window or choose the camera '
-          + "a child's sleep is measured from. Your other changes were not saved.",
+          + "a child's sleep is measured from, or hold alerts until asleep. Your other changes were not saved.",
         reason: 'admin_only_fields',
         fields,
       });
@@ -246,7 +253,7 @@ router.put('/:id', (req, res) => {
   db.prepare(
     `UPDATE children SET name = ?, birthday = ?, color = ?, photo = ?, track_sleep = ?,
        sleep_window_start = ?, sleep_window_end = ?, primary_camera_id = ?,
-       sleep_report_enabled = ?, sleep_report_show_name = ? WHERE id = ?`
+       sleep_report_enabled = ?, sleep_report_show_name = ?, hold_alerts_until_asleep = ? WHERE id = ?`
   ).run(
     name?.trim() || existing.name,
     birthday !== undefined ? birthday : existing.birthday,
@@ -258,6 +265,7 @@ router.put('/:id', (req, res) => {
     nextPrimary,
     nextReport.sleep_report_enabled,
     nextReport.sleep_report_show_name,
+    nextReport.hold_alerts_until_asleep,
     req.params.id
   );
   // Turning tracking on/off — or moving the window so it no longer contains "now" — changes whether the
@@ -449,7 +457,15 @@ router.get('/:id/sleep/:date', (req, res) => {
     // whose saved row is missing or unscored is still recompute-eligible: comparing the saved row against an
     // overlaid preview would show the parent's times as what Save would store.
     const raw = contextChoice !== undefined && req.query.raw === '1';
-    return res.json(raw ? night : applyCorrection(req.params.id, night));
+    const shown = raw ? night : applyCorrection(req.params.id, night);
+    // `transition_frames` (#907, ADDED to the shape; every existing key is unchanged): the saved bed-transition
+    // pictures the sleep detail page may offer on its Room activity rows, [{ id, type, at }]. Built HERE from the
+    // finished night, not inside computeNight: it moves no computed number, and `transitions` (the two adopted
+    // markers, which carry no id) stays exactly as it was. Present on every timeline read (`detail=1`/`debug=1`),
+    // `[]` when the night has no camera or no timeline, and ABSENT otherwise so the live card and the lists do not
+    // grow. After the correction on purpose: a "nobody was in the bed" night has no timeline left, so it gets
+    // `[]` rather than frames for rows that are not drawn. A page from before this field existed ignores it.
+    return res.json(includeTimeline ? { ...shown, transition_frames: framesForNight(shown) } : shown);
   }
   // Storing a recompute can only ever improve or re-score a night, never un-score one — see the
   // allowDowngrade guard in computeAndStoreNight. A refusal is not a server fault (the night is too old,
@@ -575,7 +591,19 @@ router.get('/:id/review/:date', (req, res) => {
   const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
   if (!DATE_ONLY.test(req.params.date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
-  res.json(getNightReview(req.params.id, req.params.date));
+  const review = getNightReview(req.params.id, req.params.date);
+  // `wake_range` (additive, lib/wakeRange.js) for the review screen's "Up between X and Y" question, and ONLY
+  // here: the hold-out check of 2026-10-27 showed the range on 3 of 9 RIGHT nights (33%, above the 25% bar
+  // set beforehand), so it is not put on the child card, the sleep page or the push, where a range on a night
+  // that was fine would just be noise. On this screen the person is already being asked, so a range costs one
+  // tap and cannot mislead. getNightReview returns only a few computed fields (no `wake_at_algo`) and lives in
+  // sleepReviews.js, a test:core module that is not edited, so the night is worked out once more here with the
+  // SAME settings the page was shown (displayContextFor) and the parent's answer laid over it (so an answered
+  // night reads null). Both computes run in this one synchronous handler, so the range and the
+  // `computed.wake_at` beside it cannot drift apart between them.
+  const shown = displayContextFor(req.params.id, req.params.date);
+  const night = computeNight(req.params.id, req.params.date, { context: shown?.context ?? null });
+  res.json({ ...review, wake_range: wakeRange(applyCorrection(req.params.id, night)) });
 });
 
 // Save the night's true times (or "no one was in the bed" instead of them), any per-transition
@@ -804,15 +832,33 @@ router.put('/:id/review/:date', (req, res) => {
   // reproduced by a test): asleep "07:30" (by the noon rule, the morning after) saved fine beside a stored
   // 06:30 wake, and every screen then showed a night ending before it began, its total floored to 0. Only for
   // a save that GIVES an asleep time. No stored night, or no stored wake yet: nothing to check against.
-  // NOT checked: a wake saved while the review has no asleep time, against the stored asleep time (the other
-  // way round), and an API save that ONLY clears the wake beside an asleep time in the review (the edit card
-  // always resends its asleep field with it, so from the screen that save is checked here). Neither was in the
-  // round-3 findings; README, "Known limits".
+  // Still NOT checked: a save that ONLY clears the wake beside an asleep time in the review (the old edit card
+  // always resent its asleep field with it, so that save was checked above; the one-question screen can clear
+  // the wake on its own, so it now reaches here unchecked. Documented in docs/sleep-tracking.md).
   if (patch.trueOnsetAt != null && !merged.true_wake_at) {
     if (asleepAfterWake({ true_onset_at: merged.true_onset_at, true_wake_at: storedNight()?.wake_at })) {
       return res.status(400).json({
         error: '"Fell asleep" can\'t be after the time they got up for the day. Check "Fell asleep", '
           + 'or give "Got up for the day" too.',
+      });
+    }
+  }
+  // The other way round, which used to be a documented gap: a WAKE saved while the review has no asleep time
+  // is compared with the night's STORED asleep time, same one minute of slack, same rule (asleepAfterWake).
+  // It matters now because the review screen asks ONLY for the wake (the one-question screen, 2026-10-27), so
+  // this is the check nearly every save meets: before, "That's right" always sent the asleep time too and the
+  // merged-review check above covered it. Found in the Codex gpt-6-sol plan review (verified): a typed wake
+  // earlier than the stored asleep time saved fine, and every screen then showed a night ending before it
+  // began, its total floored to 0. A time typed before 12:00 is the morning after (localHmToUtcSql's noon
+  // rule), so a mistyped "18:37" for "06:37" is what this catches. Only for a save that GIVES a wake
+  // (`!= null`, like its sibling above): a note, a dismissal or an event answer is never refused over a stored
+  // night that has since moved. The message names the screen's own labels, because this save no longer
+  // carries an asleep time for the person to look at.
+  if (patch.trueWakeAt != null && !merged.true_onset_at) {
+    if (asleepAfterWake({ true_onset_at: storedNight()?.onset_at, true_wake_at: merged.true_wake_at })) {
+      return res.status(400).json({
+        error: '"Got up for the day" can\'t be before the time they fell asleep, which this night already has. '
+          + 'Check the time, or open "Change bedtime or fell-asleep time" and fix "Fell asleep" too.',
       });
     }
   }

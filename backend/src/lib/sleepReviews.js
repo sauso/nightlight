@@ -549,8 +549,9 @@ export function inBedAfterOnset(r) {
 // The same minute of slack for the same reason: a wake FRAME keeps its second (up 06:29:30) and a typed asleep
 // time is to the minute ("06:30" is 06:30:00). It judges whatever pair it is given. The route calls it on the
 // merged review, and again (fix round 3, Codex #1) with an asleep time saved while the review has no wake
-// against the night's STORED wake, the one the card shows beside it. Still not checked anywhere: a wake saved
-// while the review has no asleep time, against the stored asleep time (README, "Known limits").
+// against the night's STORED wake, the one the card shows beside it. The route ALSO calls it with a wake
+// saved while the review has no asleep time, against the night's STORED asleep time (PR #897, found in the
+// Codex plan review of the one-question review, where nearly every save is wake-only).
 export const ASLEEP_AFTER_WAKE_SLACK_MS = IN_BED_AFTER_ASLEEP_SLACK_MS;
 export function asleepAfterWake(r) {
   if (!r?.true_onset_at || !r?.true_wake_at) return false;
@@ -658,6 +659,14 @@ export function applyVerdicts(childId, nightDate, verdicts, reasons, shown = und
 // real recompute against them — a materially bigger change than this fix's scope. Not attempted here.
 // The result is floored at zero.
 //
+// `sound_discounted_minutes` (#904, a fresh compute only; no column) is kept as measured over the ORIGINAL span too,
+// for the same reason as awake_minutes: which of its minutes fall inside a corrected span is not known here. So on a
+// corrected night it is the DETECTOR's count, over the span the detector worked out ([its onset, its sleepEnd)), not
+// over the corrected span the night now shows: an original 540 stays 540 when the corrected times lie wholly before
+// the fault, or run past the original wake (both pinned by "a time correction keeps it" in sleep-faulty-mic.test.js).
+// What the sleep page's "microphone looked faulty for ..." line then means is "while the detector was working the night
+// out", not "inside the times shown above it".
+//
 // "NO ONE WAS IN THE BED" (sleep_reviews.nobody_in_bed) is checked BEFORE the times. It carries no
 // times at all — saving it nulls them — so the old "no true_onset_at and no true_wake_at, so nothing to
 // do" early return would have swallowed it whole and the flag would have done nothing anywhere (plan
@@ -698,6 +707,17 @@ export function applyVerdicts(childId, nightDate, verdicts, reasons, shown = und
 // overlaid, every screen's total always fits the times it shows. The cost, a README known limit: when a
 // screen's night differs from what the review page showed, that screen re-derives its total even though
 // the parent only marked the put-down.
+//
+// THE SENSOR SHADOW ON A CORRECTED WAKE (#917, plan review): a night whose WAKE a parent changed shows `wake_at_sensor`
+// and `sensor_rejects` as null. The shadow is a wake the detector did NOT report, computed from the detector's own
+// night; beside the parent's wake it would read as a third opinion about the time shown, which it is not. Only a
+// CHANGED wake (wakeChanged below, the same test the re-derivation uses): an in-bed-only or onset-only correction, or a
+// wake saved unchanged, still shows the detector's own wake, so the shadow beside it means what it meant, and those
+// paths keep every other stored field exactly as stored (review-in-bed-and-lock.test.js pins that for every column).
+// "No one was in the bed" nulls them too (asNobodyInBed). Nulled only where the key exists (a stored row has both
+// columns, a fresh compute both keys), so no key is added. The stored row keeps both, untouched like everything else
+// here, and the comparison they exist for is made from the stored row and this review (docs/esphome.md).
+const SENSOR_SHADOW_KEYS = ['wake_at_sensor', 'sensor_rejects'];
 export function applyCorrection(childId, night) {
   if (!night || !night.night_date) return night;
   const r = getReviewStmt.get(childId, night.night_date);
@@ -731,6 +751,7 @@ export function applyCorrection(childId, night) {
   // nothing about the sleep is re-derived. See "AN UNCHANGED TIME" above.
   const onsetChanged = Boolean(r.true_onset_at) && r.true_onset_at !== night.onset_at;
   const wakeChanged = Boolean(r.true_wake_at) && r.true_wake_at !== night.wake_at;
+  if (wakeChanged) for (const k of SENSOR_SHADOW_KEYS) if (k in out) out[k] = null;
   if (!onsetChanged && !wakeChanged) return out;
   if (onset && wake) {
     const span = Math.round((Date.parse(`${wake.replace(' ', 'T')}Z`) - Date.parse(`${onset.replace(' ', 'T')}Z`)) / 60000);
@@ -770,7 +791,10 @@ export function applyCorrection(childId, night) {
 //   - longest_stretch_minutes = the span: no wake splits it, so it is one stretch, and it equals the total
 //     (a longest stretch above the total is the contradiction issue #355 reported on ok nights).
 // NOT produced: timeline, segments, wakes, visits, transitions. An `empty` night never had them, and
-// corrected timestamps alone must not manufacture an observed timeline (#355 acceptance).
+// corrected timestamps alone must not manufacture an observed timeline (#355 acceptance). Nor
+// `sound_discounted_minutes` (#904): it stays as the empty night had it (null on a fresh compute, absent on a
+// stored row), because computeNight never returns `empty` for a night with a discounted minute in its span, so
+// there is no count to carry, and none is invented for the parent's span.
 //
 // ⚠️ Only when BOTH times exist and the span is positive (span > 0, so a one-minute span promotes and a zero
 // or negative one does not), and only once the night is over (nightNotOverYet, which reads `in_progress` on a
@@ -813,6 +837,8 @@ export function applyCorrections(childId, nights) {
 // a list: a new sleep_nights column fails them until it is classified, and a new computeNight key fails
 // them if it leaks (as long as the test's `ok` night gives it a value). A new OBSERVATION key on
 // computeNight's `base` is kept automatically, which is the right default for those.
+// (`wake_at_sensor` and `sensor_rejects` are only non-null where the child has ESPHome rows, which those fixtures do not
+// lay: sleep-sensor-shadow.test.js checks them on a fresh `ok` night that has them.)
 //
 // `wake_unconfirmed` (#700, in `base`) and its stored time `wake_unconfirmed_at` are deliberately NOT listed: they
 // are the detector's note that it skipped an exit as far earlier than this child gets up, a remark about its own
@@ -820,11 +846,23 @@ export function applyCorrections(childId, nights) {
 // therefore keeps them as the detector computed them (pinned by the "no one was in the bed" test in
 // sleep-early-exit-lead.test.js, and by OBSERVED_COLUMNS in nobody-in-bed.test.js). They can only be non-null when
 // the detector's own night was `ok`, so a real detector-empty night always has them null.
+//
+// `wake_at_sensor` and `sensor_rejects` (#917, the ESPHome sensor shadow; both columns and computeNight keys) ARE listed:
+// a night shown as empty must not carry a sensor wake (#917 plan review). The stored row keeps them, so the
+// comparison they exist for is not lost (see SENSOR_SHADOW_KEYS above).
 const EMPTY_NIGHT_NULLS = [
   'onset_at', 'wake_at', 'in_bed_at',
   'onset_at_shadow', 'wake_at_shadow', 'onset_at_algo', 'wake_at_algo',
   'asleep_minutes', 'awake_minutes', 'unknown_minutes', 'wake_count', 'longest_stretch_minutes',
+  'wake_at_sensor', 'sensor_rejects',
 ];
+// Sleep claims computeNight returns that are NOT sleep_nights columns, so a stored row never has them. Nulled ONLY
+// when present: setting one on a stored row would give the flagged row a key a detector-empty stored row does not
+// have (the PRAGMA shape test in nobody-in-bed.test.js). `sound_discounted_minutes` (#904) counts minutes of the
+// night's sleep span whose sound the faulty-microphone guard ignored; a night the parent says nobody slept in has no
+// such span, and a real detector-empty night carries null, so a fresh `ok` night flagged here must not keep a count
+// (pinned by the #904 "no one was in the bed" test in sleep-faulty-mic.test.js).
+const COMPUTED_ONLY_EMPTY_NULLS = ['sound_discounted_minutes'];
 // The detail view's per-minute extras (`?detail=1`). computeNight builds these only AFTER it has decided
 // the night is `ok`, so a detector-empty night never has them. Removed rather than nulled, so a flagged
 // night's response has the same keys as a detector-empty one, not the same keys with nulls in them.
@@ -850,6 +888,7 @@ const SCORED_NIGHT_DETAIL = [
 function asNobodyInBed(night) {
   const out = { ...night };
   for (const k of EMPTY_NIGHT_NULLS) out[k] = null;
+  for (const k of COMPUTED_ONLY_EMPTY_NULLS) if (k in out) out[k] = null;
   for (const k of SCORED_NIGHT_DETAIL) delete out[k];
   out.status = 'empty';
   out.corrected = true;

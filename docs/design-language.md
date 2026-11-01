@@ -161,8 +161,8 @@ Three distinct icon systems. Do not mix them up.
 
 ### 4.1 UI icons — `lucide-react`
 
-The only icon library (`lucide-react` ^1.31.0). **51 distinct icons in use**; check that list before
-introducing a 52nd, since the vocabulary is meant to stay small.
+The only icon library (`lucide-react` ^1.31.0). **57 distinct icons in use**; check the current imports before
+introducing another, since the vocabulary is meant to stay small.
 
 | Property | Value |
 |---|---|
@@ -201,7 +201,7 @@ Semantic assignments already established — reuse rather than reinvent:
 `ChevronRight` drill-in · `ChevronLeft` back · `Play`/`Square` stream start/stop ·
 `Volume2`/`VolumeX` mute · `AudioLines` audio activity · `Mic` two-way talk · `Zap` detection ·
 `Moon` sleep · `Thermometer`/`Droplet` climate · `Cctv` cameras · `Baby` children · `Video` live ·
-`Settings` settings · `Trash2` destructive · `DoorOpen` out-of-bed.
+`Settings` settings · `Plug` integrations · `Trash2` destructive · `DoorOpen` out-of-bed.
 
 **Record** on a camera tile: `RecordIcon` (a ring with a centre dot, a hand-written component, see 4.2) in
 BOTH states, white with the same soft black glow as the other tile controls; while recording the button
@@ -379,7 +379,7 @@ is typed is kept for 6 hours in the browser tab (`lib/formDraft.js`) and restore
 background reload or a visit to another screen, with the notice saying so; **a secret field is never
 kept**, so a screen with a password must say, when it restores, that the password has to be typed again.
 
-Covered today: the child form, the camera form, Settings → Recording, General and MQTT, the Gotify, ntfy and
+Covered today: the child form, the camera form, Settings → Recording, Settings → General, Settings → Integrations → MQTT, the Gotify, ntfy and
 Pushover pages, and the add/edit caregiver screen. **Not covered** (they still lose unsaved edits on a reload):
 the Firebase page (one switch), the caregiver list, the Account name form (two fields, and its values come
 from the sign-in context), and Detection settings (no Save button; they recover through their own save queue,

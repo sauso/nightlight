@@ -4,6 +4,7 @@ import { X509Certificate } from 'node:crypto';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { inActiveWindow } from './detectSchedule.js';
+import { shouldHold } from './alertHold.js';
 import { fireDetectionAlert } from './detectionAlert.js';
 import { ALERT } from './detectionEvents.js';
 
@@ -228,6 +229,9 @@ function handleMotionMessage(topic, str) {
       logger.info(`[mqtt] "${cam.name}" motion (${topic}) within cooldown — not re-alerting`);
       continue;
     }
+    if (shouldHold(cam)) {
+      continue;
+    }
     motionLastAlert.set(cam.id, now);
     logger.info(`[detect] MQTT motion on "${cam.name}" (topic ${topic})`);
     fireDetectionAlert(cam, ALERT.MOTION, 'camera-reported (MQTT)').catch(() => {});
@@ -326,14 +330,7 @@ function hostProblem(typed) {
   return `it contains "${bad}" (${code})`;
 }
 
-export function mqttBrokerUrl(rawHost, port, { tls = false } = {}) {
-  // The default the settings screen documents for a blank port: 1883, or 8883 (the port MQTT brokers conventionally
-  // use for TLS) when TLS is on.
-  const p = port || (tls ? 8883 : 1883);
-  const scheme = tls ? 'mqtts' : 'mqtt';
-  if (!Number.isInteger(Number(p)) || Number(p) < 1 || Number(p) > 65535) {
-    throw new Error(`the port ${JSON.stringify(p)} is not a whole number between 1 and 65535`);
-  }
+export function validateHost(rawHost) {
   // Surrounding spaces are harmless typing noise (the settings route trims them before saving; a value already
   // stored that way is trimmed here too, so boot and save read the same host). Inner whitespace is not.
   const typed = typeof rawHost === 'string' ? rawHost.trim() : '';
@@ -349,13 +346,24 @@ export function mqttBrokerUrl(rawHost, port, { tls = false } = {}) {
   const host = [...typed].every((ch) => ch.charCodeAt(0) < 128) ? typed : domainToASCII(typed);
   if (!host.startsWith('[') && !BROKER_ASCII_HOST.test(host.toLowerCase())) throw notAHost();
   let u;
-  try { u = new URL(`${scheme}://${host}:${p}`); } catch {
+  try { u = new URL(`mqtt://${host}:1883`); } catch {
     // Reached by a bracketed literal that has the right characters but is not an address (`[1:2]`).
     throw new Error(`the host is not a valid hostname or address: ${host.startsWith('[') ? 'the IPv6 address in [brackets] is not a valid address' : 'it cannot be read as a host name'}`);
   }
-  if (!u.hostname || u.username || u.password || u.pathname || u.search || u.hash || u.port !== String(Number(p))) {
+  if (!u.hostname || u.username || u.password || u.pathname || u.search || u.hash || u.port !== '1883') {
     throw new Error('the host must be just a hostname or address, with no user name, path or query');
   }
+  return host;
+}
+
+export function mqttBrokerUrl(rawHost, port, { tls = false } = {}) {
+  // The default the settings screen documents for a blank port: 1883, or 8883 with TLS.
+  const p = port || (tls ? 8883 : 1883);
+  const scheme = tls ? 'mqtts' : 'mqtt';
+  if (!Number.isInteger(Number(p)) || Number(p) < 1 || Number(p) > 65535) {
+    throw new Error(`the port ${JSON.stringify(p)} is not a whole number between 1 and 65535`);
+  }
+  const host = validateHost(rawHost);
   return `${scheme}://${host}:${Number(p)}`;
 }
 

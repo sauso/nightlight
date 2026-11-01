@@ -481,7 +481,7 @@ describe('★★ what a caregiver can change (#542)', () => {
     // A page opened by an admin who was then demoted still renders the admin form; the server's 403
     // message is what tells them why nothing was saved.
     const reason = 'Only an admin can turn sleep tracking on or off, change the sleep window or choose the camera '
-      + "a child's sleep is measured from. Your other changes were not saved.";
+      + "a child's sleep is measured from, or hold alerts until asleep. Your other changes were not saved.";
     putSpy = vi.spyOn(api, 'put').mockRejectedValue(Object.assign(new Error(reason), { status: 403 }));
     const { user } = mount({ who: CAREGIVER });
     await user.click(await screen.findByRole('button', { name: 'Save changes' }));
@@ -620,6 +620,46 @@ describe('removing a child', () => {
     mount({ id: 'new' });
     await screen.findByLabelText('Name');
     expect(screen.queryByRole('button', { name: 'Remove child' })).toBeNull();
+  });
+});
+
+describe('#919 hold alerts until asleep', () => {
+  const HOLD = /Hold alerts until asleep/;
+
+  test('legacy children default to off', async () => {
+    mount();
+    expect((await screen.findByRole('switch', { name: HOLD })).checked).toBe(false);
+  });
+
+  test('new children submit the default off value', async () => {
+    const { user } = mount({ kid: null, id: 'new' });
+    expect((await screen.findByRole('switch', { name: HOLD })).checked).toBe(false);
+    await user.type(screen.getByLabelText('Name'), 'A child');
+    await user.click(screen.getByRole('button', { name: 'Add child' }));
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    expect(postSpy.mock.calls[0][1].hold_alerts_until_asleep).toBe(false);
+  });
+
+  test('admin can save the switch', async () => {
+    const { user } = mount({ kid: { ...KID, hold_alerts_until_asleep: 1 } });
+    expect((await screen.findByRole('switch', { name: HOLD })).checked).toBe(true);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1].hold_alerts_until_asleep).toBe(true);
+  });
+
+  test('caregiver sees a disabled switch and does not send it', async () => {
+    const { user } = mount({ who: CAREGIVER });
+    expect(await screen.findByRole('switch', { name: HOLD })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1]).not.toHaveProperty('hold_alerts_until_asleep');
+  });
+
+  test('switch is hidden when Track sleep is off', async () => {
+    mount({ kid: { ...KID, track_sleep: 0 } });
+    await screen.findByLabelText('Name');
+    expect(screen.queryByRole('switch', { name: HOLD })).toBeNull();
   });
 });
 

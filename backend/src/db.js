@@ -171,6 +171,58 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_sensor_readings_cam_time ON sensor_readings(camera_id, created_at);
 
+  -- #506: independent raw ESPHome history. The camera readers never use these tables; the one sleep-side reader is
+  -- lib/sleepSensor.js (#917, SELECT only), whose result is stored as a SHADOW beside each night
+  -- (sleep_nights.wake_at_sensor / sensor_rejects) and changes no wake, figure, push or alert.
+  CREATE TABLE IF NOT EXISTS esphome_devices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 6053,
+    encryption_key TEXT,
+    child_id TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS esphome_entities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id INTEGER NOT NULL,
+    object_id TEXT NOT NULL,
+    child_id TEXT,
+    kind TEXT NOT NULL,
+    name TEXT,
+    device_class TEXT,
+    unit TEXT,
+    state_class INTEGER,
+    entity_category INTEGER,
+    first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at TEXT,
+    active INTEGER NOT NULL DEFAULT 1
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_esphome_entity_active
+    ON esphome_entities(device_id, object_id) WHERE active = 1;
+  -- bucket is a UTC epoch minute. last is the last valid update, a zero included.
+  -- For a numeric sensor, mean/min/max describe the valid NON-ZERO updates and n
+  -- counts them; nzero counts the updates of exactly 0, which on the sensors this
+  -- was built for usually mean "no reading" (#506 review, round 2; see
+  -- esphomeManager.js acceptState). For a binary sensor a 0 is data: it counts in
+  -- n and mean, and nzero stays 0. n=0 marks a binary carry-over, or a numeric
+  -- minute of only zeros and/or missing updates. nmiss counts updates flagged
+  -- without a valid reading.
+  CREATE TABLE IF NOT EXISTS esphome_readings (
+    entity_id INTEGER NOT NULL,
+    bucket INTEGER NOT NULL,
+    last REAL,
+    mean REAL,
+    min REAL,
+    max REAL,
+    n INTEGER NOT NULL,
+    nzero INTEGER NOT NULL DEFAULT 0,
+    nmiss INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (entity_id, bucket)
+  ) WITHOUT ROWID;
+  CREATE INDEX IF NOT EXISTS idx_esphome_readings_bucket ON esphome_readings(bucket);
+
   -- Per-minute activity timeline for sleep tracking (see lib/activityTracker.js). The motion and
   -- sound DETECTORS already compute a continuous signal each ~5/s (motion = fraction of the zone that
   -- changed; sound = dB above a rolling ambient baseline), but detection_events are cooldown-throttled
@@ -218,6 +270,8 @@ db.exec(`
     in_bed_at TEXT,
     scoring_context TEXT,
     wake_unconfirmed_at TEXT,
+    wake_at_sensor TEXT,
+    sensor_rejects INTEGER,
     computed_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (child_id, night_date)
   );
@@ -489,6 +543,9 @@ if (!sleepReviewColumns.includes('nobody_in_bed')) {
 }
 
 const settingsColumns = db.prepare('PRAGMA table_info(settings)').all().map((c) => c.name);
+if (!settingsColumns.includes('esphome_retention_days')) {
+  db.exec('ALTER TABLE settings ADD COLUMN esphome_retention_days INTEGER NOT NULL DEFAULT 30');
+}
 if (!settingsColumns.includes('timezone')) {
   db.exec("ALTER TABLE settings ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC'");
 }
@@ -984,6 +1041,21 @@ if (!sleepNightsColumns.includes('wake_unconfirmed_at')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN wake_unconfirmed_at TEXT');
 }
 
+// #917 (follow-up to #506): the ESPHome sensor SHADOW of the night (sleepAnalysis.js, addSensorShadow). `wake_at_sensor`
+// is the wake (UTC 'YYYY-MM-DD HH:MM:00', like wake_at) a second pass with the sensor rule would have reported, and
+// `sensor_rejects` how many distinct camera exits that rule rejected. Both NULL means the night had no heart-rate or
+// breathing-rate rows when it was stored, and on every row stored before these columns: no backfill, because the raw
+// readings behind an old night may already be pruned. Written by upsertNight with the other computed columns. NOTHING
+// reads them for a wake, a figure, a push or an alert; they are kept so the sensor rule can be judged against reviewed
+// nights after the raw readings are gone (docs/esphome.md). Also in the CREATE TABLE above for fresh installs; these
+// are the upgrade path, one guard per column so neither can be skipped because the other exists.
+if (!sleepNightsColumns.includes('wake_at_sensor')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN wake_at_sensor TEXT');
+}
+if (!sleepNightsColumns.includes('sensor_rejects')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN sensor_rejects INTEGER');
+}
+
 // Quick-silence: a per-camera temporary mute of ALL alerts (motion/sound/ONVIF/MQTT), for when you're
 // still up as the alert schedule kicks in. Epoch millis; NULL/past = not muted. inActiveWindow() reads
 // it fresh each check so a snooze set from the UI takes effect without restarting the detector leg.
@@ -1078,6 +1150,9 @@ if (!childrenColumns.includes('sleep_report_enabled')) {
 }
 if (!childrenColumns.includes('sleep_report_show_name')) {
   db.exec('ALTER TABLE children ADD COLUMN sleep_report_show_name INTEGER NOT NULL DEFAULT 1');
+}
+if (!childrenColumns.includes('hold_alerts_until_asleep')) {
+  db.exec('ALTER TABLE children ADD COLUMN hold_alerts_until_asleep INTEGER NOT NULL DEFAULT 0');
 }
 
 // Ensure the single settings row always exists.

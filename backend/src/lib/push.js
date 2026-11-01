@@ -4,6 +4,7 @@ import { dataDirFrom, FIREBASE_CLIENT_CONFIG_FILE, FIREBASE_CREDENTIALS_FILE, re
 import db from '../db.js';
 import { storeSnapshot } from './pushSnapshots.js';
 import { sessionAgeCondition } from '../middleware/auth.js';
+import { stripTrailingSlashes } from './stripTrailingSlashes.js';
 
 // Push notifications via Firebase Cloud Messaging. The service-account credential is a secret,
 // so it is NEVER baked into the (public) image — it's mounted as a file into the data dir. If
@@ -379,7 +380,7 @@ export async function sendToAll(title, body, data = {}, imageBuffer = null, { ta
     // Carry the server this alert came from so a tap can switch the app to it if it's showing a
     // different one. Per-device base_url is exactly the address THIS device uses to reach us, so
     // it's the right thing for this device to point at.
-    const data = base_url ? { ...stringData, server: base_url.replace(/\/+$/, '') } : stringData;
+    const data = base_url ? { ...stringData, server: stripTrailingSlashes(base_url) } : stringData;
     const msg = {
       token,
       notification: { title, body },
@@ -388,7 +389,7 @@ export async function sendToAll(title, body, data = {}, imageBuffer = null, { ta
       ...(tag ? { apns: { headers: { 'apns-collapse-id': tag } } } : {}),
     };
     if (snapshotId && base_url) {
-      const url = `${base_url.replace(/\/+$/, '')}/api/push/snapshot/${snapshotId}`;
+      const url = `${stripTrailingSlashes(base_url)}/api/push/snapshot/${snapshotId}`;
       msg.notification.image = url;
       msg.android.notification.imageUrl = url;
     }

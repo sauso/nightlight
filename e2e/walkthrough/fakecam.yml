@@ -1,0 +1,27 @@
+logLevel: warn
+
+# Same shape as the public demo's fake camera (nightlight-website/demo/fakecam.yml): a second MediaMTX on
+# loopback that shares the app container's network namespace, so it must bind only 127.0.0.1:8555 over TCP
+# and switch every other listener off, or the app's own MediaMTX cannot start and no video path comes up.
+rtsp: yes
+rtspAddress: 127.0.0.1:8555
+rtspTransports: [tcp]
+api: no
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+moq: no
+metrics: no
+pprof: no
+playback: no
+
+paths:
+  demo:
+    runOnInit: >
+      ffmpeg -hide_banner -loglevel warning -re -stream_loop -1
+      -i /app/demo/loop.mp4
+      -map 0:v:0 -map 0:a:0
+      -c:v copy -c:a pcm_mulaw -ar 8000 -ac 1
+      -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8555/demo
+    runOnInitRestart: yes

@@ -75,7 +75,16 @@ function lineFor(name, summary, tz) {
   const wake = localHm(summary.wake_at, tz);
   const parts = [`asleep ${fmtDur(summary.asleep_minutes)}`, `${summary.wake_count} wake${summary.wake_count === 1 ? '' : 's'}`];
   if (wake) parts.push(`up ${wake}`);
-  return `${name}: ${parts.join(', ')}`;
+  // #700: the app set aside an earlier "got out of bed" because it was far earlier than this child usually gets up
+  // (`wake_unconfirmed`, only on a night the rule CHANGED). The figures above are then the app's best guess after
+  // setting that exit aside, and a night that report calls short or shows with no "up" time may in fact have ended
+  // earlier, so the push says so instead of presenting them as settled. Said in a sentence of its own, appended,
+  // so every unflagged line (the overwhelming majority: 3 of 144 stored nights on the owner's two databases, all of
+  // them nights known to be wrong) is byte-for-byte what it was. The follow-up "Sleep report updated" push reuses
+  // this function, so it carries the same sentence. Wording chosen by the owner, 2026-10-27. The sentence has no
+  // time in it on purpose: a possible earlier exit is a guess, and a time in a push reads as a fact.
+  const caveat = summary.wake_unconfirmed ? '. The night may have ended earlier than this.' : '';
+  return `${name}: ${parts.join(', ')}${caveat}`;
 }
 
 function link() {

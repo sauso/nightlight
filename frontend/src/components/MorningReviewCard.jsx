@@ -48,13 +48,13 @@ export default function MorningReviewCard({ childId, fmtTime }) {
     // returns a real boolean (unlike GET /review's raw 0/1 column), so no truthiness cast is needed
     // here the way NightReview.jsx's seed needs one.
     //
-    // `onset_at`/`wake_at` are the RESOLVED times (the parent's, else the stored detector's), added to
-    // the done card 2026-09-30 so an in-bed-only answer reads back a whole night (plan review R1). The
-    // `true_*` fallback is only for a response without them.
+    // The receipt reads back ONLY what the person answered, so it takes the raw `true_*` times and not the
+    // resolved `onset_at`/`wake_at` (the stored detector's where they gave none). Those two fields are still
+    // in the response for older clients; this one no longer reads them (2026-10-27, the one-question review).
     return (
       <ReviewReceipt
-        onsetAt={card.onset_at ?? card.true_onset_at}
-        wakeAt={card.wake_at ?? card.true_wake_at}
+        onsetAt={card.true_onset_at}
+        wakeAt={card.true_wake_at}
         inBedAt={card.true_in_bed_at}
         nobodyInBed={card.nobody_in_bed}
         fmtTime={fmtTime}
@@ -63,7 +63,6 @@ export default function MorningReviewCard({ childId, fmtTime }) {
     );
   }
 
-  const events = card.transition_count;
   return (
     <div className="card review-card">
       <button type="button" className="review-card__dismiss" onClick={dismiss} aria-label="Dismiss">
@@ -73,9 +72,11 @@ export default function MorningReviewCard({ childId, fmtTime }) {
         <span className="review-card__icon"><ClipboardCheck size={20} /></span>
         <span className="review-card__text">
           <span className="card-title">Was last night right?</span>
+          {/* One question, the one the review screen asks: when they got up. The fell-asleep time and the
+              event count this used to quote are not asked about any more (and `onset_at` /
+              `transition_count` stay in the response for clients already open). */}
           <span className="camera-tile__sub">
-            We think they fell asleep at {fmtTime(card.onset_at)} and got up at {fmtTime(card.wake_at)}
-            {events > 0 && ` · ${events} recorded ${events === 1 ? 'event' : 'events'}`}
+            {card.wake_at ? `We think they got up at ${fmtTime(card.wake_at)}. Tap to check.` : 'Tap to check the times.'}
           </span>
         </span>
         <span className="review-card__go" aria-hidden="true">›</span>

@@ -812,3 +812,87 @@ test('a snapshot path can never escape the snapshot directory', () => {
     assert.equal(bt.transitionSnapshotPath(bad), null, `rejected: ${JSON.stringify(bad)}`);
   }
 });
+
+// --- framesForNight (#907): the frames the sleep detail page may offer ------------------------------------------
+//
+// The list decides which Room activity rows get a picture button, so a wrong answer is a button that shows another
+// camera's room, a broken image, or a missing button on the frame someone needs. The fixture is hostile on every
+// axis the filter has: another camera's frame in the same hours, a flagged row whose file is gone, an unflagged row
+// whose file exists, and rows either side of each edge of the range. Images are generated placeholder bytes, never
+// a photograph.
+const PLACEHOLDER_JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+
+function clearFrameFiles() {
+  fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+  // Ids restart after the table is emptied, so a file left by an earlier test would make a row in THIS one look
+  // as if its frame exists. That is the very thing the file check must be tested against.
+  for (const f of fs.readdirSync(SNAPSHOT_DIR)) fs.rmSync(path.join(SNAPSHOT_DIR, f), { force: true });
+}
+
+// A row with `snapshot` set as given and, optionally, a file on disk.
+function seedFrame(cameraId, type, createdAt, { flag = 1, file = true } = {}) {
+  const id = seed(cameraId, type, createdAt, { snapshot: flag });
+  if (file) fs.writeFileSync(path.join(SNAPSHOT_DIR, `${id}.jpg`), PLACEHOLDER_JPEG);
+  return Number(id);
+}
+
+const FRAME_NIGHT = {
+  status: 'ok',
+  analysis_camera_id: 'cam-a',
+  window_start: '2026-07-01 09:00:00',
+  window_end: '2026-07-01 21:00:00',
+  display_start: '2026-07-01 10:00:00',
+  display_end: '2026-07-01 20:00:00',
+};
+
+test('★ framesForNight: only the analysis camera, flagged AND on disk, inside the range, ascending', () => {
+  clearFrameFiles();
+  // Inserted out of time order, so the ascending order is the query's and not the insert order's.
+  const later = seedFrame('cam-a', 'into_bed', '2026-07-01 12:00:00');
+  const first = seedFrame('cam-a', 'out_of_bed', '2026-07-01 11:00:00');
+  // The hostile rows, each wrong in exactly one way:
+  seedFrame('cam-b', 'out_of_bed', '2026-07-01 11:30:00'); // another camera, same hours, flag and file both fine
+  seedFrame('cam-a', 'out_of_bed', '2026-07-01 11:40:00', { file: false }); // flagged, file gone
+  seedFrame('cam-a', 'out_of_bed', '2026-07-01 11:50:00', { flag: 0 }); // file exists, never flagged
+
+  assert.deepEqual(bt.framesForNight(FRAME_NIGHT), [
+    { id: first, type: 'out_of_bed', at: '2026-07-01 11:00:00' },
+    { id: later, type: 'into_bed', at: '2026-07-01 12:00:00' },
+  ]);
+});
+
+test('★ framesForNight: the range is the drawn timeline plus 60 s each end, inclusive; 61 s out is not in', () => {
+  clearFrameFiles();
+  // The page matches a row to a frame within 60 s of the row, and every row lies inside display_start..display_end,
+  // so a frame up to 60 s outside that range can still belong to the first or last row.
+  const startIn = seedFrame('cam-a', 'out_of_bed', '2026-07-01 09:59:00'); // exactly 60 s before display_start
+  seedFrame('cam-a', 'out_of_bed', '2026-07-01 09:58:59'); // 61 s before
+  const endIn = seedFrame('cam-a', 'out_of_bed', '2026-07-01 20:01:00'); // exactly 60 s after display_end
+  seedFrame('cam-a', 'out_of_bed', '2026-07-01 20:01:01'); // 61 s after
+  // Inside the WINDOW but outside the drawn range: the range is display_*, not window_*.
+  seedFrame('cam-a', 'out_of_bed', '2026-07-01 09:30:00');
+  seedFrame('cam-a', 'out_of_bed', '2026-07-01 20:30:00');
+
+  assert.deepEqual(bt.framesForNight(FRAME_NIGHT).map((f) => f.id), [startIn, endIn]);
+});
+
+test('framesForNight: a night without display_* uses its window as the range', () => {
+  clearFrameFiles();
+  const inWindow = seedFrame('cam-a', 'out_of_bed', '2026-07-01 09:30:00');
+  seedFrame('cam-a', 'out_of_bed', '2026-07-01 08:58:00'); // more than 60 s before window_start
+  const { display_start, display_end, ...noDisplay } = FRAME_NIGHT;
+  assert.deepEqual(bt.framesForNight(noDisplay).map((f) => f.id), [inWindow]);
+});
+
+test('★ framesForNight: a night with no scored timeline, camera or range returns [] even when frames exist', () => {
+  clearFrameFiles();
+  seedFrame('cam-a', 'out_of_bed', '2026-07-01 11:00:00');
+  for (const status of ['off', 'empty', 'no_data', 'no_sleep']) {
+    assert.deepEqual(bt.framesForNight({ ...FRAME_NIGHT, status }), [], `${status} night`);
+  }
+  assert.deepEqual(bt.framesForNight({ ...FRAME_NIGHT, analysis_camera_id: null }), [], 'no camera');
+  assert.deepEqual(bt.framesForNight({ ...FRAME_NIGHT, display_start: undefined, window_start: undefined }), [], 'no range');
+  assert.deepEqual(bt.framesForNight({ ...FRAME_NIGHT, display_end: undefined, window_end: undefined }), [], 'no range');
+  assert.deepEqual(bt.framesForNight(null), []);
+  assert.equal(bt.framesForNight(FRAME_NIGHT).length, 1, 'precondition: the same fixture does return its frame when ok');
+});

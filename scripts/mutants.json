@@ -1554,13 +1554,13 @@
   {
     "label": "jitter: the settling-tail guard deleted outright",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "if (settlingTail) {",
-    "replace": "if (false) {",
+    "find": "if (settlingTail || sensorRejects) {",
+    "replace": "if (false || sensorRejects) {",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
     ],
-    "note": "This is the whole fix. Without it prod 2026-09-09 reports Child B's night as 1h15m."
+    "note": "This is the whole fix. Without it prod 2026-09-09 reports Child B's night as 1h15m. (#917 re-anchored it: the line now also carries the sensor shadow's `sensorRejects`, always false on the real night.)"
   },
   {
     "label": "jitter: the window boundary is inclusive",
@@ -1609,13 +1609,13 @@
   {
     "label": "jitter: a settling tail is believed without an occupied bed behind it",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at)));",
+    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at), departureCutIdx(t)));",
     "replace": "&& true);",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
     ],
-    "note": "Same lesson as the reversal guard's own corroboration mutant: without it a spurious into_bed lets this guard reject a REAL departure and the night reports wake_at = null. Re-anchored by #598, which gave the guard its own quiet-only witness (bedQuietlyOccupiedFrom); the corroboration itself is unchanged in kind."
+    "note": "Same lesson as the reversal guard's own corroboration mutant: without it a spurious into_bed lets this guard reject a REAL departure and the night reports wake_at = null. Re-anchored by #598, which gave the guard its own quiet-only witness (bedQuietlyOccupiedFrom); the corroboration itself is unchanged in kind. Re-anchored again by #914 (the witness now takes the cut as a second argument)."
   },
   {
     "label": "jitter: control — a comment edit must change nothing",
@@ -1653,8 +1653,8 @@
   {
     "label": "jitter: the return is indexed with a hand-rolled round instead of txIdx",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at)));",
-    "replace": "&& bedQuietlyOccupiedFrom(Math.round((txMs(back.created_at) - analysisStartUtc.getTime()) / 60000)));",
+    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at), departureCutIdx(t)));",
+    "replace": "&& bedQuietlyOccupiedFrom(Math.round((txMs(back.created_at) - analysisStartUtc.getTime()) / 60000), departureCutIdx(t)));",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
@@ -1738,16 +1738,6 @@
     "note": "Survived the original 5 mutants above — every existing exit fixture used nonzero seconds, so a bucket_start (always :00) could never land exactly on exit.created_at. Found by an adversarial pre-merge review (a Claude subagent), 2026-09-14."
   },
   {
-    "label": "lingering motion: overlapping flags render two prompts",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "(t) => t.lingering_motion_minutes != null && t.quick_reversal_of == null",
-    "replace": "(t) => t.lingering_motion_minutes != null",
-    "expect": "killed",
-    "tests": [
-      "MorningReview.test.jsx"
-    ]
-  },
-  {
     "label": "lingering motion: leading lookback is dropped",
     "file": "backend/src/lib/sleepReviews.js",
     "find": "Date.parse(`${startSql.replace(' ', 'T')}Z`) - LINGERING_WINDOW_MS",
@@ -1768,16 +1758,6 @@
     ]
   },
   {
-    "label": "lingering motion: collapsed-list save gate ignores the new prompt",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "(showEvents || quickReversals.length > 0 || lingeringOnly.length > 0)",
-    "replace": "(showEvents || quickReversals.length > 0)",
-    "expect": "killed",
-    "tests": [
-      "MorningReview.test.jsx"
-    ]
-  },
-  {
     "label": "lingering motion: boundary continuation is treated as a fresh run",
     "file": "backend/src/lib/bedTransitionRules.js",
     "find": "boundaryTypeByCamera?.get(cameraId) === 'out_of_bed'",
@@ -1785,16 +1765,6 @@
     "expect": "killed",
     "tests": [
       "morning-review.test.js"
-    ]
-  },
-  {
-    "label": "lingering motion: frontend runner control (comment only)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "// but ask only once per event; both cards write into the same shared verdict.",
-    "replace": "// but ask only once per event; both cards use the shared verdict state.",
-    "expect": "survives",
-    "tests": [
-      "MorningReview.test.jsx"
     ]
   },
   {
@@ -3336,124 +3306,12 @@
     "tests": ["sleepDetail.test.jsx"]
   },
   {
-    "label": "#501 before bedtime: 16:00 itself is grouped",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "hour < EARLY_CUTOFF_HOUR",
-    "replace": "hour <= EARLY_CUTOFF_HOUR",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 before bedtime: next morning's events are grouped too (night date ignored)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "return localDate === date && hour < EARLY_CUTOFF_HOUR;",
-    "replace": "return hour < EARLY_CUTOFF_HOUR;",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 before bedtime: grouped even with no bedtime anchor",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "data.computed?.in_bed_at || onsetFrame || inBedFrame || data.computed?.onset_at || data.review?.true_onset_at",
-    "replace": "true",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 before bedtime: the one-tap answer overwrites answers already given",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "for (const t of bulkable) if (next[t.id] == null) next[t.id] = 'wrong';",
-    "replace": "for (const t of bulkable) next[t.id] = 'wrong';",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 before bedtime: the one-tap answer includes quick check-in events",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "const hasOwnCard = (t) => t.quick_reversal_of != null || t.lingering_motion_minutes != null;",
-    "replace": "const hasOwnCard = (t) => t.lingering_motion_minutes != null;",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 reason chips: leaving 'No' keeps the reason",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "if (next !== 'wrong' && reasons[id] != null) setReasons((r) => ({ ...r, [id]: null }));",
-    "replace": "",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 reason chips: shown under every event, not only a 'No'",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "{verdicts[t.id] === 'wrong' && !hasOwnCard(t) && (",
-    "replace": "{true && !hasOwnCard(t) && (",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 reason chips: reasons never sent",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "        reasons,",
-    "replace": "",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
     "label": "#501 in_bed_at: the base object's default is deleted, so every early return crashes the store",
     "file": "backend/src/lib/sleepAnalysis.js",
     "find": "    in_bed_at: null,",
     "replace": "",
     "expect": "killed",
     "tests": ["morning-review.test.js", "sleepAnalysis.test.js"]
-  },
-  {
-    "label": "#501 before bedtime: the one-tap answer works without the group ever being opened",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "disabled={!earlyOpened || bulkLeft === 0}",
-    "replace": "disabled={bulkLeft === 0}",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 before bedtime: opening the group never unlocks the one-tap answer",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "onClick={() => { setShowEarly((v) => !v); setEarlyOpened(true); }}",
-    "replace": "onClick={() => setShowEarly((v) => !v)}",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 before bedtime: a typed onset correction is not a bedtime anchor",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": " || data.review?.true_onset_at",
-    "replace": "",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 reason chips: 'That was me' does not record reason 'adult'",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "setReasons((r) => ({ ...r, [oob.id]: 'adult' }));",
-    "replace": "",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 reason chips: un-tapping 'That was me' re-adds 'adult' to a cleared verdict",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "if (key === 'wrong' && verdicts[oob.id] !== 'wrong') {",
-    "replace": "if (key === 'wrong') {",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
-    "label": "#501 reason chips: a second picker under an event that has its own card",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "{verdicts[t.id] === 'wrong' && !hasOwnCard(t) && (",
-    "replace": "{verdicts[t.id] === 'wrong' && (",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
   },
   {
     "label": "#501 in bed: a corrected onset still shows the computed put-down",
@@ -6222,14 +6080,6 @@
     "note": "This is the change the #369 review round proposed (Fix 1), held back because it silences the audio watchdog. If it is ever made DELIBERATELY, delete this entry and flip A5 (and A3) in the same commit."
   },
   {
-    "label": "0.34.0 review F1: Before bedtime groups on the placeholder timezone (the loaded gate removed)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "  const groupEarly = settingsLoaded && hasBedtime;",
-    "replace": "  const groupEarly = hasBedtime;",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"]
-  },
-  {
     "label": "0.34.0 review F1: NightReview gates on !loading, which a FAILED settings load also satisfies",
     "file": "frontend/src/pages/NightReview.jsx",
     "find": "  const { settings, loaded: settingsLoaded, loading: settingsLoading } = useSettings();",
@@ -6570,37 +6420,10 @@
     "namePattern": "no one was in the bed"
   },
   {
-    "label": "nobody-in-bed frontend R5: the seed effect ignores the stored flag on reopen",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "if (!nobodyTouched) setNobody(!!data.review?.nobody_in_bed);",
-    "replace": "if (!nobodyTouched) setNobody(false);",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "reopening a flagged night seeds the flag view"
-  },
-  {
     "label": "nobody-in-bed frontend R5: the flag view loses render priority over confirm/edit",
     "file": "frontend/src/pages/NightReview.jsx",
     "find": "{nobody ? (",
     "replace": "{false ? (",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "no one was in the bed"
-  },
-  {
-    "label": "nobody-in-bed frontend: saveNobody attaches a stale time alongside the flag",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "await api.put(`/children/${id}/review/${date}`, { nobody_in_bed: flag, note: note.trim() || null });",
-    "replace": "await api.put(`/children/${id}/review/${date}`, { nobody_in_bed: flag, note: note.trim() || null, true_onset_local: onset || null });",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "no one was in the bed"
-  },
-  {
-    "label": "nobody-in-bed frontend: NightReview's bottom \"Save review\" reappears while the flag view is showing",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "editing && !nobody ?",
-    "replace": "editing ?",
     "expect": "killed",
     "tests": ["MorningReview.test.jsx"],
     "namePattern": "no one was in the bed"
@@ -6622,24 +6445,6 @@
     "expect": "killed",
     "tests": ["MorningReview.test.jsx"],
     "namePattern": "does NOT claim the flag was set"
-  },
-  {
-    "label": "nobody-in-bed fix round #4: saveNobody drops the typed note again",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "await api.put(`/children/${id}/review/${date}`, { nobody_in_bed: flag, note: note.trim() || null });",
-    "replace": "await api.put(`/children/${id}/review/${date}`, { nobody_in_bed: flag });",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "note typed in edit mode is NOT discarded"
-  },
-  {
-    "label": "nobody-in-bed fix round #5: the nobodyTouched guard drops out again (mutation-killing strengthener)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "if (!nobodyTouched) setNobody(!!data.review?.nobody_in_bed);",
-    "replace": "setNobody(!!data.review?.nobody_in_bed);",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "touched flag survives a late reseed"
   },
   {
     "label": "#493 L00: control, a comment edit in activityTracker.js must change nothing",
@@ -7607,8 +7412,8 @@
   {
     "label": "#508 A09: only the minute's STATE is gated; every other channel of an unwatched row leaks",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE;\r\n    const moved = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || out;\r\n    const heard = r.sound_peak != null && r.sound_peak > SOUND_ACTIVE;\r\n    const active = isActiveRow(r);\r\n    state[i] = state[i] === null ? active : state[i] || active;",
-    "replace": "    const out = r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE;\r\n    const moved = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || out;\r\n    const heard = r.sound_peak != null && r.sound_peak > SOUND_ACTIVE;\r\n    const active = isActiveRow(r);\r\n    if (motionSeen(r)) state[i] = state[i] === null ? active : state[i] || active;",
+    "find": "    if (!motionSeen(r)) continue;\r\n    const out = r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE;\r\n    const moved = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || out;\r\n    const heard = soundCounts(r, i);\r\n    const active = isActiveRow(r, i);\r\n    state[i] = state[i] === null ? active : state[i] || active;",
+    "replace": "    const out = r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE;\r\n    const moved = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || out;\r\n    const heard = soundCounts(r, i);\r\n    const active = isActiveRow(r, i);\r\n    if (motionSeen(r)) state[i] = state[i] === null ? active : state[i] || active;",
     "expect": "killed",
     "tests": ["sleep-zero-frame-minutes.test.js"],
     "namePattern": "#508 T9"
@@ -7743,7 +7548,7 @@
     "label": "#508 A27: the metrics extension skips an unwatched row for stateMetrics but lets its SOUND mark the minute active",
     "file": "backend/src/lib/sleepAnalysis.js",
     "find": "        if (!motionSeen(r)) continue;\r\n        const rowActive",
-    "replace": "        if (!motionSeen(r)) { if (isActiveRow(r)) activeMetrics[i] = true; continue; }\r\n        const rowActive",
+    "replace": "        if (!motionSeen(r)) { if (isActiveRow(r, i)) activeMetrics[i] = true; continue; }\r\n        const rowActive",
     "expect": "killed",
     "tests": ["sleep-zero-frame-minutes.test.js"],
     "namePattern": "#508 T4b"
@@ -8174,60 +7979,6 @@
     "namePattern": "not a minute before asleep"
   },
   {
-    "label": "in-bed/lock F3: \"Put down here\" fills \"Fell asleep\" again (the original bug, client side)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "onClick={() => tapMoment('inBed', t)}",
-    "replace": "onClick={() => tapMoment('onset', t)}",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "fills IN BED"
-  },
-  {
-    "label": "in-bed/lock F4: the in-bed time is sent even when untouched (R3)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "true_in_bed_local: withTimes && inBedTouched ? (inBed || null) : undefined,",
-    "replace": "true_in_bed_local: withTimes ? (inBed || null) : undefined,",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "sends NOTHING about in bed"
-  },
-  {
-    "label": "in-bed/lock F5: the In bed field is seeded from the detector's put-down (R3)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "setInBed(toLocalHhmm(data.review?.true_in_bed_at, tz));",
-    "replace": "setInBed(toLocalHhmm(data.review?.true_in_bed_at || data.computed?.in_bed_at, tz));",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "sends NOTHING about in bed"
-  },
-  {
-    "label": "in-bed/lock F6: the picked put-down frame is never sent",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "true_in_bed_transition_id: withTimes && inBedTouched ? inBedFrame : undefined,",
-    "replace": "true_in_bed_transition_id: undefined,",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "fills IN BED"
-  },
-  {
-    "label": "in-bed/lock F7: a got-into-bed row loses its \"Put down here\" button",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "          {t.type === 'into_bed' && (",
-    "replace": "          {false && (",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "TWO moments"
-  },
-  {
-    "label": "in-bed/lock F8: the receipt drops its in-bed line",
-    "file": "frontend/src/components/ReviewReceipt.jsx",
-    "find": "              : inBedAt",
-    "replace": "              : false",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx", "sleepDetail.test.jsx"],
-    "namePattern": "reads back as|IN-BED-ONLY"
-  },
-  {
     "label": "in-bed/lock F9: SleepDetail's receipt gate forgets an in-bed-only answer (R1)",
     "file": "frontend/src/pages/SleepDetail.jsx",
     "find": "rev.true_wake_at || rev.true_in_bed_at || rev.nobody_in_bed)",
@@ -8235,24 +7986,6 @@
     "expect": "killed",
     "tests": ["sleepDetail.test.jsx"],
     "namePattern": "IN-BED-ONLY"
-  },
-  {
-    "label": "in-bed/lock F10: SleepDetail's receipt reads the raw typed asleep time (\"asleep — to …\")",
-    "file": "frontend/src/pages/SleepDetail.jsx",
-    "find": "shown_onset_at: rev.true_onset_at || r.computed?.onset_at || null,",
-    "replace": "shown_onset_at: rev.true_onset_at || null,",
-    "expect": "killed",
-    "tests": ["sleepDetail.test.jsx"],
-    "namePattern": "IN-BED-ONLY"
-  },
-  {
-    "label": "in-bed/lock F11: the morning card's receipt reads the raw typed asleep time",
-    "file": "frontend/src/components/MorningReviewCard.jsx",
-    "find": "onsetAt={card.onset_at ?? card.true_onset_at}",
-    "replace": "onsetAt={card.true_onset_at}",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "reads back as"
   },
   {
     "label": "in-bed/lock F12: RecomputeNight ignores the server's `locked`",
@@ -8372,60 +8105,6 @@
     "namePattern": "only a got-into-bed event"
   },
   {
-    "label": "in-bed/lock fix Fc: the In bed re-seed keys on the shared `touched`, so a late timezone freezes it in the wrong zone",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "    if (!inBedTouched) {",
-    "replace": "    if (!touched) {",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "keeps re-seeding"
-  },
-  {
-    "label": "in-bed/lock fix Fe1: an in-bed time on record is not a bedtime anchor for \"Before bedtime\"",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "\r\n    || data.review?.true_in_bed_at",
-    "replace": "",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "an in-bed time the person gave"
-  },
-  {
-    "label": "in-bed/lock fix Fe2: a put-down frame picked on this screen is not a bedtime anchor",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "onsetFrame || inBedFrame || data.computed?.onset_at",
-    "replace": "onsetFrame || data.computed?.onset_at",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "put-down FRAME picked on this screen"
-  },
-  {
-    "label": "in-bed/lock fix U1: un-picking a frame leaves its time in the field",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "      m.setValue(prev.value);",
-    "replace": "      // mutant: the value is not restored",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "un-pick"
-  },
-  {
-    "label": "in-bed/lock fix U2: un-picking \"Put down here\" leaves inBedTouched set, so an empty in-bed is still sent",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "      if (key === 'inBed') setInBedTouched(prev.inBedTouched);",
-    "replace": "      // mutant: inBedTouched stays set",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "then un-picking"
-  },
-  {
-    "label": "in-bed/lock fix U3: un-pressing a put-down already on record keeps its time",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "      setInBed('');\r\n      setInBedFrame(null);",
-    "replace": "      setInBedFrame(null);",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "ON RECORD removes it"
-  },
-  {
     "label": "in-bed/lock fix2 T1: the time form no longer waits for the real timezone (Codex P1: a chip tap before /settings freezes asleep/wake in the placeholder zone and Save sends them)",
     "file": "frontend/src/pages/NightReview.jsx",
     "find": "  const timesReady = settingsLoaded;",
@@ -8469,62 +8148,6 @@
     "expect": "killed",
     "tests": ["nightReviewTimezoneGate.test.jsx"],
     "namePattern": "the error appears only once the request has settled"
-  },
-  {
-    "label": "in-bed/lock fix2 T2: \"That's right\" is usable before the real timezone arrives",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "disabled={busy || !timesReady}\r\n                    onClick={() => save(true, shownOnset, shownWake)}",
-    "replace": "disabled={busy}\r\n                    onClick={() => save(true, shownOnset, shownWake)}",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "nothing that sends a time"
-  },
-  {
-    "label": "in-bed/lock fix2 T3: \"Put down here\" is offered before the real timezone arrives",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "              disabled={!timesReady}\r\n              onClick={() => tapMoment('inBed', t)}",
-    "replace": "              onClick={() => tapMoment('inBed', t)}",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "nothing that sends a time"
-  },
-  {
-    "label": "in-bed/lock fix2 T4: the note field takes typing before the real timezone arrives (a keystroke sets `touched`)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "                  disabled={!timesReady}\r\n                  placeholder=\"e.g. put back on the bed to get dressed at 5:45\"",
-    "replace": "                  placeholder=\"e.g. put back on the bed to get dressed at 5:45\"",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "reopened into its times"
-  },
-  {
-    "label": "in-bed/lock fix2 T5: \"Save review\" is usable before the real timezone arrives",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "disabled={busy || !timesReady} onClick={() => save(true)}",
-    "replace": "disabled={busy} onClick={() => save(true)}",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "reopened into its times"
-  },
-  {
-    "label": "in-bed/lock fix2 T6: save() sends times without the real timezone (defence in depth behind the disabled buttons)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "    if (withTimes && !timesReady) return;",
-    "replace": "    // mutant: no timezone guard in save()",
-    "expect": "equivalent",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "placeholder zone|nothing that sends a time|reopened into its times",
-    "note": "Every button that calls save(true) (\"That's right\", \"Save review\") is disabled until settingsLoaded, and save(false) sends no time, so no UI path reaches this guard with withTimes && !timesReady. It is kept so a future caller cannot bypass the gate."
-  },
-  {
-    "label": "in-bed/lock fix2 T7: tapMoment acts before the real timezone arrives (defence in depth behind the disabled chips)",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "    if (!timesReady) return;\r\n    const m = {",
-    "replace": "    const m = {",
-    "expect": "equivalent",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "placeholder zone|nothing that sends a time",
-    "note": "tapMoment's only callers are the moment chips, which are disabled until settingsLoaded; a disabled button fires no click. Kept so a future caller cannot bypass the gate."
   },
   {
     "label": "in-bed/lock fix2 O1: the route stores an asleep time after the wake (no asleep <= wake check)",
@@ -9844,8 +9467,8 @@
   {
     "label": "#452 M14: the motion confirm comparison is > instead of >= (a run alerts one frame late; confirm 0 never alerts)",
     "file": "backend/src/lib/motionDetector.js",
-    "find": "if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera)) {",
-    "replace": "if (now - activeSince > confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera)) {",
+    "find": "if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera) && !shouldHold(camera)) {",
+    "replace": "if (now - activeSince > confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera) && !shouldHold(camera)) {",
     "expect": "killed",
     "tests": ["motion-frame-gap.test.js"]
   },
@@ -10827,8 +10450,8 @@
   {
     "label": "#454 M10: the stamp is written whenever the confirm time and cooldown allow, even when the quiet-hours schedule then suppresses the alert",
     "file": "backend/src/lib/motionDetector.js",
-    "find": "if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera)) {",
-    "replace": "if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && (motionAlertStamps.set(stampKey, now), inActiveWindow(camera))) {",
+    "find": "if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && inActiveWindow(camera) && !shouldHold(camera)) {",
+    "replace": "if (now - activeSince >= confirmMs && now - lastAlert >= cooldownMs && (motionAlertStamps.set(stampKey, now), inActiveWindow(camera)) && !shouldHold(camera)) {",
     "expect": "killed",
     "tests": ["motion-alert-cooldown.test.js"],
     "namePattern": "^#454 C10:"
@@ -11341,26 +10964,17 @@
   {
     "label": "#353 M-353-04: the +1 (next) night is never tried for the sampling gate (a bedtime after midnight has no lookbehind on the previous evening)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "for (let delta = nextNight ? 1 : 0; delta >= -1; delta--) {",
-    "replace": "for (let delta = 0; delta >= -1; delta--) {",
+    "find": "for (const delta of nextNight ? [0, -1, 1] : [0, -1]) {",
+    "replace": "for (const delta of [0, -1]) {",
     "expect": "killed",
     "tests": ["sleep-sampling-horizon.test.js"],
-    "namePattern": "^#353 (a 01:00 bedtime|the \\+1 night|a 00:02 start|childWindowActiveNow does not try)"
-  },
-  {
-    "label": "#353 M-353-05: childWindowActiveNow also tries the next night (the wake watcher's input moves)",
-    "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);",
-    "replace": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS, true);",
-    "expect": "killed",
-    "tests": ["sleep-sampling-horizon.test.js"],
-    "namePattern": "^#353 childWindowActiveNow does not try the next night"
+    "namePattern": "^#353 (a 01:00 bedtime|the \\+1 night|a 00:02 start)"
   },
   {
     "label": "#353 M-353-06: yesterday's night is never tried (the morning after a window is not sampled)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "for (let delta = nextNight ? 1 : 0; delta >= -1; delta--) {",
-    "replace": "for (let delta = nextNight ? 1 : 0; delta >= 0; delta--) {",
+    "find": "for (const delta of nextNight ? [0, -1, 1] : [0, -1]) {",
+    "replace": "for (const delta of nextNight ? [0, 1] : [0]) {",
     "expect": "killed",
     "tests": ["sleep-sampling-horizon.test.js", "motion-leg-reconcile.test.js"],
     "namePattern": "^#353 (a 19:00-07:00 child is still sampled|MQTT source|ONVIF source|frame-diff source)"
@@ -11377,8 +10991,8 @@
   {
     "label": "#353 M-353-08: the start edge is exclusive (>= becomes >)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;",
-    "replace": "if (now > startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;",
+    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return startUtc.getTime();",
+    "replace": "if (now > startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return startUtc.getTime();",
     "expect": "killed",
     "tests": ["sleep-sampling-horizon.test.js", "motion-leg-reconcile.test.js"],
     "namePattern": "^#353 (the afternoon gap|a 01:00 bedtime|childWindowActiveNow keeps|MQTT source|ONVIF source|frame-diff source)"
@@ -11386,8 +11000,8 @@
   {
     "label": "#353 M-353-09: the end edge is inclusive (< becomes <=)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;",
-    "replace": "if (now >= startUtc.getTime() - leadMs && now <= endUtc.getTime() + trailMs) return true;",
+    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return startUtc.getTime();",
+    "replace": "if (now >= startUtc.getTime() - leadMs && now <= endUtc.getTime() + trailMs) return startUtc.getTime();",
     "expect": "killed",
     "tests": ["sleep-sampling-horizon.test.js", "motion-leg-reconcile.test.js"],
     "namePattern": "^#353 (the sampling tail ends one reconcile margin|childWindowActiveNow keeps|MQTT source|ONVIF source|frame-diff source)"
@@ -11395,17 +11009,44 @@
   {
     "label": "#353 M-353-10: childWindowActiveNow's tail is the sampling tail (the wake watcher and the timelapse are widened to the horizon)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);",
-    "replace": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WAKE_LOOKAHEAD_MS + WINDOW_MARGIN_MS);",
+    "find": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS, true);",
+    "replace": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WAKE_LOOKAHEAD_MS + WINDOW_MARGIN_MS, true);",
     "expect": "killed",
     "tests": ["sleep-sampling-horizon.test.js"],
     "namePattern": "^#353 childWindowActiveNow keeps"
   },
   {
+    "label": "#602 M-602-01: childWindowActiveNow does not try tomorrow's night (a window opening 00:00-00:04 has no lead before midnight for the wake watcher)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS, true);",
+    "replace": "return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js", "alert-hold.test.js"],
+    "namePattern": "^#602 (childWindowActiveNow and childWindowKeyNow|a 00:02 window holds)"
+  },
+  {
+    "label": "#602 M-602-02: childWindowKeyNow does not try tomorrow's night (the hold has no key in the lead minutes and lets alerts through)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "return openWindowStartUtc(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS, true);",
+    "replace": "return openWindowStartUtc(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js", "alert-hold.test.js"],
+    "namePattern": "^#602 (childWindowActiveNow and childWindowKeyNow|a 00:02 window holds)"
+  },
+  {
+    "label": "#602 M-602-03: tomorrow's night is tried FIRST (a nearly 24-hour window switches its hold key to tomorrow's at the lead edge and restarts a hold in progress)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "for (const delta of nextNight ? [0, -1, 1] : [0, -1]) {",
+    "replace": "for (const delta of nextNight ? [1, 0, -1] : [0, -1]) {",
+    "expect": "killed",
+    "tests": ["sleep-sampling-horizon.test.js"],
+    "namePattern": "^#602 tomorrow"
+  },
+  {
     "label": "#353 M-353-11a: the tail is computed in WALL-CLOCK terms (local end + trail as a local time), not as absolute ms: wrong by an hour across a DST change in either direction",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;",
-    "replace": "if (now >= startUtc.getTime() - leadMs && now < (() => { const w = new Date(endUtc.getTime() + tzOffsetMs(endUtc, tz) + trailMs); return zonedToUtc(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate(), w.getUTCHours(), w.getUTCMinutes(), tz).getTime(); })()) return true;",
+    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return startUtc.getTime();",
+    "replace": "if (now >= startUtc.getTime() - leadMs && now < (() => { const w = new Date(endUtc.getTime() + tzOffsetMs(endUtc, tz) + trailMs); return zonedToUtc(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate(), w.getUTCHours(), w.getUTCMinutes(), tz).getTime(); })()) return startUtc.getTime();",
     "expect": "killed",
     "tests": ["sleep-sampling-horizon.test.js"],
     "namePattern": "^#353 DST (spring-forward|fall-back): the horizon is 3 REAL hours",
@@ -11414,8 +11055,8 @@
   {
     "label": "#353 M-353-11b: the lead is computed in WALL-CLOCK terms (local start - lead as a local time), not as absolute ms",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;",
-    "replace": "if (now >= (() => { const w = new Date(startUtc.getTime() + tzOffsetMs(startUtc, tz) - leadMs); return zonedToUtc(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate(), w.getUTCHours(), w.getUTCMinutes(), tz).getTime(); })() && now < endUtc.getTime() + trailMs) return true;",
+    "find": "if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return startUtc.getTime();",
+    "replace": "if (now >= (() => { const w = new Date(startUtc.getTime() + tzOffsetMs(startUtc, tz) - leadMs); return zonedToUtc(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate(), w.getUTCHours(), w.getUTCMinutes(), tz).getTime(); })() && now < endUtc.getTime() + trailMs) return startUtc.getTime();",
     "expect": "killed",
     "tests": ["sleep-sampling-horizon.test.js"],
     "namePattern": "^#353 DST (spring-forward|fall-back): a lookbehind that really crosses the change",
@@ -12015,12 +11656,12 @@
   {
     "label": "#598 M-598-01: the settling-tail witness goes back to bedOccupiedFrom (any motion, active minutes included)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at)));",
+    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at), departureCutIdx(t)));",
     "replace": "&& bedOccupiedFrom(txIdx(back.created_at)));",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
     "namePattern": "#598 C1:",
-    "note": "The whole fix reverted. The 2026-10-03 shape: a parent's ACTIVE minutes an hour after a real exit vouch for a stray into_bed 51 s before it, and the wake moves 07:12 -> 09:27."
+    "note": "The whole fix reverted. The 2026-10-03 shape: a parent's ACTIVE minutes an hour after a real exit vouch for a stray into_bed 51 s before it, and the wake moves 07:12 -> 09:27. Re-anchored by #914 (the quiet witness now takes the cut as a second argument; the mutant drops both, as bedOccupiedFrom has no cut)."
   },
   {
     "label": "#598 M-598-02: the quiet witness counts active minutes too (the quiet condition dropped)",
@@ -12064,11 +11705,12 @@
   {
     "label": "#598 M-598-06: the quiet witness window is not capped",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt);",
-    "replace": "const witnessEnd = totalMinExt;",
+    "find": "const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt, until);",
+    "replace": "const witnessEnd = Math.min(totalMinExt, until);",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
-    "namePattern": "#598 C5:"
+    "namePattern": "#914 W7:",
+    "note": "Re-anchored by #914, which added the cut (`until`) to this line; the mutant keeps the cut and drops only the cap. Its test moved from #598 C5 to #914 W7: in C5's fixture the next departure (09:27:38) now comes before the cap's last minute, so the cut, not the cap, is the nearer end there."
   },
   {
     "label": "#598 M-598-07: detectMidnightEpisodes' settlingBack stops believing an ACTIVE-only witness",
@@ -12083,12 +11725,12 @@
   {
     "label": "#598 M-598-08: the settling-tail guard never believes a return (the witness is always false)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at)));",
+    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at), departureCutIdx(t)));",
     "replace": "&& false);",
     "expect": "killed",
     "tests": ["sleepAnalysis.test.js"],
     "namePattern": "#598 C2:",
-    "note": "The over-correction C1 alone cannot see: the hostile twin (same stream, still sleeper behind it) must still skip the tail."
+    "note": "The over-correction C1 alone cannot see: the hostile twin (same stream, still sleeper behind it) must still skip the tail. Re-anchored by #914 (the witness now takes the cut as a second argument)."
   },
   {
     "label": "#598 M-598-09: the occupancy witness window is cut to 60 minutes",
@@ -12811,8 +12453,8 @@
   {
     "label": "#509 M-509-01: the veto is removed entirely (the whole fix reverted)",
     "file": "backend/src/lib/sleepAnalysis.js",
-    "find": "&& quietStretchBeforeExit(cribActExt, algoSleepEnd, selectedGapStart, MORNING_ABSENCE_MIN, MAX_POST_EXIT_ACTIVE_MIN)) {",
-    "replace": "&& false) {",
+    "find": "&& quietStretchBeforeExit(cribActExt, algoSleepEnd, selectedGapStart, MORNING_ABSENCE_MIN, MAX_POST_EXIT_ACTIVE_MIN);",
+    "replace": "&& false;",
     "expect": "killed",
     "tests": [
       "sleepAnalysis.test.js"
@@ -13049,16 +12691,16 @@
     "note": "Opus review: only the helper's own unit test pinned the lower bound; M-509-10 drops it entirely. Real data matters here: in 5 of 19 vetoed nights the bed was already quiet 10-66 minutes before A. C9b's third case (stretch of 19 from A, quiet before A)."
   },
   {
-    "label": "#509 M-509-22: the settling-tail fallback records its gap start 20 minutes late",
+    "label": "#509 M-509-22: EQUIVALENT since #618: the settling-tail fallback records its gap start 20 minutes late",
     "file": "backend/src/lib/sleepAnalysis.js",
     "find": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i };",
     "replace": "settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i + 20 };",
-    "expect": "killed",
+    "expect": "equivalent",
     "tests": [
       "sleepAnalysis.test.js"
     ],
     "namePattern": "#509",
-    "note": "Opus review: survived while C10 only killed gapStart 0. The stretch search then finds the gap's own quiet minutes. C10 at the 20/21 trailing boundary."
+    "note": "Killed by C10 before #618 (the veto then found the gap's own quiet minutes and fell back to the movement-only wake). Since #618 the veto's hand-back finds the SAME skip (its gap lies in that stretch) and returns the same exit, so the wake, the metrics and the marker are unchanged: the first #618 head survived it in the #509 mutation run, while the same entry is killed on dev (run 41141098105). selectedGapStart is read by nothing after the veto. Not proven for every contrived shape; a gap that opens before A cannot exist (A starts an active run)."
   },
   {
     "label": "#509 M-509-23: the settling-tail fallback records its gap start one minute early",
@@ -13071,6 +12713,226 @@
     ],
     "namePattern": "#509",
     "note": "Opus review: one minute shifts the trailing count by one, which only the 20/21 boundary in C10 can see."
+  },
+  {
+    "label": "#618 M-618-01: the hand-back is disabled (the veto falls back to the movement-only wake, as before #618)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (handBack) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H1",
+    "note": "The 2026-10-30 shape: from 07:18 on the wake reads 06:13 (A) instead of the skipped 06:29:56 exit."
+  },
+  {
+    "label": "#618 M-618-02: a skip from an EARLIER gap is handed back (the stretch's lower bound dropped; also what the night-wide settlingFallback would hand back)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (skip.gapStart < stretchStart || skip.gapStart >= stretchEnd) continue;",
+    "replace": "if (skip.gapStart >= stretchEnd) continue;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H3",
+    "note": "The evening tail (dt 0, the night-wide fallback's choice) comes back as the morning wake: 20:45 instead of A, or instead of the 06:29 skip in the stretch. With the smallest-dt choice, using settlingFallback itself is this same mutant."
+  },
+  {
+    "label": "#618 M-618-03: a skip in the discarded exit's own gap (or later) is handed back (the stretch's upper bound dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (skip.gapStart < stretchStart || skip.gapStart >= stretchEnd) continue;",
+    "replace": "if (skip.gapStart < stretchStart) continue;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#509 C10|#618 H8",
+    "note": "C10: the exit the veto just discarded was itself a settling-tail skip in its own gap, and would undo the veto. H8: the fallback's own gap lies after the stretch it is vetoed on."
+  },
+  {
+    "label": "#618 M-618-04: the #700 lead test is not asked at the hand-back (a far-early exit comes back)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (farEarlyAt(skip.at)) continue;",
+    "replace": "void 0;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H4",
+    "note": "With 14 earlier nights (threshold 80 min) the 05:29:56 skip, 91 min before the window end, must not come back: 05:13 (A), not 05:29."
+  },
+  {
+    "label": "#618 M-618-05: the handed-back exit's minute is Math.round, not txIdx (an exit at :56 s lands a minute late)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "transitionExitIdx = txIdx(handBack.at);",
+    "replace": "transitionExitIdx = Math.round((handBack.ms - analysisStartUtc.getTime()) / 60000);",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H2",
+    "note": "The metrics span would end at 06:30 while the wake reads 06:29: the span sum and awake_minutes (16) are off by one."
+  },
+  {
+    "label": "#618 M-618-06: the timeline marker does not move with the handed-back exit",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "exitTransitionAt = handBack.at;",
+    "replace": "exitTransitionAt = null;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H2",
+    "note": "The wake reads 06:29 but no out_of_bed marker is drawn for it."
+  },
+  {
+    "label": "#618 M-618-07: a skip is recorded however far its exit is from the gap's start (the WAKE_SNAP_MS bound dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (dt <= WAKE_SNAP_MS) settlingSkips.push(",
+    "replace": "if (true) settlingSkips.push(",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H6",
+    "note": "A blip at 06:36 opens the stretch at 06:37, 7 min after the exit: no skip may be recorded for that gap, so the wake is A (06:13), not 06:29."
+  },
+  {
+    "label": "#618 M-618-08: of two skips in the stretch's gap the FARTHER one from its start comes back",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (handBack != null && skip.dt >= handBack.dt) continue;",
+    "replace": "if (handBack != null && skip.dt <= handBack.dt) continue;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H9",
+    "note": "A double tail (two exits within a minute of one into_bed, 06:28:55 and 06:29:45): the scan's fallback takes 06:29:45 at 07:08, so the hand-back must too, or the wake moves from 06:29 to 06:28 with the clock."
+  },
+  {
+    "label": "#618 M-618-09: a skip in a stretch BETWEEN the veto's stretch and the discarded exit's own gap is handed back (the stretch's upper bound loosened to T's gap start)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const [stretchStart, stretchEnd] = vetoStretch;",
+    "replace": "const [stretchStart] = vetoStretch; const stretchEnd = selectedGapStart;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H8b",
+    "note": "Opus review of #618: H8 with 19 active minutes instead of 20. The veto finds the early stretch (05:50-06:10); a bound by T's gap would hand back the 06:29:56 skip that lies after it and move the night from 05:50 to 06:29, a night the PR says must not move."
+  },
+  {
+    "label": "#618 M-618-10: of two skips in the stretch's gap, the LAST recorded comes back, not the nearest to the gap's start",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (handBack != null && skip.dt >= handBack.dt) continue;",
+    "replace": "void 0;",
+    "expect": "killed",
+    "tests": [
+      "sleepAnalysis.test.js"
+    ],
+    "namePattern": "#618 H9b",
+    "note": "Opus review of #618: H9's two exits both sit before the gap's start, where the nearest is also the latest; H9b puts both after it (exits 06:30:10 and 06:31:00), so 'the last' reads 06:31 from the moment the later exit qualifies where the scan's fallback reads 06:30."
+  },
+  {
+    "label": "#914 M-914-01: the settling-tail guard is not given the cut (the pre-#914 count)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at), departureCutIdx(t)));",
+    "replace": "&& bedQuietlyOccupiedFrom(txIdx(back.created_at)));",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W2:",
+    "note": "The whole fix reverted. The 2026-10-30 night: the empty bed's noise after the 06:57:12 departure makes 8 quiet minutes by window end + 31, the real 06:29:56 exit is set aside and 06:57 is reported."
+  },
+  {
+    "label": "#914 M-914-02: the cut is inclusive (the departure's own minute counted)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt, until);",
+    "replace": "const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt, until + 1);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W5:",
+    "note": "W5 puts a quiet minute in the later exit's own minute, after five before it: counted, it is the sixth and the real exit is set aside."
+  },
+  {
+    "label": "#914 M-914-03: the cut REPLACES the 150-minute cap instead of tightening it",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt, until);",
+    "replace": "const witnessEnd = Math.min(totalMinExt, until === Infinity ? from + OCCUPANCY_WITNESS_MIN : until);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W7:",
+    "note": "The plausible wrong reading of 'stop at the next departure': with a departure past the window, the window would grow to it. W7 has two quiet minutes between the cap (08:59) and the departure (09:20)."
+  },
+  {
+    "label": "#914 M-914-04: with no qualifying departure the cut is undefined, not Infinity (the count never runs)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "let cut = Infinity;",
+    "replace": "let cut;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W1:",
+    "note": "Math.min with undefined is NaN, so every return would be disbelieved: the same trap bedOccupiedAfter's comment names. The `until = Infinity` parameter default is not a separate mutant: the only caller always passes a value, so changing the default is equivalent."
+  },
+  {
+    "label": "#914 M-914-05: a later settling tail cuts (the tail test dropped from the cut)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (transitions.some((back) => isSettlingPair(back, o))) continue;",
+    "replace": "if (false) continue;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W3:",
+    "note": "Half of the design rejected in plan review (cut at ANY later out_of_bed): on the reviewed 2026-09-28 night a later exit 24 s after an into_bed cut a still sleeper's evidence and, with #700 off, moved the wake about 7 h 50 min early."
+  },
+  {
+    "label": "#914 M-914-06: a reversed later exit cuts (the reversal test dropped from the cut)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (reversedBy(o)) continue;",
+    "replace": "if (false) continue;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W4:",
+    "note": "The other half of the rejected design: a trip the child came straight back from (into_bed 4 min later, the bed occupied) is not a departure. An injected trip of this shape on the 2026-09-09 profile moved the wake from 05:17 to 20:44."
+  },
+  {
+    "label": "#914 M-914-07: an exit before the one being judged cuts (the strictly-later test dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (!(txMs(o.created_at) > txMs(t.created_at))) continue;",
+    "replace": "if (false) continue;",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W9a:",
+    "note": "W9a has an out_of_bed the evening before (a departure by the cut's other two tests): cutting there empties the window. `>=` instead of `>` is equivalent and not a mutant: an exit at the same second as the judged one is also a tail of the same return, which the tail test already excludes."
+  },
+  {
+    "label": "#914 M-914-08: the LAST qualifying departure cuts, not the earliest",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "cut = Math.min(cut, txIdx(o.created_at));",
+    "replace": "cut = txIdx(o.created_at);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W9b:",
+    "note": "getBedTransitions sorts by created_at, so the last assignment is the latest departure. 'The first in array order' is equivalent to the minimum on sorted rows (same-second rows share a minute) and is not a mutant."
+  },
+  {
+    "label": "#914 M-914-09: the quiet witness window is one minute short (149, its last minute dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt, until);",
+    "replace": "const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN - 1, totalMinExt, until);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W7b:",
+    "note": "#914 review: #598 C5 pinned the window's last minute until #914 moved its fixture's cut in front of the cap; W7b puts the sixth quiet minute on offset 178, the last one inside. Also kills any shorter cap (the review's from + 140)."
+  },
+  {
+    "label": "#914 M-914-10: the cut is one minute early (the minute before the departure dropped)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "cut = Math.min(cut, txIdx(o.created_at));",
+    "replace": "cut = Math.min(cut, txIdx(o.created_at) - 1);",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#914 W5b:",
+    "note": "#914 review: W5 pins the cut's upper side (the departure's own minute is out); W5b pins the lower side with the sixth quiet minute on 06:54, the minute before a 06:55:30 departure."
   },
   {
     "label": "#564 startSleepJob: a second start arms a second interval",
@@ -14201,17 +14063,6 @@
       "twoFactorAndEvents.test.jsx"
     ],
     "namePattern": "a person caused names them"
-  },
-  {
-    "label": "#552 PR2 M22: the review shows an \"Answered by\" line with no name",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "{data.review?.answered_by_username && (",
-    "replace": "{data.review && (",
-    "expect": "killed",
-    "tests": [
-      "MorningReview.test.jsx"
-    ],
-    "namePattern": "no \"Answered by\" line at all"
   },
   {
     "label": "#552 PR2 M23: reboot reads the actor AFTER the await (an account renamed then deleted mid-reboot is named by its stale claim)",
@@ -21243,8 +21094,8 @@
   {
     "label": "#564 gotify: a trailing slash on the server URL is no longer trimmed (//message)",
     "file": "backend/src/lib/gotify.js",
-    "find": ".replace(/\\/+$/, '')",
-    "replace": "",
+    "find": "stripTrailingSlashes((s.gotify_server_url || '').trim())",
+    "replace": "(s.gotify_server_url || '').trim()",
     "expect": "killed",
     "tests": ["push-provider-payloads.test.js"],
     "namePattern": "trailing slash on the server URL"
@@ -22648,15 +22499,6 @@
     "expect": "killed",
     "tests": ["review-stored-context.test.js"],
     "namePattern": "settings_changed"
-  },
-  {
-    "label": "#361 PR4b: \"Before bedtime\" is judged in today's zone, not the zone the list was built in",
-    "file": "frontend/src/pages/NightReview.jsx",
-    "find": "  const groupTz = data.settings?.tz ?? tz;",
-    "replace": "  const groupTz = tz;",
-    "expect": "killed",
-    "tests": ["MorningReview.test.jsx"],
-    "namePattern": "judged in that zone"
   },
   {
     "label": "#589 M1: the sweep never disarms a silent camera whose window closed",
@@ -24218,5 +24060,640 @@
     "tests": ["sleep-early-exit-lead.test.js"],
     "namePattern": "#700 T8h3",
     "note": "Round 3, Opus M13b: 46 non-matching rows then 14 matching; a 50-row scan finds only 4 and turns the rule off."
+  },
+  {
+    "label": "#506 device key returned in the admin list",
+    "file": "backend/src/routes/esphome.js",
+    "find": "key_set: !!row.encryption_key, status",
+    "replace": "key_set: row.encryption_key, status",
+    "expect": "killed",
+    "tests": ["esphome-routes.test.js"],
+    "namePattern": "#506 key save"
+  },
+  {
+    "label": "#506 blank edit clears the saved key",
+    "file": "backend/src/routes/esphome.js",
+    "find": "let key = previous?.encryption_key || null;",
+    "replace": "let key = null;",
+    "expect": "killed",
+    "tests": ["esphome-routes.test.js"],
+    "namePattern": "#506 key save"
+  },
+  {
+    "label": "#506 admin gate removed",
+    "file": "backend/src/routes/esphome.js",
+    "find": "router.use(requireAuth, requireAdmin);",
+    "replace": "router.use(requireAuth);",
+    "expect": "killed",
+    "tests": ["esphome-routes.test.js"],
+    "namePattern": "#506 settings"
+  },
+  {
+    "label": "#506 missing encryption flag accepted",
+    "file": "backend/src/lib/esphomeTransport.js",
+    "find": "psk && client.health()?.encrypted !== true",
+    "replace": "psk && client.health()?.encrypted === false",
+    "expect": "killed",
+    "tests": ["esphome-transport.test.js"],
+    "namePattern": "#506 a configured key"
+  },
+  {
+    "label": "#506 sensor silent minute fabricated",
+    "file": "backend/src/lib/esphomeManager.js",
+    "find": "else if (item.kind === 'sensor' && (a.nzero || a.nmiss))",
+    "replace": "else if (item.kind === 'sensor')",
+    "expect": "killed",
+    "tests": ["esphome-manager.test.js"],
+    "namePattern": "#506 numeric buckets"
+  },
+  {
+    "label": "#506 device control sent from telemetry adapter",
+    "file": "backend/src/lib/esphomeTransport.js",
+    "find": "    stopTelemetry = client.on('telemetry', onTelemetry);",
+    "replace": "    client.command('light-lamp', { state: true });\r\n    stopTelemetry = client.on('telemetry', onTelemetry);",
+    "expect": "killed",
+    "tests": ["esphome-transport.test.js"],
+    "namePattern": "#506 read only telemetry"
+  },
+  {
+    "label": "#506 absent state (a real zero or false) recorded as missing",
+    "file": "backend/src/lib/esphomeTransport.js",
+    "find": "const raw = event.state === undefined ? (entity.kind === 'binary_sensor' ? false : 0) : event.state;",
+    "replace": "const raw = event.state;",
+    "expect": "killed",
+    "tests": ["esphome-transport.test.js"],
+    "namePattern": "#506 an update with no state"
+  },
+  {
+    "label": "#506 paged export skips the rest of a minute at a page boundary",
+    "file": "backend/src/routes/esphome.js",
+    "find": "after = [rows.at(-1).bucket, rows.at(-1).entity_id];",
+    "replace": "after = [rows.at(-1).bucket + 1, 0];",
+    "expect": "killed",
+    "tests": ["esphome-routes.test.js"],
+    "namePattern": "#506 a stalled CSV download"
+  },
+  {
+    "label": "#506 a numeric zero counted into mean, min and n",
+    "file": "backend/src/lib/esphomeManager.js",
+    "find": "if (item.kind === 'sensor' && value === 0) { a.nzero++; return; }",
+    "replace": "if (item.kind === 'sensor' && value === 0) a.nzero++;",
+    "expect": "killed",
+    "tests": ["esphome-manager.test.js"],
+    "namePattern": "#506 numeric zeros are counted in nzero"
+  },
+  {
+    "label": "#904 a minute whose p75 is exactly SPIKE_P75_MAX is no longer spike-only (<= becomes <)",
+    "file": "backend/src/lib/micGuard.js",
+    "find": "  return soundPeak != null && soundPeak > soundActive && soundP75 != null && soundP75 <= SPIKE_P75_MAX;",
+    "replace": "  return soundPeak != null && soundPeak > soundActive && soundP75 != null && soundP75 < SPIKE_P75_MAX;",
+    "expect": "killed",
+    "tests": ["micGuard.test.js"],
+    "namePattern": "p75 boundary"
+  },
+  {
+    "label": "#904 a window exactly WINDOW_FRACTION spike-only no longer qualifies (< becomes <=)",
+    "file": "backend/src/lib/micGuard.js",
+    "find": "    if ((spikeBefore[i + WINDOW_MIN] - spikeBefore[i]) / watched < WINDOW_FRACTION) continue;",
+    "replace": "    if ((spikeBefore[i + WINDOW_MIN] - spikeBefore[i]) / watched <= WINDOW_FRACTION) continue;",
+    "expect": "killed",
+    "tests": ["micGuard.test.js"],
+    "namePattern": "WINDOW_FRACTION boundary"
+  },
+  {
+    "label": "#904 a window watched for exactly MIN_WATCHED minutes no longer counts (< becomes <=)",
+    "file": "backend/src/lib/micGuard.js",
+    "find": "    if (watched < MIN_WATCHED) continue;",
+    "replace": "    if (watched <= MIN_WATCHED) continue;",
+    "expect": "killed",
+    "tests": ["micGuard.test.js"],
+    "namePattern": "MIN_WATCHED boundary"
+  },
+  {
+    "label": "#904 a window that exactly fits the timeline is never judged (<= n becomes < n)",
+    "file": "backend/src/lib/micGuard.js",
+    "find": "  for (let i = 0; i + WINDOW_MIN <= n; i++) {",
+    "replace": "  for (let i = 0; i + WINDOW_MIN < n; i++) {",
+    "expect": "killed",
+    "tests": ["micGuard.test.js"],
+    "namePattern": "WINDOW_MIN boundary"
+  },
+  {
+    "label": "#904 the window shrinks to 20 minutes (watched floor 16): a 20-minute motionless cry is taken for a fault",
+    "file": "backend/src/lib/micGuard.js",
+    "find": "  for (let i = 0; i + WINDOW_MIN <= n; i++) {\r\n    const watched = watchedBefore[i + WINDOW_MIN] - watchedBefore[i];\r\n    if (watched < MIN_WATCHED) continue;\r\n    if ((spikeBefore[i + WINDOW_MIN] - spikeBefore[i]) / watched < WINDOW_FRACTION) continue;\r\n    cover[i]++;\r\n    cover[i + WINDOW_MIN]--;\r\n  }",
+    "replace": "  for (let i = 0; i + 20 <= n; i++) {\r\n    const watched = watchedBefore[i + 20] - watchedBefore[i];\r\n    if (watched < 16) continue;\r\n    if ((spikeBefore[i + 20] - spikeBefore[i]) / watched < WINDOW_FRACTION) continue;\r\n    cover[i]++;\r\n    cover[i + 20]--;\r\n  }",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "motionless, intermittent cry"
+  },
+  {
+    "label": "#904 every minute inside a qualifying window is discounted, a real cry included",
+    "file": "backend/src/lib/micGuard.js",
+    "find": "    out[k] = inside > 0 && minutes[k] != null && minutes[k].spikeOnly === true;",
+    "replace": "    out[k] = inside > 0 && minutes[k] != null;",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "inside a faulty stretch still counts"
+  },
+  {
+    "label": "#904 windows of 480 WATCHED minutes instead of elapsed ones: spikes either side of an outage are joined",
+    "file": "backend/src/lib/micGuard.js",
+    "find": "  const n = minutes.length;\r\n  const out = new Array(n).fill(false);",
+    "replace": "  minutes = minutes.filter((m) => m != null);\r\n  const n = minutes.length;\r\n  const out = new Array(n).fill(false);",
+    "expect": "killed",
+    "tests": ["micGuard.test.js"],
+    "namePattern": "the window is ELAPSED minutes"
+  },
+  {
+    "label": "#904 the never-empty rule removed: a discounted still night becomes `empty` (and loses its frames)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (discountedIn(onset, sleepEnd) === 0) {",
+    "replace": "    if (true) {",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "a still child, a quiet zone"
+  },
+  {
+    "label": "#904 the never-empty test moved back onto the outer condition: a 74%-watched empty bed reads ok instead of no_data",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  if (maxBedPeak < EMPTY_BED_MAX_PEAK && wakeCount === 0 && awake === 0) {",
+    "replace": "  if (maxBedPeak < EMPTY_BED_MAX_PEAK && wakeCount === 0 && awake === 0 && discountedIn(onset, sleepEnd) === 0) {",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "a 74%-watched empty bed is still no_data"
+  },
+  {
+    "label": "#904 the never-empty rule counts the whole window instead of the measured span: an evening-only fault blocks `empty`",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    if (discountedIn(onset, sleepEnd) === 0) {",
+    "replace": "    if (discountedIn(preMin, totalMin) === 0) {",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "discounted minutes all lie before its onset"
+  },
+  {
+    "label": "#904 the guard records a minute only for a LOUD row: quiet watched minutes drop out of a window's share",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    const m = soundSeen[i] || (soundSeen[i] = { spike: false, real: false });\r\n    if (!(r.sound_peak != null && r.sound_peak > SOUND_ACTIVE)) return;",
+    "replace": "    if (!(r.sound_peak != null && r.sound_peak > SOUND_ACTIVE)) return;\r\n    const m = soundSeen[i] || (soundSeen[i] = { spike: false, real: false });",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "quiet WATCHED minutes count"
+  },
+  {
+    "label": "#904 the metrics extension classifies without the minute index: the fault's post-window sound is awake again",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "        const rowActive = isActiveRow(r, i);",
+    "replace": "        const rowActive = isActiveRow(r);",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "qualifies only through the post-window minutes"
+  },
+  {
+    "label": "#904 the guard never reads the post-window minutes: an in-window fault that needs them is not discounted",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  const postRows = evidenceEndMin > totalMin",
+    "replace": "  const postRows = false",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "qualifies only through the post-window minutes"
+  },
+  {
+    "label": "#904 the onset view still hears a discounted spike (`heard` ignores the discount)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "    const heard = soundCounts(r, i);",
+    "replace": "    const heard = r.sound_peak != null && r.sound_peak > SOUND_ACTIVE;",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "the onset and post-onset view reads the discount"
+  },
+  {
+    "label": "#904 the guard counts a row with no video (motion_frames 0) as a watched spike-only minute",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "  const noteSound = (r, i) => {\r\n    if (!motionSeen(r)) return;\r\n",
+    "replace": "  const noteSound = (r, i) => {\r\n",
+    "expect": "killed",
+    "tests": ["sleep-faulty-mic.test.js"],
+    "namePattern": "rows with no video"
+  },
+  {
+    "label": "#917 M-917-01: a heart-rate minute needs MORE than 3 updates (the boundary moved)",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "const hrOk = !!hr && hr.n >= VITALS_HR_MIN_N;",
+    "replace": "const hrOk = !!hr && hr.n > VITALS_HR_MIN_N;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "each threshold at its boundary",
+    "note": "Minute 1 has exactly 3 non-zero heart-rate updates: valid by the frozen definition (HR n >= 3)."
+  },
+  {
+    "label": "#917 M-917-02: the 1.0 breathing-rate placeholder counts as a breath",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "const rrOk = !!rr && rr.n >= VITALS_RR_MIN_N && !(rr.mean != null && rr.mean < RR_PLACEHOLDER_BELOW);",
+    "replace": "const rrOk = !!rr && rr.n >= VITALS_RR_MIN_N;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "each threshold at its boundary",
+    "note": "Minute 4: 30 breathing-rate updates averaging 1.9, the placeholder some sensors send."
+  },
+  {
+    "label": "#917 M-917-03: the 1 m distance cut excludes exactly 100 cm",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "return cm != null && cm <= MAX_DISTANCE_CM;",
+    "replace": "return cm != null && cm < MAX_DISTANCE_CM;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "each threshold at its boundary",
+    "note": "Minute 6 reads 100 cm: inside the owner's 1 m rule."
+  },
+  {
+    "label": "#917 M-917-04: a distance in an unknown unit (or none) passes the cut",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "return cm != null && cm <= MAX_DISTANCE_CM;",
+    "replace": "return cm == null || cm <= MAX_DISTANCE_CM;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "the distance unit contract",
+    "note": "The unit contract: 'in', NULL and '' must make the minute not valid (the safe direction, it can only fail to reject)."
+  },
+  {
+    "label": "#917 M-917-05: vital signs and distance paired per CHILD, not per device",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "      let d = devices.get(e.device_id);\r\n      if (!d) devices.set(e.device_id, (d = {}));",
+    "replace": "      let d = devices.get(0);\r\n      if (!d) devices.set(0, (d = {}));",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "paired PER DEVICE",
+    "note": "Plan review: a far device must not borrow a bedside device's 50 cm (and a device with no distance must not be cut by another's 150 cm)."
+  },
+  {
+    "label": "#917 M-917-06: rows of roles the rule never uses (illuminance, occupancy, ...) are read",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "    if (!key) continue; // not a role the rule reads: its rows are never queried (above)\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "each threshold at its boundary|no sensor: null when",
+    "note": "Code review of #917 (Codex): only heart-rate, breathing-rate and distance rows are queried. An illuminance-only minute is unknown, and a child with only other kinds is no sensor."
+  },
+  {
+    "label": "#917 M-917-07: only ACTIVE entities are read (a retired epoch of the child is lost)",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "'SELECT id, device_id, name, object_id, device_class, unit FROM esphome_entities WHERE child_id = ?'",
+    "replace": "'SELECT id, device_id, name, object_id, device_class, unit FROM esphome_entities WHERE child_id = ? AND active = 1'",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "a retired entity of this child still counts",
+    "note": "A re-assignment retires the entity and clones it with new ids; the earlier rows are still this child's."
+  },
+  {
+    "label": "#917 M-917-08: a minute is read before its row is written (the 10 ms flush ignored)",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "Math.floor((nowMs - ROW_READABLE_DELAY_MS) / MINUTE_MS)",
+    "replace": "Math.floor(nowMs / MINUTE_MS)",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "the replay clock",
+    "note": "At 9 ms past a minute boundary the previous minute's row is not written yet: a replay must not read it."
+  },
+  {
+    "label": "#917 M-917-09: a child with only presence or distance rows has a 'sensor'",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "if (key !== 'dist') vitalsSeen = true;",
+    "replace": "vitalsSeen = true;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "no sensor: null when",
+    "note": "No heart-rate or breathing-rate row means no shadow pass and NULL, not a shadow from a sensor that cannot measure the rule."
+  },
+  {
+    "label": "#917 M-917-10: the rule's window includes the exit's own minute ([e, e+9])",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "for (let k = 1; k <= SENSOR_REJECT_WINDOW_MIN; k++) if (minutes[exitIdx + k] === true) n++;",
+    "replace": "for (let k = 0; k < SENSOR_REJECT_WINDOW_MIN; k++) if (minutes[exitIdx + k] === true) n++;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "the window edges and the count|S4 ",
+    "note": "As measured: the minutes [e+1, e+10] after the exit's own minute (the child is still climbing out in it)."
+  },
+  {
+    "label": "#917 M-917-11: an unknown minute (no rows) counts as vital signs",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "if (minutes[exitIdx + k] === true) n++;",
+    "replace": "if (minutes[exitIdx + k] !== false) n++;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "the window edges and the count",
+    "note": "A disconnect must only ever fail to reject, never reject."
+  },
+  {
+    "label": "#917 M-917-12: the rule needs MORE than 6 of the 10 minutes",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "return vitalsAfterExit(minutes, exitIdx) >= SENSOR_REJECT_MIN_VITALS;",
+    "replace": "return vitalsAfterExit(minutes, exitIdx) > SENSOR_REJECT_MIN_VITALS;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "the window edges and the count|S4 ",
+    "note": "Exactly 6 rejects (x = 6, y = 10 as measured)."
+  },
+  {
+    "label": "#917 M-917-13: the shadow's wake leaks into the reported wake",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "night.wake_at_sensor = shadow.status === 'ok' ? shadow.wake_at : null;",
+    "replace": "night.wake_at = night.wake_at_sensor = shadow.status === 'ok' ? shadow.wake_at : null;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S1 |S2 ",
+    "note": "Owner decision 2026-10-31: SHADOW only. The 2026-10-28 shape reports 06:05 (the camera's) beside a 06:30 shadow."
+  },
+  {
+    "label": "#917 M-917-14: the rule reads the exit's minute by Math.round (idxOf), not txIdx",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "const sensorExitIdx = txIdx(t.created_at);",
+    "replace": "const sensorExitIdx = idxOf(t.created_at);",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S4 ",
+    "note": "S4's exit is at 06:30:45: minute 06:30 by txIdx (a floor), 06:31 by Math.round, which shifts the whole window by one."
+  },
+  {
+    "label": "#917 M-917-15: a rejected exit is dropped outright, not handed back like a settling-tail skip",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (settlingTail || sensorRejects) {",
+    "replace": "if (sensorRejects) continue; if (settlingTail) {",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S7 |S3 ",
+    "note": "The standing rule: the shadow is never the reason a night has no wake. With the only exit rejected, the hand-back keeps it."
+  },
+  {
+    "label": "#917 M-917-16: the rule is asked before the reversal guard (a reversed exit counted)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "          if (reversedBy(t)) continue;",
+    "replace": "          if (reversedBy(t)) { if (run.sensor != null && sensorContradictsExit(run.sensor.minutes, txIdx(t.created_at))) run.sensor.rejected.add(t); continue; }",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S5 ",
+    "note": "As measured: the rule sits after the onset bound and the reversal guard, at the settling guard (mes914 patchmes.mjs)."
+  },
+  {
+    "label": "#917 M-917-17: sensor_rejects counts examinations, not distinct exit rows",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (sensorRejects && !settlingTail) run.sensor.rejected.add(t);",
+    "replace": "if (sensorRejects && !settlingTail) run.sensor.rejected.add({});",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S18 ",
+    "note": "#917 plan review: the 06:04:30 exit is a candidate for the gaps at 06:03 and 06:05; it is one row."
+  },
+  {
+    "label": "#917 M-917-18: the shadow pass's #700 history reads are counted",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "priorWakeLeadReads = historyReads;",
+    "replace": "void historyReads;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S6 ",
+    "note": "#917 plan review: the counter means reads by the real night."
+  },
+  {
+    "label": "#917 M-917-19: the shadow runs on a night in progress",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (night.in_progress || run.originMs === undefined) return;",
+    "replace": "if (run.originMs === undefined) return;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S8 ",
+    "note": "Only completed nights: a night in progress has no departure scan, and the live card must not pay for a second pass."
+  },
+  {
+    "label": "#917 M-917-20: a failing second pass breaks the real night",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "logger.warn('[sleep] sensor shadow skipped: the second pass failed');",
+    "replace": "throw new Error('second pass failed');",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S10 ",
+    "note": "#917 plan review: any error leaves the two keys null and never affects the real result or its store."
+  },
+  {
+    "label": "#917 M-917-21: the shadow pass ignores the stored context (scores with today's settings)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "computeNightPass(childId, nightDate, { includeTimeline: false, context }, shadowRun);",
+    "replace": "computeNightPass(childId, nightDate, { includeTimeline: false, context: null }, shadowRun);",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S12 ",
+    "note": "#917 plan review: both passes get the same stored context."
+  },
+  {
+    "label": "#917 M-917-22: a provisional re-store keeps the first pass's sensor columns (conflict update drops them)",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "     wake_at_sensor=excluded.wake_at_sensor, sensor_rejects=excluded.sensor_rejects,\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "insert and conflict-update round trips",
+    "note": "Readings that arrive after the first store are picked up by the next provisional store."
+  },
+  {
+    "label": "#917 M-917-23: \"no one was in the bed\" keeps the sensor wake",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  'wake_at_sensor', 'sensor_rejects',\r\n];",
+    "replace": "];",
+    "expect": "killed",
+    "tests": ["nobody-in-bed.test.js", "sleep-sensor-shadow.test.js"],
+    "namePattern": "a flagged stored row reads exactly like a detector-empty row|a corrected WAKE and a",
+    "note": "#917 plan review: a night shown as empty must not carry a sensor wake. The PRAGMA marker test classifies every new column as a claim."
+  },
+  {
+    "label": "#917 M-917-24: a corrected wake keeps the sensor wake beside the parent's time",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (wakeChanged) for (const k of SENSOR_SHADOW_KEYS) if (k in out) out[k] = null;\r\n",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "a corrected WAKE and a",
+    "note": "#917 plan review: a corrected wake must not leave a misleading shadow."
+  },
+  {
+    "label": "#917 M-917-25: every correction (in bed, onset, an unchanged wake) hides the sensor wake",
+    "file": "backend/src/lib/sleepReviews.js",
+    "find": "  if (wakeChanged) for (const k of SENSOR_SHADOW_KEYS) if (k in out) out[k] = null;",
+    "replace": "  if (true) for (const k of SENSOR_SHADOW_KEYS) if (k in out) out[k] = null;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js", "review-in-bed-and-lock.test.js"],
+    "namePattern": "a corrected WAKE and a|the put-down night",
+    "note": "An in-bed-only correction keeps every stored field exactly as stored (review-in-bed-and-lock's schema-driven check); the shadow beside the detector's own wake keeps its meaning."
+  },
+  {
+    "label": "#917 M-917-26: a rejected exit that was never a candidate (far from every gap) is counted",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "            if (dt <= WAKE_SNAP_MS) {\n              if (sensorWindowReadable(run.sensor.minutes, sensorExitIdx)) run.sensor.readable = true;\n              if (sensorRejects && !settlingTail) run.sensor.rejected.add(t);\n",
+    "replace": "            if (sensorRejects && !settlingTail) run.sensor.rejected.add(t);\n            if (dt <= WAKE_SNAP_MS) {\n              if (sensorWindowReadable(run.sensor.minutes, sensorExitIdx)) run.sensor.readable = true;\n",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S16 ",
+    "note": "Code review of #917 (Opus P6): an adult at the bed at a post-wake exit is not a reject; only candidates can change the shadow."
+  },
+  {
+    "label": "#917 M-917-27: a candidate the settling-tail guard already set aside is counted as a sensor reject",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (sensorRejects && !settlingTail) run.sensor.rejected.add(t);",
+    "replace": "if (sensorRejects) run.sensor.rejected.add(t);",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S17 ",
+    "note": "sensor_rejects counts what the rule ALONE set aside."
+  },
+  {
+    "label": "#917 M-917-28: a shadow is stored though the sensor read none of the candidates' minutes",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (shadowRun.sensor.readable) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S14 |S16 ",
+    "note": "Code review of #917 (Opus P1): rows only 19:00-20:00 stored \"the sensor agreed\" (the camera's wake, 0 rejects)."
+  },
+  {
+    "label": "#917 M-917-29: a weak sensor's zeros count as unknown (only vital signs make a window readable)",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "if (minutes[exitIdx + k] != null) return true;",
+    "replace": "if (minutes[exitIdx + k] === true) return true;",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S15 |sensorWindowReadable",
+    "note": "A run of zeros is a known \"no vital signs\": such a night is stored, and can only fail to reject."
+  },
+  {
+    "label": "#917 M-917-30: any examined exit's readable minutes count, not only a candidate's",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "            if (dt <= WAKE_SNAP_MS) {\n              if (sensorWindowReadable(run.sensor.minutes, sensorExitIdx)) run.sensor.readable = true;\n",
+    "replace": "            if (sensorWindowReadable(run.sensor.minutes, sensorExitIdx)) run.sensor.readable = true;\n            if (dt <= WAKE_SNAP_MS) {\n",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "S16 ",
+    "note": "A sensor that read only a post-wake visit's minutes says nothing about the wake: nothing is stored."
+  },
+  {
+    "label": "#917 M-917-31: an exit the sensor rule set aside is not recorded for the #618 hand-back",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "if (dt <= WAKE_SNAP_MS) settlingSkips.push(",
+    "replace": "if (dt <= WAKE_SNAP_MS && settlingTail) settlingSkips.push(",
+    "expect": "killed",
+    "tests": ["sleepAnalysis.test.js"],
+    "namePattern": "#917 S13",
+    "note": "Code review of #917 (Opus A16, probe P2): without the record the shadow reads A (06:13) from 07:18, where the measured rule hands the rejected 06:29:56 exit back."
+  },
+  {
+    "label": "#917 M-917-32: the sensor read runs an hour past the night's evidence cutoff",
+    "file": "backend/src/lib/sleepAnalysis.js",
+    "find": "minutes = sensorMinutesFor(childId, run.originMs, run.cutoffMs, { nowMs: run.nowMs });",
+    "replace": "minutes = sensorMinutesFor(childId, run.originMs, run.cutoffMs + 3600000, { nowMs: run.nowMs });",
+    "expect": "equivalent",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "note": "Code review of #917 (Opus A13) asked for a test; none can exist. Only candidates are judged, and a candidate sits at most 5 min after the start of a gap that needs 20 observed minutes, so its ten minutes end at least 5 min before the evidence cutoff. The bound is defensive (sensorMinutesFor never hands back the future)."
+  },
+  {
+    "label": "#917 M-917-33: of two rows of one role on one device in one minute, the one with FEWER updates is kept",
+    "file": "backend/src/lib/sleepSensor.js",
+    "find": "if (!d[key] || r.n > d[key].n) d[key] = { n: r.n, mean: r.mean, unit: e.unit };",
+    "replace": "if (!d[key] || r.n < d[key].n) d[key] = { n: r.n, mean: r.mean, unit: e.unit };",
+    "expect": "killed",
+    "tests": ["sleep-sensor-shadow.test.js"],
+    "namePattern": "two entities of one role",
+    "note": "Code review of #917 (Opus S31): a retired entity and its clone in the minute of a move."
+  },
+  {
+    "label": "#919 cap boundary is exclusive",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "nowMs - entry.firstAt >= HOLD_CAP_MS",
+    "replace": "nowMs - entry.firstAt > HOLD_CAP_MS",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 first held alert"
+  },
+  {
+    "label": "#919 cap is doubled",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "45 * 60 * 1000",
+    "replace": "90 * 60 * 1000",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 first held alert"
+  },
+  {
+    "label": "#919 unarmed state is held",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "if (asleep !== false) return false;",
+    "replace": "if (asleep !== false) return true;",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 reads child assignment"
+  },
+  {
+    "label": "#919 option flag ignored",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "row.hold_alerts_until_asleep !== 1",
+    "replace": "false",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 off by default"
+  },
+  {
+    "label": "#919 MQTT hold checked before cooldown",
+    "file": "backend/src/lib/mqttClient.js",
+    "find": "if (now - (motionLastAlert.get(cam.id) || 0) < cooldownMs) {",
+    "replace": "if (shouldHold(cam) || now - (motionLastAlert.get(cam.id) || 0) < cooldownMs) {",
+    "expect": "killed",
+    "tests": ["mqtt-motion-payload.test.js"],
+    "namePattern": "#919"
+  },
+  {
+    "label": "#919 timer cleared on unarm",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "if (asleep !== false) return false;",
+    "replace": "if (asleep !== false) { firstHeld.delete(childId); return false; }",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 reads child assignment"
+  },
+  {
+    "label": "#919 fail open removed",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "logger.error('[alert-hold] check failed; alerts allowed');",
+    "replace": "throw new Error('hold check failed');",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 an internal database failure"
+  },
+  {
+    "label": "#919 night key from currentNightDate alone",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "import { childWindowKeyNow } from './sleepAnalysis.js';",
+    "replace": "import { currentNightDate as childWindowKeyNow } from './sleepAnalysis.js';",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 lead margin"
+  },
+  {
+    "label": "#919 frame-diff hold checked before camera schedule",
+    "file": "backend/src/lib/motionDetector.js",
+    "find": "inActiveWindow(camera) && !shouldHold(camera)",
+    "replace": "!shouldHold(camera) && inActiveWindow(camera)",
+    "expect": "killed",
+    "tests": ["motion-alert-cooldown.test.js"],
+    "namePattern": "#919 snoozed frame-diff motion"
+  },
+  {
+    "label": "#919 sound hold checked before camera schedule",
+    "file": "backend/src/lib/soundDetector.js",
+    "find": "inActiveWindow(camera) && !shouldHold(camera)",
+    "replace": "!shouldHold(camera) && inActiveWindow(camera)",
+    "expect": "killed",
+    "tests": ["sound-digital-silence.test.js"],
+    "namePattern": "#919 snoozed sound"
   }
 ]

@@ -5,10 +5,9 @@
 // would tap it and be bounced straight back, which reads as a broken app rather than a permission
 // boundary; an admin missing a link loses a feature with no error anywhere.
 //
-// The other thing worth pinning is that a caregiver never even REQUESTS the MQTT status. It is an
-// admin-only endpoint, so asking would produce a pointless 403 on every visit to Settings.
+// The MQTT status is requested on Integrations, not on this menu. A caregiver must never request it.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import Settings from '../src/pages/Settings.jsx';
 import { api } from '../src/lib/api.js';
@@ -17,13 +16,12 @@ import { api } from '../src/lib/api.js';
 // exactly the kind of regression nothing else would catch.
 const ADMIN_LABELS = [
   'General', 'Camera controls', 'Recording', 'Caregivers',
-  'MQTT', 'Push notifications', 'Clip management', 'Logs',
+  'Integrations', 'Clip management', 'Logs',
 ];
 
-function mockApi({ version = '0.29.0', mqtt = null } = {}) {
+function mockApi({ version = '0.29.0' } = {}) {
   vi.spyOn(api, 'get').mockImplementation((path) => {
     if (String(path).includes('/about')) return Promise.resolve({ version });
-    if (String(path).includes('/settings/mqtt/status')) return Promise.resolve(mqtt);
     return Promise.resolve(null);
   });
 }
@@ -60,56 +58,13 @@ describe('what the menu offers each role', () => {
   });
 });
 
-describe('the MQTT status badge', () => {
-  test('a caregiver never even asks for the admin-only status', async () => {
+describe('MQTT status belongs on Integrations', () => {
+  test.each([['admin', renderAsAdmin], ['caregiver', renderAsCaregiver]])('Settings never asks for the status as %s', async (_, renderAs) => {
     mockApi();
-    renderAsCaregiver(<Settings />);
+    renderAs(<Settings />);
     // Wait for the version request so the effect has definitely run before asserting an absence.
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/about'));
     expect(api.get).not.toHaveBeenCalledWith('/settings/mqtt/status');
-  });
-
-  test('an admin does ask for it', async () => {
-    mockApi();
-    renderAsAdmin(<Settings />);
-    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/settings/mqtt/status'));
-  });
-
-  // The badge must be ON THE MQTT ROW, not merely somewhere on the page. Asserting the text globally
-  // let a mutant that hangs the badge off the "Logs" row pass — the status would have been reported
-  // against the wrong setting entirely, which is worse than showing no status at all.
-  const mqttRow = async () => {
-    const label = await screen.findByText('MQTT');
-    return within(label.closest('.list-row'));
-  };
-
-  // Three states, and the middle one is the one that matters: "enabled but not connected" is the
-  // broken case a person needs to see, and it must not read the same as "deliberately switched off".
-  test('connected reads as Connected, on the MQTT row', async () => {
-    mockApi({ mqtt: { enabled: true, connected: true } });
-    renderAsAdmin(<Settings />);
-    await waitFor(async () => expect((await mqttRow()).getByText('Connected')).toBeTruthy());
-  });
-
-  test('enabled but not connected reads as Disconnected, not Off', async () => {
-    mockApi({ mqtt: { enabled: true, connected: false } });
-    renderAsAdmin(<Settings />);
-    await waitFor(async () => expect((await mqttRow()).getByText('Disconnected')).toBeTruthy());
-    expect(screen.queryByText('Off')).toBeNull();
-  });
-
-  test('switched off reads as Off, not Disconnected', async () => {
-    mockApi({ mqtt: { enabled: false, connected: false } });
-    renderAsAdmin(<Settings />);
-    await waitFor(async () => expect((await mqttRow()).getByText('Off')).toBeTruthy());
-    expect(screen.queryByText('Disconnected')).toBeNull();
-  });
-
-  test('no status yet means no badge at all, rather than a misleading one', async () => {
-    mockApi({ mqtt: null });
-    renderAsAdmin(<Settings />);
-    expect(await screen.findByText('MQTT')).toBeTruthy();
-    for (const t of ['Connected', 'Disconnected', 'Off']) expect(screen.queryByText(t)).toBeNull();
   });
 });
 

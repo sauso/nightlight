@@ -114,6 +114,7 @@ export async function seedDemo(clock = () => new Date()) {
   const createdAt = toSqlUtc(now);
 
   const resetTables = [
+    'esphome_readings', 'esphome_entities', 'esphome_devices',
     'push_tokens', 'sessions', 'sleep_reviews', 'sleep_nights', 'bed_transitions',
     'activity_samples', 'sensor_readings', 'detection_events', 'camera_events',
     'recordings', 'timelapses', 'cameras', 'children', 'users',

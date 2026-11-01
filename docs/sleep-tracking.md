@@ -15,6 +15,8 @@ from (a caregiver sees them, greyed out).
 A child can have more than one camera; the night is measured from one of them (see
 [One camera does the measuring](#one-camera-does-the-measuring)).
 
+An admin can also switch on [Hold alerts until asleep](notifications.md#hold-alerts-until-asleep) under **Track sleep**. It is off by default. During the sleep window, motion and sound alerts are dropped until about 15 quiet minutes show the child is asleep, or 45 minutes after the first held alert. The 45 minutes is a design choice, not a measured safety limit. Held alerts are not sent later. Camera-offline alerts continue normally.
+
 ## What you see
 
 ### At a glance, and live
@@ -50,6 +52,35 @@ you corrected in the morning review is locked against that until the correction 
 its **In bed** time yourself in the review). The detail page works the night out fresh each time, so
 it shows the time straight away.
 
+### "Up between": in the morning review, when the app has two answers
+
+The app works out when a child got up in two ways: from movement alone, and from the camera seeing
+them leave the bed. Usually they agree. When they differ by **10 minutes or more**, the morning review
+asks **Up between 6:10 and 6:50. When did they get up?** instead of showing one time to confirm. The
+10 minutes is the same tolerance the app counts as "right" when it checks a wake time against your
+answers.
+
+- **The question has three answers:** **Around 6:10**, **Around 6:50** and **Another time**. Each
+  "Around" button records that exact time as your answer; **Another time** opens one empty time field.
+  There is no "That's right", because a range cannot be right or wrong as a whole; you pick a time.
+- **It is only offered for a finished night you have not answered.** Once you give the real time, the
+  review and every other screen show your single time, and a night you marked "No one was in the bed"
+  has no range. Nothing is saved for the range itself, and the wake time the app reports is the same
+  one as before.
+- **It is not on the child's card, the sleep page or the morning report.** Those still show one time.
+  This was measured and decided: on 18 nights kept aside for the check, a range would have appeared on 5,
+  and on 3 of the 9 nights where the app's single answer was right (33%, over the 25% limit set
+  beforehand). A range on a night that was fine is noise, so it is only used where you are being asked
+  anyway.
+
+**Known limits.** This is a modest help, not a fix for late wake times. On the 26 nights the rule was
+designed on, a range appeared on 7, and the true time lay inside it on 3 of the 5 late nights where it
+appeared. On the 18 kept-aside nights it lay inside on 4 of the 5 where it appeared. On the nights that
+matter most it often does not appear: a child who stays still has no movement-only estimate, so there is
+only one time to show. When a night's two estimates fall either side of noon (possible if your sleep
+window ends after midday), the screen asks the normal single-time question instead. All of this was measured on one house's two cameras, and the 10 minutes may suit
+another room less well.
+
 ### The detail view
 
 Tap the sleep summary for the full **night timeline**: a to-scale bar of
@@ -59,7 +90,9 @@ roughly the last month of nights. Two moment markers sit on the bar — **got in
 **got out of bed** — and they are deliberately the only two shown: they're the put-down and
 the morning departure the night's times were actually derived from. A single camera can see
 that something crossed the edge of the bed, but not *who*, so movement in between is reported
-as exactly that and never attributed to a person. A stretch the camera has no data for at
+as exactly that and never attributed to a person. Where the camera saved a still frame near a
+**Room activity** row, the row has a down arrow and opens to show it, so you can see what the
+camera saw (older nights have none; see [Bed-transition frames](recording.md#bed-transition-frames-diagnostic-shown-only-in-a-nights-sleep-detail)). A stretch the camera has no data for at
 all — a detector restart, a dead connection — shows as its own striped **"No data"** segment
 rather than being folded into asleep or awake; it isn't counted toward the reported sleep
 duration either, and a night with a long enough gap can come back with less sleep counted, or
@@ -125,7 +158,7 @@ Known limits. For the first three, use **Show with today's settings**, or have a
 ### Room temperature (optional)
 
 If a camera reports temperature/humidity over **MQTT** (set
-up under **Settings → MQTT**, e.g. via Zigbee2MQTT — the readings also show on the camera
+up under **Settings → Integrations → MQTT**, e.g. via Zigbee2MQTT — the readings also show on the camera
 tile), the sleep detail overlays the night's room temperature beneath the timeline, aligned to
 the same time axis. A **"Sleep & room temperature"** card compares wake-ups on the child's warmer
 vs cooler nights, so you can spot whether a warm room tends to mean more waking — a pattern, not
@@ -196,7 +229,8 @@ those are averaged rather than combined.
 
 Across the night it builds a per-minute movement + sound timeline from
 the child's main camera: falling still for a sustained stretch reads as falling asleep,
-sustained movement or noise reads as an awakening (brief stirs don't count). On a completed
+sustained movement or noise reads as an awakening (brief stirs don't count; a microphone that looks
+faulty is the one exception, see [A microphone that looks faulty](#a-microphone-that-looks-faulty)). On a completed
 night, a short recorded exit-and-return can also count as an awakening even when it's too brief
 to show up as sustained movement on its own — as long as the bed is confirmed quiet in between
 and later bed movement supports the return. This only applies to trips of one to twenty minutes,
@@ -270,7 +304,75 @@ working out **when your child fell asleep**, a noisy minute counts as awake only
 also *moved* at around the same time. The same holds for the **first half hour** after they
 fall asleep, so the tail of the household's evening isn't reported as their first wake-up.
 After that the rule stops: mid-night the house is quiet, so a cry with no movement counts as a
-wake-up as you'd expect.
+wake-up as you'd expect (unless the microphone looks faulty at the time: see the next section).
+
+### A microphone that looks faulty
+
+Some camera microphones develop a fault: a short, loud click or bang every few seconds while the room
+is silent. Every minute then looks noisy, and the night would be reported as hours awake while your
+child lay still. So when a night is worked out, the sound of a minute is ignored when the minute was
+loud only in **brief spikes** (most of the minute stayed quiet) and such minutes make up at least
+**70%** of the watched minutes of an **8-hour** stretch. A crying episode, even one that comes and
+goes, is normally far shorter than that; the fault this was built for ran all night.
+
+- **Movement still counts** in those minutes, so a child who stirs or gets up is still seen.
+- **A sound that lasts is never ignored**, even during a fault: a cry or a noise that fills more than a
+  quarter of a minute keeps counting as awake.
+- **Once the microphone is fixed or replaced**, its sound counts again.
+- The night's detail page says so under the summary, for example *"The microphone looked faulty for
+  9h 40m, so its sound was not counted as awake time. Movement still was."* The night's API answer
+  carries the count as `sound_discounted_minutes`: the minutes between falling asleep and waking whose
+  sound was ignored (0 on an ordinary night, `null` on a night with no sleep to count). On a night
+  whose times you corrected in the review the count does not change: it stays the count for the
+  stretch the detector worked out, not for your corrected times, so the line can mention a faulty
+  stretch that lies outside the times shown.
+
+There is no setting. The fixed numbers: a minute counts as spikes only when it rose more than 6 dB
+over the room's usual level but its 75th-percentile loudness stayed within **4 dB** of it, and an
+8-hour stretch is only judged when the camera watched at least **384** of its minutes (80%). They were
+measured on one two-camera installation, on one faulty microphone and 30 days of ordinary nights: no
+ordinary night came close (the worst reached 50%), and on the faulty night the guard removed nearly all
+of the invented awake time.
+
+Known limits:
+- **Tonight's live figures** get no help until the night's timeline holds 8 hours. It starts 3 hours
+  before the sleep window, so that is about 5 hours into the window (later if the camera was not
+  recording in the evening). Until then a faulty microphone still reads as awake in "Tonight so far";
+  the finished night is worked out with the guard.
+- **A sleep window shorter than 2 hours never gets the guard**, even after it has ended: the night's
+  timeline (3 hours before the window, the window, at most 3 hours after it) only reaches 8 hours when
+  the window is at least 2 hours long. A 01:00-03:00 window is guarded; 01:00-02:59 never is.
+- **Last night's figures can still change, either way, until about 3 hours after the window.** A minute
+  whose reading has not been saved yet counts as unwatched, and when it arrives it can tip an 8-hour
+  stretch over or under 70%, so between the nightly updates a night can gain or lose ignored minutes.
+  The figures are fixed once that evidence is final.
+- **A sleep window that includes the middle of the day** (a day sleeper, a nap window) can have
+  ordinary daytime noise ignored: daytime noise can be spiky enough to look like a fault.
+- **The numbers come from one installation.** A microphone that is faulty only some of the time (in fewer
+  than about 70% of minutes) still adds wake-ups, and a home whose night-time noise is spikier than
+  that installation's could have real sound ignored.
+- **Just before and after a faulty stretch**, a brief sound without movement (a short call-out) can
+  still be ignored, because an 8-hour stretch reaching into the fault still counts as faulty. That is
+  for up to about 2½ hours (144 minutes) when the camera watched throughout. Minutes with no video
+  don't count against the 8 hours, so if the camera also lost video for up to 96 of them (a reboot or a
+  stall inside that stretch), it can reach up to about 3½ hours (212 minutes). A sound that lasts is
+  never ignored.
+- **A ticking clock, or any spiky noise that runs all night, is treated like a fault**, on purpose: it
+  isn't your child.
+- **Only the detail page shows the note.** The child's card and the morning sleep report show the
+  saved summary, which has the corrected numbers but not the note.
+- **A night is never reported as "no one was in the bed" when sound was ignored**, because that answer
+  also deletes the night's timelapse frames and the ignored minutes may have been the only sign of a very
+  still child. A night watched for less than 90% of its window still reads "no data", as before, because
+  that answer deletes nothing. The cost: an empty bed on a camera with a faulty microphone now usually
+  reads as a night slept. Before, depending on when the fault started and how much was watched, such a
+  night read "no one was in the bed", "no clear sleep" (the fault ran all evening) or "no data"; now a
+  night watched for less than 90% reads "no data" and any other reads as the whole window asleep. If that
+  happens, answer **No one was in the bed** in the night's review.
+- **Sound alerts and wake clips are unchanged.** A faulty microphone can still set off sound alerts, and a
+  wake clip can exist for noise the night's timeline no longer counts as a wake-up.
+
+More detail, and why the numbers are what they are: [KNOWN-ISSUES.md](../KNOWN-ISSUES.md#a-faulty-microphone-a-click-every-few-seconds-is-ignored-in-the-sleep-numbers).
 
 ### Getting up for the day
 
@@ -280,6 +382,14 @@ reported as the child waking. A single stray minute of movement in an otherwise 
 reaching in for a toy or a blanket) does not restart that count; several minutes together do, because
 that is a person at the bed rather than a passing arm. The wake is only accepted where a recorded
 **got out of bed** backs it up, so a quiet spell alone can never end the night early.
+
+A *got out of bed* that comes after the morning's activity has started does not move the wake later
+when the bed was strictly quiet for **20 minutes or more** in between: the child most likely left
+during that quiet stretch, and the later exit is someone at the bed. The wake is then the start of the
+activity. If a *got out of bed* at the start of that quiet stretch had been set aside as part of
+climbing back into bed (next section), that one is the wake instead. Both rules, the nights they come
+from and their limits are in [KNOWN-ISSUES.md](../KNOWN-ISSUES.md), "A morning wake that changed by
+itself as the morning went on".
 
 ### A child who gets out and climbs straight back in has not got up
 
@@ -294,6 +404,11 @@ minutes of the slight movement a sleeping child makes (too small to count as the
 2½ hours after the return. Bigger movement at the bed does not count, because after a child has
 really got up that is a parent stripping the bed, tidying or reaching in: counting it once turned a
 real early-morning wake into one more than two hours later.
+Those minutes are only counted **until the child leaves the bed again**: up to the next *got out of
+bed* that is not logged within a minute after a *got into bed* (judged by the times alone) and that
+the child does not come straight back from (a *got into bed* within 20 minutes, with the bed then
+occupied). After that the bed is empty or someone else is at it, so slight movement there says
+nothing about whether the child stayed.
 A qualifying short trip can still be counted as a wake-up within that same continuing night — see
 [How it estimates](#how-it-estimates). It can miss a trip that's interrupted by a data gap or a stray reading,
 and it cannot tell an adult's visit to the bed from the child's own trip out of it.
@@ -302,14 +417,32 @@ when the bed then shows a still sleeper (6 or more of those minutes), because th
 distinguishable from what the cameras record. Where that is the only *got out of bed* of the night it
 is still used, so the night is not left with no wake time (unless it is far earlier than your child
 usually gets up: see [the next section](#an-exit-far-earlier-than-usual-does-not-end-the-night)); where
-a later one exists, the later one is reported instead. A genuine departure followed only by a parent
-at the bed (bigger movement) is no longer set aside: it is found.
+a later one exists, the later one is reported instead, unless that later one is itself set aside
+because the bed was strictly quiet for 20 minutes in between (previous section): then this one is used,
+but only when it sits at the start of that quiet stretch and is not far earlier than your child usually
+gets up. Otherwise the start of the activity is reported, as before.
+A genuine departure followed only by a parent at the bed (bigger movement) is no longer set aside: it is found.
 **Known limit:** a child who climbs back in and then lies stiller than that (fewer than 6 minutes of
 slight movement in those 2½ hours), or a camera whose detection zone only ever registers bigger
 movement, is treated as having left at that second *got out of bed*: the wake is reported too
 **early**, not left blank (again unless it is far earlier than usual, next section). The 6 was
-measured on two cameras in one house, where the second exits that were the real wake showed 0-3 such
-minutes and the ones a review confirmed were not showed 10 or more; see KNOWN-ISSUES.
+measured on two cameras in one house. The count alone cannot tell a still child from an empty bed
+(see the next limit), and nothing checks the number against your camera; see KNOWN-ISSUES.
+**Known limit:** a camera whose picture of an **empty** bed flickers with faint noise can look like a
+still sleeper. On one night after a camera was replaced, the child had left and the empty bed still
+showed 8-10 such minutes by later in the morning; all but 4 came after the child's next *got out of
+bed*, so they no longer count and the real exit is the wake. The flicker can still set a real exit
+aside when it reaches 6 minutes before the next *got out of bed*, when no later *got out of bed*
+comes within the 2½ hours, or when a stray *got into bed* follows that next *got out of bed* within
+20 minutes (the flicker also makes that return look real, so the count does not stop there). The
+wake is then the real exit if nothing later qualifies, or if the later *got out of bed* is set aside
+as described above; otherwise it is that later one. None of these is worse than before.
+As the morning goes on, the answer can still change: when a later trip's return is only backed
+up by the bed later on, that trip stops ending the count and the earlier exit can be set aside from
+then.
+**Known limit:** a *got out of bed* the camera logged by mistake in those 2½ hours (no *got into bed*
+just before it and none soon after) also ends the count. A child who really did climb back in and
+lies very still can then be reported up at the earlier *got out of bed*: too **early**, never blank.
 
 ### An exit far earlier than usual does not end the night
 
@@ -344,7 +477,9 @@ than that is not taken as the morning wake on its own.
 - **What the night shows instead:** a later *got out of bed* can still be the wake, found the usual
   way. If there is none, the night keeps the wake worked out from movement alone, which is often none:
   the card and the detail page then say "still asleep at" the window's end, and the morning
-  notification has no "up" time. Not right either, but closer than a night that ended in the evening:
+  notification has no "up" time and ends with the sentence **The night may have ended earlier than this.**
+  (only on a night where an exit was set aside; every other report reads as before, and the follow-up
+  "Sleep report updated" carries the sentence too). Not right either, but closer than a night that ended in the evening:
   on the four measured nights, wake errors of 3 to 10 hours became a blank on one night and under
   2 hours on the other three. An improvement, not a fix, fitted to those four nights in one house.
 - **For developers:** a night worked out fresh (`GET /api/children/:id/sleep/:date`, the Recompute
@@ -355,8 +490,9 @@ than that is not taken as the morning wake on its own.
   (`null` when nothing was set aside, and on nights saved before this). Because some readers return the
   whole saved row (`GET /api/children/:id/sleep`, `?stored=1`, and `/sleep/live` when it serves the saved
   last night), `wake_unconfirmed_at` appears in those answers as an **added** key: a fresh night carries
-  `wake_unconfirmed`, a saved row carries `wake_unconfirmed_at`. Neither is in the notification or shown
-  on the page.
+  `wake_unconfirmed`, a saved row carries `wake_unconfirmed_at`. Neither is shown on the page; the
+  sleep-report notification reads `wake_unconfirmed` and adds the sentence above, with no time in it
+  (a possible earlier exit is a guess, and a time in a notification reads as a fact).
 
 **Known limits:**
 - A child who **really is up for the day** that early, or who was **carried to a parent's bed**, in a
@@ -393,6 +529,19 @@ than that is not taken as the morning wake on its own.
   was already sent in a notification is never cleared back to "still asleep" (a Recompute of it is
   refused, as before).
 
+### A radar sensor's opinion is stored, not used
+
+If a child has an [ESPHome](esphome.md) radar sensor that reports a heart rate or a breathing rate, each
+finished night also gets a **second wake time worked out with the sensor's help**: a *got out of bed*
+followed by a person's heartbeat or breathing at the bed for most of the next 10 minutes is set aside, as
+if the camera had imagined it. That time is **stored for comparison only**. The wake time you see, every
+other figure, the morning notification and the alerts stay exactly as the camera works them out, with or
+without a sensor. The reason: the sensor cannot tell a child from a parent standing at the bed, and that
+case moved real wake times more than an hour later when it was tried. The night's API answers carry the
+two added fields `wake_at_sensor` and `sensor_rejects` (empty without a sensor, when the sensor had no
+readings around the night's possible wakes, and on a night whose wake you corrected). How it works, how to compare it with your morning reviews, and its limits:
+[The sleep shadow](esphome.md#the-sleep-shadow-for-comparison-only).
+
 ### When the motion camera samples
 
 The movement timeline comes from a frame-by-frame motion leg that
@@ -414,8 +563,9 @@ lingers 5 to 10 minutes after the closing one.
   day becomes 18 for a 19:00-07:00 window). That is a relative figure; the extra CPU was not measured.
   A frame-diff camera with motion alerts on already runs all day and costs nothing extra.
 - **What is not widened:** none of these is widened to 3 hours. The timelapse records only inside the
-  sleep window itself. The live wake watcher (which also decides wake clips) uses the window plus 5
-  minutes either side.
+  sleep window itself. The live wake watcher (which also decides wake clips) uses the window plus about 5
+  minutes either side, including a window that starts between 00:00 and 00:04, whose 5 minutes before
+  midnight count too.
 - **Known limits:** a departure later than 3 hours after the window closes is not seen by any camera, and
   for a camera of this kind the morning review has no recorded *got out / into bed* events after about
   3 hours past the window's end, because nothing past that point feeds the night's numbers.
@@ -424,115 +574,88 @@ lingers 5 to 10 minutes after the closing one.
 
 ### Tell it when it got a night wrong
 
-The morning after, the child's page offers **Was last night
-right?** — confirm the times or correct them, and mark any recorded *got into / out of bed* event as
-right, wrong, or "can't tell" against the still frame it was decided from. It appears once per night
-and goes for good once answered **or dismissed**; nothing is asked about nights with no times to
-confirm. Either an admin or a caregiver can answer, deliberately — the person who was in the room at
-5am is the one who knows. The review then shows who last answered it (**Answered by** and their
-username): a save with a time, "no one was in the bed", a note or an event answer counts, and so does
-saving someone else's answers again unchanged; dismissing the prompt does not, nor does a save that
-only empties fields, and both leave the name as it was. Reviews saved before this was recorded show no
-name. Type times on your own clock; they are
-recorded against the timezone in Settings, the same one the sleep card displays.
+The morning after, the child's page offers **Was last night right?** — one question: when they got
+up. Tap it and the screen reads **Up at 6:37. Is that right?**
+- **That's right** records that time as your answer. Two taps from the child's page.
+- **Not quite** shows one time field, **Got up for the day**, to type the real time into, and
+  **Save**.
+- On a night where the app has two different answers, the question is instead **Up between 6:10 and
+  6:50. When did they get up?**, with **Around** each time and **Another time**
+  (see ["Up between"](#up-between-in-the-morning-review-when-the-app-has-two-answers)).
+- **No one was in the bed** (a small link under the buttons) says the whole night was wrong. See
+  ["No one was in the bed" says the whole night was wrong](#no-one-was-in-the-bed-says-the-whole-night-was-wrong-not-just-a-time).
+- **Change bedtime or fell-asleep time** (a collapsed section) holds **In bed**, **Fell asleep** and a
+  note, for the rare night one of those is wrong. They start closed and are only recorded if you
+  type in them; opening the section and leaving them alone records nothing. If the app found no
+  wake-up time for the night at all, there is nothing to confirm, so the screen opens straight onto
+  the time field with this section already open.
+
+The prompt appears once per night and goes for good once answered **or dismissed** (the **x** on the
+card); nothing is asked about nights with no times to confirm. Either an admin or a caregiver can
+answer, deliberately — the person who was in the room at 5am is the one who knows. Type times on your
+own clock; they are recorded against the timezone in Settings, the same one the sleep card displays.
 - **Confirming that a night was right is worth as much as correcting one** — it is what makes a
   future change to sleep detection provable rather than arguable. Confirming and correcting are
-  separate buttons on purpose: the times we guessed are never one stray tap from being recorded as
+  separate buttons on purpose: the time we guessed is never one stray tap from being recorded as
   fact.
+- **A save records only what you answered.** A wake-only answer stores your wake-up time and nothing
+  else: not the app's asleep time, as if you had said it. The receipt reads back the same way
+  (**You said up at 6:37.**).
+
+#### What is no longer asked
+
+Until this version the review also asked you to mark each recorded *got into / out of bed* event
+right, wrong or "can't tell" against its still frame, to say what a wrong one really was, and to
+pick a frame to take a time from. Nobody was answering that many questions each morning, so it is
+gone from the screen: there is no event list, no photos, no **Quick check-in?** or **Still moving?**
+card and no **Before bedtime** group. Answers already saved are kept, and so is everything behind
+the screen (the events are still recorded, and the old way of saving still works for a page that
+was open when the app updated). The screen also no longer shows **Answered by**; the app still
+records who last answered a night.
 
 #### In bed and asleep are two different answers
 
-The form has three times: **In bed** (when they
-were put down), **Fell asleep** and **Got up for the day**. On a night with a bedtime story they can
-be half an hour apart, and you can give both. "In bed" is optional: leave it empty and nothing about
-the put-down is recorded. It can't be later than "Fell asleep" (a picked frame may be up to a minute
-after a typed asleep time, since a frame keeps its seconds and a typed time doesn't); the save is
-refused with a message if it is. If your review is left with an in-bed time but no asleep time
-(you gave "In bed" on its own, or emptied "Fell asleep"), the in-bed time is checked against the
-asleep time the app already has for the night instead, since that is the one it will be shown next
-to. In the same way "Fell asleep" can't be later than "Got up for the day" (again with a minute of
-slack for a picked frame), and an asleep time saved with no wake-up time is checked against the
-wake-up time the app already has. All of these are checked against what you saved before as well as
-what you are saving now, and a refused save stores nothing, event answers included. They are checked
-only when a save gives or empties one of those times: a note, an event answer or a dismissal is
-never refused because the app's own night changed after you answered.
+Under **Change bedtime or fell-asleep time** you can give **In bed** (when they were put down) and
+**Fell asleep**. On a night with a bedtime story they can be half an hour apart, and you can give
+both. Both are optional, and each is recorded only if you type in it: the times the app guessed are
+shown for you to edit, but they are never saved as yours unless you change them. "In bed" can't be
+later than "Fell asleep"; the save is refused with a message if it is. If your review is left with
+an in-bed time but no asleep time (you gave "In bed" on its own, or emptied "Fell asleep"), the
+in-bed time is checked against the asleep time the app already has for the night instead, since
+that is the one it will be shown next to. In the same way "Fell asleep" can't be later than "Got up
+for the day", and an asleep time saved with no wake-up time is checked against the wake-up time the
+app already has.
+
+The check works the other way round too: **a wake-up time saved while your review has no asleep
+time of its own is checked against the asleep time the app already has for the night.** This is the
+check nearly every save meets now, because the screen asks only for the wake. Typing 18:37 for
+06:37 is refused with a message instead of saving a night that ends before it began. A time typed
+before 12:00 is read as the morning after, so a mistyped evening time is what it catches.
+
+All of these allow one minute of slack (a time picked from a frame keeps its seconds, and a typed
+time doesn't). They are checked against what you saved before as well as what you are saving now,
+and a refused save stores nothing. They are checked only when a save gives or empties one of those
+times: a note or a dismissal is never refused because the app's own night changed after you
+answered.
 
 #### The times wait for your timezone setting
 
-Right after the page opens, the app may not have
-loaded the timezone set in Settings yet, and until it has, the times on the page can be shown in the
-wrong zone (and saved that way). So **That's right**, **Not quite…**, the time fields and the frame
-buttons stay greyed out, with a line saying why, until it has loaded (usually a moment). Event
-answers, **Save just the event answers** and **No one was in the bed** don't involve a time and work
-straight away. If the setting can't be loaded at all, the line becomes an error saying so and the
-times stay greyed out for that visit: reload the page. Every time on this page, shown or typed, is
-in your **home** time (the timezone set in Settings), never the time zone of the phone or browser
-you are using.
-
-#### Point at the picture instead of typing
-
-Tap the frame that shows the real moment and the time is
-taken from it, exact to the second rather than rounded from memory. Typing a time by hand instead
-clears the picked frame, so only one of them is ever the answer.
-
-| On a recorded… | Button | Fills |
-|---|---|---|
-| *got into bed* | **Put down here** | **In bed** only. It never changes "Fell asleep". |
-| *got into bed* | **Asleep here** | **Fell asleep** |
-| *got out of bed* | **Up for the day here** | **Got up for the day** |
-
-Reading a story first? Mark both: **Put down here** on the put-down, **Asleep here** on the event
-closest to when they settled (or type the asleep time).
-- This is **not** the same as marking an event *correct*. An exit can be perfectly real and
-  still not be the end of the night — a child who gets out at 5:45, goes back, and gets up
-  again at 6:00 had two genuine exits and only one of them ended the night.
-- **Before 0.35.0** there was only one button on a *got into bed* event, **Put down here**,
-  and it set the *asleep* time. Reviews saved that way are kept exactly as they are: there is no way
-  to tell which stored asleep times came from that button, so none is reinterpreted as "in bed". If
-  one of yours is wrong, open the night and correct it. A page that was already open when the app
-  updated keeps the old button until it is reloaded, and saves the old way until then.
-
-#### Saying "No" can say what it really was
-
-In the full event list, answering **No** offers an
-optional follow-up: **Me or another adult**, **They moved in bed**, or **Someone walking by /
-nothing**. A plain "No" can't tell a parent leaving after a story from a child rolling over, and
-telling those apart is what future detection work needs. Skipping the follow-up is fine: a "No"
-with nothing else is still a complete answer. Changing the answer away from "No" removes the
-follow-up too. The **Quick check-in?** and **Still moving?** cards don't ask it, because their own
-buttons ("That was me", "No, still in bed") already say what happened. Those events also appear
-in the full list with your answer shown, but without the follow-up. **That was me** is saved as
-**Me or another adult** without asking; **No, still in bed** is saved with no follow-up.
-
-#### Afternoon events are grouped out of the way
-
-Events recorded before **16:00** on the night's
-date, in the timezone set in Settings (or the one the night was saved in, see [A night whose settings have
-changed](#a-night-whose-settings-have-changed)), are collected at the top of the full list as **Before
-bedtime (N)**, collapsed. They are usually someone walking across the bed zone. **None of these
-were a bedtime event** marks them all **No** in one tap. The button stays greyed out until you
-have opened the group at least once, so a real nap can't be marked "No" before anyone has looked
-at it. Closing the group again doesn't lock it. It never overwrites an answer you've
-already given, and it leaves out any event that has its own Quick check-in or Still moving card.
-Open the group to change any single one before you save, for example to mark a real afternoon
-nap as **Yes**. 16:00 is a first guess, not a measured value, and it's the same for every house.
-If your child's night really starts before 16:00, don't use the button: it would mark their
-real bedtime "No". A night with no bedtime information at all (no put-down, no sleep time, no
-frame picked, no bedtime you typed in) shows the list ungrouped. The list is also ungrouped until
-the app has loaded your timezone setting. That is usually a moment after the page opens, but it
-lasts the whole visit if the settings can't be loaded. Grouping by a guessed timezone could put
-a real evening bedtime in the afternoon group, where the button would mark it "No".
+Right after the page opens, the app may not have loaded the timezone set in Settings yet, and until
+it has, the times on the page can be shown in the wrong zone (and saved that way). So the question,
+**That's right**, **Not quite**, **Save** and the time fields stay greyed out (the question itself is
+replaced by a line saying why) until it has loaded, usually a moment. **No one was in the bed**
+doesn't involve a time and works straight away. If the setting can't be loaded at all, the line
+becomes an error saying so and the times stay greyed out for that visit: reload the page. Every
+time on this page, shown or typed, is in your **home** time (the timezone set in Settings), never
+the time zone of the phone or browser you are using.
 
 #### A night whose settings have changed
 
 The review uses the same settings as the sleep detail page. For a finished night whose camera, timezone or
-sleep window has changed since it was saved, **What we recorded**, the recorded events and the **Before
-bedtime** group all use the settings the night was saved with (see [Finished nights use the settings they
-were saved with](#finished-nights-use-the-settings-they-were-saved-with)). So the times you confirm are the
-ones the child's card shows, and the events run from noon to noon in the saved timezone and include the saved
-camera's, even if that camera has since been turned off. Times are still shown, and typed, in today's timezone.
-- A camera that has since been moved to another child, or deleted, shows no events here. Its events now
-  belong to that other child (or to no one).
+sleep window has changed since it was saved, the wake-up time it asks about (and the times under **Change
+bedtime or fell-asleep time**) use the settings the night was saved with (see [Finished nights use the
+settings they were saved with](#finished-nights-use-the-settings-they-were-saved-with)). So the time you
+confirm is the one the child's card shows. Times are still shown, and typed, in today's timezone.
 - If the settings for the night change while the review is open (someone edits the sleep window or the
   timezone, changes the camera, or the night is saved again), saving is refused: "The settings for this night
   changed while you were reviewing. Reload the page and check your times." Nothing is saved. **No one was in
@@ -553,14 +676,14 @@ sleep recalculated to match wherever an asleep or wake-up time you saved differs
 screen had (a time that is the same keeps that screen's own total). This is different from
 **Recompute this night**, which re-runs the detector: correcting records what *you* know,
 recomputing re-asks the *app*.
-- A corrected **In bed** only moves the "in bed" time. Saving the form also records the asleep and
-  wake-up times it shows, as your confirmation. Where those are the times a screen was already
-  showing, nothing about the sleep changes there: the total asleep, the wake-ups and the longest
-  stretch stay what that screen had. The total is recalculated only where a time you saved differs
-  from that screen's own, which is normally only when you changed it (but not always: see the
+- A corrected **In bed** only moves the "in bed" time. Saving the review records only the times you
+  answered: a wake-only answer stores your wake-up time, and the asleep time stays the app's. Where a
+  time you saved is the one a screen was already showing, nothing about the sleep changes there: the
+  total asleep, the wake-ups and the longest stretch stay what that screen had. The total is
+  recalculated only where a time you saved differs from that screen's own, which is normally only
+  when you changed it (but not always: see the
   [Known limits, all documented rather than fixed](#known-limits-all-documented-rather-than-fixed) about the review page and the card starting from different versions of the night).
-  Tapping a picked frame's button a second time undoes the pick and puts the field back
-  the way it was (un-pressing a put-down that was already saved removes it). When you give an in-bed
+  When you give an in-bed
   time, the card and the detail page show it next to the asleep time even if you corrected that too
   (they hide the *detector's* put-down beside a corrected asleep time, because it may belong to the
   bedtime you overruled). Either way it only shows when it is at least a minute before "asleep".
@@ -570,11 +693,11 @@ recomputing re-asks the *app*.
 Once any correction is saved (an in-bed, asleep or wake
 time, "No one was in the bed", or a plain **That's right**), the night's saved summary is complete:
 the nightly update stops refining it and **Recompute this night** refuses it (the dialog says the
-night is locked). Answering only the per-event questions (**Save just the event answers**) or
-dismissing the card is not a correction and locks nothing. A note isn't a correction either, but the
-review form always saves the asleep and wake-up times it shows along with it (as your confirmation,
-see [Your times become the ones shown](#your-times-become-the-ones-shown)), so **a note saved from the form does lock the night**. Only a note sent on its own through
-the API locks nothing. This is the same for every child and every install.
+night is locked). Dismissing the card is not a correction and locks nothing. A note isn't a correction
+either, but the review always saves a wake-up time with it (see [Your times become the ones
+shown](#your-times-become-the-ones-shown)), so **a note saved from the review does lock the night**.
+Only a note sent on its own through the API, or an event answer sent that way, locks nothing. This is
+the same for every child and every install.
 
 | | Before you correct a night | After |
 |---|---|---|
@@ -613,27 +736,30 @@ update then refines it once more if it had not finished doing so before you corr
 Either:
   - an admin opens **Recompute this night** on the sleep detail page, which says the night is locked,
     and presses **Remove my correction** (it asks you to confirm first); or
-  - anyone edits the review (**Change what you told us about this night**) and empties **all three**
-    times, **In bed**, **Fell asleep** and **Got up for the day** (or, for a night you marked "No one was
-    in the bed", presses **Someone was in the bed**). Emptying only some of them leaves the night
-    locked: the review form starts with the app's own asleep and wake-up times filled in, so clearing
-    just **In bed** still counts as a correction.
+  - for a night you marked "No one was in the bed", anyone opens the review (**Change what you told us
+    about this night**) and presses **Someone was in the bed**.
+
+  The review can still empty a time, for an admin or a caregiver: clear **Got up for the day** (and
+  **Fell asleep** and **In bed** under **Change bedtime or fell-asleep time**), then **Save**. A
+  cleared time is removed; one you leave alone is kept. Emptying all three removes the correction.
+  **Remove my correction** is the admin's other route, and a save sent straight to the API that
+  empties all three times does the same.
 
   The button **removes** the times you entered (or your "No one was in the bed" answer); it does not
   hide them, and nothing brings them back. Your answers to the individual events (and their reasons)
   and your note are kept, and so is the night's saved summary: the button only unlocks the night, it
   does not recompute it. Press **Recompute this night** afterwards to see the app's own figures beside
   the saved ones, which may be wrong (that is why you corrected the night). To keep a correction after
-  that, enter your times again, and the night locks again when you save them. Removing a correction is
-  allowed for any signed-in user through the review itself, but the button is in the admin-only
-  Recompute dialog. The one side effect: removing a "No one was in the bed" answer counts as answering
-  the review, so a dismissed prompt returns and the review names the person who removed it.
+  that, enter your times again, and the night locks again when you save them. The one side effect:
+  removing a "No one was in the bed" answer counts as answering the review, so a dismissed prompt
+  returns and the review no longer names who removed it (the app still records it).
 
 #### Known limits, all documented rather than fixed
 
   - A night corrected early (say 07:15, when the window closed at 07:00) keeps any time you did
     *not* correct at the value it had then. A detected wake-up that would have settled from 06:50
-    to 07:15 an hour later stays at 06:50. Correct the wake too if it matters.
+    to 07:15 an hour later stays at 06:50. Correct that time too if it matters (a wake-only answer
+    leaves the app's asleep time as it had it).
   - "Freshly worked out at that moment" is the moment you press save, not the moment you opened the
     page. A detected wake-up keeps moving until about 10:00 as the morning's activity is taken into
     account, so on a page left open for a while the saved night can differ a little from what the
@@ -663,8 +789,8 @@ Either:
     the detail page), while the child's card shows the night as it was saved. When those differ (a page
     left open while the detected wake-up moved on, or an older night saved by an earlier version of the
     detector), the
-    asleep and wake-up times you save unchanged are the review page's, so the card shows those and
-    recalculates its total to fit them, even if you only marked **In bed**. The sleep detail page,
+    wake-up time you save unchanged is the review page's, so the card shows that and
+    recalculates its total to fit it, even if you only marked **In bed**. The sleep detail page,
     which works the night out fresh, may keep its own total instead. Each screen's total always fits
     the times it shows; they just aren't always the same total.
   - **Correcting a night the app called "no one in the bed" makes it a slept night (#355).** Open the
@@ -709,8 +835,8 @@ Either:
     version was installed.
   - The sleep ↔ temperature averages read the detector's saved figures and never apply time
     corrections, locked or not (a night marked "No one was in the bed" is left out of them).
-  - The app's own asleep and wake-up times, saved unchanged (**That's right**, or the form with those
-    fields left as the app had them), are saved as exactly the time the page showed, as long as it is
+  - The app's own wake-up time, saved unchanged (**That's right**, or **Not quite** with the field
+    left as the app had it), is saved as exactly the time the page showed, as long as it is
     a time the app could have worked out for that night. That means inside the child's sleep window
     widened the way the detector widens it: asleep times are looked for from 3 hours before the
     window opens, wake-ups up to 3 hours after it closes. The app's own times always are, unless the
@@ -724,8 +850,8 @@ Either:
     which shows up as "In bed can't be after Fell asleep" or "Fell asleep can't be after Got up for
     the day". That includes a time from an earlier save that the form shows again, because only the
     app's own times are matched. So once the app no longer has a night's after-midday wake-up itself,
-    re-saving the form for that night is refused if your review also has an asleep time (and without
-    one, the wake-up is saved again a day early: see [the unchecked wake-up time](#time-validation-limits)). That is always
+    re-saving the review for that night saves it a day early, and is refused if the app has an asleep time
+    for the night that the early wake-up now precedes (see [the wake-up time check](#time-validation-limits)). That is always
     the case on a night older than 30 days, whose minute-by-minute data is gone so the app has no times
     of its own for it, and on a newer night if the app's own wake-up has moved since you saved yours.
   - On the night the clocks go back, the hour that happens twice can't be told apart as an HH:MM. The
@@ -743,13 +869,14 @@ Either:
 
 ##### Time validation limits
 
-  - A wake-up time saved while your review has no asleep time is not checked against the app's
-    asleep time. A wake-up typed earlier than that (with "Fell asleep" left empty) is saved, and the
-    screens then show a night that ends before it starts. Give the asleep time too.
-  - Through the API only: a save that empties just the wake-up time, beside an asleep time already in
-    your review, is not checked against the app's wake-up time, so an asleep time after it can be left
-    standing. The review form always sends its asleep time along with the wake-up time, and that save
-    is checked.
+  - A wake-up time saved while your review has no asleep time is checked against the asleep time the
+    app has stored for the night (see [In bed and asleep are two different answers](#in-bed-and-asleep-are-two-different-answers)).
+    It is not checked when the app has no stored night yet, or a stored night with no asleep time:
+    there is nothing to compare with, and a mistyped wake-up is saved. If last night's summary is
+    still being refined when you save, the comparison uses the version stored before your save.
+  - A save that empties just the wake-up time, beside an asleep time already in your review, is not
+    checked against the app's wake-up time, so an asleep time after it can be left standing. The
+    review screen can send that save (clear **Got up for the day** and **Save**).
   - Only just after updating to 0.35.0: a review page that was already open before the update has no **In
     bed** field. If it saves an asleep time earlier than an in-bed time someone else has since saved
     from an updated page, the save is refused ("In bed can't be after Fell asleep") and that old page
@@ -761,8 +888,8 @@ That is deliberate — it is what a future improvement gets scored against. Noth
 
 ### "No one was in the bed" says the whole night was wrong, not just a time
 
-Next to the usual times
-is a button for the case those don't fit at all — a night the detector scored as sleep, or as a wake
+Under the usual buttons
+is a small link for the case those don't fit at all — a night the detector scored as sleep, or as a wake
 or two, when nobody was actually there. It changes the child's card and the sleep detail page to say
 "You said no one was in the bed", the same way a time correction already shows your own times
 instead of the detector's, and it is per night and per child — there's no house- or timezone-specific
@@ -784,7 +911,9 @@ assumption in it. **Someone was in the bed** undoes it and brings the detector's
 ### The card confirms it
 
 After you answer, the prompt becomes a short receipt showing what you
-recorded, and tapping it lets you change your mind.
+said, and only that: a wake-only answer reads **You said up at 6:37.**, not a bedtime you never
+gave. An answer that includes more reads them in the order they happen (**You said in bed 6:49,
+asleep 7:13, up at 6:37.**). Tapping the receipt lets you change your mind.
 
 ### Any night can be reviewed, not just last night
 
@@ -795,7 +924,11 @@ slept or as "no one in the bed" (the card never asks about a "no one in the bed"
 way to correct one, #355); a night still in progress, and a "no data" or "no sleep" night, have no
 such button. Saving from there keeps you on that
 night and shows the receipt in place, so working back through a run of nights doesn't send you to
-re-pick the date each time.
+re-pick the date each time. It asks the same single question as the morning card. A night the app
+called "no one in the bed" has no wake-up time to confirm, so its review opens on the time field
+with **Change bedtime or fell-asleep time** already open: give both times to make it a slept night
+(a wake-up on its own leaves it "no one in the bed", see the table under the #355 point in
+[Known limits, all documented rather than fixed](#known-limits-all-documented-rather-than-fixed)).
 
 ### Reviews are kept forever
 
@@ -908,6 +1041,7 @@ For developers (the API behind the dialog, the detail page and the morning revie
 The limits are described beside the behaviour they affect:
 
 - [Bedtime and put-downs](#bedtime-is-a-guide-not-a-boundary)
+- [A microphone that looks faulty](#a-microphone-that-looks-faulty)
 - [Getting up and returning to bed](#a-child-who-gets-out-and-climbs-straight-back-in-has-not-got-up)
 - [An exit far earlier than usual](#an-exit-far-earlier-than-usual-does-not-end-the-night)
 - [Motion camera sampling](#when-the-motion-camera-samples)

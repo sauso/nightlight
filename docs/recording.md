@@ -9,7 +9,7 @@ which is which.
 | **Automatic clips** | A motion/sound **alert** | Yes — it's an alert | 14 days / 5 GB (both configurable) | On the alert, in the Alerts feed |
 | **Wake clips** | Your child **waking up** | **No — silent by design** | 14 days (configurable) | On the wake-up, in the night's sleep detail |
 | **On-demand recordings** | You pressing **Record** | No | **Forever, until you delete them** | The **Recordings** card on the child's page |
-| **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days — **or forever once you judge one** (either way, gone when the camera or child is removed) | The morning review on the child's page |
+| **Bed-transition frames** | Your child getting **into or out of bed** | No | 45 days — **or forever once you judge one** (either way, gone when the camera or child is removed) | The **Room activity** list in the night's sleep detail, under a row you open (signed-in users only) |
 
 All three are configured under **Settings → Recording** (admin only), and all three write to the same
 place on disk — see [Where recordings are stored](#where-recordings-are-stored).
@@ -70,16 +70,16 @@ Alerts that have a clip show a **play button** on their thumbnail; tapping opens
 with a **Download** button. In the mobile app, Download saves the video into your phone's Downloads
 folder.
 
-**A silenced camera, or one outside its alert hours, saves no clip.** A clip belongs to an alert, and
+**A silenced camera, one outside its alert hours, or one under Hold alerts until asleep saves no clip.** A clip belongs to an alert, and
 is cut only when an alert actually fires. While a camera is **silenced** (**Silence alerts** on its
-tile) or outside its **Alert schedule**, motion and sound raise no alert at all (no push and no entry
+tile), outside its **Alert schedule**, or under **Hold alerts until asleep**, motion and sound raise no alert at all (no push and no entry
 in the Alerts feed), so there is nothing to attach a clip to, even with **Save a clip when triggered**
 on. The detector itself keeps watching, so sleep tracking is unaffected, but no alert clip of that
 moment is kept. This is different from having no notification provider set up, or switching one off: an
 alert that fires is still recorded in the feed and still gets its clip, whether or not anything is
 pushed. So "stop the notifications" and "stop the alert" are different things here, and there is no
 per-camera setting that mutes only the push while keeping the alert and its clip: the schedule and
-the silence both stop the alert itself. See [Alert schedule](notifications.md#alert-schedule-quiet-hours)
+the silence and the hold all stop the alert itself. See [Alert schedule](notifications.md#alert-schedule-quiet-hours), [Hold alerts until asleep](notifications.md#hold-alerts-until-asleep)
 and [Silencing a camera's alerts](camera-controls.md#silencing-a-cameras-alerts-and-who-did-what).
 
 ---
@@ -214,11 +214,23 @@ clip).
 
 ---
 
-## Bed-transition frames (diagnostic, not shown anywhere)
+## Bed-transition frames (diagnostic, shown only in a night's sleep detail)
 
 Whenever sleep tracking decides your child has got **into** or **out of** bed, a single still frame is
-saved alongside that decision. These are not clips, are never shown in the app, and never notify you.
-They exist so that a sleep timeline which looks wrong can be *looked at* rather than guessed about.
+saved alongside that decision. These are not clips and never notify you. They exist so that a sleep
+timeline which looks wrong can be *looked at* rather than guessed about.
+
+- **Where you see them.** On a night's sleep detail page, a **Room activity** row that has a saved frame
+  within a minute of it has a down arrow, like a wake-up row. Tap the row to open it: the frame appears
+  underneath as a small picture with the time and whether the camera decided your child got into or out of
+  bed, and tapping the picture enlarges it. A row with no frame nearby is a plain line with no arrow, and a
+  row near two frames lists two.
+- **Who sees them.** Anyone signed in who can open the sleep page. A frame is never put in a notification,
+  an email or an export, and it can't be opened without signing in.
+- **Older nights may have none.** The arrow appears only where the picture still exists: a night older than
+  the retention below, or one whose folder was cleared, simply has no arrow. That is not a fault.
+- **The picture is the camera's decision, not the row's cause.** A row shows every frame close in time, even
+  one that belongs to a different event. Frames that fall between rows can't be opened from this page.
 
 - **One JPEG per transition**, roughly 20–40 a night across two cameras — in the region of 5 MB a
   night, and about **220 MB** once the 45-day retention is full.

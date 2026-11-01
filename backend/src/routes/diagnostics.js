@@ -9,6 +9,7 @@ import { dataDirFrom, layoutConflict } from '../lib/dataPaths.js';
 import { logger } from '../lib/logger.js';
 import { getPathStatus } from '../lib/mediamtx.js';
 import { mqttStatus, getReading } from '../lib/mqttClient.js';
+import { esphomeStatus } from '../lib/esphomeManager.js';
 import { getRecentEvents } from '../lib/cameraEvents.js';
 import { getRecentDetectionEvents } from '../lib/detectionEvents.js';
 import { pushConfigured, pushEnabled } from '../lib/push.js';
@@ -229,6 +230,12 @@ router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
 
       integrations: {
         mqtt: mqttStatus(),
+        // Device labels, addresses, keys and readings never belong in a support bundle.
+        esphome: {
+          configured: db.prepare('SELECT COUNT(*) AS n FROM esphome_devices').get().n,
+          devices: esphomeStatus().map((s) => ({ id: s.id, connected: s.state === 'connected',
+            encrypted: s.encrypted, error_code: s.error_code })),
+        },
         firebase_push: { enabled: pushEnabled(), configured: pushConfigured() },
         pushover: { enabled: pushoverEnabled(), configured: pushoverConfigured() },
       },
@@ -276,7 +283,8 @@ router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
     // actually said — this is remediation step 2 of GHSA-wcgj-6p3c-vr9h (see cameras.js's camera
     // report for the original instance) applied to this bundle too: assert the invariant instead of
     // just describing it in this file's own header comment.
-    const leak = findCredentialLeak(published);
+    const esphomeKeys = db.prepare('SELECT encryption_key FROM esphome_devices WHERE encryption_key IS NOT NULL').all().map((r) => r.encryption_key);
+    const leak = findCredentialLeak(published) || esphomeKeys.map((key) => findCredentialLeak(published, key)).find(Boolean);
     if (leak) {
       logger.error(`[diagnostics] refused to send a bundle that still contained a credential: ${leak}`);
       return res.status(500).json({ error: 'Diagnostics bundle failed a safety check — nothing was sent. Please report this.' });

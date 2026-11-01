@@ -6,7 +6,7 @@ default**. Everything else (including the in-app **Recent alerts** list — on e
 the combined view under **Settings → Logs** for admins) works without it.
 
 There are **several providers** — set up one or more; an alert is sent to **every** provider you
-enable, all managed under **Settings → Push notifications** (a row per provider):
+enable, all managed under **Settings → Integrations → Push notifications** (a row per provider):
 
 - **Pushover (simplest, works on iOS)** — a small paid third-party app. No Firebase project, no Apple
   Developer account. See **[Option A: Pushover](#option-a-pushover)**.
@@ -17,7 +17,7 @@ enable, all managed under **Settings → Push notifications** (a row per provide
 - **Gotify (self-hosted)** — a lightweight self-hosted push server. Text alerts. See
   **[Option D: Gotify](#option-d-gotify)**.
 
-Each row on **Settings → Push notifications** carries a badge, so you can see at a glance which are live:
+Each row on **Settings → Integrations → Push notifications** carries a badge, so you can see at a glance which are live:
 
 | Badge | Means |
 |---|---|
@@ -39,7 +39,7 @@ choice of kind: a provider gets all of them or none. What can be switched off se
 
 | Notification | Default | Needs | Goes to |
 |---|---|---|---|
-| **Motion alert** | **Off.** Motion detection is off on a new camera | Motion detection on for that camera. Not sent while the camera is [silenced](camera-controls.md#silencing-a-cameras-alerts-and-who-did-what) or outside its [Alert schedule](#alert-schedule-quiet-hours) | Every enabled provider; with Firebase, every device that is registered and signed in, caregivers included |
+| **Motion alert** | **Off.** Motion detection is off on a new camera | Motion detection on for that camera. Not sent while the camera is [silenced](camera-controls.md#silencing-a-cameras-alerts-and-who-did-what), outside its [Alert schedule](#alert-schedule-quiet-hours), or under [Hold alerts until asleep](#hold-alerts-until-asleep) | Every enabled provider; with Firebase, every device that is registered and signed in, caregivers included |
 | **Sound alert** | **Off.** Sound detection is off on a new camera | Sound detection on for that camera. Same silence and schedule rules | The same |
 | **Camera offline**, and **back online** | **Off** | **Settings → Camera controls → Notify when a camera goes offline** (default threshold 5 minutes, 1–1440); "back online" is sent only after an offline notification was. See [Camera controls](camera-controls.md#camera-offline-alerts) | The same |
 | **Long silence** (a camera's alerts kept silenced) | **On**, 60 minutes (1–719) | **Settings → Camera controls → Long silence alerts**. See [Camera controls](camera-controls.md#long-silence-alerts) | Meant for admins: on Firebase only admins' devices, and not the person who set the silence; Pushover, ntfy and Gotify cannot address one person, so everyone on them gets it |
@@ -55,7 +55,7 @@ What each message says. Names are the names as you typed them:
 | **Camera offline** | `<camera name> — offline` | `No video from "<camera name>" for 5+ minutes.` | None |
 | **Back online** | `<camera name> — back online` | `"<camera name>" is back online after about 7 minutes offline.` | None |
 | **Long silence** | `Alerts silenced on <camera name>` | `Alerts from "<camera name>" have been silenced on and off for 2 h 5 min. Camera history shows who set each silence.` No username | None |
-| **Sleep report** | `Sleep report — <child's name>` for one child; `Sleep reports ready` when several close in the same check. With **Show this child's name in the report** off: `Sleep report — a child` | One line per child: `<child's name>: asleep 8h12, 2 wakes, up 06:47`, or `<child's name>: no one in the bed`, or `<child's name>: no sleep data`. With the name hidden the line starts `A child:` instead. Tapping opens the sleep page | None |
+| **Sleep report** | `Sleep report — <child's name>` for one child; `Sleep reports ready` when several close in the same check. With **Show this child's name in the report** off: `Sleep report — a child` | One line per child: `<child's name>: asleep 8h12, 2 wakes, up 06:47`, or `<child's name>: no one in the bed`, or `<child's name>: no sleep data`. With the name hidden the line starts `A child:` instead. On the rare night the app set aside an earlier *got out of bed* as far too early for this child, the line ends `. The night may have ended earlier than this.` (see [How the app decides](sleep-tracking.md#an-exit-far-earlier-than-usual-does-not-end-the-night)). Tapping opens the sleep page | None |
 | **Sleep report updated** | `Sleep report updated — <child's name>` (or `Sleep reports updated`); `Sleep report updated — a child` with the name hidden | The same lines, now with the wake time | None |
 | **Test message** | `Nightlight` | `Test notification — … is working.` | None |
 
@@ -84,7 +84,7 @@ call to Pushover — nothing to bake into an app.
    screen). For alerting several caregivers, create a **Delivery Group** instead and use its group key.
 2. At [pushover.net/apps/build](https://pushover.net/apps/build), create an application (name it
    "Nightlight"). Copy its **API Token/Key**.
-3. In Nightlight, go to **Settings → Push notifications → Pushover**: paste the **application API
+3. In Nightlight, go to **Settings → Integrations → Push notifications → Pushover**: paste the **application API
    token** and your **user/group key**, tick **Enable Pushover notifications**, and **Save** (it
    verifies the tokens with Pushover). Use **Send test** to confirm it reaches your phone.
    **Device** (optional, default blank) narrows alerts to one Pushover device — its name as shown in
@@ -176,8 +176,8 @@ see `no Firebase credentials … push notifications disabled`, the service-accou
 server expects it.
 
 ### 5. Enable push on the server (admin, one-time)
-- In the web app, go to **Settings → Notifications (push)** and turn on **"Enable push
-  notifications."**
+- In the web app, go to **Settings → Integrations → Push notifications → Firebase** and turn on
+  **"Enable Firebase notifications."**
 - Saving **validates both files above are present and valid** — if one is missing it tells you
   exactly which, and nothing is enabled. This is a deliberate server-level switch: motion detection
   and the in-app **Recent alerts** list work regardless; only phone notifications wait on this.
@@ -204,7 +204,7 @@ your own server (e.g. on the same NAS).
    so choose a long, hard-to-guess name (e.g. `nightlight-alerts-3f9a2c`). On your own server you can
    also require auth.
 2. Subscribe to that topic in the **ntfy** app (or `https://ntfy.sh/<topic>` in a browser).
-3. In Nightlight: **Settings → Push notifications → ntfy**. Set the **Server URL** (`https://ntfy.sh`
+3. In Nightlight: **Settings → Integrations → Push notifications → ntfy**. Set the **Server URL** (`https://ntfy.sh`
    or your own), the **Topic**, and — if your server requires it — an **access token** *or*
    **username/password**. Tick **Enable**, **Save**, and **Send test**.
 
@@ -242,7 +242,7 @@ credential]`.
 1. Run a Gotify server and open its web UI. Under **Apps**, create an **application** (name it
    "Nightlight") and copy its **application token**.
 2. Install the **Gotify** Android app and point it at your server (or use the web UI).
-3. In Nightlight: **Settings → Push notifications → Gotify**. Set the **Server URL**, paste the
+3. In Nightlight: **Settings → Integrations → Push notifications → Gotify**. Set the **Server URL**, paste the
    **application token**, optionally adjust **Priority** (0–10, default **5**), tick **Enable**,
    **Save**, and **Send test**. Higher priorities show more prominently in the Gotify app and can
    bypass its quiet settings; **0 still delivers**, just quietly — it is a valid choice here, not
@@ -407,6 +407,12 @@ and entry frames, and timelapse frames are grabbed separately and are not affect
 overall limit beyond one per camera: with several cameras, each can be grabbing at the same time.
 Known limit: if a stream grab that was stopped for taking too long never exits, that camera's frame
 stays unavailable until the app restarts; see [KNOWN-ISSUES.md](../KNOWN-ISSUES.md).
+
+### Hold alerts until asleep
+
+On a child's settings page, an admin can turn on **Hold alerts until asleep** while **Track sleep** is on. It is off by default. During that child's sleep window (including about five minutes on each side), motion and sound alerts from their cameras are dropped until the watcher has observed about 15 quiet minutes, or until 45 minutes have passed since the first held alert that night. Held alerts are never sent later and make no alert clip or in-app event. A child who keeps crying without settling can be alerted after the 45-minute cap; that cap is a design choice, not a measured safe duration. Camera-offline, long-silence and sleep-report alerts are never held.
+
+The hold fails open when tracking is off, the window is closed, or the check fails. A restart erases both the quiet count and the cap timer, so another 45 minutes of holding is possible. Reassigning a camera between tracked children while both windows are open can carry its existing asleep latch to the new child and allow alerts early. The recording-status field `alerting_now` still reports only the Alert schedule and silence state. Demo sample events are unaffected; the hold applies only to live alerts.
 
 ### Alert schedule (quiet hours)
 

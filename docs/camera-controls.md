@@ -24,7 +24,7 @@ small or too jumpy on your camera, adjust it and see how it feels.
 | Notify when a camera goes offline | Off | — |
 | Offline for longer than (minutes) | 5 | 1–1440 |
 
-Sends a push notification (through whichever providers you've set up under **Settings → Push
+Sends a push notification (through whichever providers you've set up under **Settings → Integrations → Push
 notifications**) when a camera stops delivering video for longer than the threshold, and a
 second notification when it recovers. A brief blip that clears on its own — shorter than the
 threshold — never alerts, and each outage produces exactly one "went offline" notification, not
@@ -78,7 +78,7 @@ camera that has been silenced again and again does not go unnoticed.
   that leaves it. Who set a silence is on the camera's tile while it lasts (`Muted until <time> by
   <username>`) and in Camera history (admin only), below. The server log notes the notification
   without any name either.
-- **Not affected by the camera's alert schedule** (quiet hours): it is about the camera's alerts being
+- **Not affected by the camera's alert schedule** (quiet hours) or **Hold alerts until asleep**: it is about the camera's alerts being
   off, not an alert from the camera.
 - **Why the range stops at 719.** One silence can be at most 720 minutes, and the notification needs
   *more than* the threshold, so 719 is the highest value at which the longest single silence still
@@ -86,7 +86,7 @@ camera that has been silenced again and again does not go unnoticed.
   (`59.5`, `1e3` or `60abc` is refused, not rounded), and the switch only takes on or off (`true`,
   `false`, `1`, `0`); this is stricter than the older settings on this page, on purpose.
 
-**Who receives it depends on the channel** (the providers are set up under **Settings → Push
+**Who receives it depends on the channel** (the providers are set up under **Settings → Integrations → Push
 notifications**):
 
 | Channel | Who gets it |
@@ -136,8 +136,8 @@ schedule). See [Recording](recording.md#automatic-clips-detection-triggered).
 the first name, which anyone can change on their own account (so it cannot be used to put someone
 else's name on what you did). It is copied at the time, so renaming or deleting the account later does
 not change what was recorded. People are named by username only: the other person's account id is
-stored with the name but never sent to the browser, on the tile, in the morning review's **Answered by**,
-or in the response to a review save, for caregivers and admins alike. Camera history, which does carry
+stored with the name but never sent to the browser, on the tile, in the morning review's record of who
+answered (the review screen no longer shows it), or in the response to a review save, for caregivers and admins alike. Camera history, which does carry
 it, is admin only.
 
 - **On the tile, to everyone:** while a camera is silenced, the button reads `Muted until <time> by

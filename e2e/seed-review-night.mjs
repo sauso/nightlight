@@ -21,9 +21,20 @@
 import db from '/app/src/db.js';
 import { lastCompletedNightDate } from '/app/src/lib/sleepAnalysis.js';
 
+// The third child exists for the one-question review's WAKE-ONLY answer (07-morning-review.spec.js): that spec
+// answers a night with a wake alone and reads back that nothing else was stored, which would collide with the
+// review kid's own story if they shared a night.
+//
+// ⚠️ WHAT THIS CANNOT SEED (2026-10-27). The review screen's "That's right" needs the live recompute to find a
+// wake, and that needs an ENABLED camera with activity samples for the child. A camera row would make the
+// first-run spec's "No cameras yet" fail (that spec runs after this seed and asserts an empty dashboard; a
+// disabled camera is not scored, so it cannot be a workaround). So every seeded night has no activity, the
+// screen opens on its time field, and the "That's right" button itself is covered by the unit tests
+// (frontend/test/MorningReview.test.jsx) while the e2e proves the same request body over the real wire.
 const CHILDREN = [
   { id: 'e2e-review-kid', name: 'Review Kid' },
   { id: 'e2e-recompute-kid', name: 'Recompute Kid' },
+  { id: 'e2e-wakeonly-kid', name: 'Wake Only Kid' },
 ];
 
 for (const { id, name } of CHILDREN) {

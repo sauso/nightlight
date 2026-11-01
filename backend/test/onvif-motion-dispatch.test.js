@@ -1,7 +1,7 @@
 // #564: drive the callback supplied to ONVIF, with real camera settings and only the device/alert edges replaced.
 import { test, mock, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { useTempDataDir, cleanupTempDataDirs, makeCamera } from './helpers/harness.js';
+import { useTempDataDir, cleanupTempDataDirs, makeCamera, makeChild } from './helpers/harness.js';
 
 useTempDataDir();
 
@@ -21,8 +21,10 @@ mock.module('../src/lib/detectionAlert.js', {
 });
 
 const { default: db } = await import('../src/db.js');
-const { startOnvifMotion, stopAllOnvifMotion, _setOnvifAlertStampForTests } =
+const { startOnvifMotion, stopAllOnvifMotion, _setOnvifAlertStampForTests, _onvifAlertStampForTests } =
   await import('../src/lib/onvifMotion.js');
+const { shouldHold, HOLD_CAP_MS, _reset } = await import('../src/lib/alertHold.js');
+const { _state } = await import('../src/lib/wakeWatcher.js');
 
 after(async () => {
   await stopAllOnvifMotion();
@@ -39,6 +41,43 @@ function camera(id, extra = {}) {
   } });
   return db.prepare('SELECT * FROM cameras WHERE id = ?').get(id);
 }
+
+test('#919 ONVIF cooldown cannot start a hold, held motion keeps its stamp, release fires', async () => {
+  const id = 'hold-onvif';
+  const childId = 'hold-onvif-child';
+  const pad = (n) => String(n).padStart(2, '0');
+  const hm = (ms) => { const d = new Date(ms); return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`; };
+  const now = Date.now();
+  makeChild(db, { id: childId, start: hm(now - 3 * 3600_000), end: hm(now + 3 * 3600_000) });
+  db.prepare('UPDATE children SET hold_alerts_until_asleep = 1 WHERE id = ?').run(childId);
+  const cam = camera(id);
+  db.prepare('UPDATE cameras SET child_id = ? WHERE id = ?').run(childId, id);
+  await startOnvifMotion(cam);
+  const onMotion = subscriptions.at(-1).options.onMotion;
+  _reset();
+  const before = alerts.length;
+  const minute = new Date().getUTCHours() * 60 + new Date().getUTCMinutes();
+  db.prepare('UPDATE cameras SET detect_schedule_enabled = 1, detect_start = ?, detect_end = ? WHERE id = ?')
+    .run((minute + 120) % 1440, (minute + 121) % 1440, id);
+  onMotion();
+  assert.equal(shouldHold({ id }, now + HOLD_CAP_MS + 5_000), true, 'out-of-schedule motion started the cap');
+  _reset();
+  db.prepare('UPDATE cameras SET detect_schedule_enabled = 0 WHERE id = ?').run(id);
+  _setOnvifAlertStampForTests(id, now);
+  onMotion();
+  assert.equal(alerts.length, before);
+  assert.equal(shouldHold({ id }, now + HOLD_CAP_MS + 5_000), true, 'cooling edge started the cap');
+  _reset();
+  _setOnvifAlertStampForTests(id, now - 61_000);
+  onMotion();
+  assert.equal(alerts.length, before);
+  assert.equal(_onvifAlertStampForTests(id), now - 61_000, 'held edge stamped cooldown');
+  _state().set(id, { asleep: true });
+  onMotion();
+  assert.equal(alerts.length, before + 1);
+  _state().delete(id);
+  alerts.length = 0;
+});
 
 test('an ONVIF motion edge dispatches one alert for the current camera row', async () => {
   const cam = camera('onvif-dispatch');

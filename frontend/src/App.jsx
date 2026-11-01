@@ -38,6 +38,8 @@ const SettingsGeneral = lazyPage(() => import('./pages/SettingsGeneral.jsx'));
 const SettingsCamera = lazyPage(() => import('./pages/SettingsCamera.jsx'));
 const SettingsRecording = lazyPage(() => import('./pages/SettingsRecording.jsx'));
 const SettingsMqtt = lazyPage(() => import('./pages/SettingsMqtt.jsx'));
+const SettingsIntegrations = lazyPage(() => import('./pages/SettingsIntegrations.jsx'));
+const SettingsEsphome = lazyPage(() => import('./pages/SettingsEsphome.jsx'));
 const SettingsPush = lazyPage(() => import('./pages/SettingsPush.jsx'));
 const SettingsPushPushover = lazyPage(() => import('./pages/SettingsPushPushover.jsx'));
 const SettingsPushFirebase = lazyPage(() => import('./pages/SettingsPushFirebase.jsx'));
@@ -161,6 +163,13 @@ function Shell() {
                     {/* Retired tabs redirect to the new child-centred structure. */}
                     <Route path="/family" element={<Navigate to="/children" replace />} />
                     <Route path="/alerts" element={<Navigate to="/children" replace />} />
+                    {/* Old settings bookmarks still reach the admin-gated canonical pages. */}
+                    <Route path="/settings/mqtt" element={<Navigate to="/settings/integrations/mqtt" replace />} />
+                    <Route path="/settings/push" element={<Navigate to="/settings/integrations/notifications" replace />} />
+                    <Route path="/settings/push/pushover" element={<Navigate to="/settings/integrations/notifications/pushover" replace />} />
+                    <Route path="/settings/push/firebase" element={<Navigate to="/settings/integrations/notifications/firebase" replace />} />
+                    <Route path="/settings/push/gotify" element={<Navigate to="/settings/integrations/notifications/gotify" replace />} />
+                    <Route path="/settings/push/ntfy" element={<Navigate to="/settings/integrations/notifications/ntfy" replace />} />
                     {/* Children tab: list → child detail (cameras + alerts + sleep); avatar → settings. */}
                     <Route path="/children" element={<Children />} />
                     <Route path="/children/new" element={<ChildSettings />} />
@@ -182,12 +191,14 @@ function Shell() {
                     <Route path="/settings/general" element={<AdminProtected><SettingsGeneral /></AdminProtected>} />
                     <Route path="/settings/camera" element={<AdminProtected><SettingsCamera /></AdminProtected>} />
                     <Route path="/settings/recording" element={<AdminProtected><SettingsRecording /></AdminProtected>} />
-                    <Route path="/settings/mqtt" element={<AdminProtected><SettingsMqtt /></AdminProtected>} />
-                    <Route path="/settings/push" element={<AdminProtected><SettingsPush /></AdminProtected>} />
-                    <Route path="/settings/push/pushover" element={<AdminProtected><SettingsPushPushover /></AdminProtected>} />
-                    <Route path="/settings/push/firebase" element={<AdminProtected><SettingsPushFirebase /></AdminProtected>} />
-                    <Route path="/settings/push/gotify" element={<AdminProtected><SettingsPushGotify /></AdminProtected>} />
-                    <Route path="/settings/push/ntfy" element={<AdminProtected><SettingsPushNtfy /></AdminProtected>} />
+                    <Route path="/settings/integrations" element={<AdminProtected><SettingsIntegrations /></AdminProtected>} />
+                    <Route path="/settings/integrations/mqtt" element={<AdminProtected><SettingsMqtt /></AdminProtected>} />
+                    <Route path="/settings/integrations/esphome" element={<AdminProtected><SettingsEsphome /></AdminProtected>} />
+                    <Route path="/settings/integrations/notifications" element={<AdminProtected><SettingsPush /></AdminProtected>} />
+                    <Route path="/settings/integrations/notifications/pushover" element={<AdminProtected><SettingsPushPushover /></AdminProtected>} />
+                    <Route path="/settings/integrations/notifications/firebase" element={<AdminProtected><SettingsPushFirebase /></AdminProtected>} />
+                    <Route path="/settings/integrations/notifications/gotify" element={<AdminProtected><SettingsPushGotify /></AdminProtected>} />
+                    <Route path="/settings/integrations/notifications/ntfy" element={<AdminProtected><SettingsPushNtfy /></AdminProtected>} />
                     <Route path="/settings/users" element={<AdminProtected><SettingsUsers /></AdminProtected>} />
                     <Route path="/settings/users/new" element={<AdminProtected><UserSettings /></AdminProtected>} />
                     <Route path="/settings/users/:id" element={<AdminProtected><UserSettings /></AdminProtected>} />

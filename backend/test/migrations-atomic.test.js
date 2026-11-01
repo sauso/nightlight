@@ -256,6 +256,53 @@ describe('#700 sleep_nights.wake_unconfirmed_at', () => {
   });
 });
 
+describe('#917 sleep_nights.wake_at_sensor and sleep_nights.sensor_rejects', () => {
+  // The same shape as the #700 test above, with one thing more: each column has its OWN guard (db.js), so an install
+  // that has one of them and not the other (a boot interrupted between two releases' ALTERs would be the way) gains the
+  // missing one alone. Proved by rewinding both, and then each one by itself. NULL is "no sensor data when stored", the
+  // honest answer for every night stored before the columns: nothing is backfilled.
+  const COLS = { wake_at_sensor: 'TEXT', sensor_rejects: 'INTEGER' };
+  for (const drop of [['wake_at_sensor', 'sensor_rejects'], ['wake_at_sensor'], ['sensor_rejects']]) {
+    test(`an install without ${drop.join(' and ')} gains ${drop.length > 1 ? 'them' : 'it'} on upgrade; nullable, no default, old rows NULL, twice harmless`, () => {
+      const dir = freshDir();
+      assert.equal(bootDbJs(dir).status, 0);
+      const full = columnsOf(dir, 'sleep_nights');
+      for (const c of Object.keys(COLS)) assert.ok(full.includes(c), `a fresh install has ${c}`);
+      {
+        const db = new Database(dbFile(dir));
+        try {
+          for (const c of drop) db.exec(`ALTER TABLE sleep_nights DROP COLUMN ${c}`);
+          db.exec(`INSERT INTO sleep_nights (child_id, night_date, window_start, window_end, status, wake_at, asleep_minutes)
+                   VALUES ('old-kid', '2026-09-01', '2026-09-01 09:30:00', '2026-09-01 21:00:00', 'ok', '2026-09-01 10:30:00', 50)`);
+        } finally {
+          db.close();
+        }
+      }
+      for (const c of drop) assert.ok(!columnsOf(dir, 'sleep_nights').includes(c), `setup: ${c} rewound`);
+
+      for (let bootNumber = 1; bootNumber <= 2; bootNumber++) {
+        const boot = bootDbJs(dir);
+        assert.equal(boot.status, 0, `upgrade/reboot ${bootNumber}: ${boot.stderr}`);
+        assert.deepEqual(columnsOf(dir, 'sleep_nights').sort(), [...full].sort(), `sleep_nights after boot ${bootNumber}`);
+        const db = new Database(dbFile(dir));
+        try {
+          for (const [c, type] of Object.entries(COLS)) {
+            const def = db.prepare('PRAGMA table_info(sleep_nights)').all().find((x) => x.name === c);
+            assert.equal(def.type, type, c);
+            assert.equal(def.notnull, 0, `${c}: nullable, NULL is "no sensor data"`);
+            assert.equal(def.dflt_value, null, `${c}: no default, a default would invent a shadow for old nights`);
+          }
+          const old = db.prepare("SELECT wake_at_sensor, sensor_rejects, wake_at, asleep_minutes FROM sleep_nights WHERE child_id = 'old-kid'").get();
+          assert.deepEqual(old, { wake_at_sensor: null, sensor_rejects: null, wake_at: '2026-09-01 10:30:00', asleep_minutes: 50 },
+            'no backfill, and the old night is otherwise untouched');
+        } finally {
+          db.close();
+        }
+      }
+    });
+  }
+});
+
 describe('sleep_reviews.nobody_in_bed ("no one was in the bed")', () => {
   // Plan review R6. The loop beside this migration adds its columns as a bare INTEGER, which leaves every
   // EXISTING review NULL — a third state that `nobody_in_bed = 1` / `= 0` in SQL silently fails to match.

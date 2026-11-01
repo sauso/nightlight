@@ -203,6 +203,9 @@ test('the flag reaches /sleep?nights, /sleep/:date (with and without detail) and
 // reads it as this night's departure candidate), not a claim that anyone slept: classified as an observation, as
 // sleepReviews.js explains beside
 // EMPTY_NIGHT_NULLS. A detector-empty row stores it NULL (nothing is flagged on a night that is not `ok`).
+// `wake_at_sensor` and `sensor_rejects` (#917, the ESPHome sensor shadow) are deliberately NOT here: they are claims (a
+// wake the sensor rule would have reported), so the marker test below requires them null on a flagged night, and a
+// detector-empty row with no ESPHome rows stores them NULL. sleep-sensor-shadow.test.js checks a fresh night that has them.
 const OBSERVED_COLUMNS = [
   'id', 'child_id', 'night_date', 'window_start', 'window_end', 'coverage_minutes',
   'avg_temperature', 'avg_humidity', 'computed_at', 'notified_at', 'notified_wake_at', 'scoring_context',
@@ -281,7 +284,11 @@ test('★ a flagged detail response has exactly the keys a detector-empty one ha
   assert.equal((await put({ nobody_in_bed: true })).status, 200);
   const shown = (await get(`/sleep/${DATE}?detail=1`)).body;
 
-  const shownKeys = Object.keys(shown).filter((k) => !OVERLAY_KEYS.includes(k)).sort();
+  // `transition_frames` (#907) is added by the ROUTE to every timeline read, after the overlay, and is [] here (no
+  // timeline is drawn, so no row can show a frame; sleep-detail-frames.test.js pins that). It is neither the
+  // detector's nor the overlay's, so it is set aside before the shape comparison and checked on its own.
+  assert.deepEqual(shown.transition_frames, [], 'a flagged night offers no frames');
+  const shownKeys = Object.keys(shown).filter((k) => !OVERLAY_KEYS.includes(k) && k !== 'transition_frames').sort();
   assert.deepEqual(shownKeys, Object.keys(realEmpty).sort(), 'the same keys as a real detector-empty night');
   for (const k of Object.keys(realEmpty)) {
     if (k === 'status') assert.equal(shown.status, 'empty');

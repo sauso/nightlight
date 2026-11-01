@@ -91,6 +91,7 @@ with a "privacy check" error and nothing is sent; please report it.
 - The contents of `.jwt_secret`, or any session/JWT token value
 - Firebase service-account JSON or any push-provider API key/token
 - MQTT broker credentials
+- ESPHome Native API encryption keys
 - TOTP secrets or MFA backup codes
 - Recordings, snapshots, or clips you aren't comfortable making public — these can show your
   child and your home
@@ -153,7 +154,7 @@ manual:
 - **JWT signing secret** (`private/.jwt_secret` in the data volume): deleting it and restarting the
   container generates a new one and signs everyone out, forcing a fresh login everywhere.
 - **Notification-provider tokens** (Pushover, Firebase, Gotify, ntfy): regenerate/revoke the
-  token or key at the provider and re-enter it in Settings → Push notifications.
+  token or key at the provider and re-enter it in Settings → Integrations → Push notifications.
 - **MQTT broker credentials**: rotate on the broker and update the camera's MQTT settings.
 
 ## Camera streams are untrusted input (media isolation)

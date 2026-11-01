@@ -4,6 +4,8 @@ import { notifySleepReports, notifySleepReportUpdates, sleepAlertChannelsConfigu
 import { getBedTransitions, TRANSITION } from './bedTransitions.js';
 import { listChildWakeClips } from './recordings.js';
 import { primaryCameraRowFor } from './primaryCamera.js';
+import { isSpikeOnlyMinute, discountedMinutes } from './micGuard.js';
+import { sensorMinutesFor, sensorContradictsExit, sensorWindowReadable } from './sleepSensor.js';
 
 // A computed night is "fresh" (worth notifying about) only if its window closed within this long — so a
 // mid-day container restart that re-computes an already-seen night does NOT re-send the report push.
@@ -45,7 +47,27 @@ const REPORT_FRESH_MS = 2 * 60 * 60 * 1000;
 // '2' (#700): the lead test in the departure scan (see LEAD_FACTOR). From '2' on, the "same inputs" above also
 // include the child's EARLIER stored nights: a night's answer can change when an earlier stored night is
 // back-filled, recomputed or deleted, while its own samples, transitions and saved context stay identical.
-export const SCORING_ALGO = '2';
+// '3' (#904): the faulty-microphone guard (lib/micGuard.js). A night whose microphone spiked in most minutes of an
+// 8-hour stretch now reads that sound as quiet, so its awake minutes, wake-ups, onset and wake can all move; every
+// other night's output is unchanged apart from the added `sound_discounted_minutes` key.
+// '4' (#618, a sibling of its §2): when the #509 veto discards a later exit and the quiet stretch it found is the gap
+// of an exit the settling-tail guard had set aside, that exit is handed back instead of the movement-only wake. Only
+// a night where the veto fires can change; its wake, metrics, marker and child-out interval move together.
+// '5' (#914): the settling-tail guard's still-sleeper witness stops counting at the next later departure (see
+// SETTLING_WITNESS_MIN_QUIET). Only a night with a skipped settling tail AND a later departure inside the witness
+// window can change: an exit the old count set aside on an empty bed's noise is taken, and the wake, metrics, marker,
+// `wake_unconfirmed` and child-out interval move with it.
+// '6' (#917): the ESPHome sensor SHADOW (lib/sleepSensor.js; computeNight). Every result gains `wake_at_sensor` and
+// `sensor_rejects`, null unless a completed night has the child's heart-rate or breathing-rate readings at its exits, and then the wake
+// a second pass with the sensor rule would have reported. Every OTHER key, the reported wake included, is unchanged on
+// every night (the A/B on both databases), except `scoring.current_algo` in a stored-context replay, which is this
+// label. Bumped although no reported number moves, because this rule says "what
+// computeNight returns" and the returned object changed (the goldens record #700's and #904's added keys beside their
+// bumps too), and from '6' on the readings of the child's ESPHome sensors are among the "same inputs" above: they can
+// change these two keys and nothing else. The cost of the bump, the same as every earlier one: a night saved under '5'
+// now reads `algo_differs: true` on a stored-context replay, so the sleep detail page's settings line (shown only for
+// a finished night whose saved settings differ from today's) adds "first worked out under earlier detection rules".
+export const SCORING_ALGO = '6';
 
 const MOTION_ACTIVE = 0.01; // in-bed per-frame changed-fraction above this = real movement (sleeping room ~0)
 // Outside-bed changed-fraction above this = real activity outside the bed (someone in the room, or the
@@ -315,24 +337,25 @@ const LEAD_FLOOR_MIN = 30;
 // removes 311 minutes of wake error and adds 82. See the PR for the per-night table.
 const JITTER_REENTRY_MS = 60 * 1000;
 // What the settling-tail guard accepts as proof that the child really is BACK in the bed after that
-// `into_bed`: this many QUIET occupied minutes in the OCCUPANCY_WITNESS_MIN minutes from it. Quiet means
-// micro-motion at or above OCCUPANCY_MIN_PEAK on a minute that is NOT itself active (MOTION_ACTIVE): the
-// signature of a still sleeper. An ACTIVE minute is somebody moving at the bed, and after a child has
-// really got up that somebody is a parent, so it never counts (issue #598; the guard's comment has the
-// night that showed it).
+// `into_bed`: this many QUIET occupied minutes in the OCCUPANCY_WITNESS_MIN minutes from it, counted only up to
+// the next later departure (issue #914, below). Quiet means micro-motion at or above OCCUPANCY_MIN_PEAK on a
+// minute that is NOT itself active (MOTION_ACTIVE): the signature of a still sleeper. An ACTIVE minute is
+// somebody moving at the bed, and after a child has really got up that somebody is a parent, so it never counts
+// (issue #598; the guard's comment has the night that showed it).
 //
-// Measured 2026-10-05: every stored night of both tracked children, replayed old-vs-new at 15 frozen
+// Measured 2026-10-05 (#598): every stored night of both tracked children, replayed old-vs-new at 15 frozen
 // clocks on prod and staging snapshots (200 nights), scored against the owner's reviews. Every skip the
-// guard got WRONG (the exit it skipped was the real wake: 2026-09-13, 09-20, 09-29 and one child on
+// guard got WRONG then (the exit it skipped was the real wake: 2026-09-13, 09-20, 09-29 and one child on
 // 10-03, with prod 09-16 and 09-18 looking the same) had 0-3 quiet minutes in that window; every skip it
 // got RIGHT (2026-09-06, 09-08, 09-09, 09-14, the other child on 10-03) had 10 or more, with the one
 // exception named below. The raw occupied counts overlap (wrong 5-16; labelled right skips 11-30, and an
 // unlabelled one has 43), which is why counting any motion could not separate them. One skip that old and
-// new code both make sits inside the gap: 2026-09-28, 07:09, one child, a 2-minute double exit, with 8
-// (prod) / 7 (staging) quiet minutes. It is unlabelled, and its outcome is the same for every threshold
-// from 4 to 11. Any value from 4 to 10 gives identical results on all 200 nights; 3 leaves three wrong
-// skips in place; 11 breaks the 2026-09-09 night this guard was built for (exactly 10 quiet minutes on
-// prod). 6 sits mid-gap.
+// new code both made sat inside the gap: 2026-09-28, 07:09, one child, a 2-minute double exit, with 8
+// (prod) / 7 (staging) quiet minutes (since #914 the witness no longer believes it: the pair's second exit,
+// 07:11, cuts the count; the night's computed result is unchanged in the #914 replay). Any
+// value from 4 to 10 gave identical results on all 200 nights; 3 left three wrong skips in place; 11 broke
+// the 2026-09-09 night this guard was built for (exactly 10 quiet minutes on prod). 6 sat mid-gap. That
+// 0-3 / 10+ split is NOT a property of the count: see #914 below.
 //
 // ⚠️ Two cameras in one house. What happens to everyone else: a child who climbs back in and then lies
 // stiller than this (fewer than 6 quiet minutes in the 150) loses the skip, so the tail exit stands and
@@ -345,6 +368,57 @@ const JITTER_REENTRY_MS = 60 * 1000;
 // simply have been empty. Scaling every reading by 1/3x to 3x (a tighter or looser zone) kept the wrong
 // skips at 5 quiet minutes or fewer and the right ones at 7 or more, so the zone's size matters only
 // mildly.
+//
+// ⚠️⚠️ AN EMPTY BED'S NOISE COUNTS AS QUIET MINUTES TOO (issue #914, measured 2026-10-31 on origin/dev dc39122: 39
+// snapshots of both databases, 172 child-nights, 312 candidate exits (an `out_of_bed` within JITTER_REENTRY_MS
+// after an `into_bed`), each judged at 8 clocks from window end + 1 minute to the snapshot; the 18 frozen hold-out
+// nights excluded and never scored). After a REAL exit the empty bed still reads faint noise (infrared, a shadow)
+// on a few % of minutes, and the count grows with the clock. 2026-10-30, one child, staging: the skipped exit
+// (06:29:56, an `into_bed` 51 s before it) WAS the real wake (the owner saw it), and the witness counted 5, 8, 8 and
+// 10 quiet minutes at window end + 1, 31, 61 and 109, every one after the child had left. The same morning on
+// production the other child's real 06:02 exit was skipped at 6 at the snapshot clock and not at the earlier ones
+// (the wake read 06:58). Real exits that were never skipped had 0-3. So the old "wrong 0-3 / right 10+" claim was
+// contradicted, and no count separates them. Measured on the same population and failed: every threshold from 4 to
+// 10 still set a real exit aside and every one from 11 to 20 lost right skips (the 2026-09-09 night among them); a
+// first-N-minutes window, a density, a sliding window and an amplitude floor either did the same or needed a new
+// number fitted to a handful of minutes.
+//
+// THE PRINCIPLE, not a tuning: the guard's claim is "he came back and STAYED". A minute after a LATER real departure
+// cannot support a stay: by then the bed is empty or an adult is at it. So the count stops at the first later
+// `out_of_bed` that is a departure (departureCutIdx: strictly later, not within JITTER_REENTRY_MS after an `into_bed`
+// by the time rule only, and not reversed by a return). 6 is unchanged and no number was added. On the same
+// population: the 9 real exits are never skipped (before: 2 of them, on 6 of their 64 exit-clock verdicts), no right
+// skip is lost (3 labelled right, 5 more before a reviewed wake), and no verdict changed with the clock on these
+// nights (before: 4 exits did); it still can, see departureCutIdx.
+// Replaying computeNight on every night at those 8 clocks, with the #700 history rule on and off, only the two
+// 2026-10-30 nights above change (see the PR for the table). The cut can only take back a skip the old count made.
+//
+// Why not cut at ANY later `out_of_bed` (rejected in plan review, measured): a later exit that is itself a settling
+// tail would cut a real sleeper's evidence (2026-09-28, one child, reviewed: an `into_bed` 24 s before it; with #700
+// off that night's wake moved about 7 h 50 min early), and so would a trip the child came straight back from (an
+// injected one on the 2026-09-09 profile gave 20:44 instead of 05:17).
+//
+// ⚠️ LIMITS, stated rather than guessed:
+//   1. A lone FALSE `out_of_bed` (no return after it, no `into_bed` a minute before it: the classifier's documented
+//      failure mode) inside the 150 minutes still cuts a real still sleeper's evidence: the tail stands and the wake
+//      is too EARLY, never missing (the fallback is untouched). Injected on the 2026-09-09 profile: 20:44 with #700
+//      off; with it on, #700 refuses that far-early exit and the night keeps 05:17, recording 20:44 as
+//      `wake_unconfirmed` (verified by running the injected copy, old vs new).
+//   2. With no qualifying later departure inside the 150 minutes the rule IS the old one: an empty bed noisy enough
+//      can still set a real exit aside, and the wake lands on a departure more than 2½ hours later, or (none at all)
+//      the exit is handed back as before.
+//   3. Two cameras in one house. One of them was replaced on 2026-10-29, and whether the new camera's empty bed is
+//      noisier is UNPROVEN (two nights): from 30 minutes after the wake that empty bed read like a still sleeper on
+//      4.0% of minutes on staging (0.6% over the 19 nights before) and 5.0% on production (4.0% before, a per-night
+//      median of 0%). The other child's camera, not replaced, shows the same mechanism, before the swap too.
+//   4. `settlingBack` (detectMidnightEpisodes) has the same forward-looking flaw and is deliberately NOT changed:
+//      it was not measured (see bedQuietlyOccupiedFrom).
+//
+// History of the staging 2026-10-30 night, for the #618 comments that cite it: before #914 the skip cost nothing
+// while no later exit qualified (the fallback handed it back: 06:29 at 07:08); once one did (06:57:12) the #509 veto
+// discarded it and the wake fell to the movement-only 06:13, which #618's hand-back undid. Since #914 the skip is not
+// made: only 4 of the noisy minutes come before 06:57:12. Production read that morning's wake for that child right
+// only because its `into_bed` was logged 124 s before the exit, outside JITTER_REENTRY_MS.
 const SETTLING_WITNESS_MIN_QUIET = 6;
 // A bedtime is never a rigid clock time — a tired child can be asleep well before the window opens, and
 // clipping onset to window_start silently loses that sleep (and misreports the night's length). So the
@@ -508,37 +582,56 @@ const WINDOW_MARGIN_MS = 5 * 60 * 1000;
 // yesterday's night covers it (it starts before the instant and ends after it). Do not "explain" this
 // as consecutive windows abutting: they do not, a 19:00-07:00 child has a gap every day.
 //
-// Why +1 exists, and why it is sampling-only: a window opening 00:00-02:59 local has its 3 h lookbehind
-// on the PREVIOUS calendar day, so at 22:30 the instant belongs to TOMORROW's night (issue #353; the
-// old loop never tried it). childWindowActiveNow deliberately keeps {0, -1} so the wake watcher (which has
-// no second gate, wakeWatcher.js) behaves exactly as before this fix: its 5-minute lead has a known,
-// harmless gap for a window opening 00:00-00:04 (the wake watcher only arms once sleep has begun), and
-// the leg itself is covered by the 3 h lead of the sampling gate. (The timelapse is not the reason: it
-// also needs currentNightDate non-null, true only inside the configured window, see timelapse.js.)
+// Why +1 exists: a window opening 00:00-02:59 local has its lookbehind on the PREVIOUS calendar day, so at
+// 22:30 the instant belongs to TOMORROW's night (issue #353; the old loop never tried it). The sampling gate
+// (3 h lead) got it in #353; the window gate and the hold key (5-minute lead) got it in #602, because
+// without it a window opening 00:00-00:04 had its 5-minute lead cut off at midnight (23:57-23:59 read as
+// closed). Every caller passes it now.
+//
+// Why the order is 0, -1, then +1, and not +1 first: the boolean result is an OR, so order cannot change
+// it, but childWindowKeyNow returns the START of the first night that matches, and the hold clock is keyed
+// on it. Trying +1 last keeps that key exactly what it was wherever the old range already matched, so +1 can
+// only fill in an instant that used to be closed. With +1 first, a window of nearly 24 hours (say 00:02-23:56)
+// would switch from today's key to tomorrow's at 23:57 while today's window is still open, and a hold in
+// progress would restart its 45-minute clock (pinned in sleep-sampling-horizon.test.js, "#602").
+// Known limit (#922): with +1 in, a window leaving under 10 minutes between its end and the next start never
+// lets the gate close, so the wake watcher's asleep latch (cleared only when the gate closes) carries across
+// nights, as it already did for a true 24-hour window.
 //
 // `leadMs` and `trailMs` are ABSOLUTE milliseconds added to real instants from windowBoundsUtc, exactly
 // as computeNight adds ONSET_LOOKBEHIND_MS and WAKE_LOOKAHEAD_MS, so on a DST night the lead and tail
 // are 3 REAL hours (the wall clock may differ by one) - the same horizon the inference reads.
-function windowOpenNow(childId, leadMs, trailMs, nextNight = false) {
+function openWindowStartUtc(childId, leadMs, trailMs, nextNight = false) {
   const cfg = childSleepConfig(childId);
-  if (!cfg.track) return false;
+  if (!cfg.track) return null;
   const tz = appSettings().timezone || 'UTC';
   const now = Date.now();
-  for (let delta = nextNight ? 1 : 0; delta >= -1; delta--) {
+  for (const delta of nextNight ? [0, -1, 1] : [0, -1]) {
     const date = localDateStr(tz, delta);
     const { startUtc, endUtc } = windowBoundsUtc(date, tz, cfg.start, cfg.end);
-    if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return true;
+    if (now >= startUtc.getTime() - leadMs && now < endUtc.getTime() + trailMs) return startUtc.getTime();
   }
-  return false;
+  return null;
 }
 
-// Unchanged on purpose by #353: the window itself with a 5-minute slack each side. It gates the wake
-// watcher, which has no second gate, so widening this to the sampling horizon below would move the wake
-// watcher's input (in a core module) for no benefit to #353. The timelapse also calls it, but is already
-// bounded by currentNightDate (non-null only inside the configured window), so it never captures outside
-// the window whatever this returns.
+function windowOpenNow(childId, leadMs, trailMs, nextNight = false) {
+  return openWindowStartUtc(childId, leadMs, trailMs, nextNight) !== null;
+}
+
+// The window itself with a 5-minute slack each side (NOT the sampling horizon below: #353 left this gate at
+// the configured window on purpose, because it gates the wake watcher, which has no second gate). It tries
+// tomorrow's night too (#602), so a window opening 00:00-00:04 gets its 5-minute lead before midnight like
+// any other. The timelapse also calls it, but is already bounded by currentNightDate (non-null only inside
+// the configured window), so it never captures outside the window whatever this returns.
 export function childWindowActiveNow(childId) {
-  return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS);
+  return windowOpenNow(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS, true);
+}
+
+// #919: use the watcher's exact candidate nights and margins for the hold clock, including its lead margin.
+// Must stay the same call as childWindowActiveNow (#602 added tomorrow's night to both): a key that is null
+// while the window gate is open would let an alert through the hold for those minutes.
+export function childWindowKeyNow(childId) {
+  return openWindowStartUtc(childId, WINDOW_MARGIN_MS, WINDOW_MARGIN_MS, true);
 }
 
 // Should the activity-only SAMPLING leg be running now? The window opened ONSET_LOOKBEHIND_MS early and
@@ -865,6 +958,9 @@ export function detectMidnightEpisodes(transitions, cribActExt, bedOccupiedFrom,
 // (the scan later drops it once more than 20 bed-active minutes follow, and the rule then falls back to A
 // instead of to that exit); and a corroborated RETURN to bed after the stretch (the scan's own reversal
 // guard would reject such an absence) is not consulted. Neither was measured, so neither is guessed at.
+// A sibling of the first IS handled, by the caller and not here (#618, measured on 2026-10-30): when the stretch is
+// the gap of an exit the settling-tail guard set aside, the caller hands that exit back instead of falling back to A
+// (it reads the returned stretch's [start, end) for that).
 export function quietStretchBeforeExit(cribAct, fromIdx, gapStart, minLen, maxTrailing) {
   for (let s = Math.max(fromIdx, 0); s < gapStart; s++) {
     if (cribAct[s] !== false) continue;
@@ -1063,7 +1159,100 @@ function earlyExitThresholdMin(childId, nightDate, tz, windowEndMs) {
 // built them (refinement c), never read from the saved row. ⚠️ KNOWN LIMIT: `nightDate` is a local date key; if
 // the timezone has changed since, the caller's key is replayed in the STORED zone, which is the right night for
 // a key taken from the stored row and may not be for a key derived under today's zone.
+//
+// #917: the result also carries `wake_at_sensor` and `sensor_rejects`, the ESPHome sensor SHADOW (addSensorShadow,
+// below). Null unless the night is completed and the child has heart-rate or breathing-rate rows; they change nothing
+// else in the result, and nothing reads them for any wake, figure, push or alert.
 export function computeNight(childId, nightDate, { includeTimeline = false, context = null } = {}) {
+  // ONE clock for the night and its shadow (#917): `Date.now()` is read here once and both passes use it, so the two
+  // can never see a different "now" (a minute boundary between them would hand the shadow one more minute of evidence).
+  const run = { nowMs: Date.now(), sensor: null };
+  const night = computeNightPass(childId, nightDate, { includeTimeline, context }, run);
+  addSensorShadow(childId, nightDate, context, run, night);
+  return night;
+}
+
+// ★ #917 (follow-up to #506): THE ESPHOME SENSOR SHADOW. Owner decision 2026-10-31: run the sensor rule (lib/
+// sleepSensor.js, SENSOR_REJECT_MIN_VITALS: a camera exit with a person's vital signs at the bed in at least 6 of the
+// 10 minutes after it is not a departure) as a SECOND pass of this night, and keep only its wake, as
+// `wake_at_sensor`, with `sensor_rejects`, how many distinct camera exits the rule rejected. The real night, `night`,
+// is built first and is never read back or changed except for those two keys, which `base` puts in every result as
+// null. Why it is not allowed to act: an adult at the bed right after a real exit has the same vital signs, and the
+// rule then moves a real wake 56-91 minutes later (plan review, verified; KNOWN-ISSUES.md). So it is evidence only,
+// stored beside each night so that it outlives the raw readings' retention (docs/esphome.md says how to read it).
+//
+// WHEN IT RUNS: only on a COMPLETED night (a night in progress has no departure scan at all) whose pass reached the
+// analysis (`run.originMs` is set: not `off`, not a night with no camera), and only when the child has heart-rate or
+// breathing-rate rows in the night's span (sensorMinutesFor returns null otherwise: no second pass, both keys null, the
+// night exactly as before; the cost is one entity query plus a primary-key range query per heart-rate, breathing-rate
+// or distance entity, and nothing more for an install without ESPHome). Then exactly ONCE: the pass below is the inner
+// function, not computeNight, so it cannot recurse, and it never builds a timeline (the wake is decided before the
+// timeline is drawn), whatever the caller asked for. It runs with the SAME clock (`run.nowMs`) and the SAME `context`
+// as the real night, and its sensor minutes start at the real pass's own minute origin and end at its own evidence
+// cutoff (`run.originMs`, `run.cutoffMs`), so the rule reads exactly the minutes the camera side reads.
+//
+// WHAT IS STORED, AND WHAT NULL MEANS (code review of #917, Opus): both keys are set only when the shadow ran AND the
+// sensor had at least one known minute (vital signs or a reading of none) in the ten minutes after at least one exit
+// the rule could have changed (a candidate: see `readable` in the departure scan). Then `wake_at_sensor` is the
+// shadow's `wake_at` when it scored the night `ok` (else null), and `sensor_rejects` the candidates the rule alone set
+// aside, 0 meaning "the sensor read those minutes and set nothing aside". Both NULL means no sensor data at the exits:
+// no heart-rate or breathing-rate rows in the night's span, or rows only at other times (a sensor switched on at
+// bedtime and off at 20:00 has nothing to say at 06:30, and must not read as agreeing with the camera). A weak
+// sensor's zeros are known minutes, so such a night is stored, but it can only ever fail to reject.
+//
+// ⚠️ NEVER ALLOWED TO BREAK THE REAL NIGHT (#917 plan review): the read and the pass are each wrapped, and any error
+// leaves both keys null and logs one fixed sentence, never the error's own text (which can carry a child's id or a
+// device's name). The real result was already complete before either ran. "No sensor rows" is not an error and logs
+// nothing: it is the normal state of an install without ESPHome.
+// ⚠️ #700's history counter (priorWakeLeadReads) is restored after the shadow, so the shadow's own reads of the
+// history never count: the counter keeps meaning "reads by the real night", which its tests pin.
+//
+// What the shadow pass does differently, and nothing else: see `sensorRejects` in the departure scan.
+let sensorShadowPasses = 0;
+// Test seams ONLY, like priorWakeLeadReadsForTest: how many shadow passes have run (so a test proves it runs once, and
+// never without sensor data or on a night in progress), and a switch that makes the next shadow pass throw (so a test
+// proves a failing pass leaves the real night alone; a real failure there cannot be provoked from outside).
+export function sensorShadowPassesForTest() {
+  return sensorShadowPasses;
+}
+let failNextShadowPass = false;
+export function failNextSensorShadowPassForTest() {
+  failNextShadowPass = true;
+}
+function addSensorShadow(childId, nightDate, context, run, night) {
+  if (night.in_progress || run.originMs === undefined) return;
+  let minutes;
+  try {
+    minutes = sensorMinutesFor(childId, run.originMs, run.cutoffMs, { nowMs: run.nowMs });
+  } catch {
+    logger.warn('[sleep] sensor shadow skipped: the sensor readings could not be read');
+    return;
+  }
+  if (!minutes) return;
+  const historyReads = priorWakeLeadReads;
+  try {
+    sensorShadowPasses++;
+    if (failNextShadowPass) {
+      failNextShadowPass = false;
+      throw new Error('test fault');
+    }
+    const shadowRun = { nowMs: run.nowMs, sensor: { minutes, rejected: new Set(), readable: false } };
+    const shadow = computeNightPass(childId, nightDate, { includeTimeline: false, context }, shadowRun);
+    if (shadowRun.sensor.readable) {
+      night.wake_at_sensor = shadow.status === 'ok' ? shadow.wake_at : null;
+      night.sensor_rejects = shadowRun.sensor.rejected.size;
+    }
+  } catch {
+    logger.warn('[sleep] sensor shadow skipped: the second pass failed');
+  } finally {
+    priorWakeLeadReads = historyReads;
+  }
+}
+
+// The night itself (computeNight's whole contract above), once. `run` is { nowMs, sensor } from computeNight: the clock
+// both passes share, and the shadow's sensor minutes (null on the real pass, which therefore runs exactly as before
+// #917). The pass writes `run.originMs` and `run.cutoffMs` (its minute origin and evidence cutoff) once it has them.
+function computeNightPass(childId, nightDate, { includeTimeline = false, context = null }, run) {
   const ctx = context == null ? null : parseScoringContext(context);
   if (context != null && !ctx) {
     throw new TypeError('computeNight: `context` is not a valid scoring context (see parseScoringContext)');
@@ -1078,7 +1267,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // In-progress night: the window is still open. Cap the analysis at "now" so a morning wake that's
   // happening right now resolves to a real wake time, instead of the not-yet-elapsed minutes reading as
   // quiet (= "still asleep"). A completed night uses the full window unchanged.
-  const nowMs = Date.now();
+  // The clock is computeNight's, read once there for both passes (#917).
+  const nowMs = run.nowMs;
   const inProgress = nowMs >= startUtc.getTime() && nowMs < endUtc.getTime();
   const effEndMs = inProgress ? nowMs : endUtc.getTime();
   const asOfSql = toSqlUtc(new Date(effEndMs));
@@ -1188,6 +1378,21 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     // is that night's departure candidate in later nights' history; the object itself is not in the scoring
     // context, the push text or the morning review's `computed`.
     wake_unconfirmed: null,
+    // #904: how many minutes of the night's measured span had their sound ignored by the faulty-microphone guard
+    // (lib/micGuard.js; set on the `ok` return, where it says exactly which span). ADDED to the response shape.
+    // Null on every other status, like awake_minutes: an `off`, `no_data`, `no_sleep` or `empty` night has no span
+    // to count over, and an `empty` night can never have a discounted minute in it (the never-empty rule below).
+    // Not a sleep_nights column, so the child's card, the stored-night lists and the morning push never carry it.
+    sound_discounted_minutes: null,
+    // #917: the ESPHome sensor SHADOW (addSensorShadow, above computeNightPass): the wake a second pass with the sensor
+    // rule would have reported, and how many distinct camera exits that rule rejected. Null here, on every status and
+    // on both passes; computeNight sets them on the real result only, and only when the shadow ran. ADDED to the
+    // response shape (after `sound_discounted_minutes`, as #904 added its key): every older key keeps its value and its
+    // order, which the A/B on both databases checked with the two keys removed (apart from `scoring.current_algo` in a
+    // stored-context replay, '5' to '6': the SCORING_ALGO bump). Stored as `sleep_nights.wake_at_sensor` and
+    // `sensor_rejects` (upsertNight binds them from this object). Nothing reads them for a wake, figure, push or alert.
+    wake_at_sensor: null,
+    sensor_rejects: null,
     climate,
     // #361: present ONLY when a context was passed, so a plain compute's output keeps its exact shape (every
     // API response is built from it). In `base`, so every return below carries it, early ones included.
@@ -1225,9 +1430,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   if (winMin === 0) return { ...base, status: 'no_data' };
   const totalMin = preMin + winMin;
 
+  // `sound_p75` is read for the faulty-microphone guard only (#904, below); nothing else here uses it.
   const rows = db
     .prepare(
-      `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak, motion_frames FROM activity_samples
+      `SELECT bucket_start AS t, motion_peak, sound_peak, sound_p75, motion_out_peak, motion_frames FROM activity_samples
          WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
     )
     .all(...scoreCams, analysisStartSql, asOfSql);
@@ -1250,14 +1456,101 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // Moved up from further down in this function (issue #352's metrics extension needs it earlier than
   // the rest of the output-construction code that originally motivated it).
   const minuteTime = (i) => toSqlUtc(new Date(analysisStartUtc.getTime() + i * 60000));
+
+  // ★ #904 — THE FAULTY-MICROPHONE GUARD. Which minutes' SOUND the whole analysis below ignores, decided ONCE,
+  // before anything is classified. The rule, the measurements behind its four numbers and what they mean for
+  // other houses are in lib/micGuard.js; this is only the wiring.
+  //
+  // ONE PASS OVER THE WHOLE TIMELINE, and the order is load-bearing. A window is 8 hours, so whether a minute
+  // inside the configured window is discounted can depend on minutes AFTER it (the morning the departure scan
+  // and the metrics extension read): a fault from 03:00 to 10:00 fills an 8-hour window only once its
+  // post-window half is counted. The extension's own rows (extraRows, further down) are fetched only after onset
+  // and the departure are known, and onset itself depends on this discount, so they cannot be what decides it.
+  // Instead the post-window minutes are read HERE, up to the same evidence cutoff the departure scan uses (#350:
+  // never past "now", at most WAKE_LOOKAHEAD_MS after the window), which is the furthest the extension can ever
+  // reach (its metricsEnd is capped at totalMinExt, which is this same cutoff). The main loop, the onset view and
+  // the extension then all read this one array, so a minute cannot be discounted in one place and not another.
+  // It is also the timeline Phase 0 measured on (3 hours before the window to 3 hours after it).
+  //
+  // ⚠️ THE ONE EXCEPTION TO "STATUS IS DECIDED FROM WINDOW-BOUNDED DATA" (issue #352, see the empty-bed check):
+  // through the discount, post-window sound can now change how in-window minutes read. It can only turn
+  // sound-active minutes quiet, but WHICH minutes it turns quiet can change in EITHER direction until the night's
+  // evidence is final (3 hours after the window). More evidence adds windows, which can only add discounted
+  // minutes; but a minute already inside the timeline can still be waiting for its row (the last index is usually
+  // the minute in progress, and a row is written only after its minute closes), and a missing row counts as
+  // unwatched, outside a window's share. When it arrives quiet, the share falls: 280 spike-only minutes with 79
+  // unwatched and that last minute missing qualify at 280/400, and with it present and quiet (280/401) they do not,
+  // so 280 discounted minutes become 0 (found by the #904 review, round 2). So between the nightly job's provisional
+  // passes a `no_sleep` night can become `ok`, and, rarely, an `ok` kept from `empty` only by the never-empty rule
+  // can later become `empty`; a night in progress can change its mind either way. Once the evidence is final, the
+  // answer is fixed. Pinned by the #904 test "a fault that qualifies only through the post-window minutes".
+  //
+  // An in-progress night has no lookahead and no post-window minutes: its timeline ends now, so it gets no
+  // discount until 480 minutes of it exist (micGuard.js WINDOW_MIN, cost (a)). A completed night whose window is
+  // under 120 minutes never gets one (preMin + window + at most 180 stays under 480: cost (a')).
+  //
+  // Hoisted, unchanged, from the transitions read and the departure scan further down, which still use them: the
+  // lookahead, and issue #350's evidence cutoff (see the departure scan for why it is bounded by `nowMs`).
+  const lookahead = inProgress ? 0 : WAKE_LOOKAHEAD_MS;
+  const txEndSql = toSqlUtc(new Date(endUtc.getTime() + lookahead));
+  const evidenceCutoffMs = Math.min(nowMs, endUtc.getTime() + lookahead);
+  // #917: handed back to computeNight, so the sensor shadow's minutes start at THIS origin (index i is the same minute
+  // as cribActExt[i] and txIdx) and end at THIS cutoff, never re-derived from the result's text times.
+  run.originMs = analysisStartUtc.getTime();
+  run.cutoffMs = evidenceCutoffMs;
+  const evidenceEndMin = inProgress
+    ? totalMin
+    : Math.max(totalMin, Math.round((evidenceCutoffMs - analysisStartUtc.getTime()) / 60000));
+  // The post-window rows, from the window end (asOfSql, the main query's exclusive end, so the two never share a
+  // row) to the lookahead, as the departure scan reads them; a minute past the cutoff is dropped by index below.
+  const postRows = evidenceEndMin > totalMin
+    ? db
+      .prepare(
+        `SELECT bucket_start AS t, sound_peak, sound_p75, motion_frames FROM activity_samples
+           WHERE camera_id IN (${placeholders}) AND bucket_start >= ? AND bucket_start < ?`
+      )
+      .all(...scoreCams, asOfSql, txEndSql)
+    : [];
+  // Per minute: null when no row in it was WATCHED (motionSeen, the rule every reader in this file uses, so an
+  // unwatched minute counts neither as spike-only nor as quiet in a window's share), else whether a watched row was
+  // loud in spikes only and whether one was loud with a raised p75 (a real sound). Two rows for one minute are real
+  // (see the OR-merge note in the departure scan), so a minute is spike-only only when it has a loud spike-only row
+  // and NO loud real one: a real sound in either row keeps the minute's sound, the safe direction.
+  const soundSeen = new Array(evidenceEndMin).fill(null);
+  const noteSound = (r, i) => {
+    if (!motionSeen(r)) return;
+    const m = soundSeen[i] || (soundSeen[i] = { spike: false, real: false });
+    if (!(r.sound_peak != null && r.sound_peak > SOUND_ACTIVE)) return;
+    if (isSpikeOnlyMinute({ soundPeak: r.sound_peak, soundP75: r.sound_p75 }, SOUND_ACTIVE)) m.spike = true;
+    else m.real = true;
+  };
+  // The same index ranges the two classifying loops keep: [0, totalMin) for the main loop's rows, and from
+  // totalMin to the cutoff for the extension's (which stops at its own metricsEnd, never later than the cutoff).
+  for (const r of rows) { const i = idxOf(r.t); if (i >= 0 && i < totalMin) noteSound(r, i); }
+  for (const r of postRows) { const i = idxOf(r.t); if (i >= totalMin && i < evidenceEndMin) noteSound(r, i); }
+  const soundDiscounted = discountedMinutes(soundSeen.map((m) => m && { spikeOnly: m.spike && !m.real }));
+  // Does this row's SOUND count? Over SOUND_ACTIVE and not discounted. The one definition every sound reader below
+  // uses: the main loop's `heard` (which feeds the onset view) and isActiveRow (which feeds `state`, so the wake
+  // runs, the metrics, the timeline, and the metrics extension). `i` is the row's minute index; every caller passes
+  // it (a missing one reads `undefined`, which would quietly let the sound count again: the #904 extension test
+  // fails if the extension's call drops it).
+  const soundCounts = (r, i) => r.sound_peak != null && r.sound_peak > SOUND_ACTIVE && !soundDiscounted[i];
+  // How many discounted minutes lie in [from, to): `sound_discounted_minutes`, and the never-empty rule below.
+  const discountedIn = (from, to) => {
+    let n = 0;
+    for (let i = Math.max(0, from); i < to; i++) if (soundDiscounted[i]) n++;
+    return n;
+  };
+
   // A minute is active if the main camera saw in-bed movement, a clear noise, OR movement outside the
   // bed. Factored out (issue #352) so the post-window metrics extension below classifies a minute
   // exactly the same way the main population loop does — a future threshold change updating one site
   // and missing the other would otherwise silently make the two disagree at the window boundary.
-  const isActiveRow = (r) =>
+  // Since #904 "a clear noise" is soundCounts: a sound the faulty-microphone guard discounted is not one.
+  const isActiveRow = (r, i) =>
     (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) ||
     (r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE) ||
-    (r.sound_peak != null && r.sound_peak > SOUND_ACTIVE);
+    soundCounts(r, i);
   // Strongest in-bed movement seen anywhere in the WINDOW — the empty-bed test below reads this.
   let maxBedPeak = 0;
   // Strongest in-bed movement per MINUTE, over the whole timeline including the lookbehind. The
@@ -1275,8 +1568,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     if (!motionSeen(r)) continue;
     const out = r.motion_out_peak != null && r.motion_out_peak > MOTION_OUT_ACTIVE;
     const moved = (r.motion_peak != null && r.motion_peak > MOTION_ACTIVE) || out;
-    const heard = r.sound_peak != null && r.sound_peak > SOUND_ACTIVE;
-    const active = isActiveRow(r);
+    const heard = soundCounts(r, i);
+    const active = isActiveRow(r, i);
     state[i] = state[i] === null ? active : state[i] || active;
     if (out) outAt[i] = true;
     if (moved) motionAt[i] = true;
@@ -1319,9 +1612,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
 
   // Bed transitions across the whole timeline (lookbehind included, plus a lookahead past the window end
   // for the morning exit on a completed night). Fetched once here because BOTH the early-bedtime guard
-  // below and the shadow wake block further down need them.
-  const lookahead = inProgress ? 0 : WAKE_LOOKAHEAD_MS;
-  const txEndSql = toSqlUtc(new Date(endUtc.getTime() + lookahead));
+  // below and the shadow wake block further down need them. (`lookahead` and `txEndSql` are defined above,
+  // hoisted for #904's faulty-microphone guard.)
   const transitions = getBedTransitions(scoreCams, analysisStartSql, txEndSql);
   const txMs = (t) => new Date(t.replace(' ', 'T') + 'Z').getTime();
   // FLOOR, not round (issue #260) — a transition carries a real second (`bed_transitions.created_at`),
@@ -1654,6 +1946,18 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // reason as the two above (set only inside the block below); stays null on a night in progress, where no
   // departure is looked for at all.
   let earlyExitFlagged = null;
+  // #618 (a sibling of its §2): EVERY exit the settling-tail guard set aside within WAKE_SNAP_MS of a gap's start, one
+  // record per gap it was asked about ({ gapStart, dt, ms, at }), for the #509 veto after the scan to hand back. Not
+  // `settlingFallback`: that is ONE exit, the smallest `dt` over ALL gaps of the night (an evening tail can hold it,
+  // the 2026-09-09 shape), and it also feeds #700's `wake_unconfirmed` attribution, so it is left exactly as it was.
+  // Hoisted out of the `!inProgress` block like the four above (filled only there; empty on a night in progress,
+  // where the veto never runs anyway). `farEarlyAt` is the #700 lead test for an exit's time, set inside the block
+  // (it needs the window end and the lazily read history the scan sets up) and asked by the veto, NOT when a record
+  // is made: so the scan's own calls, and with them #700's skip bookkeeping and its history-read count, are exactly
+  // what they were, and an exit is judged only when it is about to be handed back (an ordinary morning exit, within
+  // LEAD_FACTOR x LEAD_FLOOR_MIN of the window end, never reads the history: farEarly's own shortcut).
+  const settlingSkips = [];
+  let farEarlyAt = null;
   if (!inProgress) {
     // Indices here share the timeline origin (analysisStartUtc) used by idxOf, so the lookbehind is
     // included at the front and the lookahead past the window end at the back.
@@ -1665,8 +1969,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     // being allocated at all, but by itself is NOT the fix: see the cribActExt tri-state change below,
     // which is what stops an unsampled minute INSIDE the bound (a camera outage, or evidence that just
     // hasn't been flushed to activity_samples yet) from reading as confirmed-quiet.
-    const evidenceCutoffMs = Math.min(nowMs, endUtc.getTime() + lookahead);
-    totalMinExt = Math.max(totalMin, Math.round((evidenceCutoffMs - analysisStartUtc.getTime()) / 60000));
+    // `evidenceCutoffMs` and its index `evidenceEndMin` are computed once, above the main loop (hoisted
+    // unchanged for #904: the faulty-microphone guard reads the same span), so the scan and the guard cannot
+    // disagree about where the evidence ends.
+    totalMinExt = evidenceEndMin;
     const extRows = db
       .prepare(
         `SELECT bucket_start AS t, motion_peak, motion_frames FROM activity_samples
@@ -1719,10 +2025,13 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     // real micro-motion in the OCCUPANCY_WITNESS_MIN minutes that follow; a gap in the data supplies no
     // witness either way (returns false, same as finding none).
     //
-    // ⚠️ TWO call sites, and they do NOT fail the same safe direction. (`settlingTail` was a third until
+    // ⚠️ THREE call sites, and they do NOT fail the same safe direction. (`settlingTail` was another until
     // issue #598 gave it its own witness, bedQuietlyOccupiedFrom below: see there for why it left.)
     // `reversedBy` below uses a true result to REJECT a candidate — a false `true`
     // there is a safe false-negative, exactly `bedOccupiedAfter`'s own contract.
+    // departureCutIdx (#914) asks `reversedBy` about a LATER exit, and a true result REMOVES that exit as a cut, so
+    // a false `true` (an empty bed's noise backing up a stray `into_bed`) leaves the settling-tail witness its old,
+    // uncut count: the real exit can still be set aside, exactly as before #914, never worse.
     // `detectMidnightEpisodes` (above `computeNight`) uses a true result to ADMIT an episode — a false
     // `true` there is a false POSITIVE: the 150-minute window can reach forward into an unrelated later
     // event (a parent handling an already-empty bed, or a genuinely later real return) and corroborate
@@ -1762,13 +2071,83 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     // moves the departure scan's skip decision and nothing else. `settlingBack` probably has the same
     // flaw (there it would hide a mid-night trip, not move the morning), and that is a follow-up to
     // MEASURE first, not to copy across on the strength of this one.
-    const bedQuietlyOccupiedFrom = (from) => {
-      const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt);
+    //
+    // `until` (issue #914): the count stops BEFORE minute `until` (exclusive), so it runs over
+    // [from, min(from + OCCUPANCY_WITNESS_MIN, end of the evidence, until)). The only caller passes the minute of the
+    // next later departure (departureCutIdx below): a quiet minute after the child has really left again cannot say
+    // "he came back and stayed" (see SETTLING_WITNESS_MIN_QUIET for the nights). Exclusive because that minute is the
+    // departure's own (the climb out, or an empty bed's noise as it empties), not the stay. The cap still applies: a
+    // later departure past the 150 minutes does not lengthen the window.
+    // ⚠️ The default is Infinity, NOT undefined: `Math.min(x, undefined)` is NaN, `i < NaN` is false, the loop never
+    // runs, and every return would be disbelieved (the same trap as bedOccupiedAfter's `until`).
+    // Monotone by construction: every `true` the cut count returns, the uncut one returned too, so the cut can only
+    // take back a skip the old count made, never skip an exit the old count kept.
+    const bedQuietlyOccupiedFrom = (from, until = Infinity) => {
+      const witnessEnd = Math.min(from + OCCUPANCY_WITNESS_MIN, totalMinExt, until);
       let still = 0;
       for (let i = Math.max(from, 0); i < witnessEnd; i++) {
         if (cribOccExt[i] === true && cribActExt[i] === false && ++still >= SETTLING_WITNESS_MIN_QUIET) return true;
       }
       return false;
+    };
+    // Is exit `t` logged within JITTER_REENTRY_MS after the `into_bed` `back` (a tie at the same second included)?
+    // The TIME half of the settling-tail guard, shared by the guard itself and by departureCutIdx, so the two cannot
+    // disagree about what a tail is. The guard adds its witness on top; the cut does not (see there for why).
+    // ⚠️⚠️ `<=` ON THE ORDERING, NOT `<`: see the guard in the departure scan.
+    const isSettlingPair = (back, t) => back.type === TRANSITION.INTO_BED
+      && txMs(back.created_at) <= txMs(t.created_at)
+      && txMs(t.created_at) - txMs(back.created_at) <= JITTER_REENTRY_MS;
+    // The `into_bed` that REVERSES exit `t` (the child back in the bed within MORNING_ABSENCE_MIN, and the bed
+    // corroborates it), or undefined. The departure scan's reversal guard: its comment, in the scan, has the nights and
+    // why the return must be corroborated. A function since issue #914 only so that departureCutIdx applies the same
+    // rule instead of a copy of it; the rule itself is unchanged.
+    const reversedBy = (t) => transitions.find((u) => u.type === TRANSITION.INTO_BED
+      && txMs(u.created_at) > txMs(t.created_at)
+      && txMs(u.created_at) - txMs(t.created_at) <= MORNING_ABSENCE_MIN * 60000
+      // ⚠️ txIdx, NOT a hand-rolled Math.floor. This indexes an array built by `idxOf`, and a
+      // second conversion written out longhand is free to disagree with it — mine did. A review
+      // demonstrated the divergence: an into_bed at :31 seconds lands a minute apart under floor
+      // and round, and with the only corroborating minutes sitting on that boundary the two give
+      // different nights. The file already has one named helper for this; using it means this
+      // call moves with issue #260 when the round-vs-floor question is settled globally, instead
+      // of quietly holding its own opinion.
+      && bedOccupiedFrom(txIdx(u.created_at)));
+    // Issue #914: the minute of the first `out_of_bed` after exit `t` that is a DEPARTURE by the rules below, or Infinity
+    // when there is none (the count is then exactly what it was before #914). The settling-tail guard's witness stops
+    // there (bedQuietlyOccupiedFrom's `until`). NOT exactly "what the scan would take": the scan also takes a later tail
+    // whose own witness fails (#914 W3), and that one never cuts here. A later `out_of_bed` cuts only when it is:
+    //   - STRICTLY later than `t`, by the second. An exit logged at the same second as `t`, or before it, never cuts.
+    //   - NOT itself a settling tail: no `into_bed` within JITTER_REENTRY_MS before it (isSettlingPair, the TIME rule
+    //     only). Without this, a later tail would cut a real still sleeper's evidence: 2026-09-28 (one child, both
+    //     databases, reviewed) has a later exit 24 s after an `into_bed`, and cutting there moved that night's wake to
+    //     about 7 h 50 min before the reviewed one with #700 off. The witness is deliberately NOT asked here: it would
+    //     recurse, and a tail is a tail of a return whatever the bed shows after it. It also means an exit within a
+    //     minute after the `into_bed` being judged (so in the same minute or the next) is a tail of that same return and
+    //     never cuts: the cut is always later than the return's own minute.
+    //   - NOT reversed: reversedBy, the scan's own reversal guard, unchanged. A child who gets out and is back in bed
+    //     within MORNING_ABSENCE_MIN has not left; an injected trip of that shape on the 2026-09-09 profile moved the wake
+    //     from 05:17 to 20:44 when it cut. Its witness is bedOccupiedFrom (any 3 occupied minutes), so an empty bed's
+    //     noise can back up a stray `into_bed` after a REAL later departure: that departure then does not cut and the
+    //     earlier real exit can still be set aside, as before #914 (KNOWN-ISSUES; review probe P1: 07:40, not 06:29).
+    // The EARLIEST qualifying exit by time, taken over all of them rather than the first in the array: getBedTransitions
+    // orders by `created_at` alone, so the array order of rows logged at the same second is not defined (rows at the
+    // same second share a minute, so it cannot change the answer today; the minimum states the rule).
+    // Monotone in the clock, like the old count: a departure logged later can only cut minutes that had not been observed
+    // when it was logged, and an exit can only BECOME reversed as more minutes are observed (bedOccupiedFrom only turns
+    // true), so a minute once counted stays counted and the witness can turn true with the clock, never back. It CAN turn
+    // true: a later trip whose return is backed up only later in the morning stops cutting then, and the exit is set
+    // aside from that clock on (review probe P2: 06:29 at 07:20, 07:40 at 08:30). On the measured nights no verdict
+    // changed with the clock; the old count changed on 4 exits.
+    const departureCutIdx = (t) => {
+      let cut = Infinity;
+      for (const o of transitions) {
+        if (o.type !== TRANSITION.OUT_OF_BED) continue;
+        if (!(txMs(o.created_at) > txMs(t.created_at))) continue;
+        if (transitions.some((back) => isSettlingPair(back, o))) continue;
+        if (reversedBy(o)) continue;
+        cut = Math.min(cut, txIdx(o.created_at));
+      }
+      return cut;
     };
     // Suffix count of bed-active minutes from each index to the end, so we can cheaply ask "how much
     // in-bed motion remains after this point?" for each candidate gap.
@@ -1887,6 +2266,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
       if (threshold == null || leadMin <= threshold) return null;
       return { ms: exitMs, at: t.created_at, lead_min: leadMin, threshold_min: threshold };
     };
+    // #618: the same test by an exit's time, for the veto after the scan (see `settlingSkips` above). A yes/no only:
+    // the veto records nothing (see there for why `wake_unconfirmed` is left as the scan set it).
+    farEarlyAt = (at) => farEarly({ created_at: at }) != null;
     // The EARLIEST recorded skip is the one reported (and stored). The scan meets exits roughly in time order, but
     // one exit can be asked about for two gaps and a later gap can snap to an earlier exit, so it is compared, not
     // assumed.
@@ -1956,18 +2338,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
           // of minutes sit below 0.0005, but 13-15% carry micro-motion above it, while a genuinely
           // empty bed reads dead throughout. Micro-motion is what separates "he came back" from "the
           // classifier imagined it".
-          const reversedBy = transitions.find((u) => u.type === TRANSITION.INTO_BED
-            && txMs(u.created_at) > txMs(t.created_at)
-            && txMs(u.created_at) - txMs(t.created_at) <= MORNING_ABSENCE_MIN * 60000
-            // ⚠️ txIdx, NOT a hand-rolled Math.floor. This indexes an array built by `idxOf`, and a
-            // second conversion written out longhand is free to disagree with it — mine did. A review
-            // demonstrated the divergence: an into_bed at :31 seconds lands a minute apart under floor
-            // and round, and with the only corroborating minutes sitting on that boundary the two give
-            // different nights. The file already has one named helper for this; using it means this
-            // call moves with issue #260 when the round-vs-floor question is settled globally, instead
-            // of quietly holding its own opinion.
-            && bedOccupiedFrom(txIdx(u.created_at)));
-          if (reversedBy) continue;
+          // (The rule is `reversedBy`, defined with the witnesses above, because the settling-tail guard's cut
+          // applies the same one to a LATER exit: issue #914, departureCutIdx.)
+          if (reversedBy(t)) continue;
           // AN EXIT THE CHILD NEVER LEFT FOR. The guard above rejects an exit that a later `into_bed`
           // reverses — but it is a test on ONE transition, and the failure it exists for arrives as a
           // CLUSTER. The classifier emits `out → in → out` for a single climb-back-in, and the third
@@ -2008,10 +2381,19 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
           // ACTIVE (the climb out, that parent, the next exit's own movement), and not one quiet. The
           // old witness believed the stray return on the strength of that parent an hour later and skipped
           // the real exit; once the next exit (09:27) had its own 20 quiet minutes, the stored wake moved
-          // from 07:12 to 09:27 and froze there. Over every stored night, the wrong skips had 0-3 QUIET
-          // minutes and the labelled right ones 10 or more, while the raw occupied counts overlap: see
-          // SETTLING_WITNESS_MIN_QUIET (which also names the one unlabelled skip that sits between).
+          // from 07:12 to 09:27 and froze there. On the nights measured then, the wrong skips had 0-3 QUIET
+          // minutes and the labelled right ones 10 or more, while the raw occupied counts overlap.
           // bedQuietlyOccupiedFrom counts only the quiet kind.
+          //
+          // ⚠️⚠️ ...AND ONLY UNTIL THE CHILD LEAVES AGAIN (issue #914). That 0-3 / 10+ split did not hold: after a
+          // real exit an EMPTY bed reads faint noise on a few % of minutes, every such minute counts as quiet, and
+          // the count grows with the clock (2026-10-30, one child, staging: 5, 8, 8 and 10 at window end + 1, 31, 61
+          // and 109 minutes, the exit the real wake). The claim this guard makes is "he came back and STAYED", and a
+          // minute after a later real departure cannot vouch for a stay: by then the bed is empty or an adult is at
+          // it. So the witness stops at the first later `out_of_bed` that is a departure (departureCutIdx: strictly
+          // later, not a settling tail by the time rule only, not reversed). No threshold moved and no number
+          // was added. The nights, the alternatives that were measured and failed, and the limits are at
+          // SETTLING_WITNESS_MIN_QUIET.
           //
           // On the measured nights every night this changed moved EARLIER. That is not a rule: in
           // principle a night can also move later, when a real exit that used to be set aside is now
@@ -2034,13 +2416,47 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
           // so an `into_bed` and an `out_of_bed` at the IDENTICAL second are representable — and that
           // is the strongest case for this guard, not an exclusion: if the two cannot even be ordered,
           // nothing can establish that the child left. An adversarial review found the tie escaping.
-          const settlingTail = transitions.find((back) => back.type === TRANSITION.INTO_BED
-            && txMs(back.created_at) <= txMs(t.created_at)
-            && txMs(t.created_at) - txMs(back.created_at) <= JITTER_REENTRY_MS
+          // (The time test is isSettlingPair, shared with the #914 cut.)
+          const settlingTail = transitions.find((back) => isSettlingPair(back, t)
             // ⚠️ txIdx, not a hand-rolled floor — same reason as the reversal guard above.
-            && bedQuietlyOccupiedFrom(txIdx(back.created_at)));
+            && bedQuietlyOccupiedFrom(txIdx(back.created_at), departureCutIdx(t)));
+          // ★ #917, THE SHADOW PASS ONLY (`run.sensor` is null on the real night, so this is false there and the scan
+          // is exactly what it was): the ESPHome sensor contradicts the exit when a person's vital signs were measured
+          // at the bed in at least 6 of the 10 minutes after it (lib/sleepSensor.js has the rule, its numbers and the
+          // nights behind them). Asked here, after the onset bound and the reversal guard, exactly where the
+          // measurement asked it, and the exit is then treated EXACTLY like a settling-tail skip, through the same
+          // branch: it can come back as `settlingFallback` when nothing later qualifies, it is recorded in
+          // `settlingSkips` for the #618 hand-back, and the smaller-`dt` choice applies. So the shadow, like the guard,
+          // is never the reason a night has no wake. Because it only shadows, those behaviours are kept AS MEASURED and
+          // pinned by tests (sleep-sensor-shadow.test.js, and the #618 hand-back of a rejected exit in
+          // sleepAnalysis.test.js, "#917 S13"), including the clock-dependent one plan review found: a
+          // rejected real exit can come back as the fallback early in the morning and lose to a later exit once that
+          // one qualifies, so the shadow wake can move with the clock. Deliberately NOT asked by departureCutIdx
+          // (#914) or detectMidnightEpisodes: a contradicted exit still cuts a witness and still bounds an episode.
+          //
+          // WHAT IS COUNTED (code review of #917, Opus): only a CANDIDATE, an exit within WAKE_SNAP_MS of this gap's
+          // start (the guard is asked about every exit on every gap, most of them far from it). Into `sensor_rejects`
+          // goes a candidate the rule alone set aside (not one the settling-tail guard had already set aside), counted
+          // once by its row however many gaps it is a candidate for: an exit far from every gap (a parent's visit after
+          // the wake) is never a departure, so rejecting it changes nothing and it is not counted. And `readable`
+          // records whether any candidate's ten minutes held a known minute (sensorWindowReadable): computeNight stores
+          // no shadow at all for a night where none did, because the sensor then said nothing about any exit the rule
+          // could have changed.
+          // ⚠️ The sensor's end bound (the evidence cutoff, the replay clock) can never matter HERE: a candidate is at
+          // most WAKE_SNAP_MS after the start of a gap that needs MORNING_ABSENCE_MIN observed minutes, so its ten
+          // minutes end at least 5 minutes before the evidence does. The bound stays (sensorMinutesFor must never hand
+          // back the future), but no night can show it; the mutation catalogue lists that mutant as equivalent.
           const dt = Math.abs(txMs(t.created_at) - emptyStartMs);
-          if (settlingTail) {
+          let sensorRejects = false;
+          if (run.sensor != null) {
+            const sensorExitIdx = txIdx(t.created_at);
+            sensorRejects = sensorContradictsExit(run.sensor.minutes, sensorExitIdx);
+            if (dt <= WAKE_SNAP_MS) {
+              if (sensorWindowReadable(run.sensor.minutes, sensorExitIdx)) run.sensor.readable = true;
+              if (sensorRejects && !settlingTail) run.sensor.rejected.add(t);
+            }
+          }
+          if (settlingTail || sensorRejects) {
             // ⚠️⚠️ THIS GUARD MUST NEVER BE THE REASON A NIGHT HAS NO WAKE AT ALL — the same rule the
             // reversal guard's corroboration exists to satisfy, and an adversarial review showed the
             // corroboration alone does not achieve it here.
@@ -2059,7 +2475,9 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
             // Tightening the witness window was tried and does not work: on the real nights the false
             // tail and a REAL exit both show exactly 3 occupied minutes in the following 30. So the
             // guard keeps its reach and gives up its veto instead — it may SKIP an exit in favour of a
-            // later one, but if there is no later one it hands this one back.
+            // later one, but if there is no later one it hands this one back. (#618: and if the later one
+            // is then discarded by the #509 veto after the scan, the veto hands this one back too, when
+            // the quiet stretch it found is this exit's own gap: see `settlingSkips` and the veto.)
             //
             // ...unless the lead test skips it (#700): the hand-back exists so that this guard is never the
             // reason a night has no wake, and an exit hours earlier than this child ever gets up is not one
@@ -2072,6 +2490,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
                 if (fallbackSkipped == null || earlyFallback.ms < fallbackSkipped.ms) fallbackSkipped = earlyFallback;
               } else settlingFallback = { dt, ms: txMs(t.created_at), at: t.created_at, gapStart: i };
             }
+            // #618: and every such skip, per gap, for the #509 veto below the scan. Recorded whatever `settlingFallback`
+            // already holds and whatever the lead test would say (that is asked at the veto): this list only says
+            // "this gap's departure was set aside as the tail of a return"; the veto decides whether it comes back.
+            if (dt <= WAKE_SNAP_MS) settlingSkips.push({ gapStart: i, dt, ms: txMs(t.created_at), at: t.created_at });
             continue;
           }
           // #700: asked last, so the history is consulted only for an exit that would otherwise become `best`.
@@ -2218,8 +2640,10 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // inside the departure scan. A corroborated exit T that is later than A is discarded when the bed was
   // strictly quiet for MORNING_ABSENCE_MIN minutes in between (see quietStretchBeforeExit for the nights
   // and the evidence); the wake, the metrics span, the timeline marker and the child-out interval then
-  // all fall back to A together, because they all read these three variables. `wake_at_shadow` keeps the
-  // raw exit (it is documented as "recorded whether or not adopted").
+  // all fall back to A together, because they all read these three variables, unless the stretch is the gap of
+  // an exit the settling-tail guard set aside: then they all move to THAT exit together (#618, the hand-back
+  // below). `wake_at_shadow` keeps the raw exit T either way (it is documented as "recorded whether or not
+  // adopted").
   //
   // Reached only when: the night is complete (the scan ran), A exists (`< totalMin`: a child quiet at the
   // window end has no A and keeps T, "knowing they got up beats still asleep"), an exit was adopted, and
@@ -2230,7 +2654,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   //
   // What this means for someone else's house: the rule trusts "a strictly quiet bed inside the final awake
   // run is an absence". A mic that hears the whole house starts that run early, and the later, correct exit
-  // is then set aside: the wake is EARLY (the start of the activity), never missing. A zone painted so a
+  // is then set aside: the wake is EARLY (the start of the activity, or a skipped exit inside the stretch,
+  // #618), never missing. A zone painted so a
   // departure never reads quiet has the opposite effect: no stretch exists, so the rule does nothing and
   // the later exit stands, as before. A child who fusses, falls back asleep and is carried out later is
   // reported at the fuss, and so is one who got out, was logged back in bed, and left again later (the scan's
@@ -2242,12 +2667,82 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
   // direction (pinned by the '#509 known limit' test; measured on 2026-10-01 and 2026-09-19). Calibrated
   // on two children in one house over 30 nights (no untouched validation set); see KNOWN-ISSUES.
   const rawExitMs = transitionExitMs;
-  if (USE_TRANSITION_TIMES && transitionExitIdx != null && !inProgress && algoSleepEnd < totalMin
+  // The stretch [start, end, trailing] when the veto fires, else a falsy value (false, or quietStretchBeforeExit's null).
+  const vetoStretch = USE_TRANSITION_TIMES && transitionExitIdx != null && !inProgress && algoSleepEnd < totalMin
       && selectedGapStart != null && maxBedPeak >= EMPTY_BED_MAX_PEAK
-      && quietStretchBeforeExit(cribActExt, algoSleepEnd, selectedGapStart, MORNING_ABSENCE_MIN, MAX_POST_EXIT_ACTIVE_MIN)) {
-    transitionExitMs = null;
-    exitTransitionAt = null;
-    transitionExitIdx = null;
+      && quietStretchBeforeExit(cribActExt, algoSleepEnd, selectedGapStart, MORNING_ABSENCE_MIN, MAX_POST_EXIT_ACTIVE_MIN);
+  if (vetoStretch) {
+    // ★ #618 (a sibling of its §2, not §2 as the issue describes it): THE HAND-BACK. When the stretch the veto found is
+    // the gap of an exit the settling-tail guard set aside (a `settlingSkips` record whose gap starts inside
+    // [start, end)), that exit is the wake instead of A. The stretch is, in quietStretchBeforeExit's own words, the
+    // departure "had an out_of_bed happened to land beside it": here one did, and the guard set it aside only in
+    // favour of a later exit, which this rule has just discarded. "No later exit survived" is exactly when the guard
+    // hands its exit back (the fallback in the scan), so this adds no new rule and no new number; it applies the
+    // guard's own contract to a discard that happens after the scan.
+    //
+    // ★ Measured: 2026-10-30, one child, staging. True wake 06:29 (the owner saw it). The exit 06:29:56 had an
+    // `into_bed` 51 s before it and was skipped on a witness of 8-10 quiet minutes that all came after the child had
+    // left (see SETTLING_WITNESS_MIN_QUIET); the stretch was 06:30-06:57 and the later exit 06:57:12 (the child back
+    // in the room: a real event, after the wake). The wake read 06:29 at 07:08 (the fallback: nothing later had its
+    // 20 quiet minutes yet) and 06:13, the movement-only wake, from about 07:18 on. With this it is 06:29 at every
+    // clock. On snapshots of both databases (2026-10-31, every child-night with samples, eight clocks) it is the only
+    // child-night where the veto fires with such a skip (within WAKE_SNAP_MS, not far early) in its stretch: ONE
+    // night of evidence.
+    //
+    // The conditions, and why each:
+    //   * the record's gap start inside [start, end). In a strictly quiet stretch that is the stretch's own start (the
+    //     scan opens a gap only on the first quiet minute after one that is not), and on the measured night the
+    //     skip's gap start (06:30) is the stretch's start. A skip whose gap opened before A, in another stretch, or in
+    //     T's own gap (the exit just discarded, or its tail: the '#509 C10' night) is not this departure. Nor is an
+    //     evening tail, which can hold the smaller `dt` and so `settlingFallback` (the 2026-09-09 shape).
+    //   * not far earlier than this child gets up (#700), for the reason the scan's fallback refuses one too: the
+    //     hand-back exists so a night is never left without a wake, not to revive an exit the lead test rejects.
+    //     `wake_unconfirmed` is NOT touched: the scan already decided what it records, and what stands instead is A,
+    //     the wake the night then stores, so #700's history (it reads the stored wake when nothing was flagged) learns
+    //     exactly what it learnt before #618.
+    //   * the smallest `dt`, the scan's own choice between candidate exits.
+    //   * the exit's minute by txIdx, the helper the scan uses, never a longhand conversion (an exit at :56 s, like
+    //     the measured one, is a minute later under Math.round, and the metrics span would end there).
+    //
+    // ⚠️ Deliberately NOT re-checked: the exit handed back is not put through the veto again. Its own gap can have a
+    // strictly quiet stretch before it, one this call skipped because more than MAX_POST_EXIT_ACTIVE_MIN non-quiet
+    // minutes lay between it and T, though not between it and this exit. The result is still bounded: before T (its gap
+    // ends at least MORNING_ABSENCE_MIN before T's opens), no more than WAKE_SNAP_MS before A (its gap opens at or
+    // after A, and an exit may sit up to WAKE_SNAP_MS before its gap, exactly as a `best` exit may: pinned by '#618
+    // H10'; the plan said "never earlier than A", which is true of the gap, not of the exit), and never a wake from
+    // nothing. The cost, pinned by '#618 H8': on such a night the scan's own fallback IS vetoed early in the morning
+    // (the wake reads A), and the same exit comes back once a later exit qualifies, so the wake moves later with the
+    // clock where it used to stay at A.
+    //
+    // ⚠️ KNOWN LIMIT: a FALSE settling pair is handed back as readily as a real one. If the exit set aside was itself
+    // a classifier error (the child still in the bed: a stray `into_bed` + `out_of_bed` pair, quiet micro-motion as
+    // the witness), it becomes the wake where A was the better answer. The scan's fallback already does this whenever
+    // no later exit qualifies (the 07:08 run on the measured night did); this extends it to a later exit the veto
+    // discards. An empty bed reading faint noise and a still child read the same here, so it is pinned by a test,
+    // not excluded.
+    //
+    // For someone else's house: nothing new was measured or tuned. It rests on one night of two cameras in one house,
+    // and on the settling-tail guard's witness, which that night read an empty bed as a still sleeper. It changes only
+    // a night where the veto fires AND the guard set aside an exit whose gap opens the stretch; every other night is
+    // computed exactly as before (KNOWN-ISSUES, #509 and #598).
+    const [stretchStart, stretchEnd] = vetoStretch;
+    let handBack = null;
+    for (const skip of settlingSkips) {
+      if (skip.gapStart < stretchStart || skip.gapStart >= stretchEnd) continue;
+      if (handBack != null && skip.dt >= handBack.dt) continue;
+      if (farEarlyAt(skip.at)) continue;
+      handBack = skip;
+    }
+    if (handBack) {
+      transitionExitMs = handBack.ms;
+      exitTransitionAt = handBack.at;
+      transitionExitIdx = txIdx(handBack.at);
+      selectedGapStart = handBack.gapStart; // read by nothing below; kept true to what was adopted
+    } else {
+      transitionExitMs = null;
+      exitTransitionAt = null;
+      transitionExitIdx = null;
+    }
   }
   if (USE_TRANSITION_TIMES && transitionExitIdx != null) {
     // Clamped because the metrics can only count minutes we hold per-minute state for, while the
@@ -2333,12 +2828,39 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     // protected by the downgrade guard when it closes: pre-existing, not specific to `empty` or to #508.)
     // Pinned by the #508 tests T6g/T6h.
     if (coverage < winMin * EMPTY_MIN_COVERAGE_FRAC) return { ...result, status: 'no_data' };
-    return {
-      ...result,
-      status: 'empty',
-      // Deliberately no onset/wake/duration: reporting "11h06m asleep, 0 wakes" for a bed nobody was in
-      // is the bug being fixed. The night is a real observation, it just isn't a sleep.
-    };
+    // ★ #904 — NEVER `empty` ON A NIGHT WHOSE SOUND WAS DISCOUNTED: when a minute of this span had its sound ignored
+    // by the faulty-microphone guard, the `empty` return below is skipped and the night falls through to `ok`, with
+    // the discounted figures (and says so: sound_discounted_minutes > 0). ONLY that return: the coverage `no_data`
+    // just above fires exactly as before, whatever was discounted, because "we could not see" deletes nothing and is
+    // still the honest answer for a night watched too little (#904 review round 2: the first version put this test
+    // on the outer `if` and so also skipped that `no_data`, turning a 74%-watched empty bed into `ok`). For a night
+    // with nothing discounted the flow is exactly the pre-#904 one.
+    //
+    // Why: a final `empty` is irreversible (it sends the "no one was in the bed" report and deletes the night's raw
+    // timelapse frames, timelapse.js discardFinalEmptyNightFrames, #419), and on a fault night the minutes the guard
+    // has just turned quiet may have been the only awake time, and so the only thing that kept the night `ok`: a
+    // still child in a bed zone that barely registers movement would read "nobody slept here" because the microphone
+    // was broken. Counted over the same window-bounded span as the three signals above, before the metrics
+    // extension. The 2026-10-29 fault night is nowhere near this (its in-bed peak was ~0.97-0.99, the line is 0.1),
+    // but a quiet-zone install with the same fault would reach it. Pinned by the #904 tests "a still child, a quiet
+    // zone and a faulty microphone stays ok" and "...a 74%-watched empty bed is still no_data".
+    //
+    // ⚠️ THE COST, a deliberate decision (KNOWN-ISSUES.md): this cannot tell that still child from an EMPTY bed on a
+    // camera with the same fault. On the pre-#904 rule such a night read `empty` (the fault ran to the morning, read
+    // as the child up from when it began, with no awake time before that), `no_sleep` (the fault ran all evening, so
+    // no 15 quiet minutes were ever found) or `no_data` (too little watched), depending on when the fault started and
+    // how much was watched. Now the coverage `no_data` is kept, a `no_sleep` night watched for less than
+    // EMPTY_MIN_COVERAGE_FRAC becomes `no_data` too, and every other such night reads `ok` with the whole window
+    // asleep. A wrong `ok` is reversible (frames kept; a parent can answer "no one was in the bed"), a wrong `empty`
+    // is not. Pinned by the #904 tests "KNOWN LIMIT (a deliberate decision): an EMPTY bed with a faulty microphone".
+    if (discountedIn(onset, sleepEnd) === 0) {
+      return {
+        ...result,
+        status: 'empty',
+        // Deliberately no onset/wake/duration: reporting "11h06m asleep, 0 wakes" for a bed nobody was in
+        // is the bug being fixed. The night is a real observation, it just isn't a sleep.
+      };
+    }
   }
 
   // ⚠️ ONLY NOW, AFTER STATUS IS SETTLED (issue #352). A real, transition-confirmed post-window wake IS
@@ -2356,6 +2878,11 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
       // `stateMetrics` is the tri-state twin that lets accumulateMetrics tell that default apart from
       // a real confirmed-quiet row (issue #442 — this block used to default an unsampled minute to
       // quiet here too; see the now-rewritten test in sleepAnalysis.test.js).
+      //
+      // #904: the faulty-microphone guard's verdict for these minutes was decided above the main loop, from the
+      // same post-window rows (postRows, with `sound_p75`), so isActiveRow only needs each row's index here and
+      // this query needs no p75 of its own. The minutes fetched here are a subset of postRows': both start at the
+      // window end, and metricsEnd never passes the evidence cutoff postRows was read to.
       const extraRows = db
         .prepare(
           `SELECT bucket_start AS t, motion_peak, sound_peak, motion_out_peak, motion_frames FROM activity_samples
@@ -2370,7 +2897,7 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
         // The same rule as the main loop (issue #508): an unwatched row is skipped, never merged, so a
         // post-window stall between window end and the departure counts as unknown, not asleep.
         if (!motionSeen(r)) continue;
-        const rowActive = isActiveRow(r);
+        const rowActive = isActiveRow(r, i);
         if (rowActive) activeMetrics[i] = true;
         // OR-merge, matching the main population loop's own rule for `state` (line ~646) — TWO rows for
         // one minute are real (activity_samples has no uniqueness constraint on camera_id+bucket_start:
@@ -2438,6 +2965,12 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
     wake_unconfirmed: earlyExitFlagged
       ? { at: earlyExitFlagged.at, lead_min: earlyExitFlagged.lead_min, threshold_min: earlyExitFlagged.threshold_min }
       : null,
+    // #904 (see `base`): the discounted minutes in [onset, sleepEnd), the span asleep + awake + unknown add up over,
+    // including the post-window extension when the wake came after the window. A minute counts here when its sound
+    // was ignored, whatever else it was: one with movement, or one bridged into a wake run, is still awake time. 0
+    // when the guard found nothing. Not counted: discounted minutes before onset (they can move the onset, but no
+    // awake time is measured there) and after the wake. The key keeps its place from `base`.
+    sound_discounted_minutes: discountedIn(onset, sleepEnd),
   };
 
   // Periods the child is OUT of the bed — from an out_of_bed event until the next into_bed — used below
@@ -2479,8 +3012,8 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
 
     // The transition-derived times, recorded whether or not they were adopted. When USE_TRANSITION_TIMES
     // is on these match onset_at/wake_at (except on a night where #509 set the exit aside: the headline is
-    // then the movement-only wake and the shadow keeps the raw exit); the pair worth comparing is then
-    // *_algo vs the headline.
+    // then the movement-only wake, or the exit #618 handed back in its place, and the shadow keeps the raw
+    // exit); the pair worth comparing is then *_algo vs the headline.
     out.onset_at_shadow = transitionOnset != null ? minuteTime(transitionOnset) : minuteTime(algoOnset);
     out.wake_at_shadow = (rawExitMs != null ? toSqlUtc(new Date(rawExitMs)) : null) || algoWakeAt; // raw exit even when #509 discarded it
 
@@ -2707,17 +3240,24 @@ export function computeNight(childId, nightDate, { includeTimeline = false, cont
 // `wake_unconfirmed_at` (#700) is written the same way, in both halves, for the same reason: a provisional re-store
 // recomputes the night's skip, and a later pass that no longer skips anything must clear it, or a stale value would
 // stay this night's departure candidate in later nights' history (LEAD_FACTOR, HOW THE HISTORY LEARNS).
+//
+// `wake_at_sensor` and `sensor_rejects` (#917, the ESPHome sensor shadow) likewise, in both halves: a re-store writes
+// what that compute saw, so a provisional row that had no sensor rows yet gains them when they arrive, and one whose
+// shadow did not run this time (the readings pruned, the device removed) goes back to NULL. Bound from computeNight's
+// own keys (`...summary` in computeAndStoreNight). The point of storing them is that the stored values outlive the raw
+// readings' retention; a locked (reviewed) night is never re-stored, so it keeps what it had when it was locked.
 const upsertNight = db.prepare(
   `INSERT INTO sleep_nights
      (child_id, night_date, window_start, window_end, status, onset_at, wake_at,
       onset_at_shadow, wake_at_shadow, onset_at_algo, wake_at_algo,
       asleep_minutes, awake_minutes, wake_count, longest_stretch_minutes, coverage_minutes,
-      unknown_minutes, in_bed_at, avg_temperature, avg_humidity, scoring_context, wake_unconfirmed_at, computed_at)
+      unknown_minutes, in_bed_at, avg_temperature, avg_humidity, scoring_context, wake_unconfirmed_at,
+      wake_at_sensor, sensor_rejects, computed_at)
    VALUES (@child_id, @night_date, @window_start, @window_end, @status, @onset_at, @wake_at,
            @onset_at_shadow, @wake_at_shadow, @onset_at_algo, @wake_at_algo,
            @asleep_minutes, @awake_minutes, @wake_count, @longest_stretch_minutes, @coverage_minutes,
            @unknown_minutes, @in_bed_at, @avg_temperature, @avg_humidity, @scoring_context, @wake_unconfirmed_at,
-           @computed_at)
+           @wake_at_sensor, @sensor_rejects, @computed_at)
    ON CONFLICT(child_id, night_date) DO UPDATE SET
      window_start=excluded.window_start, window_end=excluded.window_end, status=excluded.status,
      onset_at=excluded.onset_at, wake_at=excluded.wake_at, in_bed_at=excluded.in_bed_at,
@@ -2730,6 +3270,7 @@ const upsertNight = db.prepare(
      avg_temperature=excluded.avg_temperature, avg_humidity=excluded.avg_humidity,
      scoring_context=excluded.scoring_context,
      wake_unconfirmed_at=excluded.wake_unconfirmed_at,
+     wake_at_sensor=excluded.wake_at_sensor, sensor_rejects=excluded.sensor_rejects,
      computed_at=excluded.computed_at`
 );
 

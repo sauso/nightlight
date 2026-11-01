@@ -159,17 +159,17 @@ describe('the push hub', () => {
     const mountHub = () =>
       renderAsAdmin(
         <Routes>
-          <Route path="/settings/push" element={<SettingsPush />} />
+          <Route path="/settings/integrations/notifications" element={<SettingsPush />} />
           <Route path="*" element={<Probe />} />
         </Routes>,
-        { route: '/settings/push' }
+        { route: '/settings/integrations/notifications' }
       );
 
     test('each row leads to its own provider page', async () => {
       mockStatus(ALL_OFF);
       const { user } = mountHub();
       await user.click(await screen.findByText('Pushover'));
-      expect(await screen.findByText('at /settings/push/pushover')).toBeTruthy();
+      expect(await screen.findByText('at /settings/integrations/notifications/pushover')).toBeTruthy();
     });
 
     test('★ a row is reachable from the keyboard, not just the mouse', async () => {
@@ -186,7 +186,7 @@ describe('the push hub', () => {
       await user.tab();
       expect(first, 'the first provider row must be reachable by tabbing').toBe(document.activeElement);
       await user.keyboard('{Enter}');
-      expect(await screen.findByText('at /settings/push/pushover')).toBeTruthy();
+      expect(await screen.findByText('at /settings/integrations/notifications/pushover')).toBeTruthy();
     });
 
     test('Space activates a row too, without scrolling the page', async () => {
@@ -201,7 +201,7 @@ describe('the push hub', () => {
       target.dispatchEvent(before);
       expect(before.defaultPrevented, 'Space must be prevented or the page scrolls').toBe(true);
       await user.keyboard(' ');
-      expect(await screen.findByText('at /settings/push/firebase')).toBeTruthy();
+      expect(await screen.findByText('at /settings/integrations/notifications/firebase')).toBeTruthy();
     });
   });
 });

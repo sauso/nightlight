@@ -297,7 +297,10 @@ describe('the route table', () => {
     for (const [route, heading] of [
       ['/settings', 'Settings'],
       ['/settings/camera', 'Camera controls'],
-      ['/settings/mqtt', 'MQTT'],
+      ['/settings/integrations', 'Integrations'],
+      ['/settings/integrations/mqtt', 'MQTT'],
+      ['/settings/integrations/esphome', 'ESPHome'],
+      ['/settings/integrations/notifications', 'Push notifications'],
       ['/settings/logs', 'Logs'],
       ['/about', 'About'],
       ['/cameras', 'Cameras'],
@@ -325,6 +328,29 @@ describe('the route table', () => {
       vi.spyOn(nativeBridge, 'hasActiveBackgroundAudio').mockReturnValue(false);
       vi.spyOn(push, 'initPushNotifications').mockResolvedValue(undefined);
     }
+  });
+
+  const oldSettingsPaths = [
+    ['/settings/mqtt', '/settings/integrations/mqtt', 'MQTT'],
+    ['/settings/push', '/settings/integrations/notifications', 'Push notifications'],
+    ['/settings/push/pushover', '/settings/integrations/notifications/pushover', 'Pushover'],
+    ['/settings/push/firebase', '/settings/integrations/notifications/firebase', 'Firebase'],
+    ['/settings/push/gotify', '/settings/integrations/notifications/gotify', 'Gotify'],
+    ['/settings/push/ntfy', '/settings/integrations/notifications/ntfy', 'ntfy'],
+  ];
+
+  test.each(oldSettingsPaths)('old URL %s redirects an admin to %s', async (old, canonical, heading) => {
+    await openAt(old);
+    expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
+    await waitFor(() => expect(window.location.hash).toBe(`#${canonical}`));
+  });
+
+  test.each(oldSettingsPaths)('old URL %s uses the caregiver gate', async (old, canonical, heading) => {
+    setToken('a-token');
+    mockApi(CAREGIVER);
+    await boot(old);
+    await waitFor(() => expect(window.location.hash).toBe('#/'));
+    expect(screen.queryByRole('heading', { name: heading })).not.toBeInTheDocument();
   });
 
   // ★ #379. The inner <Routes> had no catch-all, so an address that matched nothing rendered the app chrome
@@ -362,7 +388,7 @@ describe('the route table', () => {
     for (const [route, heading] of [
       ['/children', 'Children'],
       ['/cameras', 'Cameras'],
-      ['/settings/mqtt', 'MQTT'],
+      ['/settings/integrations/mqtt', 'MQTT'],
       ['/family', 'Children'], // retired, redirects: must still redirect, not fall through to `*`
     ]) {
       const { unmount } = await openAt(route);
@@ -382,14 +408,19 @@ describe('the route table', () => {
     expect(screen.queryByRole('heading', { name: 'Page not found' })).not.toBeInTheDocument();
   });
 
-  test('an admin-only screen sends a CAREGIVER home, and shows nothing of it on the way', async () => {
+  test.each([
+    ['/settings/integrations', 'Integrations'],
+    ['/settings/integrations/mqtt', 'MQTT'],
+    ['/settings/integrations/esphome', 'ESPHome'],
+  ])('admin-only %s sends a CAREGIVER home without showing it', async (route, heading) => {
     setToken('a-token');
     mockApi(CAREGIVER);
-    await boot('/settings/mqtt');
+    await boot(route);
     // ⚠️ The gate is in the route table, and it is the only whole-screen role check in the app. This
     // is where the "admin-only route that 403'd everyone" class of bug is visible.
     await waitFor(() => expect(document.querySelector('.app-shell')).not.toBeNull());
-    expect(screen.queryByRole('heading', { name: 'MQTT' })).not.toBeInTheDocument();
+    await waitFor(() => expect(window.location.hash).toBe('#/'));
+    expect(screen.queryByRole('heading', { name: heading })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Live' })).toBeInTheDocument();
   });
 

@@ -9,6 +9,139 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-11-01
+
+### Added
+
+- **Hold motion and sound alerts until asleep (#919).** An admin can turn this on per child under Track sleep; it is off by default. During the sleep window, alerts are dropped until the watcher sees about 15 quiet minutes or 45 minutes pass after the first held alert. Held alerts are not sent later; camera-offline alerts continue. The 45 minutes is a design choice, not measured. A server restart can allow another 45 minutes of holding. See [Notifications](docs/notifications.md#hold-alerts-until-asleep).
+
+- **A faulty microphone no longer turns a still night into hours awake (#904).** Some camera microphones develop
+  a fault that makes a short, loud click every few seconds in a silent room, and sleep tracking read every one of
+  those minutes as awake. Now, when a night is worked out, the sound of a minute that was loud only in brief spikes
+  is ignored when such minutes make up at least 70% of the watched minutes of an 8-hour stretch (fixed numbers, not
+  settings). Movement still counts, and a cry or noise that lasts is never ignored. The night's sleep detail page
+  then says *"The microphone looked faulty for 9h 40m, so its sound was not counted as awake time"*, and the night's
+  API answer gains a `sound_discounted_minutes` field (0 on an ordinary night). A night with ignored sound is never
+  reported as "no one was in the bed" (that answer also deletes the night's frames; "no data" for a night watched
+  too little is unchanged), so an empty bed on a camera with a faulty microphone now usually reads as a night slept.
+  Limits: tonight's live figures get no help until about 5 hours into the window, and a sleep window shorter than
+  2 hours never does; last night's figures can still change either way until about 3 hours after the window; a
+  sleep window that includes the middle of the day can have daytime noise ignored; the
+  child's card and the morning report don't show the note; sound alerts and wake clips are unchanged; and the
+  numbers were measured on one two-camera installation, on one faulty microphone. The sleep scoring version moves to `3`. See
+  [docs/sleep-tracking.md](docs/sleep-tracking.md#a-microphone-that-looks-faulty).
+
+- **See the frame the camera saved at a bed transition, from the sleep page (#907).** A **Room activity** row on a night's sleep detail now has a down arrow, like a wake-up row, when a saved frame is within a minute of it; open the row to see the frame under it, with its time and whether the camera decided your child got into or out of bed, and tap the picture to enlarge it. A row with no frame is a plain line, and a row near two frames lists two. This is for checking a time the page calls "out of bed" against what the camera actually saw. The frames were already being saved (45 days, or kept once judged) and have been shown nowhere since the morning review became wake-only. They stay behind sign-in as before and are never in a notification, email or export; a night older than the retention has no arrow. A frame that falls between rows can't be opened from this page, and a row near a frame shows it even when the frame belongs to a different event. The sleep detail response gains a `transition_frames` list (`[{ id, type, at }]`, only on `detail=1`/`debug=1` reads); nothing existing changes and no sleep number moves. See [Bed-transition frames](docs/recording.md#bed-transition-frames-diagnostic-shown-only-in-a-nights-sleep-detail).
+
+- **Copy and paste a bed zone (#905).** On a camera's Motion screen, **Copy / paste zone** shows the painted zone as text you can keep as a backup or paste on another camera. Pasting snaps the shape to the painted squares, saves straight away and asks first if a zone is already painted. Text that is not a zone (not valid, outside the frame, an empty list, too long) is refused with a reason and nothing changes. A zone is a share of the picture, so on a camera with a different view it lands in the same place of a different picture; the screen asks you to check it. Where the browser blocks copying (an install on plain `http`), the text is still there to select and copy by hand. There is no undo. See [Cameras](docs/cameras.md).
+
+- **ESPHome Native API collection (#506).** Admins add direct device connections in **Settings → Integrations → ESPHome** (its logo and a connection badge are in the Integrations list). Each device shows its connection state, whether the connection is encrypted and when its last reading was stored; a device can be tested, its sensors and latest values listed, its readings kept for 1–365 days, and a CSV of its per-minute raw readings downloaded for up to 31 UTC days (the screen refuses a range it estimates at over about 25 MB; the API has no such limit). The encryption key is never shown again or kept in the browser. The readings are kept separately from sleep tracking, default to 30 days of retention (range 1–365), and are not shown to caregivers; sleep tracking uses them only for the comparison wake time below. See [ESPHome data collection](docs/esphome.md).
+
+- **An ESPHome radar sensor's opinion of the morning wake is stored beside each night, for comparison only (#917).** For a child whose ESPHome sensor reports a heart rate or a breathing rate, each finished night also gets the wake time sleep tracking would have reported if it set aside a camera *got out of bed* followed by a person's heartbeat or breathing at the bed in at least 6 of the next 10 minutes (within 1 m; fixed numbers, not settings). It changes nothing shown: the wake time, every other figure, the morning notification and alerts stay the camera's. The saved night and its API answers gain `wake_at_sensor` and `sensor_rejects`, the possible wakes the sensor alone set aside (`null` without such a sensor, when it had no readings in the minutes after the night's possible wakes, on nights saved before this, and on a night whose wake time you corrected or marked "no one was in the bed"; the saved row and the admin's raw views keep them). It is only stored because the sensor cannot tell a child from a parent at the bed: in a test on six recorded mornings, a parent's readings shortly after the real wake moved it 56 to 91 minutes later on four. Measured on one house (three reviewed nights, two sensors). The sleep scoring version moves to `6` although no reported number changed. See [The sleep shadow](docs/esphome.md#the-sleep-shadow-for-comparison-only).
+
+- **The morning review asks "Up between 6:10 and 6:50" when the app has two different answers for when a child got
+  up.** The app works the wake-up time out two ways (from movement alone, and from the camera seeing them leave the
+  bed). When the two differ by 10 minutes or more, the review reads **Up between 6:10 and 6:50. When did they get
+  up?** with **Around 6:10**, **Around 6:50** and **Another time**. Each "Around" button records that exact time as
+  your answer, and there is no "That's right" because a range cannot be confirmed as a whole. A night you already
+  answered shows your single time. The wake time the app reports and every stored number are unchanged; the review
+  response just gains an extra `wake_range` field (`null` when there is no range). **It is deliberately not on the
+  child's card, the sleep page or the morning report**: on 18 nights kept aside for the check, a range would have
+  appeared on 3 of the 9 nights where the single time was right (33%, over the 25% limit set beforehand), so there it
+  would mostly be noise. It is a modest help even in the review: on the 26 design nights it appeared on 7, with the
+  true time inside it on 3 of the 5 late nights where it appeared (4 of 5 on the kept-aside nights), and a child who
+  stays still has no movement-only estimate, so the worst nights still show one time. Measured on one house. See
+  [docs/sleep-tracking.md](docs/sleep-tracking.md#up-between-in-the-morning-review-when-the-app-has-two-answers).
+
+### Changed
+
+- **"Whole frame" asks before it clears a painted bed zone (#906).** The zone saves as you paint, so one stray tap on **Whole frame** used to wipe it and restart the camera's detector with no way back. It now asks first (Cancel is the default; Escape or tapping outside also cancels and changes nothing). With nothing painted the button is still disabled, as before.
+
+- **Settings → Integrations now holds Push notifications and MQTT**, previously two separate rows on Settings. Old links and bookmarks still work through redirects. How either integration works has not changed.
+
+- **The documentation walkthrough shows the current app (#405).** The six screenshots from August showed setup and
+  chrome only. The walkthrough in `docs/README.md` now follows a made-up household through first-run setup, the live
+  view, a child's overview, a night in detail, the morning check, recent alerts, adding a camera, notification
+  providers and a caregiver's Settings page, and the front-page README shows three of them. They come from the real
+  image running the demo household, refreshed by `sh e2e/walkthrough/run.sh` (see `e2e/README.md`); the video is a
+  synthetic picture and says so.
+
+- **The sleep report says when the night may have ended earlier than it shows (#700).** When the app sets aside a
+  *got out of bed* because it is far earlier than this child usually gets up (v0.44.2), the night can report no "up"
+  time, or one later than the real wake. The report notification, and its "Sleep report updated" follow-up, now end
+  with **The night may have ended earlier than this.** on exactly those nights; every other report reads as before.
+  The sentence has no time in it, because a possible earlier exit is a guess. It is about 2% of nights on the owner's
+  two databases (3 of 144, all already known to be wrong), and a genuine early wake that was set aside by mistake
+  gets the sentence too. Not shown on the child's card or the night's page. See
+  [docs/notifications.md](docs/notifications.md) and [docs/sleep-tracking.md](docs/sleep-tracking.md#an-exit-far-earlier-than-usual-does-not-end-the-night).
+- **The morning review asks one question: when they got up.** The screen behind "Was last night right?" used to ask
+  for three times and then for a verdict on every recorded bed event, with photos, a "What was it?" follow-up and a
+  "Before bedtime" group, and it was skipped most mornings. It now reads **Up at 6:37. Is that right?** with **That's
+  right** (two taps from the child's page) and **Not quite**, which shows one time field. **No one was in the bed** is a
+  small link underneath, and **Change bedtime or fell-asleep time** is a collapsed section for the rare night one of those
+  is wrong (it opens by itself when the app found no wake-up time, so such a night can still be given both times).
+  Differences to know about: the event list, photos, per-event answers, **Quick check-in?**, **Still moving?** and
+  **Before bedtime** are gone from this screen, and so is the **Answered by** line (the app still records who answered).
+  Answers already saved are kept. A save now records only what you answered, so a wake-only answer no longer also stores
+  the app's guessed asleep time as yours, and the receipt reads back only that (**You said up at 6:37.**). You can still
+  clear a time on the review (clear the field and **Save**) to remove it, as before. The server also now refuses a wake-up time saved on its own that is earlier than the night's stored asleep time (it
+  used to save a night that ended before it began). See [docs/sleep-tracking.md](docs/sleep-tracking.md#correcting-a-night).
+
+### Fixed
+
+- **A sleep window that opens just after midnight now gets its 5 minutes of lead before midnight (#602).** For a
+  window starting between 00:00 and 00:04, the live wake watcher and the hold-alerts-until-asleep setting treated
+  23:55 to 23:59 as outside the window, because only today's and yesterday's night were tried. They now try
+  tomorrow's night as well, so those minutes count like the 5 minutes before any other window. Only a window
+  opening 00:00 to 00:04 is affected (the timelapse still records only inside the window itself), and no sleep
+  figure changes. The note about this gap is removed from the sleep-tracking and notification guides and from
+  KNOWN-ISSUES. Known limit: a sleep window of almost 24 hours (under 10 minutes between its end and the next
+  start) now never closes that gate between nights, as a 24-hour window already did (#922).
+
+- **A real morning exit is no longer set aside because the empty bed afterwards read faint noise (#914).** A *got
+  out of bed* logged within a minute after a *got into bed* is set aside as part of climbing back into bed when the
+  bed then shows a still sleeper: 6 minutes of slight movement in the next 2½ hours. An empty bed can show that
+  slight movement too (camera noise), so a child who had really got up could be reported up at a later *got out of
+  bed*: on the night this came from, production read 06:58 for a child up at 06:02. Those minutes now count only
+  until the child's next *got out of bed* (one not logged within a minute after a *got into bed*, and that the
+  child does not come straight back from), because after that the bed is empty or someone else is at it. The 6 and the
+  2½ hours are unchanged and no number was added. Replayed over every night still on record (both databases, eight
+  clocks each, with and without the "far earlier than usual" rule), two nights change: that production night
+  (06:58 to 06:02), and the staging night behind #618, whose wake stays 06:29 and is now found directly. Limits: a
+  *got out of bed* the camera logs by mistake inside those 2½ hours now ends the count, so a child who really did
+  climb back in and lies very still can be reported up too early (never blank); noise that reaches 6 minutes before
+  the next *got out of bed*, a morning with no later one, or a stray *got into bed* soon after that next one still
+  sets a real exit aside as before, and the answer can still change as the morning goes on; the mid-night
+  version of this check is unchanged; measured on two cameras in one house. A night already saved keeps its wake
+  until it is worked out again. The sleep scoring version moves to `5`. See [KNOWN-ISSUES.md](KNOWN-ISSUES.md) ("A
+  wake reported too early after a child climbed back into bed") and
+  [docs/sleep-tracking.md](docs/sleep-tracking.md#a-child-who-gets-out-and-climbs-straight-back-in-has-not-got-up).
+
+- **A morning wake no longer slips back to the start of the morning's activity when the real exit had been set
+  aside (#618).** A later *got out of bed* is not taken as the wake when the bed was strictly quiet for 20 minutes
+  or more before it (#509), and the wake then falls back to the start of the morning's activity. When that quiet
+  stretch began at a *got out of bed* the app had set aside as part of climbing back into bed (one logged within a
+  minute after a *got into bed*), the wake now goes back to that earlier *got out of bed* instead. On the night this
+  came from, a child up at 06:29 read 06:29 at first and 06:13 from about 07:18 on; it now reads 06:29 throughout.
+  Only a night where both rules apply can change (one night on the owner's two databases); its sleep totals, the
+  "got out of bed" marker and the child-out time move with the wake, and the morning review can then ask **Up
+  between …**. Limits: a stray *got into bed* and *got out of bed* while the child stayed in bed is handed back
+  too; on one rare shape the wake can still move later as the morning goes on; it rests on one night in one house,
+  with no new number. A night already saved keeps its wake until it is worked out again. The sleep scoring version
+  moves to `4`. See [KNOWN-ISSUES.md](KNOWN-ISSUES.md) ("A morning wake that changed by itself as the morning went
+  on").
+
+### Security
+
+- **Saving a very long notification server address no longer freezes the server for seconds (CodeQL alerts #12 and #13).**
+  The ntfy and Gotify settings (and the stored push server addresses) removed trailing slashes with a pattern that
+  gets slow on a long run of slashes: about 6 seconds for 100,000 of them, during which nothing else was served. It is
+  now a plain loop (about 0.06 milliseconds for the same input) with the same result for every address. Only an
+  administrator can send that field. The end-to-end test summary also escapes a backslash in a test title (alert #15,
+  test tooling only). Also dismissed on the security tab, after re-reading the code, as test-only or false positives:
+  12 "missing rate limiting" alerts on test servers and 2 "command injection" alerts on the media-process spawn
+  (a fixed program with an argument list, no shell).
+
 ## [0.44.2] - 2026-10-27
 
 ### Changed

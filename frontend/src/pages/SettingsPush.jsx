@@ -12,13 +12,13 @@ import NtfyIcon from '../components/icons/NtfyIcon.jsx';
 // drilling into its own config page. An alert fires to every provider that's enabled. State comes
 // from /notifications/status so each row can show On / Off / Not set up at a glance (see badgeFor).
 const PERI = 'var(--peri)';
-const BACK = { state: { from: { to: '/settings/push', label: 'Push notifications' } } };
+const BACK = { state: { from: { to: '/settings/integrations/notifications', label: 'Push notifications' } } };
 
 const PROVIDERS = [
-  { key: 'pushover', to: '/settings/push/pushover', Icon: PushoverIcon, label: 'Pushover', desc: 'Simple paid app; works on iOS. Snapshots included.' },
-  { key: 'firebase', to: '/settings/push/firebase', Icon: FirebaseIcon, label: 'Firebase', desc: 'Direct to the Nightlight Android app via your own project.' },
-  { key: 'gotify', to: '/settings/push/gotify', Icon: GotifyIcon, label: 'Gotify', desc: 'Self-hosted push server. Text alerts.' },
-  { key: 'ntfy', to: '/settings/push/ntfy', Icon: NtfyIcon, label: 'ntfy', desc: 'ntfy.sh or self-hosted. Snapshots included.' },
+  { key: 'pushover', to: '/settings/integrations/notifications/pushover', Icon: PushoverIcon, label: 'Pushover', desc: 'Simple paid app; works on iOS. Snapshots included.' },
+  { key: 'firebase', to: '/settings/integrations/notifications/firebase', Icon: FirebaseIcon, label: 'Firebase', desc: 'Direct to the Nightlight Android app via your own project.' },
+  { key: 'gotify', to: '/settings/integrations/notifications/gotify', Icon: GotifyIcon, label: 'Gotify', desc: 'Self-hosted push server. Text alerts.' },
+  { key: 'ntfy', to: '/settings/integrations/notifications/ntfy', Icon: NtfyIcon, label: 'ntfy', desc: 'ntfy.sh or self-hosted. Snapshots included.' },
 ];
 
 // Four answers, and no row is ever blank once the status request has settled (#385). It used to return
@@ -51,7 +51,7 @@ export default function SettingsPush() {
 
   return (
     <>
-      <AppHeader title="Push notifications" back={{ to: '/settings', label: 'Settings' }} />
+      <AppHeader title="Push notifications" back={{ to: '/settings/integrations', label: 'Integrations' }} />
       <main className="app-main">
         <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
           Get alerted on your phone when a camera with motion or sound detection is triggered, even when

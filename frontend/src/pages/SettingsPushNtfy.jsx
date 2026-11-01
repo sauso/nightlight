@@ -9,7 +9,7 @@ import UnsavedNotice from '../components/UnsavedNotice.jsx';
 import { loadDraft } from '../lib/formDraft.js';
 import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
 
-const BACK = { to: '/settings/push', label: 'Push notifications' };
+const BACK = { to: '/settings/integrations/notifications', label: 'Push notifications' };
 
 const INITIAL = { enabled: false, configured: false, server_url: 'https://ntfy.sh', topic: '', token_set: false, token_masked: '', username: '', password_set: false };
 

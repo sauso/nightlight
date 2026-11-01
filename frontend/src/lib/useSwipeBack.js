@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 
 // iOS-style "swipe right to go back a screen." A mostly-horizontal drag that starts in the left
 // half of the screen and travels far enough to the right pops one entry off the router history —
-// so Settings → MQTT, Family → Camera, etc. can be dismissed with a swipe as well as the nav-bar
+// so Settings → Integrations → MQTT, Family → Camera, etc. can be dismissed with a swipe as well as the nav-bar
 // back button. Deliberately NOT active on the root Live dashboard: there's nowhere sensible to go
 // back to (a back there would leave the app), and the tiles own their own touch gestures (zoom /
 // PTZ / the cog sheet's vertical swipe). Starting inside the left half — not at the very edge —

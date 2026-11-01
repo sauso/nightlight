@@ -69,6 +69,8 @@ mock.module('node:child_process', {
 });
 
 const { default: db } = await import('../src/db.js');
+const { _reset: resetAlertHold, _state: holdState } = await import('../src/lib/alertHold.js');
+const { _state: wakeState } = await import('../src/lib/wakeWatcher.js');
 const { logger } = await import('../src/lib/logger.js');
 const { _resetActivityTrackerForTests } = await import('../src/lib/activityTracker.js');
 const motion = await import('../src/lib/motionDetector.js');
@@ -510,6 +512,46 @@ describe('#454 the frame-diff alert cooldown across a detector relaunch', { conc
   });
 
   // ---- C10 ----
+  test('#919 held frame-diff motion does not stamp cooldown and fires after asleep', async (t) => {
+    const childId = uniq('hold-child');
+    makeChild(db, { id: childId, start: '11:00', end: '13:00' });
+    db.prepare('UPDATE children SET hold_alerts_until_asleep = 1 WHERE id = ?').run(childId);
+    const cam = camera(uniq('hold-motion'));
+    cam.child_id = childId;
+    resetAlertHold();
+    const g = await rig(t, cam);
+    db.prepare('UPDATE cameras SET child_id = ? WHERE id = ?').run(childId, cam.id);
+    g.burst(T0 + 3200);
+    assert.equal(await g.alerts(), 0);
+    assert.equal(stampOf(cam.id), undefined, 'held motion stamped the alert cooldown');
+    wakeState().set(cam.id, { asleep: true });
+    await g.relaunch();
+    g.burst(T0 + 10_200);
+    assert.equal(await g.alerts(), 1);
+    wakeState().delete(cam.id);
+  });
+
+  test('#919 snoozed frame-diff motion does not start the hold clock', async (t) => {
+    const childId = uniq('snoozed-child');
+    makeChild(db, { id: childId, start: '11:00', end: '13:00' });
+    db.prepare('UPDATE children SET hold_alerts_until_asleep = 1 WHERE id = ?').run(childId);
+    const cam = camera(uniq('snoozed-motion'), { child_id: childId });
+    resetAlertHold();
+    const g = await rig(t, cam);
+    db.prepare('UPDATE cameras SET child_id = ?, alerts_snoozed_until = ? WHERE id = ?')
+      .run(childId, T0 + 5 * 60_000, cam.id);
+    g.burst(T0 + 3200);
+    assert.equal(await g.alerts(), 0, 'snoozed motion alerted');
+    assert.equal(holdState().has(childId), false, 'snoozed motion started the hold clock');
+
+    db.prepare('UPDATE cameras SET alerts_snoozed_until = NULL WHERE id = ?').run(cam.id);
+    await g.relaunch();
+    const firstEligibleAt = T0 + 5 * 60_000 + 3200;
+    g.burst(firstEligibleAt);
+    assert.equal(await g.alerts(), 0, 'first eligible motion was not held');
+    assert.equal(holdState().get(childId)?.firstAt, firstEligibleAt, 'the hold clock did not start at the first eligible motion');
+  });
+
   test('#454 C10: an alert the quiet-hours schedule suppressed does not stamp, so one can fire promptly when the window opens (across a relaunch)', async (t) => {
     // Window 12:05-13:00 UTC (the app timezone defaults to UTC). The cooldown is an hour, so a stamp written at the
     // suppressed alert (12:00:03) would still be in force at 12:05.

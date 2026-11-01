@@ -84,7 +84,11 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 // 30 s would report a failure for work the server is still doing.
 export const SLOW_REQUEST_TIMEOUT_MS = 90000;
 
-async function request(method, url, body, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS } = {}) {
+// `as: 'text'` returns a successful body as the raw string instead of parsing it as JSON, for a file the server
+// streams (the ESPHome CSV export). It is an option on THIS function, not a second fetch helper, so the Bearer
+// header, the timeout, the late-answer guard and the 401 sign-out are the one copy of that code. An error answer
+// is still read as JSON, so a refusal ({ "error": "..." }) reads exactly as it does on every other call.
+async function request(method, url, body, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, as } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -109,13 +113,13 @@ async function request(method, url, body, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_
   timedOut.catch(() => {});
 
   try {
-    return await Promise.race([timedOut, exchange(method, url, body, headers, controller.signal)]);
+    return await Promise.race([timedOut, exchange(method, url, body, headers, controller.signal, as)]);
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function exchange(method, url, body, headers, signal) {
+async function exchange(method, url, body, headers, signal, as) {
   const res = await fetch(`/api${url}`, {
     method,
     headers,
@@ -147,6 +151,8 @@ async function exchange(method, url, body, headers, signal) {
 
   let data = null;
   const text = await res.text();
+  // A file is handed back untouched; trying to parse megabytes of CSV as JSON would only throw it away.
+  if (as === 'text' && res.ok) return text;
   if (text) {
     try {
       data = JSON.parse(text);
@@ -174,6 +180,8 @@ async function exchange(method, url, body, headers, signal) {
 export const api = {
   // `opts.timeoutMs` overrides the default for a call known to be slow (see SLOW_REQUEST_TIMEOUT_MS).
   get: (url, opts) => request('GET', url, undefined, opts),
+  // A GET whose successful answer is a file, as text (see `as` on request). Slow by default: a long export streams.
+  getText: (url, opts) => request('GET', url, undefined, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS, ...opts, as: 'text' }),
   post: (url, body, opts) => request('POST', url, body, opts),
   put: (url, body, opts) => request('PUT', url, body, opts),
   del: (url, opts) => request('DELETE', url, undefined, opts),

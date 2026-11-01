@@ -6,6 +6,7 @@ import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
+import ImagePreviewModal from '../components/ImagePreviewModal.jsx';
 import MediaPlayerModal from '../components/MediaPlayerModal.jsx';
 import RecomputeNight from '../components/RecomputeNight.jsx';
 import ReviewNightButton from '../components/ReviewNightButton.jsx';
@@ -189,16 +190,12 @@ export default function SleepDetail() {
         // An in-bed-only answer (2026-09-30) is an answer too, and gets a receipt of its own: the gate is
         // no longer "raw onset or wake present" (plan review R1).
         //
-        // The receipt reads back RESOLVED times: the parent's where they gave one, otherwise `computed`,
-        // the detector's own answer from this same response (what the review screen showed, and what this
-        // page's night is computed from). Without that an in-bed-only save read "asleep — to —".
+        // The receipt reads back ONLY what the parent answered (the review's own `true_*` times), never the
+        // detector's: the review now asks one question, and a wake-only answer must not be read back with an
+        // asleep time the person never gave (2026-10-27; see ReviewReceipt).
         const rev = r?.review;
         setReceipt(rev && (rev.true_onset_at || rev.true_wake_at || rev.true_in_bed_at || rev.nobody_in_bed)
-          ? {
-            ...rev,
-            shown_onset_at: rev.true_onset_at || r.computed?.onset_at || null,
-            shown_wake_at: rev.true_wake_at || r.computed?.wake_at || null,
-          }
+          ? rev
           : null);
       })
       .catch(() => { /* the receipt is confirmation, not function — never block the night on it */ });
@@ -250,7 +247,7 @@ export default function SleepDetail() {
         </div>
 
         {receipt && (
-          <ReviewReceipt onsetAt={receipt.shown_onset_at} wakeAt={receipt.shown_wake_at} inBedAt={receipt.true_in_bed_at}
+          <ReviewReceipt onsetAt={receipt.true_onset_at} wakeAt={receipt.true_wake_at} inBedAt={receipt.true_in_bed_at}
             nobodyInBed={!!receipt.nobody_in_bed}
             fmtTime={fmtTime} onOpen={() => navigate(`/children/${id}/review/${date}`)} />
         )}
@@ -344,6 +341,9 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
   // 2-min live refresh of `night` without tearing the modal down mid-watch.
   const [clipFor, setClipFor] = useState(null);
   const [wakeClip, setWakeClip] = useState(null);
+  // The saved bed-transition frame open in the viewer (or null), kept as the frame itself and not an index so it
+  // also survives the 2-minute refresh (#907).
+  const [frameFor, setFrameFor] = useState(null);
   // #361 PR 4a: the page's settings view travels into every Recompute below, so its re-reads keep (or, after a
   // save, reset) the view the page is in.
   const viewProps = { settingsView, onSettingsViewChange: onSettingsView };
@@ -413,8 +413,8 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
             time turns it into a scored night (sleepReviews.js, asScoredFromEmpty). Before #355 this was shown
             only on a `corrected` night, so that correction was unreachable from the app (PR #721 review): the
             morning card never asks about an empty night (pendingReview offers `ok` nights only, on purpose),
-            and this was the one other way in. The review page opens on "Add the times" for a night with no
-            times, so both are offered. Same rule as on an `ok` night: not while the night is in progress
+            and this was the one other way in. The review page opens on its time field with the bedtime
+            disclosure already open for a night with no times, so both are offered. Same rule as on an `ok` night: not while the night is in progress
             (nothing is promoted until it is over). Deliberately not added to a morning prompt for every
             empty night. */}
         {!night.in_progress && (
@@ -454,6 +454,8 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
   const hasGap = (night.segments || []).some((s) => s.state === 'gap');
   const alerts = night.alerts || [];
   const wakeClips = night.wakeClips || [];
+  // #907. Absent on a server from before the field existed (and on a night with no camera): no buttons, no error.
+  const frames = night.transition_frames || [];
   // Coverage is measured against elapsed time so far for a live night, not the full window.
   const covEnd = night.in_progress && night.as_of ? night.as_of : night.window_end;
   const covPct = Math.round((night.coverage_minutes / Math.max(1, Math.round((utcMs(covEnd) - utcMs(night.window_start)) / 60000))) * 100);
@@ -477,6 +479,7 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
             Measured from <strong>{night.analysis_camera_name}</strong>
           </div>
         )}
+        <FaultyMicNote night={night} />
         {/* The way into a review for any night, not just the one the card is offering. Without it a
             mistake is permanent. Its own component because `navigate` belongs to whichever component
             calls the hook — inline here it was out of scope and the button silently did nothing. */}
@@ -524,25 +527,26 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
       {visits.length > 0 && (
         <div className="card">
           <div className="sleep-detail__section-title"><DoorOpen size={15} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 6 }} />Room activity · {visits.length}</div>
-          <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement the camera saw away from the bed. Before your child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.</div>
+          <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement the camera saw away from the bed. Before your child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.{frames.length > 0 && ' Where the camera saved a frame when it decided the bed was entered or left, the row opens to show it. Older nights have none.'}</div>
           <ul className="sleep-wakes">
-            {visits.map((v, i) => {
-              const isOut = v.type === 'child_out';
-              return (
-                <li key={i} className="sleep-wakes__row">
-                  <span className="sleep-wakes__time">{fmtTime(v.start_at)}{v.minutes > 1 ? ` – ${fmtTime(v.end_at)}` : ''}</span>
-                  <span className="sleep-visit-right">
-                    <span className={`sleep-visit-tag${isOut ? ' sleep-visit-tag--out' : ''}`}>{isOut ? 'Out of bed' : 'Movement outside the bed'}</span>
-                    <span className={`sleep-wakes__dur ${isOut ? 'sleep-wakes__dur--out' : 'sleep-wakes__dur--visit'}`}>{fmtDur(v.minutes)}</span>
-                  </span>
-                </li>
-              );
-            })}
+            {/* Keyed by when the row starts, not its position: each row keeps its own open/closed state, and the live
+                night is re-read every two minutes, so a row inserted before an open one must not hand it over. */}
+            {visits.map((v) => (
+              <VisitItem key={`${v.start_at}|${v.type}`} visit={v} frames={framesForVisit(frames, v)} fmtTime={fmtTime} onShowFrame={setFrameFor} />
+            ))}
           </ul>
         </div>
       )}
 
       {clipFor && <ClipPlayerModal ev={clipFor} onClose={() => setClipFor(null)} />}
+      {frameFor && (
+        <ImagePreviewModal
+          title={`Bed transition · ${fmtTime(frameFor.at)}`}
+          imagePath={`/cameras/bed-transitions/${frameFor.id}/snapshot`}
+          meta={`${frameFor.type === 'out_of_bed' ? 'Got out of bed' : 'Got into bed'} · the frame the camera saved when it decided this`}
+          onClose={() => setFrameFor(null)}
+        />
+      )}
       {wakeClip && (
         <MediaPlayerModal
           title={`Wake-up · ${fmtTime(wakeClip.started_at)}`}
@@ -605,6 +609,62 @@ function WakeItem({ wake, hits, clip, fmtTime, onPlay, onPlayWake }) {
   );
 }
 
+// One Room activity row. Same shape as a wake-up row (a head that expands, the detail underneath), because
+// that is where people already look for "what did the camera see here": the first version put one picture
+// button per frame in the row's header, and with two or three frames plus the tag and the duration the header
+// no longer fitted a phone (owner's screenshot, 2026-10-31).
+//
+// Expandable only when a saved frame lies near the row; a row with none is a plain line, with no arrow and no
+// empty state. It lists ALL the frames near it, never one picked for the row: a row can span two bed events,
+// and choosing between them here would hide the very frame someone is looking for. The head may wrap onto a
+// second line on a narrow screen rather than push the page sideways.
+export function VisitItem({ visit, frames, fmtTime, onShowFrame }) {
+  const [open, setOpen] = useState(false);
+  const expandable = frames.length > 0;
+  const isOut = visit.type === 'child_out';
+  const head = (
+    <>
+      <span className="sleep-wakes__time">{fmtTime(visit.start_at)}{visit.minutes > 1 ? ` – ${fmtTime(visit.end_at)}` : ''}</span>
+      <span className="sleep-visit-right">
+        <span className={`sleep-visit-tag${isOut ? ' sleep-visit-tag--out' : ''}`}>{isOut ? 'Out of bed' : 'Movement outside the bed'}</span>
+        <span className={`sleep-wakes__dur ${isOut ? 'sleep-wakes__dur--out' : 'sleep-wakes__dur--visit'}`}>{fmtDur(visit.minutes)}</span>
+        {expandable && <ChevronDown size={16} className={`sleep-wakes__chev${open ? ' is-open' : ''}`} aria-hidden="true" />}
+      </span>
+    </>
+  );
+  return (
+    <li className={`sleep-wakes__item${expandable ? ' sleep-wakes__item--expandable' : ''}`}>
+      {expandable ? (
+        <button type="button" className="sleep-wakes__head sleep-wakes__head--visit" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          {head}
+        </button>
+      ) : (
+        <div className="sleep-wakes__head sleep-wakes__head--visit">{head}</div>
+      )}
+      {/* `expandable` too: a refresh can leave an open row with no frames, and it must not keep an empty detail box. */}
+      {open && expandable && (
+        <ul className="sleep-wakes__alerts">
+          {frames.map((f) => {
+            const what = f.type === 'out_of_bed' ? 'Got out of bed' : 'Got into bed';
+            return (
+              <li key={f.id} className="sleep-wakes__alert">
+                <button type="button" className="sleep-wakes__thumbwrap" onClick={() => onShowFrame(f)}
+                  aria-label={`Show the frame from ${fmtTime(f.at)} (${what.toLowerCase()})`}>
+                  <img className="sleep-wakes__thumb sleep-wakes__thumb--frame" src={api.url(`/cameras/bed-transitions/${f.id}/snapshot`)} alt="" loading="lazy" />
+                </button>
+                <div className="sleep-wakes__alert-body">
+                  <span className="sleep-wakes__alert-label">{what}</span>
+                  <span className="sleep-wakes__alert-meta">{fmtTime(f.at)} · the frame the camera saved when it decided this</span>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </li>
+  );
+}
+
 // A single correlated alert inside an expanded wake. Shows the snapshot thumbnail (falling back to a
 // type icon) + label + time/camera/detail; when a clip was recorded (clip_status === 'ready') the
 // thumbnail becomes a play button that opens the same clip player used in the alert feed.
@@ -641,6 +701,23 @@ function Stat({ label, value }) {
     <div className="sleep-stat">
       <div className="sleep-stat__label">{label}</div>
       <div className="sleep-stat__value">{value}</div>
+    </div>
+  );
+}
+
+// #904: the faulty-microphone guard (backend lib/micGuard.js) ignored this many minutes of the night's sound, so the
+// night does not count them as awake time; a parent seeing "asleep" over a night the microphone was banging needs to
+// know why. `sound_discounted_minutes` is an ADDED key: a server from before it (no key), an unscored night (null)
+// and an ordinary night (0) all show nothing. The detail page only: the child's card and the morning push read the
+// stored night, which has no such column (docs/sleep-tracking.md, "A microphone that looks faulty"). On a night a
+// parent corrected, the count stays the detector's own (over the span it worked out, see applyCorrection), so the line
+// is about the microphone during that night, not about the corrected times shown: the wording claims no span.
+function FaultyMicNote({ night }) {
+  const minutes = night.sound_discounted_minutes;
+  if (!(typeof minutes === 'number' && minutes > 0)) return null;
+  return (
+    <div className="sleep-detail__source">
+      The microphone looked faulty for {fmtDurBig(minutes)}, so its sound was not counted as awake time. Movement still was.
     </div>
   );
 }
@@ -972,6 +1049,31 @@ function WakeClipRow({ clip, fmtTime, onPlay }) {
       </div>
     </li>
   );
+}
+
+// #907. The saved bed-transition frames that belong on one Room activity row: those whose time falls within
+// [start_at - 60 s, end_at + 60 s], both ends INCLUSIVE, ascending. Returns ALL matches (a row spanning two
+// frames gets two) and [] for a row with none.
+//
+// By TIME, not by transition id, because a row is a block of movement and the night's transitions carry no link
+// to it: the frame that matters most is often one the analysis did NOT adopt (a weak burst taken as the wake,
+// the true exit later), so no id on the adopted pair could point at it. The minute of slack is because a row is
+// drawn to whole minutes (end_at is the minute AFTER the last active one) while a frame keeps its real second.
+// `end_at` falls back to `start_at` for a row without one. The server lists only frames within this same slack
+// of the drawn range (FRAME_ROW_SLACK_MS in backend/src/lib/bedTransitions.js): change both together.
+// A known limit, stated in the docs: a row near a frame always shows it, even when the frame belongs to a
+// different cause.
+export const FRAME_MATCH_SLACK_MS = 60000;
+export function framesForVisit(frames, visit) {
+  if (!Array.isArray(frames) || !visit) return [];
+  const s = utcMs(visit.start_at) - FRAME_MATCH_SLACK_MS;
+  const e = utcMs(visit.end_at || visit.start_at) + FRAME_MATCH_SLACK_MS;
+  return frames
+    .filter((f) => {
+      const t = utcMs(f.at);
+      return t >= s && t <= e;
+    })
+    .sort((a, b) => utcMs(a.at) - utcMs(b.at));
 }
 
 // The automatic clip belonging to a wake, if one was captured. Matched on time like the alerts are:

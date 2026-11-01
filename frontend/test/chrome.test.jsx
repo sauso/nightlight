@@ -62,7 +62,7 @@ describe('NavBar', () => {
   });
 
   test('Settings owns Account and About as well as its own sub-pages', () => {
-    for (const route of ['/settings', '/settings/push/ntfy', '/account', '/about']) {
+    for (const route of ['/settings', '/settings/integrations/notifications/ntfy', '/account', '/about']) {
       const { unmount } = at(route);
       expect(tab('Settings')).toHaveClass('active');
       unmount();
