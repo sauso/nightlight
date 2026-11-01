@@ -644,7 +644,7 @@ export async function extractClip(
   // #932: this generic cutter removes an existing output name before encoding. A replayed alert id
   // cannot overwrite a protected clip, even when extractClip is called directly.
   const protectedOutput = () => /^\d+$/.test(String(outBase)) && !!db.prepare(
-    'SELECT 1 FROM detection_events WHERE id = ? AND camera_id = ? AND protected = 1'
+    'SELECT 1 FROM detection_events WHERE id = ? AND camera_id = ? AND protected <> 0'
   ).get(Number(outBase), cameraId);
   if (protectedOutput()) {
     if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${outBase} skipped`);

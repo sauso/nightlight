@@ -13683,7 +13683,7 @@
   {
     "label": "W5 role UI M14: a 403 on a clip or recording delete shows the generic 'try again' instead of the server's reason",
     "file": "frontend/src/components/ClipPlayerModal.jsx",
-    "find": "  return err?.status === 403 && err.message ? err.message : fallback;",
+    "find": "  return (err?.status === 403 || err?.status === 409) && err.message ? err.message : fallback;",
     "replace": "  return fallback;",
     "expect": "killed",
     "tests": ["mediaCards.test.jsx"],
@@ -24753,7 +24753,7 @@
   {
     "label": "#932 clear history removes protected snapshots",
     "file": "backend/src/lib/detectionEvents.js",
-    "find": "if (!id || !db.prepare('SELECT 1 FROM detection_events WHERE id = ? AND protected = 1').get(id)) {",
+    "find": "if (!id || !db.prepare('SELECT 1 FROM detection_events WHERE id = ? AND protected <> 0').get(id)) {",
     "replace": "if (true) {",
     "expect": "killed",
     "tests": ["protected-clips.test.js"],
@@ -24794,5 +24794,140 @@
     "expect": "killed",
     "tests": ["clips-delete-route.test.js"],
     "namePattern": "bulk delete skips a protected clip"
+  },
+  {
+    "label": "#932 aged snapshot selection includes protected rows",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "SELECT id FROM detection_events WHERE protected = 0 AND created_at < datetime('now', ?) AND snapshot = 1",
+    "replace": "SELECT id FROM detection_events WHERE created_at < datetime('now', ?) AND snapshot = 1",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "backstop age keeps protected row"
+  },
+  {
+    "label": "#932 count snapshot selection includes protected rows",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "WHERE protected = 0 AND snapshot = 1 AND id NOT IN (",
+    "replace": "WHERE snapshot = 1 AND id NOT IN (",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "backstop count excludes protected rows"
+  },
+  {
+    "label": "#932 count clip selection includes protected rows",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "WHERE protected = 0 AND clip_path IS NOT NULL AND id NOT IN (",
+    "replace": "WHERE clip_path IS NOT NULL AND id NOT IN (",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "backstop count excludes protected rows"
+  },
+  {
+    "label": "#932 aged clip selection includes protected rows",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "SELECT clip_path FROM detection_events WHERE protected = 0 AND created_at < datetime('now', ?) AND clip_path IS NOT NULL",
+    "replace": "SELECT clip_path FROM detection_events WHERE created_at < datetime('now', ?) AND clip_path IS NOT NULL",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "backstop age keeps protected row"
+  },
+  {
+    "label": "#932 count delete population includes protected ids",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "DELETE FROM detection_events WHERE protected = 0 AND id NOT IN (\n     SELECT id FROM detection_events WHERE protected = 0 ORDER BY id DESC LIMIT ?",
+    "replace": "DELETE FROM detection_events WHERE protected = 0 AND id NOT IN (\n     SELECT id FROM detection_events ORDER BY id DESC LIMIT ?",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "count backstop counts only unprotected rows"
+  },
+  {
+    "label": "#932 count snapshot population includes protected ids",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "SELECT id FROM detection_events WHERE protected = 0 AND snapshot = 1 AND id NOT IN (\n     SELECT id FROM detection_events WHERE protected = 0 ORDER BY id DESC LIMIT ?",
+    "replace": "SELECT id FROM detection_events WHERE protected = 0 AND snapshot = 1 AND id NOT IN (\n     SELECT id FROM detection_events ORDER BY id DESC LIMIT ?",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "count backstop counts only unprotected rows"
+  },
+  {
+    "label": "#932 count clip population includes protected ids",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "SELECT clip_path FROM detection_events WHERE protected = 0 AND clip_path IS NOT NULL AND id NOT IN (\n     SELECT id FROM detection_events WHERE protected = 0 ORDER BY id DESC LIMIT ?",
+    "replace": "SELECT clip_path FROM detection_events WHERE protected = 0 AND clip_path IS NOT NULL AND id NOT IN (\n     SELECT id FROM detection_events ORDER BY id DESC LIMIT ?",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "count backstop counts only unprotected rows"
+  },
+  {
+    "label": "#932 capture enqueue refuses protected event",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "if (isProtectedEvent(eventId)) {\n    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${eventId} skipped`);\n    return;\n  }",
+    "replace": "if (false) {\n    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${eventId} skipped`);\n    return;\n  }",
+    "expect": "killed",
+    "tests": ["clip-capture.test.js"],
+    "namePattern": "a protected event is never marked pending"
+  },
+  {
+    "label": "#932 capture queued job rechecks protection",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "if (isProtectedEvent(eventId)) {\n        if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${eventId} skipped`);\n        return;\n      }",
+    "replace": "if (false) {\n        if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${eventId} skipped`);\n        return;\n      }",
+    "expect": "killed",
+    "tests": ["clip-capture.test.js"],
+    "namePattern": "a queued event protected before its job starts"
+  },
+  {
+    "label": "#932 extraction rechecks protection after settle",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "if (protectedOutput()) {\n    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${outBase} skipped`);\n    throw new Error('protected clip output');\n  }\n\n  // concat demuxer list.",
+    "replace": "if (false) {\n    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${outBase} skipped`);\n    throw new Error('protected clip output');\n  }\n\n  // concat demuxer list.",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js"],
+    "namePattern": "a clip protected during the settle wait"
+  },
+  {
+    "label": "#932 protected alert list filters ordinary rows",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "WHERE protected <> 0 AND clip_status = 'ready' AND clip_path IS NOT NULL\n                      ORDER BY id DESC",
+    "replace": "WHERE clip_status = 'ready' AND clip_path IS NOT NULL\n                      ORDER BY id DESC",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "protected list and storage counters exclude ordinary"
+  },
+  {
+    "label": "#932 protected wake list filters ordinary rows",
+    "file": "backend/src/lib/recordings.js",
+    "find": "r.status = 'ready' AND r.protected <> 0",
+    "replace": "r.status = 'ready'",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "protected list and storage counters exclude ordinary"
+  },
+  {
+    "label": "#932 protected wake storage excludes ordinary rows",
+    "file": "backend/src/lib/clipStorage.js",
+    "find": "kind='wake' AND protected<>0",
+    "replace": "kind='wake'",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "protected list and storage counters exclude ordinary"
+  },
+  {
+    "label": "#932 nonzero protected alert blocks single deletion",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "return !!db.prepare('SELECT protected FROM detection_events WHERE id = ?').get(id)?.protected;",
+    "replace": "return db.prepare('SELECT protected FROM detection_events WHERE id = ?').get(id)?.protected === 1;",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "nonzero protected flags consistently survive"
+  },
+  {
+    "label": "#932 malformed bulk id cannot abort valid deletion",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (!(typeof id === 'string' || (typeof id === 'number' && Number.isFinite(id)))) continue;",
+    "replace": "if (false) continue;",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "bulk delete ignores malformed ids"
   }
 ]

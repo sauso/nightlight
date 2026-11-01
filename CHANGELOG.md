@@ -24,6 +24,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- #932 Protected clips with missing video files can be unprotected and removed. The clip player shows Delete when its caller offers it, and Sleep Detail keeps protection badges in step with changes.
+
 - The Recordings icon now lines up with its heading on a child's page.
 
 - Long back-button names now end with an ellipsis so page titles stay on one line. The Timelapse, Recordings and Room climate headings have a little more space below them.

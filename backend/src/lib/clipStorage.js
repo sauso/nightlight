@@ -170,7 +170,7 @@ export function clipStorageStats() {
   const manual = db
     .prepare("SELECT COUNT(*) n, COALESCE(SUM(bytes),0) b FROM recordings WHERE status='ready' AND kind='manual'")
     .get() || { n: 0, b: 0 };
-  const protectedWake = db.prepare("SELECT COUNT(*) n, COALESCE(SUM(bytes),0) b FROM recordings WHERE status='ready' AND kind='wake' AND protected=1").get();
+  const protectedWake = db.prepare("SELECT COUNT(*) n, COALESCE(SUM(bytes),0) b FROM recordings WHERE status='ready' AND kind='wake' AND protected<>0").get();
   return {
     recordingCount: rec.n,
     recordingBytes: rec.b,

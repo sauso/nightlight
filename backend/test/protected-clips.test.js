@@ -22,6 +22,11 @@ const root = path.resolve(CLIPS_DIR);
 const GB = 1024 ** 3;
 const row = (id) => db.prepare('SELECT * FROM detection_events WHERE id = ?').get(id);
 const rec = (id) => db.prepare('SELECT * FROM recordings WHERE id = ?').get(id);
+async function waitForMissing(file) {
+  const deadline = Date.now() + 1000;
+  while (fs.existsSync(file) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(fs.existsSync(file), false, `snapshot still exists: ${file}`);
+}
 let cameras;
 let recordings;
 let settings;
@@ -118,13 +123,14 @@ test('cap total and eviction exclude protected bytes and terminate when only pro
   assert.ok(fs.existsSync(smallLocked.file));
 });
 
-test('backstop age keeps protected row, MP4, thumbnail and snapshot', () => {
+test('backstop age keeps protected row, MP4, thumbnail and snapshot', async () => {
   const open = alert('open', { age: 31 });
   const locked = alert('locked', { age: 31, protectedClip: true });
   const young = alert('young', { age: 1 });
   const youngLocked = alert('young-locked', { age: 1, protectedClip: true });
   ev.recordDetectionEvent('cam-a', 'Test camera', ev.ALERT.MOTION);
   assert.equal(row(open.id), undefined);
+  await waitForMissing(open.snapshot);
   assert.equal(fs.existsSync(open.file), false);
   assert.equal(fs.existsSync(open.thumb), false);
   assert.equal(row(locked.id).protected, 1);
@@ -132,15 +138,30 @@ test('backstop age keeps protected row, MP4, thumbnail and snapshot', () => {
     youngLocked.file, youngLocked.thumb, youngLocked.snapshot]) assert.ok(fs.existsSync(p));
 });
 
-test('backstop count excludes protected rows from the newest 2000', () => {
+test('backstop count excludes protected rows from the newest 2000', async () => {
   const open = alert('open');
   const locked = alert('locked', { protectedClip: true });
   const insert = db.prepare("INSERT INTO detection_events (camera_id, camera_name, type) VALUES ('cam-a', 'Test camera', 'motion')");
   db.transaction(() => { for (let i = 0; i < 1999; i++) insert.run(); })();
   ev.recordDetectionEvent('cam-a', 'Test camera', ev.ALERT.MOTION);
   assert.equal(row(open.id), undefined);
+  await waitForMissing(open.snapshot);
   assert.equal(row(locked.id).protected, 1);
   for (const p of [locked.file, locked.thumb, locked.snapshot]) assert.ok(fs.existsSync(p));
+});
+
+test('count backstop counts only unprotected rows in all three inner populations', async () => {
+  const beyond = alert('beyond');
+  const within = alert('within');
+  const locked = alert('locked', { protectedClip: true });
+  const insert = db.prepare("INSERT INTO detection_events (camera_id, camera_name, type) VALUES ('cam-a', 'Test camera', 'motion')");
+  db.transaction(() => { for (let i = 0; i < 1998; i++) insert.run(); })();
+  ev.recordDetectionEvent('cam-a', 'Test camera', ev.ALERT.MOTION);
+  assert.equal(row(beyond.id), undefined);
+  await waitForMissing(beyond.snapshot);
+  assert.equal(fs.existsSync(beyond.file), false);
+  assert.ok(row(within.id), 'the 2000th unprotected row was removed');
+  for (const p of [within.file, within.snapshot, locked.file, locked.snapshot]) assert.ok(fs.existsSync(p));
 });
 
 test('clear history retains protected alert and snapshot', async () => {
@@ -187,6 +208,71 @@ test('storage counts only unprotected alert bytes in the cap and reports protect
     'protectedAlertClips', 'protectedAlertBytes', 'protectedWakeClips', 'protectedWakeBytes']) assert.ok(key in response.body);
   assert.equal(response.body.wakeClips.count, 1);
   assert.equal(response.body.protectedWakeBytes, 123);
+});
+
+test('protected list and storage counters exclude ordinary alert and wake clips', async () => {
+  const plainAlert = alert('plain', { bytes: 100 });
+  const lockedAlert = alert('locked', { bytes: 200, protectedClip: true });
+  const plainWake = wake('plain');
+  const lockedWake = wake('locked', { protectedClip: true });
+  const result = await call(`${cameras.url}/api/cameras/clips/protected`, { token: admin });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.alerts.map(({ id }) => id), [lockedAlert.id]);
+  assert.deepEqual(result.body.wake.map(({ id }) => id), [lockedWake.id]);
+  const stats = clipStorageStats();
+  assert.equal(stats.protectedAlertClips, 1);
+  assert.equal(stats.protectedAlertBytes, 200);
+  assert.equal(stats.protectedWakeClips, 1);
+  assert.equal(stats.protectedWakeBytes, 123);
+  assert.ok(row(plainAlert.id));
+  assert.ok(rec(plainWake.id));
+});
+
+test('a missing MP4 can be unprotected and then removed for both clip kinds', async () => {
+  const a = alert('missing-alert', { protectedClip: true });
+  const w = wake('missing-wake', { protectedClip: true });
+  for (const [base, id, file, deletion] of [
+    [`${cameras.url}/api/cameras/alerts`, a.id, a.file, `${cameras.url}/api/cameras/alerts/${a.id}/clip`],
+    [`${recordings.url}/api/recordings`, w.id, w.file, `${recordings.url}/api/recordings/${w.id}`],
+  ]) {
+    fs.rmSync(file);
+    const url = `${base}/${id}/protected`;
+    assert.equal((await call(url, { method: 'PUT', token: admin, body: { protected: true } })).status, 404);
+    assert.deepEqual((await call(url, { method: 'PUT', token: admin, body: { protected: false } })).body, { protected: false });
+    assert.equal((await call(deletion, { method: 'DELETE', token: admin })).status, base.includes('/alerts') ? 204 : 200);
+  }
+  assert.equal(row(a.id).clip_path, null);
+  assert.equal(rec(w.id), undefined);
+});
+
+test('nonzero protected flags consistently survive sweep, single and bulk delete and appear in the list', async () => {
+  const a = alert('odd-alert', { age: 20, protectedClip: true });
+  const w = wake('odd-wake', { age: 20, protectedClip: true });
+  db.prepare('UPDATE detection_events SET protected = 2 WHERE id = ?').run(a.id);
+  db.prepare('UPDATE recordings SET protected = 2 WHERE id = ?').run(w.id);
+  assert.equal((await call(`${cameras.url}/api/cameras/alerts/${a.id}/clip`, { method: 'DELETE', token: admin })).status, 409);
+  assert.equal((await call(`${recordings.url}/api/recordings/${w.id}`, { method: 'DELETE', token: admin })).status, 409);
+  assert.deepEqual((await call(`${cameras.url}/api/cameras/clips/delete`, { method: 'POST', token: admin, body: { ids: [a.id] } })).body,
+    { deleted: 0, skipped_protected: 1 });
+  sweepClips();
+  pruneWakeClips();
+  assert.ok(fs.existsSync(a.file));
+  assert.ok(fs.existsSync(w.file));
+  const list = (await call(`${cameras.url}/api/cameras/clips/protected`, { token: admin })).body;
+  assert.deepEqual(list.alerts.map(({ id }) => id), [a.id]);
+  assert.deepEqual(list.wake.map(({ id }) => id), [w.id]);
+  assert.equal(clipStorageStats().protectedAlertClips, 1);
+  assert.equal(clipStorageStats().protectedWakeClips, 1);
+  assert.equal(protectedWakeClipStats().count, 1);
+});
+
+test('bulk delete ignores malformed ids and still deletes valid clips', async () => {
+  const a = alert('valid');
+  const result = await call(`${cameras.url}/api/cameras/clips/delete`,
+    { method: 'POST', token: admin, body: { ids: [{}, a.id, null, Number.MAX_VALUE] } });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, { deleted: 1, skipped_protected: 0 });
+  assert.equal(row(a.id).clip_path, null);
 });
 
 test('admin protect routes validate role, boolean, ready kind and existing file; direct deletes return 409', async () => {
@@ -261,6 +347,7 @@ test('replayed extraction id leaves a protected clip and thumbnail untouched', a
   fs.renameSync(locked.file, output);
   fs.renameSync(locked.thumb, thumb);
   db.prepare('UPDATE detection_events SET clip_path = ? WHERE id = ?').run(path.join('cam-a', `${locked.id}.mp4`), locked.id);
+  db.prepare('UPDATE detection_events SET protected = 2 WHERE id = ?').run(locked.id);
   enqueueClip({ id: 'cam-a', name: 'Test camera', detect_record_clips: 1 }, locked.id);
   assert.equal(row(locked.id).clip_status, 'ready');
   await assert.rejects(extractClip('cam-a', { outBase: String(locked.id), settleMs: 0 }), /protected clip output/);

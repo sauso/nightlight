@@ -507,8 +507,8 @@ const GOLDEN_MOTION = {
     { camera_id: 'cam-golden-motion', type: 'into_bed', peak: 0.333, snapshot: 0, verdict: null, out_peak: 0.222, out_frames: 9, wrong_reason: null },
   ],
   events: [
-    { camera_id: 'cam-golden-motion', camera_name: 'Golden Motion Cam', type: 'motion', detail: '33.3% of zone', snapshot: 0, clip_status: null, clip_path: null, clip_duration_s: null, clip_bytes: null },
-    { camera_id: 'cam-golden-motion', camera_name: 'Golden Motion Cam', type: 'motion', detail: '33.3% of zone', snapshot: 0, clip_status: null, clip_path: null, clip_duration_s: null, clip_bytes: null },
+    { camera_id: 'cam-golden-motion', camera_name: 'Golden Motion Cam', type: 'motion', detail: '33.3% of zone', snapshot: 0, clip_status: null, clip_path: null, clip_duration_s: null, clip_bytes: null, protected: 0 },
+    { camera_id: 'cam-golden-motion', camera_name: 'Golden Motion Cam', type: 'motion', detail: '33.3% of zone', snapshot: 0, clip_status: null, clip_path: null, clip_duration_s: null, clip_bytes: null, protected: 0 },
     // (#454: there was a third row here, generation 2's alert at 126 s; the cooldown now suppresses it.)
   ],
   log: [
@@ -574,7 +574,7 @@ const GOLDEN_SOUND = {
     { camera_id: 'cam-golden-sound', bucket_start: '2026-09-25 12:01:00', motion_level: null, motion_peak: null, sound_level: 1.1519717499111992, sound_peak: 23.9812664492313, motion_frames: 0, sound_windows: 300, motion_out_level: null, motion_out_peak: null, sound_p75: 0, sound_p90: 0, sound_sd: 5.022056490207111 },
   ],
   events: [
-    { camera_id: 'cam-golden-sound', camera_name: 'Golden Sound Cam', type: 'sound', detail: '+12 dB over ambient', snapshot: 0, clip_status: null, clip_path: null, clip_duration_s: null, clip_bytes: null },
+    { camera_id: 'cam-golden-sound', camera_name: 'Golden Sound Cam', type: 'sound', detail: '+12 dB over ambient', snapshot: 0, clip_status: null, clip_path: null, clip_duration_s: null, clip_bytes: null, protected: 0 },
   ],
   log: [
     '[INFO] [sound] watching "Golden Sound Cam" — fires at +11 dB over ambient, sustained 4s',

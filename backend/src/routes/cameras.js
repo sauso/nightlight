@@ -744,6 +744,8 @@ router.post('/clips/delete', requireAdmin, (req, res) => {
   let deleted = 0;
   let skipped_protected = 0;
   for (const id of ids) {
+    // Ignore malformed entries without aborting the valid members of a bulk request (#932).
+    if (!(typeof id === 'string' || (typeof id === 'number' && Number.isFinite(id)))) continue;
     // #932: a mixed selection still deletes its unprotected entries.
     if (isProtectedEvent(id)) { skipped_protected++; continue; }
     if (deleteClipForEvent(id)) deleted++;

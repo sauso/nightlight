@@ -452,13 +452,14 @@ export function listProtectedWakeClips() {
                        FROM recordings r
                        LEFT JOIN cameras c ON c.id = r.camera_id
                        LEFT JOIN children ch ON ch.id = r.child_id
-                      WHERE r.kind = 'wake' AND r.status = 'ready' AND r.protected = 1
+                      WHERE r.kind = 'wake' AND r.status = 'ready' AND r.protected <> 0
                       ORDER BY r.created_at DESC, r.id DESC`).all();
 }
 
 export function setWakeClipProtected(id, value) {
   const row = db.prepare("SELECT id FROM recordings WHERE id = ? AND kind = 'wake' AND status = 'ready'").get(id);
-  if (!row || !getRecordingVideoFile(id)) return false;
+  // Unprotecting must remain possible after the MP4 disappears (#932).
+  if (!row || (value && !getRecordingVideoFile(id))) return false;
   return db.prepare("UPDATE recordings SET protected = ? WHERE id = ? AND kind = 'wake' AND status = 'ready'")
     .run(Number(value), id).changes > 0;
 }
@@ -495,7 +496,7 @@ export function wakeClipStats() {
 
 export function protectedWakeClipStats() {
   return db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(bytes), 0) AS bytes
-                       FROM recordings WHERE kind = 'wake' AND status = 'ready' AND protected = 1`).get();
+                       FROM recordings WHERE kind = 'wake' AND status = 'ready' AND protected <> 0`).get();
 }
 
 // The Recordings card on a child's page.

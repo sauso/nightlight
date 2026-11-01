@@ -93,8 +93,8 @@ export default function ClipPlayerModal({ ev, onClose, onDeleted, onProtectedCha
       afterMeta={<ProtectionNote protected={isProtected} error={protectError} />}
       onClose={close}
       headerAction={
-        isAdmin ? <span className="clip-player__actions">
-          <ProtectButton protected={isProtected} busy={protectBusy} onClick={toggleProtection} />
+        (isAdmin || onDeleted) ? <span className="clip-player__actions">
+          {isAdmin && <ProtectButton protected={isProtected} busy={protectBusy} onClick={toggleProtection} />}
           {onDeleted && <button type="button" className="icon-btn icon-btn--danger" aria-label="Delete clip"
             title={isProtected ? 'Unprotect to delete' : 'Delete clip'}
             onClick={() => setDel('confirm')} disabled={isProtected || del === 'deleting'}>

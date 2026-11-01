@@ -486,6 +486,7 @@ timelapses cannot be protected. Protected clips remain in their own list even wh
 for the recent lists. Protect a clip before cleanup removes it: protection cannot restore a deleted
 clip. Unprotecting one that is already older than your retention setting lets the next cleanup remove
 it, within 15 minutes for alert clips; wake clips wait for their own cleanup schedule.
+If a protected clip's video file has gone missing, an admin can still unprotect its entry and remove it.
 The **Clear recent alerts** confirmation says protected alerts stay. After clearing, they still appear
 in the alert list.
 

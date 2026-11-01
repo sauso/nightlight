@@ -39,11 +39,11 @@ describe('alert clip player', () => {
     expect(screen.queryByText(/Protected: kept until you unprotect it/)).toBeNull();
   });
 
-  test('a caregiver sees the protected badge and no change or delete controls', () => {
+  test('a caregiver cannot change protection but a caller can offer delete', () => {
     renderAsCaregiver(<ClipPlayerModal ev={alert} onDeleted={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByLabelText('Protected')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Unprotect this clip' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Delete clip' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Delete clip' })).toBeDisabled();
   });
 
   test('protection failure shows the server sentence and keeps the clip unprotected', async () => {
@@ -185,6 +185,38 @@ test('Sleep Detail shows the wake lock and lets an admin unprotect it without a 
   await user.click(screen.getByRole('button', { name: 'Unprotect this clip' }));
   await waitFor(() => expect(api.put).toHaveBeenCalledWith('/recordings/w1/protected', { protected: false }));
   expect(screen.queryByLabelText('Protected')).toBeNull();
+});
+
+test('Sleep Detail does not print zero after an unprotected wake clip', async () => {
+  const night = { status: 'ok', night_date: '2026-08-30', onset_at: '2026-08-30 09:00:00', wake_at: '2026-08-30 20:00:00',
+    window_start: '2026-08-30 08:00:00', window_end: '2026-08-30 21:00:00', coverage_minutes: 780,
+    asleep_minutes: 600, wakes: [{ start_at: at, end_at: '2026-08-30 10:20:00', minutes: 20 }],
+    visits: [], alerts: [], wakeClips: [{ ...wake, protected: 0 }] };
+  vi.spyOn(api, 'get').mockImplementation((path) => Promise.resolve(path.includes('/sleep/live')
+    ? { night: { night_date: '2026-08-30' } } : path.includes('/sleep/insights') ? null : night));
+  renderAsAdmin(<Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes>,
+    { kids: [{ id: 'child-1', name: 'a child' }], route: '/children/child-1/sleep' });
+  const head = await screen.findByRole('button', { name: /20m awake/ });
+  expect(head).toHaveTextContent(/20m awakeclip$/);
+  expect(head).not.toHaveTextContent(/clip0/);
+});
+
+test('Sleep Detail updates a correlated alert badge after protection changes', async () => {
+  const night = { status: 'ok', night_date: '2026-08-30', onset_at: '2026-08-30 09:00:00', wake_at: '2026-08-30 20:00:00',
+    window_start: '2026-08-30 08:00:00', window_end: '2026-08-30 21:00:00', coverage_minutes: 780,
+    asleep_minutes: 600, wakes: [{ start_at: at, end_at: '2026-08-30 10:20:00', minutes: 20 }],
+    visits: [], alerts: [{ ...alert, protected: 0 }], wakeClips: [] };
+  vi.spyOn(api, 'get').mockImplementation((path) => Promise.resolve(path.includes('/sleep/live')
+    ? { night: { night_date: '2026-08-30' } } : path.includes('/sleep/insights') ? null : night));
+  vi.spyOn(api, 'put').mockResolvedValue({ protected: true });
+  const { user } = renderAsAdmin(<Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes>,
+    { kids: [{ id: 'child-1', name: 'a child' }], route: '/children/child-1/sleep' });
+  await user.click(await screen.findByRole('button', { name: /20m awake/ }));
+  await user.click(screen.getByRole('button', { name: 'Play clip from Camera A' }));
+  await user.click(screen.getByRole('button', { name: 'Protect this clip' }));
+  await waitFor(() => expect(api.put).toHaveBeenCalledWith('/cameras/alerts/a1/protected', { protected: true }));
+  await user.click(screen.getByRole('button', { name: 'Close' }));
+  expect(screen.getByLabelText('Protected')).toBeInTheDocument();
 });
 
 test('a caregiver sees a wake clip is protected but has no toggle', () => {

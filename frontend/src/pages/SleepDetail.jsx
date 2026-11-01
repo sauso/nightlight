@@ -256,6 +256,9 @@ export default function SleepDetail() {
         <NightBody night={night} error={nightError} onRetry={() => setNightRetry((n) => n + 1)} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit}
           childId={id} date={date} onRecomputed={setNight} onCorrectionRemoved={() => { receiptRemovals.current += 1; setReceipt(null); }}
           settingsView={settingsView} onSettingsView={chooseSettingsView}
+          onAlertProtectionChange={(clipId, value) => setNight((prev) => prev && ({ ...prev,
+            alerts: (prev.alerts || []).map((clip) => clip.id === clipId ? { ...clip, protected: value } : clip),
+          }))}
           onWakeProtectionChange={(clipId, value) => setNight((prev) => prev && ({ ...prev,
             wakeClips: (prev.wakeClips || []).map((clip) => clip.id === clipId ? { ...clip, protected: value } : clip),
           }))} />
@@ -340,7 +343,7 @@ function SettingsViewLine({ night, onSettingsView }) {
   );
 }
 
-function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed, onCorrectionRemoved, settingsView, onSettingsView, onWakeProtectionChange }) {
+function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed, onCorrectionRemoved, settingsView, onSettingsView, onAlertProtectionChange, onWakeProtectionChange }) {
   // The wake↔alert clip currently open in the shared player (or null). Lives here so it survives a
   // 2-min live refresh of `night` without tearing the modal down mid-watch.
   const [clipFor, setClipFor] = useState(null);
@@ -542,7 +545,11 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
         </div>
       )}
 
-      {clipFor && <ClipPlayerModal ev={clipFor} onClose={() => setClipFor(null)} />}
+      {clipFor && <ClipPlayerModal ev={clipFor} onClose={() => setClipFor(null)}
+        onProtectedChange={(clipId, value) => {
+          setClipFor((prev) => prev && ({ ...prev, protected: value }));
+          onAlertProtectionChange(clipId, value);
+        }} />}
       {frameFor && (
         <ImagePreviewModal
           title={`Bed transition · ${fmtTime(frameFor.at)}`}
@@ -591,7 +598,7 @@ function WakeItem({ wake, hits, clip, fmtTime, onPlay, onPlayWake }) {
             <Video size={11} aria-hidden="true" />clip
           </span>
         )}
-        {clip?.protected && <ProtectedBadge />}
+        {!!clip?.protected && <ProtectedBadge />}
         {expandable && <ChevronDown size={16} className={`sleep-wakes__chev${open ? ' is-open' : ''}`} aria-hidden="true" />}
       </span>
     </>

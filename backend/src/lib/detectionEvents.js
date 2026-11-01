@@ -183,12 +183,14 @@ export function getEventClipFile(id) {
 }
 
 export function isProtectedEvent(id) {
-  return db.prepare('SELECT protected FROM detection_events WHERE id = ?').get(id)?.protected === 1;
+  // #932: sweep SQL keeps every nonzero flag, so direct deletion must make the same decision.
+  return !!db.prepare('SELECT protected FROM detection_events WHERE id = ?').get(id)?.protected;
 }
 
 // The playback lookup also checks that the path names an existing, safe file.
 export function setEventProtected(id, value) {
-  if (!getEventClipFile(id)) return false;
+  // An absent MP4 must not trap an already protected row forever (#932).
+  if (value && !getEventClipFile(id)) return false;
   return db.prepare("UPDATE detection_events SET protected = ? WHERE id = ? AND clip_status = 'ready'")
     .run(Number(value), id).changes > 0;
 }
@@ -210,7 +212,7 @@ const clipTotalsStmt = db.prepare(
 );
 // #932: protected bytes must be visible, but excluded from the cap shared with the preview.
 export function getProtectedAlertTotals() {
-  return db.prepare("SELECT COUNT(*) AS count, COALESCE(SUM(clip_bytes), 0) AS bytes FROM detection_events WHERE protected = 1 AND clip_status = 'ready' AND clip_path IS NOT NULL").get();
+  return db.prepare("SELECT COUNT(*) AS count, COALESCE(SUM(clip_bytes), 0) AS bytes FROM detection_events WHERE protected <> 0 AND clip_status = 'ready' AND clip_path IS NOT NULL").get();
 }
 
 // #932: every automatic selector below excludes protected clips; the preview imports these same queries.
@@ -259,7 +261,7 @@ export function getProtectedClips() {
   return db.prepare(`SELECT id, camera_id, camera_name, type, detail, created_at, snapshot,
                             clip_duration_s, clip_bytes, protected
                        FROM detection_events
-                      WHERE protected = 1 AND clip_status = 'ready' AND clip_path IS NOT NULL
+                      WHERE protected <> 0 AND clip_status = 'ready' AND clip_path IS NOT NULL
                       ORDER BY id DESC`).all();
 }
 
@@ -293,7 +295,7 @@ export function clearDetectionEvents() {
     for (const name of fs.readdirSync(SNAPSHOT_DIR)) {
       if (!name.endsWith('.jpg')) continue;
       const id = /^\d+\.jpg$/.test(name) ? Number(name.slice(0, -4)) : null;
-      if (!id || !db.prepare('SELECT 1 FROM detection_events WHERE id = ? AND protected = 1').get(id)) {
+      if (!id || !db.prepare('SELECT 1 FROM detection_events WHERE id = ? AND protected <> 0').get(id)) {
         fs.rm(path.join(SNAPSHOT_DIR, name), { force: true }, () => {}); // app-only: snapshots live in private/
       }
     }
