@@ -15,6 +15,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- Long back-button names now end with an ellipsis so page titles stay on one line. The Timelapse, Recordings and Room climate headings have a little more space below them.
+
 - The Record button and other video controls no longer cover the camera in Picture-in-Picture. Fullscreen camera controls stay clear of the status and gesture bars in the Android app with the matching app update; older app builds still show the bars.
 
 ## [0.45.0] - 2026-11-01
