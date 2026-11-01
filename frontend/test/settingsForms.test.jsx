@@ -58,14 +58,14 @@ describe('the Settings hub', () => {
   test('ONLY an admin sees the system configuration rows', () => {
     hub({});
     const { unmount } = renderAsAdmin(<Settings />);
-    for (const label of ['General', 'Camera and Recording', 'Caregivers', 'Integrations', 'Logs']) {
+    for (const label of ['General', 'Camera and Recording', 'Caregivers', 'Integrations', 'Remote Access', 'Logs']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     unmount();
 
     hub({});
     renderAsCaregiver(<Settings />);
-    for (const label of ['General', 'Camera and Recording', 'Caregivers', 'Integrations', 'Logs']) {
+    for (const label of ['General', 'Camera and Recording', 'Caregivers', 'Integrations', 'Remote Access', 'Logs']) {
       expect(screen.queryByText(label)).not.toBeInTheDocument();
     }
     // A caregiver still gets their own account and About.

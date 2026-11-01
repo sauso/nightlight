@@ -40,6 +40,7 @@ const SettingsCameraRecording = lazyPage(() => import('./pages/SettingsCameraRec
 const SettingsRecording = lazyPage(() => import('./pages/SettingsRecording.jsx'));
 const SettingsMqtt = lazyPage(() => import('./pages/SettingsMqtt.jsx'));
 const SettingsIntegrations = lazyPage(() => import('./pages/SettingsIntegrations.jsx'));
+const SettingsRemoteAccess = lazyPage(() => import('./pages/SettingsRemoteAccess.jsx'));
 const SettingsEsphome = lazyPage(() => import('./pages/SettingsEsphome.jsx'));
 const SettingsPush = lazyPage(() => import('./pages/SettingsPush.jsx'));
 const SettingsPushPushover = lazyPage(() => import('./pages/SettingsPushPushover.jsx'));
@@ -196,6 +197,7 @@ function Shell() {
                     <Route path="/settings/camera" element={<AdminProtected><SettingsCamera /></AdminProtected>} />
                     <Route path="/settings/recording" element={<AdminProtected><SettingsRecording /></AdminProtected>} />
                     <Route path="/settings/integrations" element={<AdminProtected><SettingsIntegrations /></AdminProtected>} />
+                    <Route path="/settings/remote-access" element={<AdminProtected><SettingsRemoteAccess /></AdminProtected>} />
                     <Route path="/settings/integrations/mqtt" element={<AdminProtected><SettingsMqtt /></AdminProtected>} />
                     <Route path="/settings/integrations/esphome" element={<AdminProtected><SettingsEsphome /></AdminProtected>} />
                     <Route path="/settings/integrations/notifications" element={<AdminProtected><SettingsPush /></AdminProtected>} />

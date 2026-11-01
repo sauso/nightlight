@@ -302,6 +302,7 @@ describe('the route table', () => {
       ['/settings/clips', 'Clip Management'],
       ['/settings/integrations', 'Integrations'],
       ['/settings/integrations/mqtt', 'MQTT'],
+      ['/settings/remote-access', 'Remote Access'],
       ['/settings/integrations/esphome', 'ESPHome'],
       ['/settings/integrations/notifications', 'Push notifications'],
       ['/settings/logs', 'Logs'],
@@ -392,6 +393,7 @@ describe('the route table', () => {
       ['/children', 'Children'],
       ['/cameras', 'Cameras'],
       ['/settings/integrations/mqtt', 'MQTT'],
+      ['/settings/remote-access', 'Remote Access'],
       ['/family', 'Children'], // retired, redirects: must still redirect, not fall through to `*`
     ]) {
       const { unmount } = await openAt(route);
@@ -416,6 +418,7 @@ describe('the route table', () => {
     ['/settings/integrations', 'Integrations'],
     ['/settings/integrations/mqtt', 'MQTT'],
     ['/settings/integrations/esphome', 'ESPHome'],
+    ['/settings/remote-access', 'Remote Access'],
   ])('admin-only %s sends a CAREGIVER home without showing it', async (route, heading) => {
     setToken('a-token');
     mockApi(CAREGIVER);
@@ -436,6 +439,7 @@ describe('the route table', () => {
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByText('About')).toBeInTheDocument();
     expect(screen.queryByText('MQTT')).not.toBeInTheDocument();
+    expect(screen.queryByText('Remote Access')).not.toBeInTheDocument();
   });
 });
 
