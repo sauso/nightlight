@@ -71,7 +71,7 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
   const confirming = del === 'confirm' || del === 'deleting' || del === 'error';
 
   return (
-    <div className="card">
+    <div className="card recordings-card">
       <div className="card-title">
         <Video size={16} aria-hidden="true" /> Recordings
       </div>

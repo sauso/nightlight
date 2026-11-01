@@ -171,12 +171,16 @@ button {
   color: var(--bar-text);
 }
 
-/* Labelled back affordance in the header's left slot on sub-pages (see BackLink.jsx). */
+/* Owner's 2026-11-01 phone screenshots: long back labels took about 40% of the bar and wrapped
+   Camera controls / Clip Management. Capping at 35% leaves roughly 225dp for a 22px serif title
+   on a ~400dp phone; this is an estimate from those screenshots, not measured at other widths. */
 .app-header__back {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 35%;
   margin-left: -6px;
   padding: 4px 6px 4px 0;
   background: none;
@@ -187,8 +191,16 @@ button {
   font-family: inherit;
 }
 
+.app-header__back svg {
+  flex-shrink: 0;
+}
+
 .app-header__back span {
   line-height: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .app-main {
@@ -1394,7 +1406,9 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--peri); ou
 
 /* Room-climate sensor history (Child detail). Temp + humidity sparklines from sensor_readings. */
 .sensor-card { margin-bottom: 14px; }
-/* .sensor-card__title styling is now the canonical .card-title rule above. */
+/* Room climate inherits the canonical title style above, but its chart starts right below the title;
+   Cameras and Recent alerts have padded rows that supply their own space. */
+.sensor-card__title { margin-bottom: 10px; }
 .sensor-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
 @media (min-width: 560px) { .sensor-grid { grid-template-columns: 1fr 1fr; } }
 .sensor-series__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
@@ -2289,11 +2303,15 @@ input[type='range'] {
 }
 
 /* "Memories" timelapse card on child detail (see components/TimelapseCard.jsx). */
+/* These media sections start directly below their titles; Cameras and Recent alerts have padded rows,
+   so only these in-card titles need extra space. */
 .timelapse-card .card-title {
   display: flex;
   align-items: center;
   gap: 6px;
+  margin-bottom: 10px;
 }
+.recordings-card .card-title { margin-bottom: 10px; }
 .timelapse-hero {
   position: relative;
   display: block;

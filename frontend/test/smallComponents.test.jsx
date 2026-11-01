@@ -52,6 +52,14 @@ describe('AppHeader', () => {
     expect(screen.getByRole('button', { name: 'Back to Settings' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Go to Live' })).not.toBeInTheDocument();
   });
+
+  test('keeps a long back label in the accessible name and title', () => {
+    const label = 'Camera and Recording';
+    at('/settings/camera', <AppHeader title="Camera controls" back={{ to: '/settings', label }} showDemoBanner={false} />);
+    const back = screen.getByRole('button', { name: `Back to ${label}` });
+    expect(back).toHaveAttribute('aria-label', `Back to ${label}`);
+    expect(back).toHaveAttribute('title', label);
+  });
 });
 
 describe('BackLink', () => {

@@ -267,6 +267,8 @@ Padding: `12px`, `10px 12px`, `12px 14px`, `16px` (card), `24px`.
 Use `gap` on a flex/grid parent rather than margins on children — the stylesheet is consistent about
 this and it avoids collapse/doubling bugs.
 
+An in-card title directly above media or a chart needs its own bottom margin; rows with their own padding do not.
+
 ### Radius
 
 | Value | Use |
@@ -328,6 +330,7 @@ One hairline border, no shadow. Shadows are reserved for things that float (shee
 Settings sub-menus (Integrations and Camera and Recording) share a pattern: a row on the Settings hub
 opens a sub-menu page. Its rows pass `state.from` for Back, and each destination has the sub-menu as
 its fallback Back target for direct links and refreshes.
+The header back label uses up to about 35% of the bar, then ends with an ellipsis so a long parent name does not push the page title onto two lines.
 
 ### Buttons
 `.btn` — inline-flex, `gap: 6px`, radius 10px, `padding: 12px 18px`, 14px/600, and **`width: 100%`
