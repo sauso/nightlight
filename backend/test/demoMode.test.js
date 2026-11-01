@@ -35,6 +35,7 @@ before(async () => {
   router.delete('/api/cameras/cam-1', record('delete-cam'));
   router.put('/api/settings', record('put-settings'));
   router.get('/api/diagnostics', record('diagnostics'));
+  router.get('/api/remote-access', record('remote-access'));
   router.get('/api/logs', record('logs'));
   router.delete('/api/logs', record('delete-logs'));
   router.get('/api/auth/sessions', record('sessions'));
@@ -213,6 +214,18 @@ describe('demoGuard — DEMO_MODE=true, blocked GETs (server internals / cross-v
     const res = await call(`${server.url}/api/diagnostics`);
     assert.equal(res.status, 403);
     assert.equal(hits.diagnostics, undefined);
+  });
+
+  test('GET /api/remote-access is blocked, handler never invoked', async () => {
+    const res = await call(`${server.url}/api/remote-access`);
+    assert.equal(res.status, 403);
+    assert.equal(hits['remote-access'], undefined);
+  });
+
+  test('HEAD /api/remote-access is blocked before the GET handler', async () => {
+    const res = await call(`${server.url}/api/remote-access`, { method: 'HEAD' });
+    assert.equal(res.status, 403);
+    assert.equal(hits['remote-access'], undefined);
   });
 
   test('GET /api/logs is blocked, handler never invoked', async () => {

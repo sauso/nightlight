@@ -516,7 +516,7 @@ describe('every API response, for every role', () => {
       admin: [
         'GET /api/settings', 'GET /api/settings/mqtt', 'GET /api/ntfy/config', 'GET /api/pushover/config',
         'GET /api/gotify/config', 'GET /api/auth/users', 'GET /api/auth/me', 'GET /api/auth/me/mfa',
-        'GET /api/cameras', 'GET /api/diagnostics', 'GET /api/logs', 'GET /api/auth/sessions/all',
+        'GET /api/cameras', 'GET /api/diagnostics', 'GET /api/remote-access', 'GET /api/logs', 'GET /api/auth/sessions/all',
         'GET /api/esphome/devices', 'GET /api/esphome/settings',
       ],
     };

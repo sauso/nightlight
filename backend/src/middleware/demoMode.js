@@ -55,6 +55,7 @@ const MUTATION_ALLOWLIST = new Set([
 // router ever grows a second matching GET route, add it here explicitly.
 const GET_BLOCKLIST = new Set([
   '/api/diagnostics',
+  '/api/remote-access',
   '/api/logs',
   '/api/auth/sessions',
   '/api/auth/sessions/all',

@@ -10,6 +10,7 @@ let stopped = false;
 // exist only to keep a permanent spawn failure from flooding the log — see the 'error' handler.
 let spawnFailures = 0;
 let lastAdvertised = null;
+let lastMediaMTXHosts = null;
 
 const RESTART_DELAY_MS = 3000;
 // #553: a launch that exits 126/127 at once (the program, or the switch to the media user, could not run) backs off from
@@ -45,6 +46,21 @@ function detectHostIPv4s() {
     }
   }
   return out;
+}
+
+export function configuredPublicHosts(env = process.env) {
+  return (env.PUBLIC_HOST || '').split(',').map((host) => host.trim()).filter(Boolean);
+}
+
+// Keep the status page's candidate list on the same path as each MediaMTX launch.
+export function getAdvertisedHosts(env = process.env) {
+  return [...new Set([...configuredPublicHosts(env), ...detectHostIPv4s()])];
+}
+
+export function getLastAdvertisedHosts(env = process.env) {
+  // Interfaces can change after launch; the page must report the candidates handed to MediaMTX,
+  // not a fresh computation that its running process has never seen.
+  return lastMediaMTXHosts === null ? getAdvertisedHosts(env) : [...lastMediaMTXHosts];
 }
 
 // The last WebRTC-port warning we logged, so a crash-looping MediaMTX (launch() re-runs every 3s)
@@ -110,14 +126,10 @@ export async function startMediaMTX(configPath) {
     // Only the values THIS launch computes go in `extra`; the operator's own MTX_* overrides are inherited
     // by childEnv({ mediamtx: true }), and nothing else of ours (JWT_SECRET, ...) is (#553).
     const extra = {};
-    const hosts = [];
-    if (process.env.PUBLIC_HOST) {
-      for (const h of process.env.PUBLIC_HOST.split(',')) {
-        if (h.trim()) hosts.push(h.trim());
-      }
-    }
-    hosts.push(...detectHostIPv4s());
-    const advertised = [...new Set(hosts)];
+    const advertised = getAdvertisedHosts();
+    // If there is no computed candidate, childEnv still inherits an operator's MTX_* override.
+    // Record that list too so the status describes what the child receives in this edge case.
+    lastMediaMTXHosts = advertised.length ? advertised : (process.env.MTX_WEBRTCADDITIONALHOSTS || '').split(',').map((host) => host.trim()).filter(Boolean);
     // Log the host list only when it CHANGES. It is recomputed every launch, and the spawn-failure
     // retry below relaunches every 3s forever, so logging it unconditionally added a second line to
     // the flood described there — and this one is info, i.e. pure noise once it has been said once.
