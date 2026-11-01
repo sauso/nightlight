@@ -2337,7 +2337,14 @@ input[type='range'] {
   gap: 6px;
   margin-bottom: 10px;
 }
-.recordings-card .card-title { margin-bottom: 10px; }
+/* Same centring as the Timelapse title above: without it the Video icon sat on the text baseline,
+   higher than the word (owner screenshot, 2026-11-01). */
+.recordings-card .card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
 .timelapse-hero {
   position: relative;
   display: block;
