@@ -20,10 +20,12 @@ import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import { renderAs, ADMIN, enabledButton } from './helpers/render.jsx';
 import Account from '../src/pages/Account.jsx';
+import ThemeToggle from '../src/components/ThemeToggle.jsx';
 import TwoFactorSection from '../src/components/TwoFactorSection.jsx';
 import { api } from '../src/lib/api.js';
 import { isReloadHeld } from '../src/lib/reloadGuard.js';
 import * as nativeBridge from '../src/lib/nativeBridge.js';
+import { setTheme } from '../src/lib/theme.js';
 
 const USER = { ...ADMIN, first_name: 'Nacho', last_name: 'Leone', photo: null };
 
@@ -309,6 +311,17 @@ describe('the theme picker', () => {
     await waitFor(() => expect(document.documentElement.getAttribute('data-theme')).toBe('dark'));
     expect(localStorage.getItem('nightlight_theme')).toBe('dark');
     expect(putSpy, 'a per-device preference is not account state').not.toHaveBeenCalled();
+  });
+
+  test('Appearance follows a change from the Live toggle', async () => {
+    setTheme('light');
+    // Mount the publisher explicitly to check Account's subscription in the same tree.
+    const { user } = renderAs(USER, <><Account /><ThemeToggle /></>, { route: '/account' });
+    const group = await screen.findByRole('group', { name: 'Theme' });
+    expect(within(group).getByRole('button', { name: 'Light' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Switch to dark mode' }));
+    expect(within(group).getByRole('button', { name: 'Dark' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(group).getByRole('button', { name: 'Light' })).toHaveAttribute('aria-pressed', 'false');
   });
 });
 

@@ -16,6 +16,11 @@ New here? Start with the [main README](../README.md), then choose the guide that
 
 ## Everyday features
 
+The Live page header button flips between light and dark. On every other page, change the theme
+under Account → Appearance, where System follows your device again.
+On About, **Got an idea?** opens a GitHub issue; you need a GitHub account. The idea form appears
+after the next release to `main`; until then, the link opens a plain new issue.
+
 - [Visual walkthrough](#visual-walkthrough) — setup, live view, sleep, alerts, notifications and a caregiver's view
 - [Camera controls](camera-controls.md) — PTZ and offline alerts under Settings → Camera and Recording
 - [Sleep tracking](sleep-tracking.md) — how nights are estimated, corrected and reviewed, and its known limits

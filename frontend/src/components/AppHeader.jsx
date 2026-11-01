@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import BackLink from './BackLink.jsx';
 import DemoBanner from './DemoBanner.jsx';
+import ThemeToggle from './ThemeToggle.jsx';
 
 // The app's sticky top header. Top-level pages (Live, Alerts, Family, Settings) show the
 // logo on the left, which taps home to Live. Sub-pages pass `back={{ to, label }}` to show
@@ -8,10 +9,12 @@ import DemoBanner from './DemoBanner.jsx';
 //
 // Navigation that used to live in a hamburger here (Settings / Account / Change server /
 // About / Sign out) now lives in the bottom-nav Settings tab + its hub, so the header stays
-// a single logo/back + title row. It's pinned (position: sticky) rather than floating, which
+// a single logo/back + title row. The theme toggle is Live-only by the owner's 2026-11-01
+// decision: other pages keep title room and use Account → Appearance to change the theme.
+// It's pinned (position: sticky) rather than floating, which
 // sidesteps mobile-browser quirks with top-anchored fixed elements drifting during the
 // address-bar hide/show animation.
-export default function AppHeader({ title, back, showDemoBanner = true }) {
+export default function AppHeader({ title, back, showDemoBanner = true, showThemeToggle = false }) {
   const navigate = useNavigate();
 
   return (
@@ -30,6 +33,7 @@ export default function AppHeader({ title, back, showDemoBanner = true }) {
             </button>
           )}
           <h1>{title}</h1>
+          {showThemeToggle && <ThemeToggle />}
         </div>
       </header>
       {showDemoBanner && <DemoBanner />}

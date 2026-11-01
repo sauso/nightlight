@@ -9,11 +9,18 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- A light/dark button at the far right of the Live page header switches the theme on this device. On other pages, use Account → Appearance, where System follows the device again.
+- About now has a **Got an idea?** link to suggest an enhancement on GitHub. A GitHub account is needed; the idea form appears after the next release to `main`.
+
 ### Changed
 
 - Camera controls, Recording and Clip management now sit under one Settings entry, Camera and Recording. Nothing was removed; the pages and their addresses are unchanged.
 
 ### Fixed
+
+- The Recordings icon now lines up with its heading on a child's page.
 
 - Long back-button names now end with an ellipsis so page titles stay on one line. The Timelapse, Recordings and Room climate headings have a little more space below them.
 

@@ -2468,8 +2468,8 @@
   {
     "label": "demo frontend: hidden live header duplicates the routed page banner",
     "file": "frontend/src/components/LiveMonitor.jsx",
-    "find": "      <AppHeader title={settings.app_name} showDemoBanner={isActive} />",
-    "replace": "      <AppHeader title={settings.app_name} />",
+    "find": "      <AppHeader title={settings.app_name} showDemoBanner={isActive} showThemeToggle={isActive} />",
+    "replace": "      <AppHeader title={settings.app_name} showThemeToggle={isActive} />",
     "expect": "killed",
     "tests": ["demoMode.test.jsx"],
     "namePattern": "DOM sibling after the header"

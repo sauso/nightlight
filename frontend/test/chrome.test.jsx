@@ -243,6 +243,14 @@ describe('ErrorBoundary', () => {
 // --- About --------------------------------------------------------------------------------------
 
 describe('About', () => {
+  test('Got an idea? opens the enhancement issue form safely', () => {
+    vi.spyOn(api, 'get').mockResolvedValue({ version: '0.45.0' });
+    renderAsAdmin(<About />);
+    const idea = screen.getByRole('link', { name: 'Got an idea?' });
+    expect(idea).toHaveAttribute('href', 'https://github.com/sauso/nightlight/issues/new?template=feature_request.yml');
+    expect(idea).toHaveAttribute('target', '_blank');
+    expect(idea).toHaveAttribute('rel', 'noreferrer');
+  });
   test('shows the app name from settings and the version from the server', async () => {
     vi.spyOn(api, 'get').mockResolvedValue({ version: '0.29.0' });
     renderAsAdmin(<About />, { settings: { app_name: 'Nursery' } });

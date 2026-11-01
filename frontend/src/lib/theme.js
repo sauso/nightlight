@@ -5,12 +5,15 @@
 // it as data-theme on <html>, so the CSS only ever deals with [data-theme='light' | 'dark'].
 const THEME_KEY = 'nightlight_theme';
 const prefersLight = window.matchMedia('(prefers-color-scheme: light)');
+const listeners = new Set();
+// Storage can be blocked, but the header must still read the choice set for this session.
+let sessionChoice = null;
 
 export function getTheme() {
   try {
-    return localStorage.getItem(THEME_KEY) || 'system';
+    return sessionChoice || localStorage.getItem(THEME_KEY) || 'system';
   } catch {
-    return 'system';
+    return sessionChoice || 'system';
   }
 }
 
@@ -19,14 +22,27 @@ function resolve(choice) {
   return prefersLight.matches ? 'light' : 'dark';
 }
 
+// The header needs the visible mode, which can differ from the saved 'system' choice.
+export function getResolvedTheme() {
+  return resolve(getTheme());
+}
+
+export function subscribeTheme(callback) {
+  listeners.add(callback);
+  return () => listeners.delete(callback);
+}
+
 export function applyTheme(choice = getTheme()) {
   document.documentElement.setAttribute('data-theme', resolve(choice));
+  listeners.forEach((callback) => callback());
 }
 
 export function setTheme(choice) {
   try {
     localStorage.setItem(THEME_KEY, choice);
+    sessionChoice = null;
   } catch {
+    sessionChoice = choice;
     // Private browsing / storage disabled — still applies for this session.
   }
   applyTheme(choice);
