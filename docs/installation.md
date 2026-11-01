@@ -74,7 +74,7 @@ Replace `/path/to/your/data` with a persistent folder on your host.
 - **If you deployed before this was added**, add `--stop-timeout 30` yourself (or `stop_grace_period: 30s` under the service in Compose, or the Unraid template's "Extra Parameters" field).
 - Nothing else breaks without it. A recording lost this way is marked failed rather than disappearing silently.
 
-**Recordings.** Nightlight records video three ways: **automatic clips** attached to motion and sound alerts (opt-in per camera), **wake clips** saved silently when your child wakes up, and **on-demand recordings** you capture with the Record button. They have different retention rules, so read [recording](recording.md) before moving clips to another mount or setting `CLIPS_DIR`; it also covers every setting under *Settings → Recording*. Video defaults to `<data dir>/clips`. You can point it at your array instead with a `/recordings` mount plus `CLIPS_DIR`.
+**Recordings.** Nightlight records video three ways: **automatic clips** attached to motion and sound alerts (opt-in per camera), **wake clips** saved silently when your child wakes up, and **on-demand recordings** you capture with the Record button. They have different retention rules, so read [recording](recording.md) before moving clips to another mount or setting `CLIPS_DIR`; it also covers every setting under *Settings → Camera and Recording → Recording*. Video defaults to `<data dir>/clips`. You can point it at your array instead with a `/recordings` mount plus `CLIPS_DIR`.
 
 ## Docker Compose
 

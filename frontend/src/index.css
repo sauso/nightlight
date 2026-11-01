@@ -1456,7 +1456,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 .clip-player__meta { font-size: 12.5px; color: var(--text-secondary); margin: 10px 0 14px; text-align: center; }
 .btn-block { display: block; width: 100%; text-align: center; }
 .icon-btn--danger { color: var(--offline); }
-/* Clip Management (Settings) */
+/* Clip Management (Settings → Camera and Recording) */
 .clip-day-select { width: auto; min-width: 140px; padding: 7px 10px; font-size: 13px; }
 
 /* Clip date filter — popup calendar */
@@ -1524,7 +1524,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 /* In-player "delete this clip?" confirm row */
 .clip-confirm { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 13.5px; }
 .clip-confirm > span { color: var(--text-secondary); }
-/* Recording storage readout (Settings → Recording) */
+/* Recording storage readout (Settings → Camera and Recording → Recording) */
 .storage-readout { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
 .storage-readout code { font-size: 12px; background: var(--field-bg); padding: 1px 5px; border-radius: 5px; }
 /* Full-screen fallback shown by ErrorBoundary when a render throw would otherwise blank

@@ -747,7 +747,7 @@ browser you happen to be using.
   stays put sees no change. Clock format (12 or 24 hour) and date order follow the device's own language
   settings, not the timezone.
 - **Where it applies:** the alert and camera-history lists (the exact time is in the tooltip on each row
-  and in the clip player), **Clip Management** (clips are grouped under their home-time **day**, and the
+  and in the clip player), **Settings → Camera and Recording → Clip management** (clips are grouped under their home-time **day**, and the
   date filter and its "today" use home days, so two people never see the same clip on different days),
   the **Recordings** card, a camera tile's **silenced until** time, and the nightly timelapse dates (a
   night is a calendar date worked out in home time, so it never shifts).

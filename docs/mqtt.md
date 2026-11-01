@@ -151,5 +151,5 @@ no other account publish to it; if your broker cannot do that, prefer one of the
 
 ## Related
 
-- **[Camera controls](camera-controls.md)** — the global PTZ and offline-alert settings this
+- **[Camera controls](camera-controls.md)** — under Settings → Camera and Recording, for the global PTZ and offline-alert settings this
   doesn't cover.

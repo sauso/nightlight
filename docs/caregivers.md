@@ -26,7 +26,7 @@ destroy or reconfigure.**
 | Manage caregiver/admin accounts and sessions | No | Yes |
 
 Deleting by hand is not the same as **retention**: the automatic sweep of old alert clips and wake clips
-(Settings → Recording, admin only to configure) runs on a timer on every install, whoever is signed in.
+(Settings → Camera and Recording → Recording, admin only to configure) runs on a timer on every install, whoever is signed in.
 
 ### Rearranging the live grid
 
@@ -65,7 +65,7 @@ camera are shown, greyed out, with a note); the server refuses them too, so a pa
 permission gets a refusal rather than a change.
 
 The **Settings** hub itself is visible to caregivers too — its admin-only pages (general,
-camera controls, recording, MQTT, push providers, users, logs, clip storage) are simply hidden
+Camera and Recording, integrations, users and logs) are simply hidden
 for them rather than the whole screen being off-limits.
 
 **Changing someone’s role takes effect immediately** — on their very next action, on every device

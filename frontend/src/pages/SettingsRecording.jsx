@@ -250,7 +250,7 @@ export default function SettingsRecording() {
 
   return (
     <>
-      <AppHeader title="Recording" back={{ to: '/settings', label: 'Settings' }} />
+      <AppHeader title="Recording" back={{ to: '/settings/camera-recording', label: 'Camera and Recording' }} />
       <main className="app-main">
         {error && <div className="error-banner">{error}</div>}
         {saved && <div className="saved-banner">Saved ✓</div>}

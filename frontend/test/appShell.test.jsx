@@ -296,7 +296,10 @@ describe('the route table', () => {
   test('each settings sub-route lands on its own screen', async () => {
     for (const [route, heading] of [
       ['/settings', 'Settings'],
+      ['/settings/camera-recording', 'Camera and Recording'],
       ['/settings/camera', 'Camera controls'],
+      ['/settings/recording', 'Recording'],
+      ['/settings/clips', 'Clip Management'],
       ['/settings/integrations', 'Integrations'],
       ['/settings/integrations/mqtt', 'MQTT'],
       ['/settings/integrations/esphome', 'ESPHome'],
@@ -409,6 +412,7 @@ describe('the route table', () => {
   });
 
   test.each([
+    ['/settings/camera-recording', 'Camera and Recording'],
     ['/settings/integrations', 'Integrations'],
     ['/settings/integrations/mqtt', 'MQTT'],
     ['/settings/integrations/esphome', 'ESPHome'],

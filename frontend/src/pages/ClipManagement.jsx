@@ -131,7 +131,7 @@ export default function ClipManagement() {
 
   return (
     <>
-      <AppHeader title="Clip Management" back={{ to: '/settings', label: 'Settings' }} />
+      <AppHeader title="Clip Management" back={{ to: '/settings/camera-recording', label: 'Camera and Recording' }} />
       <main className="app-main" style={{ paddingBottom: selCount ? 84 : undefined }}>
         {listState === 'error' && <LoadFailed what="clips" error={error} onRetry={load} />}
         {listState === 'stale' && <LoadFailed what="clips" error={error} onRetry={load} stale />}

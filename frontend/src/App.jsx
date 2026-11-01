@@ -36,6 +36,7 @@ const CameraSettings = lazyPage(() => import('./pages/CameraSettings.jsx'));
 const DetectionSettings = lazyPage(() => import('./pages/DetectionSettings.jsx'));
 const SettingsGeneral = lazyPage(() => import('./pages/SettingsGeneral.jsx'));
 const SettingsCamera = lazyPage(() => import('./pages/SettingsCamera.jsx'));
+const SettingsCameraRecording = lazyPage(() => import('./pages/SettingsCameraRecording.jsx'));
 const SettingsRecording = lazyPage(() => import('./pages/SettingsRecording.jsx'));
 const SettingsMqtt = lazyPage(() => import('./pages/SettingsMqtt.jsx'));
 const SettingsIntegrations = lazyPage(() => import('./pages/SettingsIntegrations.jsx'));
@@ -189,6 +190,9 @@ function Shell() {
                         the config sub-pages stay admin-gated. */}
                     <Route path="/settings" element={<Settings />} />
                     <Route path="/settings/general" element={<AdminProtected><SettingsGeneral /></AdminProtected>} />
+                    <Route path="/settings/camera-recording" element={<AdminProtected><SettingsCameraRecording /></AdminProtected>} />
+                    {/* These existing URLs stay stable for direct links and bookmarks; unlike
+                        Integrations, the new sub-menu does not move its child routes. */}
                     <Route path="/settings/camera" element={<AdminProtected><SettingsCamera /></AdminProtected>} />
                     <Route path="/settings/recording" element={<AdminProtected><SettingsRecording /></AdminProtected>} />
                     <Route path="/settings/integrations" element={<AdminProtected><SettingsIntegrations /></AdminProtected>} />
