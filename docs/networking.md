@@ -51,6 +51,8 @@ Low-latency video can still need a reachable UDP port even when the website itse
 
 ## What connects to the outside
 
+**Settings → Remote Access** itself contacts nothing outside your network; the server only looks up the host names you entered in `PUBLIC_HOST` through DNS. **Test from this device** makes the same connection as live video from your device to your Nightlight server, including contact with the configured STUN server when STUN is enabled. It does not use an external reachability service.
+
 **STUN.** By default the browser and MediaMTX use Google's `stun.l.google.com:19302` to work out a public address for WebRTC. Google can see public IP and connection-timing metadata; it does **not** relay your video (it isn't a TURN server). On your own network STUN isn't needed. Set `STUN_SERVERS` to an empty value to switch it off, or point it at a server you control. HLS compatibility playback never uses STUN.
 
 **Push notifications.** If you enable a notification provider, those messages go through that provider's service. See [notifications](notifications.md).

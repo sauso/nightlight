@@ -2,6 +2,14 @@
 
 To watch from outside your home network, set up a reverse proxy with HTTPS (a VPN into your home network is the other common option; see [networking](networking.md#watching-away-from-home)). If you use a reverse proxy, choose Low latency for near-instant video or Compatibility when you cannot forward UDP. The setup steps come first; the proxy settings follow.
 
+## Check your setup in Nightlight
+
+Admins can open **Settings → Remote Access**. The first card shows how Nightlight sees this device: home network, VPN, outside home, or unknown. **Your setup** lists the app and UDP video ports, public hosts and their DNS results, advertised addresses, and whether STUN is on. The checklist links back to this guide. Tailscale is marked **Coming later**; the row does not set it up.
+
+**Test from this device** makes one short Low latency video connection to a running camera, then closes its connection. When the server gives a session address, the test also asks it to end the session (DELETE); otherwise MediaMTX frees it when the connection closes. A successful UDP connection **from outside your home** shows that the port forward works for this device. A TCP connection means video connected, but it does not confirm the UDP forward. A failed or timed-out test points you to the UDP forward and `PUBLIC_HOST`; Compatibility (HLS) remains available without UDP. The test only proves the forward from **outside** your home. A connection from your home network, a VPN, or behind an untrusted proxy cannot prove it, even if the test connects. Try again from mobile data.
+
+If the network shows **Unknown**, Nightlight could not trust the forwarded client address. This often happens when a reverse proxy connects over a LAN address while `TRUST_PROXY` still has its `loopback` default. Set `TRUST_PROXY` to the address of a proxy you control as described [below](#trust_proxy--telling-nightlight-your-real-client-addresses), then reopen the page. The page makes no third-party reachability check. The test uses the same connection as live video, including your configured STUN server if enabled.
+
 ## Remote / internet access (watching from outside your home network)
 
 By default this is LAN-only. There are two ways to watch remotely, and each camera tile

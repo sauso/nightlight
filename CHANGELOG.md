@@ -11,6 +11,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- Settings → Remote Access shows how this device connects, the server's setup, and a Low latency video test. A successful test only proves the UDP forward when run from outside the home network.
+
 - A light/dark button at the far right of the Live page header switches the theme on this device. On other pages, use Account → Appearance, where System follows the device again.
 - About now has a **Got an idea?** link to suggest an enhancement on GitHub. A GitHub account is needed; the idea form appears after the next release to `main`.
 

@@ -10,7 +10,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 - [Cameras and caregivers](cameras.md) — add cameras and share access
 - [Adding caregivers](caregivers.md) — what caregivers and admins can each do, and how long a sign-in lasts (`SESSION_TTL_DAYS`)
 - [Networking and remote access](networking.md) — LAN options, WebRTC, STUN, HTTPS and privacy
-- [Reverse proxy and remote access](remote-access.md) — SWAG, `TRUST_PROXY`, `STUN_SERVERS`, `CLOUDFLARE_ANALYTICS`, watching away from home
+- [Reverse proxy and remote access](remote-access.md) — SWAG, `TRUST_PROXY`, `STUN_SERVERS`, `CLOUDFLARE_ANALYTICS`, Settings → Remote Access, watching away from home
 - [Troubleshooting](troubleshooting.md) — common problems and first checks
 - [Known issues](../KNOWN-ISSUES.md) — documented limitations and workarounds
 

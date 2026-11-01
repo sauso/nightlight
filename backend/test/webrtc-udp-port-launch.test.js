@@ -29,7 +29,7 @@ mock.module('node:child_process', {
   },
 });
 
-const { startMediaMTX, stopMediaMTX } = await import('../src/lib/mediamtxProcess.js');
+const { startMediaMTX, stopMediaMTX, getLastAdvertisedHosts } = await import('../src/lib/mediamtxProcess.js');
 
 // PUBLIC_HOST and MTX_WEBRTCADDITIONALHOSTS are cleared too, so the host-list cases below see only what they set.
 const KEYS = ['WEBRTC_UDP_PORT', 'MTX_WEBRTCLOCALUDPADDRESS', 'PUBLIC_HOST', 'MTX_WEBRTCADDITIONALHOSTS'];
@@ -106,6 +106,7 @@ describe('#553 the MediaMTX child gets the host list computed at launch', () => 
   test('PUBLIC_HOST and the detected IPs reach the child as MTX_WEBRTCADDITIONALHOSTS', async () => {
     const env = await childEnvFor({ PUBLIC_HOST: 'nightlight.example' });
     assert.equal(env.MTX_WEBRTCADDITIONALHOSTS, computed('nightlight.example'));
+    assert.deepEqual(getLastAdvertisedHosts({ PUBLIC_HOST: 'changed.example' }), env.MTX_WEBRTCADDITIONALHOSTS.split(','));
   });
 
   test('a stale inherited MTX_WEBRTCADDITIONALHOSTS is replaced by the computed value, not passed through', async () => {

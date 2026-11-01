@@ -31,6 +31,8 @@ HLS can't carry at all — WebRTC can). This drives a specific pipeline, in orde
 4. **Frontend** picks WebRTC (`WhepPlayer.jsx`, "Low latency") or HLS (`HlsPlayer.jsx`,
    "Compatibility") per camera tile, toggled by the user.
 
+`GET /api/remote-access` (`backend/src/routes/remoteAccess.js`, `lib/remoteAccess.js`) reports the admin's configured network access and calling-device network; DNS checks only configured `PUBLIC_HOST` names.
+
 ## Child process environment (`backend/src/lib/childEnv.js`, #553)
 
 Camera streams are untrusted input, and ffmpeg/ffprobe parse whatever a (possibly compromised) camera

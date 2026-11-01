@@ -15,7 +15,7 @@ import { api } from '../src/lib/api.js';
 // Every label on the admin card. Listed in full deliberately: a menu that silently loses an entry is
 // exactly the kind of regression nothing else would catch.
 const ADMIN_LABELS = [
-  'General', 'Camera and Recording', 'Caregivers', 'Integrations', 'Logs',
+  'General', 'Camera and Recording', 'Caregivers', 'Integrations', 'Remote Access', 'Logs',
 ];
 
 function mockApi({ version = '0.29.0' } = {}) {
@@ -37,6 +37,9 @@ describe('what the menu offers each role', () => {
     for (const oldLabel of ['Camera controls', 'Recording', 'Clip management']) {
       expect(screen.queryByText(oldLabel)).toBeNull();
     }
+    const rows = [...document.querySelectorAll('.card .list-row')].map((row) => row.textContent);
+    const positions = ADMIN_LABELS.map((label) => rows.findIndex((row) => row.startsWith(label)));
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });
 
   test('a caregiver is offered none of them', async () => {
