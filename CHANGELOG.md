@@ -11,6 +11,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- #932 Admins can protect alert and wake clips so automatic cleanup keeps them. Protected clips sit outside the storage cap and can fill the disk; removing a camera or child still deletes their clips. Timelapses and Record-button recordings cannot be protected yet.
+
 - Settings → Remote Access shows how this device connects, the server's setup, and a Low latency video test. A successful test only proves the UDP forward when run from outside the home network.
 
 - A light/dark button at the far right of the Live page header switches the theme on this device. On other pages, use Account → Appearance, where System follows the device again.
@@ -21,6 +23,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - Camera controls, Recording and Clip management now sit under one Settings entry, Camera and Recording. Nothing was removed; the pages and their addresses are unchanged.
 
 ### Fixed
+
+- #932 Protected clips with missing video files can be unprotected and removed. The clip player shows Delete when its caller offers it, and Sleep Detail keeps protection badges in step with changes.
 
 - The Recordings icon now lines up with its heading on a child's page.
 

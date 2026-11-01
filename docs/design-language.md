@@ -408,6 +408,9 @@ credentials in it (`https://user:pass@host`) are never kept, whatever the field 
 credential-name check reads field names only. A screen that restores must say which of its fields are not kept.
 
 ### Badges, chips, status
+
+- A protected clip uses a quiet lock badge with the accessible name **Protected** in list metadata.
+  The player’s admin-only lock button uses **Protect this clip** / **Unprotect this clip** and a pressed state; disable Delete while protected.
 - `.status-badge` — filled pill, 3px 10px, 12px/600, white text; `--ok` `--live`, `--bad`
   `--offline`, `--off` `--text-secondary`. `--sm` = 2px 8px / 11px.
 - `.cam-badge` — **outlined** pill (colour + border, transparent fill), 11px/600. Filled = state,

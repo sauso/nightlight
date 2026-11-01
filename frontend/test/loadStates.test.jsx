@@ -349,7 +349,8 @@ describe('Clip management', () => {
     await screen.findByText('clips down');
     await user.click(screen.getByRole('button', { name: /retry/i }));
     expect(await screen.findByText(EMPTY)).toBeTruthy();
-    expect(get).toHaveBeenCalledTimes(2);
+    // The protected archive loads once alongside the ordinary list; Retry only re-fetches this list.
+    expect(get.mock.calls.filter(([path]) => path === '/cameras/clips')).toHaveLength(2);
     expect(screen.queryByText('clips down')).toBeNull();
   });
 

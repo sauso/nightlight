@@ -34,10 +34,13 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 // split. The Storage cap and Keep-clips-for limits delete ALERT clips only, hence the closing sentence.
 function StorageCard({ storage }) {
   const wake = storage.wakeClips || { count: 0, bytes: 0 };
+  const protectedCount = (storage.protectedAlertClips || 0) + (storage.protectedWakeClips || 0);
+  const protectedBytes = (storage.protectedAlertBytes || 0) + (storage.protectedWakeBytes || 0);
   // Never negative: an old server that answered without recordingBytes must read as "none", not as minus the wake bytes.
   const manual = storage.manualRecordings
     || { count: Math.max(0, (storage.recordingCount || 0) - (wake.count || 0)), bytes: Math.max(0, (storage.recordingBytes || 0) - (wake.bytes || 0)) };
   const alertKnown = typeof storage.usedBytes === 'number' && isFinite(storage.usedBytes);
+  // usedBytes now counts only unprotected alert clips: exactly the population governed by the cap (#932).
   const total = alertKnown ? storage.usedBytes + (manual.bytes || 0) + (wake.bytes || 0) : null;
   return (
     <div className="card">
@@ -46,12 +49,14 @@ function StorageCard({ storage }) {
         <div>Alert clips: <strong>{fmtBytes(storage.usedBytes)}</strong>
           {typeof storage.clipCount === 'number' ? ` · ${plural(storage.clipCount, 'clip')}` : ''}</div>
         <div>Manual recordings: <strong>{fmtBytes(manual.bytes)}</strong> · {plural(manual.count || 0, 'recording')}</div>
-        <div>Wake clips: <strong>{fmtBytes(wake.bytes)}</strong> · {plural(wake.count || 0, 'clip')}</div>
+        <div>Wake clips: <strong>{fmtBytes(wake.bytes)}</strong> · {plural(wake.count || 0, 'clip')}
+          {storage.protectedWakeClips > 0 ? ` (of which ${storage.protectedWakeClips} protected)` : ''}</div>
+        {protectedCount > 0 && <div>Protected: {plural(protectedCount, 'clip')}, <strong>{fmtBytes(protectedBytes)}</strong> (not counted toward the cap)</div>}
         <div>Total of the three: <strong>{fmtBytes(total)}</strong>
           {typeof storage.freeBytes === 'number' && isFinite(storage.freeBytes) ? ` · ${fmtBytes(storage.freeBytes)} free` : ''}</div>
         <div className="camera-tile__sub">
           The Storage cap and Keep clips for limits apply to alert clips only. Manual recordings are kept until you
-          delete them, and wake clips follow their own retention. The total does not include timelapses, pictures or
+          delete them, and wake clips follow their own retention. The total does not include protected alert clips, timelapses, pictures or
           the live recording buffer.
         </div>
         <div className="camera-tile__sub" style={{ wordBreak: 'break-all' }}>

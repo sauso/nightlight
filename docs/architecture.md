@@ -469,7 +469,10 @@ trusted in the span it was computed in. `GET /review/:date` adds `settings: { ke
 Not covered by the key: a night with no usable saved context, whose key is `''` before and after a settings change.
 
 **Deleting a child or a camera is `lib/entityPurge.js`** (#540, #554), and it deletes everything that belongs to
-it. Most of the history tables have **no foreign key** to `children` / `cameras` (deliberately: `bed_transitions`,
+it. `detection_events.protected` and `recordings.protected` are 0/1 clip flags. The protected-list and
+admin toggle routes are `GET /api/cameras/clips/protected`, `PUT /api/cameras/alerts/:id/protected` and
+`PUT /api/recordings/:id/protected`.
+Most of the history tables have **no foreign key** to `children` / `cameras` (deliberately: `bed_transitions`,
 `activity_samples`, `detection_events`, `camera_events`, `sensor_readings`, `sleep_nights`, `sleep_reviews`), so
 the database will not cascade for you. **A new table or column that names a child or camera (`child_id`,
 `camera_id`) must be added to `entityPurge.js`**, or `backend/test/entity-purge.test.js` fails: it finds every such
