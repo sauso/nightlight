@@ -1,6 +1,6 @@
 # Camera controls
 
-**Settings → Camera controls** (admin only) holds three groups of global settings that apply across
+**Settings → Camera and Recording → Camera controls** (admin only) holds three groups of global settings that apply across
 every camera (the pan/tilt step, camera-offline alerts and long-silence alerts) — not per-camera
 detection settings, which live on each camera's own **Cameras → edit → Motion detection** page.
 

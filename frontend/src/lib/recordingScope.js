@@ -40,7 +40,7 @@ export function describeSetup({ cam, kids = [], settings = {}, now = Date.now() 
   // Why a wake clip is NOT possible, as every reason that applies (not just the first): an admin who fixes
   // one should not be surprised by the next.
   const wakeWhy = [];
-  if (!wakeOn) wakeWhy.push('“Record wake-ups without alerting” is off in Settings → Recording');
+  if (!wakeOn) wakeWhy.push('“Record wake-ups without alerting” is off in Settings → Camera and Recording → Recording');
   if (!cam.child_id) wakeWhy.push('no child is assigned to this camera');
   else if (kid && !kid.track_sleep) wakeWhy.push('sleep tracking is off for the assigned child');
 
@@ -97,7 +97,7 @@ export function describeSetup({ cam, kids = [], settings = {}, now = Date.now() 
       label: 'Manual recording',
       value: manualOn ? 'On' : 'Off',
       on: !!manualOn,
-      note: manualOn ? 'The Record button on the camera’s tile.' : '“Show a Record button on each camera” is off in Settings → Recording.',
+      note: manualOn ? 'The Record button on the camera’s tile.' : '“Show a Record button on each camera” is off in Settings → Camera and Recording → Recording.',
     },
   ];
 }

@@ -726,7 +726,7 @@ React + react-router, no Redux/state library — three context providers (`AuthC
 main dashboard; `pages/` holds the four management screens (Children, Cameras, Account,
 Settings). The Settings **hub itself is reachable by caregivers** — its route carries no admin
 guard (`App.jsx`) — but it's role-aware internally: admin-only rows are hidden for a caregiver,
-and every Settings *sub*-route (general, camera, recording, mqtt, push providers, users, logs,
+and every Settings *sub*-route (general, camera-recording, camera, recording, mqtt, push providers, users, logs,
 clips) is individually `AdminProtected`. `lib/api.js` is a thin fetch wrapper that attaches the
 JWT and redirects to `#/login` on a 401. Every request also carries a timeout (30 s by default, so a
 stalled connection fails with a "took too long to respond" error instead of hanging); a call the server
@@ -755,7 +755,7 @@ a new deploy has replaced, the reload is what fixes it too (the app also reloads
 
 **Unsaved form edits survive the background reload (#377).** `App.jsx` reloads the page after 15 s in the
 background to repair stale media connections, and that empties React state. The child form, the camera form
-Settings → Recording, Settings → General, Settings → Integrations → MQTT, the Gotify, ntfy and Pushover pages and the caregiver form therefore store what is different from the saved values in `sessionStorage`
+Settings → Camera and Recording → Recording, Settings → General, Settings → Integrations → MQTT, the Gotify, ntfy and Pushover pages and the caregiver form therefore store what is different from the saved values in `sessionStorage`
 (`lib/formDraft.js`, kept in step by `lib/useFormDraft.js`) and restore it on mount. Rules that must hold:
 **no secret is ever written** (each form passes an allow-list of fields, credential-named keys are dropped
 even if allowed, a value that is a URL with credentials in it is dropped whatever its key, and a camera

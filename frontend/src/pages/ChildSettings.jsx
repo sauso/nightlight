@@ -283,7 +283,7 @@ export default function ChildSettings() {
                 Estimate this child's nightly sleep from their cameras' movement &amp; sound. Wake-ups are
                 also recorded (without alerting you)
                 {isAdmin ? (
-                  <> — length and retention are under <Link to="/settings/recording">Settings › Recording</Link>.</>
+                  <> — length and retention are under <Link to="/settings/recording">Settings › Camera and Recording › Recording</Link>.</>
                 ) : (
                   <> — an admin can change their length and retention.</>
                 )}

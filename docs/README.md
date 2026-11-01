@@ -17,7 +17,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 ## Everyday features
 
 - [Visual walkthrough](#visual-walkthrough) — setup, live view, sleep, alerts, notifications and a caregiver's view
-- [Camera controls](camera-controls.md) — PTZ and offline alerts
+- [Camera controls](camera-controls.md) — PTZ and offline alerts under Settings → Camera and Recording
 - [Sleep tracking](sleep-tracking.md) — how nights are estimated, corrected and reviewed, and its known limits
 - [Recording](recording.md) — clips, wake events, manual recordings and retention
 - [Your home screen and the mobile apps](mobile.md) — install as an app, Android and iOS, push on the apps

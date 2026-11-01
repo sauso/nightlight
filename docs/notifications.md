@@ -41,8 +41,8 @@ choice of kind: a provider gets all of them or none. What can be switched off se
 |---|---|---|---|
 | **Motion alert** | **Off.** Motion detection is off on a new camera | Motion detection on for that camera. Not sent while the camera is [silenced](camera-controls.md#silencing-a-cameras-alerts-and-who-did-what), outside its [Alert schedule](#alert-schedule-quiet-hours), or under [Hold alerts until asleep](#hold-alerts-until-asleep) | Every enabled provider; with Firebase, every device that is registered and signed in, caregivers included |
 | **Sound alert** | **Off.** Sound detection is off on a new camera | Sound detection on for that camera. Same silence and schedule rules | The same |
-| **Camera offline**, and **back online** | **Off** | **Settings → Camera controls → Notify when a camera goes offline** (default threshold 5 minutes, 1–1440); "back online" is sent only after an offline notification was. See [Camera controls](camera-controls.md#camera-offline-alerts) | The same |
-| **Long silence** (a camera's alerts kept silenced) | **On**, 60 minutes (1–719) | **Settings → Camera controls → Long silence alerts**. See [Camera controls](camera-controls.md#long-silence-alerts) | Meant for admins: on Firebase only admins' devices, and not the person who set the silence; Pushover, ntfy and Gotify cannot address one person, so everyone on them gets it |
+| **Camera offline**, and **back online** | **Off** | **Settings → Camera and Recording → Camera controls → Notify when a camera goes offline** (default threshold 5 minutes, 1–1440); "back online" is sent only after an offline notification was. See [Camera controls](camera-controls.md#camera-offline-alerts) | The same |
+| **Long silence** (a camera's alerts kept silenced) | **On**, 60 minutes (1–719) | **Settings → Camera and Recording → Camera controls → Long silence alerts**. See [Camera controls](camera-controls.md#long-silence-alerts) | Meant for admins: on Firebase only admins' devices, and not the person who set the silence; Pushover, ntfy and Gotify cannot address one person, so everyone on them gets it |
 | **Sleep report** (and one **Sleep report updated** follow-up) | **On for every child**, with the child's name shown. Two switches per child (admin only, on the child's page), see below | A child with **Track sleep** on, **Send this child's sleep report** on, and at least one provider enabled. See [Sleep report notifications](#sleep-report-notifications) | The same as motion alerts |
 | **Test message** | Only when you press **Send test** (Pushover, ntfy and Gotify; Firebase has no test button) | That provider's settings **saved**: the test uses what was last saved, not what is typed on screen, so **Send test** (labelled "Send test with saved settings") is greyed out, with a hint, while a field or secret has been changed and not yet saved. Save first, then test | That one provider |
 
@@ -654,7 +654,7 @@ stops being refined, which is the other half of why no later wake time is pushed
 ## Long-silence notifications (admins)
 
 Separate again: when a camera's alerts are kept silenced, on and off, for longer than the admins allow (on by
-default, 60 minutes, under **Settings → Camera controls → Long silence alerts**), one notification goes out for
+default, 60 minutes, under **Settings → Camera and Recording → Camera controls → Long silence alerts**), one notification goes out for
 that silence. It says how long, never who: no username goes to any provider. Unlike everything above, it is
 meant for the **admins**, not the person who silenced the camera, and only the Nightlight app's own push
 (Firebase) can do that: Pushover, ntfy and Gotify cannot address one person, so everyone on them receives it

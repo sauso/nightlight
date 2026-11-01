@@ -1,4 +1,4 @@
-// The Cameras tab (src/pages/Cameras.jsx) and Settings → Camera controls (src/pages/SettingsCamera.jsx).
+// The Cameras tab (src/pages/Cameras.jsx) and Settings → Camera and Recording → Camera controls (src/pages/SettingsCamera.jsx).
 //
 // Both had ZERO tests. What is worth pinning here is not the markup:
 //   1. ROLE GATING. Every destructive or reconfiguring affordance on this page — Disable, Edit, Remove,
@@ -367,7 +367,7 @@ describe('the Cameras tab', () => {
   });
 });
 
-// --- Settings → Camera controls -----------------------------------------------------------------
+// --- Settings → Camera and Recording → Camera controls ------------------------------------------
 
 const SETTINGS = {
   ptz_step: 12,
@@ -384,7 +384,7 @@ const SETTINGS = {
 const OFFLINE_SWITCH = { name: 'Notify when a camera goes offline' };
 const SILENCE_SWITCH = { name: "Notify admins when a camera's alerts stay silenced for a long time" };
 
-describe('Settings → Camera controls', () => {
+describe('Settings → Camera and Recording → Camera controls', () => {
   test('seeds every field from the settings context', () => {
     mockApi();
     renderAsAdmin(<SettingsCamera />, { settings: SETTINGS });

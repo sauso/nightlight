@@ -58,14 +58,14 @@ describe('the Settings hub', () => {
   test('ONLY an admin sees the system configuration rows', () => {
     hub({});
     const { unmount } = renderAsAdmin(<Settings />);
-    for (const label of ['General', 'Camera controls', 'Recording', 'Caregivers', 'Integrations', 'Clip management', 'Logs']) {
+    for (const label of ['General', 'Camera and Recording', 'Caregivers', 'Integrations', 'Logs']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     unmount();
 
     hub({});
     renderAsCaregiver(<Settings />);
-    for (const label of ['General', 'Caregivers', 'Integrations', 'Logs', 'Clip management']) {
+    for (const label of ['General', 'Camera and Recording', 'Caregivers', 'Integrations', 'Logs']) {
       expect(screen.queryByText(label)).not.toBeInTheDocument();
     }
     // A caregiver still gets their own account and About.
@@ -317,7 +317,7 @@ describe('Settings → Push → ntfy', () => {
 
 // --- Recording ----------------------------------------------------------------------------------
 
-describe('Settings → Recording', () => {
+describe('Settings → Camera and Recording → Recording', () => {
   const SETTINGS = {
     clip_pre_roll_s: 5,
     clip_post_roll_s: 10,

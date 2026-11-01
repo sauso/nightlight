@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- Camera controls, Recording and Clip management now sit under one Settings entry, Camera and Recording. Nothing was removed; the pages and their addresses are unchanged.
+
 ### Fixed
 
 - The Record button and other video controls no longer cover the camera in Picture-in-Picture. Fullscreen camera controls stay clear of the status and gesture bars in the Android app with the matching app update; older app builds still show the bars.

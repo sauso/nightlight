@@ -94,7 +94,7 @@ describe('describeSetup: configuration, from the camera’s own fields', () => {
 
     const off = rowOf(setupOf({}, { wake_clips_enabled: 0 }), 'wake');
     expect(off).toMatchObject({ value: 'Not eligible', on: false });
-    expect(off.note).toMatch(/Record wake-ups without alerting.+off in Settings → Recording/);
+    expect(off.note).toMatch(/Record wake-ups without alerting.+off in Settings → Camera and Recording → Recording/);
 
     const none = rowOf(setupOf({ child_id: null }), 'wake');
     expect(none.on).toBe(false);
@@ -106,7 +106,7 @@ describe('describeSetup: configuration, from the camera’s own fields', () => {
 
     // All reasons at once, not just the first.
     const all = rowOf(setupOf({ child_id: null }, { wake_clips_enabled: 0 }), 'wake').note;
-    expect(all).toMatch(/off in Settings → Recording; no child is assigned/);
+    expect(all).toMatch(/off in Settings → Camera and Recording → Recording; no child is assigned/);
   });
 
   test('a setting that has not arrived yet is the server’s default (on), not "off"', () => {
@@ -121,7 +121,7 @@ describe('describeSetup: configuration, from the camera’s own fields', () => {
     expect(rowOf(setupOf({}, { ondemand_enabled: 1 }), 'manual').value).toBe('On');
     const off = rowOf(setupOf({}, { ondemand_enabled: 0 }), 'manual');
     expect(off).toMatchObject({ value: 'Off', on: false });
-    expect(off.note).toMatch(/Show a Record button on each camera.+Settings → Recording/);
+    expect(off.note).toMatch(/Show a Record button on each camera.+Settings → Camera and Recording → Recording/);
   });
 });
 
@@ -329,7 +329,7 @@ describe('the panel, as an admin', () => {
     expect(await p.findByText(/Not eligible: no child is assigned to this camera/)).toBeTruthy();
   });
 
-  test('a wake-up setting turned off in Settings → Recording is reflected', async () => {
+  test('a wake-up setting turned off in Settings → Camera and Recording → Recording is reflected', async () => {
     mount({ settings: { wake_clips_enabled: 0 } });
     const p = await panel();
     expect(await p.findByText(/“Record wake-ups without alerting” is off/)).toBeTruthy();

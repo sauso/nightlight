@@ -325,6 +325,10 @@ border-radius: var(--radius); padding: 16px; margin-bottom: 14px;
 ```
 One hairline border, no shadow. Shadows are reserved for things that float (sheets, the child card).
 
+Settings sub-menus (Integrations and Camera and Recording) share a pattern: a row on the Settings hub
+opens a sub-menu page. Its rows pass `state.from` for Back, and each destination has the sub-menu as
+its fallback Back target for direct links and refreshes.
+
 ### Buttons
 `.btn` — inline-flex, `gap: 6px`, radius 10px, `padding: 12px 18px`, 14px/600, and **`width: 100%`
 by default** (mobile-first: buttons are full-width unless constrained).
@@ -380,7 +384,7 @@ is typed is kept for 6 hours in the browser tab (`lib/formDraft.js`) and restore
 background reload or a visit to another screen, with the notice saying so; **a secret field is never
 kept**, so a screen with a password must say, when it restores, that the password has to be typed again.
 
-Covered today: the child form, the camera form, Settings → Recording, Settings → General, Settings → Integrations → MQTT, the Gotify, ntfy and
+Covered today: the child form, the camera form, Settings → Camera and Recording → Recording, Settings → General, Settings → Integrations → MQTT, the Gotify, ntfy and
 Pushover pages, and the add/edit caregiver screen. **Not covered** (they still lose unsaved edits on a reload):
 the Firebase page (one switch), the caregiver list, the Account name form (two fields, and its values come
 from the sign-in context), and Detection settings (no Save button; they recover through their own save queue,
@@ -516,7 +520,7 @@ is why `CamerasContext` publishes it next to `error`. A failure after a good loa
 not `stale`: there is no list on screen to keep, and the empty copy would be unverifiable. Keep the failure apart
 from the data: a catch block that sets the data to `[]` or `null` puts the failed state back into the empty one.
 
-Covered: Children, Cameras, Live, a child's alerts and unknown-child page, Sleep detail, Clip management.
+Covered: Children, Cameras, Live, a child's alerts and unknown-child page, Sleep detail, Settings → Camera and Recording → Clip management.
 Not yet: Logs (a failed fetch shows its error banner above "No log activity yet", the same conflation), Camera
 events and Recent alerts (they show their error and hide the empty copy, but have only "Refresh now", not
 **Retry**), and the Night review, Timelapse, Recordings and sensor cards.
