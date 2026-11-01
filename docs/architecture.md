@@ -726,7 +726,7 @@ React + react-router, no Redux/state library — three context providers (`AuthC
 main dashboard; `pages/` holds the four management screens (Children, Cameras, Account,
 Settings). The Settings **hub itself is reachable by caregivers** — its route carries no admin
 guard (`App.jsx`) — but it's role-aware internally: admin-only rows are hidden for a caregiver,
-and every Settings *sub*-route (general, camera, recording, mqtt, push providers, users, logs,
+and every Settings *sub*-route (general, camera-recording, camera, recording, mqtt, push providers, users, logs,
 clips) is individually `AdminProtected`. `lib/api.js` is a thin fetch wrapper that attaches the
 JWT and redirects to `#/login` on a 401. Every request also carries a timeout (30 s by default, so a
 stalled connection fails with a "took too long to respond" error instead of hanging); a call the server
