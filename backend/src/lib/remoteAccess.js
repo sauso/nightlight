@@ -26,8 +26,9 @@ export function classifyClient({ ip, forwardedHeaderPresent = false, trustedProx
     if (vpn4.check(ip, 'ipv4')) return 'vpn';
     return 'remote';
   }
-  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
-  if (mapped) return classifyClient({ ip: mapped[1] });
+  // BlockList checks IPv4 ranges against mapped IPv6 in both dotted and hex spelling.
+  if (home4.check(ip, 'ipv6')) return 'home';
+  if (vpn4.check(ip, 'ipv6')) return 'vpn';
   return home6.check(ip, 'ipv6') ? 'home' : 'remote';
 }
 

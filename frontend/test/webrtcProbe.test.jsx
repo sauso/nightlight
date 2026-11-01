@@ -85,6 +85,21 @@ test('abort closes the peer and deletes a late POST answer', async () => {
   await waitFor(() => expect(requests[1].url).toBe('/live/cam/whep/session'));
 });
 
+test('timeout aborts the in-flight WHEP POST', async () => {
+  vi.useFakeTimers();
+  globalThis.fetch = vi.fn((url, options) => {
+    requests.push({ url, options });
+    return new Promise(() => {});
+  });
+  const result = probeLowLatency({ mediamtxPath: 'cam' });
+  for (let i = 0; i < 10 && requests.length === 0; i++) await Promise.resolve();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].options.signal.aborted).toBe(false);
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(await result).toEqual({ outcome: 'timeout' });
+  expect(requests[0].options.signal.aborted).toBe(true);
+});
+
 test('refuses a path that could leave the camera WHEP endpoint', async () => {
   expect(await probeLowLatency({ mediamtxPath: '../api' })).toEqual({ outcome: 'failed' });
   expect(requests).toHaveLength(0);

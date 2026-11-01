@@ -25,6 +25,7 @@ export async function probeLowLatency({ mediamtxPath, signal } = {}) {
   let resourceUrl;
   let finished = false;
   let timer;
+  const postController = new AbortController();
   let resolveResult;
   const result = new Promise((resolve) => { resolveResult = resolve; });
 
@@ -43,8 +44,9 @@ export async function probeLowLatency({ mediamtxPath, signal } = {}) {
     finished = true;
     clearTimeout(timer);
     signal?.removeEventListener('abort', onAbort);
-    // WHY always close and DELETE: a diagnostic must not leave a viewer or a MediaMTX session
-    // running after success, failure, timeout, or navigation away. A late POST is handled below.
+    // Stop an in-flight POST on timeout or navigation; a response that wins this race is handled below.
+    postController.abort();
+    // Close the viewer and ask MediaMTX to end any session whose address we received.
     pc?.close();
     deleteSession(resourceUrl);
     resourceUrl = null;
@@ -80,6 +82,7 @@ export async function probeLowLatency({ mediamtxPath, signal } = {}) {
         method: 'POST',
         headers: { 'Content-Type': 'application/sdp', Authorization: `Bearer ${getToken()}` },
         body: offer.sdp,
+        signal: postController.signal,
       });
       if (!response.ok) throw new Error('WHEP refused');
       const url = resolveWhepResource(response.headers.get('Location'), requestUrl, window.location.origin);
