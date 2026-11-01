@@ -11,6 +11,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- #932 Admins can protect alert and wake clips so automatic cleanup keeps them. Protected clips sit outside the storage cap and can fill the disk; removing a camera or child still deletes their clips. Timelapses and Record-button recordings cannot be protected yet.
+
 - Settings → Remote Access shows how this device connects, the server's setup, and a Low latency video test. A successful test only proves the UDP forward when run from outside the home network.
 
 - A light/dark button at the far right of the Live page header switches the theme on this device. On other pages, use Account → Appearance, where System follows the device again.

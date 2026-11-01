@@ -1494,6 +1494,10 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 /* Modal clip player */
 .clip-player { width: 100%; border-radius: 12px; background: #000; display: block; max-height: 60vh; }
 .clip-player__meta { font-size: 12.5px; color: var(--text-secondary); margin: 10px 0 14px; text-align: center; }
+.clip-player__actions { display: inline-flex; align-items: center; gap: 4px; }
+.clip-player__actions .icon-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+.clip-protected-badge { display: inline-flex; align-items: center; gap: 3px; border-radius: 20px; padding: 1px 6px; color: var(--text-secondary); background: var(--bg-elevated-2); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.clip-protection-note { color: var(--text-secondary); font-size: 12px; line-height: 1.4; margin: -4px 0 12px; text-align: center; }
 .btn-block { display: block; width: 100%; text-align: center; }
 .icon-btn--danger { color: var(--offline); }
 /* Clip Management (Settings → Camera and Recording) */

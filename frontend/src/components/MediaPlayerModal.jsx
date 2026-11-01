@@ -19,6 +19,7 @@ export default function MediaPlayerModal({
   posterPath,
   filename,
   meta,
+  afterMeta,
   onClose,
   headerAction,
   footer,
@@ -67,6 +68,7 @@ export default function MediaPlayerModal({
         playsInline
       />
       {meta ? <div className="clip-player__meta">{meta}</div> : null}
+      {afterMeta}
       {footer ?? (
         <button type="button" className="btn btn-block" onClick={download} disabled={dl === 'saving'}>
           {dl === 'saving' ? 'Saving…'

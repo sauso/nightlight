@@ -71,6 +71,13 @@ Alerts that have a clip show a **play button** on their thumbnail; tapping opens
 with a **Download** button. In the mobile app, Download saves the video into your phone's Downloads
 folder.
 
+To keep an alert clip, open it from an alert or from **Settings → Camera and Recording → Clip Management**,
+then tap the lock button in the player. To keep a wake clip, open the night’s **Wake-ups**, play the clip,
+and tap the same button. Tap the open lock to unprotect it. Only admins can change protection; everyone
+can see the **Protected** badge. A protected alert clip’s Delete button is disabled until you unprotect it.
+Clip Management lists protected alert and wake clips together at the top, including clips older than its
+day list. You can play and unprotect them there. **Select all shown** skips protected clips.
+
 **A silenced camera, one outside its alert hours, or one under Hold alerts until asleep saves no clip.** A clip belongs to an alert, and
 is cut only when an alert actually fires. While a camera is **silenced** (**Silence alerts** on its
 tile), outside its **Alert schedule**, or under **Hold alerts until asleep**, motion and sound raise no alert at all (no push and no entry
@@ -460,11 +467,11 @@ image.
 three lines that never overlap — **Alert clips**, **Manual recordings** and **Wake clips** — plus the total
 of those three and the free space. The *Storage cap (GB)* and *Keep clips for* limits apply to alert clips
 only: manual recordings are kept until you delete them, and wake clips follow *Keep wake clips for*. The
-card also shows protected alert and wake clip space. Protected clips are shown separately and do not
-count toward the alert-clip storage cap. They can still fill the disk, so check the protected total.
-total leaves out timelapses, pictures and the live recording buffer, so it is lower than what the volume
-itself reports as used. If the figures cannot be loaded the card says "Storage details unavailable" and
-offers a Retry button.
+card’s **Protected** line shows their combined count and space. The Wake clips line says how many of
+those are protected. Protected clips do not count toward the alert-clip storage cap, so they can still
+fill the disk. The total leaves out protected alert clips, timelapses, pictures and the live recording
+buffer, so it is lower than what the volume itself reports as used. If the figures cannot be loaded
+the card says "Storage details unavailable" and offers a Retry button.
 
 ---
 
@@ -479,6 +486,8 @@ timelapses cannot be protected. Protected clips remain in their own list even wh
 for the recent lists. Protect a clip before cleanup removes it: protection cannot restore a deleted
 clip. Unprotecting one that is already older than your retention setting lets the next cleanup remove
 it, within 15 minutes for alert clips; wake clips wait for their own cleanup schedule.
+The **Clear recent alerts** confirmation says protected alerts stay. After clearing, they still appear
+in the alert list.
 
 - **Automatic clips** are deleted once **either** limit is passed: older than *Keep clips for (days)*,
   or total clip size over *Storage cap (GB)* (oldest first). Set either to **0** to turn that limit off.

@@ -7,7 +7,8 @@ import { useSettings } from '../lib/SettingsContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
 import ImagePreviewModal from '../components/ImagePreviewModal.jsx';
-import MediaPlayerModal from '../components/MediaPlayerModal.jsx';
+import WakeClipPlayerModal from '../components/WakeClipPlayerModal.jsx';
+import { ProtectedBadge } from '../components/ClipProtection.jsx';
 import RecomputeNight from '../components/RecomputeNight.jsx';
 import ReviewNightButton from '../components/ReviewNightButton.jsx';
 import ReviewReceipt from '../components/ReviewReceipt.jsx';
@@ -254,7 +255,10 @@ export default function SleepDetail() {
 
         <NightBody night={night} error={nightError} onRetry={() => setNightRetry((n) => n + 1)} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit}
           childId={id} date={date} onRecomputed={setNight} onCorrectionRemoved={() => { receiptRemovals.current += 1; setReceipt(null); }}
-          settingsView={settingsView} onSettingsView={chooseSettingsView} />
+          settingsView={settingsView} onSettingsView={chooseSettingsView}
+          onWakeProtectionChange={(clipId, value) => setNight((prev) => prev && ({ ...prev,
+            wakeClips: (prev.wakeClips || []).map((clip) => clip.id === clipId ? { ...clip, protected: value } : clip),
+          }))} />
 
         <SleepInsights childId={id} tempUnit={settings.temp_unit} childName={kid?.name} />
 
@@ -336,7 +340,7 @@ function SettingsViewLine({ night, onSettingsView }) {
   );
 }
 
-function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed, onCorrectionRemoved, settingsView, onSettingsView }) {
+function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed, onCorrectionRemoved, settingsView, onSettingsView, onWakeProtectionChange }) {
   // The wake↔alert clip currently open in the shared player (or null). Lives here so it survives a
   // 2-min live refresh of `night` without tearing the modal down mid-watch.
   const [clipFor, setClipFor] = useState(null);
@@ -548,13 +552,14 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
         />
       )}
       {wakeClip && (
-        <MediaPlayerModal
+        <WakeClipPlayerModal
+          clip={wakeClip}
           title={`Wake-up · ${fmtTime(wakeClip.started_at)}`}
-          videoPath={`/recordings/${wakeClip.id}/video`}
-          posterPath={`/recordings/${wakeClip.id}/thumb`}
-          filename={`wake-${wakeClip.id}.mp4`}
-          meta={`Recorded automatically${wakeClip.duration_s ? ` · ${wakeClip.duration_s}s` : ''}`}
           onClose={() => setWakeClip(null)}
+          onProtectedChange={(clipId, value) => {
+            setWakeClip((prev) => prev && ({ ...prev, protected: value }));
+            onWakeProtectionChange(clipId, value);
+          }}
         />
       )}
     </>
@@ -586,6 +591,7 @@ function WakeItem({ wake, hits, clip, fmtTime, onPlay, onPlayWake }) {
             <Video size={11} aria-hidden="true" />clip
           </span>
         )}
+        {clip?.protected && <ProtectedBadge />}
         {expandable && <ChevronDown size={16} className={`sleep-wakes__chev${open ? ' is-open' : ''}`} aria-hidden="true" />}
       </span>
     </>
@@ -687,7 +693,7 @@ function AlertRow({ a, fmtTime, onPlay }) {
         <span className="sleep-wakes__thumbwrap">{thumb}</span>
       )}
       <div className="sleep-wakes__alert-body">
-        <span className="sleep-wakes__alert-label">{alertLabel(a.type)}{a.clip_status === 'pending' ? ' · recording…' : ''}</span>
+        <span className="sleep-wakes__alert-label">{alertLabel(a.type)}{a.clip_status === 'pending' ? ' · recording…' : ''}{hasClip && !!a.protected && <ProtectedBadge />}</span>
         <span className="sleep-wakes__alert-meta">
           {fmtTime(a.created_at)}{a.camera_name ? ` · ${a.camera_name}` : ''}{a.detail ? ` · ${a.detail}` : ''}
         </span>
@@ -1041,6 +1047,7 @@ function WakeClipRow({ clip, fmtTime, onPlay }) {
         <div className="sleep-wakes__alert-title">
           <Video size={13} className="sleep-wakes__alert-ico" aria-hidden="true" />
           Recorded at the start of this wake
+          {!!clip.protected && <ProtectedBadge />}
         </div>
         <div className="sleep-wakes__alert-sub">
           {fmtTime(clip.started_at)}
