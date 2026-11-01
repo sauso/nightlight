@@ -350,7 +350,8 @@ test('replayed extraction id leaves a protected clip and thumbnail untouched', a
   db.prepare('UPDATE detection_events SET protected = 2 WHERE id = ?').run(locked.id);
   enqueueClip({ id: 'cam-a', name: 'Test camera', detect_record_clips: 1 }, locked.id);
   assert.equal(row(locked.id).clip_status, 'ready');
-  await assert.rejects(extractClip('cam-a', { outBase: String(locked.id), settleMs: 0 }), /protected clip output/);
+  // The recorder core is DB-free: the real wiring is the callback clipCapture.js passes.
+  await assert.rejects(extractClip('cam-a', { outBase: String(locked.id), settleMs: 0, isOutputProtected: () => ev.isProtectedEvent(locked.id) }), /protected clip output/);
   assert.ok(fs.existsSync(output));
   assert.ok(fs.existsSync(thumb));
 });

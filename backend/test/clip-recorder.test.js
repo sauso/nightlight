@@ -269,9 +269,10 @@ describe('extractClip refuses before it spawns anything', () => {
     fs.writeFileSync(file, 'original clip');
     fs.writeFileSync(thumb, 'original thumb');
     ev.setClipReady(id, rel, 5, 13);
-    const extraction = extractClip(CAM, { at: Date.now() - 4000, outBase: String(id), settleMs: 0 });
+    let locked = false;
+    const extraction = extractClip(CAM, { at: Date.now() - 4000, outBase: String(id), settleMs: 0, isOutputProtected: () => locked });
     // The first guard has run synchronously; this change lands during the settle await.
-    queueMicrotask(() => db.prepare('UPDATE detection_events SET protected = 1 WHERE id = ?').run(id));
+    queueMicrotask(() => { locked = true; });
     await assert.rejects(extraction, /protected clip output/);
     assert.equal(fs.readFileSync(file, 'utf8'), 'original clip');
     assert.equal(fs.readFileSync(thumb, 'utf8'), 'original thumb');

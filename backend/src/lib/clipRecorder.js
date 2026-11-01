@@ -1,5 +1,4 @@
 import { spawnChild } from './childEnv.js';
-import db from '../db.js';
 import fs from 'fs';
 import path from 'path';
 import { logger, isNoisyMediaLine } from './logger.js';
@@ -639,14 +638,18 @@ export async function probeClip(file) {
 // (Phase 2 passes the eventId; the spike passes a timestamp). Returns { file, thumb, segments, probe }.
 export async function extractClip(
   cameraId,
-  { preRollSec = 5, postRollSec = 15, at = Date.now(), outBase = String(Date.now()), settleMs = null } = {}
+  {
+    preRollSec = 5, postRollSec = 15, at = Date.now(), outBase = String(Date.now()), settleMs = null,
+    isOutputProtected = () => false,
+  } = {}
 ) {
-  // #932: this generic cutter removes an existing output name before encoding. A replayed alert id
-  // cannot overwrite a protected clip, even when extractClip is called directly.
-  const protectedOutput = () => /^\d+$/.test(String(outBase)) && !!db.prepare(
-    'SELECT 1 FROM detection_events WHERE id = ? AND camera_id = ? AND protected <> 0'
-  ).get(Number(outBase), cameraId);
-  if (protectedOutput()) {
+  // #932: this generic cutter removes an existing output name before encoding, so a replayed alert id
+  // must not be able to overwrite a protected clip. The CALLER supplies the check (clipCapture.js knows
+  // the database). It is a parameter, not an import, for two measured reasons: this capture core must
+  // not import db.js (a test that sets DATA_DIR after importing it created /app/data and failed CI on
+  // clips-dir-normalisation.test.js), and it must not gain an await before the first guard (a lazy
+  // import() here hung recordings-lifecycle.test.js).
+  if (isOutputProtected()) {
     if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${outBase} skipped`);
     throw new Error('protected clip output');
   }
@@ -681,7 +684,7 @@ export async function extractClip(
   const outDir = ensureClipsFolder([safeId], { leaf: true });
   const listDir = ensureClipsFolder([CONCAT_SUBDIR, safeId]);
 
-  if (protectedOutput()) {
+  if (isOutputProtected()) {
     if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${outBase} skipped`);
     throw new Error('protected clip output');
   }

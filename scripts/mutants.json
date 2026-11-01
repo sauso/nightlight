@@ -24879,7 +24879,7 @@
   {
     "label": "#932 extraction rechecks protection after settle",
     "file": "backend/src/lib/clipRecorder.js",
-    "find": "if (protectedOutput()) {\n    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${outBase} skipped`);\n    throw new Error('protected clip output');\n  }\n\n  // concat demuxer list.",
+    "find": "if (isOutputProtected()) {\n    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${outBase} skipped`);\n    throw new Error('protected clip output');\n  }\n\n  // concat demuxer list.",
     "replace": "if (false) {\n    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${outBase} skipped`);\n    throw new Error('protected clip output');\n  }\n\n  // concat demuxer list.",
     "expect": "killed",
     "tests": ["clip-recorder.test.js"],

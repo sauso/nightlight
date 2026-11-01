@@ -268,6 +268,9 @@ export function enqueueClip(camera, eventId, at = Date.now()) {
         postRollSec,
         at,
         outBase: String(eventId),
+        // #932: the DB-free capture core asks us whether this event is protected (also re-asked after its
+        // settle wait, in case an admin protects the clip while the post-roll is still recording).
+        isOutputProtected: () => isProtectedEvent(eventId),
       });
       // Stored relative to CLIPS_DIR (posix separator; getEventClipFile resolves it safely).
       const relPath = `${camera.id}/${eventId}.mp4`;
