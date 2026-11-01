@@ -43,6 +43,7 @@ describe('AppHeader', () => {
       </Routes>
     ));
     expect(screen.getByRole('heading', { name: 'Children' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Switch to (dark|light) mode/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Go to Live' }));
     expect(await screen.findByText('live')).toBeInTheDocument();
   });
@@ -51,6 +52,12 @@ describe('AppHeader', () => {
     at('/settings/logs', <AppHeader title="Logs" back={{ to: '/settings', label: 'Settings' }} />);
     expect(screen.getByRole('button', { name: 'Back to Settings' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Go to Live' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Switch to (dark|light) mode/ })).not.toBeInTheDocument();
+  });
+
+  test('Live can opt into the theme toggle', () => {
+    at('/', <AppHeader title="Live" showThemeToggle />);
+    expect(screen.getByRole('button', { name: /Switch to (dark|light) mode/ })).toBeInTheDocument();
   });
 
   test('keeps a long back label in the accessible name and title', () => {

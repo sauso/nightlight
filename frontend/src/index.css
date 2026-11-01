@@ -146,7 +146,7 @@ button {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
+  gap: 12px;
   width: 100%;
 }
 
@@ -196,15 +196,15 @@ button {
 }
 
 /* Owner's 2026-11-01 phone screenshots: long back labels took about 40% of the bar and wrapped
-   Camera controls / Clip Management. The theme button takes more title room, so cap Back at 30%
-   and use an 8px row gap. This is an estimate from those screenshots, not measured at other widths. */
+   Camera controls / Clip Management. Cap Back at 35% to leave roughly 225dp for the title;
+   this is an estimate from those screenshots, not measured on devices. */
 .app-header__back {
   display: inline-flex;
   align-items: center;
   gap: 2px;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 30%;
+  max-width: 35%;
   margin-left: -6px;
   padding: 4px 6px 4px 0;
   background: none;

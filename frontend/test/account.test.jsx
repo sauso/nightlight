@@ -20,6 +20,7 @@ import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import { renderAs, ADMIN, enabledButton } from './helpers/render.jsx';
 import Account from '../src/pages/Account.jsx';
+import ThemeToggle from '../src/components/ThemeToggle.jsx';
 import TwoFactorSection from '../src/components/TwoFactorSection.jsx';
 import { api } from '../src/lib/api.js';
 import { isReloadHeld } from '../src/lib/reloadGuard.js';
@@ -312,9 +313,10 @@ describe('the theme picker', () => {
     expect(putSpy, 'a per-device preference is not account state').not.toHaveBeenCalled();
   });
 
-  test('Appearance follows a change from the header toggle', async () => {
+  test('Appearance follows a change from the Live toggle', async () => {
     setTheme('light');
-    const { user } = mountAccount();
+    // Mount the publisher explicitly to check Account's subscription in the same tree.
+    const { user } = renderAs(USER, <><Account /><ThemeToggle /></>, { route: '/account' });
     const group = await screen.findByRole('group', { name: 'Theme' });
     expect(within(group).getByRole('button', { name: 'Light' })).toHaveAttribute('aria-pressed', 'true');
     await user.click(screen.getByRole('button', { name: 'Switch to dark mode' }));
