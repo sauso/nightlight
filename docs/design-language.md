@@ -49,6 +49,8 @@ JS** and stamps it on `<html>` as `data-theme`. The stylesheet therefore contain
 
 Theme is **per-device** (localStorage, key `nightlight_theme`) and deliberately not synced through
 the account — so a phone and a wall-mounted tablet can each pick what suits them.
+The button at the far right of the header flips between light and dark; Account → Appearance
+still offers **System** to follow the device again.
 
 **Rule:** every colour goes through a token. Never write a hex literal in a component rule; it will
 be wrong in one of the two themes.
@@ -330,7 +332,11 @@ One hairline border, no shadow. Shadows are reserved for things that float (shee
 Settings sub-menus (Integrations and Camera and Recording) share a pattern: a row on the Settings hub
 opens a sub-menu page. Its rows pass `state.from` for Back, and each destination has the sub-menu as
 its fallback Back target for direct links and refreshes.
-The header back label uses up to about 35% of the bar, then ends with an ellipsis so a long parent name does not push the page title onto two lines.
+The header's theme button sits at the far right of the full-width bar, including at ≥1200px.
+The bar stays navy in both themes, so the button uses fixed `--peri-soft`, not the changing
+`--text-secondary`. It is compact in short landscape and keeps a 44px touch target.
+The back label uses up to about 30% of the bar, then ends with an ellipsis to leave room
+for the page title and theme button. This width is estimated from phone screenshots, not measured on devices.
 
 ### Buttons
 `.btn` — inline-flex, `gap: 6px`, radius 10px, `padding: 12px 18px`, 14px/600, and **`width: 100%`

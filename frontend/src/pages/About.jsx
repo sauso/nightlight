@@ -10,6 +10,8 @@ const LINKS = [
   { label: 'GitHub — Mobile app', url: 'https://github.com/sauso/nightlight-mobile' },
   { label: 'Changelog', url: 'https://github.com/sauso/nightlight/blob/main/CHANGELOG.md' },
   { label: 'Report an issue', url: 'https://github.com/sauso/nightlight/issues' },
+  // GitHub loads issue forms from the default branch (main); this opens a plain new issue until the next release.
+  { label: 'Got an idea?', url: 'https://github.com/sauso/nightlight/issues/new?template=feature_request.yml' },
 ];
 
 const ISOLATION_DOCS_URL = 'https://github.com/sauso/nightlight/blob/main/docs/operations.md#media-isolation';

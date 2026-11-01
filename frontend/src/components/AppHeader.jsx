@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import BackLink from './BackLink.jsx';
 import DemoBanner from './DemoBanner.jsx';
+import ThemeToggle from './ThemeToggle.jsx';
 
 // The app's sticky top header. Top-level pages (Live, Alerts, Family, Settings) show the
 // logo on the left, which taps home to Live. Sub-pages pass `back={{ to, label }}` to show
@@ -30,6 +31,7 @@ export default function AppHeader({ title, back, showDemoBanner = true }) {
             </button>
           )}
           <h1>{title}</h1>
+          <ThemeToggle />
         </div>
       </header>
       {showDemoBanner && <DemoBanner />}

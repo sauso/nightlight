@@ -146,7 +146,7 @@ button {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
 }
 
@@ -166,21 +166,45 @@ button {
   flex-shrink: 0;
 }
 
+.app-header__theme {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  /* The bar stays navy in both themes, while --text-secondary changes with the page. */
+  color: var(--peri-soft);
+  cursor: pointer;
+}
+
+/* #381: keep the icon compact while its touch target reaches 44px. */
+.app-header__theme::after {
+  content: '';
+  position: absolute;
+  inset: -7px;
+}
+
 .app-header h1 {
   font-size: 22px;
   color: var(--bar-text);
 }
 
 /* Owner's 2026-11-01 phone screenshots: long back labels took about 40% of the bar and wrapped
-   Camera controls / Clip Management. Capping at 35% leaves roughly 225dp for a 22px serif title
-   on a ~400dp phone; this is an estimate from those screenshots, not measured at other widths. */
+   Camera controls / Clip Management. The theme button takes more title room, so cap Back at 30%
+   and use an 8px row gap. This is an estimate from those screenshots, not measured at other widths. */
 .app-header__back {
   display: inline-flex;
   align-items: center;
   gap: 2px;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 35%;
+  max-width: 30%;
   margin-left: -6px;
   padding: 4px 6px 4px 0;
   background: none;
@@ -609,6 +633,8 @@ body.in-pip .tile-menu-backdrop {
   }
   .app-header h1 { font-size: 17px; }
   .app-header__icon { width: 28px; height: 28px; }
+  .app-header__theme { width: 26px; height: 26px; }
+  .app-header__theme::after { inset: -9px; }
 
   .bottom-nav { padding: 2px 8px calc(2px + env(safe-area-inset-bottom)); }
   .bottom-nav a { font-size: 10px; padding: 2px 4px; }

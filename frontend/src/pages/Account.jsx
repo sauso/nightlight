@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Sun, Moon, Monitor } from 'lucide-react';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
-import { getTheme, setTheme } from '../lib/theme.js';
+import { getTheme, setTheme, subscribeTheme } from '../lib/theme.js';
 import Modal from '../components/Modal.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
@@ -42,6 +42,7 @@ export default function Account() {
   const [error, setError] = useState('');
   const [photoStatus, setPhotoStatus] = useState(''); // '' | 'saving' | 'saved'
   const [theme, setThemeState] = useState(getTheme());
+  useEffect(() => subscribeTheme(() => setThemeState(getTheme())), []);
   const later = useLater(); // the name and password "saved" ticks: cancelled when the page goes away (#855)
   const photoTimerRef = useRef(null); // the "Photo saved" tick's 2 s timer (#855), cancelled on unmount
   const mountedRef = useRef(true); // false once the page is gone: a save still in flight must not start the timer then

@@ -1,0 +1,40 @@
+name: Idea / enhancement
+description: Suggest something Nightlight could do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Found a security issue instead (a credential, secret, or private data exposed)? Please
+        **don't** file it here — see [SECURITY.md](https://github.com/sauso/nightlight/blob/main/SECURITY.md)
+        for how to report it privately.
+
+        Please don't include names, addresses, camera passwords or stream URLs in a public issue.
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like Nightlight to do?
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does it solve, or what do you do today?
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part is it about?
+      options:
+        - Live view
+        - Children and sleep
+        - Cameras
+        - Recording and clips
+        - Notifications
+        - Settings
+        - Mobile app
+        - Other
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Find it under Settings → About.
