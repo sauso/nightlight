@@ -7,7 +7,7 @@ import { useSettings } from '../lib/SettingsContext.jsx';
 import { useHomeTime } from '../lib/useHomeTime.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useCameras } from '../lib/CamerasContext.jsx';
-import { isNativeApp, isIOS, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, subscribeBackgroundPaused, isBackgroundPaused, setBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
+import { isNativeApp, isIOS, isSoftReload, setBackgroundListening, onBackgroundStopped, enterNativePip, hasNativePip, setNativeImmersive, subscribeBackgroundPaused, isBackgroundPaused, setBackgroundPaused, setPipAutoEnteredFullscreen } from '../lib/nativeBridge.js';
 import { queuePatch, minToHHMM } from '../lib/detectionSaves.js';
 import { useLater } from '../lib/useLater.js';
 import WhepPlayer from './WhepPlayer.jsx';
@@ -427,14 +427,26 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   // exit so the rest of the app goes back to normal portrait behavior rather than
   // staying stuck sideways.
   useEffect(() => {
+    let tileWasFullscreen = false;
     function handleFullscreenChange() {
-      setIsFullscreen(document.fullscreenElement === videoWrapRef.current);
+      const tileIsFullscreen = document.fullscreenElement === videoWrapRef.current;
+      setIsFullscreen(tileIsFullscreen);
+      // Only this tile owns its native bar state. Another tile's fullscreen event
+      // must not issue a competing call; leaving fullscreen restores the bars.
+      if (tileIsFullscreen || (tileWasFullscreen && !document.fullscreenElement)) {
+        void setNativeImmersive(tileIsFullscreen);
+      }
+      tileWasFullscreen = tileIsFullscreen;
       if (!document.fullscreenElement) {
         screen.orientation?.unlock?.();
       }
     }
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      // Unmount can skip fullscreenchange (for example, a camera is disabled mid-view).
+      if (tileWasFullscreen) void setNativeImmersive(false);
+    };
   }, []);
 
   // Keep the native foreground service in sync with this tile's state. The bridge

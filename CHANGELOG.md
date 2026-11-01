@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Fixed
+
+- The Record button and other video controls no longer cover the camera in Picture-in-Picture. Fullscreen camera controls stay clear of the status and gesture bars in the Android app with the matching app update; older app builds still show the bars.
+
 ## [0.45.0] - 2026-11-01
 
 ### Added
