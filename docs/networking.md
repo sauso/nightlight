@@ -33,6 +33,38 @@ Watching **both remotely in Low latency (WebRTC)** takes one extra step, because
 
 **Compatibility (HLS)** needs none of this. It's all HTTP over 443, so both instances work remotely with no extra port forwarding.
 
+## Finding your server automatically
+
+Nightlight announces itself on your home network (mDNS, the same way printers and smart speakers are found), so a phone can find it without anyone typing an address. The phone app's side of this is planned and not built yet; today the announcement is only visible to network-browsing tools. It is on by default.
+
+Whether a phone can hear it depends on how the container is networked:
+
+| How the container is networked | Can a phone find it? |
+|---|---|
+| Host networking (the default) | Yes, from the same network as the server |
+| Its own LAN address (ipvlan or macvlan) | Yes, from that network |
+| Docker's default bridge network | **No**: the announcement stays inside Docker. Enter the address instead |
+| Phone on a different VLAN or subnet | Only if your router passes mDNS between them (often called an mDNS reflector or repeater). Most home routers don't |
+
+These were measured on one Unraid server with a PC and a phone. Wi-Fi with client isolation, guest networks and some mesh systems may block it too. The server can't tell whether anyone can hear it, so its log says it is announcing either way. In testing, a PC took between 5 seconds and just over a minute to find it.
+
+**`MDNS_ANNOUNCE`** turns it on or off. Default: on (unset or blank). `false`, `0`, `no` or `off`, in any case, turn it off, and then nothing listens on UDP port 5353 at all. Any other value leaves it on and logs a warning. It is read at start, so restart the container after changing it.
+
+**What is announced.** Anyone on your network can see:
+
+- the service type `_nightlight._tcp` and the port Nightlight listens on;
+- a random server id, made once and kept in the database, so a restored backup keeps it;
+- a name made from the start of that id, such as `Nightlight-1a2b3c4d`. The machine's own host name is not announced;
+- the IPv4 address of every network interface the container can see. With host networking that includes Docker's internal addresses; a phone is expected to try each one.
+
+The name a phone will show is your **App name** (Settings → General), which it reads from `/api/health`. Like the sign-in screen, that is visible without signing in, so don't use a child's name or your family name there. `/api/health` answers with the same id, the app name and `"ok": true`, and never the version.
+
+Known limits:
+
+- **Changed network interfaces need a restart.** The announcement keeps the addresses the server started with.
+- **Two servers started from one copy of the database share an id**, so only one of them is announced and the other logs a warning about 10 seconds after it starts. A way to give a copy its own identity is planned. Nothing relies on the id for security yet.
+- **If UDP port 5353 can't be used**, the server logs one warning and carries on. Everything else works, and you can always connect by address.
+
 ## Watching away from home
 
 Don't expose Nightlight directly to the public internet without understanding authentication, HTTPS and network restrictions. A VPN is often the simplest way to reach your home network securely.

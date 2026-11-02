@@ -11,6 +11,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- #937 The server announces itself on the local network (mDNS, `_nightlight._tcp`) so a phone can find it without typing an address; the phone app's side is planned, not built yet. It is on by default; set `MDNS_ANNOUNCE=false` to turn it off. It does not work from Docker's default bridge network, or across VLANs without a router that passes mDNS. `/api/health` now also returns a random server id and the app name, both visible without signing in. See [Finding your server automatically](docs/networking.md#finding-your-server-automatically).
+
 - #932 Admins can protect alert and wake clips so automatic cleanup keeps them. Protected clips sit outside the storage cap and can fill the disk; removing a camera or child still deletes their clips. Timelapses and Record-button recordings cannot be protected yet.
 
 - Settings → Remote Access shows how this device connects, the server's setup, and a Low latency video test. A successful test only proves the UDP forward when run from outside the home network.

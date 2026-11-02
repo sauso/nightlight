@@ -59,6 +59,8 @@ import { logDataDirModes } from './lib/dataDirModes.js';
 import { applyTrustProxy } from './lib/trustProxy.js';
 import { buildHelmetOptions } from './lib/cspDirectives.js';
 import { safeInterval, installCrashGuards, markBootComplete } from './lib/processGuards.js';
+import { healthHandler } from './lib/serverIdentity.js';
+import { startMdnsAnnounce, stopMdnsAnnounce } from './lib/mdnsAnnounce.js';
 import {
   createCameraWatchdog, createAudioWatchdog, WATCHDOG_INTERVAL_MS, AUDIO_CHECK_INTERVAL_MS,
   createDetectorWatchdog, createRestartRequests, DETECTOR_CHECK_INTERVAL_MS,
@@ -254,7 +256,9 @@ app.use('/api/timelapses', timelapsesRoutes);
 app.use('/api/recordings', recordingsRoutes);
 app.use('/manifest.webmanifest', manifestRoutes);
 
-app.get('/api/health', (req, res) => res.json({ ok: true }));
+// #937: still unauthenticated, still `ok: true`, now also this server's id and name (lib/serverIdentity.js says what
+// it never contains). The handler lives there so health-route.test.js can mount this exact function.
+app.get('/api/health', healthHandler);
 
 // CSP violation sink (see the helmet block above). The browser POSTs a report here whenever the policy
 // blocks something; we log it so a regression — e.g. a new dependency pulling in a third-party script —
@@ -313,6 +317,9 @@ const server = app.listen(PORT, () => {
   // start, and the guards exit non-zero instead of leaving a healthy-looking container with no server
   // bound — see the boot/steady-state note in lib/processGuards.js.
   markBootComplete();
+  // #937: announce on the local network only now, once the server accepts connections: a phone that finds it
+  // checks /api/health straight away. Never throws, never blocks; MDNS_ANNOUNCE=false turns it off.
+  startMdnsAnnounce({ port: PORT });
   refreshEsphome();
   startEsphomeSampler();
   // Run the clip-storage guard + retention sweeper BEFORE reconcile, so reconcile only starts
@@ -532,6 +539,12 @@ async function shutdown() {
   // FIRST, before the seconds of awaited stops below: a tick that fired in the middle of them could SIGTERM MediaMTX
   // while a recording is still being cut from it (#479).
   stopMediamtxApiWatchdog();
+  // #937: the mDNS goodbye, STARTED here so phones drop this server from their list at once, and AWAITED just before
+  // process.exit(0) below: the goodbye is sent in an asynchronous callback, so exiting without waiting can cut it
+  // off. It runs alongside the seconds of awaited stops in between, so it normally adds nothing, and
+  // stopMdnsAnnounce caps it at about 1.5 s (STOP_CAP_MS) even if the callback never comes; it never rejects. The
+  // 23 s worst case below is therefore unchanged (recordings-shutdown.test.js; mdns-announce.test.js pins the cap).
+  const mdnsStopped = stopMdnsAnnounce();
   // Started HERE, awaited below. The only ordering that actually matters is that an in-flight
   // recording finishes cutting BEFORE stopAllClipCapture takes the ring away; the detector stops are
   // unrelated to it and can overlap.
@@ -596,6 +609,8 @@ async function shutdown() {
   // #373: unref'd, so it could never hold the process open — stopped anyway, for the #286 rule that every
   // periodic job shutdown knows about is stopped explicitly (suite-exits-cleanly.test.js asserts it).
   stopObservationLog();
+  // #937: the mDNS goodbye started at the top of shutdown (see there). Last, so it overlaps everything above.
+  await mdnsStopped;
   process.exit(0);
 }
 process.on('SIGTERM', shutdown);
