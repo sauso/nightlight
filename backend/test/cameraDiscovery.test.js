@@ -90,6 +90,16 @@ test('one browser stop throwing still closes the other browser and owned socket'
   assert.equal(bonjour.destroyed, 1);
 });
 
+test('a browse that throws still destroys the owned Bonjour and keeps the ONVIF results (#945 review)', async () => {
+  const bonjour = bonjourFixture();
+  bonjour.find = () => { throw new Error('socket already in use'); };
+  const result = await discoverCameras({ createBonjour: () => bonjour, timeoutMs: 20,
+    wsProbe: async ({ onDevice }) => { onDevice({ probeMatches: { probeMatch: { XAddrs: 'http://192.168.1.2/onvif' } } }); } });
+  assert.equal(bonjour.destroyed, 1);
+  assert.deepEqual(result.sourceErrors, [{ source: 'mdns', code: 'DISCOVERY_FAILED' }]);
+  assert.deepEqual(result.candidates.map((item) => item.ip), ['192.168.1.2']);
+});
+
 test('first twenty candidates are kept, with no extra browser records promoted', async () => {
   const bonjour = bonjourFixture();
   const pending = discoverCameras({ createBonjour: () => bonjour, wsProbe: async () => {}, timeoutMs: 5 });
