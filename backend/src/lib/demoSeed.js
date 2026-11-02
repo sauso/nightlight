@@ -155,6 +155,11 @@ export async function seedDemo(clock = () => new Date()) {
   }
 
   const seedDatabase = db.transaction(() => {
+    // WHY: tooling can seed after the first boot already classified the empty database.
+    // Keep an existing completion decision and tolerate older schemas without this table.
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'setup_state'").get()) {
+      db.prepare("UPDATE setup_state SET status = 'legacy_completed', active_step = 'review' WHERE id = 'app' AND status = 'not_started'").run();
+    }
     for (const table of resetTables) db.prepare(`DELETE FROM ${table}`).run();
     db.prepare(
       `DELETE FROM sqlite_sequence

@@ -15,7 +15,7 @@ import { api } from '../src/lib/api.js';
 // Every label on the admin card. Listed in full deliberately: a menu that silently loses an entry is
 // exactly the kind of regression nothing else would catch.
 const ADMIN_LABELS = [
-  'General', 'Camera and Recording', 'Caregivers', 'Integrations', 'Remote Access', 'Logs',
+  'Setup & diagnostics', 'General', 'Camera and Recording', 'Caregivers', 'Integrations', 'Remote Access', 'Logs',
 ];
 
 function mockApi({ version = '0.29.0' } = {}) {

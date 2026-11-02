@@ -15950,7 +15950,7 @@
   },
   {
     "label": "#378 CameraSettings: a failed remove goes to the page banner under the overlay, not the dialog",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "setRemoveError(err.message);",
     "replace": "setPageError(err.message);",
     "expect": "killed",
@@ -15959,7 +15959,7 @@
   },
   {
     "label": "#378 CameraSettings: opening the dialog keeps the previous failure",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "onClick={() => { setRemoveError(''); setRemoving(true); }}",
     "replace": "onClick={() => { setRemoving(true); }}",
     "expect": "killed",
@@ -16013,7 +16013,7 @@
   },
   {
     "label": "#383 CameraSettings: Back and the landing go to the retired /family again",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "const back = location.state?.from || { to: '/cameras', label: 'Cameras' };",
     "replace": "const back = { to: '/family', label: 'Family' };",
     "expect": "killed",
@@ -16022,7 +16022,7 @@
   },
   {
     "label": "#383 CameraSettings: the landing ignores where the page was opened from",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "const back = location.state?.from || { to: '/cameras', label: 'Cameras' };",
     "replace": "const back = { to: '/cameras', label: 'Cameras' };",
     "expect": "killed",
@@ -16346,7 +16346,7 @@
   },
   {
     "label": "#378 CameraSettings: a retry keeps the previous failure on screen while it runs",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "setRemoveBusy(true); setPageError(''); setRemoveError('');",
     "replace": "setRemoveBusy(true); setPageError('');",
     "expect": "killed",
@@ -17769,7 +17769,7 @@
   },
   {
     "label": "#554 CameraSettings: the Remove dialog stops asking \"Are you sure?\"",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "<strong>Are you sure?</strong>",
     "replace": "<strong>Done?</strong>",
     "expect": "killed",
@@ -17777,7 +17777,7 @@
   },
   {
     "label": "#554 CameraSettings: the Remove dialog drops the event-log line",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "            <li>its event log and temperature and humidity history</li>\n",
     "replace": "",
     "expect": "killed",
@@ -17785,7 +17785,7 @@
   },
   {
     "label": "#554 CameraSettings: the Remove dialog promises adding the camera back restores it",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "You can add the camera again, but none of this comes back.",
     "replace": "You can add the camera again.",
     "expect": "killed",
@@ -19927,7 +19927,7 @@
   },
   {
     "label": "#394 page: the panel is not rendered",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "<RecordingScopePanel cam={cam} />",
     "replace": "null",
     "expect": "killed",
@@ -20516,7 +20516,7 @@
   },
   {
     "label": "#377 camera: Save does not move the baseline, so the draft outlives it",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "      setBaseline({ ...form, rtsp_password: '', talk_password: '' });",
     "replace": "      /* baseline not moved */",
     "expect": "killed",
@@ -20526,7 +20526,7 @@
   },
   {
     "label": "#377 camera: a removed camera's draft is kept",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "      clearDraft(draftKey);\n      await refresh();",
     "replace": "      await refresh();",
     "expect": "killed",
@@ -20536,7 +20536,7 @@
   },
   {
     "label": "#377 camera: the draft is not restored once the camera has loaded",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "    setForm({ ...loaded, ...draft });",
     "replace": "    setForm(loaded);",
     "expect": "killed",
@@ -20546,7 +20546,7 @@
   },
   {
     "label": "#377 camera: Discard changes does not reset the form",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "  function discardDraft() {\n    setForm(baseline);",
     "replace": "  function discardDraft() {\n    setForm(form);",
     "expect": "killed",
@@ -22169,7 +22169,7 @@
   },
   {
     "label": "#738 saving a new camera keeps its old baseline",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "      setBaseline({ ...form, rtsp_password: '', talk_password: '' });",
     "replace": "      if (!isNew) setBaseline({ ...form, rtsp_password: '', talk_password: '' });",
     "expect": "killed",
@@ -22178,7 +22178,7 @@
   },
   {
     "label": "#738 RTSP host is omitted from camera drafts",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "'name', 'rtsp_host', 'rtsp_port'",
     "replace": "'name', 'rtsp_port'",
     "expect": "killed",
@@ -25027,5 +25027,50 @@
     "expect": "killed",
     "tests": ["mdns-announce.test.js"],
     "namePattern": "awaits it just before process.exit"
+  },
+  {
+    "label": "#941 existing settings row mistaken for fresh setup",
+    "file": "backend/src/db.js",
+    "find": "['settings', 'users', 'children', 'cameras']",
+    "replace": "['users', 'children', 'cameras']",
+    "expect": "killed",
+    "tests": ["setup-state.test.js"],
+    "namePattern": "old rows and demo mode"
+  },
+  {
+    "label": "#941 camera address edit leaves playback proof valid",
+    "file": "backend/src/lib/setupState.js",
+    "find": "row.rtsp_url, row.sub_rtsp_url, row.child_id, row.disabled,",
+    "replace": "null, row.sub_rtsp_url, row.child_id, row.disabled,",
+    "expect": "killed",
+    "tests": ["setup-state.test.js"],
+    "namePattern": "camera edit, reassignment"
+  },
+  {
+    "label": "#941 monitor confirmation can be replayed",
+    "file": "backend/src/lib/setupState.js",
+    "find": "!proof || proof.verifiedAt || proof.expiresAtMs <= clock()",
+    "replace": "!proof || proof.expiresAtMs <= clock()",
+    "expect": "killed",
+    "tests": ["setup-state.test.js"],
+    "namePattern": "one-shot"
+  },
+  {
+    "label": "#941 full completion accepts missing playback proof",
+    "file": "backend/src/lib/setupState.js",
+    "find": "if (!limited && !ready.ready)",
+    "replace": "if (false && !ready.ready)",
+    "expect": "killed",
+    "tests": ["setup-routes.test.js"],
+    "namePattern": "completion needs proof"
+  },
+  {
+    "label": "#941 readiness accepts a picture check before confirmation",
+    "file": "backend/src/lib/setupState.js",
+    "find": "proof.verifiedAt && proof.sessionId === sessionId",
+    "replace": "proof.sessionId === sessionId",
+    "expect": "killed",
+    "tests": ["setup-state.test.js"],
+    "namePattern": "attestation is session and camera bound"
   }
 ]

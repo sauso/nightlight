@@ -183,6 +183,7 @@ export const api = {
   // A GET whose successful answer is a file, as text (see `as` on request). Slow by default: a long export streams.
   getText: (url, opts) => request('GET', url, undefined, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS, ...opts, as: 'text' }),
   post: (url, body, opts) => request('POST', url, body, opts),
+  patch: (url, body, opts) => request('PATCH', url, body, opts),
   put: (url, body, opts) => request('PUT', url, body, opts),
   del: (url, opts) => request('DELETE', url, undefined, opts),
   // Absolute, token-carrying URL for media the browser fetches itself (<img>/<video>,

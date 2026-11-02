@@ -20,6 +20,8 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { renderAsAdmin } from './helpers/render.jsx';
 import CameraSettings from '../src/pages/CameraSettings.jsx';
+import CameraForm from '../src/components/CameraForm.jsx';
+import { draftKey } from '../src/lib/formDraft.js';
 import { api } from '../src/lib/api.js';
 
 // A fully configured camera as the API returns it to an admin: address in parts, no secrets, a flag
@@ -85,6 +87,36 @@ beforeEach(() => {
   delSpy = vi.spyOn(api, 'del').mockResolvedValue({});
 });
 afterEach(() => vi.restoreAllMocks());
+
+describe('camera form embedded in setup', () => {
+  test('initial assignment is clean, Discard keeps it, and the normal add form has no leftover draft', async () => {
+    sessionStorage.clear();
+    const key = draftKey('u-admin', 'camera:new');
+    const view = renderAsAdmin(<CameraForm embedded initialChildId="kid-1" onCreated={vi.fn()} />,
+      { kids: KIDS, route: '/setup' });
+    expect(screen.getByLabelText(/Assign to child/)).toHaveValue('kid-1');
+    expect(screen.queryByText(/Unsaved changes/)).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(key)).toBeNull();
+    await view.user.type(screen.getByLabelText('Name'), 'A camera');
+    await view.user.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(screen.getByLabelText(/Assign to child/)).toHaveValue('kid-1');
+    expect(sessionStorage.getItem(key)).toBeNull();
+    view.unmount();
+    mount({ isNew: true, cam: null });
+    expect(screen.queryByText(/Unsaved changes restored/)).not.toBeInTheDocument();
+  });
+
+  test('an unassigned embedded camera requires an assignment before save', async () => {
+    const view = renderAsAdmin(<CameraForm embedded initialChildId="kid-1" onCreated={vi.fn()} />,
+      { kids: KIDS, route: '/setup' });
+    await view.user.selectOptions(screen.getByLabelText(/Assign to child/), '');
+    await view.user.type(screen.getByLabelText('Name'), 'A camera');
+    await view.user.type(screen.getByLabelText('Camera IP address'), '192.0.2.1');
+    await view.user.click(screen.getByRole('button', { name: 'Add camera' }));
+    expect(await screen.findByText('Assign this camera to a child before continuing setup.')).toBeInTheDocument();
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+});
 
 describe('loading an existing camera into the form', () => {
   test('every stored field is shown', async () => {

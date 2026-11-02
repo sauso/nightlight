@@ -2,6 +2,14 @@
 
 Nightlight runs as a single Docker container on a Linux host that can reach your cameras. It supports `amd64` and `arm64`. Host networking is the simple default; there is a dedicated-IP option if you'd rather avoid port clashes (see [networking](networking.md)).
 
+## First run
+
+On a fresh installation, after you create the first admin account, Nightlight opens a short setup guide. It helps you add a child, add an assigned camera and check that its picture moves in your browser. The ONVIF lookup is optional; you can enter the camera's stream details yourself.
+
+You can choose **Save and exit** at any step and use the live view. The next admin visit shows **Finish setting up**; opening it resumes at the saved step. You can also open **Settings → Setup & diagnostics** at any time. **Continue with limited setup** lets you finish without a successful picture check and keeps the reminder visible. Existing installations are left as already set up and can open the diagnostics from Settings without changing their setup state unless a picture check succeeds.
+
+The picture check is tied to the current sign-in and lasts ten minutes. A server restart clears it, so run the check again if completion asks for it. See [adding a camera](cameras.md#adding-a-camera) and [picture check](cameras.md#picture-check).
+
 ## What you need
 
 - **An always-on Linux box on the same network as your cameras.** A Raspberry Pi, an Unraid server, anything running Docker.
@@ -91,6 +99,8 @@ The options above apply here too (the Compose file sets the stop timeout for you
 ## First sign-in
 
 From any phone or laptop on the same network, open `http://<server-ip>:4000`. The first time you visit, you'll be asked to create the administrator account. **Do this first, from a trusted device.** Then add your children (the Children tab), add your cameras (the Cameras tab, by IP via ONVIF or by RTSP details; see [managing cameras](cameras.md#managing-cameras)) and assign each camera to a child.
+
+An installation upgraded from an older version will not enter the new setup guide automatically. This also applies if the old installation never had an administrator account: create that account as usual, then open the guide manually when its Settings entry is available.
 
 ## Networking
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   SlidersHorizontal, Plug, Globe, ScrollText, Users, Video,
-  Info, Server, ChevronRight,
+  Info, Server, ChevronRight, ListChecks,
 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -52,6 +52,7 @@ function Row({ Icon, iconSize = 20, label, desc, trailing, onClick }) {
 }
 
 const ADMIN_ITEMS = [
+  { key: 'setup', to: '/setup', Icon: ListChecks, label: 'Setup & diagnostics', desc: 'Finish setup or check the camera picture' },
   { key: 'general', to: '/settings/general', Icon: SlidersHorizontal, label: 'General', desc: 'App name, timezone, theme, font, colours, temperature unit' },
   { key: 'camera-recording', to: '/settings/camera-recording', Icon: Video, label: 'Camera and Recording', desc: 'Camera Controls, Recording Settings and Clip Management' },
   { key: 'caregivers', to: '/settings/users', Icon: Users, label: 'Caregivers', desc: 'Manage caregiver logins and active sessions' },

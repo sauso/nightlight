@@ -4,6 +4,10 @@ Start with `docker logs -f nightlight` and [known issues](../KNOWN-ISSUES.md). F
 
 ## Video and playback
 
+### The camera connected but there is no picture
+
+In **Settings → Setup & diagnostics**, choose **Run picture check** and watch the camera tile. This option is also available after setup is complete. A connected camera or a loaded playlist does not mean video frames reached this browser. Check the stream path and login under **Cameras**, then try again. If this browser still shows no picture, try the tile's Compatibility mode or another browser or device. During unfinished setup, you can use **Continue with limited setup** and return to the check later. The check only reports frames shown in the admin's browser; it does not test the server's decoder or other devices.
+
 ### Page loads but video doesn't
 
 If video won't connect from a phone but the pages load fine, confirm the device is on the same
