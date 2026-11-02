@@ -1,4 +1,4 @@
-// General settings — the app's name, its timezone, and its colours.
+// General settings — the app's name, timezone and temperature unit.
 //
 // ★ WHY THIS SCREEN. The timezone lives here, and the timezone is the single setting in this app that
 // most decides whether it works for somebody else. `settings.timezone` is what sleep analysis anchors
@@ -81,7 +81,7 @@ describe('★ the timezone picker does not lose an unlisted zone', () => {
     const { user } = renderWith({ timezone: 'UTC' });
     await user.click(await screen.findByRole('button', { name: "Use this device's timezone" }));
 
-    expect(screen.getByLabelText('Timezone').value).toBe('Pacific/Auckland');
+    expect(screen.getByLabelText('Timezone').value).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
     expect(putSpy, 'filling the field must not write anything').not.toHaveBeenCalled();
   });
 
@@ -128,22 +128,6 @@ describe('the app name', () => {
 
     const complaints = warn.mock.calls.map((c) => String(c[0])).filter((m) => /uncontrolled|controlled/i.test(m));
     expect(complaints, `React complained: ${complaints[0] || ''}`).toHaveLength(0);
-  });
-});
-
-describe('theme presets', () => {
-  test('a preset sets all three colours at once', async () => {
-    // The three are chosen to work together; applying one without the others leaves a palette nobody
-    // designed. Asserted through the payload because that is where the combination has to survive.
-    const { user } = renderWith({ accent_color: '#000000', live_color: '#000000', offline_color: '#000000' });
-    await user.click(await screen.findByRole('button', { name: /Dusk lavender/ }));
-    await user.click(screen.getByRole('button', { name: /Save/ }));
-
-    await waitFor(() => expect(putSpy).toHaveBeenCalled());
-    const body = putSpy.mock.calls[0][1];
-    expect(body.accent_color).toBe('#C9B6F5');
-    expect(body.live_color).toBe('#7FBFA3');
-    expect(body.offline_color).toBe('#E08585');
   });
 });
 
@@ -207,7 +191,7 @@ describe('saving', () => {
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
 
     const body = putSpy.mock.calls[0][1];
-    for (const key of ['app_name', 'accent_color', 'live_color', 'offline_color', 'timezone', 'font_choice', 'temp_unit']) {
+    for (const key of ['app_name', 'timezone', 'temp_unit']) {
       expect(body, `${key} should be saved from this screen`).toHaveProperty(key);
     }
     // MQTT has its own sub-page and must not be touched from here — the settings route leaves out
@@ -215,4 +199,22 @@ describe('saving', () => {
     expect(body).not.toHaveProperty('mqtt_host');
     expect(body).not.toHaveProperty('mqtt_password');
   });
+});
+
+test('admin sees only supported General controls and saves only their fields (#943)', async () => {
+  const { user, container } = renderWith({
+    app_name: 'Nightlight', timezone: 'UTC', temp_unit: 'C',
+    accent_color: '#123456', live_color: '#00ff00', offline_color: '#ff0000',
+    font_choice: 'classic-serif',
+  });
+  expect(screen.getByLabelText('App name')).toBeInTheDocument();
+  expect(screen.getByLabelText('Timezone')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '°C' })).toBeInTheDocument();
+  expect(screen.queryByText('Theme presets')).not.toBeInTheDocument();
+  expect(screen.queryByText('Font')).not.toBeInTheDocument();
+  expect(screen.queryByText('Colors')).not.toBeInTheDocument();
+  expect(container.querySelector('input[type="color"]')).toBeNull();
+  await user.click(screen.getByRole('button', { name: /Save/ }));
+  await waitFor(() => expect(putSpy).toHaveBeenCalled());
+  expect(Object.keys(putSpy.mock.calls[0][1]).sort()).toEqual(['app_name', 'temp_unit', 'timezone']);
 });

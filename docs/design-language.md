@@ -15,120 +15,69 @@ the deployed frontend live rather than bundling it). There is no separate native
 
 ---
 
-## 1. The two-accent idea
+## 1. Brand colour
 
-This is the single most important thing to understand, and the easiest to get wrong.
-
-Nightlight has **two accent colours with different jobs**:
-
-| Token | Role | Used for | User-editable |
-|---|---|---|---|
-| `--peri` | **Chrome** — "this is interactive" | active nav tab, switches, sliders, row icons, back link, drill-in chevrons, chips | **No** — fixed in both themes |
-| `--accent` | **Call to action** — "this is the thing to press" | primary buttons, camera-tile glow, temperature/humidity icons, focus rings | **Yes** — recoloured in Settings → General |
-
-Reach for `--peri` when marking something as navigable or toggleable. Reach for `--accent` for the
-one action a screen exists to perform. A screen with three gold buttons has no primary action.
-
-`--bar` (the navy header) is fixed in both themes, and so is `--peri`. **Only the neutrals flip
-between light and dark.**
+One violet, `#7C5CD6`, identifies actions and navigation. Use `--accent` for filled
+buttons, active tabs, switches, sliders, focus rings and icons. Text on a violet
+button is white. Small linked text uses `--accent-text`: a deeper violet by day and
+a lighter tint at night. The header uses the same navy in both themes.
 
 ---
 
 ## 2. Themes
 
-### The mechanism (deviates from the usual pattern — don't "fix" it)
-
-`lib/theme.js` resolves the user's choice (`light` | `dark` | `system`) to a concrete value **in
-JS** and stamps it on `<html>` as `data-theme`. The stylesheet therefore contains
-**zero `@media (prefers-color-scheme)` blocks** and never needs any:
-
-```css
-:root { /* complete light palette */ }
-:root[data-theme='dark'] { /* neutrals + live/offline re-declared */ }
-```
-
-Theme is **per-device** (localStorage, key `nightlight_theme`) and deliberately not synced through
-the account — so a phone and a wall-mounted tablet can each pick what suits them.
-The button at the far right of the Live page header flips between light and dark. On every
-other page, change the theme under Account → Appearance, which also offers **System** to
-follow the device again.
-
-**Rule:** every colour goes through a token. Never write a hex literal in a component rule; it will
-be wrong in one of the two themes.
+`lib/theme.js` resolves the device choice (`light`, `dark`, or `system`) and stamps
+`data-theme` on `<html>`. The Live header has a moon button to switch to night
+and a sun button to switch to day. Account → Appearance keeps the three-way
+Light / Dark / System choice. This preference stays on each device.
 
 ### Tokens
 
-| Token | Light | Dark | Meaning |
+These are the owner's approximate day/night palette, grouped at the top of
+`frontend/src/index.css` for later adjustment.
+
+| Token | Day | Night | Use |
 |---|---|---|---|
-| `--bg` | `#f0eff5` | `#0f1124` | Page ground |
-| `--bg-elevated` | `#ffffff` | `#181a33` | Cards, tiles, bottom nav |
-| `--bg-elevated-2` | `#eeedfa` | `#1e2140` | Nested surface, hover, switch track |
-| `--text-primary` | `#1b1c33` | `#eceaf6` | Body text |
-| `--text-secondary` | `#70718f` | `#8d8fb4` | Labels, meta, captions, inactive tabs |
-| `--accent` | `#f4c56a` | `#f4c56a` | CTA (user-recolourable) |
-| `--accent-dim` | `#cda94f` | `#cda94f` | Pressed/secondary accent |
-| `--peri` | `#7c83db` | `#7c83db` | Interactive chrome (fixed) |
-| `--peri-soft` | `#cfd2f5` | `#cfd2f5` | Chrome on the navy bar (back link) |
-| `--bar` | `#12143a` | `#12143a` | App header (fixed) |
-| `--bar-text` | `#f4f4fb` | `#f4f4fb` | Text on the bar |
-| `--live` | `#6fae90` | `#7fc9a3` | Streaming / healthy (user-recolourable) |
-| `--offline` | `#d9707a` | `#e08585` | Offline / destructive (user-recolourable) |
-| `--border` | `#e6e4f0` | `#282a48` | Hairlines, field borders |
-| `--field-bg` | `#ffffff` | `#1e2140` | Input backgrounds |
+| `--bg` | `#F7F4FD` | `#14142A` | Page |
+| `--bg-elevated` | `#FFFFFF` | `#221F3C` | Cards |
+| `--bg-elevated-2` | `#EAE3F8` | `#100F1C` | Insets |
+| `--text-primary` | `#1D1A3A` | `#E8E2F7` | Main text |
+| `--text-secondary` | `#625C7F` | `#BCB3D5` | Supporting text |
+| `--accent` | `#7C5CD6` | `#7C5CD6` | Brand actions |
+| `--accent-text` | `#5F3DB7` | `#BCA8F3` | Small linked text |
+| `--accent-soft` | `#D9CDF4` | `#CBBCF0` | Header controls and subtle accents |
+| `--bar` | `#14142A` | `#14142A` | Header |
+| `--bar-text` | `#E8E2F7` | `#E8E2F7` | Header title |
+| `--live` | `#23734F` | `#8BDBAD` | Live status |
+| `--offline` | `#AA3F54` | `#F4A3AD` | Offline / destructive |
+| `--border` | `#DDD5EE` | `#383450` | Borders |
+| `--field-bg` | `#EAE3F8` | `#100F1C` | Inputs |
 
-Sleep-timeline palette (its own pair, both themes, near line 1123 of `index.css`):
-`--sleep-asleep`, `--sleep-stir`, `--sleep-wake`, `--sleep-awake`, `--sleep-visit`, `--sleep-temp`.
-These are **data colours** — categorical, tuned for adjacency on a timeline. Don't borrow them for
-UI chrome, and don't use `--peri`/`--accent` inside the timeline.
+The night `--accent-text` has 7.55:1 contrast on cards and 8.63:1 on the
+page. Night live and offline text have 9.65:1 and 8.04:1 on cards; by day
+they have 5.77:1 and 5.92:1 on white cards. White on the brand button is
+4.82:1. These clear WCAG's 4.5:1 normal-text target.
 
-### Runtime theming — why you must never hardcode
+Sleep-timeline tokens (`--sleep-*`) are categorical data colours. Keep them
+separate from branding.
 
-`SettingsContext` overwrites five tokens at runtime from the user's saved settings, via CSSOM:
-
-```js
-root.setProperty('--accent', settings.accent_color);
-root.setProperty('--live', settings.live_color);
-root.setProperty('--offline', settings.offline_color);
-root.setProperty('--font-display', font.display);
-root.setProperty('--font-body', font.body);
-```
-
-Two consequences:
-
-1. **A hardcoded `#f4c56a` silently stops following the user's theme.** Four palette presets ship
-   (Nursery, Dusk lavender, Ocean calm, Rose quartz) plus a free colour picker, so the accent is
-   very often *not* gold.
-2. **This is CSSOM `setProperty`, not an inline `<style>` — that's deliberate.** CSP is enforced
-   (see the repo `CLAUDE.md`) and `script-src` has no `unsafe-inline`. `setProperty` isn't policed
-   by CSP; injecting a stylesheet would be. Keep theming on this path.
+The Settings API still accepts and returns `accent_color`, `live_color`,
+`offline_color`, and `font_choice` for older clients. This web UI ignores
+those stored values and Settings → General no longer edits them. The app
+name, timezone and temperature unit remain editable.
 
 ---
 
 ## 3. Typography
 
-### Families
+Inter is the body face at weights 400, 500, 600 and 700. Nunito ExtraBold
+(800) is the wordmark and page-heading face, including `h1`–`h3`.
+Small uppercase `.section-title` labels stay Inter. `--font-mono` remains
+the system mono stack for IDs and logs.
 
-| Token | Job |
-|---|---|
-| `--font-display` | `h1`–`h3` only. Set globally: `font-weight: 600`, `letter-spacing: 0.01em` |
-| `--font-body` | Everything else, incl. `button { font-family: inherit }` |
-| `--font-mono` | Paths, IDs, log output, byte counts — `'SF Mono', 'IBM Plex Mono', Menlo, Consolas, monospace` |
-
-Four user-selectable presets (`lib/fonts.js`), default **Warm Serif**:
-
-| Preset | Display | Body |
-|---|---|---|
-| `warm-serif` *(default)* | Iowan Old Style / Palatino / Georgia | system sans |
-| `modern-sans` | system sans | system sans |
-| `rounded-friendly` | ui-rounded / SF Pro Rounded | same |
-| `classic-serif` | Georgia / Times | same |
-
-**All four are system font stacks — Nightlight ships no webfont.** That's a deliberate fit with an
-offline-capable, self-hosted, CSP-enforcing PWA on a LAN. Don't add a font file or a Google Fonts
-link without raising it first.
-
-Because the display face can be a serif *or* a rounded sans depending on the user, never rely on a
-specific face's metrics for alignment.
+Both fonts ship as local `@fontsource` latin assets imported from `main.jsx`.
+Vite emits them under its own assets path, so the LAN PWA works without
+Google Fonts, a CDN, or a CSP exception.
 
 ### Scale
 
@@ -241,22 +190,17 @@ together whenever the artwork changes.**
 | `icon-maskable-512.png` | 512 × 512 | PWA splash / high-DPI launcher | `manifest.webmanifest` |
 | `now-playing-512.png` | 512 × 512 | Media-session artwork (lock screen) | `useNowPlaying.js` |
 
-Two rules that are easy to break:
+Run `node frontend/scripts/make-icons.mjs` after replacing the 1024 × 1024
+`frontend/branding/logo-source.png`. The script uses Python Pillow
+(`python -m pip install Pillow`) and regenerates all seven icons together.
+The favicon crops closer for legibility at 32px. Maskable icons place the
+artwork within the central 80% on navy so launchers can crop the edges.
+Bump the `now-playing-512.png?v=` value in `useNowPlaying.js` after changing
+that image.
 
-1. **The manifest lists only the maskable pair, with `purpose: 'any maskable'`.** Chrome's install
-   dialog applies its own rounded-square crop, while the Android launcher applies a mask; using the
-   same full-bleed artwork for both means neither reveals the other icon's inner shape boundary. The
-   illustrated icon is still used in-app via direct references — that split is deliberate.
-2. **Maskable artwork needs the safe zone.** Keep all meaning inside the central circle of diameter
-   80% of the canvas (≈154px on 192, ≈410px on 512); the outer 10% on each edge can be cropped away.
-
-In-app the logo renders at **36 × 36 with `border-radius: 9px`** (28 × 28 in short landscape) — it's
-sourced from the 192 for retina headroom.
-
-**Colours that live outside CSS** and must be changed in lockstep with the artwork:
-`<meta name="theme-color">` = `#12172B` (`index.html`) and the manifest's `background_color` /
-`theme_color` = `#12172b`. These are near-`--bar` but **not** token-driven — a token can't reach
-them. Note they're currently one shade off `--bar` (`#12143a`); harmless, but don't propagate it.
+The manifest lists the maskable pair with `purpose: 'any maskable'`. The
+illustrated icon is referenced directly in the header and sign-in page.
+The HTML and manifest browser colours both use `#14142A` to match `--bar`.
 
 ---
 
@@ -334,7 +278,7 @@ Settings sub-menus (Integrations and Camera and Recording) share a pattern: a ro
 opens a sub-menu page. Its rows pass `state.from` for Back, and each destination has the sub-menu as
 its fallback Back target for direct links and refreshes.
 The Live page's theme button sits at the far right of the full-width bar, including at ≥1200px.
-The bar stays navy in both themes, so the button uses fixed `--peri-soft`, not the changing
+The bar stays navy in both themes, so the button uses `--accent-soft`, not the changing
 `--text-secondary`. It is compact in short landscape and keeps a 44px touch target.
 Other pages and sub-pages have no header theme button; use Account → Appearance instead.
 The back label uses up to about 35% of the bar, then ends with an ellipsis to leave room
@@ -346,8 +290,8 @@ by default** (mobile-first: buttons are full-width unless constrained).
 
 | Variant | Style | Use |
 |---|---|---|
-| `.btn-primary` | `--accent` bg, `#21170a` text | The one main action per screen |
-| `.btn-peri` | `--peri` bg, white text | Chrome-level action |
+| `.btn-primary` | `--accent` bg, white text | The one main action per screen |
+| `.btn-peri` | `--accent` bg, white text | Filled secondary action |
 | `.btn-secondary` | transparent, `--border` outline | Everything secondary |
 | `.btn-danger` | transparent, `--offline` outline + text | Destructive — outlined, never filled |
 | `.btn-sm` | `padding: 6px 14px`, 12.5px, `nowrap` | In a row |
@@ -356,8 +300,7 @@ by default** (mobile-first: buttons are full-width unless constrained).
 `:disabled` → `opacity: 0.55`. `.icon-btn` is the bare icon button: no background/border,
 `--text-secondary`, `padding: 6px 8px`; `.icon-btn--danger` recolours to `--offline`.
 
-Note `.btn-primary`'s text is `#21170a` — a near-black brown, not a token, because it must stay
-legible on *any* user-chosen accent. Keep it.
+`.btn-primary` uses white text on the fixed violet accent (4.82:1 contrast).
 
 ### Fields
 Label 12px `--text-secondary`, 6px below. Input: full width, `--field-bg`, 1px `--border`, radius
@@ -373,7 +316,7 @@ Expected from WebKit's behaviour, not checked on a device. `.field` has `margin-
 ```
 
 ### Switch
-42 × 24 track, radius 999px; 18px thumb inset 3px, `translateX(18px)` when on; track goes `--peri`
+42 × 24 track, radius 999px; 18px thumb inset 3px, `translateX(18px)` when on; track goes `--accent`
 when checked; transitions 0.16s. The real `<input>` is present but `opacity: 0` over the whole
 control — keep it, it's what makes the switch keyboard- and screen-reader-accessible.
 
@@ -415,7 +358,7 @@ credential-name check reads field names only. A screen that restores must say wh
   `--offline`, `--off` `--text-secondary`. `--sm` = 2px 8px / 11px.
 - `.cam-badge` — **outlined** pill (colour + border, transparent fill), 11px/600. Filled = state,
   outlined = attribute.
-- `.cam-chip` — `--peri` on a 12% `--peri` tint, for the child a camera belongs to.
+- `.cam-chip` — `--accent-text` on a 12% `--accent` tint, for the child a camera belongs to.
 
 ### Breathing dot — the live indicator
 14px box, 8px core + expanding ring. `--live` breathing at **3.6s** (calm, steady), `--accent`
@@ -480,7 +423,7 @@ in-app `Modal` (the camera-remove flow is the reference implementation).
 ### Tile menu — the bottom sheet
 `.tile-menu` is the per-tile action sheet: bottom-anchored, `max-width: 520`, radius `18px 18px 0 0`,
 a 38 × 4 grabber, uppercase 12px section labels, `--bg-elevated-2` grouped sections, 15px items,
-`--peri` + weight 600 for the active choice, supports a submenu (`--submenu` row with a `--value` on
+`--accent` + weight 600 for the active choice, supports a submenu (`--submenu` row with a `--value` on
 the right, plus a `--back` item). Backdrop `rgba(0,0,0,0.45)`, `sheet-fade` 0.16s in.
 
 ### Camera tile
@@ -613,7 +556,7 @@ Other rules:
 
 1. **Both themes** — light and dark, not just the one you built in.
 2. **A non-default palette** — switch to Dusk lavender; nothing gold should remain hardcoded.
-3. **A non-default font** — switch to Modern Sans; the layout must not depend on serif metrics.
+3. **Fonts** — confirm Inter and Nunito load from local assets, including when offline.
 4. **Phone width and ≥1200px** — the nav becomes a sidebar; confirm nothing collides.
 5. **Safe areas** — anything fixed to an edge needs the `env()` inset.
 6. **Keyboard** — tab through it; the focus ring must be visible on every control.
@@ -631,7 +574,6 @@ Recorded honestly so it isn't mistaken for intent, and so it can be cleaned up d
   use. The token doesn't describe the system any more.
 - Half-pixel font sizes (`12.5`, `13.5`, `14.5`, `11.5`, `10.5`) — a handful of one-offs.
 - 20 distinct `border-radius` values across the stylesheet, against the ~6 the system needs.
-- `theme-color` (`#12172B`) is one shade off `--bar` (`#12143a`).
 - The camera-tile CSS family is split across `.camera-tile*` and `.cam-*` prefixes.
 
 None of these are bugs. Match the **rule**, not the nearest drifted example.

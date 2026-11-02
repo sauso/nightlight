@@ -15,7 +15,7 @@ import {
 // screen). The ?v= is a cache-buster: this URL is otherwise stable, so the WebView / iOS artwork
 // cache keeps serving an old image after we change the file. BUMP THIS whenever the file changes.
 export const NOW_PLAYING_ARTWORK = [
-  { src: '/icons/now-playing-512.png?v=3', sizes: '512x512', type: 'image/png' },
+  { src: '/icons/now-playing-512.png?v=4', sizes: '512x512', type: 'image/png' },
 ];
 
 // Own the system media session (Now Playing / lock screen) while this camera is the active

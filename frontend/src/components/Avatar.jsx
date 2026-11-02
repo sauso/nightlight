@@ -21,7 +21,7 @@ export default function Avatar({ name, src, color, size = 40 }) {
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: color || 'var(--peri)',
+        background: color || 'var(--accent)',
         color: '#fff',
         fontWeight: 700,
         fontSize: Math.round(size * 0.4),

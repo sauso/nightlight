@@ -1,4 +1,4 @@
-// The last uncovered handlers: the appearance controls on Settings → General, and the caregiver
+// The temperature control on Settings → General, and the caregiver
 // screen's photo + two destructive confirmations.
 //
 // These are handler-per-control screens, and what makes them worth a test rather than a coverage
@@ -7,8 +7,6 @@
 //     form waits for Save — except on a NEW caregiver, who has no record to save it against yet;
 //   * "Reset two-factor" and "Remove caregiver" are the two irreversible actions on the screen and
 //     both must be un-dismissable while in flight;
-//   * the theme controls write CSS variables live, so a wrong value is visible instantly and a
-//     missing one is invisible until someone reloads.
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import { screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
@@ -22,7 +20,7 @@ afterEach(() => vi.restoreAllMocks());
 
 // --- Settings → General: appearance -------------------------------------------------------------
 
-describe('Settings → General appearance controls', () => {
+describe('Settings → General temperature unit', () => {
   const SETTINGS = {
     app_name: 'Nightlight',
     timezone: 'Australia/Melbourne',
@@ -38,69 +36,16 @@ describe('Settings → General appearance controls', () => {
     return renderAsAdmin(<SettingsGeneral />, { settings: SETTINGS });
   };
 
-  test('each colour picker shows its current value beside it and saves what you choose', async () => {
-    const { user } = show();
-    for (const [label, next] of [
-      ['Accent (buttons, highlights)', '#112233'],
-      ['Live indicator', '#445566'],
-      ['Offline / alert', '#778899'],
-    ]) {
-      const input = screen.getByLabelText(label);
-      // The hex is printed next to the swatch — a colour input alone gives no readable value at all.
-      // ⚠️ Matched case-insensitively: `<input type="color">` normalises its value to lower case,
-      // while the text beside it prints the stored setting verbatim, which is upper case.
-      expect(screen.getByText(new RegExp(`^${input.value}$`, 'i'))).toBeInTheDocument();
-      fireEvent.change(input, { target: { value: next } });
-      expect(screen.getByText(next)).toBeInTheDocument();
-    }
-
-    await user.click(screen.getByRole('button', { name: /Save/ }));
-    await waitFor(() => expect(api.put).toHaveBeenCalled());
-    const body = api.put.mock.calls[0][1];
-    expect(body.accent_color).toBe('#112233');
-    expect(body.live_color).toBe('#445566');
-    expect(body.offline_color).toBe('#778899');
-  });
-
-  test('a colour that has never been set falls back to black rather than an invalid value', () => {
-    vi.spyOn(api, 'get').mockResolvedValue(null);
-    renderAsAdmin(<SettingsGeneral />, { settings: { ...SETTINGS, accent_color: null } });
-    // ⚠️ `<input type="color">` silently rejects anything that is not a #rrggbb string, so a null
-    // would leave the swatch showing the browser default with no hint that the setting is unset.
-    expect(screen.getByLabelText('Accent (buttons, highlights)')).toHaveValue('#000000');
-  });
-
-  test('choosing a font marks exactly one option active and saves it', async () => {
-    const { user, container } = show();
-    const active = () => [...container.querySelectorAll('.font-btn--active')].map((b) => b.textContent);
-    expect(active()).toHaveLength(2); // one font + one temperature unit
-
-    // Selected by content, not by position: `.preset-row` is used by more than one group on this
-    // page (the colour presets sit in one too), so indexing into it picks a different control
-    // depending on what else happens to be on screen.
-    const fonts = [...container.querySelectorAll('.font-btn')].filter((b) => !['°C', '°F'].includes(b.textContent));
-    expect(fonts.length).toBeGreaterThan(1);
-    const other = fonts.find((b) => !b.classList.contains('font-btn--active'));
-    await user.click(other);
-    expect(other).toHaveClass('font-btn--active');
-    // Exactly one, not two — these are a radio group wearing button clothes.
-    expect(fonts.filter((b) => b.classList.contains('font-btn--active'))).toHaveLength(1);
-
-    await user.click(screen.getByRole('button', { name: /Save/ }));
-    await waitFor(() => expect(api.put).toHaveBeenCalled());
-    expect(api.put.mock.calls[0][1].font_choice).not.toBe('warm-serif');
-  });
-
   test('the temperature unit is a two-way choice and both directions save', async () => {
     const { user } = show();
     const c = screen.getByRole('button', { name: '°C' });
     const f = screen.getByRole('button', { name: '°F' });
-    expect(c).toHaveClass('font-btn--active');
-    expect(f).not.toHaveClass('font-btn--active');
+    expect(c).toHaveClass('unit-btn--active');
+    expect(f).not.toHaveClass('unit-btn--active');
 
     await user.click(f);
-    expect(f).toHaveClass('font-btn--active');
-    expect(c).not.toHaveClass('font-btn--active');
+    expect(f).toHaveClass('unit-btn--active');
+    expect(c).not.toHaveClass('unit-btn--active');
     await user.click(screen.getByRole('button', { name: /Save/ }));
     await waitFor(() => expect(api.put).toHaveBeenCalled());
     // ⚠️ Both directions asserted: this setting decides whether every room-climate reading in the app
