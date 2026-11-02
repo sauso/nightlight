@@ -35,7 +35,7 @@ Watching **both remotely in Low latency (WebRTC)** takes one extra step, because
 
 ## Finding your server automatically
 
-Nightlight announces itself on your home network (mDNS, the same way printers and smart speakers are found), so a phone can find it without anyone typing an address. The phone app's side of this is planned and not built yet; today the announcement is only visible to network-browsing tools. It is on by default.
+Nightlight announces itself on your home network (mDNS, the same way printers and smart speakers are found), so a phone can find it without anyone typing an address. The Android app uses this: tap **Look for my Nightlight** on its first screen ([how](mobile.md#finding-your-server-on-your-home-network-android)). The iPhone app doesn't yet. It is on by default.
 
 Whether a phone can hear it depends on how the container is networked:
 
@@ -46,7 +46,7 @@ Whether a phone can hear it depends on how the container is networked:
 | Docker's default bridge network | **No**: the announcement stays inside Docker. Enter the address instead |
 | Phone on a different VLAN or subnet | Only if your router passes mDNS between them (often called an mDNS reflector or repeater). Most home routers don't |
 
-These were measured on one Unraid server with a PC and a phone. Wi-Fi with client isolation, guest networks and some mesh systems may block it too. The server can't tell whether anyone can hear it, so its log says it is announcing either way. In testing, a PC took between 5 seconds and just over a minute to find it.
+These were measured on one Unraid server with a PC and a phone. Wi-Fi with client isolation, guest networks and some mesh systems may block it too. The server can't tell whether anyone can hear it, so its log says it is announcing either way. In testing, a PC took between 5 seconds and just over a minute to find it, and an Android phone found it almost at once.
 
 **`MDNS_ANNOUNCE`** turns it on or off. Default: on (unset or blank). `false`, `0`, `no` or `off`, in any case, turn it off, and then nothing listens on UDP port 5353 at all. Any other value leaves it on and logs a warning. It is read at start, so restart the container after changing it.
 

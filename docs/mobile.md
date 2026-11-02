@@ -60,7 +60,9 @@ Beyond the PWA, there are companion **native apps** in a separate repo,
 shells around this same web UI — the app loads the interface **live from your own server**
 rather than bundling it, so any server update applies to the apps automatically with no
 reinstall. On first launch you just enter your server's address (like the Home Assistant
-app); a "Change server" menu item switches later.
+app), or, on Android, tap **Look for my Nightlight** to pick it from a list
+([how it works](#finding-your-server-on-your-home-network-android)); a "Change server" menu item
+switches later.
 
 What the native apps add over the browser/PWA:
 
@@ -106,6 +108,24 @@ into your data dir (e.g. `/mnt/user/appdata/nightlight`; the next start moves th
 **Account → Notifications**.
 
 Full walkthrough for both, with troubleshooting: **[docs/notifications.md](notifications.md)**.
+
+### Finding your server on your home network (Android)
+
+On the first screen, tap **Look for my Nightlight**. The app listens on your Wi-Fi for Nightlight servers and lists the ones that answer, each with its name and address. Tap yours, check the short ID matches what you expect, and tap **Connect**. Nothing is saved or switched until you tap, and the app checks again at that moment that the address still belongs to the server it found. **Settings → Change server** brings you back to the same screen to add another server.
+
+What it needs:
+
+- Your phone on the same network as the server, over Wi-Fi or Ethernet. Mobile data can't see it.
+- A Nightlight server that announces itself. That arrived in the server release that added it (see the server's `CHANGELOG.md`); an older server doesn't appear, but you can still type its address.
+- A server that can be heard. Hosts using Docker's default bridge network, phones on a different VLAN or guest network, and some mesh systems or VPNs hide it: [the table in the networking guide](networking.md#finding-your-server-automatically) says which. If nothing turns up, the app keeps listening and shows a short checklist, and the typed address below always works.
+
+Good to know:
+
+- **Only private home addresses are listed** (10.x.x.x, 172.16 to 172.31.x.x, 192.168.x.x). A network on another range, or an IPv6-only one, needs the typed address.
+- **A found server connects with `http://` at its home address, without encryption.** That is a different address from an `https://` one you may use away from home, so the app asks you to sign in again (with your second step, if you use one). Some features, such as talking through the microphone, may also need the `https://` address.
+- **The name in the list is your server's app name**, which the server shows to anyone on your network before sign-in. Don't put a family name or a child's name there.
+- **A phone VPN can hide the server.** Turn it off while you search, or allow access to your local network.
+- **On iPhone the button isn't there yet**; type the address as before.
 
 ### Tapping an alert from another server
 
