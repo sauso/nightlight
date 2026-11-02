@@ -155,7 +155,12 @@ export default function Setup() {
     } finally { setBusy(false); }
   }
 
-  if (!setup) return <SetupStepShell step="welcome" error={error} onRetry={load}>{!error && 'Loading setup…'}</SetupStepShell>;
+  // WHY: until the status is known we cannot tell a finished setup (app chrome) from a wizard in progress.
+  // The neutral header keeps a way back to Settings if the read hangs or fails (found in the #947 review).
+  if (!setup) return <>
+    <AppHeader title="Setup" back={{ to: '/settings', label: 'Settings' }} />
+    <SetupStepShell step="review" terminal error={error} onRetry={load}>{!error && 'Loading setup…'}</SetupStepShell>
+  </>;
   // WHY: the provider fetches children and cameras beside setup. An empty list before
   // that fetch settles is not evidence that the household has no children or cameras.
   if (!camerasLoaded || camerasError) return <>

@@ -198,6 +198,27 @@ describe('setup steps', () => {
     expect(screen.getByTestId('path')).toHaveTextContent('/settings/users/new');
   });
 
+  test.each([['caregivers', 'Add a caregiver account'], ['remote', 'Set up remote access']])('a refused progress save on the %s step keeps the admin on the wizard', async (step, label) => {
+    // Save-before-navigate must be enforced, not just ordered by luck: a failed save may not leave the page (#947 review).
+    state = initial('in_progress', step);
+    setupApi.progress.mockRejectedValueOnce(new Error('Could not save'));
+    const view = wizard();
+    await view.user.click(await screen.findByRole('button', { name: label }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not save');
+    expect(screen.getByTestId('path')).not.toHaveTextContent('/settings');
+  });
+
+  test('the app header (with a way back to Settings) shows while the setup status loads and when the read fails', async () => {
+    setupApi.read.mockImplementation(() => new Promise(() => {}));
+    const first = wizard();
+    expect(await screen.findByRole('button', { name: 'Back to Settings' })).toBeInTheDocument();
+    first.unmount();
+    setupApi.read.mockRejectedValue(new Error('offline'));
+    wizard();
+    expect(await screen.findByRole('alert')).toHaveTextContent('offline');
+    expect(screen.getByRole('button', { name: 'Back to Settings' })).toBeInTheDocument();
+  });
+
   test('remote access saves review before leaving for settings', async () => {
     state = initial('in_progress', 'remote');
     const view = wizard();
