@@ -92,6 +92,8 @@ The options above apply here too (the Compose file sets the stop timeout for you
 
 From any phone or laptop on the same network, open `http://<server-ip>:4000`. The first time you visit, you'll be asked to create the administrator account. **Do this first, from a trusted device.** Then add your children (the Children tab), add your cameras (the Cameras tab, by IP via ONVIF or by RTSP details; see [managing cameras](cameras.md#managing-cameras)) and assign each camera to a child.
 
+An installation upgraded from an older version will not enter the new setup guide automatically. This also applies if the old installation never had an administrator account: create that account as usual, then open the guide manually when its Settings entry is available.
+
 ## Networking
 
 Host networking is the simplest default, and it is what the quick start and the Unraid template use. A dedicated LAN IP through ipvlan or macvlan can avoid port conflicts. [Networking](networking.md) covers the differences, remote access and running more than one instance.

@@ -97,6 +97,12 @@ const ADMIN = 'signed-in+admin'; //    requireAuth, then requireAdmin
 // caregiver can still reach says why on its own line.
 
 const ROUTE_GATES = {
+  // #941: setup state and browser playback attestations are only for a signed-in admin.
+  'GET /api/setup': ADMIN,
+  'PATCH /api/setup/progress': ADMIN,
+  'POST /api/setup/monitor-tests': ADMIN,
+  'POST /api/setup/monitor-tests/:id/confirm': ADMIN,
+  'POST /api/setup/complete': ADMIN,
   // /api/auth — the login screen has to work before anyone can sign in, so its first five are public. Each
   // carries its own rate limiter (not pinned here; login-rate-limit.test.js).
   'GET /api/auth/status': PUBLIC, //            needsSetup + demo flags, read by the login screen
@@ -239,6 +245,7 @@ const APP_REGISTRATIONS = [
   'use /api/auth authRoutes',
   'use /api/children childrenRoutes',
   'use /api/cameras camerasRoutes',
+  'use /api/setup setupRoutes',
   'use /api/settings settingsRoutes',
   'use /api/logs logsRoutes',
   'use /api/diagnostics diagnosticsRoutes',

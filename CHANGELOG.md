@@ -11,6 +11,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- #941 First-run setup state and admin-only monitor test API groundwork. A browser playback attestation lasts ten minutes and must be repeated after a server restart. Upgraded and restored installs are marked as already set up and are not treated as new installs; the guided screens and Settings entry follow in the next change.
+
 - #937 The server announces itself on the local network (mDNS, `_nightlight._tcp`) so a phone can find it without typing an address; the phone app's side is planned, not built yet. It is on by default; set `MDNS_ANNOUNCE=false` to turn it off. It does not work from Docker's default bridge network, or across VLANs without a router that passes mDNS. `/api/health` now also returns a random server id and the app name, both visible without signing in. See [Finding your server automatically](docs/networking.md#finding-your-server-automatically).
 
 - #932 Admins can protect alert and wake clips so automatic cleanup keeps them. Protected clips sit outside the storage cap and can fill the disk; removing a camera or child still deletes their clips. Timelapses and Record-button recordings cannot be protected yet.

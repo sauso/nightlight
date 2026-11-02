@@ -25027,5 +25027,41 @@
     "expect": "killed",
     "tests": ["mdns-announce.test.js"],
     "namePattern": "awaits it just before process.exit"
+  },
+  {
+    "label": "#941 existing settings row mistaken for fresh setup",
+    "file": "backend/src/db.js",
+    "find": "['settings', 'users', 'children', 'cameras']",
+    "replace": "['users', 'children', 'cameras']",
+    "expect": "killed",
+    "tests": ["setup-state.test.js"],
+    "namePattern": "old rows and demo mode"
+  },
+  {
+    "label": "#941 camera address edit leaves playback proof valid",
+    "file": "backend/src/lib/setupState.js",
+    "find": "row.rtsp_url, row.sub_rtsp_url, row.child_id, row.disabled,",
+    "replace": "null, row.sub_rtsp_url, row.child_id, row.disabled,",
+    "expect": "killed",
+    "tests": ["setup-state.test.js"],
+    "namePattern": "camera edit, reassignment"
+  },
+  {
+    "label": "#941 monitor confirmation can be replayed",
+    "file": "backend/src/lib/setupState.js",
+    "find": "!proof || proof.verifiedAt || proof.expiresAtMs <= clock()",
+    "replace": "!proof || proof.expiresAtMs <= clock()",
+    "expect": "killed",
+    "tests": ["setup-state.test.js"],
+    "namePattern": "one-shot"
+  },
+  {
+    "label": "#941 full completion accepts missing playback proof",
+    "file": "backend/src/lib/setupState.js",
+    "find": "if (!limited && !ready.ready)",
+    "replace": "if (false && !ready.ready)",
+    "expect": "killed",
+    "tests": ["setup-routes.test.js"],
+    "namePattern": "completion needs proof"
   }
 ]

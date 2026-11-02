@@ -84,6 +84,15 @@ after(async () => {
 });
 
 describe('GET /settings unauthenticated', () => {
+  test('does not expose setup state to the login screen', async () => {
+    // WHY #941: a new persistent state table must not widen the public settings response.
+    db.prepare("UPDATE setup_state SET active_step = 'private-marker' WHERE id = 'app'").run();
+    const r = await get();
+    assert.equal(r.status, 200);
+    assert.ok(!JSON.stringify(r.body).includes('private-marker'));
+    assert.ok(!('status' in r.body));
+    assert.ok(!('activeStep' in r.body));
+  });
   test('returns nothing beyond the public presentation fields', async () => {
     const r = await get();
     assert.equal(r.status, 200);

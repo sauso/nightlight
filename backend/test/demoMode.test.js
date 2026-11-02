@@ -31,6 +31,11 @@ before(async () => {
   router.post('/api/auth/logout', record('logout'));
   router.post('/api/auth/media-token', record('media-token'));
   router.post('/api/auth/setup', record('setup')); // real route, same prefix, NOT allowlisted
+  router.get('/api/setup', record('get-setup'));
+  router.patch('/api/setup/progress', record('setup-progress'));
+  router.post('/api/setup/monitor-tests', record('setup-test'));
+  router.post('/api/setup/monitor-tests/:id/confirm', record('setup-confirm'));
+  router.post('/api/setup/complete', record('setup-complete'));
   router.put('/api/auth/me/password', record('change-password'));
   router.delete('/api/cameras/cam-1', record('delete-cam'));
   router.put('/api/settings', record('put-settings'));
@@ -273,6 +278,17 @@ describe('demoGuard — DEMO_MODE=true, blocked GETs (server internals / cross-v
 
 describe('demoGuard — DEMO_MODE=true, ordinary reads pass through', () => {
   beforeEach(() => { process.env.DEMO_MODE = 'true'; });
+
+  test('setup can be read, but every setup write is blocked before its handler', async () => {
+    // WHY #941: a demo visitor is an admin, so the global write guard is essential.
+    assert.equal((await call(`${server.url}/api/setup`)).status, 200);
+    assert.equal(hits['get-setup'], 1);
+    for (const [path, method] of [
+      ['/api/setup/progress', 'PATCH'], ['/api/setup/monitor-tests', 'POST'],
+      ['/api/setup/monitor-tests/anything/confirm', 'POST'], ['/api/setup/complete', 'POST'],
+    ]) assert.equal((await call(`${server.url}${path}`, { method })).status, 403);
+    for (const key of ['setup-progress', 'setup-test', 'setup-confirm', 'setup-complete']) assert.equal(hits[key], undefined);
+  });
 
   test('an unrelated GET passes through', async () => {
     const res = await call(`${server.url}/api/cameras`);
