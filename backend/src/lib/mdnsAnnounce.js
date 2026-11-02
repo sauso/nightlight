@@ -101,6 +101,9 @@ const defaultCreateBonjour = (opts, errorCallback) => new Bonjour(opts, errorCal
 // { bonjour, service, name, watchdog, up, failed, destroyed, warned, stopping }.
 let current = null;
 
+// The discovery browser shares this socket while the announcer is running (#945).
+export function getMdnsBonjour() { return current && !current.destroyed ? current.bonjour : null; }
+
 const describeError = (err) => (err?.code ? `${err.code}: ${err.message}` : err?.message || String(err));
 
 // Release the library's socket (and multicast-dns's 5 s interface timer, which is NOT unref'd and would otherwise

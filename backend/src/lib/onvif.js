@@ -10,8 +10,8 @@ import { logger } from './logger.js';
 //   2. on failure, talk to the media service directly at known paths, and
 //   3. rebuild the RTSP URL from the trustworthy part (the path) plus the host we connected
 //      to and the credentials the user supplied - never the host/creds the camera returns.
-// Discovery-by-multicast is deliberately NOT used: WS-Discovery is L2-multicast and doesn't
-// cross VLANs, whereas add-by-IP is unicast and works across a routed network.
+// The optional discovery list now uses multicast (#945). It may miss cameras across VLANs;
+// this credentialed add-by-IP path stays available over a routed network.
 
 const { Cam } = onvifPkg;
 

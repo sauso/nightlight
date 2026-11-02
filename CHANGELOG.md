@@ -11,6 +11,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- #945 Admins can search for nearby Thingino and ONVIF cameras in setup or Add camera, then fill the address and name from a suggestion before entering a login. Searches use LAN multicast and may miss cameras across VLANs, on Docker's default bridge, or cameras that do not advertise; manual entry remains available.
+
 - #941 First-run setup guide for admins on fresh installations: add a child and assigned camera, check that video frames reach the browser, or finish with limited setup and return later from Settings → Setup & diagnostics. Save and exit resumes at the saved step without redirecting again. A confirmed picture check lasts ten minutes from confirmation and must be repeated after a server restart. Upgraded and restored installs, even those without an admin account yet, are marked as already set up and are not redirected.
 
 - #937 The server announces itself on the local network (mDNS, `_nightlight._tcp`) so a phone can find it without typing an address; the phone app's side is planned, not built yet. It is on by default; set `MDNS_ANNOUNCE=false` to turn it off. It does not work from Docker's default bridge network, or across VLANs without a router that passes mDNS. `/api/health` now also returns a random server id and the app name, both visible without signing in. See [Finding your server automatically](docs/networking.md#finding-your-server-automatically).
@@ -24,7 +26,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
-- #944 The setup guide now walks through adding a child, connecting a camera, checking the picture, and optional caregiver and remote access steps. The Settings setup link disappears after full completion; admins can still open picture checks from About. Camera discovery is not available yet, and remote access still needs network setup.
+- #944 The setup guide now walks through adding a child, connecting a camera, checking the picture, and optional caregiver and remote access steps. The Settings setup link disappears after full completion; admins can still open picture checks from About. Remote access still needs network setup.
 
 - #943 Nightlight now uses one violet brand colour, a lavender day palette, an indigo night palette, a new moon logo, and locally hosted Inter and Nunito fonts. The Live header still switches day and night.
 

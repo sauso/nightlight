@@ -89,6 +89,15 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('camera form embedded in setup', () => {
+  test('a selected suggestion fills the add fields without saving or probing', async () => {
+    const view = renderAsAdmin(<CameraForm embedded prefill={{ host: '192.168.1.2', port: 8554, name: 'cam-a' }} />,
+      { kids: KIDS, route: '/setup' });
+    await waitFor(() => expect(screen.getByLabelText('Camera IP address')).toHaveValue('192.168.1.2'));
+    expect(screen.getByLabelText('Name')).toHaveValue('cam-a');
+    expect(screen.getByLabelText('RTSP port')).toHaveValue('8554');
+    expect(postSpy).not.toHaveBeenCalled();
+    view.unmount();
+  });
   test('initial assignment is clean, Discard keeps it, and the normal add form has no leftover draft', async () => {
     sessionStorage.clear();
     const key = draftKey('u-admin', 'camera:new');
@@ -116,6 +125,14 @@ describe('camera form embedded in setup', () => {
     expect(await screen.findByText('Assign this camera to a child before continuing setup.')).toBeInTheDocument();
     expect(postSpy).not.toHaveBeenCalled();
   });
+});
+
+test('discovery is offered on Add camera and absent on edit', () => {
+  const add = mount({ isNew: true });
+  expect(screen.getByRole('button', { name: 'Find cameras on my network' })).toBeInTheDocument();
+  add.unmount();
+  mount();
+  expect(screen.queryByRole('button', { name: 'Find cameras on my network' })).not.toBeInTheDocument();
 });
 
 describe('loading an existing camera into the form', () => {

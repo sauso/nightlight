@@ -1,5 +1,41 @@
 [
   {
+    "label": "#945 private address rejection removed",
+    "file": "backend/src/lib/privateAddress.js",
+    "find": "  if (typeof ip !== 'string' || !/^(?:0|[1-9]\\d{0,2})(?:\\.(?:0|[1-9]\\d{0,2})){3}$/.test(ip)) return false;",
+    "replace": "  if (typeof ip !== 'string' || !/^(?:0|[1-9]\\d{0,2})(?:\\.(?:0|[1-9]\\d{0,2})){3}$/.test(ip)) return true;",
+    "expect": "killed",
+    "tests": ["privateAddress.test.js"],
+    "namePattern": "accepts only literal private"
+  },
+  {
+    "label": "#945 concurrent scan guard removed",
+    "file": "backend/src/lib/cameraDiscovery.js",
+    "find": "      if (active) return { scanId: active.scanId, reused: true, endsAt: active.endsAt };",
+    "replace": "      if (false && active) return { scanId: active.scanId, reused: true, endsAt: active.endsAt };",
+    "expect": "killed",
+    "tests": ["cameraDiscovery.test.js"],
+    "namePattern": "scan manager reuses one active scan"
+  },
+  {
+    "label": "#945 Bonjour cleanup skipped",
+    "file": "backend/src/lib/cameraDiscovery.js",
+    "find": "        try { bonjour?.destroy(); } catch { /* the scan has already ended */ }",
+    "replace": "        try { /* skipped destroy */ } catch { /* the scan has already ended */ }",
+    "expect": "killed",
+    "tests": ["cameraDiscovery.test.js"],
+    "namePattern": "abort stops both browsers"
+  },
+  {
+    "label": "#945 camera discovery admin gate removed",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/discover', requireAdmin, discoveryLimiter, (req, res) => {",
+    "replace": "router.post('/discover', discoveryLimiter, (req, res) => {",
+    "expect": "killed",
+    "tests": ["cameras-discovery-routes.test.js"],
+    "namePattern": "discovery routes require an admin"
+  },
+  {
     "label": "#780 camera save starts the transcoder before saving the new address",
     "file": "backend/src/routes/cameras.js",
     "find": "  const updatedRows = db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,\r\n      talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,\r\n      discovery_source = ?, onvif_capable = ?, onvif_motion_capable = ?, onvif_device_url = ?, backchannel_supported = ?,\r\n      ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?\r\n    WHERE id = ?`).run(\r\n    keepFresh('name', name?.trim() || existing.name),\r\n    keepFresh('rtsp_url', newRtsp),\r\n    keepFresh('child_id', child_id !== undefined ? child_id || null : existing.child_id),\r\n    keepFresh('mqtt_topic', mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic),\r\n    keepFresh('talk_backend', talkBackend),\r\n    keepFresh('talk_username', talkUser),\r\n    keepFresh('talk_password', talkPass),\r\n    keepFresh('sub_rtsp_url', subUrl),\r\n    keepFresh('discovery_source', discSource),\r\n    keepFresh('onvif_capable', onvifCapable),\r\n    keepFresh('onvif_motion_capable', onvifMotionCapable),\r\n    keepFresh('onvif_device_url', onvifUrl),\r\n    keepFresh('backchannel_supported', backchannel),\r\n    keepFresh('ptz_supported', ptz),\r\n    keepFresh('onvif_profile_token', profileToken),\r\n    keepFresh('onvif_username', onvifUser),\r\n    keepFresh('onvif_password', onvifPass),\r\n    req.params.id\r\n  ).changes;\r\n",

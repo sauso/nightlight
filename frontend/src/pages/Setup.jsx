@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import { setupApi } from '../lib/setupApi.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import CameraForm from '../components/CameraForm.jsx';
+import CameraDiscovery from '../components/CameraDiscovery.jsx';
 import CameraTile from '../components/CameraTile.jsx';
 import SetupStepShell from '../components/SetupStepShell.jsx';
 import AppHeader from '../components/AppHeader.jsx';
@@ -25,6 +26,7 @@ export default function Setup() {
   const [selectedChild, setSelectedChild] = useState('');
   const [selectedCamera, setSelectedCamera] = useState('');
   const [manualCamera, setManualCamera] = useState(false);
+  const [cameraPrefill, setCameraPrefill] = useState(null);
   const [testId, setTestId] = useState(null);
   const [verified, setVerified] = useState(false);
   const [limited, setLimited] = useState(false);
@@ -225,11 +227,15 @@ export default function Setup() {
               {assigned.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select></div>
         </>}
+        <CameraDiscovery autoStart onPick={(candidate) => {
+          setCameraPrefill({ host: candidate.ip, port: candidate.rtspPort, name: candidate.name });
+          setManualCamera(true);
+        }} />
         <div className="setup-manual">
           <button className="setup-manual__toggle" type="button" aria-expanded={manualCamera} onClick={() => setManualCamera((value) => !value)}>
             <strong>Add a camera manually</strong><span>Enter an RTSP or ONVIF address</span>
           </button>
-          {manualCamera && <CameraForm embedded initialChildId={selectedChild || kids[0]?.id} onCreated={addedCamera} />}
+          {manualCamera && <CameraForm embedded initialChildId={selectedChild || kids[0]?.id} onCreated={addedCamera} prefill={cameraPrefill} />}
         </div>
       </>}
       {step === 'monitor_test' && <>

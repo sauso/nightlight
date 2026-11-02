@@ -21,7 +21,7 @@ useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const { logger } = await import('../src/lib/logger.js');
 const {
-  startMdnsAnnounce, stopMdnsAnnounce, parseMdnsAnnounce, publishOptions, UP_WATCHDOG_MS, STOP_CAP_MS,
+  startMdnsAnnounce, stopMdnsAnnounce, getMdnsBonjour, parseMdnsAnnounce, publishOptions, UP_WATCHDOG_MS, STOP_CAP_MS,
 } = await import('../src/lib/mdnsAnnounce.js');
 
 const APP_NAME_MARK = 'APPNAME-MARK-937';
@@ -80,6 +80,15 @@ const bounded = (p, ms) => {
 };
 
 describe('the announcer', () => {
+  test('discovery accessor exposes only a live announcer instance', async () => {
+    assert.equal(getMdnsBonjour(), null);
+    const f = fakeBonjour();
+    let instance;
+    startMdnsAnnounce({ port: '4000', createBonjour: (...args) => (instance = f.create(...args)), env: ON });
+    assert.equal(getMdnsBonjour(), instance);
+    await stopMdnsAnnounce();
+    assert.equal(getMdnsBonjour(), null);
+  });
   // Every test leaves the module stopped, so the next one starts clean; mock timers are reset first so a stop's
   // cap is a real (short) timer again.
   afterEach(async () => {
