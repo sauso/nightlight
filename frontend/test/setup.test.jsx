@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, act } from '@testing-library/react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import { SetupGate } from '../src/App.jsx';
@@ -60,6 +60,18 @@ describe('setup handoff', () => {
     gate();
     await waitFor(() => expect(screen.getByTestId('path')).toHaveTextContent('/setup'));
     expect(screen.queryByRole('button', { name: 'Finish setting up' })).not.toBeInTheDocument();
+  });
+
+  test('a late older setup read cannot replace a published progress state', async () => {
+    let resolveRead;
+    setupApi.read.mockImplementationOnce(() => new Promise((resolve) => { resolveRead = resolve; }));
+    gate();
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('setup-state-changed', { detail: { ...initial('in_progress', 'camera'), rowVersion: 2 } }));
+    });
+    await act(async () => { resolveRead(initial()); });
+    expect(screen.getByTestId('path')).toHaveTextContent('/');
+    expect(screen.getByRole('button', { name: 'Finish setting up' })).toBeInTheDocument();
   });
 
   test('fresh handoff, Save and exit, then refresh stays on Live with the banner', async () => {
@@ -131,7 +143,7 @@ describe('setup steps', () => {
     const view = wizard({ kids: [], cameras: [], camerasLoaded: false });
     expect(await screen.findByText('Loading children and cameras…')).toBeInTheDocument();
     view.rerenderWith({ kids: [child], cameras: [camera], camerasLoaded: true });
-    expect(await screen.findByRole('button', { name: 'Start picture check' })).toBeEnabled();
+    expect(await screen.findByRole('button', { name: 'Run picture check' })).toBeEnabled();
   });
 
   test('admin completes the steps only after this browser reports frames', async () => {
@@ -139,7 +151,7 @@ describe('setup steps', () => {
     await view.user.click(await screen.findByRole('button', { name: 'Get started' }));
     await view.user.click(screen.getByRole('button', { name: 'Continue' }));
     await view.user.click(screen.getByRole('button', { name: 'Check picture' }));
-    await view.user.click(screen.getByRole('button', { name: 'Start picture check' }));
+    await view.user.click(screen.getByRole('button', { name: 'Run picture check' }));
     expect(setupApi.confirm).not.toHaveBeenCalled();
     await view.user.click(screen.getByRole('button', { name: 'Present video frames' }));
     await waitFor(() => expect(setupApi.confirm).toHaveBeenCalledWith('test-1', camera.id));
@@ -166,6 +178,27 @@ describe('setup steps', () => {
     expect(setupApi.complete).toHaveBeenCalledWith(true);
   });
 
+  test('an expired proof offers both a fresh picture check and limited completion', async () => {
+    state = { ...initial('in_progress', 'review'), readiness: { ...readiness, playbackAttested: true, ready: true, missing: [] } };
+    setupApi.complete.mockRejectedValueOnce(Object.assign(new Error('Not ready'), {
+      status: 409, data: { code: 'NOT_READY', missing: ['PLAYBACK'] },
+    }));
+    setupApi.read.mockImplementationOnce(async () => state).mockImplementation(async () => ({ ...state, readiness }));
+    const view = wizard();
+    await view.user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The picture check has expired');
+    expect(screen.getByRole('button', { name: 'Run picture check' })).toBeInTheDocument();
+    await view.user.click(screen.getByRole('button', { name: 'Continue with limited setup' }));
+    expect(screen.getByRole('button', { name: 'Finish with limited setup' })).toBeInTheDocument();
+  });
+
+  test.each(['completed', 'completed_limited', 'legacy_completed'])('%s diagnostics offers a picture check', async (status) => {
+    state = initial(status, 'review');
+    wizard();
+    expect(await screen.findByRole('button', { name: 'Run picture check' })).toBeInTheDocument();
+    expect(setupApi.progress).not.toHaveBeenCalled();
+  });
+
   test('a 409 reloads the server step and does not overwrite it', async () => {
     setupApi.progress.mockRejectedValueOnce(Object.assign(new Error('Stale'), { status: 409 }));
     state = initial('in_progress', 'welcome');
@@ -188,7 +221,7 @@ describe('setup steps', () => {
     const view = wizard();
     await view.user.click(await screen.findByRole('button', { name: 'Run picture check' }));
     expect(setupApi.progress).not.toHaveBeenCalled();
-    await view.user.click(screen.getByRole('button', { name: 'Start picture check' }));
+    await view.user.click(screen.getByRole('button', { name: 'Run picture check' }));
     expect(setupApi.complete).not.toHaveBeenCalled();
     await view.user.click(screen.getByRole('button', { name: 'Present video frames' }));
     await view.user.click(await screen.findByRole('button', { name: 'Continue' }));

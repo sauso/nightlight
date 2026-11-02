@@ -24,7 +24,7 @@ On a new installation, the setup guide opens after the first admin signs in. Add
 
 ### Picture check
 
-After adding a camera in setup, choose **Start picture check**. Nightlight waits for successive video frames to be presented in the signed-in admin's own browser. A connection or playlist by itself does not pass the check. This is a report from that browser, not a measurement made by the server. It does not prove the picture will keep working on another device or later. If the check cannot pass, you can continue with limited setup and try it again from **Settings → Setup & diagnostics**. A server restart clears a passed check until you run it again.
+After adding a camera in setup, choose **Run picture check**. Nightlight waits for successive video frames to be presented in the signed-in admin's own browser. A connection or playlist by itself does not pass the check. This is a report from that browser, not a measurement made by the server. It does not prove the picture will keep working on another device or later. Once the picture is confirmed, the check stays valid for ten minutes. An unconfirmed check expires ten minutes after it starts. If the check cannot pass, you can continue with limited setup and try it again from **Settings → Setup & diagnostics**. A server restart clears a passed check until you run it again.
 
 ### What you see on a camera
 

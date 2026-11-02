@@ -115,12 +115,14 @@ export function SetupGate({ user, children }) {
     let cancelled = false;
     Promise.all([setupApi.read(), api.get('/auth/status')]).then(([next, auth]) => {
       if (cancelled) return;
-      setState(next);
+      // WHY: a setup progress event can beat an earlier GET response on a slow connection.
+      setState((old) => old && old.rowVersion > next.rowVersion ? old : next);
       setDemo(!!auth.demo);
       setCheckedUserId(user.id);
     }).catch(() => {});
     const changed = (event) => {
-      if (event.detail) setState((old) => ({ ...old, ...event.detail }));
+      if (event.detail) setState((old) => old && old.rowVersion > event.detail.rowVersion
+        ? old : ({ ...old, ...event.detail }));
     };
     window.addEventListener('setup-state-changed', changed);
     return () => { cancelled = true; window.removeEventListener('setup-state-changed', changed); };

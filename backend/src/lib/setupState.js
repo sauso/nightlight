@@ -94,7 +94,9 @@ export function createSetupState({ db = appDb, clock = () => Date.now() } = {}) 
       || proof.fingerprint !== fingerprint(row)) {
       throw new SetupError(409, 'TEST_CHANGED', 'The camera or session changed. Start a new monitor test.');
     }
-    put(testId, { ...proof, verifiedAt: new Date(clock()).toISOString() });
+    // WHY: the confirmed picture stays valid for ten minutes after confirmation;
+    // an unconfirmed test still expires ten minutes after it started.
+    put(testId, { ...proof, verifiedAt: new Date(clock()).toISOString(), expiresAtMs: clock() + TTL_MS });
     return { ok: true };
   };
   const complete = (limited, sessionId) => {

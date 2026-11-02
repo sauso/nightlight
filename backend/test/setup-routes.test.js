@@ -89,6 +89,11 @@ test('a camera proof is session-bound and leaks no camera field in responses or 
   for (const column of protectedColumns) db.prepare(`UPDATE cameras SET ${column.name} = ? WHERE id = ?`).run(`${marker}_${column.name}`, CAMERA);
   const started = await request('/monitor-tests', { method: 'POST', body: { cameraId: CAMERA } });
   assert.equal(started.status, 200);
+  assert.equal((await request()).body.readiness.playbackAttested, false);
+  const early = await request('/complete', { method: 'POST', body: {} });
+  assert.equal(early.status, 409);
+  assert.equal(early.body.code, 'NOT_READY');
+  assert.deepEqual(early.body.missing, ['PLAYBACK']);
   assert.deepEqual(Object.keys(started.body).sort(), ['testId', 'expiresAt'].sort());
   const path = `/monitor-tests/${started.body.testId}/confirm`;
   assert.equal((await request(path, { method: 'POST', body: { cameraId: CAMERA }, token: otherAdmin })).status, 409);
@@ -100,6 +105,13 @@ test('a camera proof is session-bound and leaks no camera field in responses or 
   assert.deepEqual(completed.body, { status: 'completed' });
   for (const response of [started, got, completed]) assert.doesNotMatch(JSON.stringify(response.body), /SECRET_SETUP_MARKER/);
   for (const line of logger.getRecent().slice(logCount)) assert.doesNotMatch(line, /SECRET_SETUP_MARKER/);
+});
+
+test('completion rejects non-boolean limited choices', async () => {
+  for (const limited of ['false', 0]) {
+    const response = await request('/complete', { method: 'POST', body: { limited } });
+    assert.equal(response.status, 400);
+  }
 });
 
 test('demo mode blocks each write even for an admin, but still permits GET', async () => {

@@ -120,7 +120,7 @@ export default function Login() {
       // Must await: login() fetches the media token before setting the user, and navigating
       // first would let Protected see a null user and bounce straight back to /login.
       await login(result.token, result.user);
-      navigate(needsSetup ? '/setup' : '/');
+      navigate('/');
     } catch (err) {
       setError(err.message);
     } finally {

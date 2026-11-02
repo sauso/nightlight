@@ -48,7 +48,9 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
   const [restoredDraft] = useState(() => (isNew ? loadDraft(draftKey, DRAFT_FIELDS) : null));
   const [form, setForm] = useState(() => ({ ...EMPTY_FORM, ...restoredDraft, ...(initialChildId ? { child_id: initialChildId } : {}) }));
   // The form as last loaded or saved: what "unsaved" is measured against. Typing never touches it.
-  const [baseline, setBaseline] = useState(EMPTY_FORM);
+  // WHY: the wizard's assigned child is already saved as the initial form value,
+  // so opening it must not create an unsaved draft or let Discard unassign it.
+  const [baseline, setBaseline] = useState(() => ({ ...EMPTY_FORM, child_id: initialChildId }));
   const [restored, setRestored] = useState(!!restoredDraft);
   const [formReady, setFormReady] = useState(isNew);
   const [caps, setCaps] = useState({ backchannel_supported: undefined, talk_has_password: false, rtsp_has_password: false });
@@ -192,6 +194,11 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
 
   async function doSave(force) {
     setBusy(true); setPageError('');
+    if (embedded && !form.child_id) {
+      setPageError('Assign this camera to a child before continuing setup.');
+      setBusy(false);
+      return;
+    }
     const payload = { ...form, child_id: form.child_id || null, ...extraRef.current, ...(force ? { force: true } : {}) };
     // Backchannel cams carry no separate talk login (talk-back uses the stream creds). Never send the
     // empty talk fields for them — the API reads an empty talk_username as "disable talk-back", which

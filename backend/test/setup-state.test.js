@@ -9,7 +9,7 @@ import Database from 'better-sqlite3';
 import { useTempDataDir, cleanupTempDataDirs } from './helpers/harness.js';
 
 useTempDataDir();
-const { default: db } = await import('../src/db.js');
+const { default: db, ensureSetupState } = await import('../src/db.js');
 const { createSetupState } = await import('../src/lib/setupState.js');
 const CAMERA = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
@@ -36,9 +36,18 @@ test('two fresh boots create one not_started row and the settings seed does not 
     const { parentPort, workerData } = require('node:worker_threads');
     process.env.DATA_DIR = workerData.dir;
     parentPort.once('message', async () => {
-      const { default: db } = await import(workerData.moduleUrl);
-      parentPort.postMessage(db.prepare("SELECT status FROM setup_state WHERE id = 'app'").get().status);
-      db.close();
+      for (let attempt = 0; attempt < 20; attempt++) {
+        try {
+          const { default: db } = await import(workerData.moduleUrl + '?fresh-' + attempt);
+          parentPort.postMessage({ status: db.prepare("SELECT status FROM setup_state WHERE id = 'app'").get().status,
+            count: db.prepare('SELECT COUNT(*) AS n FROM setup_state').get().n });
+          db.close();
+          return;
+        } catch (error) {
+          if (error.code !== 'SQLITE_BUSY' || attempt === 19) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+      }
     });
   `;
   const workers = [0, 1].map(() => new Worker(script, { eval: true, workerData: {
@@ -52,7 +61,9 @@ test('two fresh boots create one not_started row and the settings seed does not 
     }));
     await Promise.all(workers.map((worker) => new Promise((resolve) => worker.once('online', resolve))));
     for (const worker of workers) worker.postMessage('go');
-    assert.deepEqual(await Promise.all(results), ['not_started', 'not_started']);
+    const boots = await Promise.all(results);
+    assert.deepEqual(boots.map((result) => result.status), ['not_started', 'not_started']);
+    assert.deepEqual(boots.map((result) => result.count), [1, 1]);
     const check = new Database(path.join(dir, 'private', 'babymonitor.db'));
     assert.equal(check.prepare('SELECT COUNT(*) AS n FROM setup_state').get().n, 1);
     check.close();
@@ -64,7 +75,6 @@ test('two fresh boots create one not_started row and the settings seed does not 
 
 test('old rows and demo mode each classify as legacy, and a later boot preserves the decision', async () => {
   // WHY: restored settings-only and unclaimed old installations must not be redirected.
-  const original = process.env.DATA_DIR;
   for (const variant of ['settings-default', 'settings-custom', 'users', 'children', 'cameras', 'demo']) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-legacy-'));
     const file = path.join(dir, 'private', 'babymonitor.db');
@@ -78,18 +88,13 @@ test('old rows and demo mode each classify as legacy, and a later boot preserves
     if (variant === 'users') fixture.exec("INSERT INTO users (id, username, password_hash) VALUES ('u', 'user', 'hash')");
     if (variant === 'children') fixture.exec("INSERT INTO children (id, name) VALUES ('c', 'a child')");
     if (variant === 'cameras') fixture.exec("INSERT INTO cameras (id, name, rtsp_url, mediamtx_path) VALUES ('cam', 'a camera', 'rtsp://camera', 'cam')");
-    fixture.close();
-    process.env.DATA_DIR = dir;
-    if (variant === 'demo') process.env.DEMO_MODE = 'true';
     try {
-      const first = (await import(`../src/db.js?setup-legacy-${variant}`)).default;
-      assert.equal(first.prepare("SELECT status FROM setup_state WHERE id = 'app'").get().status, 'legacy_completed', variant);
-      first.close();
-      const second = (await import(`../src/db.js?setup-legacy-${variant}-again`)).default;
-      assert.equal(second.prepare('SELECT COUNT(*) AS n FROM setup_state').get().n, 1);
-      assert.equal(second.prepare("SELECT status FROM setup_state WHERE id = 'app'").get().status, 'legacy_completed');
-      second.close();
-    } finally { delete process.env.DEMO_MODE; process.env.DATA_DIR = original; fs.rmSync(dir, { recursive: true, force: true }); }
+      ensureSetupState(fixture, variant === 'demo');
+      assert.equal(fixture.prepare("SELECT status FROM setup_state WHERE id = 'app'").get().status, 'legacy_completed', variant);
+      ensureSetupState(fixture, false);
+      assert.equal(fixture.prepare('SELECT COUNT(*) AS n FROM setup_state').get().n, 1);
+      assert.equal(fixture.prepare("SELECT status FROM setup_state WHERE id = 'app'").get().status, 'legacy_completed');
+    } finally { fixture.close(); fs.rmSync(dir, { recursive: true, force: true }); }
   }
 });
 
@@ -109,14 +114,27 @@ test('attestation is session and camera bound, one-shot, and expires after ten m
   // WHY: a guessed test id, another browser or another camera must not establish readiness.
   child(); camera(); camera(OTHER);
   const { testId } = setup.startTest(CAMERA, 'session-a');
+  assert.equal(setup.read('session-a').readiness.playbackAttested, false);
+  assert.throws(() => setup.complete(false, 'session-a'), (e) => e.code === 'NOT_READY' && e.missing.includes('PLAYBACK'));
   assert.throws(() => setup.confirm(crypto.randomUUID(), CAMERA, 'session-a'), (e) => e.status === 409);
   assert.throws(() => setup.confirm(testId, OTHER, 'session-a'), (e) => e.status === 409);
   assert.throws(() => setup.confirm(testId, CAMERA, 'session-b'), (e) => e.status === 409);
+  now += 9 * 60_000;
   assert.deepEqual(setup.confirm(testId, CAMERA, 'session-a'), { ok: true });
   assert.throws(() => setup.confirm(testId, CAMERA, 'session-a'), (e) => e.status === 409);
   assert.equal(setup.read('session-a').readiness.ready, true);
   assert.equal(setup.read('session-b').readiness.playbackAttested, false);
+  now += 9 * 60_000;
+  assert.equal(setup.read('session-a').readiness.playbackAttested, true);
+  now += 60_000;
+  assert.equal(setup.read('session-a').readiness.playbackAttested, false);
+});
+
+test('an unconfirmed picture check expires ten minutes after it starts', () => {
+  child(); camera();
+  const { testId } = setup.startTest(CAMERA, 'session-a');
   now += 10 * 60_000;
+  assert.throws(() => setup.confirm(testId, CAMERA, 'session-a'), (error) => error.code === 'TEST_UNAVAILABLE');
   assert.equal(setup.read('session-a').readiness.playbackAttested, false);
 });
 

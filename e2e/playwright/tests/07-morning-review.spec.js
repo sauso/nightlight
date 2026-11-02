@@ -232,8 +232,8 @@ test('"in bed" and "asleep" are separate answers, and both come back on the rece
 // (the child's page and the sleep page) say only what was answered.
 //
 // WHY THE REQUEST IS MADE DIRECTLY INSTEAD OF BY CLICKING "That's right": that button appears only when the
-// live recompute finds a wake, which needs an enabled camera with activity samples for the child, and a
-// camera row would break the first-run spec's "No cameras yet" (seed-review-night.mjs explains). The body
+// live recompute finds a wake, which needs an enabled camera with activity samples for the child.
+// This fixture has no enabled camera or activity samples (seed-review-night.mjs explains). The body
 // below is exactly the one frontend/test/MorningReview.test.jsx asserts the button sends. The re-save at the
 // end IS a real click, on the screen a night with a wake opens into.
 //

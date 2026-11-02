@@ -4,7 +4,7 @@ Nightlight runs as a single Docker container on a Linux host that can reach your
 
 ## First run
 
-After you create the first admin account, Nightlight opens a short setup guide. It helps you add a child, add an assigned camera and check that its picture moves in your browser. The ONVIF lookup is optional; you can enter the camera's stream details yourself.
+On a fresh installation, after you create the first admin account, Nightlight opens a short setup guide. It helps you add a child, add an assigned camera and check that its picture moves in your browser. The ONVIF lookup is optional; you can enter the camera's stream details yourself.
 
 You can choose **Save and exit** at any step and use the live view. The next admin visit shows **Finish setting up**; opening it resumes at the saved step. You can also open **Settings → Setup & diagnostics** at any time. **Continue with limited setup** lets you finish without a successful picture check and keeps the reminder visible. Existing installations are left as already set up and can open the diagnostics from Settings without changing their setup state unless a picture check succeeds.
 

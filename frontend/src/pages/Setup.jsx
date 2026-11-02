@@ -138,7 +138,12 @@ export default function Setup() {
       navigate('/');
     } catch (err) {
       if (err.status === 409) await load();
-      setError(err.data?.missing?.length ? 'A child, assigned camera and picture check are needed. Try the missing step, or continue with limited setup.' : err.message);
+      if (err.status === 409 && err.data?.code === 'NOT_READY' && err.data.missing?.includes('PLAYBACK')) {
+        // WHY: proof lives in server memory and may expire while this review page stays open.
+        setVerified(false);
+        setLimited(false);
+        setError('The picture check has expired. Run it again, or continue with limited setup.');
+      } else setError(err.data?.missing?.length ? 'Complete the missing setup steps, or continue with limited setup.' : err.message);
     } finally { setBusy(false); }
   }
 
@@ -194,7 +199,7 @@ export default function Setup() {
           <select id="setup-test-camera" value={selectedCamera} onChange={(event) => { testRef.current = null; setTestId(null); setSelectedCamera(event.target.value); }}>
             {assigned.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select></div>
-        <button className="btn btn-primary" type="button" disabled={busy || !camera} onClick={startTest}>Start picture check</button>
+        <button className="btn btn-primary" type="button" disabled={busy || !camera} onClick={startTest}>Run picture check</button>
         {testId && camera && <div className="setup-player"><CameraTile key={camera.id} camera={camera} frameTestId={testId} onFrames={onFrames} /></div>}
         {testId && !verified && <p role="status">Waiting for the picture to move in this browser…</p>}
         {verified && <p role="status">Picture check passed on this browser.</p>}
@@ -206,18 +211,16 @@ export default function Setup() {
       </>}
       {step === 'review' && <>
         <p>{verified ? 'The picture moved in this browser.' : 'You can return to the picture check at any time.'}</p>
-        {setup.status === 'completed' ? <p>Setup is complete.</p> : <>
+        {setup.status === 'completed' && <p>Setup is complete.</p>}
+        {setup.status !== 'completed' && <>
           <p>Child: {setup.readiness.hasChild ? 'added' : 'still needed'}. Camera: {setup.readiness.cameraAssigned ? 'assigned' : 'still needed'}.</p>
           {canFinishFull && <button className="btn btn-primary" type="button" disabled={busy} onClick={finish}>{busy ? 'Finishing…' : 'Finish setup'}</button>}
           {!canFinishFull && limited && !reviewOnly && setup.status !== 'completed_limited' &&
             <button className="btn btn-primary" type="button" disabled={busy} onClick={finish}>{busy ? 'Finishing…' : 'Finish with limited setup'}</button>}
           {!canFinishFull && !limited && !reviewOnly && setup.status !== 'completed_limited' &&
             <button className="btn btn-secondary" type="button" onClick={() => setLimited(true)}>Continue with limited setup</button>}
-          {(reviewOnly || setup.status === 'completed_limited') && !canFinishFull &&
-            <button className="btn btn-primary" type="button" onClick={() => move('monitor_test')}>Run picture check</button>}
-          {setup.status === 'completed_limited' && canFinishFull &&
-            <button className="btn btn-secondary" type="button" onClick={() => move('monitor_test')}>Run picture check again</button>}
         </>}
+        <button className="btn btn-secondary" type="button" onClick={() => move('monitor_test')}>Run picture check</button>
       </>}
     </SetupStepShell>
   );

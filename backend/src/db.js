@@ -1169,21 +1169,24 @@ if (!childrenColumns.includes('hold_alerts_until_asleep')) {
 // #941: classify before this boot seeds settings. Existing rows (including a restored backup or an
 // unclaimed old install with only settings) mean this is not a new wizard install. INSERT OR IGNORE
 // inside the schema transaction lets two fresh processes agree on one not_started row.
-db.exec(`CREATE TABLE IF NOT EXISTS setup_state (
-  id TEXT PRIMARY KEY CHECK (id = 'app'),
-  status TEXT NOT NULL CHECK (status IN ('not_started', 'in_progress', 'completed', 'completed_limited', 'legacy_completed')),
-  active_step TEXT NOT NULL DEFAULT 'welcome',
-  flow_version INTEGER NOT NULL DEFAULT 1,
-  row_version INTEGER NOT NULL DEFAULT 0,
-  completed_at TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-)`);
-const legacySetup = isDemoModeActive() || ['settings', 'users', 'children', 'cameras'].some(
-  (table) => !!db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get()
-);
-db.prepare("INSERT OR IGNORE INTO setup_state (id, status, active_step) VALUES ('app', ?, ?)")
-  .run(legacySetup ? 'legacy_completed' : 'not_started', legacySetup ? 'review' : 'welcome');
+export function ensureSetupState(connection, demoMode = isDemoModeActive()) {
+  connection.exec(`CREATE TABLE IF NOT EXISTS setup_state (
+    id TEXT PRIMARY KEY CHECK (id = 'app'),
+    status TEXT NOT NULL CHECK (status IN ('not_started', 'in_progress', 'completed', 'completed_limited', 'legacy_completed')),
+    active_step TEXT NOT NULL DEFAULT 'welcome',
+    flow_version INTEGER NOT NULL DEFAULT 1,
+    row_version INTEGER NOT NULL DEFAULT 0,
+    completed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  const legacySetup = demoMode || ['settings', 'users', 'children', 'cameras'].some(
+    (table) => !!connection.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get()
+  );
+  connection.prepare("INSERT OR IGNORE INTO setup_state (id, status, active_step) VALUES ('app', ?, ?)")
+    .run(legacySetup ? 'legacy_completed' : 'not_started', legacySetup ? 'review' : 'welcome');
+}
+ensureSetupState(db);
 
 // Ensure the single settings row always exists.
 db.prepare(

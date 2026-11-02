@@ -77,6 +77,9 @@ test('demo seed is deterministic, timezone-native, safe and stable throughout a 
   process.env.DEMO_ENDS_AT = new Date(midWindowBoot + 20 * 60_000).toISOString();
   const midWindow = await seedDemo(() => new Date(midWindowBoot));
   seededDb = midWindow.db;
+  assert.deepEqual(midWindow.db.prepare("SELECT status, active_step FROM setup_state WHERE id = 'app'").get(),
+    { status: 'legacy_completed', active_step: 'review' },
+    'seeding after a fresh boot must not send the demo into the setup guide');
   assertCompletedNightsAreOk(midWindow);
   assertSeededThroughDeadline(midWindow);
 
@@ -238,4 +241,14 @@ test('demo seed covers a sleep window that opens or closes during the session', 
       );
     }
   }
+});
+
+test('demo seed tolerates a database without the setup table', async () => {
+  // WHY: tooling can run the seed against an older schema during an upgrade.
+  const { seedDemo } = await import('../src/lib/demoSeed.js');
+  seededDb.exec('DROP TABLE setup_state');
+  const boot = Date.parse('2026-09-21T22:00:00.000Z');
+  process.env.DEMO_ENDS_AT = new Date(boot + 20 * 60_000).toISOString();
+  await seedDemo(() => new Date(boot));
+  assert.equal(seededDb.prepare("SELECT 1 FROM sqlite_master WHERE name = 'setup_state'").get(), undefined);
 });

@@ -25063,5 +25063,14 @@
     "expect": "killed",
     "tests": ["setup-routes.test.js"],
     "namePattern": "completion needs proof"
+  },
+  {
+    "label": "#941 readiness accepts a picture check before confirmation",
+    "file": "backend/src/lib/setupState.js",
+    "find": "proof.verifiedAt && proof.sessionId === sessionId",
+    "replace": "proof.sessionId === sessionId",
+    "expect": "killed",
+    "tests": ["setup-state.test.js"],
+    "namePattern": "attestation is session and camera bound"
   }
 ]
