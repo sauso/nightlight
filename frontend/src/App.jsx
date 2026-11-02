@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/AuthContext.jsx';
 import { SettingsProvider } from './lib/SettingsContext.jsx';
 import { CamerasProvider } from './lib/CamerasContext.jsx';
@@ -23,6 +23,8 @@ import Account from './pages/Account.jsx';
 import Settings from './pages/Settings.jsx';
 import NotFound from './pages/NotFound.jsx';
 import { lazyPage } from './lib/lazyPage.jsx';
+import { api } from './lib/api.js';
+import { setupApi } from './lib/setupApi.js';
 
 // #386: everything not needed to show the Live page, sign in, or reach the primary tabs is split out of
 // the entry chunk (see lib/lazyPage.jsx). Eager on purpose: Login, the Children / Cameras / Settings /
@@ -33,6 +35,7 @@ const NightReview = lazyPage(() => import('./pages/NightReview.jsx'));
 const SleepDetail = lazyPage(() => import('./pages/SleepDetail.jsx'));
 const ChildSettings = lazyPage(() => import('./pages/ChildSettings.jsx'));
 const CameraSettings = lazyPage(() => import('./pages/CameraSettings.jsx'));
+const Setup = lazyPage(() => import('./pages/Setup.jsx'));
 const DetectionSettings = lazyPage(() => import('./pages/DetectionSettings.jsx'));
 const SettingsGeneral = lazyPage(() => import('./pages/SettingsGeneral.jsx'));
 const SettingsCamera = lazyPage(() => import('./pages/SettingsCamera.jsx'));
@@ -100,6 +103,47 @@ function useReloadAfterBackground() {
   }, []);
 }
 
+export function SetupGate({ user, children }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [state, setState] = useState(null);
+  const [demo, setDemo] = useState(null);
+  const [checkedUserId, setCheckedUserId] = useState(null);
+
+  useEffect(() => {
+    if (user?.role !== 'admin') { setState(null); setDemo(null); setCheckedUserId(null); return undefined; }
+    let cancelled = false;
+    Promise.all([setupApi.read(), api.get('/auth/status')]).then(([next, auth]) => {
+      if (cancelled) return;
+      setState(next);
+      setDemo(!!auth.demo);
+      setCheckedUserId(user.id);
+    }).catch(() => {});
+    const changed = (event) => {
+      if (event.detail) setState((old) => ({ ...old, ...event.detail }));
+    };
+    window.addEventListener('setup-state-changed', changed);
+    return () => { cancelled = true; window.removeEventListener('setup-state-changed', changed); };
+  }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    // WHY: only the fresh handoff redirects. An in-progress visit is always optional,
+    // including after Save and exit or a page refresh.
+    if (user?.role === 'admin' && checkedUserId === user.id && demo === false && state?.status === 'not_started' && location.pathname !== '/setup') {
+      navigate('/setup', { replace: true });
+    }
+  }, [user?.id, user?.role, checkedUserId, demo, state?.status, location.pathname, navigate]);
+
+  return <>
+    {user?.role === 'admin' && checkedUserId === user.id && demo === false && ['in_progress', 'completed_limited'].includes(state?.status) && location.pathname !== '/setup' && (
+      <div className="setup-banner" role="status">
+        <span>Setup is still open.</span> <button className="btn btn-secondary" type="button" onClick={() => navigate('/setup')}>Finish setting up</button>
+      </div>
+    )}
+    {children}
+  </>;
+}
+
 // Exported for tests. These two are the ONLY thing standing between a caregiver and every
 // admin screen, and the loading branch matters as much as the role one: returning null rather
 // than redirecting is what stops a page refresh bouncing a signed-in user to the login screen
@@ -159,9 +203,11 @@ function Shell() {
             <Protected>
               <CamerasProvider>
                 <div className="app-shell">
+                  <SetupGate user={user}>
                   <LiveMonitor />
                   <Routes>
                     <Route path="/" element={null} />
+                    <Route path="/setup" element={<AdminProtected><Setup /></AdminProtected>} />
                     {/* Retired tabs redirect to the new child-centred structure. */}
                     <Route path="/family" element={<Navigate to="/children" replace />} />
                     <Route path="/alerts" element={<Navigate to="/children" replace />} />
@@ -219,6 +265,7 @@ function Shell() {
                     <Route path="*" element={<NotFound />} />
                   </Routes>
                   <NavBar />
+                  </SetupGate>
                 </div>
               </CamerasProvider>
             </Protected>

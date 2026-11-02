@@ -62,7 +62,7 @@ export function fmtElapsed(sec) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-export default function CameraTile({ camera, childName, dragHandleProps, refreshNonce = 0, onRecordingSaved }) {
+export default function CameraTile({ camera, childName, dragHandleProps, refreshNonce = 0, onRecordingSaved, frameTestId, onFrames }) {
   const { settings } = useSettings();
   const { user } = useAuth();
   const { refresh: refreshCameras } = useCameras();
@@ -726,6 +726,8 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               cameraName={camera.name}
               isBackgroundAudio={audioState === 'bg'}
               statusUnknown={!!camera.statusUnknown}
+              frameTestId={frameTestId}
+              onFrames={onFrames}
             />
           ) : (
             <HlsPlayer
@@ -736,6 +738,8 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               active={streamActive}
               muted={effectiveMuted}
               statusUnknown={!!camera.statusUnknown}
+              frameTestId={frameTestId}
+              onFrames={onFrames}
             />
           )}
         </div>

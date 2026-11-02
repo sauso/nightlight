@@ -28,7 +28,7 @@
 // exclude list because jsdom cannot play it), a real browser's redirect handling, or what MediaMTX does with a
 // session nobody DELETEs.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { render, waitFor, act } from '@testing-library/react';
 import WhepPlayer from '../src/components/WhepPlayer.jsx';
 import { setToken } from '../src/lib/api.js';
 import { resetIceServersCache } from '../src/lib/iceServers.js';
@@ -114,8 +114,25 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete HTMLVideoElement.prototype.requestVideoFrameCallback;
+  delete HTMLVideoElement.prototype.cancelVideoFrameCallback;
   vi.unstubAllGlobals();
   setToken(null);
+});
+
+test('WHEP connection alone does not pass the picture check; presented frames do', async () => {
+  const callbacks = [];
+  HTMLVideoElement.prototype.requestVideoFrameCallback = vi.fn((callback) => { callbacks.push(callback); return callbacks.length; });
+  HTMLVideoElement.prototype.cancelVideoFrameCallback = vi.fn();
+  const onFrames = vi.fn();
+  render(<WhepPlayer mediamtxPath="camera" active muted frameTestId="test" onFrames={onFrames} />);
+  await waitFor(() => expect(peers[0]?.remoteDescription).toBeTruthy());
+  act(() => { peers[0].connectionState = 'connected'; peers[0].onconnectionstatechange(); });
+  expect(onFrames).not.toHaveBeenCalled();
+  act(() => { callbacks.shift()(0, { presentedFrames: 1 }); });
+  expect(onFrames).not.toHaveBeenCalled();
+  act(() => { callbacks.shift()(1, { presentedFrames: 2 }); });
+  expect(onFrames).toHaveBeenCalledExactlyOnceWith('test');
 });
 
 // Mount with the given Location, wait until the answer has been applied, unmount, and return every request the

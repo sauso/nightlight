@@ -11,7 +11,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
-- #941 First-run setup state and admin-only monitor test API groundwork. A browser playback attestation lasts ten minutes and must be repeated after a server restart. Upgraded and restored installs are marked as already set up and are not treated as new installs; the guided screens and Settings entry follow in the next change.
+- #941 First-run setup guide for admins: add a child and assigned camera, check that video frames reach the browser, or finish with limited setup and return later from Settings → Setup & diagnostics. Save and exit resumes at the saved step without redirecting again. The browser's picture check lasts ten minutes and must be repeated after a server restart. Upgraded and restored installs are marked as already set up and are not redirected.
 
 - #937 The server announces itself on the local network (mDNS, `_nightlight._tcp`) so a phone can find it without typing an address; the phone app's side is planned, not built yet. It is on by default; set `MDNS_ANNOUNCE=false` to turn it off. It does not work from Docker's default bridge network, or across VLANs without a router that passes mDNS. `/api/health` now also returns a random server id and the app name, both visible without signing in. See [Finding your server automatically](docs/networking.md#finding-your-server-automatically).
 
