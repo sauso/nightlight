@@ -29,7 +29,7 @@ export default function CameraRow({ cam, child, onClick }) {
         <span className="cam-row__meta">
           {child && (
             <span className="cam-chip">
-              <span className="cam-chip__mini" style={{ background: child.color || 'var(--peri)' }}>
+              <span className="cam-chip__mini" style={{ background: child.color || 'var(--accent)' }}>
                 {child.photo
                   ? <img src={child.photo} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
                   : (child.name || '?')[0].toUpperCase()}

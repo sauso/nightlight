@@ -58,7 +58,7 @@ function Row({ Icon, label, desc, badge, onClick }) {
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
         <span style={{ width: 24, display: 'inline-flex', justifyContent: 'center', flexShrink: 0 }}>
-          <Icon size={22} color="var(--peri)" aria-hidden="true" />
+          <Icon size={22} color="var(--accent)" aria-hidden="true" />
         </span>
         <div style={{ minWidth: 0 }}>
           <div>{label}</div>

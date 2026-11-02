@@ -15,8 +15,8 @@ router.get('/', (req, res) => {
     scope: '/',
     display: 'standalone',
     orientation: 'portrait-primary',
-    background_color: '#12172b',
-    theme_color: '#12172b',
+    background_color: '#14142a',
+    theme_color: '#14142a',
     icons: [
       // Chrome's own install-dialog preview uses whatever has purpose "any" and applies
       // its own rounded-square crop - separate from what the Android launcher does with

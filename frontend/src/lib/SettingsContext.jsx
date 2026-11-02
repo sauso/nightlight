@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
 import { useAuth } from './AuthContext.jsx';
-import { FONT_PRESETS, DEFAULT_FONT_CHOICE } from './fonts.js';
 
 // Exported so tests can inject a value directly — chiefly to render a screen as an admin and
 // again as a caregiver, since role gating is real in this UI and is where bugs hide.
@@ -9,22 +8,13 @@ export const SettingsContext = createContext(null);
 
 const DEFAULTS = {
   app_name: 'Nightlight',
-  accent_color: '#f4c56a',
-  live_color: '#7FBFA3',
-  offline_color: '#E08585',
   timezone: 'UTC',
-  font_choice: DEFAULT_FONT_CHOICE,
   temp_unit: 'C',
 };
 
-function applyTheme(settings) {
-  const root = document.documentElement.style;
-  root.setProperty('--accent', settings.accent_color);
-  root.setProperty('--live', settings.live_color);
-  root.setProperty('--offline', settings.offline_color);
-  const font = FONT_PRESETS[settings.font_choice] || FONT_PRESETS[DEFAULT_FONT_CHOICE];
-  root.setProperty('--font-display', font.display);
-  root.setProperty('--font-body', font.body);
+// Older clients may still save colours and a font choice. Branding is fixed in CSS;
+// only the installation name changes the browser title.
+function applyIdentity(settings) {
   document.title = settings.app_name;
 }
 
@@ -46,7 +36,7 @@ export function SettingsProvider({ children }) {
   const { user } = useAuth() || {};
   // Which refresh is current, so a slow earlier response can't overwrite a newer one (see refresh).
   const reqSeq = useRef(0);
-  // Whether real settings have ever arrived, so a later failure doesn't reset a working theme.
+  // Whether real settings have ever arrived, so a later failure does not reset a working name.
   const loadedOnce = useRef(false);
 
   async function refresh() {
@@ -61,15 +51,15 @@ export function SettingsProvider({ children }) {
       loadedOnce.current = true;
       setLoaded(true);
       setSettings(data);
-      applyTheme(data);
+      applyIdentity(data);
     } catch {
       // Only fall back to defaults if we have never had real settings. This catch exists so a FIRST
       // failure doesn't block the app from loading — not to undo a good load. Re-applying DEFAULTS
-      // after a success would reset the palette and the tab title while `settings` state kept the real
-      // values, leaving a branded install half-themed after one transient failure, with no error and
+      // after a success would reset the tab title while `settings` state kept the real
+      // values, leaving a branded install with a stale title after one transient failure, with no error and
       // no retry. Harmless before this file re-fetched on sign-in, because it only ever ran at mount
       // when the state genuinely was DEFAULTS.
-      if (seq === reqSeq.current && !loadedOnce.current) applyTheme(DEFAULTS);
+      if (seq === reqSeq.current && !loadedOnce.current) applyIdentity(DEFAULTS);
     } finally {
       if (seq === reqSeq.current) setLoading(false);
     }
@@ -80,7 +70,7 @@ export function SettingsProvider({ children }) {
   // needs, an admin also gets the config the settings forms bind. Signing in does not reload the page
   // (Login navigates), so fetching only at mount would leave every session that began at the login
   // screen holding the anonymous response, and the admin settings forms would seed from fields that
-  // were never sent. Runs on mount too (user is undefined then), so the theme still applies
+  // were never sent. Runs on mount too (user is undefined then), so the title still applies
   // immediately rather than waiting for auth to resolve.
   useEffect(() => {
     refresh();
@@ -102,7 +92,7 @@ export function SettingsProvider({ children }) {
     // The server's own word, so the settings are real from here on — see `loaded`.
     setLoaded(true);
     setSettings(serverSettings);
-    applyTheme(serverSettings);
+    applyIdentity(serverSettings);
     // A commit IS an authoritative load, same as a successful refresh() (see its `finally` above) —
     // it's the server's own word on the current settings, just delivered via a PUT response instead of
     // a GET. Without this, a commit landing while the initial (or post-login) refresh() is still

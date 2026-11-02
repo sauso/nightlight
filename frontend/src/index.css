@@ -1,53 +1,40 @@
 :root {
-  /* Light is the default palette. Two accent roles, matching the design mockup:
-     --peri (periwinkle, fixed) is the interactive "chrome" colour — active tab, switches,
-     sliders, row icons, back link, drill-in accents. --accent (gold by default, and the one
-     the user can recolour in Settings → General) is the call-to-action colour — primary
-     buttons, the camera-tile glow, temperature/humidity icons. --bar is the navy top bar,
-     the same in both themes. Only the neutrals below flip between light and dark. */
-  --bg: #f0eff5;
+  /* #943: the owner's day/night palette is one tweakable block. Brand actions share --accent;
+     --accent-text is lighter only where small text sits on dark surfaces. */
+  --bg: #f7f4fd;
   --bg-elevated: #ffffff;
-  --bg-elevated-2: #eeedfa;
-  --text-primary: #1b1c33;
-  --text-secondary: #70718f;
-  --accent: #f4c56a;
-  --accent-dim: #cda94f;
-  --peri: #7c83db;
-  --peri-soft: #cfd2f5;
-  --bar: #12143a;
-  --bar-text: #f4f4fb;
-  --live: #6fae90;
-  --offline: #d9707a;
-  --border: #e6e4f0;
-  --field-bg: #ffffff;
+  --bg-elevated-2: #eae3f8;
+  --text-primary: #1d1a3a;
+  --text-secondary: #625c7f;
+  --accent: #7c5cd6;
+  --accent-text: #5f3db7;
+  --accent-soft: #d9cdf4;
+  --bar: #14142a;
+  --bar-text: #e8e2f7;
+  --live: #23734f;
+  --offline: #aa3f54;
+  --border: #ddd5ee;
+  --field-bg: #eae3f8;
   --radius: 16px;
 
-  --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
-  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-display: 'Nunito', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
   --font-mono: 'SF Mono', 'IBM Plex Mono', Menlo, Consolas, monospace;
 }
 
-/* Dark palette. Theme choice is per-device (see lib/theme.js), which resolves 'system' to a
-   concrete light/dark in JS and stamps it on <html>, so we only need explicit light (:root
-   above) + dark here. --accent / --live / --offline are also set inline by SettingsContext
-   from the user's saved colours, so the values here are just the fallback. --peri and --bar
-   are fixed across both themes. */
+/* lib/theme.js stamps the resolved device choice on <html>; there is no media override. */
 :root[data-theme='dark'] {
-  --bg: #0f1124;
-  --bg-elevated: #181a33;
-  --bg-elevated-2: #1e2140;
-  --text-primary: #eceaf6;
-  --text-secondary: #8d8fb4;
-  --accent: #f4c56a;
-  --accent-dim: #cda94f;
-  --peri: #7c83db;
-  --peri-soft: #cfd2f5;
-  --bar: #12143a;
-  --bar-text: #f4f4fb;
-  --live: #7fc9a3;
-  --offline: #e08585;
-  --border: #282a48;
-  --field-bg: #1e2140;
+  --bg: #14142a;
+  --bg-elevated: #221f3c;
+  --bg-elevated-2: #100f1c;
+  --text-primary: #e8e2f7;
+  --text-secondary: #bcb3d5;
+  --accent-text: #bca8f3;
+  --accent-soft: #cbbcf0;
+  --live: #8bdbad;
+  --offline: #f4a3ad;
+  --border: #383450;
+  --field-bg: #100f1c;
 }
 
 * { box-sizing: border-box; }
@@ -90,7 +77,7 @@ body {
 
 h1, h2, h3 {
   font-family: var(--font-display);
-  font-weight: 600;
+  font-weight: 800;
   letter-spacing: 0.01em;
   margin: 0;
 }
@@ -124,7 +111,7 @@ button {
 }
 
 .demo-banner a {
-  color: var(--peri);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
@@ -179,7 +166,7 @@ button {
   border: 0;
   background: none;
   /* The bar stays navy in both themes, while --text-secondary changes with the page. */
-  color: var(--peri-soft);
+  color: var(--accent-soft);
   cursor: pointer;
 }
 
@@ -210,7 +197,7 @@ button {
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--peri-soft);
+  color: var(--accent-soft);
   font-size: 15px;
   font-family: inherit;
 }
@@ -333,7 +320,7 @@ body.in-pip .tile-menu-backdrop {
 .install-banner__btn {
   flex-shrink: 0;
   background: var(--accent);
-  color: #21170a;
+  color: #fff;
   border: none;
   border-radius: 8px;
   padding: 7px 14px;
@@ -448,7 +435,7 @@ body.in-pip .tile-menu-backdrop {
 }
 
 .bottom-nav a.active {
-  color: var(--peri);
+  color: var(--accent-text);
 }
 
 .bottom-nav__icon {
@@ -511,7 +498,7 @@ body.in-pip .tile-menu-backdrop {
 
   .bottom-nav a.active {
     background: var(--bg-elevated-2);
-    color: var(--peri);
+    color: var(--accent-text);
     font-weight: 600;
   }
 
@@ -783,7 +770,7 @@ body.in-pip .tile-menu-backdrop {
 .talk-btn--active {
   background: var(--accent);
   color: #0a0d1c;
-  box-shadow: 0 0 0 3px rgba(245, 217, 168, 0.35);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .pip-btn {
@@ -921,7 +908,7 @@ body.in-pip .tile-menu-backdrop {
 }
 
 .tile-menu__item--active {
-  color: var(--peri);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
@@ -1118,7 +1105,7 @@ body.in-pip .tile-menu-backdrop {
 /* Background-listening keeps a distinct accent tint over the white, so it's clear at a
    glance the camera is being held alive in the background (not merely unmuted). */
 .mute-btn--bg {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* Inline warning inside a form (e.g. stream validation failed on save) - softer than the
@@ -1187,12 +1174,12 @@ body.in-pip .tile-menu-backdrop {
 }
 .cam-thumb.sm { width: 40px; height: 30px; border-radius: 7px; }
 .cam-thumb.off { filter: grayscale(1) brightness(0.62); }
-.cam-thumb__dot { position: absolute; top: 5px; left: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 3px rgba(111, 174, 144, 0.32); }
+.cam-thumb__dot { position: absolute; top: 5px; left: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 32%, transparent); }
 .cam-row__main { flex: 1; min-width: 0; }
 .cam-row__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .cam-row__name { font-weight: 600; font-size: 15px; }
 .cam-row__meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
-.cam-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--peri); background: rgba(124, 131, 219, 0.12); padding: 2px 9px 2px 3px; border-radius: 999px; }
+.cam-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--accent-text); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 2px 9px 2px 3px; border-radius: 999px; }
 .cam-chip__mini { width: 18px; height: 18px; border-radius: 50%; color: #fff; font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
 
 /* Child hero ("night") card — identity now, last night's sleep later. */
@@ -1205,7 +1192,7 @@ body.in-pip .tile-menu-backdrop {
 /* Enlarged child photo in a modal (tapped from the detail hero). */
 .photo-full { display: block; width: 100%; border-radius: 12px; }
 .night__id { flex: 1; min-width: 0; }
-.night__name { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 600; line-height: 1.1; }
+.night__name { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 800; line-height: 1.1; }
 .night__age { display: block; font-size: 12.5px; color: #b9bdf0; margin-top: 3px; }
 .night__edit { font-size: 12.5px; color: #c7caff; opacity: 0.85; flex-shrink: 0; }
 .night__sleep { display: flex; align-items: center; gap: 11px; margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.1); color: #cdd0ff; }
@@ -1267,7 +1254,7 @@ body.in-pip .tile-menu-backdrop {
 .recompute-diff__was { color: var(--text-secondary); text-decoration: line-through; }
 .recompute-diff__arrow { color: var(--text-secondary); text-align: center; }
 .recompute-diff__now { color: var(--text-primary); font-weight: 600; }
-.recompute-diff__row.is-changed .recompute-diff__now { color: var(--accent); }
+.recompute-diff__row.is-changed .recompute-diff__now { color: var(--accent-text); }
 /* #361 PR 3: "Use the settings this night was saved with". The whole label row is the hit area (a real
    checkbox inside a label), at least 44px tall per the touch-target rule; the help lines are secondary text. */
 .recompute-choice { margin: 0 0 12px; }
@@ -1338,7 +1325,7 @@ body.in-pip .tile-menu-backdrop {
 .sleep-tl__tip-time { font-size: 12.5px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .sleep-tl__tip-status { font-size: 11.5px; color: var(--text-secondary); text-transform: capitalize; }
 .sleep-tl__tip-temp { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--sleep-temp); font-variant-numeric: tabular-nums; }
-.sleep-live-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: #1b1c33; background: var(--accent); vertical-align: 2px; }
+.sleep-live-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: #fff; background: var(--accent); vertical-align: 2px; }
 .sleep-tl__axis { position: relative; height: 16px; margin-top: 4px; }
 .sleep-tl__tick { position: absolute; top: 0; width: 1px; height: 4px; background: var(--border); transform: translateX(-0.5px); }
 .sleep-tl__tick-label { position: absolute; top: 5px; left: 0; transform: translateX(-50%); font-size: 10px; color: var(--text-secondary); white-space: nowrap; }
@@ -1358,7 +1345,7 @@ body.in-pip .tile-menu-backdrop {
 /* The head is a <button> when the wake has correlated alerts — strip the native chrome so it reads as
    a row, and give it a full-width tap target + a visible focus ring for keyboard users. */
 button.sleep-wakes__head { width: 100%; padding: 0; border: none; background: none; cursor: pointer; text-align: left; font: inherit; color: inherit; border-radius: 8px; }
-button.sleep-wakes__head:focus-visible { outline: 2px solid var(--peri); outline-offset: 3px; }
+button.sleep-wakes__head:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .sleep-wakes__time { font-size: 14px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .sleep-wakes__headright { display: inline-flex; align-items: center; gap: 8px; flex: none; }
 .sleep-wakes__dur { font-size: 13px; color: var(--sleep-wake); font-weight: 600; }
@@ -1370,9 +1357,9 @@ button.sleep-wakes__head:focus-visible { outline: 2px solid var(--peri); outline
 .sleep-wakes__alert { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary); }
 .sleep-wakes__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: default; line-height: 0; }
 button.sleep-wakes__thumbwrap { cursor: pointer; border-radius: 8px; }
-button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
+button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sleep-wakes__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, #23264d, #14162f); }
-.sleep-wakes__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--peri-soft); }
+.sleep-wakes__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
 .sleep-wakes__play { position: absolute; inset: 0; margin: auto; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(10, 13, 28, 0.62); color: #fff; }
 .sleep-wakes__alert-ico { color: var(--sleep-wake); flex: none; }
 .sleep-wakes__alert-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
@@ -1428,7 +1415,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--peri); ou
    because the text is JSON a person may need to read; vertical resize only so it cannot widen the card. */
 .crib__text { width: 100%; box-sizing: border-box; background: var(--field-bg); border: 1px solid var(--border); color: var(--text-primary); border-radius: 10px; padding: 10px 12px; font: 12px/1.4 monospace; resize: vertical; }
 .btn-sm { padding: 6px 14px; font-size: 12.5px; white-space: nowrap; }
-.linkbtn { background: none; border: none; color: var(--accent); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
+.linkbtn { background: none; border: none; color: var(--accent-text); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
 
 /* Room-climate sensor history (Child detail). Temp + humidity sparklines from sensor_readings. */
 .sensor-card { margin-bottom: 14px; }
@@ -1449,23 +1436,21 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--peri); ou
 .child-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; cursor: pointer; font: inherit; border: 1px solid var(--border); color: var(--text-primary); background: var(--bg-elevated); border-radius: 18px; padding: 15px 16px; margin-bottom: 12px; box-shadow: 0 10px 26px -22px rgba(30, 30, 70, 0.35); transition: transform 0.12s ease, box-shadow 0.12s ease; }
 .child-card:hover { transform: translateY(-1px); box-shadow: 0 14px 32px -22px rgba(30, 30, 70, 0.45); }
 .child-card:active { transform: translateY(0); }
-.child-card:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
+.child-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .child-card__id { flex: 1; min-width: 0; }
-.child-card__name { display: block; font-family: var(--font-display); font-size: 20px; font-weight: 600; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.child-card__name { display: block; font-family: var(--font-display); font-size: 20px; font-weight: 800; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .child-card__meta { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); margin-top: 4px; }
-.child-card__chev { color: var(--peri); opacity: 0.6; flex-shrink: 0; }
+.child-card__chev { color: var(--accent); opacity: 0.6; flex-shrink: 0; }
 
-:root[data-theme='dark'] .child-card { border: none; color: #eef0ff; background: linear-gradient(165deg, #2c2f63 0%, #191b38 100%); box-shadow: 0 14px 34px -24px rgba(18, 20, 58, 0.8); }
-:root[data-theme='dark'] .child-card:hover { box-shadow: 0 18px 40px -24px rgba(18, 20, 58, 0.9); }
-:root[data-theme='dark'] .child-card__meta { color: #b9bdf0; }
-:root[data-theme='dark'] .child-card__chev { color: #c7caff; }
+:root[data-theme='dark'] .child-card { border-color: var(--border); color: var(--text-primary); background: var(--bg-elevated); box-shadow: 0 14px 34px -24px rgba(0, 0, 0, 0.8); }
+:root[data-theme='dark'] .child-card:hover { box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.9); }
 
 /* Alert list — one card, one row per alert: thumbnail, camera name, motion/sound icon + label, time.
    Shared by the Live "Recent activity" list and each child's detail screen. */
 .alert-item { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-bottom: 1px solid var(--border); }
 .alert-item:last-child { border-bottom: none; }
 .alert-item__thumb { width: 64px; height: 46px; border-radius: 9px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, #23264d, #14162f); }
-.alert-item__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--peri-soft); }
+.alert-item__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
 .alert-item__body { flex: 1; min-width: 0; }
 .alert-item__name { font-weight: 600; font-size: 14.5px; display: flex; align-items: center; gap: 7px; }
 .alert-item__nametext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1475,20 +1460,20 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--peri); ou
 @keyframes recpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
 @media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
 .alert-item__meta { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; }
-.alert-item__ico { color: var(--peri); flex-shrink: 0; }
+.alert-item__ico { color: var(--accent); flex-shrink: 0; }
 .alert-item__time { font-size: 12px; color: var(--text-secondary); flex-shrink: 0; white-space: nowrap; }
 /* Thumbnail wrapper carries the play/recording overlay. As a <button> (clip ready) it's a bare,
    tappable frame. */
 .alert-item__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: default; line-height: 0; }
 button.alert-item__thumbwrap { cursor: pointer; border-radius: 9px; }
-button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
+button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .alert-item__play {
   position: absolute; inset: 0; margin: auto; width: 26px; height: 26px;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%; background: rgba(10, 13, 28, 0.62); color: #fff;
 }
-.alert-item__play--pending { background: rgba(10, 13, 28, 0.5); color: var(--peri-soft); }
-.alert-item__clipflag { color: var(--peri); }
+.alert-item__play--pending { background: rgba(10, 13, 28, 0.5); color: var(--accent-soft); }
+.alert-item__clipflag { color: var(--accent); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 /* Modal clip player */
@@ -1510,7 +1495,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   background: var(--bg-elevated-2); border: 1px solid var(--border); color: var(--text-primary);
   border-radius: 10px; padding: 7px 12px; font-size: 13px; font-weight: 500; cursor: pointer;
 }
-.clip-datepicker__trigger:hover { border-color: var(--peri-soft); }
+.clip-datepicker__trigger:hover { border-color: var(--accent-soft); }
 .clip-cal {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 50;
   width: 280px; padding: 12px; background: var(--bg-elevated); border: 1px solid var(--border);
@@ -1537,29 +1522,29 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 .clip-cal__day.has-clips { color: var(--text-primary); font-weight: 600; cursor: pointer; }
 .clip-cal__day.has-clips::after {
   content: ''; position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
-  width: 4px; height: 4px; border-radius: 50%; background: var(--peri);
+  width: 4px; height: 4px; border-radius: 50%; background: var(--accent);
 }
 .clip-cal__day.has-clips:hover { background: var(--bg-elevated-2); }
-.clip-cal__day.is-sel { background: var(--peri); color: #fff; }
+.clip-cal__day.is-sel { background: var(--accent); color: #fff; }
 .clip-cal__day.is-sel::after { background: #fff; }
 .clip-cal__foot { display: flex; gap: 8px; margin-top: 10px; }
 .clip-cal__all, .clip-cal__done {
   flex: 1; padding: 8px; border-radius: 9px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
 }
-.clip-cal__all { border: 1px solid var(--border); background: none; color: var(--peri); }
+.clip-cal__all { border: 1px solid var(--border); background: none; color: var(--accent-text); }
 .clip-cal__all:hover:not(:disabled) { background: var(--bg-elevated-2); }
 .clip-cal__all:disabled { opacity: 0.4; cursor: default; }
-.clip-cal__done { border: none; background: var(--peri); color: #fff; }
-.clip-selectall { background: none; border: none; color: var(--peri); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 2px 4px; margin: 0 0 8px 2px; }
+.clip-cal__done { border: none; background: var(--accent); color: #fff; }
+.clip-selectall { background: none; border: none; color: var(--accent-text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 2px 4px; margin: 0 0 8px 2px; }
 .clip-row { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
 .clip-row:last-child { border-bottom: none; }
-.clip-row--sel { background: color-mix(in srgb, var(--peri) 12%, transparent); }
+.clip-row--sel { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .clip-row__check { display: inline-flex; flex-shrink: 0; }
-.clip-row__check input { width: 18px; height: 18px; accent-color: var(--peri); }
+.clip-row__check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .clip-row__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: pointer; line-height: 0; border-radius: 8px; }
-.clip-row__thumbwrap:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
+.clip-row__thumbwrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .clip-row__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; background: linear-gradient(135deg, #23264d, #14162f); }
-.clip-row__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--peri-soft); }
+.clip-row__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
 .clip-row__body { flex: 1; min-width: 0; cursor: pointer; }
 .clip-row__name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .clip-row__meta { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
@@ -1821,7 +1806,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 }
 
 .camera-tile__reading-icon {
-  color: var(--accent);
+  color: var(--accent-text);
   flex-shrink: 0;
 }
 
@@ -1891,7 +1876,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 
 .btn-primary {
   background: var(--accent);
-  color: #21170a;
+  color: #fff;
 }
 
 .btn-secondary {
@@ -1903,7 +1888,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 /* Periwinkle fill (same shade as an active segmented toggle / switch) — for secondary actions
    that still need to read clearly in light mode, e.g. the ONVIF fetch / verify buttons. */
 .btn-peri {
-  background: var(--peri);
+  background: var(--accent);
   color: #fff;
 }
 
@@ -1951,31 +1936,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   flex-wrap: wrap;
 }
 
-.preset-btn {
-  display: flex;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  border-radius: 10px;
-  padding: 6px;
-  cursor: pointer;
-  gap: 3px;
-}
-
-.preset-btn span {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  display: block;
-}
-
-.font-row {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
-}
-
-.font-btn {
+.unit-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1989,47 +1950,13 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   min-width: 84px;
 }
 
-.font-btn--active {
+.unit-btn--active {
   border-color: var(--accent);
   color: var(--text-primary);
 }
 
-.font-btn__sample {
-  font-size: 22px;
-  color: var(--text-primary);
-}
-
-.font-btn__label {
+.unit-btn__label {
   font-size: 11px;
-}
-
-.color-field {
-  margin-bottom: 16px;
-}
-
-.color-field:last-child { margin-bottom: 0; }
-
-.color-field label {
-  display: block;
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-}
-
-.color-field__row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.color-field__row input[type='color'] {
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: none;
-  cursor: pointer;
 }
 
 .empty-state {
@@ -2059,7 +1986,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   height: 84px;
   margin: 0 auto 18px;
   border-radius: 22px;
-  box-shadow: 0 8px 30px rgba(245, 217, 168, 0.18);
+  box-shadow: 0 8px 30px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .auth-card h1 {
@@ -2137,8 +2064,8 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  background: rgba(124, 131, 219, 0.15);
-  color: var(--peri);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent-text);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2166,13 +2093,13 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   height: 64px;
   border-radius: 16px;
   flex-shrink: 0;
-  box-shadow: 0 8px 30px rgba(245, 217, 168, 0.18);
+  box-shadow: 0 8px 30px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .about-hero__name {
   font-family: var(--font-display);
   font-size: 20px;
-  font-weight: 600;
+  font-weight: 800;
   margin-bottom: 2px;
 }
 
@@ -2230,13 +2157,13 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   text-align: right;
   font-size: 12px;
   font-weight: 600;
-  color: var(--peri);
+  color: var(--accent-text);
   margin-bottom: 4px;
 }
 
 input[type='range'] {
   width: 100%;
-  accent-color: var(--peri);
+  accent-color: var(--accent);
 }
 
 /* Segmented control (e.g. the Light / Dark / System theme picker in Account). */
@@ -2267,7 +2194,7 @@ input[type='range'] {
 }
 
 .segmented__btn--active {
-  background: var(--peri);
+  background: var(--accent);
   color: #fff;
   font-weight: 600;
 }
@@ -2297,12 +2224,12 @@ input[type='range'] {
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .detect-toggle:hover:not(:disabled) {
-  border-color: var(--peri);
+  border-color: var(--accent);
   color: var(--text-primary);
 }
 .detect-toggle--on {
-  background: var(--peri);
-  border-color: var(--peri);
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
   font-weight: 600;
 }
@@ -2321,8 +2248,8 @@ input[type='range'] {
   justify-content: center;
 }
 .silence-btn--muted {
-  border-color: var(--accent-dim);
-  color: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent-text);
 }
 .silence-menu {
   display: flex;
@@ -2412,7 +2339,7 @@ input[type='range'] {
   color: var(--text-secondary);
 }
 .timelapse-strip__item--active {
-  border-color: var(--peri);
+  border-color: var(--accent);
   color: var(--text-primary);
 }
 .timelapse-strip__item img {
@@ -2472,8 +2399,8 @@ input[type='range'] {
 }
 
 .switch input:checked ~ .switch__track {
-  background: var(--peri);
-  border-color: var(--peri);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .switch input:checked ~ .switch__track .switch__thumb {
@@ -2515,12 +2442,12 @@ input[type='range'] {
 
 .log-chip:hover {
   color: var(--text-primary);
-  border-color: var(--peri-soft);
+  border-color: var(--accent-soft);
 }
 
 .log-chip--active {
-  background: var(--peri);
-  border-color: var(--peri);
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
 }
 
@@ -2654,9 +2581,9 @@ input[type='range'] {
 .event-log__dot--offline { background: var(--offline); }
 .event-log__dot--online { background: var(--live); }
 .event-log__dot--restart { background: var(--accent); }
-/* A person silencing a camera's alerts (#552): --peri, the chrome-level accent, since it is a person acting
+/* A person silencing a camera's alerts (#552): use the brand accent since it is a person acting
    on the app rather than the camera's own state (offline/online/restart above). */
-.event-log__dot--snooze { background: var(--peri); }
+.event-log__dot--snooze { background: var(--accent); }
 .event-log__dot--motion { background: #e0a57f; }
 .event-log__dot--sound { background: #8fd1e0; }
 
@@ -2777,7 +2704,7 @@ input[type='range'] {
   border: 2px solid transparent; border-radius: 8px; overflow: hidden;
   background: var(--bg-elevated-2); color: var(--text-secondary); cursor: pointer;
 }
-.rec-strip__item:hover { border-color: var(--peri); color: var(--text-primary); }
+.rec-strip__item:hover { border-color: var(--accent); color: var(--text-primary); }
 .rec-strip__item img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
 .rec-strip__item span:last-child { display: block; padding: 5px 6px; font-size: 11px; line-height: 1.25; }
 /* A recording that couldn't be saved (issue #276). It has no thumbnail to show, so the tile keeps the
@@ -2900,8 +2827,7 @@ input[type='range'] {
 .sleep-wakes__thumb--frame { width: 96px; height: 54px; }
 
 /* Morning review — the "was last night right?" card and the screen behind it.
-   Chrome is --peri (this is something to interact with), not --accent: it is an invitation, not the
-   primary action on the page. The card must read as dismissable at a glance or it becomes nagging. */
+   The icon uses the brand accent to show the card can be opened. */
 .review-card { display: flex; align-items: stretch; padding: 0; overflow: hidden; }
 
 .review-card__body {
@@ -2912,11 +2838,11 @@ input[type='range'] {
 .review-card__icon {
   flex-shrink: 0; width: 34px; height: 34px; border-radius: 10px;
   display: inline-flex; align-items: center; justify-content: center;
-  color: var(--peri); background: rgba(124, 131, 219, 0.12);
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .review-card__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.review-card__go { color: var(--peri); font-size: 20px; padding-right: 12px; }
+.review-card__go { color: var(--accent); font-size: 20px; padding-right: 12px; }
 
 .review-card__dismiss {
   order: 2; align-self: flex-start; flex-shrink: 0;
@@ -2961,8 +2887,8 @@ input[type='range'] {
 /* "You corrected this" — shown wherever a night's times came from a person rather than the detector. */
 .sleep-corrected {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11.5px; font-weight: 600; color: var(--peri);
-  background: rgba(124, 131, 219, 0.12); padding: 2px 9px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 600; color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 2px 9px; border-radius: 999px;
 }
 
 .sleep-detail__recompute-note {

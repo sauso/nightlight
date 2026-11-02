@@ -1,11 +1,7 @@
-// Settings drive the app's identity: accent colour, status colours, font pair, tab title. The theming
-// is applied through CSSOM `setProperty` rather than a <style> block ON PURPOSE - that is what lets the
-// enforced CSP run without `unsafe-inline`. These tests pin that mechanism, not just the values, so a
-// future refactor to inline styles fails here instead of silently breaking the CSP in production.
+// Settings publish server values and the app name. Legacy appearance fields never override CSS (#943).
 import { describe, test, expect, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { useContext } from 'react';
-import { FONT_PRESETS, DEFAULT_FONT_CHOICE } from '../../src/lib/fonts.js';
 
 let SettingsProvider, SettingsContext;
 
@@ -86,42 +82,17 @@ describe('loading settings', () => {
   });
 });
 
-describe('theming (CSSOM, never inline styles - the CSP depends on it)', () => {
-  test('stamps the accent and status colours onto the document root', async () => {
-    stubFetch(() => ({
-      body: {
-        app_name: 'Casa',
-        accent_color: '#123456',
-        live_color: '#00ff00',
-        offline_color: '#ff0000',
-        font_choice: 'modern-sans',
-      },
-    }));
-    renderProvider();
-    await waitFor(() => expect(cssVar('--accent')).toBe('#123456'));
-    expect(cssVar('--live')).toBe('#00ff00');
-    expect(cssVar('--offline')).toBe('#ff0000');
-  });
-
-  test('applies the chosen font pair', async () => {
-    stubFetch(() => ({ body: { app_name: 'Casa', font_choice: 'classic-serif' } }));
-    renderProvider();
-    await waitFor(() => expect(cssVar('--font-display')).toBe(FONT_PRESETS['classic-serif'].display));
-    expect(cssVar('--font-body')).toBe(FONT_PRESETS['classic-serif'].body);
-  });
-
-  test('falls back to the default pair for an unknown font choice rather than clearing the font', async () => {
-    stubFetch(() => ({ body: { app_name: 'Casa', font_choice: 'comic-papyrus' } }));
-    renderProvider();
-    await waitFor(() =>
-      expect(cssVar('--font-display')).toBe(FONT_PRESETS[DEFAULT_FONT_CHOICE].display)
-    );
-  });
-
-  test('sets the browser tab title from app_name', async () => {
-    stubFetch(() => ({ body: { app_name: 'Casa Nightlight' } }));
+describe('fixed branding (#943)', () => {
+  test('ignores saved colours and fonts while keeping the app name', async () => {
+    stubFetch(() => ({ body: {
+      app_name: 'Casa Nightlight', accent_color: '#123456',
+      live_color: '#00ff00', offline_color: '#ff0000', font_choice: 'classic-serif',
+    } }));
     renderProvider();
     await waitFor(() => expect(document.title).toBe('Casa Nightlight'));
+    for (const token of ['--accent', '--live', '--offline', '--font-display', '--font-body']) {
+      expect(cssVar(token), token).toBe('');
+    }
   });
 });
 
@@ -164,15 +135,13 @@ describe('commit() (#449)', () => {
 });
 
 describe('when the settings request fails', () => {
-  test('still finishes loading and still themes the page with the defaults', async () => {
+  test('still finishes loading and sets the default tab title', async () => {
     stubFetch(() => ({ status: 500, body: '' }));
     renderProvider();
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
 
-    // An unthemed app is a broken-looking app, so the fallback must apply the defaults, not nothing.
     expect(screen.getByTestId('name')).toHaveTextContent('Nightlight');
-    expect(cssVar('--accent')).toBe('#f4c56a');
-    expect(cssVar('--font-display')).toBe(FONT_PRESETS[DEFAULT_FONT_CHOICE].display);
+    expect(cssVar('--accent')).toBe('');
     expect(document.title).toBe('Nightlight');
   });
 
@@ -180,7 +149,7 @@ describe('when the settings request fails', () => {
     globalThis.fetch = vi.fn(async () => { throw new Error('offline'); });
     renderProvider();
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
-    expect(cssVar('--accent')).toBe('#f4c56a');
+    expect(cssVar('--accent')).toBe('');
   });
 });
 

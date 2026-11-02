@@ -213,7 +213,7 @@ function UserSettingsForm() {
                 )}
               </div>
               {photoStatus && (
-                <div className="camera-tile__sub" style={{ color: 'var(--peri)' }}>
+                <div className="camera-tile__sub" style={{ color: 'var(--accent)' }}>
                   {photoStatus === 'saving' ? 'Saving photo…' : 'Photo saved ✓'}
                 </div>
               )}
