@@ -110,6 +110,17 @@ test('progress is versioned and cannot move a terminal state backwards', () => {
   assert.deepEqual(setup.complete(true, 'session-a'), { status: 'completed_limited' });
 });
 
+test('optional steps advance without changing readiness or old stored steps', () => {
+  for (const step of ['caregivers', 'remote']) {
+    const next = setup.advance(step, row().row_version, 'session-a');
+    assert.equal(next.activeStep, step);
+    assert.deepEqual(next.readiness.missing, ['CHILD', 'CAMERA', 'PLAYBACK']);
+  }
+  assert.throws(() => setup.advance('unknown', row().row_version, 'session-a'), (error) => error.status === 400);
+  db.prepare("UPDATE setup_state SET active_step = 'camera' WHERE id = 'app'").run();
+  assert.equal(setup.read('session-a').activeStep, 'camera');
+});
+
 test('attestation is session and camera bound, one-shot, and expires after ten minutes', () => {
   // WHY: a guessed test id, another browser or another camera must not establish readiness.
   child(); camera(); camera(OTHER);

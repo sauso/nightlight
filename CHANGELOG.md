@@ -24,6 +24,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- #944 The setup guide now walks through adding a child, connecting a camera, checking the picture, and optional caregiver and remote access steps. The Settings setup link disappears after full completion; admins can still open picture checks from About. Camera discovery is not available yet, and remote access still needs network setup.
+
 - #943 Nightlight now uses one violet brand colour, a lavender day palette, an indigo night palette, a new moon logo, and locally hosted Inter and Nunito fonts. The Live header still switches day and night.
 
 - Camera controls, Recording and Clip management now sit under one Settings entry, Camera and Recording. Nothing was removed; the pages and their addresses are unchanged.

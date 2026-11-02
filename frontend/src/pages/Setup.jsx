@@ -6,9 +6,11 @@ import { useCameras } from '../lib/CamerasContext.jsx';
 import CameraForm from '../components/CameraForm.jsx';
 import CameraTile from '../components/CameraTile.jsx';
 import SetupStepShell from '../components/SetupStepShell.jsx';
+import AppHeader from '../components/AppHeader.jsx';
 
-const STEPS = ['welcome', 'children', 'camera', 'monitor_test', 'review'];
+const STEPS = ['welcome', 'children', 'camera', 'monitor_test', 'caregivers', 'remote', 'review'];
 const terminal = (status) => ['legacy_completed', 'completed_limited', 'completed'].includes(status);
+const normalChrome = (status) => ['legacy_completed', 'completed'].includes(status);
 const publish = (state) => window.dispatchEvent(new CustomEvent('setup-state-changed', { detail: state }));
 
 export default function Setup() {
@@ -19,8 +21,10 @@ export default function Setup() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [childName, setChildName] = useState('');
+  const [birthday, setBirthday] = useState('');
   const [selectedChild, setSelectedChild] = useState('');
   const [selectedCamera, setSelectedCamera] = useState('');
+  const [manualCamera, setManualCamera] = useState(false);
   const [testId, setTestId] = useState(null);
   const [verified, setVerified] = useState(false);
   const [limited, setLimited] = useState(false);
@@ -90,7 +94,7 @@ export default function Setup() {
     event.preventDefault();
     setBusy(true); setError('');
     try {
-      const child = await api.post('/children', { name: childName.trim() });
+      const child = await api.post('/children', { name: childName.trim(), ...(birthday ? { birthday } : {}) });
       setSelectedChild(child.id);
       await refresh();
       await move('camera');
@@ -101,6 +105,10 @@ export default function Setup() {
   async function addedCamera(camera) {
     setSelectedCamera(camera.id);
     await move('monitor_test');
+  }
+
+  async function leaveFor(next, route) {
+    if (await move(next)) navigate(route);
   }
 
   async function startTest() {
@@ -147,24 +155,46 @@ export default function Setup() {
     } finally { setBusy(false); }
   }
 
-  if (!setup) return <main className="app-main">{error ? <div className="error-banner" role="alert">{error} <button className="btn" onClick={load}>Try again</button></div> : 'Loading setup…'}</main>;
+  if (!setup) return <SetupStepShell step="welcome" error={error} onRetry={load}>{!error && 'Loading setup…'}</SetupStepShell>;
   // WHY: the provider fetches children and cameras beside setup. An empty list before
   // that fetch settles is not evidence that the household has no children or cameras.
-  if (!camerasLoaded || camerasError) return <main className="app-main">
-    {camerasError ? <div className="error-banner" role="alert">Could not load children and cameras: {camerasError} <button className="btn" type="button" onClick={refresh}>Try again</button></div> : 'Loading children and cameras…'}
-  </main>;
+  if (!camerasLoaded || camerasError) return <>
+    {normalChrome(setup.status) && <AppHeader title="Setup" back={{ to: '/settings', label: 'Settings' }} />}
+    <SetupStepShell step={normalChrome(setup.status) ? 'review' : step} terminal={normalChrome(setup.status)} onExit={normalChrome(setup.status) ? null : saveAndExit}>
+      {camerasError ? <div className="error-banner" role="alert">Could not load children and cameras: {camerasError} <button className="btn" type="button" onClick={refresh}>Try again</button></div> : 'Loading children and cameras…'}
+    </SetupStepShell>
+  </>;
   const assigned = cameras.filter((camera) => camera.child_id && !camera.disabled);
   const camera = assigned.find((item) => item.id === selectedCamera);
   const reviewOnly = setup.status === 'legacy_completed' || setup.status === 'completed';
   const back = step === 'welcome' || (step === 'review' && terminal(setup.status))
     ? null : () => move(terminal(setup.status) ? 'review' : STEPS[STEPS.indexOf(step) - 1]);
   const canFinishFull = verified || setup.readiness.ready;
+  const reviewChild = kids.find((item) => item.id === selectedChild);
+  const primary = step === 'welcome' ? { label: 'Get started', onClick: () => move('children') }
+    : step === 'children' ? kids.length
+      ? { label: 'Continue', disabled: !selectedChild, onClick: () => move('camera') }
+      : { label: busy ? 'Adding…' : 'Continue', disabled: !childName.trim(), form: 'setup-child-form' }
+    : step === 'camera' && assigned.length ? { label: 'Check picture', disabled: !selectedCamera, onClick: () => move('monitor_test') }
+    : step === 'monitor_test' && verified ? { label: 'Continue', onClick: () => move(terminal(setup.status) ? 'review' : 'caregivers') }
+    : step === 'caregivers' ? { label: 'Skip for now', onClick: () => move('remote') }
+    : step === 'remote' ? { label: 'Maybe later', onClick: () => move('review') }
+    : step === 'review' && setup.status === 'completed'
+      ? { label: 'Open my monitor', onClick: () => navigate('/') }
+      : step === 'review' && canFinishFull
+      ? { label: 'Open my monitor', onClick: finish }
+      : step === 'review' && !canFinishFull && limited && !reviewOnly && setup.status !== 'completed_limited'
+        ? { label: 'Finish with limited setup', onClick: finish }
+        : null;
 
   return (
-    <SetupStepShell step={step} error={error} busy={busy} onBack={back} onExit={saveAndExit} onRetry={load}>
+    <>
+    {normalChrome(setup.status) && <AppHeader title="Setup" back={{ to: '/settings', label: 'Settings' }} />}
+    <SetupStepShell step={step} error={error} busy={busy} onBack={back} onExit={normalChrome(setup.status) ? null : saveAndExit} onRetry={load} primary={primary} terminal={normalChrome(setup.status)} subtitle={step === 'review' && canFinishFull && reviewChild ? `Nightlight is ready to monitor ${reviewChild.name}.` : undefined}>
       {step === 'welcome' && <>
-        <p>Add a child and camera, then check that this browser shows a picture. You can leave and finish later.</p>
-        <button className="btn btn-primary" type="button" disabled={busy} onClick={() => move('children')}>Get started</button>
+        <img className="setup-welcome-icon" src="/icons/icon-192.png" alt="" />
+        <ul className="setup-checklist"><li>Add your child</li><li>Connect your camera</li><li>Test your monitor</li><li>Invite caregivers (optional)</li><li>Watch from anywhere (optional)</li></ul>
+        <p>You can save your progress and finish later.</p>
       </>}
       {step === 'children' && <>
         {kids.length > 0 && <>
@@ -173,13 +203,13 @@ export default function Setup() {
             <select id="setup-child" value={selectedChild} onChange={(event) => setSelectedChild(event.target.value)}>
               {kids.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}
             </select></div>
-          <button className="btn btn-primary" type="button" disabled={busy || !selectedChild} onClick={() => move('camera')}>Continue</button>
         </>}
-        {kids.length === 0 && <form onSubmit={addChild}>
+        {kids.length === 0 && <form id="setup-child-form" onSubmit={addChild}>
           <p>Add the first child to group their camera and alerts.</p>
           <div className="field"><label htmlFor="setup-child-name">Child's name</label>
             <input id="setup-child-name" required value={childName} onChange={(event) => setChildName(event.target.value)} /></div>
-          <button className="btn btn-primary" type="submit" disabled={busy || !childName.trim()}>{busy ? 'Adding…' : 'Add child'}</button>
+          <div className="field"><label htmlFor="setup-child-birthday">Date of birth (optional)</label>
+            <input id="setup-child-birthday" type="date" value={birthday} onChange={(event) => setBirthday(event.target.value)} /></div>
         </form>}
       </>}
       {step === 'camera' && <>
@@ -189,9 +219,13 @@ export default function Setup() {
             <select id="setup-camera" value={selectedCamera} onChange={(event) => setSelectedCamera(event.target.value)}>
               {assigned.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select></div>
-          <button className="btn btn-primary" type="button" disabled={busy || !selectedCamera} onClick={() => move('monitor_test')}>Check picture</button>
         </>}
-        {assigned.length === 0 && <CameraForm embedded initialChildId={selectedChild || kids[0]?.id} onCreated={addedCamera} />}
+        <div className="setup-manual">
+          <button className="setup-manual__toggle" type="button" aria-expanded={manualCamera} onClick={() => setManualCamera((value) => !value)}>
+            <strong>Add a camera manually</strong><span>Enter an RTSP or ONVIF address</span>
+          </button>
+          {manualCamera && <CameraForm embedded initialChildId={selectedChild || kids[0]?.id} onCreated={addedCamera} />}
+        </div>
       </>}
       {step === 'monitor_test' && <>
         <p>This checks whether video frames reach this browser. It does not measure the server or guarantee the camera will stay available.</p>
@@ -203,25 +237,32 @@ export default function Setup() {
         {testId && camera && <div className="setup-player"><CameraTile key={camera.id} camera={camera} frameTestId={testId} onFrames={onFrames} /></div>}
         {testId && !verified && <p role="status">Waiting for the picture to move in this browser…</p>}
         {verified && <p role="status">Picture check passed on this browser.</p>}
-        {verified && <button className="btn btn-primary" type="button" disabled={busy} onClick={() => move('review')}>Continue</button>}
         {!verified && <>
           <p>If the camera connects but shows no picture, check its stream path and login in Cameras, then try again.</p>
-          <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => { setLimited(true); move('review'); }}>Continue with limited setup</button>
+          <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => { setLimited(true); move(terminal(setup.status) ? 'review' : 'caregivers'); }}>Continue with limited setup</button>
         </>}
+      </>}
+      {step === 'caregivers' && <>
+        <p>An admin can create caregiver accounts in Settings → Caregivers. Caregivers can view the children and live cameras in this installation.</p>
+        <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => leaveFor('remote', '/settings/users/new')}>Add a caregiver account</button>
+      </>}
+      {step === 'remote' && <>
+        <p>To watch away from home, set up access to Nightlight on your network. Settings → Remote Access shows how this device connects and lets you check low latency video.</p>
+        <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => leaveFor('review', '/settings/remote-access')}>Set up remote access</button>
       </>}
       {step === 'review' && <>
         <p>{verified ? 'The picture moved in this browser.' : 'You can return to the picture check at any time.'}</p>
+        <div className="setup-summary"><div>Child <strong>{reviewChild?.name || (setup.readiness.hasChild ? 'Added' : 'Still needed')}</strong></div>
+          <div>Camera <strong>{camera?.name || (setup.readiness.cameraAssigned ? 'Assigned' : 'Still needed')}</strong></div></div>
         {setup.status === 'completed' && <p>Setup is complete.</p>}
         {setup.status !== 'completed' && <>
           <p>Child: {setup.readiness.hasChild ? 'added' : 'still needed'}. Camera: {setup.readiness.cameraAssigned ? 'assigned' : 'still needed'}.</p>
-          {canFinishFull && <button className="btn btn-primary" type="button" disabled={busy} onClick={finish}>{busy ? 'Finishing…' : 'Finish setup'}</button>}
-          {!canFinishFull && limited && !reviewOnly && setup.status !== 'completed_limited' &&
-            <button className="btn btn-primary" type="button" disabled={busy} onClick={finish}>{busy ? 'Finishing…' : 'Finish with limited setup'}</button>}
           {!canFinishFull && !limited && !reviewOnly && setup.status !== 'completed_limited' &&
             <button className="btn btn-secondary" type="button" onClick={() => setLimited(true)}>Continue with limited setup</button>}
         </>}
         <button className="btn btn-secondary" type="button" onClick={() => move('monitor_test')}>Run picture check</button>
       </>}
     </SetupStepShell>
+    </>
   );
 }

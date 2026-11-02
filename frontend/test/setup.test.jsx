@@ -26,7 +26,7 @@ let state;
 
 function initial(status = 'not_started', activeStep = 'welcome') {
   return { status, activeStep, flowVersion: 1, rowVersion: 0,
-    steps: ['welcome', 'children', 'camera', 'monitor_test', 'review'], readiness };
+    steps: ['welcome', 'children', 'camera', 'monitor_test', 'caregivers', 'remote', 'review'], readiness };
 }
 
 function Path() { return <span data-testid="path">{useLocation().pathname}</span>; }
@@ -125,17 +125,17 @@ describe('setup handoff', () => {
 
 describe('setup steps', () => {
   function wizard({ kids = [child], cameras = [camera], camerasLoaded = true } = {}) {
-    return renderAsAdmin(<><Path /><Routes><Route path="/setup" element={<Setup />} /><Route path="/" element={<span>Live view</span>} /></Routes></>,
+    return renderAsAdmin(<><Path /><Routes><Route path="/setup" element={<Setup />} /><Route path="/" element={<span>Live view</span>} /><Route path="/settings/users/new" element={<span>New caregiver</span>} /><Route path="/settings/remote-access" element={<span>Remote access</span>} /></Routes></>,
       { route: '/setup', kids, cameras, camerasLoaded });
   }
 
   test('waits for the child and camera lists before offering to add one', async () => {
     const view = wizard({ kids: [], cameras: [], camerasLoaded: false });
     expect(await screen.findByText('Loading children and cameras…')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Add child' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
     view.rerenderWith({ camerasLoaded: true });
     await view.user.click(await screen.findByRole('button', { name: 'Get started' }));
-    expect(screen.getByRole('button', { name: 'Add child' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
   });
 
   test('refresh resume selects an assigned camera after its list arrives', async () => {
@@ -149,14 +149,24 @@ describe('setup steps', () => {
   test('admin completes the steps only after this browser reports frames', async () => {
     const view = wizard();
     await view.user.click(await screen.findByRole('button', { name: 'Get started' }));
+    expect(screen.getByRole('heading', { name: 'Add your child' })).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Step 1 of 6' })).toBeInTheDocument();
     await view.user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.getByRole('heading', { name: 'Connect your camera' })).toBeInTheDocument();
     await view.user.click(screen.getByRole('button', { name: 'Check picture' }));
+    expect(screen.getByRole('heading', { name: 'Test your monitor' })).toBeInTheDocument();
     await view.user.click(screen.getByRole('button', { name: 'Run picture check' }));
     expect(setupApi.confirm).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Open my monitor' })).not.toBeInTheDocument();
+    expect(setupApi.complete).not.toHaveBeenCalled();
     await view.user.click(screen.getByRole('button', { name: 'Present video frames' }));
     await waitFor(() => expect(setupApi.confirm).toHaveBeenCalledWith('test-1', camera.id));
     await view.user.click(await screen.findByRole('button', { name: 'Continue' }));
-    await view.user.click(screen.getByRole('button', { name: 'Finish setup' }));
+    expect(screen.getByRole('heading', { name: 'Invite caregivers' })).toBeInTheDocument();
+    await view.user.click(screen.getByRole('button', { name: 'Skip for now' }));
+    expect(screen.getByRole('heading', { name: 'Watch from anywhere' })).toBeInTheDocument();
+    await view.user.click(screen.getByRole('button', { name: 'Maybe later' }));
+    await view.user.click(screen.getByRole('button', { name: 'Open my monitor' }));
     expect(setupApi.complete).toHaveBeenCalledWith(false);
     await waitFor(() => expect(screen.getByTestId('path')).toHaveTextContent('/'));
   });
@@ -165,15 +175,51 @@ describe('setup steps', () => {
     const view = wizard({ kids: [], cameras: [] });
     await view.user.click(await screen.findByRole('button', { name: 'Get started' }));
     await view.user.type(screen.getByRole('textbox', { name: "Child's name" }), 'A child');
-    await view.user.click(screen.getByRole('button', { name: 'Add child' }));
+    await view.user.click(screen.getByRole('button', { name: 'Continue' }));
     expect(api.post).toHaveBeenCalledWith('/children', { name: 'A child' });
+    await view.user.click(screen.getByRole('button', { name: /Add a camera manually/ }));
     expect(await screen.findByRole('button', { name: 'Add camera form' })).toBeInTheDocument();
+  });
+
+  test.each([['2024-02-29', { name: 'A child', birthday: '2024-02-29' }], ['', { name: 'A child' }]])('child birthday %s is sent only when entered', async (date, expected) => {
+    const view = wizard({ kids: [], cameras: [] });
+    await view.user.click(await screen.findByRole('button', { name: 'Get started' }));
+    await view.user.type(screen.getByRole('textbox', { name: "Child's name" }), 'A child');
+    if (date) await view.user.type(screen.getByLabelText('Date of birth (optional)'), date);
+    await view.user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(api.post).toHaveBeenCalledWith('/children', expected);
+  });
+
+  test('the optional steps save progress before leaving for settings', async () => {
+    state = initial('in_progress', 'caregivers');
+    const view = wizard();
+    await view.user.click(await screen.findByRole('button', { name: 'Add a caregiver account' }));
+    expect(setupApi.progress).toHaveBeenCalledWith('remote', 0);
+    expect(screen.getByTestId('path')).toHaveTextContent('/settings/users/new');
+  });
+
+  test('remote access saves review before leaving for settings', async () => {
+    state = initial('in_progress', 'remote');
+    const view = wizard();
+    await view.user.click(await screen.findByRole('button', { name: 'Set up remote access' }));
+    expect(setupApi.progress).toHaveBeenCalledWith('review', 0);
+    expect(screen.getByTestId('path')).toHaveTextContent('/settings/remote-access');
+  });
+
+  test.each(['completed', 'legacy_completed'])('%s setup uses the app header and Settings back button', async (status) => {
+    state = initial(status, 'review');
+    wizard();
+    expect(await screen.findByRole('heading', { name: 'Setup' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back to Settings' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save and exit' })).not.toBeInTheDocument();
   });
 
   test('limited setup is explicit and can resume at the saved step', async () => {
     state = initial('in_progress', 'monitor_test');
     const view = wizard();
     await view.user.click(await screen.findByRole('button', { name: 'Continue with limited setup' }));
+    await view.user.click(screen.getByRole('button', { name: 'Skip for now' }));
+    await view.user.click(screen.getByRole('button', { name: 'Maybe later' }));
     await view.user.click(await screen.findByRole('button', { name: 'Finish with limited setup' }));
     expect(setupApi.complete).toHaveBeenCalledWith(true);
   });
@@ -185,7 +231,7 @@ describe('setup steps', () => {
     }));
     setupApi.read.mockImplementationOnce(async () => state).mockImplementation(async () => ({ ...state, readiness }));
     const view = wizard();
-    await view.user.click(await screen.findByRole('button', { name: 'Finish setup' }));
+    await view.user.click(await screen.findByRole('button', { name: 'Open my monitor' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('The picture check has expired');
     expect(screen.getByRole('button', { name: 'Run picture check' })).toBeInTheDocument();
     await view.user.click(screen.getByRole('button', { name: 'Continue with limited setup' }));
@@ -196,6 +242,7 @@ describe('setup steps', () => {
     state = initial(status, 'review');
     wizard();
     expect(await screen.findByRole('button', { name: 'Run picture check' })).toBeInTheDocument();
+    if (status === 'completed_limited') expect(screen.queryByRole('heading', { name: 'Setup' })).not.toBeInTheDocument();
     expect(setupApi.progress).not.toHaveBeenCalled();
   });
 
@@ -225,7 +272,7 @@ describe('setup steps', () => {
     expect(setupApi.complete).not.toHaveBeenCalled();
     await view.user.click(screen.getByRole('button', { name: 'Present video frames' }));
     await view.user.click(await screen.findByRole('button', { name: 'Continue' }));
-    await view.user.click(screen.getByRole('button', { name: 'Finish setup' }));
+    await view.user.click(screen.getByRole('button', { name: 'Open my monitor' }));
     expect(setupApi.complete).toHaveBeenCalledWith(false);
   });
 });
