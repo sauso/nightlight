@@ -54,6 +54,8 @@ before(async () => {
     res.json({ ok: true });
   });
   router.get('/api/cameras', record('list-cameras'));
+  router.get('/api/cameras/discover/:scanId', record('discovery-get'));
+  router.post('/api/cameras/discover', record('discovery-post'));
   router.get('/api/cameras/clips/protected', record('protected-clips'));
   router.put('/api/cameras/alerts/:id/protected', record('protect-alert'));
   router.put('/api/recordings/:id/protected', record('protect-wake'));
@@ -222,6 +224,13 @@ describe('demoGuard — DEMO_MODE=true, blocked GETs (server internals / cross-v
     const res = await call(`${server.url}/api/diagnostics`);
     assert.equal(res.status, 403);
     assert.equal(hits.diagnostics, undefined);
+  });
+
+  test('camera discovery GET and POST are blocked before LAN addresses are exposed', async () => {
+    assert.equal((await call(`${server.url}/api/cameras/discover/scan-1`)).status, 403);
+    assert.equal((await call(`${server.url}/api/cameras/discover`, { method: 'POST' })).status, 403);
+    assert.equal(hits['discovery-get'], undefined);
+    assert.equal(hits['discovery-post'], undefined);
   });
 
   test('GET /api/remote-access is blocked, handler never invoked', async () => {

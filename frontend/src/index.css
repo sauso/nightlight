@@ -2934,6 +2934,9 @@ input[type='range'] {
 .setup-checklist li { padding: 9px 0 9px 30px; position: relative; }
 .setup-checklist li::before { content: '✓'; position: absolute; left: 2px; color: var(--accent-text); font-weight: 800; }
 .setup-manual { border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.camera-discovery { padding: 14px; margin-bottom: 14px; }
+.camera-discovery__row { width: 100%; background: none; color: var(--text-primary); text-align: left; cursor: pointer; font: inherit; }
+.camera-discovery__row span:first-child { min-width: 0; overflow-wrap: anywhere; }
 .setup-manual__toggle { display: grid; gap: 3px; width: 100%; min-height: 44px; border: 0; background: none; color: var(--text-primary); text-align: left; font: inherit; cursor: pointer; }
 .setup-manual__toggle span { color: var(--text-secondary); font-size: 13px; }
 .setup-summary { display: grid; gap: 10px; }

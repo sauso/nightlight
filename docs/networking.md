@@ -48,6 +48,8 @@ Whether a phone can hear it depends on how the container is networked:
 
 These were measured on one Unraid server with a PC and a phone. Wi-Fi with client isolation, guest networks and some mesh systems may block it too. The server can't tell whether anyone can hear it, so its log says it is announcing either way. In testing, a PC took between 5 seconds and just over a minute to find it.
 
+Finding [cameras](cameras.md#finding-cameras) follows the same multicast rules in the other direction. Nightlight can browse mDNS and send ONVIF WS-Discovery probes only where that traffic reaches the cameras. Docker's default bridge does not expose LAN multicast; another VLAN needs a router that relays mDNS, while WS-Discovery usually stays on one network segment. Camera searches run only when an admin starts one (the setup guide starts one when its camera step opens).
+
 **`MDNS_ANNOUNCE`** turns it on or off. Default: on (unset or blank). `false`, `0`, `no` or `off`, in any case, turn it off, and then nothing listens on UDP port 5353 at all. Any other value leaves it on and logs a warning. It is read at start, so restart the container after changing it.
 
 **What is announced.** Anyone on your network can see:

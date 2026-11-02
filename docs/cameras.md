@@ -16,7 +16,20 @@ Nightlight works with **ONVIF / RTSP** cameras in general: video, audio and, on 
 
 ### Adding a camera
 
-On a new installation, the setup guide opens after the first admin signs in. Choose **Add your child**, then **Connect your camera** and open **Add a camera manually**. Enter the camera's address, stream path and login, and assign it to the child. Camera discovery is planned but not available yet. You can leave the guide and return through **Settings → Setup & diagnostics** while setup is open; the normal **Cameras** tab uses the same add-camera form.
+On a new installation, the setup guide opens after the first admin signs in. Choose **Add your child**, then **Connect your camera**. Search for a camera or open **Add a camera manually**. Enter its stream path and login, and assign it to the child. You can leave the guide and return through **Settings → Setup & diagnostics** while setup is open; the normal **Cameras** tab uses the same add-camera form.
+
+### Finding cameras
+
+The setup guide starts a search when you reach its camera step. From **Cameras → Add camera**, press **Find cameras on my network**. Nightlight suggests Thingino cameras advertising `_thingino._tcp` over mDNS and ONVIF cameras responding to WS-Discovery. Results can appear throughout the 30-second search. Pick a suggestion to fill its name, IP address and RTSP port, then enter the login and stream path. Search does not connect to a suggested camera, test it or save it. The existing ONVIF fetch runs only if you press its button after entering a camera address. Only an admin can start a search.
+
+| Nightlight's network connection | Can discovery find cameras? |
+| --- | --- |
+| Host networking, same network segment | Usually, if the camera advertises either service |
+| A container with its own LAN address, same segment | Usually, if multicast reaches it |
+| Docker's default bridge | No: multicast stays inside Docker |
+| Camera on another VLAN | WS-Discovery usually cannot cross. Thingino mDNS may work if the router relays mDNS |
+
+Cameras that do not advertise either service will not appear; add them manually. The advertised Thingino service types were read from firmware source and measured on one LAN with four cameras. Other firmware versions are untested. In that measurement, results varied by up to about 35 seconds; a search may miss a late camera, so search again or enter its address manually. See [networking](networking.md#finding-your-server-automatically) for the same multicast limits when finding Nightlight itself.
 
 - **Via ONVIF (easiest):** type the camera's IP and press **Fetch port & path from ONVIF**. Nightlight queries the camera and fills in the port and stream path for you, and detects whether it supports pan/tilt and two-way audio. It looks the camera up at the IP you typed; it doesn't scan your network for cameras. Most cameras answer without a login. If yours needs one, fill in the username and password before you fetch, and keep them entered when you Save.
 - **Manually:** type the IP, port, path and login yourself (see the camera's manual for its RTSP path, for example `/stream1`).

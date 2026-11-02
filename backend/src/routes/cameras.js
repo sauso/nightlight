@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { readFileSync } from 'fs';
 import { join as joinPath } from 'path';
 import { serveMediaFile } from '../lib/mediaFiles.js';
@@ -44,6 +45,7 @@ import { clearStalePrimaryPointers, primaryCameraRowFor } from '../lib/primaryCa
 import { childTracksSleep } from '../lib/sleepAnalysis.js';
 import { purgeCamera, preflightCameraPurge, purgeFailureReason } from '../lib/entityPurge.js';
 import { recordingReadiness } from '../lib/recordingReadiness.js';
+import { createScanManager } from '../lib/cameraDiscovery.js';
 
 const router = Router();
 
@@ -124,6 +126,32 @@ router.get('/:id/snapshot', requireAuthQueryOrHeader, asyncHandler(async (req, r
 }));
 
 router.use(requireAuth);
+
+// A single scan is shared server-wide; this limit also bounds requests from one admin (#945).
+const discoveryLimiter = rateLimit({ windowMs: 60_000, limit: 5, standardHeaders: true,
+  legacyHeaders: false, keyGenerator: (req) => `${ipKeyGenerator(req.ip)}|${req.user.id}`,
+  message: { error: 'Too many camera searches. Try again in a minute.' } });
+// rtsp_host is a public API field derived from the saved URL, not a database column (#945).
+export function existingCameraHostsForDiscovery() {
+  return new Set(db.prepare('SELECT rtsp_url FROM cameras').all()
+    .map((row) => parseRtspComponents(row.rtsp_url)?.host).filter(Boolean));
+}
+let discoveryScans = createScanManager({ existingHosts: existingCameraHostsForDiscovery });
+// Route tests inject a scan manager without opening multicast sockets.
+export function setCameraDiscoveryScansForTest(scans) { discoveryScans = scans; }
+router.post('/discover', requireAdmin, discoveryLimiter, (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  res.json(discoveryScans.start());
+});
+router.get('/discover/:scanId', requireAdmin, (req, res) => {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.params.scanId)) {
+    return res.status(404).json({ error: 'Camera search not found.' });
+  }
+  const scan = discoveryScans.get(req.params.scanId);
+  if (!scan) return res.status(404).json({ error: 'Camera search not found.' });
+  res.set('Cache-Control', 'private, no-store');
+  res.json({ done: scan.done, candidates: scan.candidates, sourceErrors: scan.sourceErrors, endsAt: scan.endsAt });
+});
 
 function isValidRtsp(url) {
   return typeof url === 'string' && /^rtsps?:\/\/.+/i.test(url.trim());

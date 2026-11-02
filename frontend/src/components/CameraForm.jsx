@@ -15,6 +15,7 @@ import { useDetectionSave, retry } from '../lib/detectionSaves.js';
 import { loadState } from '../lib/loadState.js';
 import LoadFailed from '../components/LoadFailed.jsx';
 import NotFound from '../pages/NotFound.jsx';
+import CameraDiscovery from './CameraDiscovery.jsx';
 import { TITLES as DETECTION_TITLES } from '../pages/DetectionSettings.jsx';
 
 const minToHHMM = (m) => `${String(Math.floor((m || 0) / 60)).padStart(2, '0')}:${String((m || 0) % 60).padStart(2, '0')}`;
@@ -36,7 +37,7 @@ const DRAFT_FIELDS = [
 // camera; /cameras/:id edits one. Only connection/identity fields live here — motion, sound and
 // schedule are their own screens (see DetectionSettings.jsx), reachable from the Detection rows
 // below on an existing camera. Admin-only (gated by the route in App.jsx).
-export default function CameraForm({ onCreated, initialChildId = '', embedded = false }) {
+export default function CameraForm({ onCreated, initialChildId = '', embedded = false, prefill }) {
   const { id } = useParams();
   const isNew = !id || id === 'new';
   const navigate = useNavigate();
@@ -47,6 +48,15 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
   const draftKey = useDraftKey(isNew ? 'camera:new' : `camera:${id}`);
   const [restoredDraft] = useState(() => (isNew ? loadDraft(draftKey, DRAFT_FIELDS) : null));
   const [form, setForm] = useState(() => ({ ...EMPTY_FORM, ...restoredDraft, ...(initialChildId ? { child_id: initialChildId } : {}) }));
+  const [selectedPrefill, setSelectedPrefill] = useState(null);
+  const appliedPrefill = useRef(null);
+  const picked = prefill || selectedPrefill;
+  useEffect(() => {
+    if (!isNew || !picked || appliedPrefill.current === picked) return;
+    appliedPrefill.current = picked;
+    setForm((current) => ({ ...current, name: picked.name, rtsp_host: picked.host,
+      rtsp_port: String(picked.port || 554) }));
+  }, [picked, isNew]);
   // The form as last loaded or saved: what "unsaved" is measured against. Typing never touches it.
   // WHY: the wizard's assigned child is already saved as the initial form value,
   // so opening it must not create an unsaved draft or let Discard unassign it.
@@ -283,6 +293,9 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
     <>
       {!embedded && <AppHeader title={isNew ? 'Add camera' : (cam?.name || 'Camera')} back={back} />}
       <ContentTag className="app-main">
+        {isNew && !embedded && <CameraDiscovery onPick={(candidate) => setSelectedPrefill({
+          host: candidate.ip, port: candidate.rtspPort, name: candidate.name,
+        })} />}
         {!isNew && detSave.state === 'failed' && (
           // A sibling of <form> below, never a descendant of it — see the comment on `detSave` above.
           <div className="error-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>

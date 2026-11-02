@@ -88,7 +88,7 @@ export const SLOW_REQUEST_TIMEOUT_MS = 90000;
 // streams (the ESPHome CSV export). It is an option on THIS function, not a second fetch helper, so the Bearer
 // header, the timeout, the late-answer guard and the 401 sign-out are the one copy of that code. An error answer
 // is still read as JSON, so a refusal ({ "error": "..." }) reads exactly as it does on every other call.
-async function request(method, url, body, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, as } = {}) {
+async function request(method, url, body, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, as, signal } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -97,6 +97,9 @@ async function request(method, url, body, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_
   // connection for the browser's per-origin pool) and rejects a race - the race is what guarantees
   // the caller is released even if the fetch implementation ignores the signal.
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
   let timer;
   const timedOut = new Promise((_, reject) => {
     timer = setTimeout(() => {
@@ -116,6 +119,7 @@ async function request(method, url, body, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_
     return await Promise.race([timedOut, exchange(method, url, body, headers, controller.signal, as)]);
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
   }
 }
 

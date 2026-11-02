@@ -16,8 +16,10 @@ vi.mock('../src/lib/api.js', async (importOriginal) => {
 });
 vi.mock('../src/components/CameraTile.jsx', () => ({ default: ({ frameTestId, onFrames }) =>
   <button onClick={() => onFrames(frameTestId)}>Present video frames</button> }));
-vi.mock('../src/components/CameraForm.jsx', () => ({ default: ({ onCreated }) =>
-  <button onClick={() => onCreated({ id: 'camera-1' })}>Add camera form</button> }));
+vi.mock('../src/components/CameraForm.jsx', () => ({ default: ({ onCreated, prefill }) =>
+  <button onClick={() => onCreated({ id: 'camera-1' })}>Add camera form {prefill?.host || ''}</button> }));
+vi.mock('../src/components/CameraDiscovery.jsx', () => ({ default: ({ onPick }) =>
+  <button onClick={() => onPick({ ip: '192.168.1.2', name: 'cam-a', rtspPort: 8554 })}>Pick cam-a</button> }));
 
 const child = { id: 'child-1', name: 'A child' };
 const camera = { id: 'camera-1', name: 'Camera', child_id: child.id, disabled: false };
@@ -179,6 +181,13 @@ describe('setup steps', () => {
     expect(api.post).toHaveBeenCalledWith('/children', { name: 'A child' });
     await view.user.click(screen.getByRole('button', { name: /Add a camera manually/ }));
     expect(await screen.findByRole('button', { name: 'Add camera form' })).toBeInTheDocument();
+  });
+
+  test('picking a suggestion opens the shared form with its address', async () => {
+    state = initial('in_progress', 'camera');
+    const view = wizard();
+    await view.user.click(await screen.findByRole('button', { name: 'Pick cam-a' }));
+    expect(screen.getByRole('button', { name: 'Add camera form 192.168.1.2' })).toBeInTheDocument();
   });
 
   test.each([['2024-02-29', { name: 'A child', birthday: '2024-02-29' }], ['', { name: 'A child' }]])('child birthday %s is sent only when entered', async (date, expected) => {
