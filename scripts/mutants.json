@@ -13171,8 +13171,8 @@
   {
     "label": "#563 app gate: a NEW unguarded app-level route in index.js",
     "file": "backend/src/index.js",
-    "find": "app.get('/api/health', (req, res) => res.json({ ok: true }));",
-    "replace": "app.get('/api/health', (req, res) => res.json({ ok: true }));\napp.get('/api/debug/logs', (req, res) => res.json(logger.getRecent()));",
+    "find": "app.get('/api/health', healthHandler);",
+    "replace": "app.get('/api/health', healthHandler);\napp.get('/api/debug/logs', (req, res) => res.json(logger.getRecent()));",
     "expect": "killed",
     "tests": ["route-permissions.test.js"]
   },
@@ -24929,5 +24929,103 @@
     "expect": "killed",
     "tests": ["protected-clips.test.js"],
     "namePattern": "bulk delete ignores malformed ids"
+  },
+  {
+    "label": "#937 server id backfill runs on every boot (IS NULL guard removed)",
+    "file": "backend/src/db.js",
+    "find": "WHERE id = 'app' AND server_id IS NULL",
+    "replace": "WHERE id = 'app'",
+    "expect": "killed",
+    "tests": ["server-identity.test.js"],
+    "namePattern": "stable across restarts",
+    "note": "Every restart would give the server a new identity, so no phone would recognise it."
+  },
+  {
+    "label": "#937 /api/health back to { ok: true } only",
+    "file": "backend/src/index.js",
+    "find": "app.get('/api/health', healthHandler);",
+    "replace": "app.get('/api/health', (req, res) => res.json({ ok: true }));",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js", "mdns-announce.test.js"]
+  },
+  {
+    "label": "#937 health fallback removed (a failed identity read becomes a failed liveness probe)",
+    "file": "backend/src/lib/serverIdentity.js",
+    "find": "return { ok: true };",
+    "replace": "throw err;",
+    "expect": "killed",
+    "tests": ["health-route.test.js", "server-identity.test.js"]
+  },
+  {
+    "label": "#937 TXT record gains a field",
+    "file": "backend/src/lib/mdnsAnnounce.js",
+    "find": "txt: { v: '1', id },",
+    "replace": "txt: { v: '1', id, ver: '1' },",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "publishes exactly this"
+  },
+  {
+    "label": "#937 host left to the library default (the machine's host name is broadcast)",
+    "file": "backend/src/lib/mdnsAnnounce.js",
+    "find": "host: `nightlight-${short}.local`,",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "publishes exactly this"
+  },
+  {
+    "label": "#937 MDNS_ANNOUNCE off ignored",
+    "file": "backend/src/lib/mdnsAnnounce.js",
+    "find": "if (!enabled) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "MDNS_ANNOUNCE off"
+  },
+  {
+    "label": "#937 no listener for 'error' on the underlying mDNS emitter (a failed bind crashes the process)",
+    "file": "backend/src/lib/mdnsAnnounce.js",
+    "find": "mdns.on('error', (err) => onFatal(s, err));",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "underlying mDNS socket"
+  },
+  {
+    "label": "#937 library error callback not passed (its default is throw)",
+    "file": "backend/src/lib/mdnsAnnounce.js",
+    "find": "s.bonjour = createBonjour({}, (err) => onNonFatal(s, err));",
+    "replace": "s.bonjour = createBonjour({});",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "error callback"
+  },
+  {
+    "label": "#937 no-up watchdog never armed (a silent name collision goes unreported)",
+    "file": "backend/src/lib/mdnsAnnounce.js",
+    "find": "armWatchdog(s);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "no `up` within 10 s"
+  },
+  {
+    "label": "#937 stop has no cap (a goodbye that never completes holds shutdown for ever)",
+    "file": "backend/src/lib/mdnsAnnounce.js",
+    "find": "cap = setTimeout(finish, STOP_CAP_MS);",
+    "replace": "cap = null;",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "never completes"
+  },
+  {
+    "label": "#937 shutdown no longer awaits the mDNS goodbye before process.exit",
+    "file": "backend/src/index.js",
+    "find": "await mdnsStopped;",
+    "replace": "void mdnsStopped;",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "awaits it just before process.exit"
   }
 ]

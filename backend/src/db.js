@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { dataDirFrom, ensurePrivateDir, present, privateDirOf, resolveDbPath } from './lib/dataPaths.js';
 
 const DATA_DIR = dataDirFrom();
@@ -1174,6 +1175,24 @@ db.prepare(
 // the refreshed UI uses. Migrate installs still on the exact old default to the new one; a value
 // that isn't the old default means the user picked their own colour, so leave it untouched.
 db.prepare("UPDATE settings SET accent_color = '#f4c56a' WHERE accent_color = '#F5D9A8'").run();
+
+// #937: this server's identity, a random UUID made once and then kept. /api/health returns it and the mDNS
+// announcement carries it (lib/serverIdentity.js, lib/mdnsAnnounce.js), so a phone can tell "the server I saved"
+// from "another Nightlight on this network" and can recognise its server at a new address.
+// WHY A COLUMN IN THE DATABASE, not a file in the data directory: the documented backup is the database file alone,
+// restored into what may be a brand-new data directory. Identity that lives in the row survives that restore, so
+// phones still recognise the server; a file next to it would give a restored server a new identity and every phone
+// would treat it as a stranger. The cost goes the other way: a COPY of the database (production copied to a test
+// server) shares the id until a "Reset server identity" action exists (planned, not built: nothing trusts the id
+// yet), and of two servers with one id on one network only one is announced (docs/networking.md states it).
+// Here, after the settings-row seed, so the row the UPDATE targets always exists; inside the schema transaction like
+// every group above (#258), so the ALTER and the first id land together. `IS NULL` is what makes it run once: every
+// later boot finds the id already set and writes nothing, so the id is stable across restarts. A database from an
+// older build gets the column and a fresh id at its first boot on this one (server-identity.test.js).
+if (!settingsColumns.includes('server_id')) {
+  db.exec('ALTER TABLE settings ADD COLUMN server_id TEXT');
+}
+db.prepare("UPDATE settings SET server_id = ? WHERE id = 'app' AND server_id IS NULL").run(crypto.randomUUID());
 
 // ── End of the schema transaction opened after the pragmas at the top. ────────────────────────────
 // Reaching here means every CREATE, every migration group and the settings-row seed applied. Anything

@@ -254,7 +254,7 @@ const APP_REGISTRATIONS = [
   'use /api/timelapses timelapsesRoutes',
   'use /api/recordings recordingsRoutes',
   'use /manifest.webmanifest manifestRoutes',
-  'get /api/health <handler>', //                                     PUBLIC: a liveness probe
+  'get /api/health healthHandler', //                                 PUBLIC: a liveness probe (+ server id and name, #937)
   'post /api/csp-report express.text() <handler>', //                 PUBLIC: browsers send CSP reports without credentials
   'use express.static()',
   'get * <handler>', //                                               the SPA shell; /api/* falls through to a 404

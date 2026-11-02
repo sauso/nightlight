@@ -180,7 +180,7 @@ start whatever you do, so the database and secrets stay owner-only.
 ### Health check
 
 The image defines a Docker `HEALTHCHECK`: every 30 seconds it requests `GET /api/health` (no login
-needed; it answers `{"ok":true}`) on the port the app listens on (`PORT`, default 4000), with a
+needed; the check looks only at the status, and the reply starts `{"ok":true`) on the port the app listens on (`PORT`, default 4000), with a
 5 second timeout. After 3 failures in a row the container is marked **unhealthy**; failures during
 the first **120 seconds** after start do not count, because MediaMTX and the detectors start slowly.
 `docker ps`, `docker inspect` and Unraid's Docker tab show it.
@@ -363,7 +363,9 @@ at `private/backup-*.db` (and run it as root).
 After upgrading:
 
 1. Check `docker logs nightlight` for a clean startup with no error lines.
-2. `curl http://<host>:4000/api/health` should return `{"ok":true}`.
+2. `curl http://<host>:4000/api/health` should return `{"ok":true,"app":"nightlight","id":"…","name":"…"}`:
+   the server's random id and your app name ([why](networking.md#finding-your-server-automatically)). Older
+   versions return `{"ok":true}` alone, which is also healthy.
 3. Open the app and confirm at least one camera is streaming.
 
 ## 6. Rolling back
