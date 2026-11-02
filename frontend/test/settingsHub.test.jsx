@@ -7,10 +7,11 @@
 //
 // The MQTT status is requested on Integrations, not on this menu. A caregiver must never request it.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, act } from '@testing-library/react';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import Settings from '../src/pages/Settings.jsx';
 import { api } from '../src/lib/api.js';
+import { setupApi } from '../src/lib/setupApi.js';
 
 // Every label on the admin card. Listed in full deliberately: a menu that silently loses an entry is
 // exactly the kind of regression nothing else would catch.
@@ -23,6 +24,7 @@ function mockApi({ version = '0.29.0' } = {}) {
     if (String(path).includes('/about')) return Promise.resolve({ version });
     return Promise.resolve(null);
   });
+  vi.spyOn(setupApi, 'read').mockResolvedValue({ status: 'in_progress' });
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -32,6 +34,7 @@ describe('what the menu offers each role', () => {
 
   test('an admin is offered every admin screen', async () => {
     renderAsAdmin(<Settings />);
+    await screen.findByText('Setup & diagnostics');
     for (const label of ADMIN_LABELS) expect(screen.getByText(label)).toBeTruthy();
     expect(screen.getByText('Camera Controls, Recording Settings and Clip Management')).toBeInTheDocument();
     for (const oldLabel of ['Camera controls', 'Recording', 'Clip management']) {
@@ -47,6 +50,49 @@ describe('what the menu offers each role', () => {
     for (const label of ADMIN_LABELS) {
       expect(screen.queryByText(label)).toBeNull();
     }
+    expect(setupApi.read).not.toHaveBeenCalled();
+  });
+
+  test.each(['not_started', 'in_progress', 'completed_limited'])('setup row shows while status is %s', async (status) => {
+    setupApi.read.mockResolvedValue({ status });
+    renderAsAdmin(<Settings />);
+    expect(await screen.findByText('Setup & diagnostics')).toBeInTheDocument();
+  });
+
+  test.each(['completed', 'legacy_completed'])('setup row stays hidden when status is %s', async (status) => {
+    setupApi.read.mockResolvedValue({ status });
+    renderAsAdmin(<Settings />);
+    await waitFor(() => expect(setupApi.read).toHaveBeenCalled());
+    expect(screen.queryByText('Setup & diagnostics')).not.toBeInTheDocument();
+  });
+
+  test('setup row stays hidden until status resolves', async () => {
+    let resolveRead;
+    setupApi.read.mockImplementation(() => new Promise((resolve) => { resolveRead = resolve; }));
+    renderAsAdmin(<Settings />);
+    expect(screen.queryByText('Setup & diagnostics')).not.toBeInTheDocument();
+    resolveRead({ status: 'in_progress' });
+    expect(await screen.findByText('Setup & diagnostics')).toBeInTheDocument();
+  });
+
+  test('setup status refreshes after a setup change', async () => {
+    setupApi.read.mockResolvedValueOnce({ status: 'in_progress' }).mockResolvedValue({ status: 'completed' });
+    renderAsAdmin(<Settings />);
+    expect(await screen.findByText('Setup & diagnostics')).toBeInTheDocument();
+    await act(async () => { window.dispatchEvent(new Event('setup-state-changed')); });
+    await waitFor(() => expect(screen.queryByText('Setup & diagnostics')).not.toBeInTheDocument());
+    expect(setupApi.read).toHaveBeenCalledTimes(2);
+  });
+
+  test('a late initial status cannot reopen a completed setup row', async () => {
+    let resolveInitial;
+    setupApi.read.mockImplementationOnce(() => new Promise((resolve) => { resolveInitial = resolve; }))
+      .mockResolvedValue({ status: 'completed' });
+    renderAsAdmin(<Settings />);
+    await act(async () => { window.dispatchEvent(new Event('setup-state-changed')); });
+    await waitFor(() => expect(setupApi.read).toHaveBeenCalledTimes(2));
+    await act(async () => { resolveInitial({ status: 'in_progress' }); });
+    expect(screen.queryByText('Setup & diagnostics')).not.toBeInTheDocument();
   });
 
   test('both roles still get their account and the About page', async () => {

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import appDb from '../db.js';
 
-export const STEPS = Object.freeze(['welcome', 'children', 'camera', 'monitor_test', 'review']);
+export const STEPS = Object.freeze(['welcome', 'children', 'camera', 'monitor_test', 'caregivers', 'remote', 'review']);
 const TTL_MS = 10 * 60_000;
 const CAP = 16;
 const uuid = (value) => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);

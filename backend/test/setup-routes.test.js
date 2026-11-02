@@ -46,7 +46,7 @@ test('only an admin reaches each setup endpoint, and GET has the agreed shape', 
   const got = await request();
   assert.equal(got.status, 200);
   assert.deepEqual(Object.keys(got.body).sort(), ['status', 'activeStep', 'flowVersion', 'rowVersion', 'steps', 'readiness'].sort());
-  assert.deepEqual(got.body.steps, ['welcome', 'children', 'camera', 'monitor_test', 'review']);
+  assert.deepEqual(got.body.steps, ['welcome', 'children', 'camera', 'monitor_test', 'caregivers', 'remote', 'review']);
   assert.deepEqual(got.body.readiness.missing, ['CHILD', 'CAMERA', 'PLAYBACK']);
   const raw = await fetch(`${server.url}/api/setup`, { headers: { authorization: `Bearer ${admin}` } });
   assert.match(raw.headers.get('cache-control'), /private.*no-store/);
@@ -64,6 +64,19 @@ test('progress rejects stale versions and malformed bodies; completion needs pro
   assert.deepEqual(refused.body, { error: 'Complete the missing setup steps first.', code: 'NOT_READY', missing: ['CHILD', 'CAMERA', 'PLAYBACK'] });
   assert.equal((await request('/complete', { method: 'POST' })).body.code, 'NOT_READY');
   assert.deepEqual((await request('/complete', { method: 'POST', body: { limited: true } })).body, { status: 'completed_limited' });
+});
+
+test('optional progress steps are accepted and unknown steps are rejected', async () => {
+  const caregivers = await request('/progress', { method: 'PATCH', body: { activeStep: 'caregivers', expectedRowVersion: 0 } });
+  assert.equal(caregivers.status, 200);
+  const remote = await request('/progress', { method: 'PATCH', body: { activeStep: 'remote', expectedRowVersion: 1 } });
+  assert.equal(remote.body.activeStep, 'remote');
+  assert.equal((await request('/progress', { method: 'PATCH', body: { activeStep: 'unknown', expectedRowVersion: 2 } })).status, 400);
+});
+
+test('a stored old step still reads after the flow grows', async () => {
+  db.prepare("UPDATE setup_state SET active_step = 'camera' WHERE id = 'app'").run();
+  assert.equal((await request()).body.activeStep, 'camera');
 });
 
 test('legacy install is reported without a redirect flag or progress mutation', async () => {

@@ -376,7 +376,8 @@ describe('About', () => {
   test('every outbound link opens safely, for either role', () => {
     vi.spyOn(api, 'get').mockResolvedValue({ version: '0.29.0' });
     const { unmount } = renderAsAdmin(<About />);
-    const links = screen.getAllByRole('link');
+    // Outbound = leaves the app. The admin-only 'Setup status' link (#944) is an in-app route and stays in the SPA.
+    const links = screen.getAllByRole('link').filter((a) => /^https?:/.test(a.getAttribute('href')));
     expect(links.length).toBeGreaterThanOrEqual(5); // 4 links + donate
     for (const a of links) {
       expect(a).toHaveAttribute('target', '_blank');

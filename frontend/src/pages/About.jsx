@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ExternalLink, Heart } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -81,6 +82,10 @@ export default function About() {
             )}
           </div>
         </div>
+
+        {user?.role === 'admin' && <div className="card">
+          <Link className="list-row about-link" to="/setup">Setup status and picture check</Link>
+        </div>}
 
         <div className="card">
           <div className="card-title">Links</div>

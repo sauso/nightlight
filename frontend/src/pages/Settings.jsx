@@ -9,6 +9,7 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import { isNativeApp, changeServer } from '../lib/nativeBridge.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
+import useSetupStatus from '../lib/useSetupStatus.js';
 
 // Settings is a hub. Account sits at the top in its own card (like the mockup); system config
 // (General / Camera and Recording / Caregivers / Integrations / Remote Access / Logs) is admin-only; About + Change server share the
@@ -65,6 +66,7 @@ export default function Settings() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const setupStatus = useSetupStatus(isAdmin);
   const [version, setVersion] = useState(null);
 
   useEffect(() => {
@@ -98,7 +100,7 @@ export default function Settings() {
 
         {isAdmin && (
           <div className="card">
-            {ADMIN_ITEMS.map((it) => (
+            {ADMIN_ITEMS.filter((it) => it.key !== 'setup' || ['not_started', 'in_progress', 'completed_limited'].includes(setupStatus)).map((it) => (
               <Row
                 key={it.key}
                 {...it}
