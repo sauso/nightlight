@@ -84,6 +84,15 @@ jobs:
           grep -q '^# skipped 0$' "$RUNNER_TEMP/busybox-media.tap" \
             || { cat "$RUNNER_TEMP/busybox-media.tap"; echo "::error::the media isolation run (as root) skipped tests"; exit 1; }
           tail -9 "$RUNNER_TEMP/busybox-media.tap"
+          docker run --rm --user root -v "$PWD/backend:/w:ro" -w /w node:24-alpine \
+            sh -c 'apk add --no-cache setpriv >/dev/null && node --test --test-reporter=tap test/app-exec-real.test.js' \
+            > "$RUNNER_TEMP/busybox-app.tap" \
+            || { cat "$RUNNER_TEMP/busybox-app.tap"; exit 1; }
+          grep -q '^# skipped 0$' "$RUNNER_TEMP/busybox-app.tap" \
+            || { cat "$RUNNER_TEMP/busybox-app.tap"; echo "::error::the app wrapper run (as root) skipped tests"; exit 1; }
+          tail -9 "$RUNNER_TEMP/busybox-app.tap"
+          docker run --rm --user root -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+            sh -c 'apk add --no-cache setpriv >/dev/null && sh scripts/app-exec.mutants.sh'
           bash scripts/entrypoint-umask.mutants.sh
 
   frontend:

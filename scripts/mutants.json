@@ -1,5 +1,167 @@
 [
   {
+    "label": "#965 flag cleared on child exit before final confirmed stop",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "      lastExitCode = code;",
+    "replace": "      lastExitCode = code; setLoopbackExposed(false);",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "exposure stays set through a crash and pending relaunch gap"
+  },
+  {
+    "label": "#965 generation check ignored",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "const current = (g) => generation === g;",
+    "replace": "const current = () => true;",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "late old-generation exit"
+  },
+  {
+    "label": "#965 five-second exposure hold removed",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "}, session?.exposureHoldMs ?? EXPOSURE_HOLD_MS);",
+    "replace": "}, 0);",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "fixed argv, allowlisted env"
+  },
+  {
+    "label": "#965 failed SIGKILL clears exposure",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "if (!sent && proc === child) unavailable(g, 'sigkill_failed');",
+    "replace": "if (!sent && proc === child) { unavailable(g, 'sigkill_failed'); setLoopbackExposed(false); }",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "failed SIGKILL keeps exposure"
+  },
+  {
+    "label": "#965 runtime directory name fixed",
+    "file": "backend/src/lib/tailscaleState.js",
+    "find": "runtimeDir = fsImpl.mkdtempSync(path.join(tmpDir, 'nightlight-tailscale-'));",
+    "replace": "runtimeDir = path.join(tmpDir, 'nightlight-tailscale'); fsImpl.mkdirSync(runtimeDir, { recursive: true });",
+    "expect": "killed",
+    "tests": ["tailscale-state.test.js"],
+    "namePattern": "runtime directories use unpredictable distinct names"
+  },
+  {
+    "label": "#965 state directory mode widened",
+    "file": "backend/src/lib/tailscaleState.js",
+    "find": "const DIR_MODE = 0o700;",
+    "replace": "const DIR_MODE = 0o755;",
+    "expect": "killed",
+    "tests": ["tailscale-state.test.js"],
+    "namePattern": "state and runtime are private"
+  },
+  {
+    "label": "#965 root uid refusal removed",
+    "file": "backend/src/lib/tailscaleState.js",
+    "find": "if (!Number.isSafeInteger(uid) || uid <= 0) refuse('app_is_root');\n    if (!dataDir)",
+    "replace": "if (!dataDir)",
+    "expect": "killed",
+    "tests": ["tailscale-state.test.js"],
+    "namePattern": "state refuses root and an owner mismatch"
+  },
+  {
+    "label": "#965 daemon line reaches diagnostics ring",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "try { (s.consoleSink ?? console.log)(`[tailscale] ${redactLine(line)}`); }",
+    "replace": "try { (s.consoleSink ?? console.log)(`[tailscale] ${redactLine(line)}`); logger.raw('tailscale', line); }",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "daemon output is console-only"
+  },
+  {
+    "label": "#965 daemon console redaction removed",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "`[tailscale] ${redactLine(line)}`",
+    "replace": "`[tailscale] ${line}`",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "daemon output is console-only"
+  },
+  {
+    "label": "#965 support-log upload disable flag dropped",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "'--tun=userspace-networking', '--no-logs-no-support',",
+    "replace": "'--tun=userspace-networking',",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "fixed argv, allowlisted env"
+  },
+  {
+    "label": "#965 userspace networking flag dropped",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "'--tun=userspace-networking', '--no-logs-no-support',",
+    "replace": "'--no-logs-no-support',",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "fixed argv, allowlisted env"
+  },
+  {
+    "label": "#965 media child spawn used for daemon",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "const child = (s.spawnFn ?? spawnAsApp)(s.binary ?? TAILSCALED_BINARY, argv,",
+    "replace": "const child = (s.spawnFn ?? spawnChild)(s.binary ?? TAILSCALED_BINARY, argv,",
+    "expect": "killed",
+    "tests": ["child-env.test.js"],
+    "namePattern": "spawnAsApp is called exactly once"
+  },
+  {
+    "label": "#965 spawnAsApp ignores isolation",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "  if (mediaIsolationOn()) {\n    return spawn(APP_EXEC_PATH,",
+    "replace": "  if (false) {\n    return spawn(APP_EXEC_PATH,",
+    "expect": "killed",
+    "tests": ["child-env.test.js"],
+    "namePattern": "spawnAsApp isolation on wraps"
+  },
+  {
+    "label": "#965 production daemon spawn drops cwd",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "{ cwd: prepared.stateDir, stdio: ['ignore', 'pipe', 'pipe'] });",
+    "replace": "{ stdio: ['ignore', 'pipe', 'pipe'] });",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "fixed argv, allowlisted env"
+  },
+  {
+    "label": "#965 exposure hold default removed",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "export const EXPOSURE_HOLD_MS = 5000;",
+    "replace": "export const EXPOSURE_HOLD_MS = 0;",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "production timing bounds"
+  },
+  {
+    "label": "#965 daemon output budget not reset on start",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "  outputWindowAt = 0; outputLines = 0;",
+    "replace": "  // output budget is accidentally shared between starts",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "new start resets the daemon output budget"
+  },
+  {
+    "label": "#965 redaction runs before input slice",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "return String(line).slice(0, 1024)",
+    "replace": "return String(line)",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "64 KiB hostile daemon line"
+  },
+  {
+    "label": "#965 state failure reason carries path",
+    "file": "backend/src/lib/tailscaleState.js",
+    "find": "return { ok: true, stateDir };\n  } catch (err) {\n    return { ok: false, reason: failureCode(err) };",
+    "replace": "return { ok: true, stateDir };\n  } catch (err) {\n    return { ok: false, reason: err.message };",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "status reasons are fixed codes"
+  },
+  {
     "label": "#963 exposed loopback setup refusal removed",
     "file": "backend/src/routes/auth.js",
     "find": "  if (!setupBlockedByExposedLoopback(isLoopbackExposed(), req.ip)) return false;",
@@ -23070,8 +23232,8 @@
   {
     "label": "#553 phase 1 spawnChild: isolation on is ignored (the program is spawned unwrapped)",
     "file": "backend/src/lib/childEnv.js",
-    "find": "  if (mediaIsolationOn()) {",
-    "replace": "  if (false) {",
+    "find": "  if (mediaIsolationOn()) {\n    return spawn(MEDIA_EXEC_PATH,",
+    "replace": "  if (false) {\n    return spawn(MEDIA_EXEC_PATH,",
     "expect": "killed",
     "tests": ["media-exec.test.js"],
     "namePattern": "on: the wrapper is spawned"

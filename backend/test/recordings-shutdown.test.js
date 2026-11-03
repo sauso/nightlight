@@ -230,7 +230,10 @@ describe('stopAllRecordings', () => {
     // Mirrors shutdown() exactly: motion and sound run while the recording is still saving (ONVIF is
     // not process-bound and adds nothing), then the transcoder stop runs after.
     const detectors = forceKill('motionDetector.js') + forceKill('soundDetector.js');
-    const worstCase = Math.max(SHUTDOWN_BUDGET_MS, detectors) + forceKill('transcoder.js');
+    const tailscaleSrc = fs.readFileSync(new URL('../src/lib/tailscaleProcess.js', import.meta.url), 'utf8');
+    const stopCap = /export const TAILSCALE_STOP_CAP_MS = (\d+);/.exec(tailscaleSrc);
+    assert.ok(stopCap, 'tailscale stop cap must remain measurable from the supervisor');
+    const worstCase = Math.max(SHUTDOWN_BUDGET_MS, detectors, Number(stopCap[1])) + forceKill('transcoder.js');
     // #867: this used to be the literal `<= 9000`, which was only ever a stand-in for "fits inside the declared
     // grace" (and forced the recording budget down to 6s, too short for a cut on a NAS). The grace is read from
     // docker-compose.yml, not typed, so the bound cannot drift from the config. The 5s margin is for what runs
@@ -257,6 +260,15 @@ describe('stopAllRecordings', () => {
     assert.ok(started !== -1, 'the recording stop is no longer started before the detector stops');
     assert.ok(awaited > started, 'the recording stop is never awaited — #256 is reintroduced');
     assert.ok(awaited < clipCapture, 'the ring is torn down before the recording finishes cutting from it');
+    const shutdown = indexSrc.slice(indexSrc.indexOf('async function shutdown()'))
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const startStop = shutdown.search(/const\s+tailscaleStopped\s*=\s*stopTailscale\s*\(\s*\)\s*;/);
+    const firstAwait = shutdown.search(/\bawait\b/);
+    const awaitStop = shutdown.search(/await\s+tailscaleStopped\s*;/);
+    const exit = shutdown.search(/process\.exit\s*\(\s*0\s*\)/);
+    assert.ok(startStop >= 0 && startStop < firstAwait, 'tailscale stop must start before first await');
+    assert.ok(awaitStop >= 0 && awaitStop < exit, 'tailscale stop must be awaited before exit');
+    assert.ok(awaitStop < shutdown.search(/await\s+mdnsStopped\s*;/), 'mDNS goodbye remains the final await');
 
     // ★ AND THE DETECTOR STOPS MUST SIT BETWEEN THOSE TWO — which is the whole of the overlap, and
     // was NOT asserted until adversarial review of #279 demonstrated the gap. Moving `await

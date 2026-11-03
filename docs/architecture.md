@@ -52,12 +52,18 @@ child. This narrows what a child *inherits*; it does not stop a child reading th
 | `MTX_WEBRTCLOCALUDPADDRESS` | no | yes | the operator's own value when they set one: it wins, and `WEBRTC_UDP_PORT` is then ignored with a warning; otherwise `:<port>` from a valid `WEBRTC_UDP_PORT`; otherwise unset, so MediaMTX keeps `:8189` from `mediamtx.yml` |
 | `HOME`, `LIBVA_*`, `NVIDIA_*`, `HTTP(S)_PROXY`, `LD_LIBRARY_PATH`, `RTSP_*` | no | no | nothing in the app documents or sets them (ffmpeg runs with software decoding; cameras are reached directly on the LAN; `RTSP_*` is MediaMTX's legacy override prefix, which it still reads: use the `MTX_*` spelling) |
 
+| Process | User and privileges | Environment |
+|---|---|---|
+| `tailscaled` | app uid, capabilities and extra groups dropped | same `PATH`, `TZ`, `LANG`, `LC_ALL` allowlist; no `MTX_*`, `PORT` or `HOME` |
+
 A name that is unset in the backend stays unset in the child. A caller-supplied `env` option is ignored.
+
+`tailscaled` is network-facing. Its app uid lets it read the database and `.jwt_secret`, so its state in `private/tailscale` must be app-owned and mode 0700; a share that ignores chmod prevents it from starting. Its state files are mode 0600. Its output goes only to the console after redaction. It uses `--no-logs-no-support`, which prevents upload to Tailscale's log service. Nothing starts this supervisor yet.
 
 **To add a variable:** add the name to `ALLOWED_NAMES` in `childEnv.js` with a comment saying which setup
 needs it, add a row to the table above, and update `backend/test/child-env.test.js` (it pins the list on
 purpose). For a per-launch computed value (MediaMTX's) pass it as `extra` instead. **To add a new spawn
-site:** call `spawnChild()`, never `child_process` directly; the source test in `child-env.test.js` fails
+site:** call `spawnChild()` for media processes, or `spawnAsApp()` only for the tunnel daemon; never `child_process` directly. The source test in `child-env.test.js` fails
 on any other import of it under `backend/src`.
 
 **What the allowlist does not do:**
