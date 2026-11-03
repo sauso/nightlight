@@ -262,13 +262,13 @@ describe('stopAllRecordings', () => {
     assert.ok(awaited < clipCapture, 'the ring is torn down before the recording finishes cutting from it');
     const shutdown = indexSrc.slice(indexSrc.indexOf('async function shutdown()'))
       .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    const tokens = shutdown.match(/\b(?:await|stopTailscale|tailscaleStopped|process\.exit)\b/g) ?? [];
-    const startStop = tokens.findIndex((x) => x === 'stopTailscale');
-    const firstAwait = tokens.findIndex((x) => x === 'await');
+    const startStop = shutdown.search(/const\s+tailscaleStopped\s*=\s*stopTailscale\s*\(\s*\)\s*;/);
+    const firstAwait = shutdown.search(/\bawait\b/);
     const awaitStop = shutdown.search(/await\s+tailscaleStopped\s*;/);
     const exit = shutdown.search(/process\.exit\s*\(\s*0\s*\)/);
     assert.ok(startStop >= 0 && startStop < firstAwait, 'tailscale stop must start before first await');
     assert.ok(awaitStop >= 0 && awaitStop < exit, 'tailscale stop must be awaited before exit');
+    assert.ok(awaitStop < shutdown.search(/await\s+mdnsStopped\s*;/), 'mDNS goodbye remains the final await');
 
     // ★ AND THE DETECTOR STOPS MUST SIT BETWEEN THOSE TWO — which is the whole of the overlap, and
     // was NOT asserted until adversarial review of #279 demonstrated the gap. Moving `await

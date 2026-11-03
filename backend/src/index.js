@@ -615,8 +615,8 @@ async function shutdown() {
   // periodic job shutdown knows about is stopped explicitly (suite-exits-cleanly.test.js asserts it).
   stopObservationLog();
   // #937: the mDNS goodbye started at the top of shutdown (see there). Last, so it overlaps everything above.
-  await mdnsStopped;
   await tailscaleStopped;
+  await mdnsStopped;
   process.exit(0);
 }
 process.on('SIGTERM', shutdown);

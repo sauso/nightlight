@@ -9,8 +9,8 @@ import { logger } from './logger.js';
 const TAILSCALED_BINARY = '/usr/local/bin/tailscaled';
 const RESTART_DELAY_MS = 3000;
 const MAX_RESTART_DELAY_MS = 60000;
-const FORCE_KILL_MS = 3000;
-const EXPOSURE_HOLD_MS = 5000;
+export const FORCE_KILL_MS = 3000;
+export const EXPOSURE_HOLD_MS = 5000;
 export const TAILSCALE_STOP_CAP_MS = 4000;
 
 let state = 'off';
@@ -47,14 +47,16 @@ function notice(message) {
 function redactLine(line) {
   // Opus plan review of #965: diagnostics are shareable, and daemon output can contain login
   // identity, tailnet names, endpoint addresses, and auth material. Console is still scrubbed.
-  return String(line)
+  // Bound regex work before matching: a hostile daemon can print arbitrarily long lines.
+  // Delete controls first so they cannot split a login or endpoint token.
+  return String(line).slice(0, 1024)
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '')
     .replace(/https:\/\/login\.tailscale\.com\/[^\s"']+/gi, '[login URL]')
     .replace(/\btskey-[^\s"']+/gi, '[key]')
     .replace(/\bauthkey\b[^\r\n]*/gi, 'authkey [redacted]')
-    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[email]')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\b/gi, '[email]')
     .replace(/\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net\b/gi, '[tailnet name]')
-    .replace(/(?:\b\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-f:]+\]):\d{1,5}\b/gi, '[endpoint]')
-    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ')
+    .replace(/(?:\b\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-z:.%_-]+\]):\d{1,5}\b/gi, '[endpoint]')
     .slice(0, 500);
 }
 
@@ -115,9 +117,8 @@ function launch(g) {
     // Opus plan review of #965: no await may separate this flag from the spawn boundary.
     setLoopbackExposed(true);
     s.atSpawn = true;
-    const child = s.spawnFn
-      ? s.spawnFn(s.binary ?? TAILSCALED_BINARY, argv, { cwd: prepared.stateDir, stdio: ['ignore', 'pipe', 'pipe'] })
-      : spawnAsApp(s.binary ?? TAILSCALED_BINARY, argv, { cwd: prepared.stateDir, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = (s.spawnFn ?? spawnAsApp)(s.binary ?? TAILSCALED_BINARY, argv,
+      { cwd: prepared.stateDir, stdio: ['ignore', 'pipe', 'pipe'] });
     s.atSpawn = false;
     proc = child;
     s.launchedAt = s.now();
@@ -146,7 +147,7 @@ function launch(g) {
       if (!exec.execFailed && duration < 30000) shortDelay = Math.min(MAX_RESTART_DELAY_MS, shortDelay * 2);
       restarts += 1;
       state = 'backoff';
-      reason = err?.code ?? (exec.execFailed ? 'exec_failure' : 'daemon_exited');
+      reason = err ? 'spawn_failed' : (exec.execFailed ? 'exec_failure' : 'daemon_exited');
       notice(`${reason}; retry in ${delay}ms (exit ${code ?? 'unknown'})`);
       restartTimer = timer(() => { restartTimer = null; if (current(g) && state === 'backoff') launch(g); }, s.delayMs?.(delay) ?? delay);
     };
@@ -168,13 +169,13 @@ function launch(g) {
     if (s.atSpawn) {
       s.atSpawn = false;
       state = 'backoff';
-      reason = err?.code ?? 'spawn_failed';
+      reason = 'spawn_failed';
       restarts += 1;
       const delay = shortDelay;
       shortDelay = Math.min(MAX_RESTART_DELAY_MS, shortDelay * 2);
       notice(`${reason}; retry in ${delay}ms`);
       restartTimer = timer(() => { restartTimer = null; if (current(g) && state === 'backoff') launch(g); }, s.delayMs?.(delay) ?? delay);
-    } else unavailable(g, err?.code ?? 'start_failed');
+    } else unavailable(g, 'start_failed');
   }
 }
 
@@ -188,6 +189,8 @@ export function startTailscale({ db, dataDir, binary, argvSuffix, spawnFn, killF
   const g = ++generation;
   state = 'starting';
   restarts = 0; lastExitCode = null; reason = null; shortDelay = RESTART_DELAY_MS; lastNoticeAt = -Infinity;
+  // Opus review of #965: a new start is a new output session; relaunches keep one shared budget.
+  outputWindowAt = 0; outputLines = 0;
   session = { db, dataDir, binary, argvSuffix, spawnFn, killFn, stateOptions, runtimeOptions,
     now, delayMs, exposureHoldMs, forceKillMs, stopCapMs, consoleSink,
     execBackoff: execFailureBackoff(RESTART_DELAY_MS, { now }) };

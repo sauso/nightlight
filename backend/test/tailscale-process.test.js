@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnAsApp } from '../src/lib/childEnv.js';
-import { startTailscale, stopTailscale, getTailscaleStatus } from '../src/lib/tailscaleProcess.js';
+import { startTailscale, stopTailscale, getTailscaleStatus, EXPOSURE_HOLD_MS, FORCE_KILL_MS, TAILSCALE_STOP_CAP_MS } from '../src/lib/tailscaleProcess.js';
 import { isLoopbackExposed } from '../src/lib/loopbackExposure.js';
 import { logger } from '../src/lib/logger.js';
 import { useTempDataDir, cleanupTempDataDirs, mountRouter, call } from './helpers/harness.js';
@@ -18,6 +18,7 @@ after(() => { healthDb.close(); cleanupTempDataDirs(); });
 
 const FAKE = fileURLToPath(new URL('./helpers/fakeTailscaled.js', import.meta.url));
 const roots = [];
+const allChildren = [];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(fn, ms = 1500) {
   const end = Date.now() + ms;
@@ -45,6 +46,7 @@ function fixture(mode = 'stay', changes = {}) {
     // Preserve the production argv in `seen`, then run the real fake using Node on Windows too.
     const child = spawnAsApp(process.execPath, [FAKE, ...argv], options);
     children.push(child);
+    allChildren.push(child);
     return child;
   };
   const opts = {
@@ -58,7 +60,14 @@ function fixture(mode = 'stay', changes = {}) {
   return { opts, seen, children, pids, markerDir, dataDir };
 }
 afterEach(async () => {
-  await stopTailscale();
+  // A failed stop seam can leave a SIGTERM-ignoring real child alive. Kill every child before
+  // awaiting shutdown, including when the assertion in the test failed early (Opus review of #965).
+  for (const child of allChildren.splice(0)) {
+    if (child.pid && child.exitCode === null && child.signalCode === null) {
+      try { process.kill(child.pid, 'SIGKILL'); } catch { /* already exited */ }
+    }
+  }
+  await Promise.race([stopTailscale(), sleep(500)]);
   await sleep(35);
   for (const p of roots.splice(0)) fs.rmSync(p, { recursive: true, force: true });
   logger.clear();
@@ -120,7 +129,7 @@ test('#965 missing binary ENOENT enters quiet backoff without throwing (#257)', 
     spawnFn: (binary, argv, options) => spawnAsApp(binary, argv, options) });
   assert.equal(startTailscale(f.opts), true);
   await until(() => getTailscaleStatus().state === 'backoff');
-  assert.equal(getTailscaleStatus().reason, 'ENOENT');
+  assert.equal(getTailscaleStatus().reason, 'spawn_failed');
 });
 
 test('#965 non-executable binary EACCES enters backoff without throwing (#257)', {
@@ -133,7 +142,7 @@ test('#965 non-executable binary EACCES enters backoff without throwing (#257)',
   f.opts.spawnFn = (cmd, argv, options) => spawnAsApp(cmd, argv, options);
   startTailscale(f.opts);
   await until(() => getTailscaleStatus().state === 'backoff');
-  assert.equal(getTailscaleStatus().reason, 'EACCES');
+  assert.equal(getTailscaleStatus().reason, 'spawn_failed');
 });
 
 test('#965 wrapper-style 127 and crash retain exposure during relaunch', async () => {
@@ -186,19 +195,45 @@ test('#965 Gate B blocks initial launch and rechecks after a crash', async () =>
 });
 
 test('#965 daemon output is console-only, redacted, capped, and rate-limited', async () => {
-  const secret = ['active login: someone@example.com', 'device.tail.ts.net', '203.0.113.7:1234', 'https://login.tailscale.com/a', 'tskey-secret', 'authkey=secret'];
+  const secret = ['active login: someone@example.com', 'device.tail.ts.net', '203.0.113.7:1234', 'https://login.tailscale.com/a', 'tskey-secret', 'authkey=secret',
+    'person@\u0000example.com someone\u001b@example.com someone@github someone@passkey',
+    '[fe80::1%eth0]:41641 [::ffff:203.0.113.7]:41641'];
   const sink = [];
-  const f = fixture(`print-lines=${JSON.stringify([...secret, ...Array(30).fill('ordinary line')])}`, { consoleSink: (x) => sink.push(x) });
+  const f = fixture(`print-lines=${JSON.stringify([...secret, 'ordinary line', ...Array(30).fill('more output')])}`, { consoleSink: (x) => sink.push(x) });
   startTailscale(f.opts);
-  await until(() => sink.length > 0);
+  await until(() => sink.some((line) => line.includes('ordinary line')));
   assert.ok(sink.length <= 10);
   const all = sink.join('\n');
-  for (const raw of ['someone@example.com', 'device.tail.ts.net', '203.0.113.7:1234', 'login.tailscale.com/a', 'tskey-secret', 'authkey=secret']) {
+  for (const raw of ['someone@example.com', 'person@example.com', 'person@\u0000example.com', 'someone\u001b@example.com', 'someone@github', 'someone@passkey',
+    'device.tail.ts.net', '203.0.113.7:1234', '[fe80::1%eth0]:41641', '[::ffff:203.0.113.7]:41641',
+    'login.tailscale.com/a', 'tskey-secret', 'authkey=secret']) {
     assert.equal(all.includes(raw), false, raw);
     assert.equal(logger.getRecent().join('\n').includes(raw), false, raw);
   }
   assert.equal(all.includes('ordinary line'), true);
   assert.equal(logger.getRecent().some((x) => x.includes('ordinary line')), false);
+});
+
+test('#965 a new start resets the daemon output budget', async () => {
+  const sink = [];
+  const f = fixture(`print-lines=${JSON.stringify([...Array(10).fill('first run'), 'overflow'])}`,
+    { consoleSink: (line) => sink.push(line) });
+  startTailscale(f.opts);
+  await until(() => sink.length === 10);
+  await stopTailscale();
+  f.opts.argvSuffix = [`--marker-dir=${f.markerDir}`, `--mode=print-lines=${JSON.stringify(['second run'])}`];
+  startTailscale(f.opts);
+  await until(() => sink.some((line) => line.includes('second run')));
+});
+
+test('#965 a 64 KiB hostile daemon line is redacted promptly', async () => {
+  const sink = [];
+  const f = fixture('print-hostile', { consoleSink: (line) => sink.push(line) });
+  const start = performance.now();
+  startTailscale(f.opts);
+  await until(() => sink.length === 1);
+  assert.ok(performance.now() - start < 900, 'regex work on a hostile line blocked the event loop');
+  assert.ok(sink[0].length <= 512);
 });
 
 test('#965 one daemon line is length-capped before the console sink', async () => {
@@ -242,13 +277,37 @@ test('#965 failed SIGKILL keeps exposure until the child truly exits', {
   startTailscale(f.opts);
   await until(() => f.pids().length === 1);
   const at = Date.now();
-  await stopTailscale();
+  await Promise.race([stopTailscale(), sleep(500).then(() => assert.fail('stop exceeded its cap'))]);
   assert.ok(Date.now() - at < 500, 'the injected 100ms stop cap did not bound the wait');
   assert.equal(getTailscaleStatus().state, 'unavailable');
   assert.equal(isLoopbackExposed(), true);
   process.kill(f.children[0].pid, 'SIGKILL');
   await until(() => getTailscaleStatus().state === 'off');
   await until(() => !isLoopbackExposed());
+});
+
+test('#965 status reasons are fixed codes without paths', async () => {
+  const f = fixture('stay');
+  f.opts.dataDir = path.join(f.dataDir, 'missing');
+  startTailscale(f.opts);
+  const reason = getTailscaleStatus().reason;
+  assert.match(reason, /^[a-z][a-z0-9_]*$/);
+  assert.equal(reason.includes('/'), false);
+  assert.equal(logger.getRecent().some((line) => line.includes(f.dataDir)), false);
+});
+
+test('#965 production timing bounds', () => {
+  assert.ok(EXPOSURE_HOLD_MS >= 5000);
+  assert.ok(FORCE_KILL_MS < TAILSCALE_STOP_CAP_MS);
+});
+
+test('#965 runtime directory is removed after the child exits', async () => {
+  const f = fixture('exit=1', { delayMs: () => 1000 });
+  startTailscale(f.opts);
+  await until(() => getTailscaleStatus().state === 'backoff');
+  assert.equal(f.pids().length, 1, 'the real child must have exited before checking cleanup');
+  const socket = f.seen[0].argv.find((arg) => arg.startsWith('--socket=')).slice(9);
+  assert.equal(fs.existsSync(path.dirname(socket)), false);
 });
 
 test('#965 a late old-generation exit cannot clear or relaunch over a new child', async () => {

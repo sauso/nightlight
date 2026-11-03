@@ -21,7 +21,7 @@ test('#965 state refuses root and an owner mismatch', () => {
   const rootOwned = { ...ownedFs, lstatSync: (p) => Object.assign(ownedFs.lstatSync(p), { uid: 0 }) };
   assert.equal(prepareStateDir({ dataDir, uid: 0, fsImpl: rootOwned }).ok, false);
   const mismatch = { ...ownedFs, lstatSync: (p) => Object.assign(fs.lstatSync(p), { uid: uid + 1 }) };
-  assert.match(prepareStateDir({ dataDir, uid, fsImpl: mismatch }).reason, /wrong owner/);
+  assert.equal(prepareStateDir({ dataDir, uid, fsImpl: mismatch }).reason, 'state_owner_mismatch');
 });
 
 test('#965 state refuses symlink, non-directory, and chmod EPERM', (t) => {
@@ -36,7 +36,7 @@ test('#965 state refuses symlink, non-directory, and chmod EPERM', (t) => {
     fs.rmSync(path.join(dataDir, 'private'));
   }
   const denied = { ...ownedFs, chmodSync: () => { const e = new Error('denied'); e.code = 'EPERM'; throw e; } };
-  assert.match(prepareStateDir({ dataDir, uid, fsImpl: denied }).reason, /denied/);
+  assert.equal(prepareStateDir({ dataDir, uid, fsImpl: denied }).reason, 'state_unwritable');
 });
 
 test('#965 state refuses a chmod-ignoring share and unwritable directory', () => {
@@ -45,9 +45,9 @@ test('#965 state refuses a chmod-ignoring share and unwritable directory', () =>
     const st = ownedFs.lstatSync(p);
     return Object.assign(st, { mode: (st.mode & ~0o777) | 0o755 });
   } };
-  assert.match(prepareStateDir({ dataDir, uid, fsImpl: ignores }).reason, /mode 0700/);
+  assert.equal(prepareStateDir({ dataDir, uid, fsImpl: ignores }).reason, 'state_mode_unverifiable');
   const unwritable = { ...ownedFs, accessSync: () => { throw new Error('read-only share'); } };
-  assert.match(prepareStateDir({ dataDir, uid, fsImpl: unwritable }).reason, /read-only share/);
+  assert.equal(prepareStateDir({ dataDir, uid, fsImpl: unwritable }).reason, 'state_unwritable');
 });
 
 test('#965 a share that ignores state-file chmod is refused', () => {
@@ -60,7 +60,7 @@ test('#965 a share that ignores state-file chmod is refused', () => {
     const st = ownedFs.lstatSync(p);
     return p === stateFile ? Object.assign(st, { mode: (st.mode & ~0o777) | 0o644 }) : st;
   } };
-  assert.match(prepareStateDir({ dataDir, uid, fsImpl: ignores }).reason, /mode 0600/);
+  assert.equal(prepareStateDir({ dataDir, uid, fsImpl: ignores }).reason, 'state_mode_unverifiable');
 });
 
 test('#965 state and runtime are private and a 0644 state file is tightened', {
@@ -88,7 +88,7 @@ test('#965 runtime path refuses a Unix socket path longer than 107 bytes', () =>
   fs.mkdirSync(tmpDir);
   const r = makeRuntimeDir({ uid, fsImpl: ownedFs, tmpDir });
   assert.equal(r.ok, false);
-  assert.match(r.reason, /socket path/);
+  assert.equal(r.reason, 'socket_path_too_long');
 });
 
 test('#965 runtime directories use unpredictable distinct names', () => {

@@ -25,6 +25,7 @@ if (mode.startsWith('write-state=')) {
 if (mode.startsWith('print-lines=')) {
   for (const line of JSON.parse(mode.slice('print-lines='.length))) console.log(line);
 }
+if (mode === 'print-hostile') console.log('a.'.repeat(32768));
 if (mode.startsWith('exit=')) process.exit(Number(mode.slice('exit='.length)));
 if (mode.startsWith('crash-after=')) setTimeout(() => process.exit(1), Number(mode.slice('crash-after='.length)));
 if (mode === 'ignore-sigterm') process.on('SIGTERM', () => {});

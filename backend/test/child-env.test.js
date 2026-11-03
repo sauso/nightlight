@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnChild, childEnv, ALLOWED_NAMES } from '../src/lib/childEnv.js';
+import { spawnChild, spawnAsApp, APP_EXEC_PATH, childEnv, ALLOWED_NAMES } from '../src/lib/childEnv.js';
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
 const PRINT_ENV = ['-e', 'process.stdout.write(JSON.stringify(process.env))'];
@@ -201,12 +201,38 @@ describe('every process the backend starts goes through the helper (#553, source
 
   test('#965 spawnAsApp is called exactly once and only by the tunnel daemon supervisor', () => {
     // Token-based, after stripping comments: an unused import or a commented call cannot pass.
-    const calls = walk(SRC).flatMap((f) => Array.from(code(f).matchAll(/(?<![\w.$])spawnAsApp\s*\(/g), () => rel(f)));
+    const calls = walk(SRC).flatMap((f) => Array.from(code(f).matchAll(/(?<![\w.$])spawnAsApp\s*(?:\(|\))/g), () => rel(f)));
     assert.deepEqual(calls.filter((f) => f !== 'lib/childEnv.js'), ['lib/tailscaleProcess.js']);
     assert.equal(calls.filter((f) => f === 'lib/childEnv.js').length, 1);
     const helper = code(path.join(SRC, 'lib/childEnv.js'));
     assert.match(helper, /spawn\(APP_EXEC_PATH,\s*\[String\(process\.getuid\(\)\), String\(process\.getgid\(\)\), command/);
     assert.match(helper, /return spawn\(command, args, \{ \.\.\.rest, env \}\);/);
+  });
+
+  test('#965 spawnAsApp isolation on wraps the app uid and off spawns the command', {
+    skip: process.platform === 'win32' && 'POSIX uid/gid APIs are required; Linux CI runs this',
+  }, async () => {
+    const prior = process.env.MEDIA_ISOLATION;
+    const command = process.execPath;
+    const args = ['-e', 'process.exit(0)'];
+    try {
+      process.env.MEDIA_ISOLATION = 'on';
+      const wrapped = spawnAsApp(command, args, { stdio: 'ignore' });
+      // A missing shell or setpriv can report an asynchronous spawn error after metadata is set.
+      wrapped.on('error', () => {});
+      assert.equal(wrapped.spawnfile, APP_EXEC_PATH);
+      assert.deepEqual(wrapped.spawnargs, [APP_EXEC_PATH, String(process.getuid()), String(process.getgid()), command, ...args]);
+      await new Promise((resolve) => wrapped.once('close', resolve));
+      process.env.MEDIA_ISOLATION = 'off';
+      const plain = spawnAsApp(command, args, { stdio: 'ignore' });
+      plain.on('error', () => {});
+      assert.equal(plain.spawnfile, command);
+      assert.deepEqual(plain.spawnargs, [command, ...args]);
+      await new Promise((resolve) => plain.once('close', resolve));
+    } finally {
+      if (prior === undefined) delete process.env.MEDIA_ISOLATION;
+      else process.env.MEDIA_ISOLATION = prior;
+    }
   });
 
   test('each known spawn site calls spawnChild the expected number of times, and MediaMTX asks for MTX_*', () => {

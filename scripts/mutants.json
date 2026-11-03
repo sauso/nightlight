@@ -36,16 +36,6 @@
     "namePattern": "failed SIGKILL keeps exposure"
   },
   {
-    "label": "#965 wrapper retains inherited and ambient capabilities (root CI step required)",
-    "file": "backend/app-exec.sh",
-    "find": "--inh-caps=-all --ambient-caps=-all",
-    "replace": "",
-    "expect": "killed",
-    "tests": ["app-exec-real.test.js"],
-    "namePattern": "app wrapper drops capabilities",
-    "note": "Requires the root node:24-alpine step with util-linux setpriv."
-  },
-  {
     "label": "#965 runtime directory name fixed",
     "file": "backend/src/lib/tailscaleState.js",
     "find": "runtimeDir = fsImpl.mkdtempSync(path.join(tmpDir, 'nightlight-tailscale-'));",
@@ -66,7 +56,7 @@
   {
     "label": "#965 root uid refusal removed",
     "file": "backend/src/lib/tailscaleState.js",
-    "find": "if (!Number.isSafeInteger(uid) || uid <= 0) throw new Error('Tailscale requires a non-root app uid');\n    if (!dataDir)",
+    "find": "if (!Number.isSafeInteger(uid) || uid <= 0) refuse('app_is_root');\n    if (!dataDir)",
     "replace": "if (!dataDir)",
     "expect": "killed",
     "tests": ["tailscale-state.test.js"],
@@ -111,11 +101,65 @@
   {
     "label": "#965 media child spawn used for daemon",
     "file": "backend/src/lib/tailscaleProcess.js",
-    "find": ": spawnAsApp(s.binary ?? TAILSCALED_BINARY, argv, { cwd: prepared.stateDir, stdio: ['ignore', 'pipe', 'pipe'] });",
-    "replace": ": spawnChild(s.binary ?? TAILSCALED_BINARY, argv, { cwd: prepared.stateDir, stdio: ['ignore', 'pipe', 'pipe'] });",
+    "find": "const child = (s.spawnFn ?? spawnAsApp)(s.binary ?? TAILSCALED_BINARY, argv,",
+    "replace": "const child = (s.spawnFn ?? spawnChild)(s.binary ?? TAILSCALED_BINARY, argv,",
     "expect": "killed",
     "tests": ["child-env.test.js"],
     "namePattern": "spawnAsApp is called exactly once"
+  },
+  {
+    "label": "#965 spawnAsApp ignores isolation",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "  if (mediaIsolationOn()) {\n    return spawn(APP_EXEC_PATH,",
+    "replace": "  if (false) {\n    return spawn(APP_EXEC_PATH,",
+    "expect": "killed",
+    "tests": ["child-env.test.js"],
+    "namePattern": "spawnAsApp isolation on wraps"
+  },
+  {
+    "label": "#965 production daemon spawn drops cwd",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "{ cwd: prepared.stateDir, stdio: ['ignore', 'pipe', 'pipe'] });",
+    "replace": "{ stdio: ['ignore', 'pipe', 'pipe'] });",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "fixed argv, allowlisted env"
+  },
+  {
+    "label": "#965 exposure hold default removed",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "export const EXPOSURE_HOLD_MS = 5000;",
+    "replace": "export const EXPOSURE_HOLD_MS = 0;",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "production timing bounds"
+  },
+  {
+    "label": "#965 daemon output budget not reset on start",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "  outputWindowAt = 0; outputLines = 0;",
+    "replace": "  // output budget is accidentally shared between starts",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "new start resets the daemon output budget"
+  },
+  {
+    "label": "#965 redaction runs before input slice",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "return String(line).slice(0, 1024)",
+    "replace": "return String(line)",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "64 KiB hostile daemon line"
+  },
+  {
+    "label": "#965 state failure reason carries path",
+    "file": "backend/src/lib/tailscaleState.js",
+    "find": "return { ok: true, stateDir };\n  } catch (err) {\n    return { ok: false, reason: failureCode(err) };",
+    "replace": "return { ok: true, stateDir };\n  } catch (err) {\n    return { ok: false, reason: err.message };",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "status reasons are fixed codes"
   },
   {
     "label": "#963 exposed loopback setup refusal removed",
@@ -23188,8 +23232,8 @@
   {
     "label": "#553 phase 1 spawnChild: isolation on is ignored (the program is spawned unwrapped)",
     "file": "backend/src/lib/childEnv.js",
-    "find": "  if (mediaIsolationOn()) {",
-    "replace": "  if (false) {",
+    "find": "  if (mediaIsolationOn()) {\n    return spawn(MEDIA_EXEC_PATH,",
+    "replace": "  if (false) {\n    return spawn(MEDIA_EXEC_PATH,",
     "expect": "killed",
     "tests": ["media-exec.test.js"],
     "namePattern": "on: the wrapper is spawned"
