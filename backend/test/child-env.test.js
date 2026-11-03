@@ -199,6 +199,16 @@ describe('every process the backend starts goes through the helper (#553, source
     assert.deepEqual(offenders.map(rel), []);
   });
 
+  test('#965 spawnAsApp is called exactly once and only by the tunnel daemon supervisor', () => {
+    // Token-based, after stripping comments: an unused import or a commented call cannot pass.
+    const calls = walk(SRC).flatMap((f) => Array.from(code(f).matchAll(/(?<![\w.$])spawnAsApp\s*\(/g), () => rel(f)));
+    assert.deepEqual(calls.filter((f) => f !== 'lib/childEnv.js'), ['lib/tailscaleProcess.js']);
+    assert.equal(calls.filter((f) => f === 'lib/childEnv.js').length, 1);
+    const helper = code(path.join(SRC, 'lib/childEnv.js'));
+    assert.match(helper, /spawn\(APP_EXEC_PATH,\s*\[String\(process\.getuid\(\)\), String\(process\.getgid\(\)\), command/);
+    assert.match(helper, /return spawn\(command, args, \{ \.\.\.rest, env \}\);/);
+  });
+
   test('each known spawn site calls spawnChild the expected number of times, and MediaMTX asks for MTX_*', () => {
     const expected = {
       // timelapse.js is not listed: since #781 it runs ffmpeg through clipRecorder.js's runFfmpeg (the call counted below).

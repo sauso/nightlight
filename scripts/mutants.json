@@ -1,5 +1,123 @@
 [
   {
+    "label": "#965 flag cleared on child exit before final confirmed stop",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "      lastExitCode = code;",
+    "replace": "      lastExitCode = code; setLoopbackExposed(false);",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "exposure stays set through a crash and pending relaunch gap"
+  },
+  {
+    "label": "#965 generation check ignored",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "const current = (g) => generation === g;",
+    "replace": "const current = () => true;",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "late old-generation exit"
+  },
+  {
+    "label": "#965 five-second exposure hold removed",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "}, session?.exposureHoldMs ?? EXPOSURE_HOLD_MS);",
+    "replace": "}, 0);",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "fixed argv, allowlisted env"
+  },
+  {
+    "label": "#965 failed SIGKILL clears exposure",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "if (!sent && proc === child) unavailable(g, 'sigkill_failed');",
+    "replace": "if (!sent && proc === child) { unavailable(g, 'sigkill_failed'); setLoopbackExposed(false); }",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "failed SIGKILL keeps exposure"
+  },
+  {
+    "label": "#965 wrapper retains inherited and ambient capabilities (root CI step required)",
+    "file": "backend/app-exec.sh",
+    "find": "--inh-caps=-all --ambient-caps=-all",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["app-exec-real.test.js"],
+    "namePattern": "app wrapper drops capabilities",
+    "note": "Requires the root node:24-alpine step with util-linux setpriv."
+  },
+  {
+    "label": "#965 runtime directory name fixed",
+    "file": "backend/src/lib/tailscaleState.js",
+    "find": "runtimeDir = fsImpl.mkdtempSync(path.join(tmpDir, 'nightlight-tailscale-'));",
+    "replace": "runtimeDir = path.join(tmpDir, 'nightlight-tailscale'); fsImpl.mkdirSync(runtimeDir, { recursive: true });",
+    "expect": "killed",
+    "tests": ["tailscale-state.test.js"],
+    "namePattern": "runtime directories use unpredictable distinct names"
+  },
+  {
+    "label": "#965 state directory mode widened",
+    "file": "backend/src/lib/tailscaleState.js",
+    "find": "const DIR_MODE = 0o700;",
+    "replace": "const DIR_MODE = 0o755;",
+    "expect": "killed",
+    "tests": ["tailscale-state.test.js"],
+    "namePattern": "state and runtime are private"
+  },
+  {
+    "label": "#965 root uid refusal removed",
+    "file": "backend/src/lib/tailscaleState.js",
+    "find": "if (!Number.isSafeInteger(uid) || uid <= 0) throw new Error('Tailscale requires a non-root app uid');\n    if (!dataDir)",
+    "replace": "if (!dataDir)",
+    "expect": "killed",
+    "tests": ["tailscale-state.test.js"],
+    "namePattern": "state refuses root and an owner mismatch"
+  },
+  {
+    "label": "#965 daemon line reaches diagnostics ring",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "try { (s.consoleSink ?? console.log)(`[tailscale] ${redactLine(line)}`); }",
+    "replace": "try { (s.consoleSink ?? console.log)(`[tailscale] ${redactLine(line)}`); logger.raw('tailscale', line); }",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "daemon output is console-only"
+  },
+  {
+    "label": "#965 daemon console redaction removed",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "`[tailscale] ${redactLine(line)}`",
+    "replace": "`[tailscale] ${line}`",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "daemon output is console-only"
+  },
+  {
+    "label": "#965 support-log upload disable flag dropped",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "'--tun=userspace-networking', '--no-logs-no-support',",
+    "replace": "'--tun=userspace-networking',",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "fixed argv, allowlisted env"
+  },
+  {
+    "label": "#965 userspace networking flag dropped",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "'--tun=userspace-networking', '--no-logs-no-support',",
+    "replace": "'--no-logs-no-support',",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "fixed argv, allowlisted env"
+  },
+  {
+    "label": "#965 media child spawn used for daemon",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": ": spawnAsApp(s.binary ?? TAILSCALED_BINARY, argv, { cwd: prepared.stateDir, stdio: ['ignore', 'pipe', 'pipe'] });",
+    "replace": ": spawnChild(s.binary ?? TAILSCALED_BINARY, argv, { cwd: prepared.stateDir, stdio: ['ignore', 'pipe', 'pipe'] });",
+    "expect": "killed",
+    "tests": ["child-env.test.js"],
+    "namePattern": "spawnAsApp is called exactly once"
+  },
+  {
     "label": "#963 exposed loopback setup refusal removed",
     "file": "backend/src/routes/auth.js",
     "find": "  if (!setupBlockedByExposedLoopback(isLoopbackExposed(), req.ip)) return false;",

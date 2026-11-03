@@ -116,8 +116,8 @@ RUN chmod +x ./entrypoint.sh
 # and 0755: the media user can run them and cannot change them. (The app user owns /app itself, its home, so it could
 # replace them; an app that holds CAP_SETUID gains nothing by that. Root-owned code the app cannot replace is a later
 # phase of #553.)
-COPY backend/media-exec.sh backend/media-probe.sh ./
-RUN chmod 755 ./media-exec.sh ./media-probe.sh
+COPY backend/media-exec.sh backend/app-exec.sh backend/media-probe.sh ./
+RUN chmod 755 ./media-exec.sh ./app-exec.sh ./media-probe.sh
 
 ENV DATA_DIR=/app/data
 # Express behaves differently outside production mode - most importantly, its default

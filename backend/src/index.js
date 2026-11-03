@@ -62,6 +62,7 @@ import { buildHelmetOptions } from './lib/cspDirectives.js';
 import { safeInterval, installCrashGuards, markBootComplete } from './lib/processGuards.js';
 import { healthHandler } from './lib/serverIdentity.js';
 import { startMdnsAnnounce, stopMdnsAnnounce } from './lib/mdnsAnnounce.js';
+import { stopTailscale } from './lib/tailscaleProcess.js';
 import {
   createCameraWatchdog, createAudioWatchdog, WATCHDOG_INTERVAL_MS, AUDIO_CHECK_INTERVAL_MS,
   createDetectorWatchdog, createRestartRequests, DETECTOR_CHECK_INTERVAL_MS,
@@ -547,6 +548,8 @@ async function shutdown() {
   // stopMdnsAnnounce caps it at about 1.5 s (STOP_CAP_MS) even if the callback never comes; it never rejects. The
   // 23 s worst case below is therefore unchanged (recordings-shutdown.test.js; mdns-announce.test.js pins the cap).
   const mdnsStopped = stopMdnsAnnounce();
+  // Opus plan review of #965: start the bounded daemon stop before any recording awaits.
+  const tailscaleStopped = stopTailscale();
   // Started HERE, awaited below. The only ordering that actually matters is that an in-flight
   // recording finishes cutting BEFORE stopAllClipCapture takes the ring away; the detector stops are
   // unrelated to it and can overlap.
@@ -613,6 +616,7 @@ async function shutdown() {
   stopObservationLog();
   // #937: the mDNS goodbye started at the top of shutdown (see there). Last, so it overlaps everything above.
   await mdnsStopped;
+  await tailscaleStopped;
   process.exit(0);
 }
 process.on('SIGTERM', shutdown);
