@@ -12,10 +12,75 @@
 // Found by adversarial review of the PR that introduced the setting. The review also found the parsing
 // had NO coverage at all — a mutant removing the numeric coercion survived the entire suite, because
 // nothing ever executed index.js or inspected the result.
-import { test, describe } from 'node:test';
+import { test, describe, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 import { parseTrustProxy, applyTrustProxy, DEFAULT_TRUST_PROXY } from '../src/lib/trustProxy.js';
+import { isLoopbackAddress, setLoopbackExposed } from '../src/lib/loopbackExposure.js';
+
+afterEach(() => setLoopbackExposed(false));
+
+test('#959 compiled trust function rejects every loopback spelling while exposed', () => {
+  // Fails on the old code: its compiled function trusts each loopback hop, including mapped IPv6.
+  for (const raw of [undefined, '127.0.0.1', '1', 'true']) {
+    const app = express();
+    assert.equal(applyTrustProxy(app, raw), parseTrustProxy(raw).value);
+    assert.equal(app.get('trust proxy'), parseTrustProxy(raw).value);
+    const trust = app.get('trust proxy fn');
+    setLoopbackExposed(true);
+    for (const addr of ['127.0.0.1', '127.0.0.2', '::1', '::ffff:127.0.0.1', '::ffff:7f00:1']) {
+      assert.equal(isLoopbackAddress(addr), true, `${addr} was not recognised`);
+      assert.equal(trust(addr, 0), false, `${JSON.stringify(raw)} trusted ${addr}`);
+    }
+    assert.equal(trust('::ffff:127.255.255.255', 1), false);
+    setLoopbackExposed(false);
+  }
+});
+
+test('#959 compiled trust function preserves non-loopback proxy trust', () => {
+  // Fails on the old code's always-trusted loopback, and if the gate blocks LAN proxy hops.
+  const app = express();
+  applyTrustProxy(app, '10.0.0.20');
+  setLoopbackExposed(true);
+  assert.equal(app.get('trust proxy fn')('10.0.0.20', 0), true);
+  assert.equal(app.get('trust proxy fn')('10.0.0.20', 1), true);
+  assert.equal(app.get('trust proxy fn')('127.0.0.1', 1), false);
+  assert.equal(app.get('trust proxy fn')('10.0.0.21', 0), false);
+  assert.equal(isLoopbackAddress('10.0.0.20'), false);
+  const wide = express();
+  applyTrustProxy(wide, 'true');
+  assert.equal(wide.get('trust proxy fn')('127.0.0.1', 0), false);
+  assert.equal(wide.get('trust proxy fn')('10.0.0.20', 1), true);
+});
+
+test('#959 flag off retains default loopback trust', () => {
+  // Fails if the gate becomes unconditional.
+  const app = express();
+  applyTrustProxy(app);
+  assert.equal(app.get('trust proxy fn')('127.0.0.1', 0), true);
+  setLoopbackExposed(true);
+  assert.equal(app.get('trust proxy fn')('127.0.0.1', 0), false);
+  setLoopbackExposed(false);
+  assert.equal(app.get('trust proxy fn')('127.0.0.1', 0), true);
+});
+
+test('#959 Express rejection fallback also guards loopback', () => {
+  // Fails if only the normal app.set path installs the wrapper.
+  const app = express();
+  const originalSet = app.set.bind(app);
+  let rejected = false;
+  app.set = (key, ...values) => {
+    if (key === 'trust proxy' && !rejected) {
+      rejected = true;
+      throw new Error('test rejection');
+    }
+    return originalSet(key, ...values);
+  };
+  assert.equal(applyTrustProxy(app, '10.0.0.20'), DEFAULT_TRUST_PROXY);
+  assert.equal(app.get('trust proxy'), DEFAULT_TRUST_PROXY);
+  setLoopbackExposed(true);
+  assert.equal(app.get('trust proxy fn')('127.0.0.1', 0), false);
+});
 
 describe('nothing an operator can type takes the app down', () => {
   // ★ THE CASE THAT MATTERS. Each of these went through `app.set` unchecked before, and the ones that

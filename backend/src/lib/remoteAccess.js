@@ -2,6 +2,7 @@ import { lookup } from 'node:dns/promises';
 import { BlockList, isIP } from 'node:net';
 import { configuredPublicHosts, getLastAdvertisedHosts, resolveWebrtcUdpAddress } from './mediamtxProcess.js';
 import { parseStunServers } from './stunServers.js';
+import { isLoopbackAddress, isLoopbackExposed } from './loopbackExposure.js';
 
 const home4 = new BlockList();
 for (const [address, prefix] of [['127.0.0.0', 8], ['10.0.0.0', 8], ['172.16.0.0', 12], ['192.168.0.0', 16], ['169.254.0.0', 16]]) {
@@ -14,13 +15,16 @@ for (const [address, prefix] of [['::1', 128], ['fc00::', 7], ['fe80::', 10]]) {
   home6.addSubnet(address, prefix, 'ipv6');
 }
 
-export function classifyClient({ ip, forwardedHeaderPresent = false, trustedProxyChain = false }) {
+export function classifyClient({ ip, forwardedHeaderPresent = false, trustedProxyChain = false, loopbackExposed = isLoopbackExposed() }) {
   // A LAN reverse proxy can send X-Forwarded-For while the default loopback trust setting ignores it.
   // In that case req.ip is the proxy, not the caller; reporting "home" would be misleading.
   if (forwardedHeaderPresent && !trustedProxyChain) return 'unknown';
   if (typeof ip !== 'string') return 'unknown';
   const family = isIP(ip);
   if (!family) return 'unknown';
+  // MEASURED 2026-11-03: userspace tailscaled delivers every tailnet peer to the app as a
+  // connection from 127.0.0.1. The socket could also be a local process, so its network is unknown.
+  if (loopbackExposed && isLoopbackAddress(ip)) return 'unknown';
   if (family === 4) {
     if (home4.check(ip, 'ipv4')) return 'home';
     if (vpn4.check(ip, 'ipv4')) return 'vpn';

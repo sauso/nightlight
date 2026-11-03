@@ -8,7 +8,7 @@ Admins can open **Settings → Remote Access**. The first card shows how Nightli
 
 **Test from this device** makes one short Low latency video connection to a running camera, then closes its connection. When the server gives a session address, the test also asks it to end the session (DELETE); otherwise MediaMTX frees it when the connection closes. A successful UDP connection **from outside your home** shows that the port forward works for this device. A TCP connection means video connected, but it does not confirm the UDP forward. A failed or timed-out test points you to the UDP forward and `PUBLIC_HOST`; Compatibility (HLS) remains available without UDP. The test only proves the forward from **outside** your home. A connection from your home network, a VPN, or behind an untrusted proxy cannot prove it, even if the test connects. Try again from mobile data.
 
-If the network shows **Unknown**, Nightlight could not trust the forwarded client address. This often happens when a reverse proxy connects over a LAN address while `TRUST_PROXY` still has its `loopback` default. Set `TRUST_PROXY` to the address of a proxy you control as described [below](#trust_proxy--telling-nightlight-your-real-client-addresses), then reopen the page. The page makes no third-party reachability check. The test uses the same connection as live video, including your configured STUN server if enabled.
+If the network shows **Unknown**, Nightlight cannot reliably identify this device's network. A LAN reverse proxy may need its own address in `TRUST_PROXY`, as described [below](#trust_proxy--telling-nightlight-your-real-client-addresses). When a tunnel daemon is attached, a tailnet peer may also show Unknown; changing `TRUST_PROXY` will not identify that peer. The page makes no third-party reachability check. The test uses the same connection as live video, including your configured STUN server if enabled.
 
 ## Remote / internet access (watching from outside your home network)
 
@@ -75,6 +75,8 @@ video signaling handshake — no extra ports to open on your router for this par
 Behind a proxy, every request arrives from the **proxy's** address unless you tell Nightlight to trust
 it. The default (`loopback`) only trusts a proxy on `127.0.0.1` — and SWAG reaches Nightlight by its
 LAN IP, so with the [SWAG setup](#running-behind-a-reverse-proxy-eg-swag-on-unraid) **it is not trusted and every remote visitor looks like one client**.
+
+While a tunnel daemon is attached, Nightlight ignores `X-Forwarded-For` from any loopback hop, whatever `TRUST_PROXY` says. A proxy that reaches Nightlight by a LAN address is unaffected as long as no hop in its chain is loopback. Tailnet peers then share one per-address login bucket, so one noisy peer can use that bucket for others. The separate per-account throttle still applies.
 
 Set it to the address your proxy connects *from*:
 

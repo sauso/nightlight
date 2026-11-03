@@ -26,6 +26,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- #959 Ahead of planned remote access, Nightlight now ignores forwarded client addresses from loopback while a tunnel daemon is attached, so tailnet peers cannot choose a different per-address login bucket.
+
 - #944 The setup guide now walks through adding a child, connecting a camera, checking the picture, and optional caregiver and remote access steps. The Settings setup link disappears after full completion; admins can still open picture checks from About. Remote access still needs network setup.
 
 - #943 Nightlight now uses one violet brand colour, a lavender day palette, an indigo night palette, a new moon logo, and locally hosted Inter and Nunito fonts. The Live header still switches day and night.
