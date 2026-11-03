@@ -37,7 +37,7 @@ Watching **both remotely in Low latency (WebRTC)** takes one extra step, because
 
 ## Finding your server automatically
 
-Nightlight announces itself on your home network (mDNS, the same way printers and smart speakers are found), so a phone can find it without anyone typing an address. The phone app's side of this is planned and not built yet; today the announcement is only visible to network-browsing tools. It is on by default.
+Nightlight announces itself on your home network (mDNS, the same way printers and smart speakers are found), so a phone can find it without anyone typing an address. The Android app uses this: tap **Look for my Nightlight** on its first screen ([how](mobile.md#finding-your-server-on-your-home-network-android)). The iPhone app doesn't yet. It is on by default.
 
 Whether a phone can hear it depends on how the container is networked:
 
@@ -48,7 +48,7 @@ Whether a phone can hear it depends on how the container is networked:
 | Docker's default bridge network | **No**: the announcement stays inside Docker. Enter the address instead |
 | Phone on a different VLAN or subnet | Only if your router passes mDNS between them (often called an mDNS reflector or repeater). Most home routers don't |
 
-These were measured on one Unraid server with a PC and a phone. Wi-Fi with client isolation, guest networks and some mesh systems may block it too. The server can't tell whether anyone can hear it, so its log says it is announcing either way. In testing, a PC took between 5 seconds and just over a minute to find it.
+These were measured on one Unraid server with a PC and a phone. Wi-Fi with client isolation, guest networks and some mesh systems may block it too. The server can't tell whether anyone can hear it, so its log says it is announcing either way. In testing, a PC took between 5 seconds and just over a minute to find it, and an Android phone found it almost at once.
 
 Finding [cameras](cameras.md#finding-cameras) follows the same multicast rules in the other direction. Nightlight can browse mDNS and send ONVIF WS-Discovery probes only where that traffic reaches the cameras. Docker's default bridge does not expose LAN multicast; another VLAN needs a router that relays mDNS, while WS-Discovery usually stays on one network segment. Camera searches run only when an admin starts one (the setup guide starts one when its camera step opens).
 
