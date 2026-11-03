@@ -4,7 +4,7 @@ Add and edit cameras from the **Cameras** tab (admin only). This page covers whi
 
 ## Managing cameras
 
-A camera's address is entered as separate fields: **IP address**, **RTSP port** (usually 554), **stream path** and the camera's **username / password**. Nightlight assembles the `rtsp://` URL itself, so the password never appears in a URL on screen.
+For a camera found on the network, enter its username and password; Nightlight finds the stream settings. For manual setup, enter the **IP address**, **RTSP port** (usually 554), **stream path** and camera login as separate fields. Nightlight assembles the `rtsp://` URL itself, so the password never appears in a URL on screen.
 
 ### Which cameras work
 
@@ -16,11 +16,13 @@ Nightlight works with **ONVIF / RTSP** cameras in general: video, audio and, on 
 
 ### Adding a camera
 
-On a new installation, the setup guide opens after the first admin signs in. Choose **Add your child**, then **Connect your camera**. Search for a camera or open **Add a camera manually**. Enter its stream path and login, and assign it to the child. You can leave the guide and return through **Settings → Setup & diagnostics** while setup is open; the normal **Cameras** tab uses the same add-camera form.
+On a new installation, the setup guide opens after the first admin signs in. Choose **Add your child**, then **Connect your camera**. Pick a camera found on your network or open **Add a camera manually**. The guide assigns the camera to the child you chose. You can leave the guide and return through **Settings → Setup & diagnostics** while setup is open; **Cameras → Add camera** uses the same cards.
 
 ### Finding cameras
 
-The setup guide starts a search when you reach its camera step. From **Cameras → Add camera**, press **Find cameras on my network**. Nightlight suggests Thingino cameras advertising `_thingino._tcp` over mDNS and ONVIF cameras responding to WS-Discovery. Results can appear throughout the 30-second search. Pick a suggestion to fill its name, IP address and RTSP port, then enter the login and stream path. Search does not connect to a suggested camera, test it or save it. The existing ONVIF fetch runs only if you press its button after entering a camera address. Only an admin can start a search.
+The setup guide starts a search when you reach its camera step. From **Cameras → Add camera**, press **Find cameras on my network**. Nightlight shows a card for each Thingino camera advertising `_thingino._tcp` over mDNS or ONVIF camera responding to WS-Discovery. Results can appear throughout the 30-second search. Each card shows the camera name and address; a camera already saved has a greyed **Already added** card that cannot be selected. Only an admin can start a search.
+
+Pick a camera card to edit its name and enter its username and password. Nightlight asks you to choose a child only when several are available and the setup guide has not already selected one. Press **Add camera** to let Nightlight find the stream settings over ONVIF and test the stream before saving. A wrong login shows the camera's message; repeated wrong attempts can temporarily lock some cameras out. If the camera does not answer the ONVIF request, open **Advanced settings** or **Enter the stream details yourself** to enter its address and stream path. The separate **Add a camera manually** card is always below the found cameras. A camera that does not advertise either service may still be added there.
 
 | Nightlight's network connection | Can discovery find cameras? |
 | --- | --- |

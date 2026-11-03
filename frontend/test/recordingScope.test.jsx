@@ -351,10 +351,11 @@ describe('the panel, as an admin', () => {
   });
 
   test('the panel is not on the add-camera page (there is no camera to describe yet)', async () => {
-    renderAsAdmin(
+    const { user } = renderAsAdmin(
       <Routes><Route path="/cameras/new" element={<CameraSettings />} /></Routes>,
       { cameras: [], kids: KIDS, route: '/cameras/new' }
     );
+    await user.click(screen.getByRole('button', { name: /Add a camera manually/ }));
     await screen.findByLabelText('Name');
     expect(screen.queryByRole('region', { name: 'Recording and alerts' })).toBeNull();
     expect(readinessCalls()).toHaveLength(0);

@@ -43,6 +43,9 @@ export function probeOnvifDiscovery({ timeoutMs, onDevice }) {
   });
 }
 
+// existingHosts: the IPs of cameras already saved. A discovered camera at one of those IPs is NOT dropped; it is
+// returned with `alreadyAdded: true` so the screen can show it greyed out (#950). It still counts toward the
+// 20-candidate cap and still passes the private-address filter and the name sanitising like any other.
 export async function discoverCameras({
   createBonjour = defaultCreateBonjour, reuseBonjour = null,
   wsProbe = probeOnvifDiscovery, onCandidate = () => {}, signal,
@@ -62,11 +65,13 @@ export async function discoverCameras({
   const add = (ip, source, name, txt = {}) => {
     if (!alive()) return;
     if (!isPrivateLanIPv4(ip)) { dropped++; return; }
-    if (existingHosts.has(ip)) return;
     let candidate = candidates.get(ip);
     if (!candidate) {
       if (candidates.size >= 20) return;
       candidate = { id: idFor(ip), ip, name: cleanName(name, ip), rtspPort: ports.get(ip) || 554, sources: [] };
+      // A saved camera is kept and marked, not dropped (#950): leaving it out looked like a missed camera.
+      // The flag is present only when true, so a camera that is not saved carries no extra field.
+      if (existingHosts.has(ip)) candidate.alreadyAdded = true;
       candidates.set(ip, candidate);
     }
     if (!candidate.sources.includes(source)) candidate.sources.push(source);

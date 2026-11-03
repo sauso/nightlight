@@ -6,7 +6,7 @@ import { useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, signToken,
 useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const { default: router, setCameraDiscoveryScansForTest, existingCameraHostsForDiscovery } = await import('../src/routes/cameras.js');
-const { createScanManager } = await import('../src/lib/cameraDiscovery.js');
+const { createScanManager, discoverCameras } = await import('../src/lib/cameraDiscovery.js');
 const { demoGuard } = await import('../src/middleware/demoMode.js');
 let server, adminToken, caregiverToken;
 const scanId = '12345678-1234-1234-1234-123456789abc';
@@ -42,9 +42,20 @@ test('discovery routes require an admin and return an injected scan', async () =
   assert.equal((await get(scanId, adminToken)).status, 404);
 });
 
-test('saved camera hosts are derived from RTSP URLs for discovery dedupe', () => {
+test('a saved camera found by a scan is marked alreadyAdded, using the real saved-host query (#950)', async () => {
   makeCamera(db, { id: 'cam-existing', name: 'cam-a', extra: { rtsp_url: 'rtsp://user:pass@192.168.1.9:554/stream' } });
   assert.equal(existingCameraHostsForDiscovery().has('192.168.1.9'), true);
+  // The hosts come from the real database, the scan is the real discoverCameras with a fake network.
+  const callbacks = {};
+  const bonjour = { find: ({ type }, cb) => { callbacks[type] = cb; return { stop() {} }; }, destroy() {} };
+  const pending = discoverCameras({ createBonjour: () => bonjour, wsProbe: async () => {}, timeoutMs: 20,
+    existingHosts: existingCameraHostsForDiscovery() });
+  callbacks.thingino({ addresses: ['192.168.1.9'], name: 'cam-a' });
+  callbacks.thingino({ addresses: ['192.168.1.2'], name: 'cam-b' });
+  const { candidates } = await pending;
+  const saved = candidates.find((item) => item.ip === '192.168.1.9');
+  assert.equal(saved.alreadyAdded, true);
+  assert.equal('alreadyAdded' in candidates.find((item) => item.ip === '192.168.1.2'), false);
 });
 
 test('burst is limited and the public demo blocks both routes', async () => {
