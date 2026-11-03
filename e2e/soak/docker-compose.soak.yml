@@ -65,9 +65,9 @@ services:
       # be able to run at the same time — this stack is meant to be left up for days, not brought up
       # only for a single CI run.
       - "4100:4000"
-      # WebRTC media. Everything else MediaMTX listens on (RTSP 8554, HLS 8888, API 9997) is bound to
-      # 127.0.0.1 inside the container and reached through the backend's proxy on 4000 — this is the one
-      # port that must be published for video to actually play.
+      # WebRTC media. MediaMTX's RTSP, HLS and API listeners bind to 127.0.0.2 inside the container.
+      # The backend reaches them internally and proxies browser requests on 4000. Low latency WebRTC
+      # media also needs this UDP port published to play.
       - "8189:8189/udp"
     volumes:
       - ./data:/app/data

@@ -116,7 +116,7 @@ async function waitFor(pred, what, capMs = 25_000) {
 async function settle() {
   for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
 }
-const procsFor = (cam) => procs.filter((p) => p.args.includes(`rtsp://127.0.0.1:8554/${cam.mediamtx_path}`));
+const procsFor = (cam) => procs.filter((p) => p.args.includes(`rtsp://127.0.0.2:8554/${cam.mediamtx_path}`));
 const linesFor = (needle) => logger.getRecent().filter((l) => l.includes(needle));
 const stripTime = (l) => l.replace(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /, '');
 
@@ -141,7 +141,10 @@ function soundCam(id, { childId = null } = {}) {
 async function start(cam) {
   await startSoundDetector(cam);
   await waitFor(() => procsFor(cam).length === 1, `the ${cam.id} sound ffmpeg`);
-  return procsFor(cam)[0];
+  const proc = procsFor(cam)[0];
+  const transportAt = proc.args.indexOf('-rtsp_transport');
+  assert.deepEqual(proc.args.slice(transportAt, transportAt + 2), ['-rtsp_transport', 'tcp']);
+  return proc;
 }
 // One window per stdout read, window k produced (and received) at startMs + k * STEP_MS.
 function deliver(t, proc, windows, startMs) {

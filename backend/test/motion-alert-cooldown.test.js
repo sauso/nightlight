@@ -147,7 +147,7 @@ const camera = (id, extra = {}) => ({
   snapshot_url: null,
   ...extra,
 });
-const urlOf = (p) => `rtsp://127.0.0.1:8554/${p}`;
+const urlOf = (p) => `rtsp://127.0.0.2:8554/${p}`;
 const uniq = (label) => `${label}-${++seq}`;
 
 // Starts a detector (observation clock OFF, relaunch delay shrunk) and returns a rig to drive it. Frames go to

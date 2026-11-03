@@ -700,7 +700,7 @@ make the container a sandbox, and it does not stop everything:
   at a compromised app.
 - **All the media programs share one user.** One taken-over FFmpeg can signal or inspect the others, MediaMTX and
   other cameras' FFmpeg included.
-- **MediaMTX's control API (`127.0.0.1:9997`) and its RTSP port (`127.0.0.1:8554`) have no password.** A taken-over
+- **MediaMTX's control API (`127.0.0.2:9997`) and its RTSP port (`127.0.0.2:8554`) have no password.** A taken-over
   media program can add, change or remove stream paths, and read or publish a camera's stream. It cannot get a camera's
   address or password from them: MediaMTX is never told them (FFmpeg connects to the camera itself). A password on the
   API would not help while all the media programs share one user, which can already signal or inspect MediaMTX. The

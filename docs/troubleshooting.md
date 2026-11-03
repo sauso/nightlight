@@ -71,7 +71,7 @@ native apps, not the browser/PWA; see [Mobile apps](mobile.md#mobile-apps-androi
 For advanced MediaMTX path diagnostics, check its API from inside the container. It is loopback-only, so a browser cannot reach it directly:
 
 ```bash
-docker exec nightlight wget -qO- http://127.0.0.1:9997/v3/paths/list
+docker exec nightlight wget -qO- http://127.0.0.2:9997/v3/paths/list
 ```
 
 An empty `"items":[]` list when cameras are configured in the app can mean MediaMTX and the app's

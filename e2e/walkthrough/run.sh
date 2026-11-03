@@ -38,7 +38,7 @@ start "$EMPTY" 4102 "-e WALKTHROUGH_EMPTY=1"
 # Wait until both camera paths are publishing (the seeded app) and the empty app answers.
 i=0
 until [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4102/api/health || true)" = "200" ] \
-   && docker exec "$SEEDED" node -e "fetch('http://127.0.0.1:9997/v3/paths/list').then(r=>r.json()).then(j=>{const p=new Map((j.items||[]).map(x=>[x.name,x.ready]));process.exit(p.get('demo-avery')&&p.get('demo-riley')?0:1)}).catch(()=>process.exit(1))" 2>/dev/null; do
+   && docker exec "$SEEDED" node -e "fetch('http://127.0.0.2:9997/v3/paths/list').then(r=>r.json()).then(j=>{const p=new Map((j.items||[]).map(x=>[x.name,x.ready]));process.exit(p.get('demo-avery')&&p.get('demo-riley')?0:1)}).catch(()=>process.exit(1))" 2>/dev/null; do
   i=$((i + 1))
   [ "$i" -lt 90 ] || { echo "walkthrough stack did not become ready" >&2; docker logs "$SEEDED" | tail -20; exit 1; }
   sleep 1

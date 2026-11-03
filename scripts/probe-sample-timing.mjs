@@ -15,7 +15,7 @@
 // Then analyse the captured file (works anywhere Node runs, no container needed):
 //   node scripts/probe-sample-timing.mjs --analyse ./scratchpad/motion-day.jsonl
 //
-// Optional flags: --host 127.0.0.1:8554 (default), --block-every S --block-ms MS (busy-wait the
+// Optional flags: --host 127.0.0.2:8554 (default), --block-every S --block-ms MS (busy-wait the
 // probe's OWN event loop for MS every S seconds, to manufacture a Node-side backlog on purpose —
 // soak box only, see plan "Runs" §2), --relaunch (keep respawning ffmpeg every RESTART_DELAY_MS
 // after it exits, like the real detectors do, until --minutes elapses).
@@ -970,7 +970,7 @@ export function analyse(events) {
 // --- CLI -------------------------------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const out = { host: '127.0.0.1:8554' };
+  const out = { host: '127.0.0.2:8554' };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     switch (a) {

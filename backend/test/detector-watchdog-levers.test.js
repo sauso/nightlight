@@ -90,7 +90,7 @@ async function waitFor(pred, what, capMs = 25_000) {
     await sleep(10);
   }
 }
-const urlOf = (p) => `rtsp://127.0.0.1:8554/${p}`;
+const urlOf = (p) => `rtsp://127.0.0.2:8554/${p}`;
 const procsFor = (p) => procs.filter((x) => x.args.includes(urlOf(p)));
 const liveFor = (p) => procsFor(p).filter((x) => !x.ended);
 const linesFor = (needle) => logger.getRecent().filter((l) => l.includes(needle));

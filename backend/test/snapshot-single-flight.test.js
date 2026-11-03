@@ -303,7 +303,8 @@ describe('captureSnapshot: onExit fires once, when no ffmpeg is left running', S
     let exits = 0;
     const p = captureSnapshot('path_normal', { onExit: () => { exits += 1; } });
     const proc = spawned.at(-1);
-    assert.ok(proc.args.includes('rtsp://127.0.0.1:8554/path_normal'));
+    assert.ok(proc.args.includes('rtsp://127.0.0.2:8554/path_normal'));
+    assert.deepEqual(proc.args.slice(proc.args.indexOf('-rtsp_transport'), proc.args.indexOf('-rtsp_transport') + 2), ['-rtsp_transport', 'tcp']);
     proc.stdout.emit('data', JPEG_A);
     proc.finish(0);
     assert.deepEqual(await p, JPEG_A);
@@ -440,7 +441,7 @@ describe('captureSnapshot: onExit fires once, when no ffmpeg is left running', S
     assert.equal(await grab(c, { capture }), null); // timed out and SIGKILLed; still exiting
     assert.equal(await grab(c, { capture }), null);
     assert.equal(spawned.length - before, 1, 'a second ffmpeg started beside one that was still exiting');
-    assert.ok(spawned.at(-1).args.includes(`rtsp://127.0.0.1:8554/${c.mediamtx_path}`));
+    assert.ok(spawned.at(-1).args.includes(`rtsp://127.0.0.2:8554/${c.mediamtx_path}`));
 
     spawned.at(-1).finish(null, 'SIGKILL');
     await flush();
@@ -576,7 +577,7 @@ describe('GET /api/cameras/:id/snapshot through the real router', SUITE, () => {
       }
     });
     assert.equal(procs.length, 1, `${procs.length} ffmpeg processes for one still frame`);
-    assert.ok(procs[0].args.includes('rtsp://127.0.0.1:8554/path_cam-sf-route-ffmpeg'));
+    assert.ok(procs[0].args.includes('rtsp://127.0.0.2:8554/path_cam-sf-route-ffmpeg'));
     for (const g of got) {
       assert.equal(g.status, 200);
       assert.equal(g.type, 'image/jpeg');

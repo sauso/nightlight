@@ -1,5 +1,6 @@
 import { spawnChild } from './childEnv.js';
 import { killIfSpawned } from './processGuards.js';
+import { mediamtxRtspUrl } from './mediamtx.js';
 
 // How long to wait for audio packets before giving up on a probe.
 const PROBE_TIMEOUT_MS = 6000;
@@ -37,7 +38,7 @@ export function probeAudioFlowing(mediamtxPath) {
       '-read_intervals', '%+#20', // read up to 20 audio packets, then stop
       '-show_entries', 'packet=pts_time',
       '-of', 'csv=p=0',
-      '-i', `rtsp://127.0.0.1:8554/${mediamtxPath}`,
+      '-i', mediamtxRtspUrl(mediamtxPath),
     ];
     let proc;
     try {
@@ -69,7 +70,7 @@ export function probeAudioFlowing(mediamtxPath) {
     //    "confirmed no audio". Consequence that made it worth fixing: createAudioWatchdog restarts a camera's
     //    TRANSCODER after two `false` in a row (`null` resets its count), so a failed run could count toward a
     //    restart of a healthy transcoder. HOW OFTEN a run fails is limited, and stated plainly (#515 review): the
-    //    probe reads the LOCAL MediaMTX (127.0.0.1:8554, no authentication) and only runs on a path the API has
+    //    probe reads the LOCAL MediaMTX (127.0.0.2:8554, no authentication) and only runs on a path the API has
     //    just reported ready, so a refused connection or wrong credentials cannot happen here; a failure needs
     //    the path to drop between that status read and the probe, twice in a row. The late-drain fix above is
     //    plausibly the more common effect. Not verified (no ffprobe on the build machine): whether ffprobe exits
@@ -122,7 +123,7 @@ export function probeVideoFlowing(mediamtxPath) {
       '-read_intervals', `%+${VIDEO_PROBE_READ_SECONDS}`,
       '-show_entries', 'packet=codec_type',
       '-of', 'csv=p=0',
-      '-i', `rtsp://127.0.0.1:8554/${mediamtxPath}`,
+      '-i', mediamtxRtspUrl(mediamtxPath),
     ];
     let proc;
     try {

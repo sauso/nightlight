@@ -60,7 +60,7 @@ async function waitFor(pred, what, capMs = 15_000) {
   }
 }
 const lines = (needle) => logger.getRecent().filter((l) => l.includes(needle));
-const liveFor = (p) => procs.filter((x) => !x.ended && x.args.includes(`rtsp://127.0.0.1:8554/${p}`));
+const liveFor = (p) => procs.filter((x) => !x.ended && x.args.includes(`rtsp://127.0.0.2:8554/${p}`));
 const camera = (id) => ({
   id,
   name: `Eperm ${id}`,
