@@ -46,6 +46,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 - The Record button and other video controls no longer cover the camera in Picture-in-Picture. Fullscreen camera controls stay clear of the status and gesture bars in the Android app with the matching app update; older app builds still show the bars.
 
+### Security
+
+- #952 Turned off an unused listener in the bundled media server (MoQ, ports 8892 and 8893) that Nightlight never needed. Update to this version and restart the container. If you publish those ports or run on your own LAN address (host networking, ipvlan or macvlan), check that they no longer answer.
+
 ## [0.45.0] - 2026-11-01
 
 ### Added
