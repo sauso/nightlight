@@ -8,6 +8,8 @@ import { logger } from './logger.js';
 let loopbackExposed = false;
 const loopback4 = new BlockList();
 loopback4.addSubnet('127.0.0.0', 8, 'ipv4');
+const loopback6 = new BlockList();
+loopback6.addAddress('::1', 'ipv6');
 
 export function setLoopbackExposed(exposed) {
   const next = Boolean(exposed);
@@ -24,6 +26,8 @@ export function isLoopbackAddress(addr) {
   const family = typeof addr === 'string' ? isIP(addr) : 0;
   if (family === 4) return loopback4.check(addr, 'ipv4');
   // BlockList recognises both dotted and hex IPv4-mapped IPv6 spellings of 127/8.
-  if (family === 6) return addr === '::1' || loopback4.check(addr, 'ipv6');
+  // BlockList parses the address, so `0:0:0:0:0:0:0:1` matches too (Codex review of #960: a string
+  // compare against '::1' missed that spelling, which proxy-addr still reads as loopback).
+  if (family === 6) return loopback6.check(addr, 'ipv6') || loopback4.check(addr, 'ipv6');
   return false;
 }

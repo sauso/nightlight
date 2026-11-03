@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { logger } from './logger.js';
 import { isLoopbackAddress, isLoopbackExposed } from './loopbackExposure.js';
 
@@ -80,7 +81,9 @@ function guardLoopback(app) {
   // Express compiles this function when the setting is applied. Guard each hop at request time:
   // the daemon can start or stop while a connection and this app remain alive.
   const base = app.get('trust proxy fn');
-  app.set('trust proxy fn', (addr, i) => !(isLoopbackExposed() && isLoopbackAddress(addr)) && base(addr, i));
+  // A hop that is not a canonical IP at all (`0x7f000001`, `127.1`) is refused too while exposed: proxy-addr
+  // reads some of those as loopback, and a real socket or proxy always reports a canonical address.
+  app.set('trust proxy fn', (addr, i) => !(isLoopbackExposed() && (isLoopbackAddress(addr) || !isIP(addr))) && base(addr, i));
 }
 
 /** Apply it to an Express app, logging whatever the operator needs to know. */

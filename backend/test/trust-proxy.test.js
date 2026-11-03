@@ -28,9 +28,13 @@ test('#959 compiled trust function rejects every loopback spelling while exposed
     assert.equal(app.get('trust proxy'), parseTrustProxy(raw).value);
     const trust = app.get('trust proxy fn');
     setLoopbackExposed(true);
-    for (const addr of ['127.0.0.1', '127.0.0.2', '::1', '::ffff:127.0.0.1', '::ffff:7f00:1']) {
+    for (const addr of ['127.0.0.1', '127.0.0.2', '::1', '0:0:0:0:0:0:0:1', '::ffff:127.0.0.1', '::ffff:7f00:1']) {
       assert.equal(isLoopbackAddress(addr), true, `${addr} was not recognised`);
       assert.equal(trust(addr, 0), false, `${JSON.stringify(raw)} trusted ${addr}`);
+    }
+    // Non-canonical spellings only ever arrive as an X-Forwarded-For hop; proxy-addr reads some as loopback.
+    for (const addr of ['0x7f000001', '127.1', '2130706433']) {
+      assert.equal(trust(addr, 1), false, `${JSON.stringify(raw)} trusted non-canonical ${addr}`);
     }
     assert.equal(trust('::ffff:127.255.255.255', 1), false);
     setLoopbackExposed(false);

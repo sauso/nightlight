@@ -24,7 +24,7 @@ afterEach(() => setLoopbackExposed(false));
 
 test('#959 exposed loopback is unknown; unexposed loopback and a LAN client remain home', () => {
   // Fails on the old code: the loopback caller was always labelled home.
-  for (const ip of ['127.0.0.1', '127.0.0.2', '::1', '::ffff:127.0.0.1', '::ffff:7f00:1']) {
+  for (const ip of ['127.0.0.1', '127.0.0.2', '::1', '0:0:0:0:0:0:0:1', '::ffff:127.0.0.1', '::ffff:7f00:1']) {
     assert.equal(classifyClient({ ip, loopbackExposed: true }), 'unknown', ip);
     assert.equal(classifyClient({ ip, loopbackExposed: false }), 'home', ip);
   }
@@ -42,10 +42,18 @@ test('#959 admin remote access route labels an exposed loopback caller unknown',
   try {
     setLoopbackExposed(true);
     const url = `http://127.0.0.1:${server.address().port}`;
-    const { status, body } = await request(url, { headers: { 'x-forwarded-for': '192.168.1.50' } });
-    assert.equal(status, 200);
-    assert.equal(body.client.network, 'unknown');
-    assert.equal(body.trust_proxy, 'loopback');
+    // The measured userspace path: a peer arrives as 127.0.0.1 with NO forwarded header. Only the new
+    // loopback line in classifyClient can make this 'unknown'; with a header present the older
+    // untrusted-header branch would answer 'unknown' by itself (Opus review of #960: a header-only test
+    // survived a mutant that never read the flag).
+    const bare = await request(url);
+    assert.equal(bare.status, 200);
+    assert.equal(bare.body.client.network, 'unknown');
+    assert.equal(bare.body.trust_proxy, 'loopback');
+    const forged = await request(url, { headers: { 'x-forwarded-for': '192.168.1.50' } });
+    assert.equal(forged.body.client.network, 'unknown');
+    setLoopbackExposed(false);
+    assert.equal((await request(url)).body.client.network, 'home', 'flag off: a header-less loopback caller is home as before');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     setLoopbackExposed(false);

@@ -2,8 +2,8 @@
   {
     "label": "#959 exposed gate removed from proxy wrapper",
     "file": "backend/src/lib/trustProxy.js",
-    "find": "!(isLoopbackExposed() && isLoopbackAddress(addr))",
-    "replace": "!isLoopbackAddress(addr)",
+    "find": "!(isLoopbackExposed() && (isLoopbackAddress(addr) || !isIP(addr)))",
+    "replace": "!(isLoopbackAddress(addr) || !isIP(addr))",
     "expect": "killed",
     "tests": ["trust-proxy.test.js", "loopback-exposure.test.js"],
     "namePattern": "#959 flag off retains default loopback trust"
@@ -20,8 +20,8 @@
   {
     "label": "#959 mapped loopback address ignored",
     "file": "backend/src/lib/loopbackExposure.js",
-    "find": "if (family === 6) return addr === '::1' || loopback4.check(addr, 'ipv6');",
-    "replace": "if (family === 6) return addr === '::1';",
+    "find": "if (family === 6) return loopback6.check(addr, 'ipv6') || loopback4.check(addr, 'ipv6');",
+    "replace": "if (family === 6) return loopback6.check(addr, 'ipv6');",
     "expect": "killed",
     "tests": ["trust-proxy.test.js", "remoteAccess.test.js"],
     "namePattern": "#959 compiled trust function rejects every loopback spelling"
