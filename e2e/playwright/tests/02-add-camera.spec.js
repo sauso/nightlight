@@ -8,6 +8,9 @@ test('add a camera through the UI and see it go live on the grid', async ({ page
   await page.goto('/#/cameras');
 
   await page.getByRole('button', { name: '+ Add camera' }).click();
+  // #957: discovery cannot find the synthetic RTSP source. The separate manual
+  // card starts collapsed and can open without waiting for a scan (#950).
+  await page.getByRole('button', { name: /Add a camera manually/ }).click();
   await page.getByLabel('Name', { exact: true }).fill(CAMERA.name);
   await page.getByLabel('Camera IP address').fill(CAMERA.rtsp_host);
   await page.getByLabel('RTSP port').fill(CAMERA.rtsp_port);

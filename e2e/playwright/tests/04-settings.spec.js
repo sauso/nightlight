@@ -12,5 +12,5 @@ test('changing the temperature unit saves and persists', async ({ page }) => {
 
   // Reload from the server and confirm °F is the active choice.
   await page.goto('/#/settings/general');
-  await expect(page.getByRole('button', { name: '°F', exact: true })).toHaveClass(/font-btn--active/);
+  await expect(page.getByRole('button', { name: '°F', exact: true })).toHaveClass(/unit-btn--active/);
 });
