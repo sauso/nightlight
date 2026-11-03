@@ -9,6 +9,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.45.1] - 2026-11-03
+
+### Security
+
+- #952 Turned off an unused listener in the bundled media server (MoQ, ports 8892 and 8893) that Nightlight never needed. Update to this version and restart the container. If you publish those ports or run on your own LAN address (host networking, ipvlan or macvlan), check that they no longer answer.
+
 ## [0.45.0] - 2026-11-01
 
 ### Added

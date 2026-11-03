@@ -13,6 +13,9 @@ logLevel: info
 # interfaces, and RTSP has no authentication of its own - left at the default, anyone on
 # the LAN could watch (or potentially publish to) a camera directly, bypassing the app's
 # login entirely.
+# KNOWN, tolerated for now: MediaMTX 1.21.3 also opens the RTSP UDP media ports 8000/8001 on all
+# interfaces whatever rtspAddress says (#952 tracks closing them). They carry no stream without an
+# RTSP session, which only the loopback listener above can create.
 rtsp: yes
 rtspAddress: 127.0.0.1:8554
 
@@ -73,6 +76,15 @@ hlsAlwaysRemux: no
 hlsSegmentDuration: 1s
 hlsSegmentCount: 6
 hlsAllowOrigins: ["*"]
+
+# #952, measured 2026-11-03 with MediaMTX 1.21.3: MoQ listened on all interfaces
+# (TCP/UDP 8892, UDP 8893), and Nightlight does not use it. Keep it off explicitly.
+# Metrics, profiling and playback are also unused; pin their currently-off defaults
+# so a future MediaMTX default change cannot open another listener silently.
+moq: no
+metrics: no
+pprof: no
+playback: no
 
 # --- RTMP/SRT outputs not needed for this project ---
 rtmp: no

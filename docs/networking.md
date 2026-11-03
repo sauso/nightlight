@@ -18,6 +18,8 @@ Nightlight needs its own routable IP on your LAN so WebRTC has no NAT/ICE troubl
 | Host itself can reach the container | Yes (it *is* the host) | Yes | **No** (Linux kernel limitation); use ipvlan instead if a reverse proxy runs on the host |
 | Multiple instances on one host | Awkward: only one can hold port 4000 | Easy: each gets its own IP | Easy: each gets its own IP |
 
+For web and video, only the app port and WebRTC media UDP port are meant to be reachable; the media server's other listeners are off or loopback-only, except its known RTSP media UDP ports 8000/8001, which remain open pending hardening.
+
 Either way, the app is served on port **4000** (change it with the `PORT` environment variable if you need to). For **remote / internet** access, see [Remote / internet access](remote-access.md#remote--internet-access-watching-from-outside-your-home-network); that part is the same in both modes.
 
 ### Running more than one instance (e.g. staging + production)
