@@ -89,7 +89,7 @@ export async function detectorExecBackoffSuite(legName) {
 
   describe(`#553 the ${legName} detector backs off when ffmpeg cannot be run`, () => {
     test(`${legName}: one line for a run of 127s, relaunches at 5, 10, 20 s; an ordinary exit is 5 s again`, async () => {
-      const mine = () => procs.filter((p) => p.args.includes(`rtsp://127.0.0.1:8554/${cam.mediamtx_path}`));
+      const mine = () => procs.filter((p) => p.args.includes(`rtsp://127.0.0.2:8554/${cam.mediamtx_path}`));
       const count = () => mine().length;
       const prefix = `[${leg.tag}:${cam.mediamtx_path}]`;
       DetectorAs = Exec127Ffmpeg;

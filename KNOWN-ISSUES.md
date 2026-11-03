@@ -172,7 +172,7 @@ could disconnect a stream that was still working.
 **What to do:** check the streaming server from inside the container (the same check as in the
 the [troubleshooting guide](docs/troubleshooting.md)):
 ```bash
-docker exec nightlight wget -qO- http://127.0.0.1:9997/v3/paths/list
+docker exec nightlight wget -qO- http://127.0.0.2:9997/v3/paths/list
 ```
 If that hangs too, MediaMTX is wedged. Since issue #479 Nightlight restarts it for you: every 30 seconds
 it asks MediaMTX's API one question, and when **nothing** has answered for **3 minutes in a row** it stops
