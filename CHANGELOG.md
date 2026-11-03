@@ -46,6 +46,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 - The Record button and other video controls no longer cover the camera in Picture-in-Picture. Fullscreen camera controls stay clear of the status and gesture bars in the Android app with the matching app update; older app builds still show the bars.
 
+### Security
+
+- #952 Turned off the bundled media server's unused MoQ listener (ports 8892 and 8893). Only the app port and WebRTC media port are meant to be reachable; RTSP media UDP ports 8000/8001 remain open pending follow-up hardening. Operators using host networking should update and restart.
+
 ## [0.45.0] - 2026-11-01
 
 ### Added
