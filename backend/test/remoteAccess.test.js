@@ -1,6 +1,7 @@
-import { test, after } from 'node:test';
+import { test, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import express from 'express';
 import {
   useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, signToken, mountRouter, call,
 } from './helpers/harness.js';
@@ -8,6 +9,8 @@ import {
 useTempDataDir();
 const { default: db } = await import('../src/db.js');
 const { classifyClient } = await import('../src/lib/remoteAccess.js');
+const { applyTrustProxy } = await import('../src/lib/trustProxy.js');
+const { setLoopbackExposed } = await import('../src/lib/loopbackExposure.js');
 const { createRemoteAccessRouter } = await import('../src/routes/remoteAccess.js');
 const { getAdvertisedHosts } = await import('../src/lib/mediamtxProcess.js');
 
@@ -17,6 +20,45 @@ const tokenFor = (user) => signToken({ id: user.id, username: user.username, rol
 const adminToken = tokenFor(admin);
 const caregiverToken = tokenFor(caregiver);
 after(() => { db.close(); cleanupTempDataDirs(); });
+afterEach(() => setLoopbackExposed(false));
+
+test('#959 exposed loopback is unknown; unexposed loopback and a LAN client remain home', () => {
+  // Fails on the old code: the loopback caller was always labelled home.
+  for (const ip of ['127.0.0.1', '127.0.0.2', '::1', '0:0:0:0:0:0:0:1', '::ffff:127.0.0.1', '::ffff:7f00:1']) {
+    assert.equal(classifyClient({ ip, loopbackExposed: true }), 'unknown', ip);
+    assert.equal(classifyClient({ ip, loopbackExposed: false }), 'home', ip);
+  }
+  assert.equal(classifyClient({ ip: '192.168.1.50', trustedProxyChain: true, loopbackExposed: true }), 'home');
+});
+
+test('#959 admin remote access route labels an exposed loopback caller unknown', async () => {
+  // Fails on the old code. Configure once: withRoute's per-request app.set would replace the wrapper.
+  const app = express();
+  applyTrustProxy(app);
+  app.use('/api/remote-access', createRemoteAccessRouter({ env: {}, resolver: () => { throw new Error('unexpected DNS'); } }));
+  const server = await new Promise((resolve) => {
+    const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
+  });
+  try {
+    setLoopbackExposed(true);
+    const url = `http://127.0.0.1:${server.address().port}`;
+    // The measured userspace path: a peer arrives as 127.0.0.1 with NO forwarded header. Only the new
+    // loopback line in classifyClient can make this 'unknown'; with a header present the older
+    // untrusted-header branch would answer 'unknown' by itself (Opus review of #960: a header-only test
+    // survived a mutant that never read the flag).
+    const bare = await request(url);
+    assert.equal(bare.status, 200);
+    assert.equal(bare.body.client.network, 'unknown');
+    assert.equal(bare.body.trust_proxy, 'loopback');
+    const forged = await request(url, { headers: { 'x-forwarded-for': '192.168.1.50' } });
+    assert.equal(forged.body.client.network, 'unknown');
+    setLoopbackExposed(false);
+    assert.equal((await request(url)).body.client.network, 'home', 'flag off: a header-less loopback caller is home as before');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    setLoopbackExposed(false);
+  }
+});
 
 const cases = [
   ['127.0.0.1', 'home'], ['127.255.255.255', 'home'], ['::1', 'home'],
