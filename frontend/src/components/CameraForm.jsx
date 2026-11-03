@@ -49,7 +49,10 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
   const cam = isNew ? null : cameras.find((c) => c.id === id);
 
   const draftKey = useDraftKey(isNew ? 'camera:new' : `camera:${id}`);
-  const [restoredDraft] = useState(() => (isNew ? loadDraft(draftKey, DRAFT_FIELDS) : null));
+  // A prefill (a camera picked from the search, then Advanced settings) supersedes any stored draft: the
+  // shared 'camera:new' draft belongs to whatever was typed last, which may be ANOTHER camera's address and
+  // username (found in the #951 review).
+  const [restoredDraft] = useState(() => (isNew && !prefill ? loadDraft(draftKey, DRAFT_FIELDS) : null));
   const [form, setForm] = useState(() => ({ ...EMPTY_FORM, ...restoredDraft, ...(initialChildId ? { child_id: initialChildId } : {}) }));
   const appliedPrefill = useRef(null);
   const picked = prefill;

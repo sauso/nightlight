@@ -16,6 +16,12 @@ import CameraForm from './CameraForm.jsx';
 // NOTHING typed on the connect card is stored: no draft, no localStorage, no sessionStorage. The password lives
 // in this component's state until the request is sent (the full form keeps the same rule, see DRAFT_FIELDS in
 // CameraForm.jsx).
+// Messages that mean the CAMERA REFUSED THE LOGIN (see friendlyAuthError and the stream-URI fault in
+// backend/src/lib/onvif.js): typing the stream details by hand would not help, and retrying risks a lockout. The
+// 'No ONVIF media profiles found ... Check the IP, port, and ONVIF username/password' message is deliberately NOT
+// here: it also covers a camera without ONVIF, which the manual route does solve.
+const LOGIN_PROBLEM = /incorrect|rejected|locked|lock the camera|wrong attempts|not ?authori[sz]ed|unauthori[sz]ed|requires authori[sz]ation|authentication|auth failed/i;
+
 export default function AddCameraFlow({ initialChildId = '', onCreated, autoStart = false }) {
   const [selected, setSelected] = useState(null);
   const [manualOpen, setManualOpen] = useState(false);
@@ -122,7 +128,7 @@ function ConnectCard({ candidate, initialChildId, onCreated, onAdvanced }) {
         setError(err.message);
         // The probe route returns plain messages for both login rejection and unavailable ONVIF. Its
         // login messages explicitly warn about lockouts; only an unavailable probe offers manual details.
-        setCanEnterDetails(!/incorrect|rejected|locked|lock the camera|lock the camera out|wrong attempts/i.test(err.message));
+        setCanEnterDetails(!LOGIN_PROBLEM.test(err.message));
       }
     } finally {
       if (mounted.current) setBusy(false);
@@ -138,21 +144,21 @@ function ConnectCard({ candidate, initialChildId, onCreated, onAdvanced }) {
       <p className="camera-connect__address">{candidate.ip}</p>
       <div className="field">
         <label htmlFor="connect-name">Name</label>
-        <input id="connect-name" value={name} onChange={(event) => setName(event.target.value)} required />
+        <input id="connect-name" value={name} onChange={(event) => setName(event.target.value)} required disabled={busy} />
       </div>
       <div className="field">
         <label htmlFor="connect-user">Username</label>
-        <input id="connect-user" value={username} onChange={loginChanged(setUsername)}
+        <input id="connect-user" value={username} onChange={loginChanged(setUsername)} disabled={busy}
           autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
       </div>
       <div className="field">
         <label htmlFor="connect-pass">Password</label>
-        <input id="connect-pass" type="password" value={password} onChange={loginChanged(setPassword)}
+        <input id="connect-pass" type="password" value={password} onChange={loginChanged(setPassword)} disabled={busy}
           autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
       </div>
       {askChild && <div className="field">
         <label htmlFor="connect-child">Child</label>
-        <select id="connect-child" value={chosenChild} onChange={(event) => setChosenChild(event.target.value)}>
+        <select id="connect-child" value={chosenChild} onChange={(event) => setChosenChild(event.target.value)} disabled={busy}>
           <option value="">Unassigned</option>
           {kids.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}
         </select>

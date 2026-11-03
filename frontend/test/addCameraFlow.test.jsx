@@ -215,3 +215,100 @@ test('leaving during the probe never saves or calls onCreated', async () => {
   expect(api.post.mock.calls.filter(([path]) => path === '/cameras')).toHaveLength(0);
   expect(onCreated).not.toHaveBeenCalled();
 });
+
+// ---- #951 review: the cases the first review round found or the mutants showed were unguarded ----
+
+const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
+
+test('Advanced settings for a second camera does not inherit the first camera\'s stored draft (#951 review)', async () => {
+  const second = { id: 'three', ip: '192.168.1.4', name: 'cam-c', rtspPort: 554, sources: ['onvif'] };
+  api.get.mockResolvedValue({ done: true, candidates: [cams[0], second], endsAt: Date.now() + 30000 });
+  const { user, list } = await found();
+  await user.click(within(list).getAllByRole('button')[0]);
+  await user.type(within(screen.getByRole('form', { name: `Connect ${cams[0].name}` })).getByLabelText('Username'), 'alice');
+  await user.click(screen.getByRole('button', { name: 'Advanced settings' }));
+  expect(screen.getByLabelText('Username')).toHaveValue('alice');
+  await user.click(within(list).getAllByRole('button')[1]);
+  await user.click(within(screen.getByRole('form', { name: 'Connect cam-c' })).getByRole('button', { name: 'Advanced settings' }));
+  expect(screen.getByLabelText('Camera IP address')).toHaveValue('192.168.1.4');
+  expect(screen.getByLabelText('Username')).toHaveValue('');
+  expect(screen.queryByText(/Unsaved changes restored/)).toBeNull();
+});
+
+test('the login fields are locked while the camera is being contacted, so the saved login is the one probed (#951 review)', async () => {
+  const probe = deferred();
+  api.post.mockImplementation((path) => {
+    if (path === '/cameras/discover') return Promise.resolve({ scanId: 'scan-1', endsAt: Date.now() + 30000 });
+    if (path === '/cameras/onvif-probe') return probe.promise;
+    return Promise.resolve(saved);
+  });
+  const { user, list, onCreated } = await found();
+  await user.click(within(list).getAllByRole('button')[0]);
+  const form = screen.getByRole('form', { name: `Connect ${cams[0].name}` });
+  await user.type(within(form).getByLabelText('Username'), 'old');
+  await user.click(within(form).getByRole('button', { name: 'Add camera' }));
+  expect(await screen.findByLabelText('Username')).toBeDisabled();
+  expect(screen.getByLabelText('Password')).toBeDisabled();
+  expect(screen.getByLabelText('Name')).toBeDisabled();
+  await act(async () => { probe.resolve(answer); });
+  await waitFor(() => expect(onCreated).toHaveBeenCalled());
+  const save = api.post.mock.calls.find(([path]) => path === '/cameras');
+  expect(save[1].rtsp_username).toBe('old');
+});
+
+test.each([
+  ['Connected over ONVIF but could not get the stream URL: NotAuthorized', false],
+  ['The ONVIF username or password appears to be incorrect. Double-check them before retrying — repeated wrong attempts can temporarily lock the camera out.', false],
+  ['No ONVIF media profiles found at 192.168.1.2:80. Check the IP, port, and ONVIF username/password.', true],
+])('the manual route is offered only when the login was not the problem: %s (#951 review)', async (message, offered) => {
+  api.post.mockImplementation((path) => path === '/cameras/onvif-probe'
+    ? Promise.reject(new Error(message)) : Promise.resolve({ scanId: 'scan-1', endsAt: Date.now() + 30000 }));
+  const { user, list } = await found();
+  await user.click(within(list).getAllByRole('button')[0]);
+  await user.click(screen.getByRole('button', { name: 'Add camera' }));
+  await screen.findByRole('alert');
+  expect(!!screen.queryByRole('button', { name: 'Enter the stream details yourself' })).toBe(offered);
+});
+
+test('changing the login after a refused save probes the camera again with the new login (#951 review)', async () => {
+  let saves = 0;
+  api.post.mockImplementation((path) => {
+    if (path === '/cameras/discover') return Promise.resolve({ scanId: 'scan-1', endsAt: Date.now() + 30000 });
+    if (path === '/cameras/onvif-probe') return Promise.resolve(answer);
+    if (path === '/cameras' && saves++ === 0) {
+      const err = new Error('Camera stream refused the connection');
+      err.data = { needsConfirm: true };
+      return Promise.reject(err);
+    }
+    return Promise.resolve(saved);
+  });
+  const { user, list, onCreated } = await found();
+  await user.click(within(list).getAllByRole('button')[0]);
+  const form = screen.getByRole('form', { name: `Connect ${cams[0].name}` });
+  await user.type(within(form).getByLabelText('Password'), 'wrong');
+  await user.click(within(form).getByRole('button', { name: 'Add camera' }));
+  await screen.findByRole('button', { name: 'Save anyway' });
+  await user.clear(within(form).getByLabelText('Password'));
+  await user.type(within(form).getByLabelText('Password'), 'right');
+  await user.click(within(form).getByRole('button', { name: 'Add camera' }));
+  await waitFor(() => expect(onCreated).toHaveBeenCalled());
+  const probes = api.post.mock.calls.filter(([path]) => path === '/cameras/onvif-probe');
+  expect(probes).toHaveLength(2);
+  expect(probes[1][1].password).toBe('right');
+});
+
+test('leaving the page while the camera is being saved does not call onCreated (#951 review)', async () => {
+  const save = deferred();
+  api.post.mockImplementation((path) => {
+    if (path === '/cameras/discover') return Promise.resolve({ scanId: 'scan-1', endsAt: Date.now() + 30000 });
+    if (path === '/cameras/onvif-probe') return Promise.resolve(answer);
+    return save.promise;
+  });
+  const { user, list, onCreated, unmount } = await found();
+  await user.click(within(list).getAllByRole('button')[0]);
+  await user.click(screen.getByRole('button', { name: 'Add camera' }));
+  await waitFor(() => expect(api.post.mock.calls.some(([path]) => path === '/cameras')).toBe(true));
+  unmount();
+  await act(async () => { save.resolve(saved); });
+  expect(onCreated).not.toHaveBeenCalled();
+});
