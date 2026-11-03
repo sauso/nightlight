@@ -76,10 +76,6 @@ Behind a proxy, every request arrives from the **proxy's** address unless you te
 it. The default (`loopback`) only trusts a proxy on `127.0.0.1` — and SWAG reaches Nightlight by its
 LAN IP, so with the [SWAG setup](#running-behind-a-reverse-proxy-eg-swag-on-unraid) **it is not trusted and every remote visitor looks like one client**.
 
-While a tunnel daemon is attached, Nightlight ignores `X-Forwarded-For` from any loopback hop, or any hop that is not a normal IP address, whatever `TRUST_PROXY` says. A proxy that reaches Nightlight by a LAN address is unaffected as long as no hop in its chain is loopback. Tailnet peers then share one per-address login bucket, so one noisy peer can use that bucket for others. The separate per-account throttle still applies.
-
-Tailscale cannot be turned on until an admin account exists. Finish first-admin setup on your home network before enabling it: setup cannot be completed through a tunnel. A same-host proxy that reaches Nightlight over loopback also cannot finish setup while the tunnel daemon is attached.
-
 Set it to the address your proxy connects *from*:
 
 ```bash
@@ -106,6 +102,14 @@ is used instead — a typo here will never stop the app starting.
 **You do not have to set it.** Login attempts are limited per account *and* per source, so even with
 every remote user sharing the proxy's address, one person mistyping their password cannot lock anyone
 else out. Setting `TRUST_PROXY` makes the per-source half meaningful as well.
+
+### While a tunnel daemon is attached (planned Tailscale support)
+
+Nothing in a released version attaches a tunnel daemon yet; these rules are in place ahead of it.
+
+- Nightlight ignores `X-Forwarded-For` from any loopback hop, or any hop that is not a normal IP address, whatever `TRUST_PROXY` says. A proxy that reaches Nightlight by a LAN address is unaffected as long as no hop in its chain is loopback.
+- Remote peers then share one per-address login bucket, so one noisy peer can use that bucket for others. The separate per-account throttle still applies.
+- Tailscale will not turn on until an admin account exists, and first-admin setup cannot be completed through a tunnel. Finish setup on your home network first. A same-host proxy that reaches Nightlight over loopback also cannot finish setup while the tunnel daemon is attached.
 
 ### `STUN_SERVERS` — which STUN servers Low latency (WebRTC) uses
 

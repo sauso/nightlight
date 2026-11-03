@@ -1,7 +1,7 @@
 import { test, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  useTempDataDir, cleanupTempDataDirs, makeUser, mountRouter, call,
+  useTempDataDir, cleanupTempDataDirs, makeUser, mountRouter, mountRouterTrustingProxy, call,
 } from './helpers/harness.js';
 
 useTempDataDir();
@@ -59,10 +59,14 @@ test('#963 no users or a lone caregiver blocks Tailscale until an admin exists',
 });
 
 test('#963 exposed loopback setup refuses forged forwarded LAN address without a user or session', async () => {
+  const hashesBefore = passwordWorkerStats().submitted;
   try {
     setLoopbackExposed(true);
     const result = await setup({ 'x-forwarded-for': '192.168.1.50' });
     assert.equal(result.status, 403);
+    // The refusal must come BEFORE the costly bcrypt hash, or a remote peer can make the server hash
+    // for free; the after-hash guard alone would still answer 403 (Codex review of #964).
+    assert.equal(passwordWorkerStats().submitted, hashesBefore, 'a refused setup still paid for a password hash');
     assert.deepEqual(result.body, {
       error: 'Finish setup from a device on your home network, not through Tailscale.',
     });
@@ -96,8 +100,29 @@ test('#963 completed setup keeps its existing 400 even while exposed', async () 
 test('#963 exposed LAN caller is allowed by the setup guard', () => {
   // The harness listens on loopback only; an injected LAN req.ip pins the guard's direction.
   assert.equal(setupBlockedByExposedLoopback(true, '192.168.1.50'), false);
-  assert.equal(setupBlockedByExposedLoopback(true, '127.0.0.1'), true);
   assert.equal(setupBlockedByExposedLoopback(false, '127.0.0.1'), false);
+  // index.js listens with app.listen(PORT), which is dual-stack, so a peer relayed to 127.0.0.1 can arrive
+  // as ::ffff:127.0.0.1 (Opus review of #964: a guard comparing only '127.0.0.1' passed every other test).
+  for (const loopback of ['127.0.0.1', '::ffff:127.0.0.1', '::1', '0:0:0:0:0:0:0:1']) {
+    assert.equal(setupBlockedByExposedLoopback(true, loopback), true, loopback);
+  }
+});
+
+test('#963 exposed setup from a LAN address is allowed by the route itself', async () => {
+  // mountRouterTrustingProxy has no Gate A wrapper, so a forwarded address becomes req.ip: the route, not
+  // just the predicate, must let a LAN caller through (Opus review of #964: a refuse-everyone mutant survived).
+  const lan = await mountRouterTrustingProxy('/api/auth', authRouter);
+  try {
+    setLoopbackExposed(true);
+    const result = await call(`${lan.url}/api/auth/setup`, {
+      method: 'POST', body: setupBody, headers: { 'x-forwarded-for': '192.168.1.50' },
+    });
+    assert.equal(result.status, 200);
+    assert.equal(count('users'), 1);
+  } finally {
+    setLoopbackExposed(false);
+    await lan.close();
+  }
 });
 
 test('#963 flag turning on during the setup hash refuses the insert', async () => {
