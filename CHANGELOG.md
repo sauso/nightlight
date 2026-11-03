@@ -11,7 +11,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
-- #945 Admins can search for nearby Thingino and ONVIF cameras in setup or Add camera, then fill the address and name from a suggestion before entering a login. Searches use LAN multicast and may miss cameras across VLANs, on Docker's default bridge, or cameras that do not advertise; manual entry remains available.
+- #945 Admins can search for nearby Thingino and ONVIF cameras in setup or Add camera. Each result has its own card; pick one and enter its login while Nightlight finds the stream settings. Cameras already saved appear as greyed **Already added** cards. Searches use LAN multicast and may miss cameras across VLANs, on Docker's default bridge, or cameras that do not advertise; a separate manual card remains available.
 
 - #941 First-run setup guide for admins on fresh installations: add a child and assigned camera, check that video frames reach the browser, or finish with limited setup and return later from Settings → Setup & diagnostics. Save and exit resumes at the saved step without redirecting again. A confirmed picture check lasts ten minutes from confirmation and must be repeated after a server restart. Upgraded and restored installs, even those without an admin account yet, are marked as already set up and are not redirected.
 

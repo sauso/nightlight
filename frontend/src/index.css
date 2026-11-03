@@ -2933,12 +2933,40 @@ input[type='range'] {
 .setup-checklist { list-style: none; padding: 0; margin: 8px 0; }
 .setup-checklist li { padding: 9px 0 9px 30px; position: relative; }
 .setup-checklist li::before { content: '✓'; position: absolute; left: 2px; color: var(--accent-text); font-weight: 800; }
-.setup-manual { border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
-.camera-discovery { padding: 14px; margin-bottom: 14px; }
-.camera-discovery__row { width: 100%; background: none; color: var(--text-primary); text-align: left; cursor: pointer; font: inherit; }
-.camera-discovery__row span:first-child { min-width: 0; overflow-wrap: anywhere; }
-.setup-manual__toggle { display: grid; gap: 3px; width: 100%; min-height: 44px; border: 0; background: none; color: var(--text-primary); text-align: left; font: inherit; cursor: pointer; }
-.setup-manual__toggle span { color: var(--text-secondary); font-size: 13px; }
+/* Add a camera (#950): the search card, one card per camera found, the login card, the manual card. The camera
+   cards follow the 12px card of the design language and the saved-server rows of the mobile app: a full-width
+   tappable row, name bold on the left, address muted under it, a small badge and a chevron on the right. */
+.camera-discovery { padding: 14px; margin-bottom: 12px; }
+.camera-discovery__title { margin: 0 0 10px; font-size: 16px; font-weight: 700; }
+.camera-list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+.camera-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; min-height: 44px; padding: 12px 14px; box-sizing: border-box;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px;
+  color: var(--text-primary); font: inherit; text-align: left; cursor: pointer;
+}
+.camera-card.is-selected { border-color: var(--accent); }
+/* An already-saved camera: greyed and not tappable. It is still listed so it does not look like a missed camera. */
+.camera-card.is-added { opacity: 0.55; cursor: default; }
+/* min-width 0 lets the text column shrink inside the flex row, so a long product string ends in an ellipsis
+   instead of pushing the badge off the card or wrapping in the middle of a word. */
+.camera-card__text { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.camera-card__name { font-size: 15px; font-weight: 700; }
+.camera-card__line { font-size: 13px; color: var(--text-secondary); }
+.camera-card__name, .camera-card__line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.camera-card__side { display: flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--text-secondary); }
+.camera-card__chevron { opacity: 0.45; }
+.camera-card__chevron.is-open { transform: rotate(90deg); }
+.camera-connect { padding: 14px; }
+.camera-connect__title { margin: 0; font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.camera-connect__address { margin: 2px 0 12px; font-size: 13px; color: var(--text-secondary); }
+.camera-connect__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.camera-connect__actions .btn { width: auto; flex: 1 1 140px; }
+.camera-connect__advanced { min-height: 44px; padding: 0 8px; }
+.camera-manual { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 14px; }
+.camera-manual .camera-card { border: 0; background: none; }
+.camera-manual__form { padding: 0 14px 14px; }
+.camera-manual__form .app-main { padding: 0; max-width: none; }
 .setup-summary { display: grid; gap: 10px; }
 .setup-summary div { display: flex; justify-content: space-between; gap: 10px; padding: 12px; background: var(--bg-elevated-2); border-radius: 10px; }
 .setup-main--terminal { width: 100%; }

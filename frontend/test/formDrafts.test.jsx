@@ -212,6 +212,7 @@ describe('camera form', () => {
     const { user, camerasValue } = mountCamera('new');
     let finishRefresh;
     camerasValue.refresh.mockImplementation(() => new Promise((resolve) => { finishRefresh = resolve; }));
+    await user.click(screen.getByRole('button', { name: /Add a camera manually/ }));
     await user.type(await screen.findByLabelText('Name'), 'Playroom');
     await user.type(screen.getByLabelText('Camera IP address'), '10.0.0.9');
     expect(screen.getByText('Unsaved changes.')).toBeInTheDocument();

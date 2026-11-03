@@ -18,8 +18,10 @@ vi.mock('../src/components/CameraTile.jsx', () => ({ default: ({ frameTestId, on
   <button onClick={() => onFrames(frameTestId)}>Present video frames</button> }));
 vi.mock('../src/components/CameraForm.jsx', () => ({ default: ({ onCreated, prefill }) =>
   <button onClick={() => onCreated({ id: 'camera-1' })}>Add camera form {prefill?.host || ''}</button> }));
-vi.mock('../src/components/CameraDiscovery.jsx', () => ({ default: ({ onPick }) =>
-  <button onClick={() => onPick({ ip: '192.168.1.2', name: 'cam-a', rtspPort: 8554 })}>Pick cam-a</button> }));
+vi.mock('../src/components/CameraDiscovery.jsx', () => ({ default: ({ onPick, children }) => <>
+  <button onClick={() => onPick({ id: 'cam-a', ip: '192.168.1.2', name: 'cam-a', rtspPort: 8554 })}>Pick cam-a</button>
+  {children}
+</> }));
 
 const child = { id: 'child-1', name: 'A child' };
 const camera = { id: 'camera-1', name: 'Camera', child_id: child.id, disabled: false };
@@ -183,10 +185,13 @@ describe('setup steps', () => {
     expect(await screen.findByRole('button', { name: 'Add camera form' })).toBeInTheDocument();
   });
 
-  test('picking a suggestion opens the shared form with its address', async () => {
+  test('picking a suggestion opens the login card, with advanced settings in the manual card', async () => {
     state = initial('in_progress', 'camera');
     const view = wizard();
     await view.user.click(await screen.findByRole('button', { name: 'Pick cam-a' }));
+    expect(screen.getByRole('form', { name: 'Connect cam-a' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Camera IP address')).toBeNull();
+    await view.user.click(screen.getByRole('button', { name: 'Advanced settings' }));
     expect(screen.getByRole('button', { name: 'Add camera form 192.168.1.2' })).toBeInTheDocument();
   });
 

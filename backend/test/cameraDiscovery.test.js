@@ -24,8 +24,15 @@ test('merges private candidates, sanitises LAN text, and keeps RTSP separate fro
     port: 80, txt: { product: 'Thingino 1', streamer: '<script>' } });
   bonjour.callbacks.thingino({ addresses: ['192.168.1.9'], name: 'already-added' });
   const result = await resultPromise;
-  assert.equal(result.candidates.length, 1);
+  // A saved camera is kept and marked (#950), not omitted: the screen shows it greyed as "Already added".
+  assert.equal(result.candidates.length, 2);
+  const saved = result.candidates.find((item) => item.ip === '192.168.1.9');
+  assert.equal(saved.alreadyAdded, true);
+  assert.equal(saved.name, 'already-added');
   assert.deepEqual(result.candidates[0].sources.sort(), ['mdns', 'onvif']);
+  // The flag exists only on a saved camera: a camera that is not saved carries no alreadyAdded field at all.
+  assert.equal('alreadyAdded' in result.candidates[0], false);
+  assert.equal(updates.some((item) => item.ip === '192.168.1.9' && item.alreadyAdded === true), true);
   assert.equal(result.candidates[0].rtspPort, 8554);
   assert.equal(result.candidates[0].name, 'cam-a');
   assert.equal(result.candidates[0].product, 'Thingino 1');
@@ -107,6 +114,18 @@ test('first twenty candidates are kept, with no extra browser records promoted',
   const result = await pending;
   assert.equal(result.candidates.length, 20);
   assert.equal(result.candidates.at(-1).ip, '10.0.0.20');
+});
+
+test('a saved camera counts toward the twenty cap and a saved public address is still dropped (#950)', async () => {
+  const bonjour = bonjourFixture();
+  const pending = discoverCameras({ createBonjour: () => bonjour, wsProbe: async () => {}, timeoutMs: 5,
+    existingHosts: new Set(['10.0.0.1', '10.0.0.2', '8.8.8.8']) });
+  bonjour.callbacks.thingino({ addresses: ['8.8.8.8'], name: 'public' });
+  for (let i = 1; i <= 25; i++) bonjour.callbacks.thingino({ addresses: [`10.0.0.${i}`], name: `cam-${i}` });
+  const result = await pending;
+  assert.equal(result.candidates.length, 20);
+  assert.deepEqual(result.candidates.filter((item) => item.alreadyAdded).map((item) => item.ip), ['10.0.0.1', '10.0.0.2']);
+  assert.equal(result.candidates.some((item) => item.ip === '8.8.8.8'), false);
 });
 
 test('mDNS failure does not discard ONVIF results', async () => {

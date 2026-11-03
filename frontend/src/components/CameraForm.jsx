@@ -15,7 +15,7 @@ import { useDetectionSave, retry } from '../lib/detectionSaves.js';
 import { loadState } from '../lib/loadState.js';
 import LoadFailed from '../components/LoadFailed.jsx';
 import NotFound from '../pages/NotFound.jsx';
-import CameraDiscovery from './CameraDiscovery.jsx';
+import { probeCamera, buildCameraPayload } from '../lib/cameraConnect.js';
 import { TITLES as DETECTION_TITLES } from '../pages/DetectionSettings.jsx';
 
 const minToHHMM = (m) => `${String(Math.floor((m || 0) / 60)).padStart(2, '0')}:${String((m || 0) % 60).padStart(2, '0')}`;
@@ -37,7 +37,10 @@ const DRAFT_FIELDS = [
 // camera; /cameras/:id edits one. Only connection/identity fields live here — motion, sound and
 // schedule are their own screens (see DetectionSettings.jsx), reachable from the Detection rows
 // below on an existing camera. Admin-only (gated by the route in App.jsx).
-export default function CameraForm({ onCreated, initialChildId = '', embedded = false, prefill }) {
+// requireChild: the wizard needs the camera assigned to the child it is setting up, so an embedded form insists on
+// one by default. The Add camera screen embeds this form too (as its manual card) and a camera may be left
+// unassigned there, as it always could; AddCameraFlow turns the requirement off when it has no child to offer (#950).
+export default function CameraForm({ onCreated, initialChildId = '', embedded = false, prefill, requireChild = embedded }) {
   const { id } = useParams();
   const isNew = !id || id === 'new';
   const navigate = useNavigate();
@@ -46,16 +49,20 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
   const cam = isNew ? null : cameras.find((c) => c.id === id);
 
   const draftKey = useDraftKey(isNew ? 'camera:new' : `camera:${id}`);
-  const [restoredDraft] = useState(() => (isNew ? loadDraft(draftKey, DRAFT_FIELDS) : null));
+  // A prefill (a camera picked from the search, then Advanced settings) supersedes any stored draft: the
+  // shared 'camera:new' draft belongs to whatever was typed last, which may be ANOTHER camera's address and
+  // username (found in the #951 review).
+  const [restoredDraft] = useState(() => (isNew && !prefill ? loadDraft(draftKey, DRAFT_FIELDS) : null));
   const [form, setForm] = useState(() => ({ ...EMPTY_FORM, ...restoredDraft, ...(initialChildId ? { child_id: initialChildId } : {}) }));
-  const [selectedPrefill, setSelectedPrefill] = useState(null);
   const appliedPrefill = useRef(null);
-  const picked = prefill || selectedPrefill;
+  const picked = prefill;
   useEffect(() => {
     if (!isNew || !picked || appliedPrefill.current === picked) return;
     appliedPrefill.current = picked;
+    // `username` is the login already typed on the connect card when the person chose Advanced settings (#950).
+    // The password is never part of a prefill: it is not kept anywhere between the two cards.
     setForm((current) => ({ ...current, name: picked.name, rtsp_host: picked.host,
-      rtsp_port: String(picked.port || 554) }));
+      rtsp_port: String(picked.port || 554), ...(picked.username ? { rtsp_username: picked.username } : {}) }));
   }, [picked, isNew]);
   // The form as last loaded or saved: what "unsaved" is measured against. Typing never touches it.
   // WHY: the wizard's assigned child is already saved as the initial form value,
@@ -136,32 +143,19 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
     if (!host) { setPageError('Enter the camera IP first'); return; }
     setOnvifBusy(true); setOnvifMsg(''); setPageError('');
     try {
-      const r = await api.post('/cameras/onvif-probe', {
-        host, username: form.rtsp_username || undefined, password: form.rtsp_password || undefined,
-        id: isNew ? undefined : id,
-      }, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS }); // the server allows the probe up to 18 s itself
+      const r = await probeCamera({
+        host, username: form.rtsp_username, password: form.rtsp_password, id: isNew ? undefined : id,
+      });
       setForm((f) => ({
         ...f,
-        rtsp_host: r.rtspHost || host,
-        rtsp_port: r.rtspPort || f.rtsp_port || '554',
-        rtsp_path: r.rtspPath || f.rtsp_path,
-        sub_rtsp_path: r.subRtspPath || f.sub_rtsp_path,
+        rtsp_host: r.fields.rtsp_host,
+        rtsp_port: r.fields.rtsp_port || f.rtsp_port || '554',
+        rtsp_path: r.fields.rtsp_path || f.rtsp_path,
+        sub_rtsp_path: r.fields.sub_rtsp_path || f.sub_rtsp_path,
       }));
-      extraRef.current = {
-        discovery_source: 'onvif',
-        onvif_device_url: r.onvifDeviceUrl,
-        backchannel_supported: r.backchannel,
-        motion_events_supported: r.motionEvents,
-        ptz_supported: r.ptz ? 1 : 0,
-        onvif_profile_token: r.profileToken || null,
-      };
-      setCaps((c) => ({ ...c, backchannel_supported: r.backchannel, backchannel_verified: r.backchannelVerified }));
-      const res = r.video?.width ? `${r.video.codec || ''} ${r.video.width}×${r.video.height}`.trim() : r.video?.codec || '';
-      const talk = r.backchannel === 'yes' ? ' · two-way audio' : r.backchannel === 'no' ? ' · no two-way audio' : '';
-      const ptz = r.ptz ? ' · PTZ' : '';
-      const motion = r.motionEvents === 'yes' ? ' · ONVIF motion' : '';
-      const low = r.subRtspPath ? ' · low-quality stream' : '';
-      setOnvifMsg(`Found stream${res ? ` — ${res}` : ''}${talk}${ptz}${motion}${low}. Port & path filled in.`);
+      extraRef.current = r.extra;
+      setCaps((c) => ({ ...c, ...r.caps }));
+      setOnvifMsg(r.summary);
     } catch (err) {
       setPageError(err.message);
     } finally {
@@ -204,12 +198,12 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
 
   async function doSave(force) {
     setBusy(true); setPageError('');
-    if (embedded && !form.child_id) {
+    if (requireChild && !form.child_id) {
       setPageError('Assign this camera to a child before continuing setup.');
       setBusy(false);
       return;
     }
-    const payload = { ...form, child_id: form.child_id || null, ...extraRef.current, ...(force ? { force: true } : {}) };
+    const payload = buildCameraPayload(form, extraRef.current, { force });
     // Backchannel cams carry no separate talk login (talk-back uses the stream creds). Never send the
     // empty talk fields for them — the API reads an empty talk_username as "disable talk-back", which
     // would silently turn two-way audio off on any unrelated edit.
@@ -293,9 +287,6 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
     <>
       {!embedded && <AppHeader title={isNew ? 'Add camera' : (cam?.name || 'Camera')} back={back} />}
       <ContentTag className="app-main">
-        {isNew && !embedded && <CameraDiscovery onPick={(candidate) => setSelectedPrefill({
-          host: candidate.ip, port: candidate.rtspPort, name: candidate.name,
-        })} />}
         {!isNew && detSave.state === 'failed' && (
           // A sibling of <form> below, never a descendant of it — see the comment on `detSave` above.
           <div className="error-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
