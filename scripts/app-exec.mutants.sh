@@ -35,7 +35,10 @@ mutant() {
 }
 
 mutant 'inherited capabilities retained' 's/ --inh-caps=-all//'
-mutant 'ambient capabilities retained' 's/ --ambient-caps=-all//'
+# No mutant for `--ambient-caps=-all`: it is EQUIVALENT. The kernel drops any ambient capability that is not also in
+# the inheritable set (capabilities(7)), so `--inh-caps=-all` already empties it, and the test above, which hands the
+# wrapper ambient SETUID/SETGID/KILL, sees CapAmb 0 without the flag (first CI run of this script, #966). The flag stays
+# as defence in depth, like media-exec.sh. A "mutant" that cannot change behaviour is documented, not chased.
 mutant 'no-new-privs dropped' 's/ --no-new-privs//'
 mutant 'supplemental groups retained' 's/ --groups="\$gid"//'
 mutant 'uid zero accepted' '/^case "\$1" in /s/^/# /'
