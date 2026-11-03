@@ -19,6 +19,7 @@ import {
 import { normalizePhoto } from '../lib/photo.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { createAccountThrottle } from '../lib/accountThrottle.js';
+import { isLoopbackAddress, isLoopbackExposed } from '../lib/loopbackExposure.js';
 
 const router = Router();
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
@@ -563,11 +564,26 @@ router.post('/guest', guestLimiter, (req, res, next) => {
   res.json({ token: sign(user, sessionId), user: toPublicUser(user) });
 });
 
+// MEASURED 2026-11-03: userspace tailscaled delivers every tailnet peer to the app as a
+// connection from 127.0.0.1. Gate A makes req.ip the socket address while exposed, so a
+// forwarded header cannot make a remote peer look like a LAN caller.
+export function setupBlockedByExposedLoopback(exposed, address) {
+  return exposed && isLoopbackAddress(address);
+}
+
+function refuseExposedLoopbackSetup(req, res) {
+  if (!setupBlockedByExposedLoopback(isLoopbackExposed(), req.ip)) return false;
+  res.status(403).json({ error: 'Finish setup from a device on your home network, not through Tailscale.' });
+  return true;
+}
+
 // One-time: create the first admin account. Locked once any user exists.
 router.post('/setup', setupLimiter, asyncHandler(async (req, res) => {
   if (userCount() > 0) {
     return res.status(400).json({ error: 'Setup already completed' });
   }
+  // Refuse before the costly hash, but preserve the existing completed-setup answer above.
+  if (refuseExposedLoopbackSetup(req, res)) return;
   const { username, password, first_name, last_name } = req.body || {};
   if (!username || !password || password.length < 8) {
     return res.status(400).json({ error: 'Username and an 8+ character password are required' });
@@ -580,6 +596,8 @@ router.post('/setup', setupLimiter, asyncHandler(async (req, res) => {
   if (userCount() > 0) {
     return res.status(400).json({ error: 'Setup already completed' });
   }
+  // The flag can turn on while hashing yields; check again with no await before the INSERT.
+  if (refuseExposedLoopbackSetup(req, res)) return;
   db.prepare(
     'INSERT INTO users (id, username, password_hash, role, first_name, last_name) VALUES (?, ?, ?, ?, ?, ?)'
   ).run(id, username, password_hash, 'admin', first_name?.trim() || null, last_name?.trim() || null);

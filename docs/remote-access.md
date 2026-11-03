@@ -78,6 +78,8 @@ LAN IP, so with the [SWAG setup](#running-behind-a-reverse-proxy-eg-swag-on-unra
 
 While a tunnel daemon is attached, Nightlight ignores `X-Forwarded-For` from any loopback hop, or any hop that is not a normal IP address, whatever `TRUST_PROXY` says. A proxy that reaches Nightlight by a LAN address is unaffected as long as no hop in its chain is loopback. Tailnet peers then share one per-address login bucket, so one noisy peer can use that bucket for others. The separate per-account throttle still applies.
 
+Tailscale cannot be turned on until an admin account exists. Finish first-admin setup on your home network before enabling it: setup cannot be completed through a tunnel. A same-host proxy that reaches Nightlight over loopback also cannot finish setup while the tunnel daemon is attached.
+
 Set it to the address your proxy connects *from*:
 
 ```bash
