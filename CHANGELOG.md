@@ -26,6 +26,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- #963 Ahead of planned remote access, Nightlight refuses first-admin setup through an attached tunnel daemon, and the Tailscale support that follows will require an admin account before it can turn on.
+
 - #959 Ahead of planned remote access, Nightlight now ignores forwarded client addresses from loopback while a tunnel daemon is attached, so tailnet peers cannot choose a different per-address login bucket.
 
 - #944 The setup guide now walks through adding a child, connecting a camera, checking the picture, and optional caregiver and remote access steps. The Settings setup link disappears after full completion; admins can still open picture checks from About. Remote access still needs network setup.

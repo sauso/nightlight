@@ -1,5 +1,68 @@
 [
   {
+    "label": "#963 exposed loopback setup refusal removed",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (!setupBlockedByExposedLoopback(isLoopbackExposed(), req.ip)) return false;",
+    "replace": "  if (true) return false;",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "#963 exposed loopback setup refuses forged forwarded LAN address"
+  },
+  {
+    "label": "#963 caregiver accepted as first admin",
+    "file": "backend/src/lib/tailnetPreconditions.js",
+    "find": "SELECT 1 FROM users WHERE role = 'admin' LIMIT 1",
+    "replace": "SELECT 1 FROM users LIMIT 1",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "#963 no users or a lone caregiver blocks Tailscale"
+  },
+  {
+    "label": "#963 setup guard rejects LAN instead of loopback",
+    "file": "backend/src/routes/auth.js",
+    "find": "  return exposed && isLoopbackAddress(address);",
+    "replace": "  return exposed && !isLoopbackAddress(address);",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "#963 exposed LAN caller is allowed by the setup guard"
+  },
+  {
+    "label": "#963 setup guard only recognises 127.0.0.1",
+    "file": "backend/src/routes/auth.js",
+    "find": "  return exposed && isLoopbackAddress(address);",
+    "replace": "  return exposed && address === '127.0.0.1';",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "#963 exposed LAN caller is allowed by the setup guard"
+  },
+  {
+    "label": "#963 setup guard refuses every caller while exposed",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (!setupBlockedByExposedLoopback(isLoopbackExposed(), req.ip)) return false;",
+    "replace": "  if (!isLoopbackExposed()) return false;",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "#963 exposed setup from a LAN address is allowed by the route itself"
+  },
+  {
+    "label": "#963 setup guard before the hash removed",
+    "file": "backend/src/routes/auth.js",
+    "find": "  // Refuse before the costly hash, but preserve the existing completed-setup answer above.\n  if (refuseExposedLoopbackSetup(req, res)) return;",
+    "replace": "  // Refuse before the costly hash, but preserve the existing completed-setup answer above.",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "#963 exposed loopback setup refuses forged forwarded LAN address"
+  },
+  {
+    "label": "#963 setup guard after the hash removed",
+    "file": "backend/src/routes/auth.js",
+    "find": "  // The flag can turn on while hashing yields; check again with no await before the INSERT.\n  if (refuseExposedLoopbackSetup(req, res)) return;",
+    "replace": "  // The flag can turn on while hashing yields; check again with no await before the INSERT.",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "#963 flag turning on during the setup hash refuses the insert"
+  },
+  {
     "label": "#959 exposed gate removed from proxy wrapper",
     "file": "backend/src/lib/trustProxy.js",
     "find": "!(isLoopbackExposed() && (isLoopbackAddress(addr) || !isIP(addr)))",
