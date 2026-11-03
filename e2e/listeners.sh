@@ -51,8 +51,26 @@ done
 [ "$ready" -eq 1 ] || { docker logs "$NAME" >&2 || true; die 'app did not become ready'; }
 ok 'app is ready'
 
-# BusyBox netstat -lntu reports listening TCP and UDP sockets from inside the image.
-sockets=$(docker exec "$NAME" netstat -lntu) || die 'could not inspect listening sockets'
+# The app answers /api/health before MediaMTX has bound anything (it is started asynchronously and is
+# restarted if it dies), so a MediaMTX that never came up would leave only the app socket and sail
+# through the allowlist below. Wait for its expected loopback sockets and the WebRTC media socket first
+# (found in the review of PR #953). BusyBox netstat -lntu lists listening TCP and UDP sockets.
+has_socket() { # has_socket <tcp|udp> <awk regex for the local address>
+  printf '%s\n' "$sockets" | awk -v proto="$1" -v addr="$2" '$1 ~ ("^" proto) && $4 ~ addr { f=1 } END { exit !f }'
+}
+mediamtx_up=0
+for ((i=0; i<60; i++)); do
+  sockets=$(docker exec "$NAME" netstat -lntu) || die 'could not inspect listening sockets'
+  missing=''
+  for p in 8554 8888 8889 9997; do
+    has_socket tcp "^127[.][0-9.]+:$p\$" || missing="$missing tcp:$p"
+  done
+  has_socket udp ':8189$' || missing="$missing udp:8189"
+  if [ -z "$missing" ]; then mediamtx_up=1; break; fi
+  sleep 1
+done
+[ "$mediamtx_up" -eq 1 ] || die "MediaMTX sockets never appeared (missing:$missing): the check would prove nothing"
+ok 'MediaMTX is listening on its expected sockets'
 parsed=$(printf '%s\n' "$sockets" | awk '$1 ~ /^(tcp|udp)/ { n++ } END { print n+0 }')
 [ "$parsed" -gt 0 ] || die 'netstat returned no TCP or UDP sockets'
 
@@ -61,7 +79,10 @@ offenders=$(printf '%s\n' "$sockets" | awk -v app_port="$PORT" '
     proto=$1; sub(/[0-9]+$/, "", proto)
     local_addr=$4
     port=local_addr; sub(/^.*:/, "", port)
-    if (local_addr ~ /^127[.]0[.]0[.]1:/) next
+    # Any loopback address (127/8 or ::1) is unreachable from another host; the planned hardening moves the
+    # internal media listeners to 127.0.0.2, so do not hardcode 127.0.0.1 here. (No apostrophes in this
+    # comment: it sits inside a single-quoted awk program.)
+    if (local_addr ~ /^127[.]/ || local_addr ~ /^(\[::1\]|::1):/) next
     if (proto == "tcp" && port == app_port) next
     if (proto == "udp" && port == "8189") next
     # TODO (#952): UDP 8000/8001 are KNOWN RTSP RTP/RTCP media sockets;

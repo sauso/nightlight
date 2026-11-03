@@ -14,6 +14,14 @@ test('unused MediaMTX listeners stay disabled', () => {
   }
 });
 
+test('the MediaMTX addresses are all present (a missing key falls back to bind-all)', () => {
+  // Review of PR #953: the check below passed when every address line was deleted, which would hand each
+  // enabled service MediaMTX's default (all interfaces).
+  for (const key of ['rtspAddress', 'apiAddress', 'webrtcAddress', 'hlsAddress', 'webrtcLocalUDPAddress']) {
+    assert.ok(settings.has(key), `${key} must be set explicitly`);
+  }
+});
+
 test('configured MediaMTX addresses bind to loopback except WebRTC media', () => {
   for (const [key, value] of entries.filter(([key]) => key.endsWith('Address'))) {
     if (key === 'webrtcLocalUDPAddress') continue;
