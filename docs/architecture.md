@@ -21,7 +21,7 @@ HLS can't carry at all — WebRTC can). This drives a specific pipeline, in orde
 1. **FFmpeg** (`backend/src/lib/transcoder.js`, one process per camera) pulls each camera's
    RTSP feed, copies video untouched, and produces **two audio tracks**: track 0 copied as-is
    (for WebRTC, which can't decode AAC), track 1 transcoded to AAC (for HLS, which can't carry
-   the original codec). It publishes the result into MediaMTX via RTSP on `127.0.0.1:8554`.
+   the original codec). It publishes the result into MediaMTX via RTSP on `127.0.0.2:8554`.
 2. **MediaMTX** (`backend/src/lib/mediamtxProcess.js`, spawned as a child process, config baked
    into the image at `mediamtx/mediamtx.yml`) re-publishes that stream as WebRTC (WHEP) and HLS.
    Each camera's path has no pull source configured — it's publisher-only; FFmpeg pushes into
@@ -665,7 +665,7 @@ which the six-capability hardening does not grant).
   camera-facing programs, not the app.
 - **One uid for all media processes.** A taken-over ffmpeg can signal or `ptrace` the others (MediaMTX, other
   cameras' ffmpeg); there is no per-camera separation.
-- **MediaMTX's API on `127.0.0.1:9997` and its RTSP port `127.0.0.1:8554` have no password.** A taken-over media process
+- **MediaMTX's API on `127.0.0.2:9997` and its RTSP port `127.0.0.2:8554` have no password.** A taken-over media process
   can add, change or remove stream paths and read or publish a camera's stream. It cannot learn a camera's address or
   password from them: MediaMTX is never given one (every path is registered as publisher-only and FFmpeg pulls the
   camera itself; `backend/test/mediamtx-never-given-credentials.test.js` pins that, and it was read back from a real

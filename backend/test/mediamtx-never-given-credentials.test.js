@@ -1,7 +1,7 @@
 // MediaMTX is never given a camera's address or password (GHSA-2wvp-f9vx-7fmf).
 //
 // WHY THIS TEST EXISTS. docs/architecture.md and docs/operations.md used to say "MediaMTX's control API on
-// 127.0.0.1:9997 has no password, so a taken-over media process can read the cameras' passwords from it". That was
+// 127.0.0.2:9997 has no password, so a taken-over media process can read the cameras' passwords from it". That was
 // false, and the advisory built on it was withdrawn: the app registers every path as `{ source: 'publisher' }`
 // (lib/mediamtx.js upsertPath, unchanged since the first commit) and FFmpeg, not MediaMTX, pulls the camera's RTSP
 // URL. Read back from a real MediaMTX (the image's own binary) the path config holds `source: publisher` and nothing

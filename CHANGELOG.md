@@ -32,6 +32,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 - Camera controls, Recording and Clip management now sit under one Settings entry, Camera and Recording. Nothing was removed; the pages and their addresses are unchanged.
 
+- #952 Ahead of planned remote access, MediaMTX's internal ports now listen on 127.0.0.2 instead of 127.0.0.1, and its RTSP UDP media ports are closed. If you use `docker exec` to script against ports 9997 or 8554, or set `MEDIAMTX_API` to a local URL, use 127.0.0.2. The app port and WebRTC media port are unchanged.
+
 ### Removed
 
 - #943 Settings → General no longer offers theme presets, font choices or colour pickers. Older clients may still send those settings, but this web UI ignores the saved appearance values.

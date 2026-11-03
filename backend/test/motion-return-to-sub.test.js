@@ -149,7 +149,7 @@ function clockReadingForQuiet(start, ms) {
   while (reading - start < ms) reading += Math.max(Number.EPSILON * Math.abs(reading), Number.MIN_VALUE);
   return reading;
 }
-const urlOf = (p) => `rtsp://127.0.0.1:8554/${p}`;
+const urlOf = (p) => `rtsp://127.0.0.2:8554/${p}`;
 const procsFor = (p) => procs.filter((x) => x.args.includes(urlOf(p)));
 const linesFor = (needle) => logger.getRecent().filter((l) => l.includes(needle));
 
@@ -204,7 +204,10 @@ async function startOnMain(cam) {
   await motion.startMotionDetector(cam);
   await waitFor(() => procsFor(MAIN(cam.id)).length === 1, `${cam.id}: the main-stream ffmpeg to spawn`);
   assert.equal(procsFor(SUB(cam.id)).length, 0, 'it spawned on the sub although the sub was not ready');
-  return procsFor(MAIN(cam.id))[0];
+  const proc = procsFor(MAIN(cam.id))[0];
+  const transportAt = proc.args.indexOf('-rtsp_transport');
+  assert.deepEqual(proc.args.slice(transportAt, transportAt + 2), ['-rtsp_transport', 'tcp']);
+  return proc;
 }
 
 // Frames: the detector's own geometry, 320x180 gray. Regions: bed = rows 0-59 of the left half (33% of the zone,

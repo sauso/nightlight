@@ -34,7 +34,7 @@ import { talkConfigured } from './lib/twoWayAudio.js';
 import { handleTalkConnection } from './lib/talkSocket.js';
 import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js';
 import db from './db.js';
-import { upsertPath, isPathConfiguredCorrectly } from './lib/mediamtx.js';
+import { upsertPath, isPathConfiguredCorrectly, MEDIAMTX_INTERNAL_HOST } from './lib/mediamtx.js';
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
 import { stopAllMotionDetectors, reconcileMotionLeg } from './lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, stopAllOnvifMotion } from './lib/onvifMotion.js';
@@ -197,7 +197,7 @@ app.use(
   requireAuth,
   whepOnlyGuard,
   createProxyMiddleware({
-    target: process.env.MEDIAMTX_WEBRTC_URL || 'http://127.0.0.1:8889',
+    target: process.env.MEDIAMTX_WEBRTC_URL || `http://${MEDIAMTX_INTERNAL_HOST}:8889`,
     changeOrigin: true,
     pathRewrite: { '^/live': '' },
     on: {
@@ -213,7 +213,7 @@ app.use(
   '/hls',
   requireAuthQueryOrHeader,
   createProxyMiddleware({
-    target: process.env.MEDIAMTX_HLS_URL || 'http://127.0.0.1:8888',
+    target: process.env.MEDIAMTX_HLS_URL || `http://${MEDIAMTX_INTERNAL_HOST}:8888`,
     changeOrigin: true,
     pathRewrite: { '^/hls': '' },
     on: {

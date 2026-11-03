@@ -2,10 +2,13 @@
 // a global, same as console or setTimeout.
 import { reportGuardFailure } from './processGuards.js';
 
-// Host networking means MediaMTX's API is reachable on localhost from the backend container.
-// Exported so lib/webrtcSessions.js can talk to the same API without a second, independent
-// process.env.MEDIAMTX_API read that could silently drift from this one.
-export const MEDIAMTX_API = process.env.MEDIAMTX_API || 'http://127.0.0.1:9997';
+// #952, measured 2026-11-03: userspace tailnet forwarding dials only 127.0.0.1 inside the
+// container. MediaMTX still works on 127.0.0.2, while that forwarded address refuses the connection.
+export const MEDIAMTX_INTERNAL_HOST = '127.0.0.2';
+export const mediamtxRtspUrl = (pathName) => `rtsp://${MEDIAMTX_INTERNAL_HOST}:8554/${pathName}`;
+
+// Exported so lib/webrtcSessions.js uses the same API; operator overrides still take precedence.
+export const MEDIAMTX_API = process.env.MEDIAMTX_API || `http://${MEDIAMTX_INTERNAL_HOST}:9997`;
 
 // Every call to MediaMTX's API has a deadline (issue #451). Before this the only bound was undici's own
 // 300s headersTimeout/bodyTimeout, so a MediaMTX that accepted the connection and never answered held
@@ -106,11 +109,12 @@ export async function probeMediamtxApi() {
 
 // Whether MEDIAMTX_API points at this machine. The watchdog restarts the LOCAL MediaMTX child, so an API on another
 // host that stops answering (the network, not our child) must not make it kill a healthy local process. The published
-// image always runs MediaMTX inside the container, on loopback.
+// image always runs MediaMTX inside the container, on loopback. #952: all of 127/8 is local,
+// including the new default, so the watchdog must continue to supervise it.
 export function mediamtxApiIsLocal(api = MEDIAMTX_API) {
   try {
     const host = new URL(api).hostname;
-    return host === '127.0.0.1' || host === 'localhost' || host === '[::1]'; // a URL keeps the brackets of an IPv6 host
+    return /^127(?:\.\d{1,3}){3}$/.test(host) || host === 'localhost' || host === '[::1]'; // a URL keeps the brackets of an IPv6 host
   } catch {
     return false;
   }

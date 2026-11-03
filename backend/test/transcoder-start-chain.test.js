@@ -83,6 +83,7 @@ mock.module('../src/lib/rtspProbe.js', {
 mock.module('../src/lib/mediamtx.js', {
   exports: {
     hlsPathName: (p) => `${p}-hls`,
+    mediamtxRtspUrl: (p) => `rtsp://127.0.0.2:8554/${p}`,
     // subPathName / removePath: subStream.js (the real one, used by the #806 cases) imports them too.
     subPathName: (p) => `${p}-sub`,
     removePath: async (p) => { removals.push(p); },
@@ -174,6 +175,12 @@ describe('#478: one start at a time per camera', () => {
     await releaseUntilSettled([a, b]);
 
     assert.equal(spawned.length, 2, `precondition: both starts launched (spawned ${spawned.length})`);
+    const outputs = spawned[0].args;
+    for (const path of ['path_a', 'path_a-hls']) {
+      const i = outputs.indexOf(`rtsp://127.0.0.2:8554/${path}`);
+      assert.ok(i > 1, `${path} publish URL missing`);
+      assert.deepEqual(outputs.slice(i - 2, i), ['-rtsp_transport', 'tcp']);
+    }
     assert.equal(live().length, 1, `${live().length} ffmpeg processes alive for one camera: one is orphaned`);
     assert.equal(spawned[0].ended, true, 'the first ffmpeg was never stopped');
     assert.deepEqual(spawned[0].signals, ['SIGTERM']);

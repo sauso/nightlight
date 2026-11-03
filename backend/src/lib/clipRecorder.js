@@ -8,6 +8,7 @@ import { killIfSpawned, isKillError, execFailureBackoff, describeExecFailure } f
 import { CLIPS_DIR, resolveClipsDir } from './clipsDir.js';
 import { statMediaFile, unlinkMediaFile, safeSegmentNames } from './mediaFiles.js';
 import { ensureClipsFolder, writeInputFile } from './mediaLayout.js';
+import { mediamtxRtspUrl } from './mediamtx.js';
 
 // Event-recording capture core (Stage 1, "Option A"; shipped in 0.17.0).
 //
@@ -102,7 +103,7 @@ function segmenterArgs(pathName, ringDir) {
     '-nostdin',
     '-loglevel', 'warning',
     '-rtsp_transport', 'tcp',
-    '-i', `rtsp://127.0.0.1:8554/${pathName}`,
+    '-i', mediamtxRtspUrl(pathName),
     '-map', '0:v:0',
     '-map', '0:a:0?', // the camera's ORIGINAL audio (clean copy); optional so a silent camera records video-only
     '-c', 'copy',

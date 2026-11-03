@@ -85,9 +85,6 @@ offenders=$(printf '%s\n' "$sockets" | awk -v app_port="$PORT" '
     if (local_addr ~ /^127[.]/ || local_addr ~ /^(\[::1\]|::1):/) next
     if (proto == "tcp" && port == app_port) next
     if (proto == "udp" && port == "8189") next
-    # TODO (#952): UDP 8000/8001 are KNOWN RTSP RTP/RTCP media sockets;
-    # tolerate them until the follow-up hardening closes them.
-    if (proto == "udp" && (port == "8000" || port == "8001")) next
     print
   }
 ')

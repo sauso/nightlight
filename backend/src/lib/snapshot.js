@@ -1,6 +1,7 @@
 import { spawnChild } from './childEnv.js';
 import { logger } from './logger.js';
 import { decodeUrlCredential } from './urlCredentials.js';
+import { mediamtxRtspUrl } from './mediamtx.js';
 
 // Fetch a JPEG straight from a camera's own HTTP snapshot endpoint (thingino, sonoff-hack, and most
 // IP cameras expose one). Preferred over the ffmpeg stream grab when configured: it returns a full
@@ -134,7 +135,7 @@ export function captureSnapshot(pathName, { timeoutMs = 8000, onExit } = {}) {
       '-fflags', 'nobuffer', // emit the frame as soon as it decodes, don't sit on a jitter buffer
       '-analyzeduration', '2000000', // 2s: enough to identify H264(+audio); default 5s wastes budget
       '-probesize', '2000000', // 2MB: same trade-off as analyzeduration
-      '-i', `rtsp://127.0.0.1:8554/${pathName}`,
+      '-i', mediamtxRtspUrl(pathName),
       '-frames:v', '1',
       '-q:v', '4', // JPEG quality (2=best..31=worst); 4 is a good small-but-clear thumbnail
       '-f', 'image2',

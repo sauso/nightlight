@@ -40,6 +40,7 @@ mock.module('../src/lib/rtspProbe.js', {
 mock.module('../src/lib/mediamtx.js', {
   exports: {
     hlsPathName: (path) => `${path}-hls`,
+    mediamtxRtspUrl: (p) => `rtsp://127.0.0.2:8554/${p}`,
     upsertPath: async () => {},
     isPathConfiguredCorrectly: async () => true,
   },
