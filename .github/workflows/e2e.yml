@@ -175,6 +175,20 @@ jobs:
           MEDIA_ISO_LOG_DIR: ${{ runner.temp }}/media-isolation-logs
         run: bash e2e/media-isolation.sh all
 
+      # #971: reuse this job's built image. e2e.yml does not run on feature-branch
+      # pushes, so this evidence needs a workflow dispatch on the branch.
+      - name: Tailscale listener and privilege boundary
+        run: bash e2e/listeners.sh check
+
+      - name: Loopback listener negative control
+        run: |
+          if bash e2e/listeners.sh loopback-control > "$RUNNER_TEMP/listeners-control.log" 2>&1; then
+            cat "$RUNNER_TEMP/listeners-control.log"
+            exit 1
+          fi
+          grep -q 'image has an unexpected Tailscale-phase listener' "$RUNNER_TEMP/listeners-control.log" \
+            || { cat "$RUNNER_TEMP/listeners-control.log"; exit 1; }
+
       - name: Upload the media isolation run's container logs
         if: always()
         uses: actions/upload-artifact@v7

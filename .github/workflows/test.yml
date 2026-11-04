@@ -25,6 +25,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  tailscale-binaries:
+    name: Pinned Tailscale binaries (native fetch, both target arches)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # #971: this target stage runs on BUILDPLATFORM for both architectures;
+      # the riscv64 failure must carry our marker, not a QEMU or network error.
+      - name: Build pinned amd64 and arm64 binary stages
+        run: |
+          docker build --platform linux/amd64 --target tailscale-binaries -t nightlight-tailscale:amd64 .
+          docker build --platform linux/arm64 --target tailscale-binaries -t nightlight-tailscale:arm64 .
+      - name: Unsupported target architecture fails closed
+        run: |
+          if docker build --progress=plain --platform linux/riscv64 --target tailscale-binaries . > "$RUNNER_TEMP/tailscale-arch.log" 2>&1; then
+            cat "$RUNNER_TEMP/tailscale-arch.log"
+            exit 1
+          fi
+          grep -q TAILSCALE_UNSUPPORTED_ARCH "$RUNNER_TEMP/tailscale-arch.log" || { cat "$RUNNER_TEMP/tailscale-arch.log"; exit 1; }
+      - name: Wrong digest fails before extraction
+        run: |
+          mkdir -p "$RUNNER_TEMP/tailscale-digest"
+          if docker run --rm -v "$PWD:/repo:ro" -v "$RUNNER_TEMP/tailscale-digest:/out" node:24-alpine \
+            sh -c 'apk add --no-cache wget >/dev/null && sh /repo/scripts/fetch-tailscale.sh amd64 1.104.5 "$1" /out' sh \
+              0000000000000000000000000000000000000000000000000000000000000000 \
+              > "$RUNNER_TEMP/tailscale-digest.log" 2>&1; then
+            cat "$RUNNER_TEMP/tailscale-digest.log"
+            exit 1
+          fi
+          grep -q TAILSCALE_DIGEST_MISMATCH "$RUNNER_TEMP/tailscale-digest.log" || { cat "$RUNNER_TEMP/tailscale-digest.log"; exit 1; }
+          test -z "$(find "$RUNNER_TEMP/tailscale-digest" -mindepth 1 -print -quit)"
+
   unit:
     runs-on: ubuntu-latest
     steps:

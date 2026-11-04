@@ -11,6 +11,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- #971 Bundled Tailscale 1.104.5 binaries for the guarded remote-access API, with a fixed download digest for each image architecture.
+
 - #945 Admins can search for nearby Thingino and ONVIF cameras in setup or Add camera. Each result has its own card; pick one and enter its login while Nightlight finds the stream settings. Cameras already saved appear as greyed **Already added** cards. Searches use LAN multicast and may miss cameras across VLANs, on Docker's default bridge, or cameras that do not advertise; a separate manual card remains available.
 
 - #941 First-run setup guide for admins on fresh installations: add a child and assigned camera, check that video frames reach the browser, or finish with limited setup and return later from Settings → Setup & diagnostics. Save and exit resumes at the saved step without redirecting again. A confirmed picture check lasts ten minutes from confirmation and must be repeated after a server restart. Upgraded and restored installs, even those without an admin account yet, are marked as already set up and are not redirected.
@@ -26,9 +28,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
-- #969 Ahead of planned remote access, admins can start Tailscale sign-in, choose a neutral machine name, manage private HTTPS Serve, log out and reset a copied node identity through bounded CLI actions. The Tailscale binaries are not packaged yet.
+- #969 Ahead of planned remote access, admins can start Tailscale sign-in, choose a neutral machine name, manage private HTTPS Serve, log out and reset a copied node identity through bounded CLI actions.
 
-- #967 Ahead of planned remote access, Nightlight stores a guarded Tailscale enable setting and checks network mode before starting a tunnel daemon. The daemon is not packaged yet.
+- #967 Ahead of planned remote access, Nightlight stores a guarded Tailscale enable setting and checks network mode before starting a tunnel daemon.
 
 - #965 Ahead of planned remote access, Nightlight now has a guarded tunnel daemon supervisor. Nothing starts the daemon yet.
 

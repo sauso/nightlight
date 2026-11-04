@@ -15,7 +15,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function fixture(mode) {
   const record = path.join(os.tmpdir(), `nl-969-cli-${process.pid}-${Math.random()}.txt`);
   files.push(record);
-  return { record, spawnFn: (_binary, argv, options) => spawnAsApp(process.execPath,
+  return { record, socketExists: () => true, spawnFn: (_binary, argv, options) => spawnAsApp(process.execPath,
     [script, mode, record, ...argv], options) };
 }
 afterEach(async () => {
@@ -97,7 +97,45 @@ function fakeChild({ closeOnKill }) {
   return child;
 }
 const fakeOpts = (child, extra = {}) => ({ socketPath: '/tmp/private.sock', hostname: 'nightlight',
-  spawnFn: () => child, ...extra });
+  socketExists: () => true, spawnFn: () => child, ...extra });
+
+test('#971 a late LocalAPI socket lets the CLI run', async () => {
+  const socketPath = path.join(os.tmpdir(), `nl-971-socket-${process.pid}-${Math.random()}`);
+  files.push(socketPath);
+  const child = fakeChild({ closeOnKill: true });
+  let spawns = 0;
+  const pending = runTailscaleCli('status', { socketPath, socketWaitMs: 500,
+    spawnFn: () => {
+      spawns++;
+      queueMicrotask(() => { child.stdout.write('{"BackendState":"NeedsLogin"}'); child.emit('close', 0); });
+      return child;
+    } });
+  await sleep(80);
+  assert.equal(spawns, 0);
+  fs.writeFileSync(socketPath, 'ready');
+  assert.deepEqual(await pending, { ok: true, json: { BackendState: 'NeedsLogin' } });
+  assert.equal(spawns, 1);
+});
+
+test('#971 a missing LocalAPI socket never spawns the CLI', async () => {
+  let spawns = 0;
+  const result = await runTailscaleCli('status', { socketPath: `/missing-${process.pid}-${Math.random()}`,
+    socketWaitMs: 100, spawnFn: () => { spawns++; return fakeChild({ closeOnKill: true }); } });
+  assert.deepEqual(result, { ok: false, code: 'daemon_not_ready' });
+  assert.equal(spawns, 0);
+});
+
+test('#971 cancelling during the socket wait prevents a late CLI launch', async () => {
+  let ready = false;
+  let spawns = 0;
+  const pending = runTailscaleCli('logout', { socketPath: '/pending.sock', socketExists: () => ready,
+    socketWaitMs: 500, spawnFn: () => { spawns++; return fakeChild({ closeOnKill: true }); } });
+  await cancelTailscaleCli();
+  ready = true;
+  assert.deepEqual(await pending, { ok: false, code: 'daemon_not_ready' });
+  await sleep(60);
+  assert.equal(spawns, 0);
+});
 
 test('#969 a sign-in URL split across output chunks is never returned truncated', async () => {
   const child = fakeChild({ closeOnKill: true });

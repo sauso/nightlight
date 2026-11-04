@@ -1,5 +1,14 @@
 [
   {
+    "label": "#971 CLI socket wait removed",
+    "file": "backend/src/lib/tailscaleCli.js",
+    "find": "  if (exists()) return launch();",
+    "replace": "  return launch();",
+    "expect": "killed",
+    "tests": ["tailscale-cli.test.js"],
+    "namePattern": "a missing LocalAPI socket never spawns the CLI"
+  },
+  {
     "label": "#967 first-admin blocker dropped",
     "file": "backend/src/lib/tailnetPreconditions.js",
     "find": "if (!firstAdminExists(db)) return {",
