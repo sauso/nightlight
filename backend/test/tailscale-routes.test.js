@@ -396,6 +396,91 @@ test('#969 action queue rechecks a revoked session at mutation time', async () =
   assert.equal(calls, 3); // first mutation plus two read-only status checks from its response
 });
 
+test('#969 action queue rechecks a demoted admin at mutation time', async () => {
+  const user = makeUser(db, { id: 'demoted-969', username: 'demoted-969' });
+  const token = signToken({ id: user.id, sid: makeSession(db, user.id), role: 'admin' });
+  let release; let entered = false; let calls = 0;
+  const held = new Promise((resolve) => { release = resolve; });
+  await mount({ blocker: () => null, status: () => ({ state: 'running' }),
+    onEnqueued: (req) => { if (req.headers.authorization === `Bearer ${token}`) entered = true; },
+    cli: async () => { calls++; if (calls === 1) await held; return { ok: true, json: {} }; } });
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  const first = call(`${route()}/actions`, { method: 'POST', token: adminToken, body: { action: 'serve-enable' } });
+  await until(() => calls === 1);
+  const second = call(`${route()}/actions`, { method: 'POST', token, body: { action: 'serve-enable' } });
+  await until(() => entered);
+  db.prepare("UPDATE users SET role = 'caregiver' WHERE id = ?").run(user.id); // session stays valid: role is the only change
+  release();
+  assert.equal((await first).status, 200);
+  assert.equal((await second).status, 403);
+  assert.equal(calls, 3); // the demoted request never reached the CLI
+});
+
+test('#969 reset refuses a linked state directory and deletes nothing through it', async () => {
+  const privateDir = path.join(dataDir, 'private');
+  const stateDir = path.join(privateDir, 'tailscale');
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'nl-969-outside-'));
+  roots.push(outside);
+  fs.writeFileSync(path.join(outside, 'precious'), 'must survive');
+  fs.mkdirSync(privateDir, { recursive: true });
+  fs.rmSync(stateDir, { recursive: true, force: true });
+  fs.symlinkSync(outside, stateDir, 'junction'); // a junction is the unprivileged link on win32
+  let state = 'running';
+  await mount({ blocker: () => null, status: () => ({ state }), stop: async () => { state = 'off'; },
+    start: () => { state = 'running'; }, cli: async () => ({ ok: true, json: {} }) });
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  const result = await call(`${route()}/actions`, { method: 'POST', token: adminToken, body: { action: 'reset' } });
+  fs.unlinkSync(stateDir); // remove the link itself, never its target
+  assert.equal(result.status, 409);
+  assert.equal(fs.readFileSync(path.join(outside, 'precious'), 'utf8'), 'must survive');
+});
+
+test('#969 disable and logout do not wait behind a sign-in that never prints a link', async () => {
+  for (const [name, send] of [['disable', () => put(false)],
+    ['logout', () => call(`${route()}/actions`, { method: 'POST', token: adminToken, body: { action: 'logout' } })]]) {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough(); child.stderr = new PassThrough();
+    let spawned = false;
+    child.kill = () => { queueMicrotask(() => child.emit('close', null)); return true; };
+    let state = 'running';
+    await mount({ blocker: () => null, status: () => ({ state }), stop: async () => { state = 'off'; },
+      cli: (verb, o) => runTailscaleCli(verb, { ...o, socketPath: '/tmp/owned.sock',
+        timeoutMs: 20_000, spawnFn: () => {
+          // First spawn = the stalled sign-in. Any later CLI call (the logout itself) gets a fresh
+          // child that succeeds at once; handing it the killed child would hang until the timeout.
+          if (spawned) {
+            const next = new EventEmitter();
+            next.stdout = new PassThrough(); next.stderr = new PassThrough();
+            next.kill = () => true;
+            queueMicrotask(() => next.emit('close', 0));
+            return next;
+          }
+          spawned = true; return child;
+        } }) });
+    db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+    const signIn = call(`${route()}/actions`, { method: 'POST', token: adminToken, body: { action: 'sign-in' } });
+    await until(() => spawned);
+    const started = Date.now();
+    const result = await send();
+    assert.equal(result.status === 200 || result.status === 409, true, name);
+    assert.ok(Date.now() - started < 5000, `${name} waited behind the stalled sign-in`);
+    await signIn;
+    await server.close(); server = null;
+    spawned = false;
+  }
+});
+
+test('#969 disable clears an old action error', async () => {
+  let state = 'running';
+  await mount({ blocker: () => null, status: () => ({ state }), stop: async () => { state = 'off'; },
+    cli: async () => ({ ok: false, code: 'consent_required' }) });
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  await call(`${route()}/actions`, { method: 'POST', token: adminToken, body: { action: 'serve-enable' } });
+  const off = await put(false);
+  assert.equal(off.status, 200);
+  assert.equal(off.body.last_error, null);
+});
+
 test('#969 reset removes only Tailscale state and restarts a new node', async () => {
   const privateDir = path.join(dataDir, 'private');
   const stateDir = path.join(privateDir, 'tailscale');

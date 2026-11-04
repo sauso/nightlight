@@ -29,8 +29,11 @@ function approvedConsentUrl(value) {
   try {
     const url = new URL(value);
     return url.protocol === 'https:' && url.hostname === 'login.tailscale.com' &&
-      !url.username && !url.password && !url.port && url.pathname.startsWith('/admin/') &&
-      !url.hash ? url.href : null;
+      !url.username && !url.password && !url.port && !url.hash &&
+      // Opus review of #970: the link the owner's real run printed (2026-11-03) was
+      // /f/serve?node=<id>, not /admin/..., so both shapes are accepted and nothing else.
+      ((url.pathname.startsWith('/admin/') && !url.search) ||
+        (url.pathname === '/f/serve' && /^\?node=[A-Za-z0-9_-]+$/.test(url.search))) ? url.href : null;
   } catch { return null; }
 }
 
@@ -38,8 +41,12 @@ function approvedConsentUrl(value) {
 // first half and was returned truncated. While the child is still running a candidate counts only
 // once whitespace follows it (`terminated`); at exit the end of output also terminates it.
 function extractUrl(output, approve, terminated = false) {
-  const pattern = terminated ? /https?:\/\/[^\s<>"']+(?=\s)/g : /https?:\/\/[^\s<>"']+/g;
-  for (const candidate of output.match(pattern) ?? []) {
+  // Opus review of #970 (verified by running): a `(?=\s)` lookahead made this pattern backtrack
+  // quadratically (50 ms per call on 16 KB without whitespace, re-run on every chunk). Match
+  // greedily and test the character after the match instead.
+  for (const match of output.matchAll(/https?:\/\/[^\s<>"']+/g)) {
+    if (terminated && match.index + match[0].length >= output.length) continue;
+    const candidate = match[0];
     const url = approve(candidate.replace(/[),.;]+$/, ''));
     if (url) return url;
   }
@@ -109,6 +116,8 @@ export function runTailscaleCli(verb, { hostname, socketPath = getTailscaleSocke
       clearTimeout(timer);
       children.delete(child);
       if (mutates) mutation = false;
+      // Opus review of #970: a finished or timed-out sign-in leaves a dead link; do not show it again.
+      if (verb === 'up' && (failure || code === 0)) loginUrl = null;
       if (settled) return;
       if (failure) return finish({ ok: false, code: failure });
       if (verb === 'up') {
@@ -146,6 +155,18 @@ export function runTailscaleCli(verb, { hostname, socketPath = getTailscaleSocke
       if (verb === 'up') {
         const url = extractUrl(output, approvedLoginUrl, true);
         if (url) { loginUrl = url; finish({ ok: true, loginUrl: url }); }
+      }
+      if (verb === 'serve-set') {
+        // Opus review of #970: the real CLI prints the approval link and then WAITS, so reading it
+        // only at exit meant a 10 s timeout and no link. Settle as soon as it appears; the child is
+        // then cancelled, because it would otherwise hold the mutation lock until its timeout.
+        const url = extractUrl(output, approvedConsentUrl, true);
+        if (url) {
+          consentUrl = url;
+          finish({ ok: false, code: 'consent_required', consentUrl: url });
+          try { child.kill('SIGKILL'); } catch { /* the release cap below still frees the lock */ }
+          forceRelease();
+        }
       }
     };
     // Codex review of #970 (verified by running): a child that ignores SIGKILL never emits close, so

@@ -111,6 +111,33 @@ test('#969 a sign-in URL split across output chunks is never returned truncated'
   await cancelTailscaleCli();
 });
 
+test('#969 a Serve approval link is returned while the CLI keeps waiting, and only vetted shapes pass', async () => {
+  const child = fakeChild({ closeOnKill: true });
+  const pending = runTailscaleCli('serve-set', fakeOpts(child, { timeoutMs: 5000 }));
+  child.stdout.write('Serve is not enabled on your tailnet.\nTo enable, visit:\n  https://login.tailscale.com/f/serve?node=n123ABC\n');
+  const result = await pending; // must settle on the data event: this child never exits by itself
+  assert.equal(result.code, 'consent_required');
+  assert.equal(result.consentUrl, 'https://login.tailscale.com/f/serve?node=n123ABC');
+  for (const hostile of ['https://login.tailscale.com/f/serve', 'https://login.tailscale.com/f/serve?node=a&next=evil',
+    'https://login.tailscale.com/f/other?node=a', 'https://evil.example/f/serve?node=a']) {
+    const c = fakeChild({ closeOnKill: true });
+    const p = runTailscaleCli('serve-set', fakeOpts(c, { timeoutMs: 20 }));
+    c.stdout.write(`${hostile}\n`);
+    assert.equal((await p).code, 'timeout', hostile); // never accepted as a link
+    await sleep(5); // the killed fake closes at once, which frees the mutation lock
+  }
+});
+
+test('#969 a finished sign-in does not leave a dead link behind', async () => {
+  const child = fakeChild({ closeOnKill: true });
+  const pending = runTailscaleCli('up', fakeOpts(child));
+  child.stdout.write('https://login.tailscale.com/a/abc123\n');
+  assert.equal((await pending).ok, true);
+  assert.equal(getTailscaleLinks().loginUrl, 'https://login.tailscale.com/a/abc123');
+  child.emit('close', 0); // the user completed sign-in
+  assert.equal(getTailscaleLinks().loginUrl, null);
+});
+
 test('#969 a killed child that never reports close still releases the mutation lock', async () => {
   const stuck = fakeChild({ closeOnKill: false });
   assert.equal((await runTailscaleCli('up', fakeOpts(stuck, { timeoutMs: 5 }))).code, 'timeout');

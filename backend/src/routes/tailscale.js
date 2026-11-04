@@ -73,6 +73,11 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
       typeof req.body.enabled !== 'boolean') {
       return res.status(400).json({ error: 'Expected only enabled as a boolean.' });
     }
+    // Opus review of #970 (verified by running): a sign-in that never prints a link holds the route
+    // queue for its whole 5 minute timeout, so a disable queued behind it waited just as long. The
+    // cancel runs BEFORE queueing so the stalled job ends. It is safe for any admin that got past
+    // the middleware: it only ends a pending sign-in and clears the stored links.
+    if (req.body.enabled === false) void cancelTailscaleCli();
     // Opus plan review of #967: a queued request can lose its live session or
     // admin role while an earlier stop waits for its child to exit.
     const job = async () => {
@@ -106,6 +111,7 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
         } else {
           try { write(0); }
           catch { return conflict(res, 'could_not_save', 'The Tailscale setting could not be saved.'); }
+          lastError = null; // Opus review of #970: an old action error must not outlive a disable.
           await cancelTailscaleCli();
           await stop();
           if (status().state !== 'off') {
@@ -134,6 +140,8 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
       return res.status(400).json({ error: 'Invalid Tailscale action.' });
     }
     onEnqueued(req);
+    // Same reason as the PUT: logout and reset must not wait out a stalled sign-in.
+    if (req.body.action === 'logout' || req.body.action === 'reset') void cancelTailscaleCli();
     const job = async () => {
       const token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null;
       const live = verify(token);
