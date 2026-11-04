@@ -137,8 +137,8 @@
   {
     "label": "#967 in-lock admin role check dropped",
     "file": "backend/src/routes/tailscale.js",
-    "find": "if (live.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });",
-    "replace": "if (false) return res.status(403).json({ error: 'Admin access required' });",
+    "find": "if (!live) return res.status(401).json({ error: 'Invalid or expired session' });\n      if (live.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });",
+    "replace": "if (!live) return res.status(401).json({ error: 'Invalid or expired session' });\n      if (false) return res.status(403).json({ error: 'Admin access required' });",
     "expect": "killed",
     "tests": ["tailscale-routes.test.js"],
     "namePattern": "queued admin demotion is checked after middleware"
@@ -155,8 +155,8 @@
   {
     "label": "#967 strict body accepts extra keys",
     "file": "backend/src/routes/tailscale.js",
-    "find": "Object.keys(req.body).length !== 1",
-    "replace": "false",
+    "find": "Object.keys(req.body).length !== 1 ||",
+    "replace": "false ||",
     "expect": "killed",
     "tests": ["tailscale-routes.test.js"],
     "namePattern": "strict body and fixed response shape"
@@ -164,8 +164,8 @@
   {
     "label": "#967 disable stops before clearing intent",
     "file": "backend/src/routes/tailscale.js",
-    "find": "          try { write(0); }\n          catch { return conflict(res, 'could_not_save', 'The Tailscale setting could not be saved.'); }\n          await stop();",
-    "replace": "          await stop();\n          try { write(0); }\n          catch { return conflict(res, 'could_not_save', 'The Tailscale setting could not be saved.'); }",
+    "find": "          try { write(0); }\n          catch { return conflict(res, 'could_not_save', 'The Tailscale setting could not be saved.'); }\n          lastError = null; // Opus review of #970: an old action error must not outlive a disable.\n          await cancelTailscaleCli();\n          await stop();",
+    "replace": "          await stop();\n          try { write(0); }\n          catch { return conflict(res, 'could_not_save', 'The Tailscale setting could not be saved.'); }\n          lastError = null; // Opus review of #970: an old action error must not outlive a disable.\n          await cancelTailscaleCli();",
     "expect": "killed",
     "tests": ["tailscale-routes.test.js"],
     "namePattern": "intent is saved after a started state"
@@ -182,8 +182,8 @@
   {
     "label": "#967 uncertain stop reported as success",
     "file": "backend/src/routes/tailscale.js",
-    "find": "return res.status(409).json({ ...view(), error: 'The tunnel daemon may still be running.', code: 'stop_uncertain' });",
-    "replace": "return res.status(200).json({ ...view(), error: 'The tunnel daemon may still be running.', code: 'stop_uncertain' });",
+    "find": "return res.status(409).json({ ...await view(), error: 'The tunnel daemon may still be running.', code: 'stop_uncertain' });",
+    "replace": "return res.status(200).json({ ...await view(), error: 'The tunnel daemon may still be running.', code: 'stop_uncertain' });",
     "expect": "killed",
     "tests": ["tailscale-routes.test.js"],
     "namePattern": "wedged stop reports busy and uncertain disable"
@@ -200,8 +200,8 @@
   {
     "label": "#967 mutation lock removed",
     "file": "backend/src/routes/tailscale.js",
-    "find": "const current = tail.then(job, job);",
-    "replace": "const current = job();",
+    "find": "onEnqueued(req);\n    const current = tail.then(job, job);",
+    "replace": "onEnqueued(req);\n    const current = job();",
     "expect": "killed",
     "tests": ["tailscale-routes.test.js"],
     "namePattern": "SIGTERM-ignoring fake serialises disable then enable"
@@ -25585,5 +25585,50 @@
     "expect": "killed",
     "tests": ["setup-state.test.js"],
     "namePattern": "attestation is session and camera bound"
+  },
+  {
+    "label": "#969 login URL path validation removed",
+    "file": "backend/src/lib/tailscaleCli.js",
+    "find": "!url.port && /^\\/a\\/[A-Za-z0-9_-]+\\/?$/.test(url.pathname) &&",
+    "replace": "!url.port && /^\\/[ab]\\/[A-Za-z0-9_-]+\\/?$/.test(url.pathname) &&",
+    "expect": "killed",
+    "tests": ["tailscale-cli.test.js"],
+    "namePattern": "hostile URLs and hostnames"
+  },
+  {
+    "label": "#969 CLI mutation serialisation removed",
+    "file": "backend/src/lib/tailscaleCli.js",
+    "find": "if (mutates && mutation) return Promise.resolve({ ok: false, code: 'busy' });",
+    "replace": "if (false) return Promise.resolve({ ok: false, code: 'busy' });",
+    "expect": "killed",
+    "tests": ["tailscale-cli.test.js"],
+    "namePattern": "mutations serialise"
+  },
+  {
+    "label": "#969 queued admin session gate removed",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "if (!live?.id) return res.status(401).json({ error: 'Invalid or expired session' });",
+    "replace": "if (false) return res.status(401).json({ error: 'Invalid or expired session' });",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "action queue rechecks a revoked session"
+  },
+  {
+    "label": "#969 reset state scope widened",
+    "file": "backend/src/lib/tailscaleState.js",
+    "find": "fsImpl.rmSync(stateDir, { recursive: true });",
+    "replace": "fsImpl.rmSync(privateDir, { recursive: true });",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "reset removes only Tailscale state"
+  },
+  {
+    "label": "#969 Serve target changed",
+    "file": "backend/src/lib/tailscaleCli.js",
+    "find": "['serve', '--bg', '--https=443', 'http://127.0.0.1:4000']",
+    "replace": "['serve', '--bg', '--https=443', 'http://127.0.0.1:4001']",
+    "expect": "killed",
+    "tests": ["tailscale-cli.test.js"],
+    "namePattern": "Serve uses the exact private argv"
   }
 ]

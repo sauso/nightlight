@@ -199,10 +199,11 @@ describe('every process the backend starts goes through the helper (#553, source
     assert.deepEqual(offenders.map(rel), []);
   });
 
-  test('#965 spawnAsApp is called exactly once and only by the tunnel daemon supervisor', () => {
+  test('#965/#969 spawnAsApp is called only by the daemon supervisor and bounded CLI runner', () => {
     // Token-based, after stripping comments: an unused import or a commented call cannot pass.
     const calls = walk(SRC).flatMap((f) => Array.from(code(f).matchAll(/(?<![\w.$])spawnAsApp\s*(?:\(|\))/g), () => rel(f)));
-    assert.deepEqual(calls.filter((f) => f !== 'lib/childEnv.js'), ['lib/tailscaleProcess.js']);
+    // #969: the CLI must run as the app uid to reach the private LocalAPI socket.
+    assert.deepEqual(calls.filter((f) => f !== 'lib/childEnv.js').sort(), ['lib/tailscaleCli.js', 'lib/tailscaleProcess.js']);
     assert.equal(calls.filter((f) => f === 'lib/childEnv.js').length, 1);
     const helper = code(path.join(SRC, 'lib/childEnv.js'));
     assert.match(helper, /spawn\(APP_EXEC_PATH,\s*\[String\(process\.getuid\(\)\), String\(process\.getgid\(\)\), command/);

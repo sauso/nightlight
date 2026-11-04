@@ -35,6 +35,8 @@ HLS can't carry at all — WebRTC can). This drives a specific pipeline, in orde
 
 `GET` and `PUT /api/remote-access/tailscale` are admin-only status and enable-setting routes. The `PUT` serialises requests, checks live admin access again when each request begins, and stores intent only after the supervisor starts. After the server listens and `markBootComplete()` runs, `bootTailscale()` checks the network and starts the supervisor only when intent is enabled. The detector and supervisor recheck conditions on every launch.
 
+`POST /api/remote-access/tailscale/actions` accepts a fixed action name for sign-in, hostname, HTTPS Serve, logout or node reset. It rechecks the live admin session and enable preconditions when a queued mutation begins. `tailscaleCli.js` owns the fixed CLI arguments, private socket, output and time bounds, URL validation and one-at-a-time mutation guard. Status exposes only vetted tailnet IPv4 addresses, a DNS name and safe codes; login and HTTPS consent links remain admin-only. Reset stops the daemon and removes only `private/tailscale` before starting a fresh node. The image does not yet contain the CLI or daemon binaries.
+
 ## Child process environment (`backend/src/lib/childEnv.js`, #553)
 
 Camera streams are untrusted input, and ffmpeg/ffprobe parse whatever a (possibly compromised) camera
@@ -57,6 +59,7 @@ child. This narrows what a child *inherits*; it does not stop a child reading th
 | Process | User and privileges | Environment |
 |---|---|---|
 | `tailscaled` | app uid, capabilities and extra groups dropped | same `PATH`, `TZ`, `LANG`, `LC_ALL` allowlist; no `MTX_*`, `PORT` or `HOME` |
+| `tailscale` CLI | app uid, capabilities and extra groups dropped | same allowlist; it needs the private daemon socket and receives no application secrets |
 
 A name that is unset in the backend stays unset in the child. A caller-supplied `env` option is ignored.
 
@@ -65,7 +68,7 @@ A name that is unset in the backend stays unset in the child. A caller-supplied 
 **To add a variable:** add the name to `ALLOWED_NAMES` in `childEnv.js` with a comment saying which setup
 needs it, add a row to the table above, and update `backend/test/child-env.test.js` (it pins the list on
 purpose). For a per-launch computed value (MediaMTX's) pass it as `extra` instead. **To add a new spawn
-site:** call `spawnChild()` for media processes, or `spawnAsApp()` only for the tunnel daemon; never `child_process` directly. The source test in `child-env.test.js` fails
+site:** call `spawnChild()` for media processes, or `spawnAsApp()` only for the tunnel daemon and bounded CLI runner; never `child_process` directly. The source test in `child-env.test.js` fails
 on any other import of it under `backend/src`.
 
 **What the allowlist does not do:**

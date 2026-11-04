@@ -190,6 +190,7 @@ const ROUTE_GATES = {
   'GET /api/remote-access': ADMIN,
   'GET /api/remote-access/tailscale': ADMIN,
   'PUT /api/remote-access/tailscale': ADMIN,
+  'POST /api/remote-access/tailscale/actions': ADMIN,
   'GET /api/esphome/devices': ADMIN,
   'POST /api/esphome/devices': ADMIN,
   'PUT /api/esphome/devices/:id': ADMIN,

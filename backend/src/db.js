@@ -551,6 +551,9 @@ const settingsColumns = db.prepare('PRAGMA table_info(settings)').all().map((c) 
 if (!settingsColumns.includes('tailscale_enabled')) {
   db.exec('ALTER TABLE settings ADD COLUMN tailscale_enabled INTEGER NOT NULL DEFAULT 0');
 }
+if (!settingsColumns.includes('tailscale_hostname')) {
+  db.exec("ALTER TABLE settings ADD COLUMN tailscale_hostname TEXT NOT NULL DEFAULT 'nightlight'");
+}
 if (!settingsColumns.includes('esphome_retention_days')) {
   db.exec('ALTER TABLE settings ADD COLUMN esphome_retention_days INTEGER NOT NULL DEFAULT 30');
 }

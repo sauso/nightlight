@@ -5,6 +5,7 @@ import { prepareStateDir, makeRuntimeDir, removeRuntimeDir } from './tailscaleSt
 import { killIfSpawned, isKillError, execFailureBackoff } from './processGuards.js';
 import { forwardProcessLines } from './processOutput.js';
 import { logger } from './logger.js';
+import { cancelTailscaleCli } from './tailscaleCli.js';
 
 export { TAILSCALED_BINARY };
 
@@ -206,6 +207,8 @@ export function startTailscale({ db, dataDir, binary, argvSuffix, spawnFn, killF
 
 export function stopTailscale() {
   try {
+    // A pending sign-in retains a CLI child even after its URL has been returned.
+    cancelTailscaleCli();
     if (stopPromise) return stopPromise;
     if (state === 'off') return Promise.resolve();
     state = 'stopping';
@@ -241,3 +244,7 @@ export function stopTailscale() {
 
 export function getTailscaleStatus() { return { state, restarts, lastExitCode, reason }; }
 export function hasLiveTailscaleProcess() { return Boolean(proc); }
+export function getTailscaleSocketPath() {
+  return proc && state === 'running' && session?.runtimeDir
+    ? `${session.runtimeDir}/tailscaled.sock` : null;
+}
