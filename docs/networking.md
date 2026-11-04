@@ -4,7 +4,7 @@ Nightlight is made for your home network first: add your cameras, watch them fro
 
 ## Networking modes
 
-Planned Tailscale support will need the container to have its own address through bridge, ipvlan or macvlan; host networking will be refused. The check counts TCP listeners on `127.0.0.1` or a wildcard, ignores Docker DNS on `127.0.0.11`, and cannot detect UDP-only loopback services in a shared namespace.
+Bundled Tailscale 1.104.5 uses userspace networking and needs the container to have its own address through bridge, ipvlan or macvlan; host networking is refused. It opens separate automatic IPv4 and IPv6 UDP ports. No router port forward is needed for Tailscale because Tailscale's DERP relays can carry connections when a direct path is unavailable (a phone reaching a test server through a relay played live video on 2026-11-03; not yet re-tested with this image). Sign-in over a tailnet, HTTPS Serve and WebRTC are not yet verified end to end, and this is not a released feature. The check counts TCP listeners on `127.0.0.1` or a wildcard, ignores Docker DNS on `127.0.0.11`, and cannot detect UDP-only loopback services in a shared namespace.
 
 Nightlight needs its own routable IP on your LAN so WebRTC has no NAT/ICE trouble: MediaMTX advertises that IP to browsers. There are two supported ways to provide one:
 
@@ -22,7 +22,7 @@ Nightlight needs its own routable IP on your LAN so WebRTC has no NAT/ICE troubl
 
 For web and video, only the app port and WebRTC media UDP port are meant to be reachable. The media server's other listeners are off or bound to its internal loopback address (`127.0.0.2`); RTSP uses TCP only, with no UDP media ports.
 
-Either way, the app is served on port **4000** (change it with the `PORT` environment variable if you need to). The planned bundled Tailscale HTTPS Serve control requires port 4000; its binaries are not packaged yet. For **remote / internet** access, see [Remote / internet access](remote-access.md#remote--internet-access-watching-from-outside-your-home-network); that part is the same in both modes.
+Either way, the app is served on port **4000** (change it with the `PORT` environment variable if you need to). The bundled Tailscale HTTPS Serve control requires port 4000. For **remote / internet** access, see [Remote / internet access](remote-access.md#remote--internet-access-watching-from-outside-your-home-network); that part is the same in both modes.
 
 ### Running more than one instance (e.g. staging + production)
 

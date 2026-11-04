@@ -262,6 +262,8 @@ jobs:
             [ "$arch" = aarch64 ] || { echo "expected aarch64, got $arch"; exit 1; }
             ffmpeg -hide_banner -version
             mediamtx --version
+            tailscaled --version
+            tailscale version --daemon=false
             node -e "const Database = require(\"better-sqlite3\"); const db = new Database(\":memory:\"); if (db.prepare(\"select 1 as ok\").get().ok !== 1) process.exit(1); console.log(\"better-sqlite3 opened a database\")"
           '
 

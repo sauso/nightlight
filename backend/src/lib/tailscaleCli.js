@@ -1,5 +1,6 @@
 import { spawnAsApp } from './childEnv.js';
 import { getTailscaleSocketPath } from './tailscaleProcess.js';
+import fs from 'node:fs';
 
 export const TAILSCALE_BINARY = '/usr/local/bin/tailscale';
 // #969: CLI output can contain account and tailnet details. Keep it in memory only and
@@ -10,8 +11,13 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 // Direct up --timeout=0 returns a URL promptly; five minutes bounds a stalled child.
 const LOGIN_TIMEOUT_MS = 300_000;
 const KILL_RELEASE_MS = 1000;
+// MEASURED 2026-11-03: the real daemon creates its LocalAPI socket about 300 ms
+// after spawn; a CLI run before then fails. The wait is on top of the verb timeout.
+const SOCKET_WAIT_MS = 3000;
+const SOCKET_POLL_MS = 50;
 // child -> release(): cancel must also free the lock if a killed child never reports close.
 const children = new Map();
+const waiting = new Set();
 let mutation = false;
 let loginUrl = null;
 let consentUrl = null;
@@ -81,6 +87,7 @@ export function clearTailscaleLinks() { loginUrl = null; consentUrl = null; }
 
 export function cancelTailscaleCli() {
   clearTailscaleLinks();
+  for (const cancel of [...waiting]) cancel();
   const stopped = [];
   for (const [child, release] of [...children]) {
     stopped.push(new Promise((resolve) => {
@@ -95,7 +102,8 @@ export function cancelTailscaleCli() {
 
 // This is the only CLI execution path. No request can supply an argv token, socket or target.
 export function runTailscaleCli(verb, { hostname, socketPath = getTailscaleSocketPath(),
-  binary = TAILSCALE_BINARY, spawnFn, timeoutMs,
+  binary = TAILSCALE_BINARY, spawnFn, timeoutMs, socketExists = fs.existsSync,
+  socketWaitMs = SOCKET_WAIT_MS,
 } = {}) {
   const fixed = argvFor(verb, hostname);
   if (!fixed) return Promise.resolve({ ok: false, code: 'invalid_command' });
@@ -103,7 +111,7 @@ export function runTailscaleCli(verb, { hostname, socketPath = getTailscaleSocke
   const mutates = !['status', 'serve-status'].includes(verb);
   if (mutates && mutation) return Promise.resolve({ ok: false, code: 'busy' });
   if (mutates) mutation = true;
-  return new Promise((resolve) => {
+  const launch = () => new Promise((resolve) => {
     let child;
     let output = '';
     let settled = false;
@@ -194,5 +202,26 @@ export function runTailscaleCli(verb, { hostname, socketPath = getTailscaleSocke
       if (mutates) mutation = false;
       finish({ ok: false, code: 'cli_failed' });
     }
+  });
+  // Preserve the existing synchronous launch path when the socket is already ready;
+  // this also lets fake children emit immediately after runTailscaleCli returns.
+  const exists = () => { try { return socketExists(socketPath); } catch { return false; } };
+  if (exists()) return launch();
+  return new Promise((resolve) => {
+    const deadline = Date.now() + socketWaitMs;
+    let timer;
+    const cancel = () => {
+      clearTimeout(timer);
+      waiting.delete(cancel);
+      if (mutates) mutation = false;
+      resolve({ ok: false, code: 'daemon_not_ready' });
+    };
+    waiting.add(cancel);
+    const poll = () => {
+      if (exists()) { waiting.delete(cancel); launch().then(resolve); return; }
+      if (Date.now() >= deadline) return cancel();
+      timer = setTimeout(poll, Math.min(SOCKET_POLL_MS, deadline - Date.now()));
+    };
+    poll();
   });
 }

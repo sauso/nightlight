@@ -1,5 +1,23 @@
 [
   {
+    "label": "#971 default socket wait is zero",
+    "file": "backend/src/lib/tailscaleCli.js",
+    "find": "const SOCKET_WAIT_MS = 3000;",
+    "replace": "const SOCKET_WAIT_MS = 0;",
+    "expect": "killed",
+    "tests": ["tailscale-cli.test.js"],
+    "namePattern": "the default socket wait covers a daemon that is still starting"
+  },
+  {
+    "label": "#971 CLI socket wait removed",
+    "file": "backend/src/lib/tailscaleCli.js",
+    "find": "  if (exists()) return launch();",
+    "replace": "  return launch();",
+    "expect": "killed",
+    "tests": ["tailscale-cli.test.js"],
+    "namePattern": "a missing LocalAPI socket never spawns the CLI"
+  },
+  {
     "label": "#967 first-admin blocker dropped",
     "file": "backend/src/lib/tailnetPreconditions.js",
     "find": "if (!firstAdminExists(db)) return {",
