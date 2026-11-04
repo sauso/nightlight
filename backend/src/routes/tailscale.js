@@ -8,20 +8,15 @@ import { runTailscaleCli, validateHostname, getTailscaleLinks, cancelTailscaleCl
 import { resetTailscaleState } from '../lib/tailscaleState.js';
 import { isDemoModeActive } from '../middleware/demoMode.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
-
-function tailnetIPv4(value) {
-  if (typeof value !== 'string') return false;
-  const parts = value.split('.');
-  if (parts.length !== 4 || parts.some((p) => !/^(0|[1-9][0-9]{0,2})$/.test(p) || Number(p) > 255)) return false;
-  return Number(parts[0]) === 100 && Number(parts[1]) >= 64 && Number(parts[1]) <= 127;
-}
+import { vettedTailnetIPv4, setTailnetAddress } from '../lib/tailnetAddress.js';
+import { applyVideoAddressNow, videoAddressPending } from '../lib/videoAddressSync.js';
 
 function cleanStatus(result) {
   if (!result.ok) return { state: 'error', addresses: [], dns_name: null, login_url: null,
     error: typeof result.code === 'string' && /^[a-z_]+$/.test(result.code) ? result.code : 'status_unavailable' };
   const self = result.json.Self;
   const backendState = result.json.BackendState;
-  const addresses = Array.isArray(self?.TailscaleIPs) ? self.TailscaleIPs.filter(tailnetIPv4) : [];
+  const addresses = Array.isArray(self?.TailscaleIPs) ? self.TailscaleIPs.filter((value) => vettedTailnetIPv4([value]) !== null) : [];
   const dns = typeof self?.DNSName === 'string' ? self.DNSName.replace(/\.$/, '') : '';
   const dns_name = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net$/.test(dns) ? dns : null;
   const state = backendState === 'Running' ? 'connected' :
@@ -34,6 +29,7 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
   blocker = tailnetEnableBlocker, start = startTailscale,
   stop = stopTailscale, status = getTailscaleStatus, hasLiveProcess = hasLiveTailscaleProcess,
   verify = verifyToken, onEnqueued = () => {}, cli = runTailscaleCli,
+  pendingVideoAddress = videoAddressPending, applyVideoAddress = applyVideoAddressNow,
   write = (value) => database.prepare("UPDATE settings SET tailscale_enabled = ? WHERE id = 'app'").run(value) } = {}) {
   const router = Router();
   let tail = Promise.resolve();
@@ -47,7 +43,7 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
       addresses: [], dns_name: null, login_url: null };
     let serve = { enabled: false, consent_url: getTailscaleLinks().consentUrl };
     if (enabled() && process.state === 'running') {
-      remote = cleanStatus(await cli('status'));
+      remote = cleanStatus(await cli('status-peerless'));
       const served = await cli('serve-status');
       const web = served.ok ? served.json?.Web : null;
       const serving = web && typeof web === 'object' && Object.entries(web).some(([address, config]) =>
@@ -62,7 +58,7 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
         (remote.login_url ?? getTailscaleLinks().loginUrl), serve,
       last_error: lastError ?? remote.error ?? (process.state === 'unavailable' && typeof process.reason === 'string' &&
         /^[a-z_]+$/.test(process.reason) ? process.reason : null),
-      hostname: hostname() };
+      hostname: hostname(), video_address_pending: pendingVideoAddress() };
   };
   const conflict = (res, code, message) => res.status(409).json({ error: message, code });
 
@@ -116,6 +112,7 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
           try { write(0); }
           catch { return conflict(res, 'could_not_save', 'The Tailscale setting could not be saved.'); }
           lastError = null; // Opus review of #970: an old action error must not outlive a disable.
+          setTailnetAddress(null);
           await cancelTailscaleCli();
           await stop();
           if (status().state !== 'off') {
@@ -135,7 +132,7 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
       if (!res.headersSent) conflict(res, 'operation_failed', 'Tailscale could not complete the request.');
     });
   });
-  const actions = new Set(['sign-in', 'hostname', 'serve-enable', 'serve-disable', 'logout', 'reset']);
+  const actions = new Set(['sign-in', 'hostname', 'serve-enable', 'serve-disable', 'logout', 'reset', 'apply-video-address']);
   router.post('/actions', requireAuth, requireAdmin, (req, res) => {
     if (!req.body || Array.isArray(req.body) || !actions.has(req.body.action) ||
       Object.keys(req.body).some((key) => !['action', 'hostname'].includes(key)) ||
@@ -152,9 +149,16 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
       if (!live?.id) return res.status(401).json({ error: 'Invalid or expired session' });
       if (live.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
       if (isDemoModeActive()) return res.status(403).json({ error: 'This is a read-only public demo - that action is disabled here.' });
+      const action = req.body.action;
+      // #974: applying a cached host is available even after the daemon is turned off.
+      if (action === 'apply-video-address') {
+        const applied = await applyVideoAddress();
+        if (!applied) return res.status(409).json({ ...await view(), applied: false,
+          code: 'video_address_not_applied', error: 'The video address could not be applied.' });
+        return res.json({ ...await view(), applied });
+      }
       const blocked = blocker(database, { hostNetwork: detector() });
       if (blocked) return conflict(res, blocked.code, blocked.message);
-      const action = req.body.action;
       if (action !== 'reset' && (!enabled() || status().state !== 'running'))
         return conflict(res, 'daemon_not_ready', 'The tunnel daemon is not ready.');
       let result;
@@ -163,13 +167,14 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
         await stop();
         if (status().state !== 'off') return conflict(res, 'stop_uncertain', 'The tunnel daemon may still be running.');
         if (!resetTailscaleState({ dataDir })) return conflict(res, 'reset_failed', 'Could not reset the Tailscale connection.');
+        setTailnetAddress(null);
         if (enabled()) start({ db: database, dataDir });
         result = { ok: true };
       } else if (action === 'hostname') {
         result = await cli('set-hostname', { hostname: req.body.hostname });
         if (result.ok) database.prepare("UPDATE settings SET tailscale_hostname = ? WHERE id = 'app'").run(req.body.hostname);
       } else if (action === 'sign-in') result = await cli('up', { hostname: hostname() });
-      else if (action === 'logout') { await cancelTailscaleCli(); result = await cli('logout'); }
+      else if (action === 'logout') { await cancelTailscaleCli(); result = await cli('logout'); if (result.ok) setTailnetAddress(null); }
       else if (action === 'serve-enable') result = await cli('serve-set');
       else result = await cli('serve-reset');
       if (!result.ok) {

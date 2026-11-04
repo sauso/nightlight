@@ -3,6 +3,8 @@ import { networkInterfaces } from 'os';
 import { logger } from './logger.js';
 import { killIfSpawned, isKillError, execFailureBackoff, describeExecFailure } from './processGuards.js';
 import { forwardProcessLines } from './processOutput.js';
+import { MEDIAMTX_API, mediamtxApiIsLocal } from './mediamtx.js';
+import { getTailnetAddress } from './tailnetAddress.js';
 
 let proc = null;
 let stopped = false;
@@ -53,14 +55,38 @@ export function configuredPublicHosts(env = process.env) {
 }
 
 // Keep the status page's candidate list on the same path as each MediaMTX launch.
-export function getAdvertisedHosts(env = process.env) {
-  return [...new Set([...configuredPublicHosts(env), ...detectHostIPv4s()])];
+export function getAdvertisedHosts(env = process.env, detect = detectHostIPv4s) {
+  const base = [...configuredPublicHosts(env), ...detect()];
+  // #974 Opus review: when no computed host exists, a live PATCH still has to retain the
+  // operator's inherited list. The tailnet address is always last, once.
+  if (!base.length) base.push(...(env.MTX_WEBRTCADDITIONALHOSTS || '').split(',').map((host) => host.trim()).filter(Boolean));
+  const tailnet = getTailnetAddress();
+  return [...new Set([...base.filter((host) => host !== tailnet), ...(tailnet ? [tailnet] : [])])];
 }
 
 export function getLastAdvertisedHosts(env = process.env) {
   // Interfaces can change after launch; the page must report the candidates handed to MediaMTX,
   // not a fresh computation that its running process has never seen.
   return lastMediaMTXHosts === null ? getAdvertisedHosts(env) : [...lastMediaMTXHosts];
+}
+
+export function resetMediaMTXHostsForTest() { lastMediaMTXHosts = null; lastAdvertised = null; }
+
+// #974 measured with MediaMTX 1.21.3: this patch reloads only API and WebRTC, retaining the
+// process and configured camera paths. Send the whole list; MediaMTX replaces it, not appends.
+export async function applyWebrtcHostsLive({ fetchImpl = fetch, api = MEDIAMTX_API, env = process.env,
+  detect = detectHostIPv4s } = {}) {
+  const hosts = getAdvertisedHosts(env, detect);
+  if (!hosts.length || !mediamtxApiIsLocal(api)) return false;
+  const res = await fetchImpl(`${api}/v3/config/global/patch`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ webrtcAdditionalHosts: hosts }),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) return false;
+  lastMediaMTXHosts = [...hosts];
+  lastAdvertised = hosts.join(',');
+  return true;
 }
 
 // The last WebRTC-port warning we logged, so a crash-looping MediaMTX (launch() re-runs every 3s)
@@ -127,9 +153,8 @@ export async function startMediaMTX(configPath) {
     // by childEnv({ mediamtx: true }), and nothing else of ours (JWT_SECRET, ...) is (#553).
     const extra = {};
     const advertised = getAdvertisedHosts();
-    // If there is no computed candidate, childEnv still inherits an operator's MTX_* override.
-    // Record that list too so the status describes what the child receives in this edge case.
-    lastMediaMTXHosts = advertised.length ? advertised : (process.env.MTX_WEBRTCADDITIONALHOSTS || '').split(',').map((host) => host.trim()).filter(Boolean);
+    // The operator's inherited list is included by getAdvertisedHosts when there is no base.
+    lastMediaMTXHosts = advertised;
     // Log the host list only when it CHANGES. It is recomputed every launch, and the spawn-failure
     // retry below relaunches every 3s forever, so logging it unconditionally added a second line to
     // the flood described there — and this one is info, i.e. pure noise once it has been said once.

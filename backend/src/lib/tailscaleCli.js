@@ -68,6 +68,7 @@ export function validateHostname(value) {
 const argvFor = (verb, hostname) => {
   switch (verb) {
     case 'status': return ['status', '--json'];
+    case 'status-peerless': return ['status', '--json', '--peers=false']; // #974: the Peer map can exceed the 16 KB cap.
     case 'up':
       if (!validateHostname(hostname)) return null;
       return ['up', `--hostname=${hostname}`, '--timeout=0']; // MEASURED 2026-11-03: default up times out after about 60s.
@@ -108,7 +109,7 @@ export function runTailscaleCli(verb, { hostname, socketPath = getTailscaleSocke
   const fixed = argvFor(verb, hostname);
   if (!fixed) return Promise.resolve({ ok: false, code: 'invalid_command' });
   if (!socketPath || typeof socketPath !== 'string') return Promise.resolve({ ok: false, code: 'daemon_not_ready' });
-  const mutates = !['status', 'serve-status'].includes(verb);
+  const mutates = !['status', 'status-peerless', 'serve-status'].includes(verb);
   if (mutates && mutation) return Promise.resolve({ ok: false, code: 'busy' });
   if (mutates) mutation = true;
   const launch = () => new Promise((resolve) => {
@@ -137,7 +138,7 @@ export function runTailscaleCli(verb, { hostname, socketPath = getTailscaleSocke
         if (url) { consentUrl = url; return finish({ ok: false, code: 'consent_required', consentUrl: url }); }
       }
       if (code !== 0) return finish({ ok: false, code: 'cli_failed' });
-      if (verb === 'status' || verb === 'serve-status') {
+      if (verb === 'status' || verb === 'status-peerless' || verb === 'serve-status') {
         try {
           const json = JSON.parse(output);
           if (!json || typeof json !== 'object' || Array.isArray(json)) throw Error('invalid JSON');
