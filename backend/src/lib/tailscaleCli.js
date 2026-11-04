@@ -9,7 +9,9 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 // MEASURED 2026-11-03: containerboot's default up timed out at about 60 seconds.
 // Direct up --timeout=0 returns a URL promptly; five minutes bounds a stalled child.
 const LOGIN_TIMEOUT_MS = 300_000;
-const children = new Set();
+const KILL_RELEASE_MS = 1000;
+// child -> release(): cancel must also free the lock if a killed child never reports close.
+const children = new Map();
 let mutation = false;
 let loginUrl = null;
 let consentUrl = null;
@@ -32,8 +34,12 @@ function approvedConsentUrl(value) {
   } catch { return null; }
 }
 
-function extractUrl(output, approve) {
-  for (const candidate of output.match(/https?:\/\/[^\s<>"']+/g) ?? []) {
+// Codex review of #970 (verified by running): a URL split across two output chunks matched its
+// first half and was returned truncated. While the child is still running a candidate counts only
+// once whitespace follows it (`terminated`); at exit the end of output also terminates it.
+function extractUrl(output, approve, terminated = false) {
+  const pattern = terminated ? /https?:\/\/[^\s<>"']+(?=\s)/g : /https?:\/\/[^\s<>"']+/g;
+  for (const candidate of output.match(pattern) ?? []) {
     const url = approve(candidate.replace(/[),.;]+$/, ''));
     if (url) return url;
   }
@@ -69,10 +75,10 @@ export function clearTailscaleLinks() { loginUrl = null; consentUrl = null; }
 export function cancelTailscaleCli() {
   clearTailscaleLinks();
   const stopped = [];
-  for (const child of children) {
+  for (const [child, release] of [...children]) {
     stopped.push(new Promise((resolve) => {
       child.once('close', resolve);
-      const cap = setTimeout(resolve, 1000);
+      const cap = setTimeout(() => { release(); resolve(); }, 1000);
       cap.unref?.();
     }));
     try { child.kill('SIGKILL'); } catch { /* close/timeout will settle it */ }
@@ -133,18 +139,26 @@ export function runTailscaleCli(verb, { hostname, socketPath = getTailscaleSocke
       if (Buffer.byteLength(output) > OUTPUT_LIMIT) {
         failure = 'output_limit';
         finish({ ok: false, code: failure });
-        try { child.kill('SIGKILL'); } catch { /* timeout still bounds it */ }
+        try { child.kill('SIGKILL'); } catch { /* the release cap below still frees the lock */ }
+        forceRelease();
         return;
       }
       if (verb === 'up') {
-        const url = extractUrl(output, approvedLoginUrl);
+        const url = extractUrl(output, approvedLoginUrl, true);
         if (url) { loginUrl = url; finish({ ok: true, loginUrl: url }); }
       }
+    };
+    // Codex review of #970 (verified by running): a child that ignores SIGKILL never emits close, so
+    // `done` never released the mutation lock and every later action answered `busy` forever. After a
+    // forced kill, release the lock on a short cap even without a close event.
+    const forceRelease = () => {
+      const cap = setTimeout(() => done(null), KILL_RELEASE_MS);
+      cap.unref?.();
     };
     let timer;
     try {
       child = (spawnFn ?? spawnAsApp)(binary, [`--socket=${socketPath}`, ...fixed], { stdio: ['ignore', 'pipe', 'pipe'] });
-      children.add(child);
+      children.set(child, () => done(null));
       child.stdout?.on('data', onData);
       child.stderr?.on('data', onData);
       child.on('error', () => { failure = 'cli_failed'; done(null); });
@@ -152,7 +166,8 @@ export function runTailscaleCli(verb, { hostname, socketPath = getTailscaleSocke
       timer = setTimeout(() => {
         failure = 'timeout';
         finish({ ok: false, code: failure });
-        try { child.kill('SIGKILL'); } catch { done(null); }
+        try { child.kill('SIGKILL'); } catch { done(null); return; }
+        forceRelease();
       }, timeoutMs ?? (verb === 'up' ? LOGIN_TIMEOUT_MS : DEFAULT_TIMEOUT_MS));
     } catch {
       if (mutates) mutation = false;

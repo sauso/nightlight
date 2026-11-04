@@ -1,5 +1,7 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -84,4 +86,38 @@ test('#969 Serve consent link is vetted for admin retry', {
   const result = await runTailscaleCli('serve-set', { ...f, socketPath: '/tmp/private.sock' });
   assert.equal(result.code, 'consent_required');
   assert.equal(result.consentUrl, 'https://login.tailscale.com/admin/feature/serve');
+});
+
+// In-process fake children (no nested spawn), so these run on win32 too.
+function fakeChild({ closeOnKill }) {
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => { if (closeOnKill) queueMicrotask(() => child.emit('close', null)); return true; };
+  return child;
+}
+const fakeOpts = (child, extra = {}) => ({ socketPath: '/tmp/private.sock', hostname: 'nightlight',
+  spawnFn: () => child, ...extra });
+
+test('#969 a sign-in URL split across output chunks is never returned truncated', async () => {
+  const child = fakeChild({ closeOnKill: true });
+  const pending = runTailscaleCli('up', fakeOpts(child));
+  child.stdout.write('To authenticate, visit: https://login.tailscale.com/a/abc');
+  await sleep(10);
+  assert.equal(getTailscaleLinks().loginUrl, null, 'the unfinished first half must not be accepted');
+  child.stdout.write('def123\n');
+  const result = await pending;
+  assert.equal(result.loginUrl, 'https://login.tailscale.com/a/abcdef123');
+  await cancelTailscaleCli();
+});
+
+test('#969 a killed child that never reports close still releases the mutation lock', async () => {
+  const stuck = fakeChild({ closeOnKill: false });
+  assert.equal((await runTailscaleCli('up', fakeOpts(stuck, { timeoutMs: 5 }))).code, 'timeout');
+  assert.equal((await runTailscaleCli('logout', fakeOpts(fakeChild({ closeOnKill: true })))).code, 'busy');
+  await sleep(1200);
+  const next = fakeChild({ closeOnKill: true });
+  const result = runTailscaleCli('logout', fakeOpts(next));
+  next.emit('close', 0);
+  assert.equal((await result).ok, true);
 });
