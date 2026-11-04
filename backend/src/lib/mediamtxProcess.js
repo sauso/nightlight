@@ -3,7 +3,6 @@ import { networkInterfaces } from 'os';
 import { logger } from './logger.js';
 import { killIfSpawned, isKillError, execFailureBackoff, describeExecFailure } from './processGuards.js';
 import { forwardProcessLines } from './processOutput.js';
-import { MEDIAMTX_API, mediamtxApiIsLocal } from './mediamtx.js';
 import { getTailnetAddress } from './tailnetAddress.js';
 
 let proc = null;
@@ -79,11 +78,17 @@ export function resetMediaMTXHostsForTest() { lastMediaMTXHosts = null; lastAdve
 
 // #974 measured with MediaMTX 1.21.3: this patch reloads only API and WebRTC, retaining the
 // process and configured camera paths. Send the whole list; MediaMTX replaces it, not appends.
-export async function applyWebrtcHostsLive({ fetchImpl = fetch, api = MEDIAMTX_API, env = process.env,
+// CI run 41792011333: notify-timeouts.test.js refuses `x = fetch` (an alias slips past its signal scan), so the default is
+// chosen at the call below instead. The deadline on that call is pinned by video-address-sync.test.js (the `signal` check).
+export async function applyWebrtcHostsLive({ fetchImpl = null, api = null, env = process.env,
   detect = detectHostIPv4s } = {}) {
+  // CI run 41792011333: media-supervision.test.js replaces ./mediamtx.js with a mock that exports only four names, so a
+  // top-level named import of MEDIAMTX_API broke that whole file at link time. Resolved lazily, only when a patch is made.
+  const { MEDIAMTX_API, mediamtxApiIsLocal } = await import('./mediamtx.js');
+  const target = api ?? MEDIAMTX_API;
   const hosts = getAdvertisedHosts(env, detect);
-  if (!hosts.length || !mediamtxApiIsLocal(api)) return false;
-  const res = await fetchImpl(`${api}/v3/config/global/patch`, {
+  if (!hosts.length || !mediamtxApiIsLocal(target)) return false;
+  const res = await (fetchImpl ?? fetch)(`${target}/v3/config/global/patch`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ webrtcAdditionalHosts: hosts }),
     signal: AbortSignal.timeout(5000),
