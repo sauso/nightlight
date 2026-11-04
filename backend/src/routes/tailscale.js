@@ -46,8 +46,11 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
       remote = cleanStatus(await cli('status-peerless'));
       const served = await cli('serve-status');
       const web = served.ok ? served.json?.Web : null;
-      const serving = web && typeof web === 'object' && Object.entries(web).some(([address, config]) =>
-        address.endsWith(':443') && config?.Handlers?.['/']?.Proxy === 'http://127.0.0.1:4000');
+      // Lead review of #978 (Codex, verified): after a rename Tailscale leaves the Serve entry under the OLD name (measured
+      // 2026-11-04), so 'any :443 entry' reported the secure address as on while the NEW name served nothing. The entry must
+      // be for the name this node has now. With no vetted DNS name there is nothing to compare, so it is not on.
+      const serving = web && typeof web === 'object' && remote.dns_name && Object.entries(web).some(([address, config]) =>
+        address === `${remote.dns_name}:443` && config?.Handlers?.['/']?.Proxy === 'http://127.0.0.1:4000');
       serve = { enabled: Boolean(serving),
         consent_url: getTailscaleLinks().consentUrl };
     }

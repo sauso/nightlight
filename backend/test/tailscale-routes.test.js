@@ -339,6 +339,25 @@ test('#969 status vets addresses and DNS while retaining the old fields', async 
   for (const field of ['enabled', 'process', 'blocker', 'host_network']) assert.ok(Object.hasOwn(got.body, field));
 });
 
+// Found in the review of #978 and MEASURED on the real CLI (2026-11-04): a rename leaves the Serve entry under the OLD name.
+// 'Any :443 entry' called the secure address on while the node's new name served nothing.
+test('#978 the secure address counts as on only when Serve is set up for the CURRENT name', async () => {
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  const proxy = 'http://127.0.0.1:4000';
+  let web;
+  await mount({ blocker: () => null, status: () => ({ state: 'running', restarts: 0, reason: null }),
+    cli: async (verb) => verb === 'status-peerless'
+      ? { ok: true, json: { BackendState: 'Running', Self: { TailscaleIPs: ['100.64.0.1'], DNSName: 'new-name.example.ts.net.' } } }
+      : { ok: true, json: { Web: web } } });
+  const enabled = async () => (await call(route(), { token: adminToken })).body.serve.enabled;
+  web = { 'old-name.example.ts.net:443': { Handlers: { '/': { Proxy: proxy } } } };
+  assert.equal(await enabled(), false);
+  web = { 'new-name.example.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:9999' } } } };
+  assert.equal(await enabled(), false);
+  web = { 'new-name.example.ts.net:443': { Handlers: { '/': { Proxy: proxy } } } };
+  assert.equal(await enabled(), true);
+});
+
 test('#969 hostname is saved only after CLI success and sign-in uses that name', async () => {
   const calls = [];
   await mount({ blocker: () => null, status: () => ({ state: 'running' }),

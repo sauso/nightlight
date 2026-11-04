@@ -61,14 +61,17 @@ export default function TailscaleCard({ compact = false, publicHostSet = false }
   const region = useRef(null);
 
   useEffect(() => { if (view?.hostname) setName(view.hostname); }, [view?.hostname]);
+  // Codex review of #978 (verified): the sign-in link replaces the Sign in button inside the same state, so watching the
+  // state alone dropped focus to <body>. The key changes whenever the card's primary control does.
+  const focusKey = view ? `${view.state}|${view.login_url ? 'link' : ''}|${consentUrl ? 'consent' : ''}|${view.serve?.enabled ? 'https' : ''}` : null;
   useEffect(() => {
-    if (!view) return;
-    // Polls change the card in place. Put keyboard focus on its new next step only when the state changes.
-    if (previousState.current && previousState.current !== view.state) {
+    if (!focusKey) return;
+    // Polls change the card in place. Put keyboard focus on its new next step only when it changes.
+    if (previousState.current && previousState.current !== focusKey) {
       region.current?.querySelector('[data-tailscale-primary]')?.focus({ preventScroll: true });
     }
-    previousState.current = view.state;
-  }, [view?.state]);
+    previousState.current = focusKey;
+  }, [focusKey]);
   useEffect(() => () => probeRef.current?.abort(), []);
 
   async function signIn() {
@@ -112,7 +115,7 @@ export default function TailscaleCard({ compact = false, publicHostSet = false }
 
   let content;
   if (!view) {
-    content = loading ? <p>Loading…</p> : <LoadFailed what="Tailscale details" onRetry={load} />;
+    content = loading ? <p>Loading…</p> : <LoadFailed what="Tailscale details" onRetry={readOnly ? undefined : load} />;
   } else if (!view.enabled || view.state === 'off') {
     content = <>
       <p role="status">Use Tailscale to watch your cameras away from home, with no router changes. It stays private to your Tailscale account.</p>
@@ -171,7 +174,8 @@ export default function TailscaleCard({ compact = false, publicHostSet = false }
       <h3>Add someone</h3>
       <ol><li>Install Tailscale on their phone or computer.</li><li>Invite them to your Tailscale network, or share this device with them from the Tailscale admin console.</li><li>Open the address above and sign in with their Nightlight account.</li></ol>
       <p>Joining Tailscale doesn't replace a Nightlight account. Add caregivers in Settings → Caregivers.</p>
-      <p role="status">{view.video_address_pending ? 'Low latency video: updating. Viewers reconnect once.' : 'Low latency video: ready'}</p>
+      {/* Codex review of #978 (verified): pending=false is also what the server says before it has found the address, so it is not proof of ready. Claim nothing until there is an update to report. */}
+      {view.video_address_pending && <p role="status">Low latency video: updating. Viewers reconnect once.</p>}
       {view.video_address_pending && button('Apply now', () => act('apply-video-address'))}
       <h3>Check it works</h3>
       {!camera && <p>No camera is running yet, so there is nothing to test. Add or start a camera first.</p>}

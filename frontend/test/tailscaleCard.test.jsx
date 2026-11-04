@@ -227,3 +227,29 @@ test.each([
   await act(async () => { await vi.advanceTimersByTimeAsync(interval); });
   expect(get).toHaveBeenCalledTimes(2);
 });
+
+// Codex review of #978 (verified): the server also says 'not pending' before it has found the address, so a ready line
+// built on that flag claimed more than was known.
+test('nothing claims video is ready when no update is waiting', async () => {
+  card(ready);
+  await screen.findByText('Your secure address');
+  expect(screen.queryByText(/Low latency video: ready/)).toBeNull();
+  expect(screen.queryByText(/Low latency video: updating/)).toBeNull();
+});
+
+// Codex review of #978 (verified): the sign-in link replaces the button inside the same state, and focus fell to <body>.
+test('keyboard focus follows the card to the sign-in link', async () => {
+  const view = card(waiting);
+  api.post.mockResolvedValue({ ...waiting, login_url: 'https://login.tailscale.com/a/token' });
+  await view.user.click(await screen.findByRole('button', { name: 'Sign in with Tailscale' }));
+  const link = await screen.findByRole('link', { name: 'Open Tailscale sign-in' });
+  await waitFor(() => expect(link).toHaveFocus());
+});
+
+test('in the demo a failed load offers no Retry', async () => {
+  demo.value = { demo: true };
+  vi.spyOn(api, 'get').mockRejectedValue(new Error('offline'));
+  renderAsAdmin(<TailscaleCard />, { cameras: [camera] });
+  await screen.findByText(/Couldn.t load Tailscale details/);
+  expect(screen.queryByRole('button', { name: /Retry/ })).toBeNull();
+});

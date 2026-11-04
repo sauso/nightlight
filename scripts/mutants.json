@@ -1,5 +1,14 @@
 [
   {
+    "label": "#978 Serve counted for any name",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "address === `${remote.dns_name}:443` &&",
+    "replace": "address.endsWith(\":443\") &&",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "the secure address counts as on only when Serve is set up for the CURRENT name"
+  },
+  {
     "label": "#971 default socket wait is zero",
     "file": "backend/src/lib/tailscaleCli.js",
     "find": "const SOCKET_WAIT_MS = 3000;",
