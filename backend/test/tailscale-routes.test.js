@@ -20,6 +20,7 @@ const { verifyToken } = await import('../src/middleware/auth.js');
 const { isLoopbackExposed } = await import('../src/lib/loopbackExposure.js');
 const { spawnAsApp } = await import('../src/lib/childEnv.js');
 const { runTailscaleCli, getTailscaleLinks } = await import('../src/lib/tailscaleCli.js');
+const { setTailnetAddress, getTailnetAddress } = await import('../src/lib/tailnetAddress.js');
 const FAKE = fileURLToPath(new URL('./helpers/fakeTailscaled.js', import.meta.url));
 const safe = { host: false, evidence: [], unknown: null };
 const roots = [];
@@ -70,6 +71,7 @@ afterEach(async () => {
   await Promise.race([stopTailscale(), sleep(500)]);
   db.prepare("UPDATE settings SET tailscale_enabled = 0 WHERE id = 'app'").run();
   db.prepare("UPDATE settings SET tailscale_hostname = 'nightlight' WHERE id = 'app'").run();
+  setTailnetAddress(null);
   await server?.close(); server = null;
   await settings?.close(); settings = null;
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
@@ -116,7 +118,7 @@ test('#967 admin routes, strict body and fixed response shape', async () => {
   const got = await call(route(), { token: adminToken });
   assert.equal(got.status, 200);
   assert.deepEqual(Object.keys(got.body).sort(), ['addresses', 'blocker', 'dns_name', 'enabled', 'host_network',
-    'hostname', 'last_error', 'login_url', 'process', 'serve', 'state']);
+    'hostname', 'last_error', 'login_url', 'process', 'serve', 'state', 'video_address_pending']);
   assert.equal(got.body.state, 'off');
   assert.equal(got.body.hostname, 'nightlight');
   assert.doesNotMatch(JSON.stringify(got.body), /private\/|pid-|tskey-|@example/);
@@ -323,7 +325,7 @@ test('#967 unavailable route branch has no unreachable second stop', () => {
 test('#969 status vets addresses and DNS while retaining the old fields', async () => {
   db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
   await mount({ blocker: () => null, status: () => ({ state: 'running', restarts: 0, reason: null }),
-    cli: async (verb) => verb === 'status' ? { ok: true, json: { BackendState: 'Running', AuthURL: 'https://login.tailscale.com.evil/a/steal', Self: {
+    cli: async (verb) => verb === 'status-peerless' ? { ok: true, json: { BackendState: 'Running', AuthURL: 'https://login.tailscale.com.evil/a/steal', Self: {
       TailscaleIPs: ['100.64.0.1', '100.127.255.255', '100.128.0.1', '192.168.0.1', '100.64.1.999'],
       DNSName: 'neutral.example.ts.net.',
     } } } : { ok: true, json: { Web: {} } } });
@@ -565,4 +567,72 @@ test('#969 logout cancels pending sign-in before running its CLI mutation', asyn
   assert.equal(killed, true);
   assert.equal(verbs[0], 'logout');
   assert.equal(getTailscaleLinks().loginUrl, null);
+});
+
+// A cached tailnet address must not outlive the node that owned it: while it is cached, the next MediaMTX launch
+// would advertise a dead address ("never advertise a disconnected IP", design section 4).
+test('#974 disable, logout and reset each forget the cached tailnet address', async () => {
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  let state = 'running';
+  await mount({ blocker: () => null, status: () => ({ state }), stop: async () => { state = 'off'; },
+    start: () => true, cli: async () => ({ ok: true, json: {} }) });
+  setTailnetAddress('100.64.1.1');
+  assert.equal((await call(`${route()}/actions`, { method: 'POST', token: adminToken, body: { action: 'logout' } })).status, 200);
+  assert.equal(getTailnetAddress(), null);
+  setTailnetAddress('100.64.1.1');
+  assert.equal((await put(false)).status, 200);
+  assert.equal(getTailnetAddress(), null);
+  state = 'running'; setTailnetAddress('100.64.1.1');
+  await call(`${route()}/actions`, { method: 'POST', token: adminToken, body: { action: 'reset' } });
+  assert.equal(getTailnetAddress(), null);
+});
+
+test('#974 Apply now is admin-only, works with the daemon off, and reports failures', async () => {
+  let applied = true; let calls = 0;
+  await mount({ blocker: () => ({ code: 'host_network', message: 'Unavailable.' }),
+    pendingVideoAddress: () => true, applyVideoAddress: async () => { calls++; return applied; } });
+  const action = (token = adminToken) => call(`${route()}/actions`, { method: 'POST', token,
+    body: { action: 'apply-video-address' } });
+  assert.equal((await action(caregiverToken)).status, 403);
+  const view = await call(route(), { token: adminToken });
+  assert.equal(view.body.video_address_pending, true);
+  const good = await action();
+  assert.equal(good.status, 200); assert.equal(good.body.applied, true);
+  assert.equal(good.body.video_address_pending, true);
+  applied = false;
+  const bad = await action();
+  assert.equal(bad.status, 409); assert.equal(bad.body.code, 'video_address_not_applied');
+  assert.equal(bad.body.applied, false); assert.equal(bad.body.video_address_pending, true);
+  applied = null;
+  const busy = await action();
+  assert.equal(busy.status, 409); assert.equal(busy.body.code, 'busy');
+  assert.equal(busy.body.error, 'A video address check is in progress. Try again in a moment.');
+  assert.equal(busy.body.applied, false); assert.equal(busy.body.video_address_pending, true);
+  process.env.DEMO_MODE = 'true';
+  try { assert.equal((await action()).status, 403); }
+  finally { delete process.env.DEMO_MODE; }
+  assert.equal(calls, 3);
+});
+
+test('#974 queued Apply now rechecks revoked and demoted admin sessions', async () => {
+  let calls = 0;
+  const user = makeUser(db, { id: 'queued-974', username: 'queued-974' });
+  const sid = makeSession(db, user.id);
+  const token = signToken({ id: user.id, sid, role: 'admin' });
+  await mount({ onEnqueued: (req) => {
+    if (req.headers.authorization === `Bearer ${token}`) db.prepare('DELETE FROM sessions WHERE id = ?').run(sid);
+  }, applyVideoAddress: async () => { calls++; return true; } });
+  const action = () => call(`${route()}/actions`, { method: 'POST', token,
+    body: { action: 'apply-video-address' } });
+  assert.equal((await action()).status, 401);
+  await server.close(); server = null;
+  const sid2 = makeSession(db, user.id);
+  const token2 = signToken({ id: user.id, sid: sid2, role: 'admin' });
+  await mount({ onEnqueued: (req) => {
+    if (req.headers.authorization === `Bearer ${token2}`)
+      db.prepare("UPDATE users SET role = 'caregiver' WHERE id = ?").run(user.id);
+  }, applyVideoAddress: async () => { calls++; return true; } });
+  const demoted = await call(`${route()}/actions`, { method: 'POST', token: token2,
+    body: { action: 'apply-video-address' } });
+  assert.equal(demoted.status, 403); assert.equal(calls, 0);
 });

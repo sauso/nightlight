@@ -47,6 +47,28 @@ test('#969 hostile URLs and hostnames are rejected', () => {
   assert.equal(validateHostname('nightlight'), true);
 });
 
+test('#974 peerless status uses fixed read-only argv and avoids the 16 KB peer map', async () => {
+  const full = { BackendState: 'Running', Self: { TailscaleIPs: ['100.64.1.2'] }, Peer: {
+    huge: { name: 'x'.repeat(20_000) } } };
+  assert.ok(Buffer.byteLength(JSON.stringify(full)) > 16 * 1024);
+  let argvSeen;
+  const result = await runTailscaleCli('status-peerless', { socketPath: '/tmp/private.sock', socketExists: () => true,
+    spawnFn: (_binary, argv) => {
+      argvSeen = argv;
+      const child = new EventEmitter();
+      child.stdout = new PassThrough(); child.stderr = new PassThrough();
+      child.kill = () => true;
+      queueMicrotask(() => {
+        child.stdout.write(JSON.stringify({ BackendState: full.BackendState, Self: full.Self }));
+        child.stdout.end(); child.emit('close', 0);
+      });
+      return child;
+    } });
+  assert.deepEqual(argvSeen, ['--socket=/tmp/private.sock', 'status', '--json', '--peers=false']);
+  assert.equal(result.ok, true);
+  assert.equal(result.json.Self.TailscaleIPs[0], '100.64.1.2');
+});
+
 test('#969 fake CLI cannot return hostile URLs', {
   skip: process.platform === 'win32' && 'The sandbox refuses nested process spawn on win32; Linux CI runs the real CLI child',
 }, async () => {
@@ -98,6 +120,18 @@ function fakeChild({ closeOnKill }) {
 }
 const fakeOpts = (child, extra = {}) => ({ socketPath: '/tmp/private.sock', hostname: 'nightlight',
   socketExists: () => true, spawnFn: () => child, ...extra });
+
+test('#974 peerless status runs while a mutating CLI child holds the lock', async () => {
+  const up = fakeChild({ closeOnKill: true });
+  const login = runTailscaleCli('up', fakeOpts(up));
+  up.stdout.write('https://login.tailscale.com/a/abc123\n');
+  assert.equal((await login).ok, true);
+  const status = fakeChild({ closeOnKill: true });
+  const result = runTailscaleCli('status-peerless', fakeOpts(status));
+  status.stdout.write('{"BackendState":"Running","Self":{"TailscaleIPs":["100.64.1.2"]}}');
+  status.emit('close', 0);
+  assert.deepEqual(await result, { ok: true, json: { BackendState: 'Running', Self: { TailscaleIPs: ['100.64.1.2'] } } });
+});
 
 test('#971 a late LocalAPI socket lets the CLI run', async () => {
   const socketPath = path.join(os.tmpdir(), `nl-971-socket-${process.pid}-${Math.random()}`);

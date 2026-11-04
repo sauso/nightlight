@@ -46,6 +46,7 @@ import { startClipStorage, stopClipStorage } from './lib/clipStorage.js';
 import { initPush } from './lib/push.js';
 import { startMediaMTX, stopMediaMTX, restartMediaMTX } from './lib/mediamtxProcess.js';
 import { startMediamtxApiWatchdog, stopMediamtxApiWatchdog } from './lib/mediamtxApiWatchdog.js';
+import { startVideoAddressSync, stopVideoAddressSync } from './lib/videoAddressSync.js';
 import { recordCameraEvent, EVENT } from './lib/cameraEvents.js';
 import { parseStunServers, writeMediamtxConfig } from './lib/stunServers.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
@@ -112,6 +113,7 @@ startMediamtxApiWatchdog({
     }
   },
 });
+startVideoAddressSync(); // #974: poll the peerless Tailscale status and patch WebRTC hosts when safe.
 refreshMqttConnection(); // no-ops if no broker is configured
 startSensorSampler(); // persist MQTT temp/humidity over time (Stage-2 sleep-tracking groundwork)
 startActivityTracker(); // bucket motion/sound activity per minute (Stage-2 sleep-tracking timeline)
@@ -548,6 +550,8 @@ async function shutdown() {
   // FIRST, before the seconds of awaited stops below: a tick that fired in the middle of them could SIGTERM MediaMTX
   // while a recording is still being cut from it (#479).
   stopMediamtxApiWatchdog();
+  // #974: an in-flight status read must not patch during the awaited stops.
+  stopVideoAddressSync();
   // #937: the mDNS goodbye, STARTED here so phones drop this server from their list at once, and AWAITED just before
   // process.exit(0) below: the goodbye is sent in an asynchronous callback, so exiting without waiting can cut it
   // off. It runs alongside the seconds of awaited stops in between, so it normally adds nothing, and
