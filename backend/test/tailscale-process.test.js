@@ -8,6 +8,7 @@ import { spawnAsApp } from '../src/lib/childEnv.js';
 import { startTailscale, stopTailscale, getTailscaleStatus, EXPOSURE_HOLD_MS, FORCE_KILL_MS, TAILSCALE_STOP_CAP_MS } from '../src/lib/tailscaleProcess.js';
 import { isLoopbackExposed } from '../src/lib/loopbackExposure.js';
 import { logger } from '../src/lib/logger.js';
+import { detectHostNetwork } from '../src/lib/hostNetwork.js';
 import { useTempDataDir, cleanupTempDataDirs, mountRouter, call } from './helpers/harness.js';
 
 useTempDataDir();
@@ -345,6 +346,19 @@ test('#967 omitted network and binary injections end unavailable', async () => {
   startTailscale({ db: f.opts.db, dataDir: f.dataDir });
   assert.equal(getTailscaleStatus().state, 'unavailable');
   assert.ok(['host_network', 'not_installed'].includes(getTailscaleStatus().reason));
+  assert.equal(f.seen.length, 0);
+});
+
+test('#967 real host detection refuses an executable binary without injections', (t) => {
+  const network = detectHostNetwork();
+  if (!network.host) {
+    t.skip('This machine did not report host networking; Linux host CI exercises this case.');
+    return;
+  }
+  const f = fixture();
+  startTailscale({ db: f.opts.db, dataDir: f.dataDir, binary: process.execPath });
+  assert.equal(getTailscaleStatus().state, 'unavailable');
+  assert.equal(getTailscaleStatus().reason, 'host_network');
   assert.equal(f.seen.length, 0);
 });
 

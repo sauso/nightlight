@@ -15,14 +15,13 @@ function listener(text, ownPort, ipv6) {
     const [address, hexPort] = fields[1].split(':');
     if (!address || !hexPort || parseInt(hexPort, 16) === ownPort) continue;
     if (ipv6) {
-      // Opus plan review of #967: proc's IPv4-mapped IPv6 addresses retain the IPv4
-      // little-endian word; wildcard sockets also expose this namespace.
+      // Opus fix review of #967: Tailscale netstack dials 127.0.0.1 for tailnet
+      // traffic. Docker DNS listens on 127.0.0.11 in every user-defined network,
+      // so other loopback addresses and ::1 cannot indicate a shared namespace.
+      // Proc's mapped IPv4 addresses retain the little-endian IPv4 word.
       if (/^0{32}$/i.test(address) ||
-          /^0{16}FFFF0000[0-9A-F]{8}$/i.test(address) &&
-          address.slice(-8).toUpperCase() !== '0200007F' &&
-          (address.slice(-8) === '00000000' || address.slice(-8).toUpperCase().endsWith('7F'))) return true;
-    } else if (address === '00000000' ||
-      (address.slice(-2).toUpperCase() === '7F' && address.toUpperCase() !== '0200007F')) return true;
+          /^(?:0{16}FFFF0000)(?:0100007F|00000000)$/i.test(address)) return true;
+    } else if (address === '00000000' || address.toUpperCase() === '0100007F') return true;
   }
   return false;
 }
@@ -71,8 +70,13 @@ export function detectHostNetwork({ platform = process.platform, readdir = fs.re
   try {
     // Opus plan review of #967: a shared namespace may expose another process's
     // loopback listener even when its interface shape resembles a bridge container.
-    if (listener(readFile('/proc/net/tcp', 'utf8'), port, false) ||
-        listener(readFile('/proc/net/tcp6', 'utf8'), port, true)) evidence.add('foreign_listener');
+    const tcp = readFile('/proc/net/tcp', 'utf8');
+    // Opus fix review of #967: ipv6.disable=1 removes tcp6 entirely; that is
+    // absence of IPv6 listeners, while a missing tcp remains a namespace fault.
+    let tcp6;
+    try { tcp6 = readFile('/proc/net/tcp6', 'utf8'); }
+    catch (err) { if (err?.code !== 'ENOENT') throw err; tcp6 = ''; }
+    if (listener(tcp, port, false) || listener(tcp6, port, true)) evidence.add('foreign_listener');
   } catch { return { host: false, evidence: [], unknown: 'proc_mismatch' }; }
   return { host: evidence.size > 0, evidence: [...evidence], unknown: null };
 }

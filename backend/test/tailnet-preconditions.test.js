@@ -1,5 +1,7 @@
 import { test, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { stripCommentsOnly } from './helpers/sourceScan.js';
 import {
   useTempDataDir, cleanupTempDataDirs, makeUser, mountRouter, mountRouterTrustingProxy, call,
 } from './helpers/harness.js';
@@ -58,7 +60,7 @@ test('#963 no users or a lone caregiver blocks Tailscale until an admin exists',
   assert.equal(tailnetEnableBlocker(db, { hostNetwork: { host: false, evidence: [], unknown: 'not_linux' }, binaryPath: process.execPath }), null);
 });
 
-test('#967 host network and missing daemon block with real defaults', () => {
+test('#967 host network and missing daemon block with injected conditions', () => {
   makeUser(db, { id: 'admin-new', username: 'admin-new', role: 'admin' });
   assert.equal(tailnetEnableBlocker(db, { hostNetwork: { host: true, evidence: ['bridge_dir'], unknown: null },
     binaryPath: process.execPath })?.code, 'host_network');
@@ -66,6 +68,14 @@ test('#967 host network and missing daemon block with real defaults', () => {
     binaryPath: process.execPath })?.code, 'host_network');
   assert.equal(tailnetEnableBlocker(db, { hostNetwork: { host: false, evidence: [], unknown: null },
     binaryPath: '/missing-daemon-for-967' })?.code, 'not_installed');
+});
+
+test('#967 blocker defaults pin real detection and the fixed executable path', () => {
+  const source = stripCommentsOnly(fs.readFileSync(new URL('../src/lib/tailnetPreconditions.js', import.meta.url), 'utf8'));
+  // Opus fix review of #967: an allowed default hides a host-network refusal
+  // when callers omit injections, even if every injected-case test passes.
+  assert.match(source, /hostNetwork\s*=\s*detectHostNetwork\s*\(/);
+  assert.match(source, /binaryPath\s*=\s*TAILSCALED_BINARY\b/);
 });
 
 test('#963 exposed loopback setup refuses forged forwarded LAN address without a user or session', async () => {

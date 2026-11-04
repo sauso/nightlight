@@ -4,7 +4,7 @@ Nightlight is made for your home network first: add your cameras, watch them fro
 
 ## Networking modes
 
-Planned Tailscale support will need the container to have its own address through bridge, ipvlan or macvlan; host networking will be refused.
+Planned Tailscale support will need the container to have its own address through bridge, ipvlan or macvlan; host networking will be refused. The check counts TCP listeners on `127.0.0.1` or a wildcard, ignores Docker DNS on `127.0.0.11`, and cannot detect UDP-only loopback services in a shared namespace.
 
 Nightlight needs its own routable IP on your LAN so WebRTC has no NAT/ICE trouble: MediaMTX advertises that IP to browsers. There are two supported ways to provide one:
 

@@ -8,7 +8,7 @@ import { startTailscale, stopTailscale, getTailscaleStatus, hasLiveTailscaleProc
 export function createTailscaleRouter({ database = db, dataDir = process.env.DATA_DIR || '/app/data',
   detector = detectHostNetwork, blocker = tailnetEnableBlocker, start = startTailscale,
   stop = stopTailscale, status = getTailscaleStatus, hasLiveProcess = hasLiveTailscaleProcess,
-  verify = verifyToken,
+  verify = verifyToken, onEnqueued = () => {},
   write = (value) => database.prepare("UPDATE settings SET tailscale_enabled = ? WHERE id = 'app'").run(value) } = {}) {
   const router = Router();
   let tail = Promise.resolve();
@@ -47,7 +47,8 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
             return conflict(res, 'busy', 'The tunnel daemon is still stopping.');
           }
           if (now.state === 'unavailable') {
-            if (hasLiveProcess()) await stop();
+            // Opus fix review of #967: launch() stops a spawned child in its
+            // catch; a live child was already handled by the busy branch.
             return conflict(res, now.reason || 'unavailable', 'The tunnel daemon could not start.');
           }
           if (!['starting', 'running', 'backoff'].includes(now.state)) {
@@ -70,6 +71,9 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
       } catch { return conflict(res, 'operation_failed', 'Tailscale could not complete the request.'); }
     };
     // Opus plan review of #967: a rejected job must not poison later requests.
+    // Opus fix review of #967: this seam records that a queued request passed
+    // both auth middlewares before a test revokes or demotes its live session.
+    onEnqueued(req);
     const current = tail.then(job, job);
     tail = current.catch(() => {});
     return current.catch(() => {

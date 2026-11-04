@@ -8,7 +8,7 @@ To watch from outside your home network, set up a reverse proxy with HTTPS (a VP
 
 Tailscale support is being added, but no released version can attach Nightlight to a tailnet yet. The admin API now stores an enable setting and checks whether a tunnel daemon could start. It refuses host networking, an unverified network, a missing daemon, or an installation without an admin. The usual host-network Docker setup therefore cannot use this planned route; give the container its own address through bridge, ipvlan or macvlan first. Check the container's network mode in Docker or your container manager before trying it.
 
-The network check looks at interfaces and listeners when the daemon starts. A passed-through physical network card may be refused. A nested Docker host without a bridge in its namespace may go undetected, and a listener opened after the check is only detected on a later start. There is no override in this version.
+The network check looks at interfaces and TCP listeners when the daemon starts. A TCP listener on `127.0.0.1` or a wildcard address counts as evidence of a shared network; Docker's own DNS listener on `127.0.0.11` does not. A passed-through physical network card may be refused. A nested Docker host without a bridge in its namespace may go undetected, and a listener opened after the check is only detected on a later start. UDP-only services on `127.0.0.1` in a shared namespace are not detected, even though userspace tailscaled can relay UDP to them. There is no override in this version.
 
 If you copy Nightlight's data folder to a second installation, you also copy its Tailscale identity. Turn Tailscale off first, or delete `private/tailscale` in the copy before that installation can start the daemon.
 

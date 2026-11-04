@@ -107,15 +107,32 @@ jobs:
           sleep 2
           docker run --rm --network "container:$helper" -v "$PWD:/repo:ro" -w /repo node:24-alpine \
             node scripts/host-network-probe.mjs shared
+          user_bridge="nightlight-probe-bridge-$RANDOM"
+          docker network create -d bridge "$user_bridge"
+          docker run --rm --network "$user_bridge" -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+            node scripts/host-network-probe.mjs bridge
+          docker network rm "$user_bridge" >/dev/null
           parent="$(ip route show default 2>/dev/null | awk '{print $5; exit}' || true)"
           for driver in ipvlan macvlan; do
             network="nightlight-probe-$driver-$RANDOM"
             if [ -n "$parent" ] && docker network create -d "$driver" -o "parent=$parent" "$network"; then
-              docker run --rm --network "$network" -v "$PWD:/repo:ro" -w /repo node:24-alpine \
-                node scripts/host-network-probe.mjs || true
+              # Opus fix review of #967: an optional driver may be unavailable
+              # on a runner. Once created, a wrong detector result (exit 42)
+              # must fail this step; a container launch failure is reported.
+              if docker run --rm --network "$network" -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+                node scripts/host-network-probe.mjs bridge; then
+                echo "$driver probe passed"
+              else
+                code=$?
+                if [ "$code" -eq 42 ]; then
+                  echo "::error::$driver detector result is wrong"
+                  exit 1
+                fi
+                echo "::warning::$driver probe container could not run (exit $code)"
+              fi
               docker network rm "$network" >/dev/null || true
             else
-              echo "$driver probe unavailable on this runner"
+              echo "::warning::$driver network could not be created on this runner"
             fi
           done
 

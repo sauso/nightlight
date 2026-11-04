@@ -2,6 +2,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { bootTailscale } from '../src/lib/tailscaleBoot.js';
+import { stripCommentsOnly } from './helpers/sourceScan.js';
 import { useTempDataDir, cleanupTempDataDirs, makeUser } from './helpers/harness.js';
 
 const dataDir = useTempDataDir();
@@ -21,6 +22,19 @@ test('#967 boot starts once only for persisted intent and logs fixed codes', () 
     start: (args) => starts.push(args), log });
   assert.equal(starts.length, 1);
   assert.deepEqual(starts[0], { db, dataDir });
+  db.prepare("UPDATE settings SET tailscale_enabled = 0 WHERE id = 'app'").run();
+  bootTailscale({ db, dataDir,
+    detector: () => ({ host: true, evidence: ['bridge_dir'], unknown: null }),
+    start: (args) => starts.push(args), log });
+  assert.equal(starts.length, 1);
+  const checks = lines.filter((line) => line.startsWith('[tailscale] network check: '));
+  assert.equal(checks.length, 3);
+  for (const line of checks.slice(0, 2)) {
+    const result = JSON.parse(line.slice('[tailscale] network check: '.length));
+    assert.deepEqual(result, { host: false, evidence: [], unknown: null });
+    assert.doesNotMatch(line, /br0|eth0|private|\/sys\//);
+  }
+  assert.equal(checks[2], '[tailscale] network check: {"host":true,"evidence":["bridge_dir"],"unknown":null}');
 });
 
 test('#967 boot detector and database throws never escape', () => {
@@ -50,11 +64,13 @@ test('#967 boot with host networking or no admin is unavailable without spawning
 });
 
 test('#967 index mounts the route first and boots only after markBootComplete in listen callback', () => {
-  const src = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  // Opus fix review of #967: a commented-out call must not satisfy the pin.
+  const src = stripCommentsOnly(fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8'));
   const listen = src.indexOf('app.listen(PORT, () => {');
+  const callbackEnd = src.indexOf('\n});', listen);
   const mark = src.indexOf('markBootComplete();', listen);
   const boot = src.indexOf('bootTailscale({ db, dataDir: DATA_DIR });', listen);
-  assert.ok(listen >= 0 && mark > listen && boot > mark);
+  assert.ok(listen >= 0 && mark > listen && boot > mark && boot < callbackEnd);
   assert.ok(src.indexOf("app.use('/api/remote-access/tailscale', tailscaleRoutes);") <
     src.indexOf("app.use('/api/remote-access', remoteAccessRoutes);"));
 });

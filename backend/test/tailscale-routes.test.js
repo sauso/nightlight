@@ -138,11 +138,16 @@ test('#967 unavailable start does not persist intent', async () => {
 
 test('#967 intent is saved after a started state, and enable while running is idempotent', async () => {
   let state = 'off'; let atStart;
-  await mount({ blocker: () => null, start: () => {
+  await mount({ blocker: () => null, start: (args) => {
+    assert.deepEqual(args, { db, dataDir });
     atStart = db.prepare("SELECT tailscale_enabled FROM settings WHERE id = 'app'").get().tailscale_enabled;
     state = 'running';
   }, status: () => ({ state, restarts: 0, lastExitCode: null, reason: null }),
-  stop: async () => { state = 'off'; } });
+  stop: async () => {
+    // Opus fix review of #967: disable intent must be durable before stopping.
+    assert.equal(db.prepare("SELECT tailscale_enabled FROM settings WHERE id = 'app'").get().tailscale_enabled, 0);
+    state = 'off';
+  } });
   assert.equal((await put(true)).status, 200);
   assert.equal(atStart, 0);
   assert.equal((await put(true)).status, 200);
@@ -219,27 +224,47 @@ test('#967 rejected job is followed by a valid PUT', async () => {
   assert.equal((await put(true)).status, 200);
 });
 
-test('#967 queued admin revocation is checked when the job begins', {
-  skip: process.platform === 'win32' && 'POSIX signal handling is required; Linux CI runs this',
-}, async () => {
-  const f = fixture('ignore-sigterm', { stopCapMs: 500 });
-  await mount({ start: f.start, blocker: f.blocker });
-  assert.equal((await put(true)).status, 200);
-  await until(() => fs.readdirSync(path.join(f.root, 'markers')).some((n) => n.startsWith('ready-')));
-  const sid = makeSession(db, 'u-admin');
-  const token = signToken({ id: 'u-admin', sid, role: 'admin' });
+async function queuedRoleChange(how) {
+  const id = `queued-${how}`;
+  makeUser(db, { id, username: id });
+  const sid = makeSession(db, id);
+  const token = signToken({ id, sid, role: 'admin' });
+  let state = 'running'; let release; let reached = false; let starts = 0;
+  const held = new Promise((resolve) => { release = resolve; });
+  await mount({ blocker: () => null, onEnqueued: (req) => {
+    if (req.headers.authorization === `Bearer ${token}`) reached = true;
+  }, start: () => { starts++; state = 'running'; },
+  stop: async () => { state = 'stopping'; await held; state = 'off'; },
+  status: () => ({ state, restarts: 0, lastExitCode: null, reason: null }) });
   const disabling = put(false);
-  await until(() => getTailscaleStatus().state === 'stopping');
+  await until(() => state === 'stopping');
   const queued = put(true, token);
-  db.prepare('DELETE FROM sessions WHERE id = ?').run(sid);
-  await disabling;
-  assert.equal((await queued).status, 401);
+  // Opus fix review of #967: the seam fires only after requireAuth and
+  // requireAdmin, while the prior PUT still holds the route's lock.
+  await until(() => reached);
+  assert.equal(state, 'stopping');
+  if (how === 'revoked') db.prepare('DELETE FROM sessions WHERE id = ?').run(sid);
+  else db.prepare("UPDATE users SET role = 'caregiver' WHERE id = ?").run(id);
+  release();
+  assert.equal((await disabling).status, 200);
+  assert.equal((await queued).status, how === 'revoked' ? 401 : 403);
+  assert.equal(starts, 0);
+  assert.equal(db.prepare("SELECT tailscale_enabled FROM settings WHERE id = 'app'").get().tailscale_enabled, 0);
+}
+
+test('#967 queued admin revocation is checked after middleware while lock waits', async () => {
+  await queuedRoleChange('revoked');
+});
+
+test('#967 queued admin demotion is checked after middleware while lock waits', async () => {
+  await queuedRoleChange('demoted');
 });
 
 test('#967 schema flag is hidden from settings GET and ignored by settings PUT', async () => {
   settings = await mountRouter('/api/settings', settingsRouter);
   const cols = db.prepare('PRAGMA table_info(settings)').all();
   assert.equal(cols.find((c) => c.name === 'tailscale_enabled')?.dflt_value, '0');
+  assert.equal(cols.find((c) => c.name === 'tailscale_enabled')?.notnull, 1);
   for (const token of [undefined, adminToken]) {
     const got = await call(`${settings.url}/api/settings`, { token });
     assert.equal(got.status, 200);
@@ -247,4 +272,13 @@ test('#967 schema flag is hidden from settings GET and ignored by settings PUT',
   }
   await call(`${settings.url}/api/settings`, { method: 'PUT', token: adminToken, body: { tailscale_enabled: 1 } });
   assert.equal(db.prepare("SELECT tailscale_enabled FROM settings WHERE id = 'app'").get().tailscale_enabled, 0);
+});
+
+test('#967 unavailable route branch has no unreachable second stop', () => {
+  const source = fs.readFileSync(new URL('../src/routes/tailscale.js', import.meta.url), 'utf8');
+  const branch = source.match(/if \(now\.state === 'unavailable'\) \{([\s\S]*?)\n          \}/)?.[1];
+  assert.ok(branch);
+  // Opus fix review of #967: the busy branch handles a live process first;
+  // launch() handles a spawned child if its later setup throws.
+  assert.doesNotMatch(branch, /hasLiveProcess\(|await stop\(/);
 });
