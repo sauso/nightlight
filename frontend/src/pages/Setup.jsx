@@ -29,6 +29,8 @@ export default function Setup() {
   const [verified, setVerified] = useState(false);
   const [limited, setLimited] = useState(false);
   const [testing, setTesting] = useState(false);
+  // The Tailscale card reports when its secure address is live; only then is the step done (see TailscaleCard `ready`).
+  const [remoteReady, setRemoteReady] = useState(false);
   const mounted = useRef(false);
   const stepRef = useRef(step);
   const testRef = useRef(null);
@@ -183,7 +185,7 @@ export default function Setup() {
     : step === 'camera' && assigned.length ? { label: 'Check picture', disabled: !selectedCamera, onClick: () => move('monitor_test') }
     : step === 'monitor_test' && verified ? { label: 'Continue', onClick: () => move(terminal(setup.status) ? 'review' : 'caregivers') }
     : step === 'caregivers' ? { label: 'Skip for now', onClick: () => move('remote') }
-    : step === 'remote' ? { label: 'Maybe later', onClick: () => move('review') }
+    : step === 'remote' ? { label: remoteReady ? 'Continue' : 'Maybe later', onClick: () => move('review') }
     : step === 'review' && setup.status === 'completed'
       ? { label: 'Open my monitor', onClick: () => navigate('/') }
       : step === 'review' && canFinishFull
@@ -247,7 +249,7 @@ export default function Setup() {
         <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => leaveFor('remote', '/settings/users/new')}>Add a caregiver account</button>
       </>}
       {step === 'remote' && <>
-        <TailscaleCard compact />
+        <TailscaleCard compact onReady={setRemoteReady} />
       </>}
       {step === 'review' && <>
         <p>{verified ? 'The picture moved in this browser.' : 'You can return to the picture check at any time.'}</p>

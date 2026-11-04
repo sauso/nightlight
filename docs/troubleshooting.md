@@ -29,7 +29,10 @@ but if it persists, power-cycle or update that camera's firmware. See
 The app could not get an answer from the server (it is restarting, off, or this device is not on
 the home network), so it does not know whether you are signed in and does not ask for a password
 that could not be checked anyway. Confirm the server is running and the phone is on a network that
-can reach it.
+can reach it. If you opened Nightlight at its Tailscale address (ending in `.ts.net`), the screen says to
+check that Tailscale is switched on for the device instead: switching it off on a phone is the usual cause.
+That wording only appears once Nightlight's own page has loaded. If the phone's browser or the app shows
+its own timeout message first, the same cause applies.
 
 It retries by itself (after 5 seconds, then 10, 20, and every 30 seconds from then on), and you
 can press **Try again** at any time. Once the server answers, you land in the app or on the sign-in
