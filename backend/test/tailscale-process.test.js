@@ -107,6 +107,11 @@ test('#965 a daemon-created 0644 state file is tightened before relaunch', {
   const f = fixture('write-state=0644');
   startTailscale(f.opts);
   await until(() => f.pids().length === 1);
+  // #971 (CI run 41780779865, a flake in a file this PR does not touch): the fake daemon writes its pid marker
+  // BEFORE the 0644 state file, so stopping on the marker alone could kill it first, leaving no file to tighten
+  // (second spawn saw stateMode null). Wait until the hostile 0644 file really exists.
+  const stateFile = f.seen[0].argv.find((arg) => arg.startsWith('--state=')).slice('--state='.length);
+  await until(() => fs.existsSync(stateFile) && (fs.statSync(stateFile).mode & 0o777) === 0o644);
   await stopTailscale();
   startTailscale(f.opts);
   await until(() => f.pids().length === 2);

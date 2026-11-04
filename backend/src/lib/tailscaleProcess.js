@@ -243,6 +243,7 @@ export function stopTailscale() {
 }
 
 export function getTailscaleStatus() { return { state, restarts, lastExitCode, reason }; }
+export function getTailscalePid() { return proc?.pid ?? null; }
 export function hasLiveTailscaleProcess() { return Boolean(proc); }
 export function getTailscaleSocketPath() {
   return proc && state === 'running' && session?.runtimeDir

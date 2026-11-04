@@ -14,6 +14,8 @@ const { createTailscaleRouter } = await import('../src/routes/tailscale.js');
 const { default: settingsRouter } = await import('../src/routes/settings.js');
 const { tailnetEnableBlocker } = await import('../src/lib/tailnetPreconditions.js');
 const { startTailscale, stopTailscale, getTailscaleStatus } = await import('../src/lib/tailscaleProcess.js');
+const { detectHostNetwork } = await import('../src/lib/hostNetwork.js');
+const { onlyListenerPorts } = await import('./helpers/procTcpFilter.js');
 const { verifyToken } = await import('../src/middleware/auth.js');
 const { isLoopbackExposed } = await import('../src/lib/loopbackExposure.js');
 const { spawnAsApp } = await import('../src/lib/childEnv.js');
@@ -76,6 +78,30 @@ after(() => { db.close(); cleanupTempDataDirs(); });
 async function mount(options = {}) {
   server = await mountRouter('/api/remote-access/tailscale', createTailscaleRouter({ database: db, dataDir, detector: () => safe, ...options }));
 }
+
+// Linux-only: the default detector reads real /proc socket ownership.
+test('#971 default route detector ignores the fake daemon listener',
+  { skip: process.platform !== 'linux' && '/proc is Linux-only' }, async () => {
+    const f = fixture('listen-wildcard');
+    const blocker = (_database, { hostNetwork }) => hostNetwork.evidence.includes('foreign_listener')
+      ? { code: 'host_network', message: 'A foreign listener is present.' } : null;
+    // Opus review of PR #973 (reproduced): the real /proc table holds the CI runner's own listeners, so show the
+    // detector only the fake daemon's (ownership stays real: see helpers/procTcpFilter.js).
+    const markers = path.join(f.root, 'markers');
+    const readFile = onlyListenerPorts(() => fs.readdirSync(markers).filter((n) => n.startsWith('listener-'))
+      .map((n) => JSON.parse(fs.readFileSync(path.join(markers, n), 'utf8')).port));
+    await mount({ detector: undefined, start: f.start, blocker,
+      detect: ({ ownedPid }) => detectHostNetwork({ ownedPid, port: Number(new URL(server.url).port), readFile }),
+      cli: async () => ({ ok: false, code: 'status_unavailable' }) });
+    assert.equal((await put(true)).status, 200);
+    await until(() => fs.readdirSync(markers).some((n) => n.startsWith('listener-')));
+    assert.equal(detectHostNetwork({ port: Number(new URL(server.url).port), readFile }).evidence.includes('foreign_listener'), true);
+    const got = await call(route(), { token: adminToken });
+    assert.equal(got.status, 200);
+    assert.equal(got.body.blocker, null);
+    assert.equal(got.body.host_network.unknown, null);
+    assert.equal(got.body.host_network.evidence.includes('foreign_listener'), false);
+  });
 
 test('#967 admin routes, strict body and fixed response shape', async () => {
   const f = fixture(); await mount({ start: f.start, blocker: f.blocker });

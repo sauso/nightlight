@@ -11,7 +11,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
-- #971 Bundled Tailscale 1.104.5 binaries for the guarded remote-access API, with a fixed download digest for each image architecture.
+- #971 Bundled Tailscale 1.104.5 binaries for the guarded remote-access API, with a fixed download digest for each image architecture. The network check now ignores the connected daemon's own TCP listener by socket ownership while still blocking on other listeners.
 
 - #945 Admins can search for nearby Thingino and ONVIF cameras in setup or Add camera. Each result has its own card; pick one and enter its login while Nightlight finds the stream settings. Cameras already saved appear as greyed **Already added** cards. Searches use LAN multicast and may miss cameras across VLANs, on Docker's default bridge, or cameras that do not advertise; a separate manual card remains available.
 
