@@ -7,6 +7,7 @@ import AddCameraFlow from '../components/AddCameraFlow.jsx';
 import CameraTile from '../components/CameraTile.jsx';
 import SetupStepShell from '../components/SetupStepShell.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import TailscaleCard from '../components/TailscaleCard.jsx';
 
 const STEPS = ['welcome', 'children', 'camera', 'monitor_test', 'caregivers', 'remote', 'review'];
 const terminal = (status) => ['legacy_completed', 'completed_limited', 'completed'].includes(status);
@@ -246,8 +247,7 @@ export default function Setup() {
         <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => leaveFor('remote', '/settings/users/new')}>Add a caregiver account</button>
       </>}
       {step === 'remote' && <>
-        <p>To watch away from home, set up access to Nightlight on your network. Settings → Remote Access shows how this device connects and lets you check low latency video.</p>
-        <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => leaveFor('review', '/settings/remote-access')}>Set up remote access</button>
+        <TailscaleCard compact />
       </>}
       {step === 'review' && <>
         <p>{verified ? 'The picture moved in this browser.' : 'You can return to the picture check at any time.'}</p>

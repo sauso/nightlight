@@ -47,7 +47,9 @@ beforeEach(() => {
   setupApi.startTest.mockResolvedValue({ testId: 'test-1', expiresAt: 'later' });
   setupApi.confirm.mockResolvedValue({ ok: true });
   setupApi.complete.mockImplementation(async (limited) => ({ status: limited ? 'completed_limited' : 'completed' }));
-  api.get.mockResolvedValue({ demo: false });
+  api.get.mockImplementation(async (path) => path === '/remote-access/tailscale'
+    ? { enabled: false, state: 'off', blocker: null, hostname: 'nightlight', serve: { enabled: false }, video_address_pending: false }
+    : { demo: false });
   api.post.mockResolvedValue({ id: child.id });
 });
 
@@ -212,7 +214,7 @@ describe('setup steps', () => {
     expect(screen.getByTestId('path')).toHaveTextContent('/settings/users/new');
   });
 
-  test.each([['caregivers', 'Add a caregiver account'], ['remote', 'Set up remote access']])('a refused progress save on the %s step keeps the admin on the wizard', async (step, label) => {
+  test.each([['caregivers', 'Add a caregiver account'], ['remote', 'Maybe later']])('a refused progress save on the %s step keeps the admin on the wizard', async (step, label) => {
     // Save-before-navigate must be enforced, not just ordered by luck: a failed save may not leave the page (#947 review).
     state = initial('in_progress', step);
     setupApi.progress.mockRejectedValueOnce(new Error('Could not save'));
@@ -233,12 +235,13 @@ describe('setup steps', () => {
     expect(screen.getByRole('button', { name: 'Back to Settings' })).toBeInTheDocument();
   });
 
-  test('remote access saves review before leaving for settings', async () => {
+  test('remote step shows the Tailscale card and Maybe later saves review', async () => {
     state = initial('in_progress', 'remote');
     const view = wizard();
-    await view.user.click(await screen.findByRole('button', { name: 'Set up remote access' }));
+    expect(await screen.findByRole('button', { name: 'Turn on Tailscale' })).toBeInTheDocument();
+    await view.user.click(await screen.findByRole('button', { name: 'Maybe later' }));
     expect(setupApi.progress).toHaveBeenCalledWith('review', 0);
-    expect(screen.getByTestId('path')).toHaveTextContent('/settings/remote-access');
+    expect(screen.getByRole('heading', { name: "You're all set!" })).toBeInTheDocument();
   });
 
   test.each(['completed', 'legacy_completed'])('%s setup uses the app header and Settings back button', async (status) => {

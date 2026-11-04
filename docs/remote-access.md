@@ -1,12 +1,22 @@
-# Reverse proxy and remote access
+# Watch from anywhere
 
-To watch from outside your home network, set up a reverse proxy with HTTPS (a VPN into your home network is the other common option; see [networking](networking.md#watching-away-from-home)). If you use a reverse proxy, choose Low latency for near-instant video or Compatibility when you cannot forward UDP. The setup steps come first; the proxy settings follow.
+## Watch from anywhere with Tailscale
 
-## Check your setup in Nightlight
+Tailscale lets you open Nightlight away from home without changing your router or making Nightlight public. Every person who watches away from home needs the Tailscale app and access to your Tailscale network. They still sign in with their own Nightlight account. Watching at home continues to work as before.
 
-### Planned Tailscale support
+1. Give the Nightlight container its own network address using bridge, ipvlan or macvlan. Tailscale cannot run when it shares the server's network; see [Networking modes](networking.md#networking-modes).
+2. Sign in to Nightlight as an admin and open **Settings → Remote Access**, or use the optional **Watch from anywhere** setup step. Select **Turn on Tailscale**.
+3. Choose a neutral device name, then select **Sign in with Tailscale**. Open the link or scan the code and approve the device. The sign-in link appears after you start sign-in.
+4. Select **Turn on the secure address**. If Tailscale asks for one-time HTTPS approval for your account, open the approval link, approve it and select **Try again**. On a tailnet with HTTPS already enabled, no approval is needed.
+5. Install Tailscale on each viewer's phone or computer. Invite them to your tailnet or share this device from the Tailscale admin console. They open the secure address shown in Nightlight and sign in with their Nightlight account. Add caregiver accounts in **Settings → Caregivers**.
 
-Tailscale 1.104.5 is bundled in the image. It runs in userspace mode, without a TUN device. The admin API can start sign-in, set a machine name, configure HTTPS Serve, log out and reset a node identity. This is not a released remote-viewing feature. HTTPS Serve answered 200 with a valid certificate on a tailnet that already had HTTPS enabled (measured 2026-11-04). Nightlight adds the vetted 100.x address to MediaMTX's WebRTC host list. Low latency viewing over the tailnet worked from a phone on cellular with the router's UDP forward closed, on one staging install and one phone: the MediaMTX log showed the remote candidate as `127.0.0.1`, which is how tailnet forwarding presents (measured 2026-11-04). Long sessions, relayed-only (DERP) paths and other devices are not yet tested. It refuses host networking, an unverified network, a missing daemon, or an installation without an admin. The usual host-network Docker setup therefore cannot use this planned route; give the container its own address through bridge, ipvlan or macvlan first. Check the container's network mode in Docker or your container manager before trying it.
+The card has **Check it works** once a camera is running. Run it from the secure `.ts.net` page on a device connected to Tailscale. A successful test from your home-network address cannot prove remote viewing; test on a phone away from home. Low latency video needs the container's UDP listener to accept the tailnet address. The hosted demo's custom `MTX_WEBRTCLOCALUDPADDRESS` binding prevents that. Tailscale viewers may show as **Unknown** in the own-domain network card; that is expected. Renaming the device changes its address immediately and Nightlight turns HTTPS Serve on again for the new name.
+
+## Tailscale details and limits
+
+### How the bundled service works
+
+Tailscale 1.104.5 is bundled in the image. It runs in userspace mode, without a TUN device. The admin UI can start sign-in, set a machine name, configure HTTPS Serve, log out and reset a node identity. HTTPS Serve answered 200 with a valid certificate on a tailnet that already had HTTPS enabled (measured 2026-11-04). Nightlight adds the vetted 100.x address to MediaMTX's WebRTC host list. Low latency viewing over the tailnet worked from a phone on cellular with the router's UDP forward closed, on one staging install and one phone: the MediaMTX log showed the remote candidate as `127.0.0.1`, which is how tailnet forwarding presents (measured 2026-11-04). Long sessions, relayed-only (DERP) paths and other devices are not yet tested. It refuses host networking, an unverified network, a missing daemon, or an installation without an admin. The usual host-network Docker setup therefore cannot use this route; give the container its own address through bridge, ipvlan or macvlan first. Check the container's network mode in Docker or your container manager before trying it.
 
 After Tailscale sign-in, Nightlight checks the address every 15 seconds and adds it to the WebRTC candidate list. The first addition briefly disconnects Low latency viewers; cameras and recordings continue. Later address changes wait until no Low latency viewer is connected, or an admin can choose **Apply now** to disconnect those viewers immediately. Failed changes retry after 30 seconds, then double the wait up to 10 minutes. The poll and retry intervals are fixed, not settings. The tailnet candidate uses the same WebRTC UDP port as the LAN candidate and needs no router forward. If `MTX_WEBRTCLOCALUDPADDRESS` binds UDP to a specific host instead of all interfaces (as the hosted demo does), nothing listens on `127.0.0.1` and the tailnet candidate cannot work there.
 
@@ -16,13 +26,19 @@ HTTPS Serve is limited to port 443 forwarding to Nightlight at `127.0.0.1:4000`.
 
 The network check looks at interfaces and TCP listeners when the daemon starts and on each API read or action. A TCP listener on `127.0.0.1` or a wildcard address counts as evidence of a shared network, except the daemon's own socket, identified by its socket inode; Docker's own DNS listener on `127.0.0.11` does not count. Every other qualifying TCP listener still counts. If the daemon's fd directory cannot be read, none is exempted. A passed-through physical network card may be refused. A nested Docker host without a bridge in its namespace may go undetected, and a listener opened after the check is reported on a later API call and blocks further Tailscale actions, but it does not stop a tunnel that is already running (turn Tailscale off to stop it). UDP-only services on `127.0.0.1` in a shared namespace are not detected, even though userspace tailscaled can relay UDP to them. There is no override in this version.
 
-If you copy Nightlight's data folder to a second installation, you also copy its Tailscale identity. Turn Tailscale off in the copy, then use the admin reset action (there is no button for it yet) before rejoining. Reset stops its daemon and removes only `private/tailscale`; the rest of `private/` stays in place. Keep the original and copy from running as the same node at once. Treat backups of the Tailscale state as secrets.
+If you copy Nightlight's data folder to a second installation, you also copy its Tailscale identity. Turn Tailscale off in the copy, then use **Reset this device's Tailscale identity** under **Advanced** before rejoining. Reset stops its daemon and removes only `private/tailscale`; the rest of `private/` stays in place. Keep the original and copy from running as the same node at once. Treat backups of the Tailscale state as secrets.
 
 While a sign-in is waiting for you to approve it in your browser, the other Tailscale actions answer "busy" (one action runs at a time); turning Tailscale off or choosing log out cancels the wait. Measured 2026-11-04 against the real daemon.
 
 The project maintainers watch Tailscale security bulletins. Updating the bundled version and its two SHA-256 pins requires a reviewed PR; the weekly image rebuild does not update the pinned version.
 
-Admins can open **Settings → Remote Access**. The first card shows how Nightlight sees this device: home network, VPN, outside home, or unknown. **Your setup** lists the app and UDP video ports, public hosts and their DNS results, advertised addresses, and whether STUN is on. The checklist links back to this guide. Tailscale is marked **Coming later**; the row does not set it up.
+## Your own domain or port forward
+
+If you prefer to use your own domain, set up a reverse proxy with HTTPS (a VPN into your home network is another option; see [networking](networking.md#watching-away-from-home)). Choose Low latency for near-instant video or Compatibility when you cannot forward UDP.
+
+### Check your setup in Nightlight
+
+Admins can open **Settings → Remote Access** and expand **Use your own domain or port forward (advanced)**. The first card there shows how Nightlight sees this device: home network, VPN, outside home, or unknown. **Your setup** lists the app and UDP video ports, public hosts and their DNS results, advertised addresses, and whether STUN is on. The checklist links back to this guide.
 
 **Test from this device** makes one short Low latency video connection to a running camera, then closes its connection. When the server gives a session address, the test also asks it to end the session (DELETE); otherwise MediaMTX frees it when the connection closes. A successful UDP connection **from outside your home** shows that the port forward works for this device. A TCP connection means video connected, but it does not confirm the UDP forward. A failed or timed-out test points you to the UDP forward and `PUBLIC_HOST`; Compatibility (HLS) remains available without UDP. The test only proves the forward from **outside** your home. A connection from your home network, a VPN, or behind an untrusted proxy cannot prove it, even if the test connects. Try again from mobile data.
 
@@ -121,9 +137,9 @@ is used instead — a typo here will never stop the app starting.
 every remote user sharing the proxy's address, one person mistyping their password cannot lock anyone
 else out. Setting `TRUST_PROXY` makes the per-source half meaningful as well.
 
-### While a tunnel daemon is attached (planned Tailscale support)
+### While a tunnel daemon is attached
 
-Nothing in a released version attaches a tunnel daemon yet; these rules are in place ahead of it.
+These rules apply while the Tailscale daemon is attached.
 
 - Nightlight ignores `X-Forwarded-For` from any loopback hop, or any hop that is not a normal IP address, whatever `TRUST_PROXY` says. A proxy that reaches Nightlight by a LAN address is unaffected as long as no hop in its chain is loopback.
 - Remote peers then share one per-address login bucket, so one noisy peer can use that bucket for others. The separate per-account throttle still applies.

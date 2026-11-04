@@ -15,6 +15,7 @@ const setup = {
   client: { network: 'remote' },
 };
 const camera = { id: 'c1', mediamtx_path: 'cam', disabled: false, status: { ready: true } };
+const tailscale = { enabled: false, state: 'off', blocker: null, hostname: 'nightlight', serve: { enabled: false, consent_url: null }, video_address_pending: false };
 let peers;
 let requests;
 let protocol;
@@ -35,16 +36,21 @@ class Peer {
   close() { this.closed = true; this.connectionState = 'closed'; }
 }
 function mockSetup(data = setup) {
-  vi.spyOn(api, 'get').mockImplementation((path) => Promise.resolve(path === '/remote-access' ? data : { stunServers: [] }));
+  vi.spyOn(api, 'get').mockImplementation((path) => Promise.resolve(path === '/remote-access' ? data : path === '/remote-access/tailscale' ? tailscale : { stunServers: [] }));
 }
 function renderPage(data = setup, cameras = [camera]) {
   mockSetup(data);
   return renderAsAdmin(<SettingsRemoteAccess />, { cameras });
 }
 async function run() {
+  await openAdvanced();
   const button = await screen.findByRole('button', { name: 'Test from this device' });
   fireEvent.click(button);
   await waitFor(() => expect(requests.some((r) => r.options.method === 'POST')).toBe(true));
+}
+async function openAdvanced() {
+  const summary = await screen.findByText('Use your own domain or port forward (advanced)');
+  if (!summary.closest('details').open) fireEvent.click(summary);
 }
 beforeEach(() => {
   peers = []; requests = []; protocol = 'udp'; postResponse = null;
@@ -59,14 +65,16 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); resetIceServersCache(); setToken(null); });
 
-test('admin sees all cards and the static Tailscale row', async () => {
+test('admin sees Tailscale first and the four own-domain cards when expanded', async () => {
   renderPage();
+  expect(await screen.findByRole('button', { name: 'Turn on Tailscale' })).toBeInTheDocument();
+  expect(screen.getByText('Your own-domain setup is working and stays as it is.')).toBeInTheDocument();
+  expect(screen.getByText('Use your own domain or port forward (advanced)').closest('details').open).toBe(false);
+  await openAdvanced();
   for (const title of ["How you're connected right now", 'Your setup', 'Test Low latency video from this device', 'Before watching from outside']) {
     expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument();
   }
-  expect(screen.getByText('Tailscale')).toBeInTheDocument();
-  expect(screen.getByText('Coming later')).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Tailscale' })).toBeNull();
+  expect(screen.getByText("Viewers who arrive over Tailscale show as 'Unknown' in the first card below; that's expected.")).toBeInTheDocument();
   expect(requests).toHaveLength(0);
 });
 
@@ -109,16 +117,28 @@ test('setup shows IP literal, resolved name, DNS errors, addresses and STUN priv
 });
 
 test('failed load shows a banner and Retry loads again', async () => {
-  const get = vi.spyOn(api, 'get').mockRejectedValueOnce(new Error('offline')).mockResolvedValue(setup);
+  const get = vi.spyOn(api, 'get').mockImplementation((path) => path === '/remote-access/tailscale' ? Promise.resolve(tailscale) : Promise.reject(new Error('offline')));
   const view = renderAsAdmin(<SettingsRemoteAccess />, { cameras: [camera] });
   expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't load remote access details");
+  get.mockImplementation((path) => Promise.resolve(path === '/remote-access' ? setup : tailscale));
   await view.user.click(screen.getByRole('button', { name: 'Retry' }));
+  await openAdvanced();
   expect(await screen.findByRole('heading', { name: 'Your setup' })).toBeInTheDocument();
-  expect(get).toHaveBeenCalledTimes(2);
+  expect(get).toHaveBeenCalledWith('/remote-access');
+});
+
+test('a failed Tailscale read leaves the own-domain cards available', async () => {
+  vi.spyOn(api, 'get').mockImplementation((path) => path === '/remote-access/tailscale'
+    ? Promise.reject(new Error('offline')) : Promise.resolve(path === '/remote-access' ? setup : { demo: false }));
+  renderAsAdmin(<SettingsRemoteAccess />, { cameras: [camera] });
+  expect(await screen.findByText(/Couldn’t load Tailscale details/)).toBeInTheDocument();
+  await openAdvanced();
+  expect(screen.getByRole('heading', { name: 'Your setup' })).toBeInTheDocument();
 });
 
 test('no running enabled camera disables the test', async () => {
   renderPage(setup, [{ ...camera, disabled: true }, { ...camera, id: 'c2', status: { ready: false } }]);
+  await openAdvanced();
   expect(await screen.findByText('No camera is running yet, so there is nothing to test. Add or start a camera first.')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Test from this device' })).toBeDisabled();
 });
@@ -146,6 +166,7 @@ test('remote failure names the UDP port and PUBLIC_HOST', async () => {
 
 test('timeout ends the probe and gives the same remote guidance', async () => {
   renderPage();
+  await openAdvanced();
   const button = await screen.findByRole('button', { name: 'Test from this device' });
   vi.useFakeTimers();
   await act(async () => { fireEvent.click(button); await vi.advanceTimersByTimeAsync(1000); });
@@ -159,12 +180,14 @@ test('timeout ends the probe and gives the same remote guidance', async () => {
 test('unsupported browser gives a plain result', async () => {
   vi.stubGlobal('RTCPeerConnection', undefined);
   renderPage();
+  await openAdvanced();
   fireEvent.click(await screen.findByRole('button', { name: 'Test from this device' }));
   expect(await screen.findByText("This browser can't make a Low latency connection.")).toBeInTheDocument();
 });
 
 test('double click starts one probe and keeps the button busy', async () => {
   renderPage();
+  await openAdvanced();
   const button = await screen.findByRole('button', { name: 'Test from this device' });
   fireEvent.click(button); fireEvent.click(button);
   await waitFor(() => expect(requests).toHaveLength(1));

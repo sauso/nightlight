@@ -104,7 +104,7 @@ Start with the [documentation hub](docs/README.md), or jump directly to:
 - [Architecture](docs/architecture.md)
 - [Building and testing](docs/development.md)
 - [Sleep tracking](docs/sleep-tracking.md)
-- [Reverse proxy and remote access](docs/remote-access.md)
+- [Watch from anywhere: Tailscale, reverse proxy and remote access](docs/remote-access.md)
 - [Adding caregivers](docs/caregivers.md)
 - [Your home screen and the mobile apps](docs/mobile.md)
 - [How it works](docs/how-it-works.md)

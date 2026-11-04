@@ -11,6 +11,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- #977 Settings → Remote Access and the setup guide now lead with a Tailscale option for private viewing away from home, including sign-in, a secure address, viewer steps, a video check and identity controls. The existing own-domain and port-forward guidance remains under Advanced.
+
 - #974 Tailscale sign-in now adds its vetted tailnet address to the Low latency video candidates without restarting camera streams. The first addition briefly reconnects Low latency viewers; later address changes wait for viewers to leave, with an admin Apply now action. Checked once on a staging install: Low latency played on a phone over cellular through the tailnet with the router forward closed; long sessions and relayed-only paths are untested.
 
 - #971 Bundled Tailscale 1.104.5 binaries for the guarded remote-access API, with a fixed download digest for each image architecture. The network check now ignores the connected daemon's own TCP listener by socket ownership while still blocking on other listeners.
