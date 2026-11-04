@@ -8,12 +8,32 @@ function exists(path, lstat) {
   try { lstat(path); return true; } catch (err) { if (absent(err)) return false; throw err; }
 }
 
-function listener(text, ownPort, ipv6) {
+function ownedSockets(ownedPid, readdir, readlink) {
+  const inodes = new Set();
+  if (!Number.isSafeInteger(ownedPid) || ownedPid <= 0) return inodes;
+  const dir = `/proc/${ownedPid}/fd`;
+  let fds;
+  // MEASURED 2026-11-04: the daemon runs as the app uid, so its fds are readable.
+  // If that changes, exempt nothing and keep the host-network block in place.
+  try { fds = readdir(dir); } catch { return inodes; }
+  for (const fd of fds) {
+    try {
+      const inode = String(readlink(`${dir}/${fd}`)).match(/^socket:\[(\d+)\]$/)?.[1];
+      if (inode) inodes.add(inode);
+    } catch { /* An fd can close while /proc is scanned; it cannot be exempted. */ }
+  }
+  return inodes;
+}
+
+function listener(text, ownPort, ipv6, ownedInodes) {
   for (const line of String(text).split('\n').slice(1)) {
     const fields = line.trim().split(/\s+/);
     if (fields.length < 4 || fields[3] !== '0A') continue;
     const [address, hexPort] = fields[1].split(':');
     if (!address || !hexPort || parseInt(hexPort, 16) === ownPort) continue;
+    // MEASURED 2026-11-04: connected tailscaled owns one wildcard TCP listener.
+    // Only its socket inode is exempt; every other qualifying listener still blocks.
+    if (ownedInodes.has(fields[9])) continue;
     if (ipv6) {
       // Opus fix review of #967: Tailscale netstack dials 127.0.0.1 for tailnet
       // traffic. Docker DNS listens on 127.0.0.11 in every user-defined network,
@@ -28,7 +48,7 @@ function listener(text, ownPort, ipv6) {
 
 export function detectHostNetwork({ platform = process.platform, readdir = fs.readdirSync,
   lstat = fs.lstatSync, realpath = fs.realpathSync, readFile = fs.readFileSync,
-  port = Number(process.env.PORT || 4000) } = {}) {
+  readlink = fs.readlinkSync, port = Number(process.env.PORT || 4000), ownedPid = null } = {}) {
   if (platform !== 'linux') return { host: false, evidence: [], unknown: 'not_linux' };
   let names;
   try { names = readdir(NET); } catch { return { host: false, evidence: [], unknown: 'no_sysfs' }; }
@@ -76,7 +96,8 @@ export function detectHostNetwork({ platform = process.platform, readdir = fs.re
     let tcp6;
     try { tcp6 = readFile('/proc/net/tcp6', 'utf8'); }
     catch (err) { if (err?.code !== 'ENOENT') throw err; tcp6 = ''; }
-    if (listener(tcp, port, false) || listener(tcp6, port, true)) evidence.add('foreign_listener');
+    const ownedInodes = ownedSockets(ownedPid, readdir, readlink);
+    if (listener(tcp, port, false, ownedInodes) || listener(tcp6, port, true, ownedInodes)) evidence.add('foreign_listener');
   } catch { return { host: false, evidence: [], unknown: 'proc_mismatch' }; }
   return { host: evidence.size > 0, evidence: [...evidence], unknown: null };
 }

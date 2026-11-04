@@ -3,7 +3,7 @@ import db from '../db.js';
 import { requireAuth, requireAdmin, verifyToken } from '../middleware/auth.js';
 import { detectHostNetwork } from '../lib/hostNetwork.js';
 import { tailnetEnableBlocker } from '../lib/tailnetPreconditions.js';
-import { startTailscale, stopTailscale, getTailscaleStatus, hasLiveTailscaleProcess } from '../lib/tailscaleProcess.js';
+import { startTailscale, stopTailscale, getTailscaleStatus, getTailscalePid, hasLiveTailscaleProcess } from '../lib/tailscaleProcess.js';
 import { runTailscaleCli, validateHostname, getTailscaleLinks, cancelTailscaleCli, approvedLoginUrl } from '../lib/tailscaleCli.js';
 import { resetTailscaleState } from '../lib/tailscaleState.js';
 import { isDemoModeActive } from '../middleware/demoMode.js';
@@ -30,7 +30,8 @@ function cleanStatus(result) {
 }
 
 export function createTailscaleRouter({ database = db, dataDir = process.env.DATA_DIR || '/app/data',
-  detector = detectHostNetwork, blocker = tailnetEnableBlocker, start = startTailscale,
+  detect = detectHostNetwork, detector = () => detect({ ownedPid: getTailscalePid() }),
+  blocker = tailnetEnableBlocker, start = startTailscale,
   stop = stopTailscale, status = getTailscaleStatus, hasLiveProcess = hasLiveTailscaleProcess,
   verify = verifyToken, onEnqueued = () => {}, cli = runTailscaleCli,
   write = (value) => database.prepare("UPDATE settings SET tailscale_enabled = ? WHERE id = 'app'").run(value) } = {}) {

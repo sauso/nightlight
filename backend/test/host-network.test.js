@@ -2,9 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { detectHostNetwork } from '../src/lib/hostNetwork.js';
 
-const tcp = (address = null, port = 9000, state = '0A') =>
+const tcp = (address = null, port = 9000, state = '0A', inode = '123') =>
   '  sl  local_address rem_address   st\n' +
-  (address ? `   0: ${address}:${port.toString(16).padStart(4, '0')} 00000000:0000 ${state}\n` : '');
+  (address ? `   0: ${address}:${port.toString(16).padStart(4, '0')} 00000000:0000 ${state} 00000000:00000000 00:00000000 00000000 1000 0 ${inode}\n` : '');
 function fixture({ names = ['lo', 'eth0'], plain = [], attrs = {}, procNames = names.filter((n) => !plain.includes(n)),
   tcp4 = tcp(), tcp6 = tcp() } = {}) {
   const dirs = new Set(Object.entries(attrs).flatMap(([name, parts]) => parts.map((part) => `/sys/class/net/${name}/${part}`)));
@@ -78,4 +78,28 @@ test('#967 absent tcp6 means no IPv6 listeners; absent tcp is unknown', () => {
     if (p === '/proc/net/tcp') throw Object.assign(new Error('missing'), { code: 'ENOENT' });
     return base.readFile(p, enc);
   } }).unknown, 'proc_mismatch');
+});
+
+test('#971 only socket inodes owned by the live daemon are exempt', () => {
+  const base = fixture({ tcp4: tcp('00000000') });
+  const pid = 321;
+  const dir = `/proc/${pid}/fd`;
+  const owned = { ...base, ownedPid: pid,
+    readdir: (p) => p === dir ? ['3', '4'] : base.readdir(p),
+    readlink: (p) => p === `${dir}/3` ? 'socket:[123]' : 'pipe:[456]' };
+  assert.deepEqual(detectHostNetwork(owned).evidence, []);
+  assert.deepEqual(detectHostNetwork({ ...owned,
+    readFile: (p) => p === '/proc/net/tcp' ? tcp('00000000', 9000, '0A', '456') : base.readFile(p) }).evidence,
+  ['foreign_listener']);
+  assert.deepEqual(detectHostNetwork({ ...owned, readFile: (p) => p === '/proc/net/tcp6'
+    ? tcp('00000000000000000000000000000000') : base.readFile(p) }).evidence, []);
+  assert.deepEqual(detectHostNetwork({ ...owned, readdir: (p) => {
+    if (p === dir) throw Error('permission denied');
+    return base.readdir(p);
+  } }).evidence, ['foreign_listener']);
+  assert.deepEqual(detectHostNetwork({ ...owned,
+    readFile: (p) => p === '/proc/net/tcp' ? tcp('00000000', 4000) : base.readFile(p) }).evidence, []);
+  for (const invalid of [null, NaN]) {
+    assert.deepEqual(detectHostNetwork({ ...owned, ownedPid: invalid }).evidence, ['foreign_listener']);
+  }
 });

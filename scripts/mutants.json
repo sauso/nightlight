@@ -18,6 +18,33 @@
     "namePattern": "a missing LocalAPI socket never spawns the CLI"
   },
   {
+    "label": "#971 owned socket exemption removed",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "if (ownedInodes.has(fields[9])) continue;",
+    "replace": "if (false) continue;",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "only socket inodes owned by the live daemon are exempt"
+  },
+  {
+    "label": "#971 all socket inodes exempted",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "if (ownedInodes.has(fields[9])) continue;",
+    "replace": "if (true) continue;",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "only socket inodes owned by the live daemon are exempt"
+  },
+  {
+    "label": "#971 unreadable fd directory exempts every listener",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "try { fds = readdir(dir); } catch { return inodes; }",
+    "replace": "try { fds = readdir(dir); } catch { return { has: () => true }; }",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "only socket inodes owned by the live daemon are exempt"
+  },
+  {
     "label": "#967 first-admin blocker dropped",
     "file": "backend/src/lib/tailnetPreconditions.js",
     "find": "if (!firstAdminExists(db)) return {",
@@ -101,8 +128,8 @@
   {
     "label": "#967 foreign listener evidence dropped",
     "file": "backend/src/lib/hostNetwork.js",
-    "find": "listener(tcp6, port, true)) evidence.add('foreign_listener');",
-    "replace": "listener(tcp6, port, true)) { /* ignored */ }",
+    "find": "listener(tcp6, port, true, ownedInodes)) evidence.add('foreign_listener');",
+    "replace": "listener(tcp6, port, true, ownedInodes)) { /* ignored */ }",
     "expect": "killed",
     "tests": ["host-network.test.js"],
     "namePattern": "only dialled loopback and wildcard LISTEN sockets"

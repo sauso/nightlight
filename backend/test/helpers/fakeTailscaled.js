@@ -2,6 +2,7 @@
 // A real child for #965 supervisor tests. It reads test controls only from argv, not environment.
 import fs from 'node:fs';
 import path from 'node:path';
+import net from 'node:net';
 
 const value = (name) => process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
 const markerDir = value('marker-dir');
@@ -26,6 +27,10 @@ if (mode.startsWith('print-lines=')) {
   for (const line of JSON.parse(mode.slice('print-lines='.length))) console.log(line);
 }
 if (mode === 'print-hostile') console.log('a.'.repeat(32768));
+if (mode === 'listen-wildcard') {
+  const server = net.createServer((socket) => socket.destroy());
+  server.listen(0, '0.0.0.0', () => save('listener', { port: server.address().port }));
+}
 if (mode.startsWith('exit=')) process.exit(Number(mode.slice('exit='.length)));
 if (mode.startsWith('crash-after=')) setTimeout(() => process.exit(1), Number(mode.slice('crash-after='.length)));
 if (mode === 'ignore-sigterm') {

@@ -134,6 +134,9 @@ for ((i=0; i<60; i++)); do
   sleep 1
 done
 [ -n "$tail_udp" ] || die 'tailscaled never owned a UDP listener'
+# #971 measured 2026-11-04: this no-TCP assertion applies to the logged-out
+# daemon CI can start without credentials. A signed-in daemon opens one random
+# wildcard TCP listener, which CI cannot reach because it cannot sign in.
 printf '%s\n' "$owned" | awk -v pid="$tail_pid" '$1 ~ /^tcp/ && $NF == pid "/tailscaled" {bad=1} END {exit bad}' \
   || die 'tailscaled opened a TCP listener'
 ok 'tailscaled owns UDP and no TCP listener'
