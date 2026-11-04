@@ -1,5 +1,14 @@
 [
   {
+    "label": "#971 default socket wait is zero",
+    "file": "backend/src/lib/tailscaleCli.js",
+    "find": "const SOCKET_WAIT_MS = 3000;",
+    "replace": "const SOCKET_WAIT_MS = 0;",
+    "expect": "killed",
+    "tests": ["tailscale-cli.test.js"],
+    "namePattern": "the default socket wait covers a daemon that is still starting"
+  },
+  {
     "label": "#971 CLI socket wait removed",
     "file": "backend/src/lib/tailscaleCli.js",
     "find": "  if (exists()) return launch();",

@@ -4,7 +4,7 @@ Nightlight is made for your home network first: add your cameras, watch them fro
 
 ## Networking modes
 
-Bundled Tailscale 1.104.5 uses userspace networking and needs the container to have its own address through bridge, ipvlan or macvlan; host networking is refused. It opens separate automatic IPv4 and IPv6 UDP ports. No router port forward is needed for Tailscale because DERP relays can carry connections when a direct path is unavailable. Sign-in over a tailnet, HTTPS Serve and WebRTC are not yet verified end to end, and this is not a released feature. The check counts TCP listeners on `127.0.0.1` or a wildcard, ignores Docker DNS on `127.0.0.11`, and cannot detect UDP-only loopback services in a shared namespace.
+Bundled Tailscale 1.104.5 uses userspace networking and needs the container to have its own address through bridge, ipvlan or macvlan; host networking is refused. It opens separate automatic IPv4 and IPv6 UDP ports. No router port forward is needed for Tailscale because Tailscale's DERP relays can carry connections when a direct path is unavailable (a phone reaching a test server through a relay played live video on 2026-11-03; not yet re-tested with this image). Sign-in over a tailnet, HTTPS Serve and WebRTC are not yet verified end to end, and this is not a released feature. The check counts TCP listeners on `127.0.0.1` or a wildcard, ignores Docker DNS on `127.0.0.11`, and cannot detect UDP-only loopback services in a shared namespace.
 
 Nightlight needs its own routable IP on your LAN so WebRTC has no NAT/ICE trouble: MediaMTX advertises that IP to browsers. There are two supported ways to provide one:
 

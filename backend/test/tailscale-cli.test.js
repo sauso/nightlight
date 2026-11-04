@@ -117,6 +117,24 @@ test('#971 a late LocalAPI socket lets the CLI run', async () => {
   assert.equal(spawns, 1);
 });
 
+// Opus review of #972 (verified by running): every other wait test injects its own `socketWaitMs`, so the
+// shipped default (3000) could be set to 0 and all of them still passed. The real daemon creates its socket
+// ~300 ms after it starts (MEASURED 2026-11-04), so this one uses the DEFAULT wait with a socket that
+// appears after 150 ms: with the default at 0 the call answers daemon_not_ready instead.
+test('#971 the default socket wait covers a daemon that is still starting', async () => {
+  const socketPath = path.join(os.tmpdir(), `nl-971-default-${process.pid}-${Math.random()}`);
+  files.push(socketPath);
+  const child = fakeChild({ closeOnKill: true });
+  const pending = runTailscaleCli('status', { socketPath,
+    spawnFn: () => {
+      queueMicrotask(() => { child.stdout.write('{"BackendState":"NeedsLogin"}'); child.emit('close', 0); });
+      return child;
+    } });
+  await sleep(150);
+  fs.writeFileSync(socketPath, 'ready');
+  assert.deepEqual(await pending, { ok: true, json: { BackendState: 'NeedsLogin' } });
+});
+
 test('#971 a missing LocalAPI socket never spawns the CLI', async () => {
   let spawns = 0;
   const result = await runTailscaleCli('status', { socketPath: `/missing-${process.pid}-${Math.random()}`,

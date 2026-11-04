@@ -42,18 +42,24 @@ jobs:
             cat "$RUNNER_TEMP/tailscale-arch.log"
             exit 1
           fi
-          grep -q TAILSCALE_UNSUPPORTED_ARCH "$RUNNER_TEMP/tailscale-arch.log" || { cat "$RUNNER_TEMP/tailscale-arch.log"; exit 1; }
+          # Opus review of #972 (verified by running): BuildKit's plain log also echoes the RUN command text, which
+          # contains the marker, so a bare grep passes on ANY failure. Match the real output line only.
+          grep -Eq '^#[0-9]+ [0-9.]+ TAILSCALE_UNSUPPORTED_ARCH$' "$RUNNER_TEMP/tailscale-arch.log" || { cat "$RUNNER_TEMP/tailscale-arch.log"; exit 1; }
       - name: Wrong digest fails before extraction
         run: |
           mkdir -p "$RUNNER_TEMP/tailscale-digest"
+          # Opus review of #972 (verified by running): a script that ran `tar -t` BEFORE the digest check still passed
+          # this step (non-zero exit, marker, empty /out). A `tar` shim that announces itself and fails makes the
+          # ordering observable: it must never be called on bytes whose digest did not match.
           if docker run --rm -v "$PWD:/repo:ro" -v "$RUNNER_TEMP/tailscale-digest:/out" node:24-alpine \
-            sh -c 'apk add --no-cache wget >/dev/null && sh /repo/scripts/fetch-tailscale.sh amd64 1.104.5 "$1" /out' sh \
+            sh -c 'apk add --no-cache wget >/dev/null && mkdir /shim && printf "#!/bin/sh\necho TAR_CALLED >&2\nexit 99\n" > /shim/tar && chmod +x /shim/tar && PATH=/shim:$PATH sh /repo/scripts/fetch-tailscale.sh amd64 1.104.5 "$1" /out' sh \
               0000000000000000000000000000000000000000000000000000000000000000 \
               > "$RUNNER_TEMP/tailscale-digest.log" 2>&1; then
             cat "$RUNNER_TEMP/tailscale-digest.log"
             exit 1
           fi
           grep -q TAILSCALE_DIGEST_MISMATCH "$RUNNER_TEMP/tailscale-digest.log" || { cat "$RUNNER_TEMP/tailscale-digest.log"; exit 1; }
+          if grep -q TAR_CALLED "$RUNNER_TEMP/tailscale-digest.log"; then cat "$RUNNER_TEMP/tailscale-digest.log"; exit 1; fi
           test -z "$(find "$RUNNER_TEMP/tailscale-digest" -mindepth 1 -print -quit)"
 
   unit:

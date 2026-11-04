@@ -143,10 +143,12 @@ ok 'tailscaled owns UDP and no TCP listener'
 proc_status=$(docker exec "$NAME" cat "/proc/$tail_pid/status") || die 'could not read tailscaled status'
 printf '%s\n' "$proc_status" | awk -v uid="$app_uid" -v gid="$app_gid" '
   /^Uid:/ { if ($2 != uid || $3 != uid || $4 != uid || $5 != uid) bad=1; seen_uid=1 }
+  # Opus review of #972 (verified on crafted status files): Groups: alone let a primary gid of 1700 or 0 through.
+  /^Gid:/ { if ($2 != gid || $3 != gid || $4 != gid || $5 != gid) bad=1; seen_gid=1 }
   /^Groups:/ { found=0; for (i=2;i<=NF;i++) { if ($i == gid) found=1; if ($i == 1700) bad=1 } if (!found) bad=1; seen_groups=1 }
   /^Cap(Inh|Prm|Eff|Amb):/ { if ($2 !~ /^0+$/) bad=1; caps++ }
   /^NoNewPrivs:/ { if ($2 != 1) bad=1; seen_nnp=1 }
-  END { if (bad || !seen_uid || !seen_groups || caps != 4 || !seen_nnp) exit 1 }
+  END { if (bad || !seen_uid || !seen_gid || !seen_groups || caps != 4 || !seen_nnp) exit 1 }
 ' || die 'tailscaled did not have the app uid, app group, zero capabilities and no-new-privs'
 ok 'tailscaled privilege boundary holds'
 
@@ -201,17 +203,26 @@ fi
 [ "${1:-check}" != loopback-control ] || die 'loopback control survived the listener check'
 ok 'Tailscale-on listener allowlist holds'
 
-# An unrelated wildcard UDP socket must not inherit tailscaled's exemption just
-# because it uses the same address family. This also tests the ownership gate.
-docker exec -d "$NAME" node -e "require('dgram').createSocket('udp4').bind(46465,'0.0.0.0')" \
-  || die 'could not launch the UDP ownership control'
+# Controls for the UDP rules (Opus and Codex reviews of #972, verified by running: with the ownership match
+# removed from both `tail_udp` lines, or UDP exempted on 127.0.0.1, this script still passed).
+# Both sockets belong to the APP user (docker exec -u), so `netstat -p` lists them as PID/node. They are
+# bound AFTER the main check and `tail_udp` is recomputed from a fresh snapshot, so a broken ownership match
+# would credit the unowned wildcard socket to tailscaled and it would vanish from the offenders.
+docker exec -d -u "$app_uid:$app_gid" "$NAME" node -e "
+  const d = require('dgram');
+  d.createSocket('udp4').bind(46465, '0.0.0.0');
+  d.createSocket('udp4').bind(46466, '127.0.0.1');
+  setTimeout(() => {}, 600000);" || die 'could not launch the UDP controls'
 control_ready=0
 for ((i=0; i<20; i++)); do
   sockets=$(docker exec "$NAME" netstat -lntu) || die 'UDP control netstat failed'
-  if has_socket udp ':46465$'; then control_ready=1; break; fi
+  if has_socket udp ':46465$' && has_socket udp '^127[.]0[.]0[.]1:46466$'; then control_ready=1; break; fi
   sleep 1
 done
-[ "$control_ready" -eq 1 ] || die 'UDP ownership control did not bind'
+[ "$control_ready" -eq 1 ] || die 'UDP controls did not bind'
+owned=$(docker exec -u "$app_uid:$app_gid" "$NAME" netstat -lntup) || die 'same-uid control netstat failed'
+tail_udp=$(printf '%s\n' "$owned" | awk -v pid="$tail_pid" '$1 ~ /^udp/ && $NF == pid "/tailscaled" { print $4 }')
 offenders=$(find_tail_offenders)
-printf '%s\n' "$offenders" | grep -q ':46465' || die 'unowned UDP listener escaped the allowlist'
-ok 'an unowned wildcard UDP listener is rejected'
+printf '%s\n' "$offenders" | grep -q ':46465' || die 'unowned wildcard UDP listener escaped the allowlist'
+printf '%s\n' "$offenders" | grep -q ':46466' || die 'UDP listener on 127.0.0.1 escaped the allowlist'
+ok 'an unowned wildcard UDP listener and a 127.0.0.1 UDP listener are rejected'

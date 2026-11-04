@@ -24,8 +24,13 @@ if [ "$actual" != "$expected" ]; then
 fi
 prefix="tailscale_${version}_${arch}"
 # Inspect the selected entries before extraction: links and missing/duplicate entries fail.
+#
+# Opus review of #972 (verified by running): BusyBox tar lists a HARD link as a regular-file line ending
+# "-> target" (its first column still starts with "-"), so the column test alone let one through. A listing
+# line containing " -> " or " link to " is refused too. (Only reachable after the digest matched: defence in depth.)
 tar -tvzf "$archive" "$prefix/tailscale" "$prefix/tailscaled" | awk '
   $1 !~ /^-/ { bad=1 }
+  / -> / || / link to / { bad=1 }
   END { if (NR != 2 || bad) exit 1 }
 '
 mkdir -p "$outdir"

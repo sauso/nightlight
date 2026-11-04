@@ -444,7 +444,8 @@ test('#969 disable and logout do not wait behind a sign-in that never prints a l
     child.kill = () => { queueMicrotask(() => child.emit('close', null)); return true; };
     let state = 'running';
     await mount({ blocker: () => null, status: () => ({ state }), stop: async () => { state = 'off'; },
-      cli: (verb, o) => runTailscaleCli(verb, { ...o, socketPath: '/tmp/owned.sock',
+      // #971: these tests fake the CLI child, not the daemon, so the socket the new wait looks for is "ready".
+      cli: (verb, o) => runTailscaleCli(verb, { ...o, socketPath: '/tmp/owned.sock', socketExists: () => true,
         timeoutMs: 20_000, spawnFn: () => {
           // First spawn = the stalled sign-in. Any later CLI call (the logout itself) gets a fresh
           // child that succeeds at once; handing it the killed child would hang until the timeout.
@@ -506,7 +507,7 @@ test('#969 disable cancels a login child whose URL was already returned', async 
   child.stdout = new PassThrough(); child.stderr = new PassThrough();
   let killed = false;
   child.kill = () => { killed = true; queueMicrotask(() => child.emit('close', null)); return true; };
-  const pending = runTailscaleCli('up', { hostname: 'nightlight', socketPath: '/tmp/owned.sock',
+  const pending = runTailscaleCli('up', { hostname: 'nightlight', socketPath: '/tmp/owned.sock', socketExists: () => true,
     spawnFn: () => {
       queueMicrotask(() => child.stdout.write('https://login.tailscale.com/a/waiting\n'));
       return child;
@@ -527,7 +528,7 @@ test('#969 logout cancels pending sign-in before running its CLI mutation', asyn
   child.stdout = new PassThrough(); child.stderr = new PassThrough();
   let killed = false; const verbs = [];
   child.kill = () => { killed = true; queueMicrotask(() => child.emit('close', null)); return true; };
-  const pending = runTailscaleCli('up', { hostname: 'nightlight', socketPath: '/tmp/owned.sock',
+  const pending = runTailscaleCli('up', { hostname: 'nightlight', socketPath: '/tmp/owned.sock', socketExists: () => true,
     spawnFn: () => { queueMicrotask(() => child.stdout.write('https://login.tailscale.com/a/waiting\n')); return child; } });
   await pending;
   await mount({ blocker: () => null, status: () => ({ state: 'running' }),
