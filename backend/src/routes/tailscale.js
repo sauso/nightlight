@@ -7,6 +7,7 @@ import { startTailscale, stopTailscale, getTailscaleStatus, hasLiveTailscaleProc
 import { runTailscaleCli, validateHostname, getTailscaleLinks, cancelTailscaleCli, approvedLoginUrl } from '../lib/tailscaleCli.js';
 import { resetTailscaleState } from '../lib/tailscaleState.js';
 import { isDemoModeActive } from '../middleware/demoMode.js';
+import { asyncHandler } from '../lib/asyncHandler.js';
 
 function tailnetIPv4(value) {
   if (typeof value !== 'string') return false;
@@ -64,10 +65,12 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
   };
   const conflict = (res, code, message) => res.status(409).json({ error: message, code });
 
-  router.get('/', requireAuth, requireAdmin, async (req, res) => {
+  // #970 CI: the class guard in async-errors.test.js refuses an unwrapped async route handler, and
+  // this one became async when status started reading the CLI. The try/catch keeps its own 409 shape.
+  router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
     try { res.json(await view()); }
     catch { conflict(res, 'status_unavailable', 'Tailscale status is unavailable.'); }
-  });
+  }));
   router.put('/', requireAuth, requireAdmin, (req, res) => {
     if (!req.body || Array.isArray(req.body) || Object.keys(req.body).length !== 1 ||
       typeof req.body.enabled !== 'boolean') {

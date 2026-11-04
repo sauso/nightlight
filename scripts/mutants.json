@@ -137,8 +137,8 @@
   {
     "label": "#967 in-lock admin role check dropped",
     "file": "backend/src/routes/tailscale.js",
-    "find": "if (live.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });",
-    "replace": "if (false) return res.status(403).json({ error: 'Admin access required' });",
+    "find": "if (!live) return res.status(401).json({ error: 'Invalid or expired session' });\n      if (live.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });",
+    "replace": "if (!live) return res.status(401).json({ error: 'Invalid or expired session' });\n      if (false) return res.status(403).json({ error: 'Admin access required' });",
     "expect": "killed",
     "tests": ["tailscale-routes.test.js"],
     "namePattern": "queued admin demotion is checked after middleware"
@@ -155,8 +155,8 @@
   {
     "label": "#967 strict body accepts extra keys",
     "file": "backend/src/routes/tailscale.js",
-    "find": "Object.keys(req.body).length !== 1",
-    "replace": "false",
+    "find": "Object.keys(req.body).length !== 1 ||",
+    "replace": "false ||",
     "expect": "killed",
     "tests": ["tailscale-routes.test.js"],
     "namePattern": "strict body and fixed response shape"
@@ -164,8 +164,8 @@
   {
     "label": "#967 disable stops before clearing intent",
     "file": "backend/src/routes/tailscale.js",
-    "find": "          try { write(0); }\n          catch { return conflict(res, 'could_not_save', 'The Tailscale setting could not be saved.'); }\n          await stop();",
-    "replace": "          await stop();\n          try { write(0); }\n          catch { return conflict(res, 'could_not_save', 'The Tailscale setting could not be saved.'); }",
+    "find": "          try { write(0); }\n          catch { return conflict(res, 'could_not_save', 'The Tailscale setting could not be saved.'); }\n          lastError = null; // Opus review of #970: an old action error must not outlive a disable.\n          await cancelTailscaleCli();\n          await stop();",
+    "replace": "          await stop();\n          try { write(0); }\n          catch { return conflict(res, 'could_not_save', 'The Tailscale setting could not be saved.'); }\n          lastError = null; // Opus review of #970: an old action error must not outlive a disable.\n          await cancelTailscaleCli();",
     "expect": "killed",
     "tests": ["tailscale-routes.test.js"],
     "namePattern": "intent is saved after a started state"
@@ -182,8 +182,8 @@
   {
     "label": "#967 uncertain stop reported as success",
     "file": "backend/src/routes/tailscale.js",
-    "find": "return res.status(409).json({ ...view(), error: 'The tunnel daemon may still be running.', code: 'stop_uncertain' });",
-    "replace": "return res.status(200).json({ ...view(), error: 'The tunnel daemon may still be running.', code: 'stop_uncertain' });",
+    "find": "return res.status(409).json({ ...await view(), error: 'The tunnel daemon may still be running.', code: 'stop_uncertain' });",
+    "replace": "return res.status(200).json({ ...await view(), error: 'The tunnel daemon may still be running.', code: 'stop_uncertain' });",
     "expect": "killed",
     "tests": ["tailscale-routes.test.js"],
     "namePattern": "wedged stop reports busy and uncertain disable"
@@ -200,8 +200,8 @@
   {
     "label": "#967 mutation lock removed",
     "file": "backend/src/routes/tailscale.js",
-    "find": "const current = tail.then(job, job);",
-    "replace": "const current = job();",
+    "find": "onEnqueued(req);\n    const current = tail.then(job, job);",
+    "replace": "onEnqueued(req);\n    const current = job();",
     "expect": "killed",
     "tests": ["tailscale-routes.test.js"],
     "namePattern": "SIGTERM-ignoring fake serialises disable then enable"
