@@ -7,6 +7,7 @@ import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { detectHostNetwork } from '../src/lib/hostNetwork.js';
+import { onlyListenerPorts } from './helpers/procTcpFilter.js';
 
 const FAKE = fileURLToPath(new URL('./helpers/fakeTailscaled.js', import.meta.url));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -22,14 +23,19 @@ test('#971 real child socket is exempt, but a test-process listener is foreign',
       const marker = path.join(markerDir, `listener-${child.pid}.json`);
       for (let i = 0; i < 200 && !fs.existsSync(marker); i++) await sleep(10);
       assert.ok(fs.existsSync(marker), 'child wildcard listener did not become ready');
-      const owned = () => detectHostNetwork({ ownedPid: child.pid });
+      const childPort = JSON.parse(fs.readFileSync(marker, 'utf8')).port;
+      // Only the two listeners this test opens are visible (see procTcpFilter.js): the runner has others.
+      const ports = [childPort];
+      const readFile = onlyListenerPorts(() => ports);
+      const owned = () => detectHostNetwork({ ownedPid: child.pid, readFile });
       assert.equal(owned().unknown, null);
       assert.equal(owned().evidence.includes('foreign_listener'), false);
-      const unowned = detectHostNetwork();
+      const unowned = detectHostNetwork({ readFile });
       assert.equal(unowned.unknown, null);
       assert.equal(unowned.evidence.includes('foreign_listener'), true);
       server = net.createServer((socket) => socket.destroy());
       await new Promise((resolve, reject) => server.once('error', reject).listen(0, '0.0.0.0', resolve));
+      ports.push(server.address().port);
       assert.equal(owned().evidence.includes('foreign_listener'), true);
     } finally {
       await new Promise((resolve) => server?.close(resolve) ?? resolve());
