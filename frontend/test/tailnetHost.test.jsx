@@ -12,7 +12,7 @@ describe('isTailnetHost', () => {
 
   // The CGNAT boundary is the part a regex gets wrong: 100.63 and 100.128 are ordinary addresses.
   test.each([
-    '100.63.255.255', '100.128.0.0', '100.64.0.256', '100.64.0', '100.64.0.1.5',
+    '100.63.255.255', '100.128.0.0', '100.64.0.256', '100.64.0', '100.64.0.1.5', '100.064.0.1', '100.64.00.1',
     '192.168.1.10', '10.0.0.5', 'localhost', 'nightlight.local', 'ts.net', 'example.com', 'notts.net', 'a.ts.net.evil.com',
     '', null, undefined, 42,
   ])('%s is not', (host) => expect(isTailnetHost(host)).toBe(false));
