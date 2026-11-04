@@ -13,6 +13,7 @@ import manifestRoutes from './routes/manifest.js';
 import logsRoutes from './routes/logs.js';
 import diagnosticsRoutes from './routes/diagnostics.js';
 import remoteAccessRoutes from './routes/remoteAccess.js';
+import tailscaleRoutes from './routes/tailscale.js';
 import esphomeRoutes from './routes/esphome.js';
 import eventsRoutes from './routes/events.js';
 import aboutRoutes from './routes/about.js';
@@ -63,6 +64,7 @@ import { safeInterval, installCrashGuards, markBootComplete } from './lib/proces
 import { healthHandler } from './lib/serverIdentity.js';
 import { startMdnsAnnounce, stopMdnsAnnounce } from './lib/mdnsAnnounce.js';
 import { stopTailscale } from './lib/tailscaleProcess.js';
+import { bootTailscale } from './lib/tailscaleBoot.js';
 import {
   createCameraWatchdog, createAudioWatchdog, WATCHDOG_INTERVAL_MS, AUDIO_CHECK_INTERVAL_MS,
   createDetectorWatchdog, createRestartRequests, DETECTOR_CHECK_INTERVAL_MS,
@@ -246,6 +248,7 @@ app.use('/api/setup', setupRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/diagnostics', diagnosticsRoutes);
+app.use('/api/remote-access/tailscale', tailscaleRoutes);
 app.use('/api/remote-access', remoteAccessRoutes);
 app.use('/api/esphome', esphomeRoutes);
 app.use('/api/events', eventsRoutes);
@@ -320,6 +323,9 @@ const server = app.listen(PORT, () => {
   // start, and the guards exit non-zero instead of leaving a healthy-looking container with no server
   // bound — see the boot/steady-state note in lib/processGuards.js.
   markBootComplete();
+  // Opus plan review of #967: a persisted intent is handled only after the server
+  // has bound and startup guards have entered steady state.
+  bootTailscale({ db, dataDir: DATA_DIR });
   // #937: announce on the local network only now, once the server accepts connections: a phone that finds it
   // checks /api/health straight away. Never throws, never blocks; MDNS_ANNOUNCE=false turns it off.
   startMdnsAnnounce({ port: PORT });

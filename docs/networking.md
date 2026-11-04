@@ -4,6 +4,8 @@ Nightlight is made for your home network first: add your cameras, watch them fro
 
 ## Networking modes
 
+Planned Tailscale support will need the container to have its own address through bridge, ipvlan or macvlan; host networking will be refused. The check counts TCP listeners on `127.0.0.1` or a wildcard, ignores Docker DNS on `127.0.0.11`, and cannot detect UDP-only loopback services in a shared namespace.
+
 Nightlight needs its own routable IP on your LAN so WebRTC has no NAT/ICE trouble: MediaMTX advertises that IP to browsers. There are two supported ways to provide one:
 
 - **Host networking (the default, and the simplest).** The container shares the host's IP (`--network host`, or `<Network>host</Network>` in the Unraid template). There's nothing to configure; it's what the quick start and the template use. The trade-off is that it binds its ports (4000, plus MediaMTX's) directly on the host, which clashes if something else there already uses them.

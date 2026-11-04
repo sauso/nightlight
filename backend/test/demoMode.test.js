@@ -41,6 +41,8 @@ before(async () => {
   router.put('/api/settings', record('put-settings'));
   router.get('/api/diagnostics', record('diagnostics'));
   router.get('/api/remote-access', record('remote-access'));
+  router.get('/api/remote-access/tailscale', record('tailscale-get'));
+  router.put('/api/remote-access/tailscale', record('tailscale-put'));
   router.get('/api/logs', record('logs'));
   router.delete('/api/logs', record('delete-logs'));
   router.get('/api/auth/sessions', record('sessions'));
@@ -69,6 +71,14 @@ before(async () => {
 
 after(async () => {
   await server?.close();
+});
+
+test('#967 demo blocks tunnel status and enable', async () => {
+  process.env.DEMO_MODE = 'true';
+  assert.equal((await call(`${server.url}/api/remote-access/tailscale`)).status, 403);
+  assert.equal((await call(`${server.url}/api/remote-access/tailscale`, { method: 'PUT', body: { enabled: true } })).status, 403);
+  assert.equal(hits['tailscale-get'], undefined);
+  assert.equal(hits['tailscale-put'], undefined);
 });
 
 beforeEach(() => {

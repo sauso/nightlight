@@ -28,5 +28,10 @@ if (mode.startsWith('print-lines=')) {
 if (mode === 'print-hostile') console.log('a.'.repeat(32768));
 if (mode.startsWith('exit=')) process.exit(Number(mode.slice('exit='.length)));
 if (mode.startsWith('crash-after=')) setTimeout(() => process.exit(1), Number(mode.slice('crash-after='.length)));
-if (mode === 'ignore-sigterm') process.on('SIGTERM', () => {});
+if (mode === 'ignore-sigterm') {
+  process.on('SIGTERM', () => {});
+  // Opus plan review of #967: stop tests need proof the handler is installed
+  // before sending SIGTERM; the PID marker is written earlier in startup.
+  fs.writeFileSync(path.join(markerDir, `ready-${process.pid}`), 'ready');
+}
 setInterval(() => {}, 1000);

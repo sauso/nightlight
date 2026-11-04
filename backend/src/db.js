@@ -547,6 +547,10 @@ if (!sleepReviewColumns.includes('nobody_in_bed')) {
 }
 
 const settingsColumns = db.prepare('PRAGMA table_info(settings)').all().map((c) => c.name);
+// Opus plan review of #967: this is intent only; a fresh or restored database stays off.
+if (!settingsColumns.includes('tailscale_enabled')) {
+  db.exec('ALTER TABLE settings ADD COLUMN tailscale_enabled INTEGER NOT NULL DEFAULT 0');
+}
 if (!settingsColumns.includes('esphome_retention_days')) {
   db.exec('ALTER TABLE settings ADD COLUMN esphome_retention_days INTEGER NOT NULL DEFAULT 30');
 }

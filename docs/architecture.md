@@ -33,6 +33,8 @@ HLS can't carry at all — WebRTC can). This drives a specific pipeline, in orde
 
 `GET /api/remote-access` (`backend/src/routes/remoteAccess.js`, `lib/remoteAccess.js`) reports the admin's configured network access and calling-device network; DNS checks only configured `PUBLIC_HOST` names.
 
+`GET` and `PUT /api/remote-access/tailscale` are admin-only status and enable-setting routes. The `PUT` serialises requests, checks live admin access again when each request begins, and stores intent only after the supervisor starts. After the server listens and `markBootComplete()` runs, `bootTailscale()` checks the network and starts the supervisor only when intent is enabled. The detector and supervisor recheck conditions on every launch.
+
 ## Child process environment (`backend/src/lib/childEnv.js`, #553)
 
 Camera streams are untrusted input, and ffmpeg/ffprobe parse whatever a (possibly compromised) camera
@@ -58,7 +60,7 @@ child. This narrows what a child *inherits*; it does not stop a child reading th
 
 A name that is unset in the backend stays unset in the child. A caller-supplied `env` option is ignored.
 
-`tailscaled` is network-facing. Its app uid lets it read the database and `.jwt_secret`, so its state in `private/tailscale` must be app-owned and mode 0700; a share that ignores chmod prevents it from starting. Its state files are mode 0600. Its output goes only to the console after redaction. It uses `--no-logs-no-support`, which prevents upload to Tailscale's log service. Nothing starts this supervisor yet.
+`tailscaled` is network-facing. Its app uid lets it read the database and `.jwt_secret`, so its state in `private/tailscale` must be app-owned and mode 0700; a share that ignores chmod prevents it from starting. Its state files are mode 0600. Its output goes only to the console after redaction. It uses `--no-logs-no-support`, which prevents upload to Tailscale's log service. The binary is not packaged yet, so the enable precondition refuses it in current images.
 
 **To add a variable:** add the name to `ALLOWED_NAMES` in `childEnv.js` with a comment saying which setup
 needs it, add a row to the table above, and update `backend/test/child-env.test.js` (it pins the list on
