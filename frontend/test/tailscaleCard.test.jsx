@@ -253,3 +253,15 @@ test('in the demo a failed load offers no Retry', async () => {
   await screen.findByText(/Couldn.t load Tailscale details/);
   expect(screen.queryByRole('button', { name: /Retry/ })).toBeNull();
 });
+
+// MEASURED 2026-11-04: a reset on a tailnet that still held the old entry produced the name nightlight-staging-1,
+// while the saved setting stayed nightlight-staging.
+test('rename starts from the name the device really has', async () => {
+  const view = card({ ...ready, hostname: 'nightlight-staging', dns_name: 'nightlight-staging-1.example.ts.net' });
+  fireEvent.click(await screen.findByText('Advanced'));
+  expect(screen.getByLabelText('Rename this device')).toHaveValue('nightlight-staging-1');
+  expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  await view.user.clear(screen.getByLabelText('Rename this device'));
+  await view.user.type(screen.getByLabelText('Rename this device'), 'nightlight-staging');
+  expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+});

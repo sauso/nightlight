@@ -60,7 +60,10 @@ export default function TailscaleCard({ compact = false, publicHostSet = false }
   const previousState = useRef(null);
   const region = useRef(null);
 
-  useEffect(() => { if (view?.hostname) setName(view.hostname); }, [view?.hostname]);
+  // MEASURED 2026-11-04: after a reset Tailscale named the new device `nightlight-staging-1` because the old entry still
+  // existed, while the saved setting stayed `nightlight-staging`. Show the name the device really has once it has one.
+  const currentName = view?.dns_name ? view.dns_name.split('.')[0] : view?.hostname;
+  useEffect(() => { if (currentName) setName(currentName); }, [currentName]);
   // Codex review of #978 (verified): the sign-in link replaces the Sign in button inside the same state, so watching the
   // state alone dropped focus to <body>. The key changes whenever the card's primary control does.
   const focusKey = view ? `${view.state}|${view.login_url ? 'link' : ''}|${consentUrl ? 'consent' : ''}|${view.serve?.enabled ? 'https' : ''}` : null;
@@ -82,7 +85,7 @@ export default function TailscaleCard({ compact = false, publicHostSet = false }
 
   async function rename(event) {
     event.preventDefault();
-    if (!NAME.test(name) || name === view.hostname) return;
+    if (!NAME.test(name) || name === currentName) return;
     const hadHttps = view.serve?.enabled;
     if (!await act('hostname', { hostname: name })) return;
     // Measured: Tailscale leaves Serve under the old DNS name after a rename.
@@ -192,7 +195,7 @@ export default function TailscaleCard({ compact = false, publicHostSet = false }
     {view && <details className="tailscale-advanced"><summary>Advanced</summary>
       <form onSubmit={rename}><div className="field"><label htmlFor="tailscale-rename">Rename this device</label>
         <input id="tailscale-rename" value={name} maxLength={63} onChange={(event) => setName(event.target.value)} disabled={disabled || !view.enabled} /></div>
-        <button type="submit" className="btn btn-secondary" disabled={disabled || !view.enabled || !NAME.test(name) || name === view.hostname}>Save</button></form>
+        <button type="submit" className="btn btn-secondary" disabled={disabled || !view.enabled || !NAME.test(name) || name === currentName}>Save</button></form>
       <button type="button" className="btn btn-secondary" disabled={disabled || !view.serve?.enabled} onClick={() => setConfirm('serve-disable')}>Turn off the secure address</button>
       <button type="button" className="btn btn-secondary" disabled={disabled || !view.enabled} onClick={() => setConfirm('logout')}>Log out of Tailscale</button>
       <button type="button" className="btn btn-danger" disabled={disabled} onClick={() => setConfirm('reset')}>Reset this device's Tailscale identity</button>
