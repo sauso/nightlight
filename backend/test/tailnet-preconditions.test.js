@@ -55,7 +55,17 @@ test('#963 no users or a lone caregiver blocks Tailscale until an admin exists',
   assert.equal(tailnetEnableBlocker(db)?.code, 'no_admin');
   makeUser(db, { id: 'admin-one', username: 'admin-one', role: 'admin' });
   assert.equal(firstAdminExists(db), true);
-  assert.equal(tailnetEnableBlocker(db), null);
+  assert.equal(tailnetEnableBlocker(db, { hostNetwork: { host: false, evidence: [], unknown: 'not_linux' }, binaryPath: process.execPath }), null);
+});
+
+test('#967 host network and missing daemon block with real defaults', () => {
+  makeUser(db, { id: 'admin-new', username: 'admin-new', role: 'admin' });
+  assert.equal(tailnetEnableBlocker(db, { hostNetwork: { host: true, evidence: ['bridge_dir'], unknown: null },
+    binaryPath: process.execPath })?.code, 'host_network');
+  assert.equal(tailnetEnableBlocker(db, { hostNetwork: { host: false, evidence: [], unknown: 'proc_mismatch' },
+    binaryPath: process.execPath })?.code, 'host_network');
+  assert.equal(tailnetEnableBlocker(db, { hostNetwork: { host: false, evidence: [], unknown: null },
+    binaryPath: '/missing-daemon-for-967' })?.code, 'not_installed');
 });
 
 test('#963 exposed loopback setup refuses forged forwarded LAN address without a user or session', async () => {

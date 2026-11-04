@@ -56,6 +56,7 @@ const MUTATION_ALLOWLIST = new Set([
 const GET_BLOCKLIST = new Set([
   '/api/diagnostics',
   '/api/remote-access',
+  '/api/remote-access/tailscale',
   '/api/logs',
   '/api/auth/sessions',
   '/api/auth/sessions/all',

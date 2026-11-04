@@ -4,6 +4,14 @@ To watch from outside your home network, set up a reverse proxy with HTTPS (a VP
 
 ## Check your setup in Nightlight
 
+### Planned Tailscale support
+
+Tailscale support is being added, but no released version can attach Nightlight to a tailnet yet. The admin API now stores an enable setting and checks whether a tunnel daemon could start. It refuses host networking, an unverified network, a missing daemon, or an installation without an admin. The usual host-network Docker setup therefore cannot use this planned route; give the container its own address through bridge, ipvlan or macvlan first. Check the container's network mode in Docker or your container manager before trying it.
+
+The network check looks at interfaces and listeners when the daemon starts. A passed-through physical network card may be refused. A nested Docker host without a bridge in its namespace may go undetected, and a listener opened after the check is only detected on a later start. There is no override in this version.
+
+If you copy Nightlight's data folder to a second installation, you also copy its Tailscale identity. Turn Tailscale off first, or delete `private/tailscale` in the copy before that installation can start the daemon.
+
 Admins can open **Settings → Remote Access**. The first card shows how Nightlight sees this device: home network, VPN, outside home, or unknown. **Your setup** lists the app and UDP video ports, public hosts and their DNS results, advertised addresses, and whether STUN is on. The checklist links back to this guide. Tailscale is marked **Coming later**; the row does not set it up.
 
 **Test from this device** makes one short Low latency video connection to a running camera, then closes its connection. When the server gives a session address, the test also asks it to end the session (DELETE); otherwise MediaMTX frees it when the connection closes. A successful UDP connection **from outside your home** shows that the port forward works for this device. A TCP connection means video connected, but it does not confirm the UDP forward. A failed or timed-out test points you to the UDP forward and `PUBLIC_HOST`; Compatibility (HLS) remains available without UDP. The test only proves the forward from **outside** your home. A connection from your home network, a VPN, or behind an untrusted proxy cannot prove it, even if the test connects. Try again from mobile data.

@@ -1,5 +1,185 @@
 [
   {
+    "label": "#967 first-admin blocker dropped",
+    "file": "backend/src/lib/tailnetPreconditions.js",
+    "find": "if (!firstAdminExists(db)) return {",
+    "replace": "if (false) return {",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "no users or a lone caregiver blocks Tailscale"
+  },
+  {
+    "label": "#967 host-network blocker dropped",
+    "file": "backend/src/lib/tailnetPreconditions.js",
+    "find": "if (hostNetwork.host || (hostNetwork.unknown && hostNetwork.unknown !== 'not_linux')) return {",
+    "replace": "if (false) return {",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "host network and missing daemon block"
+  },
+  {
+    "label": "#967 missing-daemon blocker dropped",
+    "file": "backend/src/lib/tailnetPreconditions.js",
+    "find": "  try {\n    if (!fs.statSync(binaryPath).isFile()) throw Error('not a file');\n    fs.accessSync(binaryPath, fs.constants.X_OK);\n  }",
+    "replace": "  try { /* missing executable accepted */ }",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "host network and missing daemon block"
+  },
+  {
+    "label": "#967 physical NIC evidence dropped",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "if (exists(`${entry}/device`, lstat)) evidence.add('physical_nic');",
+    "replace": "if (false) evidence.add('physical_nic');",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "structural evidence is fixed codes"
+  },
+  {
+    "label": "#967 bridge directory evidence dropped",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "['bridge', 'bridge_dir']",
+    "replace": "['missing-bridge', 'bridge_dir']",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "structural evidence is fixed codes"
+  },
+  {
+    "label": "#967 bridge-port directory evidence dropped",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "['brport', 'brport_dir']",
+    "replace": "['missing-brport', 'brport_dir']",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "structural evidence is fixed codes"
+  },
+  {
+    "label": "#967 bonding directory evidence dropped",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "['bonding', 'bonding_dir']",
+    "replace": "['missing-bonding', 'bonding_dir']",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "structural evidence is fixed codes"
+  },
+  {
+    "label": "#967 host interface name evidence dropped",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "if (HOST_NAME.test(name)) evidence.add('host_iface_name');",
+    "replace": "if (false) evidence.add('host_iface_name');",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "structural evidence is fixed codes"
+  },
+  {
+    "label": "#967 foreign listener evidence dropped",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "listener(readFile('/proc/net/tcp6', 'utf8'), port, true)) evidence.add('foreign_listener');",
+    "replace": "listener(readFile('/proc/net/tcp6', 'utf8'), port, true)) { /* ignored */ }",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "foreign loopback and wildcard listeners refuse"
+  },
+  {
+    "label": "#967 plain sysfs file counted as interface",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "return lstat(entry).isSymbolicLink() || exists(`${entry}/ifindex`, lstat);",
+    "replace": "return true;",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "plain bonding_masters is ignored"
+  },
+  {
+    "label": "#967 missing loopback accepted",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "if (!names.includes('lo')) return { host: false, evidence: [], unknown: 'no_lo' };",
+    "replace": "if (false) return { host: false, evidence: [], unknown: 'no_lo' };",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "no lo and proc mismatch refuse"
+  },
+  {
+    "label": "#967 proc namespace mismatch accepted",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "interfaces.length !== procNames.size || interfaces.some((name) => !procNames.has(name))",
+    "replace": "false",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "no lo and proc mismatch refuse"
+  },
+  {
+    "label": "#967 intent persisted before start",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "          start({ db: database, dataDir });",
+    "replace": "          write(1);\n          start({ db: database, dataDir });",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "intent is saved after a started state"
+  },
+  {
+    "label": "#967 strict body accepts extra keys",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "Object.keys(req.body).length !== 1",
+    "replace": "false",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "strict body and fixed response shape"
+  },
+  {
+    "label": "#967 disable leaves daemon running",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "          await stop();\n          if (status().state !== 'off')",
+    "replace": "          /* stop omitted */\n          if (status().state !== 'off')",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "enable is idempotent and disable clears intent"
+  },
+  {
+    "label": "#967 uncertain stop reported as success",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "return res.status(409).json({ ...view(), error: 'The tunnel daemon may still be running.', code: 'stop_uncertain' });",
+    "replace": "return res.status(200).json({ ...view(), error: 'The tunnel daemon may still be running.', code: 'stop_uncertain' });",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "wedged stop reports busy and uncertain disable"
+  },
+  {
+    "label": "#967 failed save omits compensating stop",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "          catch {\n            await stop();\n            return conflict(res, 'could_not_save'",
+    "replace": "          catch {\n            /* stop omitted */\n            return conflict(res, 'could_not_save'",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "failed save compensates by stopping"
+  },
+  {
+    "label": "#967 mutation lock removed",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "const current = tail.then(job, job);",
+    "replace": "const current = job();",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "lock serialises disable then enable"
+  },
+  {
+    "label": "#967 fresh schema defaults enabled",
+    "file": "backend/src/db.js",
+    "find": "ALTER TABLE settings ADD COLUMN tailscale_enabled INTEGER NOT NULL DEFAULT 0",
+    "replace": "ALTER TABLE settings ADD COLUMN tailscale_enabled INTEGER NOT NULL DEFAULT 1",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "schema flag is hidden from settings GET"
+  },
+  {
+    "label": "#967 demo status block removed",
+    "file": "backend/src/middleware/demoMode.js",
+    "find": "  '/api/remote-access/tailscale',",
+    "replace": "  /* tailscale status exposed */",
+    "expect": "killed",
+    "tests": ["demoMode.test.js"],
+    "namePattern": "demo blocks tunnel status and enable"
+  },
+  {
     "label": "#965 flag cleared on child exit before final confirmed stop",
     "file": "backend/src/lib/tailscaleProcess.js",
     "find": "      lastExitCode = code;",

@@ -1,12 +1,13 @@
 import { spawnAsApp } from './childEnv.js';
-import { tailnetEnableBlocker } from './tailnetPreconditions.js';
+import { tailnetEnableBlocker, TAILSCALED_BINARY } from './tailnetPreconditions.js';
 import { setLoopbackExposed } from './loopbackExposure.js';
 import { prepareStateDir, makeRuntimeDir, removeRuntimeDir } from './tailscaleState.js';
 import { killIfSpawned, isKillError, execFailureBackoff } from './processGuards.js';
 import { forwardProcessLines } from './processOutput.js';
 import { logger } from './logger.js';
 
-const TAILSCALED_BINARY = '/usr/local/bin/tailscaled';
+export { TAILSCALED_BINARY };
+
 const RESTART_DELAY_MS = 3000;
 const MAX_RESTART_DELAY_MS = 60000;
 export const FORCE_KILL_MS = 3000;
@@ -99,7 +100,7 @@ function launch(g) {
   try {
     // The order is intentional on EVERY launch. A restored database can lose its admin, and
     // a share can change permissions after the previous run (Opus plan review of #965).
-    const blocker = tailnetEnableBlocker(s.db);
+    const blocker = tailnetEnableBlocker(s.db, { hostNetwork: s.hostNetwork, binaryPath: s.binaryPath });
     if (blocker) return unavailable(g, blocker.code);
     const prepared = prepareStateDir({ dataDir: s.dataDir, ...(s.stateOptions ?? {}) });
     if (!prepared.ok) return unavailable(g, prepared.reason);
@@ -175,13 +176,18 @@ function launch(g) {
       shortDelay = Math.min(MAX_RESTART_DELAY_MS, shortDelay * 2);
       notice(`${reason}; retry in ${delay}ms`);
       restartTimer = timer(() => { restartTimer = null; if (current(g) && state === 'backoff') launch(g); }, s.delayMs?.(delay) ?? delay);
-    } else unavailable(g, 'start_failed');
+    } else {
+      unavailable(g, 'start_failed');
+      // Opus plan review of #967: a post-spawn exception must not leave a live
+      // tunnel daemon hidden behind an unavailable status.
+      if (proc) void stopTailscale();
+    }
   }
 }
 
 export function startTailscale({ db, dataDir, binary, argvSuffix, spawnFn, killFn,
   stateOptions, runtimeOptions, now = () => performance.now(), delayMs, exposureHoldMs,
-  forceKillMs, stopCapMs, consoleSink } = {}) {
+  forceKillMs, stopCapMs, consoleSink, hostNetwork, binaryPath } = {}) {
   if (state === 'starting' || state === 'running' || state === 'backoff' || state === 'stopping' || (state === 'unavailable' && proc)) return false;
   // Start while stopping is deliberately refused: an uncertain old child must never overlap a new one.
   clearTimeout(clearTimer); clearTimer = null;
@@ -191,7 +197,7 @@ export function startTailscale({ db, dataDir, binary, argvSuffix, spawnFn, killF
   restarts = 0; lastExitCode = null; reason = null; shortDelay = RESTART_DELAY_MS; lastNoticeAt = -Infinity;
   // Opus review of #965: a new start is a new output session; relaunches keep one shared budget.
   outputWindowAt = 0; outputLines = 0;
-  session = { db, dataDir, binary, argvSuffix, spawnFn, killFn, stateOptions, runtimeOptions,
+  session = { db, dataDir, binary, argvSuffix, spawnFn, killFn, stateOptions, runtimeOptions, hostNetwork, binaryPath,
     now, delayMs, exposureHoldMs, forceKillMs, stopCapMs, consoleSink,
     execBackoff: execFailureBackoff(RESTART_DELAY_MS, { now }) };
   launch(g);
@@ -234,3 +240,4 @@ export function stopTailscale() {
 }
 
 export function getTailscaleStatus() { return { state, restarts, lastExitCode, reason }; }
+export function hasLiveTailscaleProcess() { return Boolean(proc); }

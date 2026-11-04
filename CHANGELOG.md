@@ -26,6 +26,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- #967 Ahead of planned remote access, Nightlight stores a guarded Tailscale enable setting and checks network mode before starting a tunnel daemon. The daemon is not packaged yet.
+
 - #965 Ahead of planned remote access, Nightlight now has a guarded tunnel daemon supervisor. Nothing starts the daemon yet.
 
 - #963 Ahead of planned remote access, Nightlight refuses first-admin setup through an attached tunnel daemon, and the Tailscale support that follows will require an admin account before it can turn on.

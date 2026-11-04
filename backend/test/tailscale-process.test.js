@@ -51,6 +51,7 @@ function fixture(mode = 'stay', changes = {}) {
   };
   const opts = {
     db: { prepare: () => ({ get: () => ({ id: 1 }) }) }, dataDir,
+    hostNetwork: { host: false, evidence: [], unknown: 'not_linux' }, binaryPath: process.execPath,
     binary: '/usr/local/bin/tailscaled', argvSuffix: [`--marker-dir=${markerDir}`, `--mode=${mode}`],
     stateOptions: { uid, fsImpl }, runtimeOptions: { uid, fsImpl },
     spawnFn, delayMs: () => 30, exposureHoldMs: 20, forceKillMs: 40, stopCapMs: 100,
@@ -124,9 +125,11 @@ test('#965 two starts in one tick spawn once and start while stopping refuses', 
   await until(() => getTailscaleStatus().state === 'off');
 });
 
-test('#965 missing binary ENOENT enters quiet backoff without throwing (#257)', async () => {
-  const f = fixture('stay', { binary: path.join(os.tmpdir(), 'nonexistent-tailscaled-965'),
-    spawnFn: (binary, argv, options) => spawnAsApp(binary, argv, options) });
+test('#965 missing interpreter enters quiet backoff without throwing (#257)', async () => {
+  const f = fixture('stay', { spawnFn: (binary, argv, options) => spawnAsApp(binary, argv, options) });
+  f.opts.binary = path.join(f.dataDir, 'bad-interpreter');
+  fs.writeFileSync(f.opts.binary, '#!/missing-interpreter-for-967\n', { mode: 0o700 });
+  f.opts.binaryPath = f.opts.binary;
   assert.equal(startTailscale(f.opts), true);
   await until(() => getTailscaleStatus().state === 'backoff');
   assert.equal(getTailscaleStatus().reason, 'spawn_failed');
@@ -139,6 +142,7 @@ test('#965 non-executable binary EACCES enters backoff without throwing (#257)',
   const binary = path.join(f.dataDir, 'not-executable');
   fs.writeFileSync(binary, '#!/bin/sh\nexit 0\n', { mode: 0o600 });
   f.opts.binary = binary;
+  f.opts.binaryPath = process.execPath;
   f.opts.spawnFn = (cmd, argv, options) => spawnAsApp(cmd, argv, options);
   startTailscale(f.opts);
   await until(() => getTailscaleStatus().state === 'backoff');
@@ -327,11 +331,36 @@ test('#965 a late old-generation exit cannot clear or relaunch over a new child'
 });
 
 test('#965 production callers supply no test-only argv suffix', () => {
-  const src = fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(src, /startTailscale\s*\(/);
+  for (const file of ['../src/routes/tailscale.js', '../src/lib/tailscaleBoot.js']) {
+    const src = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
+    assert.doesNotMatch(src, /argvSuffix|--marker-dir|--mode=/);
+  }
   const supervisor = fs.readFileSync(new URL('../src/lib/tailscaleProcess.js', import.meta.url), 'utf8');
   assert.doesNotMatch(supervisor, /from\s+['"][^'"]*mediamtx/i);
   assert.deepEqual(Object.keys(getTailscaleStatus()), ['state', 'restarts', 'lastExitCode', 'reason']);
+});
+
+test('#967 omitted network and binary injections end unavailable', async () => {
+  const f = fixture();
+  startTailscale({ db: f.opts.db, dataDir: f.dataDir });
+  assert.equal(getTailscaleStatus().state, 'unavailable');
+  assert.ok(['host_network', 'not_installed'].includes(getTailscaleStatus().reason));
+  assert.equal(f.seen.length, 0);
+});
+
+test('#967 post-spawn exception sends stop to the live child', async () => {
+  let kills = 0;
+  const handlers = {};
+  const f = fixture('stay', {
+    spawnFn: () => ({ pid: 12345, on: (event, fn) => {
+      if (event === 'close') throw Error('handler setup failed');
+      handlers[event] = fn;
+    } }),
+    killFn: () => { kills++; queueMicrotask(() => handlers.exit?.(0)); return true; },
+  });
+  startTailscale(f.opts);
+  assert.ok(kills > 0, 'catch left a spawned child without a stop signal');
+  await until(() => getTailscaleStatus().state === 'off');
 });
 
 test('#965 repeated crashes keep ring output bounded and /api/health answering', async () => {

@@ -94,6 +94,30 @@ jobs:
           docker run --rm --user root -v "$PWD:/repo:ro" -w /repo node:24-alpine \
             sh -c 'apk add --no-cache setpriv >/dev/null && sh scripts/app-exec.mutants.sh'
           bash scripts/entrypoint-umask.mutants.sh
+          # Opus plan review of #967: sysfs fixtures cannot prove the detector sees
+          # real Docker namespaces. These three modes gate on the measured codes.
+          docker run --rm --network host -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+            node scripts/host-network-probe.mjs host
+          docker run --rm -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+            node scripts/host-network-probe.mjs bridge
+          helper="nightlight-listener-$RANDOM"
+          docker run -d --name "$helper" node:24-alpine \
+            node -e "require('net').createServer().listen(4567, '127.0.0.1')"
+          trap 'docker rm -f "$helper" >/dev/null 2>&1 || true' EXIT
+          sleep 2
+          docker run --rm --network "container:$helper" -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+            node scripts/host-network-probe.mjs shared
+          parent="$(ip route show default 2>/dev/null | awk '{print $5; exit}' || true)"
+          for driver in ipvlan macvlan; do
+            network="nightlight-probe-$driver-$RANDOM"
+            if [ -n "$parent" ] && docker network create -d "$driver" -o "parent=$parent" "$network"; then
+              docker run --rm --network "$network" -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+                node scripts/host-network-probe.mjs || true
+              docker network rm "$network" >/dev/null || true
+            else
+              echo "$driver probe unavailable on this runner"
+            fi
+          done
 
   frontend:
     name: Front-end component tests
