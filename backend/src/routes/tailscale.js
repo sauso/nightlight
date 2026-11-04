@@ -153,7 +153,9 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
       // #974: applying a cached host is available even after the daemon is turned off.
       if (action === 'apply-video-address') {
         const applied = await applyVideoAddress();
-        if (!applied) return res.status(409).json({ ...await view(), applied: false,
+        if (applied === null) return res.status(409).json({ ...await view(), applied: false,
+          code: 'busy', error: 'A video address check is in progress. Try again in a moment.' });
+        if (applied === false) return res.status(409).json({ ...await view(), applied: false,
           code: 'video_address_not_applied', error: 'The video address could not be applied.' });
         return res.json({ ...await view(), applied });
       }

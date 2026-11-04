@@ -603,10 +603,15 @@ test('#974 Apply now is admin-only, works with the daemon off, and reports failu
   const bad = await action();
   assert.equal(bad.status, 409); assert.equal(bad.body.code, 'video_address_not_applied');
   assert.equal(bad.body.applied, false); assert.equal(bad.body.video_address_pending, true);
+  applied = null;
+  const busy = await action();
+  assert.equal(busy.status, 409); assert.equal(busy.body.code, 'busy');
+  assert.equal(busy.body.error, 'A video address check is in progress. Try again in a moment.');
+  assert.equal(busy.body.applied, false); assert.equal(busy.body.video_address_pending, true);
   process.env.DEMO_MODE = 'true';
   try { assert.equal((await action()).status, 403); }
   finally { delete process.env.DEMO_MODE; }
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
 });
 
 test('#974 queued Apply now rechecks revoked and demoted admin sessions', async () => {

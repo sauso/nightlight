@@ -64,6 +64,11 @@ export function getAdvertisedHosts(env = process.env, detect = detectHostIPv4s) 
   return [...new Set([...base.filter((host) => host !== tailnet), ...(tailnet ? [tailnet] : [])])];
 }
 
+// A tailnet candidate alone cannot stand in for the host IP used by local WebRTC clients.
+export function hasNonTailnetWebrtcHost(hosts, tailnet = getTailnetAddress()) {
+  return hosts.some((host) => host !== tailnet);
+}
+
 export function getLastAdvertisedHosts(env = process.env) {
   // Interfaces can change after launch; the page must report the candidates handed to MediaMTX,
   // not a fresh computation that its running process has never seen.
@@ -162,7 +167,8 @@ export async function startMediaMTX(configPath) {
     if (advertised.length) {
       extra.MTX_WEBRTCADDITIONALHOSTS = advertisedKey;
       if (advertisedKey !== lastAdvertised) logger.info(`[mediamtx] advertising WebRTC hosts: ${advertised.join(', ')}`);
-    } else if (lastAdvertised !== '') {
+    }
+    if (!hasNonTailnetWebrtcHost(advertised) && advertisedKey !== lastAdvertised) {
       logger.error('[mediamtx] no routable host IP found - WebRTC may only advertise loopback');
     }
     lastAdvertised = advertisedKey;

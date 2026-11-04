@@ -2,13 +2,14 @@ import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { getTailnetAddress, setTailnetAddress, vettedTailnetIPv4 } from '../src/lib/tailnetAddress.js';
 import { refreshTailnetAddress, videoAddressPending, createVideoAddressSync } from '../src/lib/videoAddressSync.js';
-import { getAdvertisedHosts, getLastAdvertisedHosts, applyWebrtcHostsLive, resetMediaMTXHostsForTest } from '../src/lib/mediamtxProcess.js';
+import { getAdvertisedHosts, getLastAdvertisedHosts, hasNonTailnetWebrtcHost, applyWebrtcHostsLive, resetMediaMTXHostsForTest } from '../src/lib/mediamtxProcess.js';
 
 afterEach(() => { setTailnetAddress(null); resetMediaMTXHostsForTest(); });
 
 test('#974 hostile tailnet addresses are rejected and status only clears on evidence', async () => {
   for (const value of ['100.63.1.2', '100.128.1.2', '100.100.100.100.5', ' 100.100.1.2',
-    '100.064.1.2', 100100100100, 'fd7a::1']) assert.equal(vettedTailnetIPv4([value]), null);
+    '100.064.1.2', '10.64.0.1', '127.100.0.1', '101.64.0.1', 100100100100, 'fd7a::1'])
+    assert.equal(vettedTailnetIPv4([value]), null);
   assert.equal(vettedTailnetIPv4(['fd7a::1', '100.64.0.1']), '100.64.0.1');
   let state = 'running'; let result = { ok: true, json: { BackendState: 'Running', Self: {
     TailscaleIPs: ['fd7a::1', '100.100.1.2'] } } };
@@ -21,6 +22,17 @@ test('#974 hostile tailnet addresses are rejected and status only clears on evid
   result = { ok: true, json: { BackendState: 'NeedsLogin' } }; assert.equal(await refresh(), null);
   setTailnetAddress('100.100.1.2'); state = 'off'; assert.equal(await refresh(), null);
   setTailnetAddress('100.100.1.2'); state = 'unavailable'; assert.equal(await refresh(), null);
+});
+
+test('#974 a late status read cannot restore an explicitly cleared address', async () => {
+  setTailnetAddress('100.64.1.1');
+  let finish;
+  const pending = refreshTailnetAddress({ status: () => ({ state: 'running' }),
+    cli: () => new Promise((resolve) => { finish = resolve; }) });
+  setTailnetAddress(null);
+  finish({ ok: true, json: { BackendState: 'Running', Self: { TailscaleIPs: ['100.64.1.1'] } } });
+  assert.equal(await pending, null);
+  assert.equal(getTailnetAddress(), null);
 });
 
 test('#974 pending tracks the tailnet host only, not LAN order or removal', () => {
@@ -42,6 +54,7 @@ test('#974 advertised hosts preserve operator fallback and live PATCH updates st
   assert.equal(await applyWebrtcHostsLive({ fetchImpl: fake, api: 'http://127.0.0.2:9997', env }), true);
   assert.equal(requests[0][0], 'http://127.0.0.2:9997/v3/config/global/patch');
   assert.equal(requests[0][1].method, 'PATCH');
+  assert.ok(requests[0][1].signal instanceof AbortSignal);
   assert.deepEqual(JSON.parse(requests[0][1].body), { webrtcAdditionalHosts: getAdvertisedHosts(env) });
   const before = getLastAdvertisedHosts();
   setTailnetAddress('100.64.1.3');
@@ -54,6 +67,14 @@ test('#974 advertised hosts preserve operator fallback and live PATCH updates st
   assert.equal(JSON.parse(requests[1][1].body).webrtcAdditionalHosts.includes('100.64.1.2'), false);
   assert.equal(await applyWebrtcHostsLive({ fetchImpl: fake, api: 'http://127.0.0.2:9997', env: {}, detect: () => [] }), false);
   assert.equal(requests.length, 2);
+});
+
+test('#974 a tailnet-only candidate still reports no routable host IP', () => {
+  setTailnetAddress('100.64.1.2');
+  const hosts = getAdvertisedHosts({}, () => []);
+  assert.deepEqual(hosts, ['100.64.1.2']);
+  assert.equal(hasNonTailnetWebrtcHost(hosts), false);
+  assert.equal(hasNonTailnetWebrtcHost(['192.168.1.2', ...hosts]), true);
 });
 
 test('#974 first address applies with viewers; later address waits, retries with a fake clock, and applies once', async () => {
@@ -75,13 +96,48 @@ test('#974 first address applies with viewers; later address waits, retries with
 });
 
 test('#974 the same address returning after a logout and a MediaMTX relaunch is applied again', async () => {
-  let address = '100.64.1.1'; let hosts = []; let attempts = 0;
+  let address = '100.64.1.1'; let hosts = []; let attempts = 0; let time = 0;
   const sync = createVideoAddressSync({ refresh: async () => {}, getAddress: () => address, getHosts: () => hosts,
-    now: () => 0, countViewers: async () => 0, apply: async () => { attempts++; hosts = [address]; return true; } });
+    now: () => time, countViewers: async () => 0, apply: async () => { attempts++; hosts = [address]; return true; } });
   assert.equal(await sync.tick(), true); assert.equal(attempts, 1);
   address = null; assert.equal(await sync.tick(), false); // logged out
   hosts = []; address = '100.64.1.1'; // a relaunch dropped it, then the same node signs in again
+  time = 45_000; assert.equal(await sync.tick(), false); assert.equal(attempts, 1);
+  time = 60_000;
   assert.equal(await sync.tick(), true); assert.equal(attempts, 2);
+});
+
+test('#974 successful apply holds repeated pending checks for one minute', async () => {
+  let time = 0; let attempts = 0;
+  const sync = createVideoAddressSync({ refresh: async () => {}, getAddress: () => '100.64.1.1', getHosts: () => [],
+    now: () => time, apply: async () => { attempts++; return true; } });
+  assert.equal(await sync.tick(), true);
+  for (time of [15_000, 30_000, 45_000]) {
+    assert.equal(await sync.tick(), false);
+    assert.equal(attempts, 1);
+  }
+  time = 60_000;
+  assert.equal(await sync.tick(), true);
+  assert.equal(attempts, 2);
+});
+
+test('#974 Apply now success rechecks a pending address after the hold', async () => {
+  let time = 0; let attempts = 0;
+  const sync = createVideoAddressSync({ refresh: async () => {}, getAddress: () => '100.64.1.1', getHosts: () => [],
+    now: () => time, countViewers: async () => 0, apply: async () => { attempts++; return true; } });
+  assert.equal(await sync.applyNow(), true);
+  time = 45_000; assert.equal(await sync.tick(), false); assert.equal(attempts, 1);
+  time = 60_000; assert.equal(await sync.tick(), true); assert.equal(attempts, 2);
+});
+
+test('#974 Apply now reports busy while a poll is in flight', async () => {
+  let release;
+  const waiting = new Promise((resolve) => { release = resolve; });
+  const sync = createVideoAddressSync({ refresh: () => waiting });
+  const tick = sync.tick();
+  assert.equal(await sync.applyNow(), null);
+  release();
+  await tick;
 });
 
 test('#974 a failed first-address patch retries despite viewers', async () => {

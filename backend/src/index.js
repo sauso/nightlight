@@ -550,7 +550,8 @@ async function shutdown() {
   // FIRST, before the seconds of awaited stops below: a tick that fired in the middle of them could SIGTERM MediaMTX
   // while a recording is still being cut from it (#479).
   stopMediamtxApiWatchdog();
-  stopVideoAddressSync(); // #974: an in-flight status read must not patch during the awaited stops.
+  // #974: an in-flight status read must not patch during the awaited stops.
+  stopVideoAddressSync();
   // #937: the mDNS goodbye, STARTED here so phones drop this server from their list at once, and AWAITED just before
   // process.exit(0) below: the goodbye is sent in an asynchronous callback, so exiting without waiting can cut it
   // off. It runs alongside the seconds of awaited stops in between, so it normally adds nothing, and

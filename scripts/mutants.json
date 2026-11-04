@@ -25740,15 +25740,6 @@
     "namePattern": "Apply now ignores viewers"
   },
   {
-    "label": "#974 attempt state kept after the address is gone",
-    "file": "backend/src/lib/videoAddressSync.js",
-    "find": "lastAddress = null; nextAttempt = 0; retryMs = FIRST_RETRY_MS;",
-    "replace": "/* attempt state kept */",
-    "expect": "killed",
-    "tests": ["video-address-sync.test.js"],
-    "namePattern": "the same address returning after a logout"
-  },
-  {
     "label": "#974 PATCH omits computed hosts",
     "file": "backend/src/lib/mediamtxProcess.js",
     "find": "webrtcAdditionalHosts: hosts",
@@ -25756,5 +25747,77 @@
     "expect": "killed",
     "tests": ["video-address-sync.test.js"],
     "namePattern": "advertised hosts preserve operator fallback"
+  },
+  {
+    "label": "#974 success hold removed",
+    "file": "backend/src/lib/videoAddressSync.js",
+    "find": "const SUCCESS_HOLD_MS = 60_000;",
+    "replace": "const SUCCESS_HOLD_MS = 0;",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "successful apply holds repeated pending checks"
+  },
+  {
+    "label": "#974 cleared address epoch ignored",
+    "file": "backend/src/lib/videoAddressSync.js",
+    "find": "if (tailnetAddressEpoch() !== epoch) return getTailnetAddress();",
+    "replace": "/* stale status is accepted */",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "a late status read cannot restore"
+  },
+  {
+    "label": "#974 busy Apply now mapped to patch failure",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "if (applied === null) return res.status(409).json({ ...await view(), applied: false,",
+    "replace": "if (applied === false) return res.status(409).json({ ...await view(), applied: false,",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "Apply now is admin-only"
+  },
+  {
+    "label": "#974 tailnet first octet unchecked",
+    "file": "backend/src/lib/tailnetAddress.js",
+    "find": "parts[0] === '100' &&",
+    "replace": "true &&",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "hostile tailnet addresses"
+  },
+  {
+    "label": "#974 PATCH without a deadline",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "signal: AbortSignal.timeout(5000),",
+    "replace": "/* no deadline */",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "advertised hosts preserve operator fallback"
+  },
+  {
+    "label": "#974 shutdown omits video address stop",
+    "file": "backend/src/index.js",
+    "find": "stopVideoAddressSync();",
+    "replace": "/* video address sync left running */",
+    "expect": "killed",
+    "tests": ["suite-exits-cleanly.test.js"],
+    "namePattern": "shutdown\\(\\) calls stopVideoAddressSync"
+  },
+  {
+    "label": "#974 peerless status wrongly takes mutation lock",
+    "file": "backend/src/lib/tailscaleCli.js",
+    "find": "['status', 'status-peerless', 'serve-status'].includes(verb)",
+    "replace": "['status', 'serve-status'].includes(verb)",
+    "expect": "killed",
+    "tests": ["tailscale-cli.test.js"],
+    "namePattern": "peerless status runs while"
+  },
+  {
+    "label": "#974 tailnet-only hosts hide missing host IP",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "return hosts.some((host) => host !== tailnet);",
+    "replace": "return hosts.length > 0;",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "a tailnet-only candidate still reports"
   }
 ]

@@ -121,6 +121,18 @@ function fakeChild({ closeOnKill }) {
 const fakeOpts = (child, extra = {}) => ({ socketPath: '/tmp/private.sock', hostname: 'nightlight',
   socketExists: () => true, spawnFn: () => child, ...extra });
 
+test('#974 peerless status runs while a mutating CLI child holds the lock', async () => {
+  const up = fakeChild({ closeOnKill: true });
+  const login = runTailscaleCli('up', fakeOpts(up));
+  up.stdout.write('https://login.tailscale.com/a/abc123\n');
+  assert.equal((await login).ok, true);
+  const status = fakeChild({ closeOnKill: true });
+  const result = runTailscaleCli('status-peerless', fakeOpts(status));
+  status.stdout.write('{"BackendState":"Running","Self":{"TailscaleIPs":["100.64.1.2"]}}');
+  status.emit('close', 0);
+  assert.deepEqual(await result, { ok: true, json: { BackendState: 'Running', Self: { TailscaleIPs: ['100.64.1.2'] } } });
+});
+
 test('#971 a late LocalAPI socket lets the CLI run', async () => {
   const socketPath = path.join(os.tmpdir(), `nl-971-socket-${process.pid}-${Math.random()}`);
   files.push(socketPath);

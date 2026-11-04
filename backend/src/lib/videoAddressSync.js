@@ -2,13 +2,14 @@ import { logger } from './logger.js';
 import { safeInterval } from './processGuards.js';
 import { getTailscaleStatus } from './tailscaleProcess.js';
 import { runTailscaleCli } from './tailscaleCli.js';
-import { getTailnetAddress, setTailnetAddress, vettedTailnetIPv4 } from './tailnetAddress.js';
+import { getTailnetAddress, setTailnetAddress, tailnetAddressEpoch, vettedTailnetIPv4 } from './tailnetAddress.js';
 import { applyWebrtcHostsLive, getLastAdvertisedHosts } from './mediamtxProcess.js';
 import { listWebrtcSessions } from './webrtcSessions.js';
 
 const CHECK_INTERVAL_MS = 15_000;
 const FIRST_RETRY_MS = 30_000;
 const MAX_RETRY_MS = 10 * 60_000;
+const SUCCESS_HOLD_MS = 60_000;
 
 // #974: Starting and CLI errors do not erase a known address. Only an explicit off/unavailable
 // daemon or NeedsLogin proves that the current address must no longer be advertised.
@@ -16,7 +17,9 @@ export async function refreshTailnetAddress({ status = getTailscaleStatus, cli =
   const state = status().state;
   if (state === 'off' || state === 'unavailable') { setTailnetAddress(null); return null; }
   if (state !== 'running') return getTailnetAddress();
+  const epoch = tailnetAddressEpoch();
   const result = await cli('status-peerless');
+  if (tailnetAddressEpoch() !== epoch) return getTailnetAddress();
   if (!result.ok) return getTailnetAddress();
   if (result.json?.BackendState === 'NeedsLogin') setTailnetAddress(null);
   else if (result.json?.BackendState === 'Running') {
@@ -50,13 +53,7 @@ export function createVideoAddressSync({ refresh = refreshTailnetAddress, apply 
       try { await refresh(); } catch { return false; }
       if (stopRequested) return false;
       const address = getAddress();
-      if (!address) {
-        // Lead review of #974 (found by reading): after a success `nextAttempt` is Infinity. If the address goes away
-        // (logout) and the SAME one returns after a MediaMTX relaunch dropped it, nothing would ever re-apply it, because
-        // the address string never changed. Forget the attempt state when the address is gone.
-        lastAddress = null; nextAttempt = 0; retryMs = FIRST_RETRY_MS;
-        return false;
-      }
+      if (!address) return false;
       if (!seenAnyAddress) { seenAnyAddress = true; firstAddressValue = address; }
       else if (address !== firstAddressValue) firstAddressValue = null;
       const firstAddress = address === firstAddressValue;
@@ -73,7 +70,7 @@ export function createVideoAddressSync({ refresh = refreshTailnetAddress, apply 
       try { applied = await apply(); } catch { /* retry on the next backoff rung */ }
       if (stopRequested) return false;
       if (applied) {
-        nextAttempt = Infinity;
+        nextAttempt = now() + SUCCESS_HOLD_MS;
         logger.info(`[video] tailnet address ${address} added to the WebRTC hosts`);
       } else {
         nextAttempt = now() + retryMs;
@@ -84,7 +81,8 @@ export function createVideoAddressSync({ refresh = refreshTailnetAddress, apply 
   };
 
   const applyNow = async () => {
-    if (running || stopRequested) return false;
+    if (running) return null;
+    if (stopRequested) return false;
     running = true;
     try {
       let applied = false;
@@ -97,7 +95,7 @@ export function createVideoAddressSync({ refresh = refreshTailnetAddress, apply 
           lastAddress = address;
           logger.info(`[video] tailnet address ${address} added to the WebRTC hosts`);
         }
-        nextAttempt = Infinity;
+        nextAttempt = now() + SUCCESS_HOLD_MS;
         retryMs = FIRST_RETRY_MS;
       }
       return applied;

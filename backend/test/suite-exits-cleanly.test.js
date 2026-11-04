@@ -225,6 +225,7 @@ const PERIODIC = [
   // #479: the 30 s check that restarts a MediaMTX whose API stopped answering. Created through `safeInterval` and unref'd,
   // so it never pinned the loop; listed so that shutdown() is asserted to stop it (the first call in shutdown()).
   { module: 'src/lib/mediamtxApiWatchdog.js', start: 'startMediamtxApiWatchdog', stop: 'stopMediamtxApiWatchdog', pinsLoop: false },
+  { module: 'src/lib/videoAddressSync.js', start: 'startVideoAddressSync', stop: 'stopVideoAddressSync', pinsLoop: false },
 ];
 
 describe('shutdown() actually stops the tracker', () => {

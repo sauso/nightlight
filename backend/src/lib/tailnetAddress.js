@@ -1,6 +1,7 @@
 // #974: Only a Tailscale IPv4 address may become a WebRTC host. Keep this state independent of
 // MediaMTX so a status read cannot accidentally advertise an unvetted CLI value.
 let address = null;
+let epoch = 0;
 
 export function vettedTailnetIPv4(list) {
   if (!Array.isArray(list)) return null;
@@ -13,4 +14,8 @@ export function vettedTailnetIPv4(list) {
 }
 
 export function getTailnetAddress() { return address; }
-export function setTailnetAddress(value) { address = vettedTailnetIPv4([value]); }
+export function tailnetAddressEpoch() { return epoch; }
+export function setTailnetAddress(value) {
+  address = vettedTailnetIPv4([value]);
+  if (address === null) epoch++;
+}
