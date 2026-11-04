@@ -3,6 +3,7 @@ import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { probeLowLatency } from '../lib/webrtcProbe.js';
 import AppHeader from '../components/AppHeader.jsx';
+import TailscaleCard from '../components/TailscaleCard.jsx';
 
 const DOCS = 'https://github.com/sauso/nightlight/blob/main/docs/remote-access.md';
 const TRUST_PROXY_DOCS = `${DOCS}#trust_proxy--telling-nightlight-your-real-client-addresses`;
@@ -89,9 +90,12 @@ export default function SettingsRemoteAccess() {
   return <>
     <AppHeader title="Remote Access" back={{ to: '/settings', label: 'Settings' }} />
     <main className="app-main">
+      <TailscaleCard publicHostSet={Boolean(setup?.public_host_set)} />
       {loading && !setup && <p>Loading…</p>}
       {error && <div className="error-banner" role="alert">{error} <button type="button" className="btn btn-secondary" onClick={load}>Retry</button></div>}
       {setup && <>
+        <details className="remote-advanced"><summary>Use your own domain or port forward (advanced)</summary>
+        <p>Viewers who arrive over Tailscale show as 'Unknown' in the first card below; that's expected.</p>
         <section className="card" aria-labelledby="remote-network-title">
           <h2 id="remote-network-title" className="card-title">How you're connected right now</h2>
           <span className="status-badge status-badge--off">{network === 'vpn' ? 'VPN' : network === 'home' ? 'Home' : network === 'remote' ? 'Outside home' : 'Unknown'}</span>
@@ -125,7 +129,7 @@ export default function SettingsRemoteAccess() {
           </ul>
           <p>Keep the raw app port off the internet; use HTTPS.</p>
         </section>
-        <section className="card" aria-label="Tailscale"><div className="list-row"><span>Tailscale</span><span className="status-badge status-badge--off">Coming later</span></div></section>
+        </details>
       </>}
     </main>
   </>;

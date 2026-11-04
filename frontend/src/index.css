@@ -572,6 +572,27 @@ body.in-pip .tile-menu-backdrop {
   margin-bottom: 14px;
 }
 
+/* The same steps sit in Settings and the narrower setup card. Let long DNS names wrap on a phone. */
+.tailscale-card { min-width: 0; }
+.tailscale-card__heading, .tailscale-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tailscale-card__heading { justify-content: space-between; }
+.tailscale-card__heading .card-title { margin: 0; }
+.tailscale-card .btn, .remote-advanced summary, .tailscale-advanced summary { min-height: 44px; }
+.tailscale-actions .btn { flex: 1 1 130px; width: auto; }
+.tailscale-card p, .tailscale-card li { line-height: 1.5; }
+.tailscale-address { overflow-wrap: anywhere; font-weight: 600; font-size: 1.1rem; }
+.tailscale-hint { color: var(--text-secondary); font-size: 0.875rem; }
+.tailscale-qr { width: min(180px, 100%); margin: 16px auto; text-align: center; }
+.tailscale-qr svg { display: block; width: 100%; height: auto; }
+.tailscale-qr__background { fill: var(--bg-elevated); }
+.tailscale-qr__modules { fill: var(--text-primary); }
+.tailscale-qr figcaption { margin-top: 8px; color: var(--text-secondary); }
+.tailscale-advanced, .remote-advanced { margin-top: 18px; }
+.tailscale-advanced summary, .remote-advanced summary { cursor: pointer; padding: 10px 0; font-weight: 600; }
+.tailscale-advanced summary:focus-visible, .remote-advanced summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tailscale-advanced > .btn, .tailscale-advanced form { margin-top: 12px; }
+.tailscale-card--compact { border-top: 1px solid var(--border); padding-top: 16px; }
+
 .card-grid {
   display: grid;
   grid-template-columns: 1fr;
