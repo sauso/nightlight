@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { useTempDataDir, cleanupTempDataDirs, makeUser, makeSession, signToken, mountRouter, call } from './helpers/harness.js';
 
@@ -15,6 +17,7 @@ const { startTailscale, stopTailscale, getTailscaleStatus } = await import('../s
 const { verifyToken } = await import('../src/middleware/auth.js');
 const { isLoopbackExposed } = await import('../src/lib/loopbackExposure.js');
 const { spawnAsApp } = await import('../src/lib/childEnv.js');
+const { runTailscaleCli, getTailscaleLinks } = await import('../src/lib/tailscaleCli.js');
 const FAKE = fileURLToPath(new URL('./helpers/fakeTailscaled.js', import.meta.url));
 const safe = { host: false, evidence: [], unknown: null };
 const roots = [];
@@ -64,6 +67,7 @@ afterEach(async () => {
   }
   await Promise.race([stopTailscale(), sleep(500)]);
   db.prepare("UPDATE settings SET tailscale_enabled = 0 WHERE id = 'app'").run();
+  db.prepare("UPDATE settings SET tailscale_hostname = 'nightlight' WHERE id = 'app'").run();
   await server?.close(); server = null;
   await settings?.close(); settings = null;
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
@@ -85,7 +89,10 @@ test('#967 admin routes, strict body and fixed response shape', async () => {
   assert.equal(f.spawns, 0);
   const got = await call(route(), { token: adminToken });
   assert.equal(got.status, 200);
-  assert.deepEqual(Object.keys(got.body).sort(), ['blocker', 'enabled', 'host_network', 'process']);
+  assert.deepEqual(Object.keys(got.body).sort(), ['addresses', 'blocker', 'dns_name', 'enabled', 'host_network',
+    'hostname', 'last_error', 'login_url', 'process', 'serve', 'state']);
+  assert.equal(got.body.state, 'off');
+  assert.equal(got.body.hostname, 'nightlight');
   assert.doesNotMatch(JSON.stringify(got.body), /private\/|pid-|tskey-|@example/);
 });
 
@@ -265,13 +272,17 @@ test('#967 schema flag is hidden from settings GET and ignored by settings PUT',
   const cols = db.prepare('PRAGMA table_info(settings)').all();
   assert.equal(cols.find((c) => c.name === 'tailscale_enabled')?.dflt_value, '0');
   assert.equal(cols.find((c) => c.name === 'tailscale_enabled')?.notnull, 1);
+  assert.equal(cols.find((c) => c.name === 'tailscale_hostname')?.dflt_value, "'nightlight'");
   for (const token of [undefined, adminToken]) {
     const got = await call(`${settings.url}/api/settings`, { token });
     assert.equal(got.status, 200);
     assert.equal(Object.hasOwn(got.body, 'tailscale_enabled'), false);
+    assert.equal(Object.hasOwn(got.body, 'tailscale_hostname'), false);
   }
-  await call(`${settings.url}/api/settings`, { method: 'PUT', token: adminToken, body: { tailscale_enabled: 1 } });
+  await call(`${settings.url}/api/settings`, { method: 'PUT', token: adminToken,
+    body: { tailscale_enabled: 1, tailscale_hostname: 'injected' } });
   assert.equal(db.prepare("SELECT tailscale_enabled FROM settings WHERE id = 'app'").get().tailscale_enabled, 0);
+  assert.equal(db.prepare("SELECT tailscale_hostname FROM settings WHERE id = 'app'").get().tailscale_hostname, 'nightlight');
 });
 
 test('#967 unavailable route branch has no unreachable second stop', () => {
@@ -281,4 +292,165 @@ test('#967 unavailable route branch has no unreachable second stop', () => {
   // Opus fix review of #967: the busy branch handles a live process first;
   // launch() handles a spawned child if its later setup throws.
   assert.doesNotMatch(branch, /hasLiveProcess\(|await stop\(/);
+});
+
+test('#969 status vets addresses and DNS while retaining the old fields', async () => {
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  await mount({ blocker: () => null, status: () => ({ state: 'running', restarts: 0, reason: null }),
+    cli: async (verb) => verb === 'status' ? { ok: true, json: { BackendState: 'Running', AuthURL: 'https://login.tailscale.com.evil/a/steal', Self: {
+      TailscaleIPs: ['100.64.0.1', '100.127.255.255', '100.128.0.1', '192.168.0.1', '100.64.1.999'],
+      DNSName: 'neutral.example.ts.net.',
+    } } } : { ok: true, json: { Web: {} } } });
+  const got = await call(route(), { token: adminToken });
+  assert.equal(got.status, 200);
+  assert.equal(got.body.state, 'connected');
+  assert.deepEqual(got.body.addresses, ['100.64.0.1', '100.127.255.255']);
+  assert.equal(got.body.dns_name, 'neutral.example.ts.net');
+  assert.equal(got.body.login_url, null);
+  assert.doesNotMatch(JSON.stringify(got.body), /steal/);
+  for (const field of ['enabled', 'process', 'blocker', 'host_network']) assert.ok(Object.hasOwn(got.body, field));
+});
+
+test('#969 hostname is saved only after CLI success and sign-in uses that name', async () => {
+  const calls = [];
+  await mount({ blocker: () => null, status: () => ({ state: 'running' }),
+    cli: async (verb, options) => {
+      calls.push([verb, options]);
+      if (verb === 'set-hostname' && options.hostname === 'failed-name') return { ok: false, code: 'cli_failed' };
+      return { ok: true, json: {} };
+    } });
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  const action = (body) => call(`${route()}/actions`, { method: 'POST', token: adminToken, body });
+  assert.equal((await action({ action: 'hostname', hostname: 'failed-name' })).status, 409);
+  assert.equal(db.prepare("SELECT tailscale_hostname FROM settings WHERE id = 'app'").get().tailscale_hostname, 'nightlight');
+  assert.equal((await action({ action: 'hostname', hostname: 'neutral-name' })).status, 200);
+  assert.equal(db.prepare("SELECT tailscale_hostname FROM settings WHERE id = 'app'").get().tailscale_hostname, 'neutral-name');
+  assert.equal((await action({ action: 'sign-in' })).status, 200);
+  assert.deepEqual(calls.findLast(([verb]) => verb === 'up'), ['up', { hostname: 'neutral-name' }]);
+});
+
+test('#969 malformed CLI status reports a safe error', async () => {
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  await mount({ blocker: () => null, status: () => ({ state: 'running' }),
+    cli: async () => ({ ok: false, code: 'invalid_status' }) });
+  const got = await call(route(), { token: adminToken });
+  assert.equal(got.status, 200);
+  assert.equal(got.body.state, 'error');
+  assert.equal(got.body.last_error, 'invalid_status');
+});
+
+test('#969 actions reject caregiver, revoked admin, demo and hostile hostname', async () => {
+  let calls = 0;
+  await mount({ blocker: () => null, status: () => ({ state: 'running' }),
+    cli: async () => { calls++; return { ok: true, json: {} }; } });
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  const action = (body, token = adminToken) => call(`${route()}/actions`, { method: 'POST', token, body });
+  assert.equal((await action({ action: 'serve-enable' }, caregiverToken)).status, 403);
+  assert.equal((await action({ action: 'hostname', hostname: 'private.name' })).status, 400);
+  assert.equal((await action({ action: 'serve-enable', target: 'http://evil' })).status, 400);
+  const user = makeUser(db, { id: 'revoked-969', username: 'revoked-969' });
+  const sid = makeSession(db, user.id);
+  const revoked = signToken({ id: user.id, sid, role: 'admin' });
+  db.prepare('DELETE FROM sessions WHERE id = ?').run(sid);
+  assert.equal((await action({ action: 'serve-enable' }, revoked)).status, 401);
+  process.env.DEMO_MODE = 'true';
+  try { assert.equal((await action({ action: 'serve-enable' })).status, 403); }
+  finally { delete process.env.DEMO_MODE; }
+  assert.equal(calls, 0);
+});
+
+test('#969 every action refuses host networking before CLI or reset', async () => {
+  let calls = 0; let stops = 0;
+  await mount({ blocker: () => ({ code: 'host_network', message: 'Use a separate network.' }),
+    status: () => ({ state: 'running' }), stop: async () => { stops++; },
+    cli: async () => { calls++; return { ok: true, json: {} }; } });
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  for (const action of ['sign-in', 'hostname', 'serve-enable', 'serve-disable', 'logout', 'reset']) {
+    const body = action === 'hostname' ? { action, hostname: 'neutral' } : { action };
+    const got = await call(`${route()}/actions`, { method: 'POST', token: adminToken, body });
+    assert.equal(got.status, 409, action);
+    assert.equal(got.body.code, 'host_network', action);
+  }
+  assert.equal(calls, 0);
+  assert.equal(stops, 0);
+});
+
+test('#969 action queue rechecks a revoked session at mutation time', async () => {
+  const user = makeUser(db, { id: 'queued-969', username: 'queued-969' });
+  const sid = makeSession(db, user.id);
+  const token = signToken({ id: user.id, sid, role: 'admin' });
+  let release; let entered = false; let calls = 0;
+  const held = new Promise((resolve) => { release = resolve; });
+  await mount({ blocker: () => null, status: () => ({ state: 'running' }),
+    onEnqueued: (req) => { if (req.headers.authorization === `Bearer ${token}`) entered = true; },
+    cli: async () => { calls++; if (calls === 1) await held; return { ok: true, json: {} }; } });
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  const first = call(`${route()}/actions`, { method: 'POST', token: adminToken, body: { action: 'serve-enable' } });
+  await until(() => calls === 1);
+  const second = call(`${route()}/actions`, { method: 'POST', token, body: { action: 'serve-enable' } });
+  await until(() => entered);
+  db.prepare('DELETE FROM sessions WHERE id = ?').run(sid);
+  release();
+  assert.equal((await first).status, 200);
+  assert.equal((await second).status, 401);
+  assert.equal(calls, 3); // first mutation plus two read-only status checks from its response
+});
+
+test('#969 reset removes only Tailscale state and restarts a new node', async () => {
+  const privateDir = path.join(dataDir, 'private');
+  const stateDir = path.join(privateDir, 'tailscale');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const sentinel = path.join(privateDir, 'keep-969');
+  fs.writeFileSync(sentinel, 'secret sibling');
+  fs.writeFileSync(path.join(stateDir, 'tailscaled.state'), 'old identity');
+  let state = 'running'; let starts = 0;
+  await mount({ blocker: () => null,
+    status: () => ({ state }), stop: async () => { state = 'off'; },
+    start: () => { starts++; state = 'running'; }, cli: async () => ({ ok: false, code: 'invalid_status' }) });
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  const result = await call(`${route()}/actions`, { method: 'POST', token: adminToken, body: { action: 'reset' } });
+  assert.equal(result.status, 200);
+  assert.equal(starts, 1);
+  assert.equal(fs.existsSync(stateDir), false);
+  assert.equal(fs.readFileSync(sentinel, 'utf8'), 'secret sibling');
+  fs.rmSync(sentinel);
+});
+
+test('#969 disable cancels a login child whose URL was already returned', async () => {
+  const child = new EventEmitter();
+  child.stdout = new PassThrough(); child.stderr = new PassThrough();
+  let killed = false;
+  child.kill = () => { killed = true; queueMicrotask(() => child.emit('close', null)); return true; };
+  const pending = runTailscaleCli('up', { hostname: 'nightlight', socketPath: '/tmp/owned.sock',
+    spawnFn: () => {
+      queueMicrotask(() => child.stdout.write('https://login.tailscale.com/a/waiting\n'));
+      return child;
+    } });
+  assert.equal((await pending).ok, true);
+  assert.equal(getTailscaleLinks().loginUrl, 'https://login.tailscale.com/a/waiting');
+  let state = 'running';
+  await mount({ blocker: () => null, status: () => ({ state }),
+    stop: async () => { state = 'off'; } });
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  assert.equal((await put(false)).status, 200);
+  assert.equal(killed, true);
+  assert.equal(getTailscaleLinks().loginUrl, null);
+});
+
+test('#969 logout cancels pending sign-in before running its CLI mutation', async () => {
+  const child = new EventEmitter();
+  child.stdout = new PassThrough(); child.stderr = new PassThrough();
+  let killed = false; const verbs = [];
+  child.kill = () => { killed = true; queueMicrotask(() => child.emit('close', null)); return true; };
+  const pending = runTailscaleCli('up', { hostname: 'nightlight', socketPath: '/tmp/owned.sock',
+    spawnFn: () => { queueMicrotask(() => child.stdout.write('https://login.tailscale.com/a/waiting\n')); return child; } });
+  await pending;
+  await mount({ blocker: () => null, status: () => ({ state: 'running' }),
+    cli: async (verb) => { verbs.push(verb); return { ok: true, json: {} }; } });
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  const got = await call(`${route()}/actions`, { method: 'POST', token: adminToken, body: { action: 'logout' } });
+  assert.equal(got.status, 200);
+  assert.equal(killed, true);
+  assert.equal(verbs[0], 'logout');
+  assert.equal(getTailscaleLinks().loginUrl, null);
 });

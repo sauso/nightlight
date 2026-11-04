@@ -86,3 +86,20 @@ export function removeRuntimeDir(runtimeDir, { fsImpl = fs } = {}) {
   try { if (runtimeDir) fsImpl.rmSync(runtimeDir, { recursive: true, force: true }); }
   catch { /* the supervisor must not throw during shutdown */ }
 }
+
+export function resetTailscaleState({ dataDir, fsImpl = fs } = {}) {
+  try {
+    // Only the fixed child of private/ may be removed. Refuse links and odd parents;
+    // never let a copied installation turn reset into deletion of a sibling secret.
+    const privateDir = path.join(dataDir, 'private');
+    const stateDir = path.join(privateDir, 'tailscale');
+    const parent = fsImpl.lstatSync(privateDir);
+    if (!parent.isDirectory() || parent.isSymbolicLink()) return false;
+    try {
+      const target = fsImpl.lstatSync(stateDir);
+      if (!target.isDirectory() || target.isSymbolicLink()) return false;
+    } catch (err) { if (err.code === 'ENOENT') return true; return false; }
+    fsImpl.rmSync(stateDir, { recursive: true });
+    return true;
+  } catch { return false; }
+}

@@ -22,7 +22,7 @@ Nightlight needs its own routable IP on your LAN so WebRTC has no NAT/ICE troubl
 
 For web and video, only the app port and WebRTC media UDP port are meant to be reachable. The media server's other listeners are off or bound to its internal loopback address (`127.0.0.2`); RTSP uses TCP only, with no UDP media ports.
 
-Either way, the app is served on port **4000** (change it with the `PORT` environment variable if you need to). For **remote / internet** access, see [Remote / internet access](remote-access.md#remote--internet-access-watching-from-outside-your-home-network); that part is the same in both modes.
+Either way, the app is served on port **4000** (change it with the `PORT` environment variable if you need to). The planned bundled Tailscale HTTPS Serve control requires port 4000; its binaries are not packaged yet. For **remote / internet** access, see [Remote / internet access](remote-access.md#remote--internet-access-watching-from-outside-your-home-network); that part is the same in both modes.
 
 ### Running more than one instance (e.g. staging + production)
 

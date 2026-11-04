@@ -4,24 +4,68 @@ import { requireAuth, requireAdmin, verifyToken } from '../middleware/auth.js';
 import { detectHostNetwork } from '../lib/hostNetwork.js';
 import { tailnetEnableBlocker } from '../lib/tailnetPreconditions.js';
 import { startTailscale, stopTailscale, getTailscaleStatus, hasLiveTailscaleProcess } from '../lib/tailscaleProcess.js';
+import { runTailscaleCli, validateHostname, getTailscaleLinks, cancelTailscaleCli, approvedLoginUrl } from '../lib/tailscaleCli.js';
+import { resetTailscaleState } from '../lib/tailscaleState.js';
+import { isDemoModeActive } from '../middleware/demoMode.js';
+
+function tailnetIPv4(value) {
+  if (typeof value !== 'string') return false;
+  const parts = value.split('.');
+  if (parts.length !== 4 || parts.some((p) => !/^(0|[1-9][0-9]{0,2})$/.test(p) || Number(p) > 255)) return false;
+  return Number(parts[0]) === 100 && Number(parts[1]) >= 64 && Number(parts[1]) <= 127;
+}
+
+function cleanStatus(result) {
+  if (!result.ok) return { state: 'error', addresses: [], dns_name: null, login_url: null,
+    error: typeof result.code === 'string' && /^[a-z_]+$/.test(result.code) ? result.code : 'status_unavailable' };
+  const self = result.json.Self;
+  const backendState = result.json.BackendState;
+  const addresses = Array.isArray(self?.TailscaleIPs) ? self.TailscaleIPs.filter(tailnetIPv4) : [];
+  const dns = typeof self?.DNSName === 'string' ? self.DNSName.replace(/\.$/, '') : '';
+  const dns_name = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net$/.test(dns) ? dns : null;
+  const state = backendState === 'Running' ? 'connected' :
+    (backendState === 'NeedsLogin' || result.json.AuthURL ? 'needs-sign-in' : 'starting');
+  return { state, addresses, dns_name, login_url: approvedLoginUrl(result.json.AuthURL) };
+}
 
 export function createTailscaleRouter({ database = db, dataDir = process.env.DATA_DIR || '/app/data',
   detector = detectHostNetwork, blocker = tailnetEnableBlocker, start = startTailscale,
   stop = stopTailscale, status = getTailscaleStatus, hasLiveProcess = hasLiveTailscaleProcess,
-  verify = verifyToken, onEnqueued = () => {},
+  verify = verifyToken, onEnqueued = () => {}, cli = runTailscaleCli,
   write = (value) => database.prepare("UPDATE settings SET tailscale_enabled = ? WHERE id = 'app'").run(value) } = {}) {
   const router = Router();
   let tail = Promise.resolve();
+  let lastError = null;
   const enabled = () => database.prepare("SELECT tailscale_enabled FROM settings WHERE id = 'app'").get()?.tailscale_enabled === 1;
-  const view = () => {
+  const hostname = () => database.prepare("SELECT tailscale_hostname FROM settings WHERE id = 'app'").get()?.tailscale_hostname ?? 'nightlight';
+  const view = async () => {
     const hostNetwork = detector();
-    return { enabled: enabled(), process: status(),
-      blocker: blocker(database, { hostNetwork })?.code ?? null, host_network: hostNetwork };
+    const process = status();
+    let remote = { state: !enabled() ? 'off' : process.state === 'unavailable' ? 'error' : 'starting',
+      addresses: [], dns_name: null, login_url: null };
+    let serve = { enabled: false, consent_url: getTailscaleLinks().consentUrl };
+    if (enabled() && process.state === 'running') {
+      remote = cleanStatus(await cli('status'));
+      const served = await cli('serve-status');
+      const web = served.ok ? served.json?.Web : null;
+      const serving = web && typeof web === 'object' && Object.entries(web).some(([address, config]) =>
+        address.endsWith(':443') && config?.Handlers?.['/']?.Proxy === 'http://127.0.0.1:4000');
+      serve = { enabled: Boolean(serving),
+        consent_url: getTailscaleLinks().consentUrl };
+    }
+    return { enabled: enabled(), process,
+      blocker: blocker(database, { hostNetwork })?.code ?? null, host_network: hostNetwork,
+      state: remote.state, addresses: remote.addresses, dns_name: remote.dns_name,
+      login_url: remote.state === 'connected' || remote.state === 'off' ? null :
+        (remote.login_url ?? getTailscaleLinks().loginUrl), serve,
+      last_error: lastError ?? remote.error ?? (process.state === 'unavailable' && typeof process.reason === 'string' &&
+        /^[a-z_]+$/.test(process.reason) ? process.reason : null),
+      hostname: hostname() };
   };
   const conflict = (res, code, message) => res.status(409).json({ error: message, code });
 
-  router.get('/', requireAuth, requireAdmin, (req, res) => {
-    try { res.json(view()); }
+  router.get('/', requireAuth, requireAdmin, async (req, res) => {
+    try { res.json(await view()); }
     catch { conflict(res, 'status_unavailable', 'Tailscale status is unavailable.'); }
   });
   router.put('/', requireAuth, requireAdmin, (req, res) => {
@@ -62,12 +106,13 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
         } else {
           try { write(0); }
           catch { return conflict(res, 'could_not_save', 'The Tailscale setting could not be saved.'); }
+          await cancelTailscaleCli();
           await stop();
           if (status().state !== 'off') {
-            return res.status(409).json({ ...view(), error: 'The tunnel daemon may still be running.', code: 'stop_uncertain' });
+            return res.status(409).json({ ...await view(), error: 'The tunnel daemon may still be running.', code: 'stop_uncertain' });
           }
         }
-        return res.json(view());
+        return res.json(await view());
       } catch { return conflict(res, 'operation_failed', 'Tailscale could not complete the request.'); }
     };
     // Opus plan review of #967: a rejected job must not poison later requests.
@@ -79,6 +124,54 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
     return current.catch(() => {
       if (!res.headersSent) conflict(res, 'operation_failed', 'Tailscale could not complete the request.');
     });
+  });
+  const actions = new Set(['sign-in', 'hostname', 'serve-enable', 'serve-disable', 'logout', 'reset']);
+  router.post('/actions', requireAuth, requireAdmin, (req, res) => {
+    if (!req.body || Array.isArray(req.body) || !actions.has(req.body.action) ||
+      Object.keys(req.body).some((key) => !['action', 'hostname'].includes(key)) ||
+      (req.body.action === 'hostname' ? !validateHostname(req.body.hostname) || Object.keys(req.body).length !== 2
+        : Object.keys(req.body).length !== 1)) {
+      return res.status(400).json({ error: 'Invalid Tailscale action.' });
+    }
+    onEnqueued(req);
+    const job = async () => {
+      const token = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null;
+      const live = verify(token);
+      if (!live?.id) return res.status(401).json({ error: 'Invalid or expired session' });
+      if (live.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+      if (isDemoModeActive()) return res.status(403).json({ error: 'This is a read-only public demo - that action is disabled here.' });
+      const blocked = blocker(database, { hostNetwork: detector() });
+      if (blocked) return conflict(res, blocked.code, blocked.message);
+      const action = req.body.action;
+      if (action !== 'reset' && (!enabled() || status().state !== 'running'))
+        return conflict(res, 'daemon_not_ready', 'The tunnel daemon is not ready.');
+      let result;
+      if (action === 'reset') {
+        await cancelTailscaleCli();
+        await stop();
+        if (status().state !== 'off') return conflict(res, 'stop_uncertain', 'The tunnel daemon may still be running.');
+        if (!resetTailscaleState({ dataDir })) return conflict(res, 'reset_failed', 'Could not reset the Tailscale connection.');
+        if (enabled()) start({ db: database, dataDir });
+        result = { ok: true };
+      } else if (action === 'hostname') {
+        result = await cli('set-hostname', { hostname: req.body.hostname });
+        if (result.ok) database.prepare("UPDATE settings SET tailscale_hostname = ? WHERE id = 'app'").run(req.body.hostname);
+      } else if (action === 'sign-in') result = await cli('up', { hostname: hostname() });
+      else if (action === 'logout') { await cancelTailscaleCli(); result = await cli('logout'); }
+      else if (action === 'serve-enable') result = await cli('serve-set');
+      else result = await cli('serve-reset');
+      if (!result.ok) {
+        lastError = result.code;
+        return res.status(409).json({ code: result.code,
+          error: result.code === 'consent_required' ? 'Tailscale needs HTTPS approval.' : 'Tailscale could not complete the request.',
+          ...(result.consentUrl ? { consent_url: result.consentUrl } : {}) });
+      }
+      lastError = null;
+      return res.json({ ...await view(), ...(result.loginUrl ? { login_url: result.loginUrl } : {}) });
+    };
+    const current = tail.then(job, job);
+    tail = current.catch(() => {});
+    return current.catch(() => { if (!res.headersSent) conflict(res, 'operation_failed', 'Tailscale could not complete the request.'); });
   });
   return router;
 }

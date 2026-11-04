@@ -26,6 +26,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- #969 Ahead of planned remote access, admins can start Tailscale sign-in, choose a neutral machine name, manage private HTTPS Serve, log out and reset a copied node identity through bounded CLI actions. The Tailscale binaries are not packaged yet.
+
 - #967 Ahead of planned remote access, Nightlight stores a guarded Tailscale enable setting and checks network mode before starting a tunnel daemon. The daemon is not packaged yet.
 
 - #965 Ahead of planned remote access, Nightlight now has a guarded tunnel daemon supervisor. Nothing starts the daemon yet.
