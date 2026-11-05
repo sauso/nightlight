@@ -140,8 +140,7 @@ describe('setup steps', () => {
     expect(await screen.findByText('Loading children and cameras…')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
     view.rerenderWith({ camerasLoaded: true });
-    await view.user.click(await screen.findByRole('button', { name: 'Get started' }));
-    expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Continue' })).toBeInTheDocument();
   });
 
   test('refresh resume selects an assigned camera after its list arrives', async () => {
@@ -154,8 +153,8 @@ describe('setup steps', () => {
 
   test('admin completes the steps only after this browser reports frames', async () => {
     const view = wizard();
-    await view.user.click(await screen.findByRole('button', { name: 'Get started' }));
-    expect(screen.getByRole('heading', { name: 'Add your child' })).toBeInTheDocument();
+    // The guide opens on "Add your child": the welcome screen now comes before the admin account (FirstRun.jsx).
+    expect(await screen.findByRole('heading', { name: 'Add your child' })).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: 'Step 1 of 6' })).toBeInTheDocument();
     await view.user.click(screen.getByRole('button', { name: 'Continue' }));
     expect(screen.getByRole('heading', { name: 'Connect your camera' })).toBeInTheDocument();
@@ -179,8 +178,7 @@ describe('setup steps', () => {
 
   test('adding the first child leads to the shared camera form', async () => {
     const view = wizard({ kids: [], cameras: [] });
-    await view.user.click(await screen.findByRole('button', { name: 'Get started' }));
-    await view.user.type(screen.getByRole('textbox', { name: "Child's name" }), 'A child');
+    await view.user.type(await screen.findByRole('textbox', { name: "Child's name" }), 'A child');
     await view.user.click(screen.getByRole('button', { name: 'Continue' }));
     expect(api.post).toHaveBeenCalledWith('/children', { name: 'A child' });
     await view.user.click(screen.getByRole('button', { name: /Add a camera manually/ }));
@@ -199,8 +197,7 @@ describe('setup steps', () => {
 
   test.each([['2024-02-29', { name: 'A child', birthday: '2024-02-29' }], ['', { name: 'A child' }]])('child birthday %s is sent only when entered', async (date, expected) => {
     const view = wizard({ kids: [], cameras: [] });
-    await view.user.click(await screen.findByRole('button', { name: 'Get started' }));
-    await view.user.type(screen.getByRole('textbox', { name: "Child's name" }), 'A child');
+    await view.user.type(await screen.findByRole('textbox', { name: "Child's name" }), 'A child');
     if (date) await view.user.type(screen.getByLabelText('Date of birth (optional)'), date);
     await view.user.click(screen.getByRole('button', { name: 'Continue' }));
     expect(api.post).toHaveBeenCalledWith('/children', expected);
@@ -353,11 +350,32 @@ describe('setup steps', () => {
 
   test('a 409 reloads the server step and does not overwrite it', async () => {
     setupApi.progress.mockRejectedValueOnce(Object.assign(new Error('Stale'), { status: 409 }));
-    state = initial('in_progress', 'welcome');
+    state = initial('in_progress', 'caregivers');
     const view = wizard();
-    await view.user.click(await screen.findByRole('button', { name: 'Get started' }));
+    await view.user.click(await screen.findByRole('button', { name: 'Skip for now' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Setup changed in another tab');
-    expect(screen.getByRole('button', { name: 'Get started' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Skip for now' }), 'still on the step the server holds').toBeInTheDocument();
+  });
+
+  test('★ a new installation opens the guide on "Add your child": no Welcome step, no Back, no photo control', async () => {
+    // The Welcome screen moved BEFORE the admin account (FirstRun.jsx, owner 2026-11-06), and the server still stores `welcome` as a
+    // new installation's first step, which is shown as the first real step.
+    state = initial('not_started', 'welcome');
+    wizard();
+    expect(await screen.findByRole('heading', { name: 'Add your child' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Welcome to Nightlight' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Back' }), 'nothing before the first step').toBeNull();
+    expect(screen.queryByRole('button', { name: 'Get started' })).toBeNull();
+    expect(screen.queryByLabelText('Add photo')).toBeNull();
+    expect(screen.getByRole('progressbar', { name: 'Step 1 of 6' })).toBeInTheDocument();
+  });
+
+  test('the second step still has a Back that returns to the first', async () => {
+    state = initial('in_progress', 'camera');
+    const view = wizard();
+    await view.user.click(await screen.findByRole('button', { name: 'Back' }));
+    expect(setupApi.progress).toHaveBeenCalledWith('children', 0);
+    expect(await screen.findByRole('heading', { name: 'Add your child' })).toBeInTheDocument();
   });
 
   test('Save and exit writes the current step before returning to Live', async () => {

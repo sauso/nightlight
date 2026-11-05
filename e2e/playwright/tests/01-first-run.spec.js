@@ -7,7 +7,9 @@ const { test, expect } = require('@playwright/test');
 test('first run: create the admin account and enter the setup guide', async ({ page }) => {
   await page.goto('/');
 
-  // No users yet -> the login screen is in first-run (setup) mode.
+  // No users yet -> first-run mode: the welcome screen with the steps comes first (owner, 2026-11-06), then the account form.
+  await expect(page.getByRole('heading', { name: 'Welcome to Nightlight' })).toBeVisible();
+  await page.getByRole('button', { name: 'Get started' }).click();
   await expect(page.getByRole('button', { name: 'Create admin account' })).toBeVisible();
 
   await page.getByLabel('First name').fill('E2E');
@@ -18,7 +20,7 @@ test('first run: create the admin account and enter the setup guide', async ({ p
 
   // A fresh install enters the optional guide after the first admin signs in.
   await expect(page).toHaveURL(/\/setup$/);
-  await expect(page.getByRole('button', { name: 'Get started' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Add your child' })).toBeVisible();
 
   // Hand the logged-in state to the rest of the suite.
   await page.context().storageState({ path: '.auth/state.json' });

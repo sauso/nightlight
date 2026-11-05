@@ -97,7 +97,8 @@ describe('which of the three screens is shown', () => {
     expect(screen.queryByRole('button', { name: /Sign in|Create admin/ })).toBeNull();
 
     resolveStatus({ needsSetup: true });
-    expect(await screen.findByRole('button', { name: 'Create admin account' })).toBeTruthy();
+    // A fresh install opens on the welcome screen (FirstRun.jsx); the account form comes after "Get started".
+    expect(await screen.findByRole('button', { name: 'Get started' })).toBeTruthy();
   });
 
   test('an established install gets the sign-in form', async () => {
@@ -107,12 +108,16 @@ describe('which of the three screens is shown', () => {
     expect(screen.queryByLabelText('First name'), 'no name fields once an admin exists').toBeNull();
   });
 
-  test('a fresh install gets the setup form, with the names it needs', async () => {
+  test('★ a fresh install opens on the welcome screen with the steps, and only then asks for the account (names included)', async () => {
     mockStatus(true);
-    mount();
+    const { user } = mount();
+    expect(await screen.findByRole('heading', { name: 'Welcome to Nightlight' })).toBeTruthy();
+    expect(screen.getByText('Add your child')).toBeTruthy();
+    expect(screen.queryByLabelText('Username'), 'no account form yet').toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Get started' }));
     expect(await screen.findByLabelText('First name')).toBeTruthy();
     expect(screen.getByLabelText('Last name')).toBeTruthy();
-    expect(screen.getByText(/Set up the first admin account/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Create your account' })).toBeTruthy();
   });
 
   test('★ #382: a failed status check says the server cannot be reached; it does NOT show sign-in', async () => {
@@ -130,7 +135,7 @@ describe('which of the three screens is shown', () => {
     const get = vi.spyOn(api, 'get').mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ needsSetup: true });
     const { user } = mount();
     await user.click(await screen.findByRole('button', { name: 'Try again' }));
-    expect(await screen.findByLabelText('First name'), 'the setup form, not a guessed sign-in').toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Welcome to Nightlight' }), 'the first-run welcome screen, not a guessed sign-in').toBeTruthy();
     expect(get).toHaveBeenCalledTimes(2);
     expect(screen.queryByText(/Can't reach/)).toBeNull();
   });
@@ -340,6 +345,7 @@ describe('first-run setup', () => {
 
   test('posts the names alongside the credentials, to /auth/setup', async () => {
     const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Get started' }));
     await user.type(await screen.findByLabelText('First name'), 'Nacho');
     await user.type(screen.getByLabelText('Last name'), 'Leone');
     await user.type(screen.getByLabelText('Username'), 'nacho');
@@ -356,7 +362,8 @@ describe('first-run setup', () => {
   test('★ the first password has a minimum length; signing in does not', async () => {
     // The floor belongs on the screen that CREATES a password. Putting it on the sign-in form would
     // lock out anyone whose existing password predates the rule, which is not a security improvement.
-    mount();
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Get started' }));
     expect((await screen.findByLabelText('Password')).getAttribute('minlength')).toBe('8');
     expect(screen.getByLabelText('Password').getAttribute('autocomplete')).toBe('new-password');
   });
