@@ -32,6 +32,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- On a child's settings and on your Account, the avatar itself is now the photo control: a round photo (or initials) with a small camera badge, and tapping it opens the file picker. This replaces the separate **Add photo** / **Change photo** buttons; **Remove** stays under the avatar. Saving is unchanged: an existing child's or your own photo still saves as soon as it is chosen, and a new child's photo is kept until the first save.
 - About no longer shows **Setup status and picture check** once setup is fully complete. It stays while setup is unfinished, after a limited setup, and on an installation upgraded from before the setup guide.
 - While the setup guide is open, the bottom bar (the side menu on a wide screen) is hidden, so a new admin goes through the guide or chooses Save and exit first. The navigation returns on Save and exit, when setup finishes, or when the guide sends you to another page. The guide also no longer scrolls behind the phone's status bar.
 - The Tailscale card's text now follows one size scale, with the title larger than the headings and address beneath it. Its video button is renamed from "Check it works" to "Test video".

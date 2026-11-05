@@ -3033,3 +3033,10 @@ html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; 
 .setup-player { max-width: 520px; margin-block: 16px; }
 @media (max-width: 600px) { .setup-banner { flex-wrap: wrap; } }
 .esphome-dates .field { flex: 1 1 140px; min-width: 0; }
+/* AvatarEditor (child settings, account): the avatar with a camera badge at its bottom-right. The invisible file input covers
+   the whole avatar so a tap lands on it; the badge is a rounded square in the card colour with a brand-violet border (the
+   reference image's border is green). Size is set inline from the avatar size, so the badge scales with it. */
+.avatar-editor { position: relative; display: inline-block; flex: none; border-radius: 50%; cursor: pointer; }
+.avatar-editor__input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border-radius: 50%; }
+.avatar-editor__badge { position: absolute; right: -4px; bottom: -4px; display: flex; align-items: center; justify-content: center; background: var(--bg-elevated); border: 2px solid var(--accent); border-radius: 9px; color: var(--accent-text); pointer-events: none; }
+.avatar-editor:focus-within .avatar-editor__badge { outline: 2px solid var(--accent); outline-offset: 2px; }
