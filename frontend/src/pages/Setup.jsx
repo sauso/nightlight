@@ -7,6 +7,7 @@ import AddCameraFlow from '../components/AddCameraFlow.jsx';
 import CameraTile from '../components/CameraTile.jsx';
 import SetupStepShell from '../components/SetupStepShell.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import Logo from '../components/Logo.jsx';
 import TailscaleCard from '../components/TailscaleCard.jsx';
 
 const STEPS = ['welcome', 'children', 'camera', 'monitor_test', 'caregivers', 'remote', 'review'];
@@ -210,7 +211,7 @@ export default function Setup() {
     {normalChrome(setup.status) && <AppHeader title="Setup" back={{ to: '/settings', label: 'Settings' }} />}
     <SetupStepShell step={step} error={error} busy={busy} onBack={back} onExit={normalChrome(setup.status) ? null : saveAndExit} onRetry={load} primary={primary} terminal={normalChrome(setup.status)} subtitle={step === 'review' && canFinishFull && reviewChild ? `Nightlight is ready to monitor ${reviewChild.name}.` : undefined}>
       {step === 'welcome' && <>
-        <img className="setup-welcome-icon" src="/icons/icon-192.png" alt="" />
+        <Logo size={72} className="setup-welcome-icon" />
         <ul className="setup-checklist"><li>Add your child</li><li>Connect your camera</li><li>Test your monitor</li><li>Invite caregivers (optional)</li><li>Watch from anywhere (optional)</li></ul>
         <p>You can save your progress and finish later.</p>
       </>}

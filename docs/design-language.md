@@ -184,8 +184,8 @@ together whenever the artwork changes.**
 |---|---|---|---|
 | `favicon-32.png` | 32 × 32 | Browser tab | `index.html` |
 | `apple-touch-icon.png` | 180 × 180 | iOS home screen | `index.html` |
-| `icon-192.png` | 192 × 192 | **In-app illustrated logo** (header, login) | `AppHeader.jsx` |
-| `icon-512.png` | 512 × 512 | High-DPI illustrated logo | direct reference |
+| `icon-192.png` | 192 × 192 | App icon (home screen, install prompt); not used in the app screens any more | direct reference |
+| `icon-512.png` | 512 × 512 | High-DPI app icon (the Unraid template points at it) | direct reference |
 | `icon-maskable-192.png` | 192 × 192 | PWA install + Android launcher | `manifest.webmanifest` |
 | `icon-maskable-512.png` | 512 × 512 | PWA splash / high-DPI launcher | `manifest.webmanifest` |
 | `now-playing-512.png` | 512 × 512 | Media-session artwork (lock screen) | `useNowPlaying.js` |
@@ -198,9 +198,16 @@ artwork within the central 80% on navy so launchers can crop the edges.
 Bump the `now-playing-512.png?v=` value in `useNowPlaying.js` after changing
 that image.
 
-The manifest lists the maskable pair with `purpose: 'any maskable'`. The
-illustrated icon is referenced directly in the header and sign-in page.
+The manifest lists the maskable pair with `purpose: 'any maskable'`.
 The HTML and manifest browser colours both use `#14142A` to match `--bar`.
+
+**The logo in the app** (header, setup guide, About, sign-in) is not one of these PNGs. It is the SVG
+`public/icons/nightlight-logo.svg` (the owner's periwinkle crescent and sleeping baby, transparent ground), drawn
+by `components/Logo.jsx`: bare in the header (the bar already is `--bar`, `#14142A`), and everywhere else on a
+`--bar` rounded square with a corner radius of 25% of its size, so the setup guide, About, sign-in and "Can't
+reach" screens show the same tile. The PNGs above are made from the same SVG on `#14142A`
+(`branding/logo-source.png` is that 1024px render; the standard icons are opaque full-bleed squares, and the OS
+rounds them).
 
 ---
 

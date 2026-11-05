@@ -1,6 +1,7 @@
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { isTailnetHost } from '../lib/tailnetHost.js';
 import ChangeServerLink from './ChangeServerLink.jsx';
+import Logo from './Logo.jsx';
 
 // Shown instead of the sign-in form when startup cannot reach the server (#382). Sign-in is only right
 // when the server ANSWERED and said this device is not signed in (a 401): showing the form to someone
@@ -13,7 +14,7 @@ export default function ServerUnreachable({ onRetry, retrying, hostname = window
   return (
     <div className="auth-screen">
       <div className="auth-card">
-        <img src="/icons/icon-192.png" alt="" className="auth-icon" />
+        <Logo size={84} glow className="auth-icon" />
         <h1>{settings.app_name}</h1>
         <p className="tagline" role="status">
           Can't reach {settings.app_name}. Trying again…

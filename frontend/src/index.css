@@ -2013,13 +2013,12 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent); o
   max-width: 380px;
 }
 
-.auth-icon {
-  display: block;
-  width: 84px;
-  height: 84px;
+/* The size, shape and glow come from the shared logo tile (.logo-tile, defined later in this file); this is only the sign-in
+   screen's spacing. It is `.logo-tile.auth-icon` so its `display: flex` (which lets `margin: 0 auto` centre the tile) wins
+   over `.logo-tile`'s `inline-flex`, which comes later and would otherwise override it. */
+.logo-tile.auth-icon {
+  display: flex;
   margin: 0 auto 18px;
-  border-radius: 22px;
-  box-shadow: 0 8px 30px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .auth-card h1 {
@@ -2119,14 +2118,6 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent); o
   display: flex;
   align-items: center;
   gap: 16px;
-}
-
-.about-hero__icon {
-  width: 64px;
-  height: 64px;
-  border-radius: 16px;
-  flex-shrink: 0;
-  box-shadow: 0 8px 30px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .about-hero__name {
@@ -2946,7 +2937,6 @@ input[type='range'] {
 .setup-card { padding: clamp(20px, 5vw, 36px); }
 .setup-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-secondary); font-size: 13px; }
 .setup-wordmark { display: flex; align-items: center; gap: 9px; color: var(--text-primary); font: 800 19px var(--font-display); }
-.setup-wordmark img { width: 32px; height: 32px; }
 .setup-progress { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 24px 0; }
 .setup-progress span { height: 7px; border-radius: 99px; background: var(--border); }
 .setup-progress .is-complete { background: var(--accent); }
@@ -2962,7 +2952,14 @@ input[type='range'] {
 .setup-actions { display: flex; gap: 10px; margin-top: 24px; }
 .setup-actions .btn { min-height: 44px; flex: 1; }
 .setup-exit { display: block; margin: 12px auto 0; padding: 12px; min-height: 44px; background: none; border: 0; color: var(--accent-text); font: inherit; cursor: pointer; }
-.setup-welcome-icon { display: block; width: 72px; height: 72px; margin: 0 auto; }
+.logo-tile.setup-welcome-icon { display: flex; margin: 0 auto; }
+/* The logo (components/Logo.jsx), everywhere but the header: the owner's SVG on the header colour in a rounded square. Owner,
+   2026-11-05: the setup guide's was square and About's was rounded; they now share this one tile. The radius is a percentage
+   (the old header, About and sign-in tiles were all about 25%), so every size keeps the same shape. The glow is the accent
+   shadow About and the sign-in screen already had. The header shows the bare SVG (its bar is the same colour). */
+.logo-tile { display: inline-flex; flex-shrink: 0; background: var(--bar); border-radius: 25%; overflow: hidden; }
+.logo-tile img { display: block; width: 100%; height: 100%; }
+.logo-tile--glow { box-shadow: 0 8px 30px color-mix(in srgb, var(--accent) 18%, transparent); }
 .setup-checklist { list-style: none; padding: 0; margin: 8px 0; }
 .setup-checklist li { padding: 9px 0 9px 30px; position: relative; }
 .setup-checklist li::before { content: '✓'; position: absolute; left: 2px; color: var(--accent-text); font-weight: 800; }
