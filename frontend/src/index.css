@@ -1137,8 +1137,11 @@ body.in-pip .tile-menu-backdrop {
 
 /* Background-listening keeps a distinct accent tint over the white, so it's clear at a
    glance the camera is being held alive in the background (not merely unmuted). */
+/* Owner 2026-11-05: washed out and hard to see in light mode, fine in dark. This button sits over the VIDEO, not on a themed
+   surface, so it must not follow the theme: by day `--accent-text` is the dark violet #5F3DB7, which has little contrast on a
+   picture. The night value of `--accent-text` (#BCA8F3, docs/design-language.md tokens) is used in both themes. */
 .mute-btn--bg {
-  color: var(--accent-text);
+  color: #BCA8F3;
 }
 
 /* Inline warning inside a form (e.g. stream validation failed on save) - softer than the
@@ -2917,11 +2920,14 @@ input[type='range'] {
 .review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .review-actions .btn { flex: 1 1 auto; }
 
-/* "You corrected this" — shown wherever a night's times came from a person rather than the detector. */
+/* "You corrected this" — shown wherever a night's times came from a person rather than the detector.
+   Owner 2026-11-05: hard to read. It is only used on the sleep card (`.night`), which is a dark indigo gradient in BOTH themes,
+   but it was coloured with `--accent-text`, which by day is the dark violet #5F3DB7: dark text on a dark card. Light text on a
+   light veil reads on that card in either theme. If this pill is ever used on a light surface, scope these colours to `.night`. */
 .sleep-corrected {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11.5px; font-weight: 600; color: var(--accent-text);
-  background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 2px 9px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 600; color: #D9CDF4;
+  background: rgba(255, 255, 255, 0.14); padding: 2px 9px; border-radius: 999px;
 }
 
 .sleep-detail__recompute-note {
