@@ -155,7 +155,7 @@ describe('setup steps', () => {
     const view = wizard();
     // The guide opens on "Add your child": the welcome screen now comes before the admin account (FirstRun.jsx).
     expect(await screen.findByRole('heading', { name: 'Add your child' })).toBeInTheDocument();
-    expect(screen.getByRole('progressbar', { name: 'Step 1 of 6' })).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Step 2 of 7' })).toBeInTheDocument();
     await view.user.click(screen.getByRole('button', { name: 'Continue' }));
     expect(screen.getByRole('heading', { name: 'Connect your camera' })).toBeInTheDocument();
     await view.user.click(screen.getByRole('button', { name: 'Check picture' }));
@@ -367,7 +367,10 @@ describe('setup steps', () => {
     expect(screen.queryByRole('button', { name: 'Back' }), 'nothing before the first step').toBeNull();
     expect(screen.queryByRole('button', { name: 'Get started' })).toBeNull();
     expect(screen.queryByLabelText('Add photo')).toBeNull();
-    expect(screen.getByRole('progressbar', { name: 'Step 1 of 6' })).toBeInTheDocument();
+    // Creating the account was Step 1 (FirstRun.jsx, owner 2026-11-06), so the guide opens on Step 2 of 7 with the first segment done.
+    const bar = screen.getByRole('progressbar', { name: 'Step 2 of 7' });
+    expect([...bar.children].map((segment) => segment.className).slice(0, 3)).toEqual(['is-complete', 'is-current', '']);
+    expect(bar.children).toHaveLength(7);
   });
 
   test('the second step still has a Back that returns to the first', async () => {

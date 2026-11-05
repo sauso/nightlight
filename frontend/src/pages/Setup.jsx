@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { setupApi } from '../lib/setupApi.js';
+import { useSetupChrome } from '../lib/useSetupChrome.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import AddCameraFlow from '../components/AddCameraFlow.jsx';
 import CameraTile from '../components/CameraTile.jsx';
@@ -71,11 +72,7 @@ export default function Setup() {
   // on <html>, the way modals use `modal-scroll-locked`; index.css does the hiding. `normalChrome` stays the one answer to "is the
   // guide still running": the finished view has the real header and keeps the navigation.
   const wizardActive = Boolean(setup) && !normalChrome(setup.status);
-  useEffect(() => {
-    if (!wizardActive) return undefined;
-    document.documentElement.classList.add('setup-wizard');
-    return () => document.documentElement.classList.remove('setup-wizard');
-  }, [wizardActive]);
+  useSetupChrome(wizardActive);
 
   useEffect(() => {
     if (kids.length) setSelectedChild((current) => kids.some((child) => child.id === current) ? current : kids[0].id);

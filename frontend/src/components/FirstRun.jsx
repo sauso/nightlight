@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { fileToAvatarDataUrl } from '../lib/imageResize.js';
+import { useSetupChrome } from '../lib/useSetupChrome.js';
 import SetupStepShell from './SetupStepShell.jsx';
 import AvatarEditor from './AvatarEditor.jsx';
 import ChangeServerLink from './ChangeServerLink.jsx';
@@ -24,6 +25,9 @@ export default function FirstRun() {
   const [form, setForm] = useState(BLANK);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // Owner testing 2026-11-06: these screens have no header, so on a phone the page showed under the status bar and its light icons
+  // vanished on the light page. Same navy strip as the guide, for as long as either screen is up.
+  useSetupChrome();
 
   const fullName = [form.first_name, form.last_name].map((part) => part.trim()).filter(Boolean).join(' ');
   const set = (field) => (event) => setForm((current) => ({ ...current, [field]: event.target.value }));
@@ -62,7 +66,9 @@ export default function FirstRun() {
           await refresh();
         } catch { /* optional: the admin is already signed in, and Account has the photo control */ }
       }
-      navigate('/');
+      // Straight to the guide's next step (Step 2), not '/' and the setup gate's redirect, so the Live page does not flash up
+      // between the account and the first step of the guide.
+      navigate('/setup');
     } catch (err) {
       // A failed account creation keeps what was typed (password included, as the sign-in form does) so a taken username can be fixed.
       setError(err.message);

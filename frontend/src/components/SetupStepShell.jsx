@@ -1,9 +1,11 @@
 import Logo from './Logo.jsx';
 
-const STEPS = ['children', 'camera', 'monitor_test', 'caregivers', 'remote', 'review'];
+// Creating the account is Step 1 (owner, 2026-11-06: it felt like a detour before "step 1"), so the guide's own first step is
+// Step 2. `review` closes the list but is never counted, so the counter reads "of 7" with six steps shown.
+const STEPS = ['account', 'children', 'camera', 'monitor_test', 'caregivers', 'remote', 'review'];
 const TITLES = {
   welcome: 'Welcome to Nightlight',
-  // `welcome` and `account` are the two screens BEFORE the first admin exists (FirstRun.jsx); neither is one of the six counted steps.
+  // `welcome` is the unnumbered start screen; `account` (FirstRun.jsx) is Step 1.
   account: 'Create your account',
   children: 'Add your child',
   camera: 'Connect your camera',
@@ -25,7 +27,7 @@ const SUBTITLES = {
 
 export default function SetupStepShell({ step, error, busy, onBack, onExit, onRetry, primary, subtitle, children, terminal = false }) {
   const position = STEPS.indexOf(step) + 1;
-  // The counter and progress bar belong to the six steps; the review page, the welcome page and the account page have none.
+  // The counter and progress bar belong to the counted steps; the review page and the welcome page have none.
   const counted = STEPS.includes(step) && step !== 'review';
   return (
     <main className={`app-main setup-main${terminal ? ' setup-main--terminal' : ''}`}>
@@ -33,9 +35,9 @@ export default function SetupStepShell({ step, error, busy, onBack, onExit, onRe
         {!terminal && <>
           <div className="setup-head">
             <div className="setup-wordmark"><Logo size={32} />Nightlight</div>
-            {counted && <span aria-label={`Step ${position} of 6`}>Step {position} of 6</span>}
+            {counted && <span aria-label={`Step ${position} of ${STEPS.length}`}>Step {position} of {STEPS.length}</span>}
           </div>
-          {counted && <div className="setup-progress" role="progressbar" aria-label={`Step ${position} of 6`} aria-valuenow={position} aria-valuemin={1} aria-valuemax={6}>
+          {counted && <div className="setup-progress" role="progressbar" aria-label={`Step ${position} of ${STEPS.length}`} aria-valuenow={position} aria-valuemin={1} aria-valuemax={STEPS.length}>
             {STEPS.map((item, index) => <span key={item} className={index < position - 1 ? 'is-complete' : index === position - 1 ? 'is-current' : ''} />)}
           </div>}
         </>}

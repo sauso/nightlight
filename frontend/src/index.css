@@ -2267,7 +2267,10 @@ input[type='range'] {
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-.detect-toggle:hover:not(:disabled) {
+/* `:not(.detect-toggle--on)`: the hover rule out-ranks the lit rule below, and a phone keeps a tapped button in :hover, so a
+   just-tapped lit toggle showed the plain text colour (white in dark mode, navy in light) on the accent fill until you tapped
+   elsewhere (owner, 2026-11-06). Hover is for the unlit buttons; a lit one keeps its own colours. */
+.detect-toggle:hover:not(:disabled):not(.detect-toggle--on) {
   border-color: var(--accent-line);
   color: var(--text-primary);
 }
@@ -2484,7 +2487,8 @@ input[type='range'] {
   cursor: pointer;
 }
 
-.log-chip:hover {
+/* Not on the lit chip: same sticky-hover fault as `.detect-toggle` above (hover out-ranks `.log-chip--active`). */
+.log-chip:hover:not(.log-chip--active) {
   color: var(--text-primary);
   border-color: var(--accent-soft);
 }
@@ -2977,7 +2981,9 @@ input[type='range'] {
 .setup-exit { display: block; margin: 12px auto 0; padding: 12px; min-height: 44px; background: none; border: 0; color: var(--accent-text); font: inherit; cursor: pointer; }
 .logo-tile.setup-welcome-icon { display: flex; margin: 0 auto; }
 /* The guide's own caregiver form (SetupCaregivers); the first-run account form (FirstRun) uses the same classes so the two look alike. */
-.setup-caregivers__photo { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+/* The avatar sits in the middle of the form, with Remove under it (owner, 2026-11-06). Used by the guide's caregiver form and by
+   the first-run account form. */
+.setup-caregivers__photo { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 12px; }
 .setup-caregivers__added { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .setup-caregivers__added li { padding: 10px 12px; background: var(--bg-elevated-2); border-radius: 10px; color: var(--text-primary); }
 /* The logo (components/Logo.jsx), everywhere but the header: the owner's SVG on the header colour in a rounded square. Owner,
@@ -3054,8 +3060,10 @@ input[type='range'] {
 html.setup-wizard .bottom-nav { display: none; }
 html.setup-wizard .app-shell { padding-left: 0; padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
 /* Same test: with no header the page scrolled up behind the transparent status bar, under its icons. An opaque strip the height
-   of the status bar (nothing on a desktop, where there is no inset) hides what scrolls under it. Below the modal overlay (50). */
-html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); background: var(--bg); z-index: 10; }
+   of the status bar (nothing on a desktop, where there is no inset) hides what scrolls under it. Below the modal overlay (50).
+   NAVY (--bar, the header colour in both themes), not the page colour (owner, 2026-11-06): the phone draws its status-bar icons
+   light, and on the light page colour they disappeared. Also on the screens before the first admin exists (FirstRun.jsx). */
+html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); background: var(--bar); z-index: 10; }
 .setup-player { max-width: 520px; margin-block: 16px; }
 @media (max-width: 600px) { .setup-banner { flex-wrap: wrap; } }
 .esphome-dates .field { flex: 1 1 140px; min-width: 0; }

@@ -355,8 +355,9 @@ describe('first-run setup', () => {
     await waitFor(() => expect(postSpy).toHaveBeenCalledWith('/auth/setup', {
       username: 'nacho', password: 'longenough1', first_name: 'Nacho', last_name: 'Leone',
     }));
-    // The setup gate decides whether a first admin sees the guide. Login always lands at /.
-    expect(await screen.findByText('at /')).toBeInTheDocument();
+    // Creating the first admin is Step 1 of the guide, so it goes straight on to /setup (Step 2) rather than to / and the gate's
+    // redirect. (A normal sign-in still lands at /; see the tests above.)
+    expect(await screen.findByText('at /setup')).toBeInTheDocument();
   });
 
   test('★ the first password has a minimum length; signing in does not', async () => {

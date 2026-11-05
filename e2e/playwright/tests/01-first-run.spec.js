@@ -11,6 +11,7 @@ test('first run: create the admin account and enter the setup guide', async ({ p
   await expect(page.getByRole('heading', { name: 'Welcome to Nightlight' })).toBeVisible();
   await page.getByRole('button', { name: 'Get started' }).click();
   await expect(page.getByRole('button', { name: 'Create admin account' })).toBeVisible();
+  await expect(page.getByText('Step 1 of 7')).toBeVisible(); // creating the account is Step 1 (owner, 2026-11-06)
 
   await page.getByLabel('First name').fill('E2E');
   await page.getByLabel('Last name').fill('Tester');
@@ -21,6 +22,7 @@ test('first run: create the admin account and enter the setup guide', async ({ p
   // A fresh install enters the optional guide after the first admin signs in.
   await expect(page).toHaveURL(/\/setup$/);
   await expect(page.getByRole('heading', { name: 'Add your child' })).toBeVisible();
+  await expect(page.getByText('Step 2 of 7')).toBeVisible();
 
   // Hand the logged-in state to the rest of the suite.
   await page.context().storageState({ path: '.auth/state.json' });
