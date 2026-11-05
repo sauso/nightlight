@@ -4,7 +4,7 @@ import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useLater } from '../lib/useLater.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
-import Avatar from '../components/Avatar.jsx';
+import AvatarEditor from '../components/AvatarEditor.jsx';
 import Modal from '../components/Modal.jsx';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
 import { loadDraft, clearDraft } from '../lib/formDraft.js';
@@ -202,16 +202,10 @@ function UserSettingsForm() {
             )}
 
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <Avatar name={fullName} src={form.photo} size={84} />
-              <div style={{ display: 'flex', gap: 8 }}>
-                <label className="btn btn-peri" style={{ width: 'auto', cursor: 'pointer' }}>
-                  {form.photo ? 'Change photo' : 'Add photo'}
-                  <input type="file" accept="image/*" onChange={onPhoto} style={{ display: 'none' }} />
-                </label>
-                {form.photo && (
-                  <button type="button" className="btn btn-danger" style={{ width: 'auto' }} onClick={removePhoto}>Remove</button>
-                )}
-              </div>
+              <AvatarEditor name={fullName} src={form.photo} size={88} onChange={onPhoto} />
+              {form.photo && (
+                <button type="button" className="icon-btn" onClick={removePhoto}>Remove</button>
+              )}
               {photoStatus && (
                 <div className="camera-tile__sub" style={{ color: 'var(--accent-text)' }}>
                   {photoStatus === 'saving' ? 'Saving photo…' : 'Photo saved ✓'}

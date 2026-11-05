@@ -11,6 +11,9 @@ import { renderAs, ADMIN } from './helpers/render.jsx';
 import AvatarEditor from '../src/components/AvatarEditor.jsx';
 import ChildSettings from '../src/pages/ChildSettings.jsx';
 import Account from '../src/pages/Account.jsx';
+import UserSettings from '../src/pages/UserSettings.jsx';
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { api } from '../src/lib/api.js';
 import * as imageResize from '../src/lib/imageResize.js';
 
@@ -115,5 +118,57 @@ describe('on the account page', () => {
     renderAs({ ...ADMIN, photo: null }, <Account />, { route: '/account' });
     await screen.findByLabelText('Add photo');
     expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
+  });
+});
+
+describe('on the caregiver page (an admin editing a caregiver)', () => {
+  const CAREGIVER = { id: 'u-care', username: 'nanny', first_name: 'Nanny', last_name: 'McPhee', role: 'caregiver', photo: null, mfa_enabled: 0 };
+  const mount = (user = CAREGIVER) => {
+    // The page fetches the LIST and finds its user in it: there is no per-user GET.
+    vi.spyOn(api, 'get').mockImplementation((p) => (String(p).includes('/auth/users') ? Promise.resolve([user]) : Promise.resolve([])));
+    vi.spyOn(api, 'put').mockResolvedValue({});
+    vi.spyOn(imageResize, 'fileToAvatarDataUrl').mockResolvedValue('data:image/png;base64,PICKED');
+    return renderAs(ADMIN, <Routes>
+      <Route path="/settings/users/:id" element={<UserSettings />} />
+    </Routes>, { route: `/settings/users/${user.id}` });
+  };
+
+  test('★ the avatar is the photo control, like the child and account pages', async () => {
+    mount();
+    await screen.findByDisplayValue('nanny');
+    expect(screen.getByLabelText('Add photo').type).toBe('file');
+    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
+  });
+
+  test('★ picking a photo saves it to that caregiver, carrying only the photo; with a photo there is a Remove', async () => {
+    const { user } = mount();
+    await screen.findByDisplayValue('nanny');
+    pick(screen.getByLabelText('Add photo'));
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/auth/users/u-care', { photo: 'data:image/png;base64,PICKED' }, expect.anything()));
+    expect(await screen.findByText('Photo saved ✓')).toBeTruthy();
+    await user.click(await screen.findByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/auth/users/u-care', { photo: null }, expect.anything()));
+  });
+});
+
+// Owner 2026-11-05: clicking the camera drew a second box around the badge, because the ring was on :focus-within and a click
+// focuses the invisible input. jsdom does not apply :focus-visible or :has(), so this reads the rules by their tokens (not exact
+// text, so a reformat cannot break it); the rendered check with a real click and a real Tab is in the PR.
+describe("the focus ring", () => {
+  const css = readFileSync(join(process.cwd(), "src", "index.css"), "utf8");
+  const rules = () => css.replace(/\/\*[\s\S]*?\*\//g, '').split("}").map((rule) => rule.replace(/\s+/g, ' ').trim()).filter((rule) => rule.includes('avatar-editor'));
+
+  test('★ nothing outlines the badge or the avatar on a plain focus (a click)', () => {
+    expect(rules().length, 'the stylesheet was read and has the avatar rules').toBeGreaterThan(3);
+    const outlined = rules().filter((rule) => /outline\s*:\s*[^;]*\S/.test(rule) && !/outline\s*:\s*none/.test(rule));
+    for (const rule of outlined) expect(rule, `an outline that applies on any focus: ${rule}`).toContain(':focus-visible');
+    expect(outlined.some((rule) => rule.includes(':focus-within')), 'no :focus-within ring').toBe(false);
+  });
+
+  test('★ keyboard focus still gets a visible ring, around the avatar', () => {
+    const ring = rules().find((rule) => rule.includes(':focus-visible') && /outline\s*:/.test(rule));
+    expect(ring, 'a :focus-visible ring exists').toBeTruthy();
+    expect(ring.startsWith('.avatar-editor:has(')).toBe(true);
+    expect(ring, 'the ring is on the avatar, not on the badge').not.toContain('__badge');
   });
 });

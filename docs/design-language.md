@@ -359,14 +359,14 @@ credential-name check reads field names only. A screen that restores must say wh
 
 ### Avatar editor (`components/AvatarEditor.jsx`)
 
-Where someone changes a photo (the child's settings, your own Account) the avatar is the control: the round photo, or the
+Where someone changes a photo (the child's settings, your own Account, an admin editing a caregiver) the avatar is the control: the round photo, or the
 initials on their colour, with a small camera badge at its bottom-right, and a tap opens the file picker. The badge is a
 rounded square in the card colour with a brand-violet border and a 16px-scale camera icon (`Camera`, sized from the avatar);
 it is decoration (`aria-hidden`), and the invisible file input that covers the avatar carries the name "Add photo" / "Change photo".
 The component is only the picker: resizing, saving, the Saving / Saved text and the Remove button stay with the page, since a
 child's photo and your own go to different endpoints and a new child holds its photo until its first save. Avatars that are only
-shown (lists, headers, the Settings row) stay the plain `Avatar` with no badge. The caregiver edit page (`UserSettings`) has not
-been converted yet.
+shown (lists, headers, the Settings row) stay the plain `Avatar` with no badge. Keyboard focus draws one ring around the whole
+avatar (`:focus-visible` only); a click or tap draws nothing, since a second box around the badge looked wrong on the owner's phone.
 
 ### Badges, chips, status
 
