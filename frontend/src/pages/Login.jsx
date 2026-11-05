@@ -7,11 +7,10 @@ import { useAutoRetry } from '../lib/useAutoRetry.js';
 import ServerUnreachable from '../components/ServerUnreachable.jsx';
 import ChangeServerLink from '../components/ChangeServerLink.jsx';
 import Logo from '../components/Logo.jsx';
+import FirstRun from '../components/FirstRun.jsx';
 
 export default function Login() {
   const [needsSetup, setNeedsSetup] = useState(null);
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -110,10 +109,8 @@ export default function Login() {
     setError('');
     setBusy(true);
     try {
-      const payload = needsSetup
-        ? { username, password, first_name: firstName, last_name: lastName }
-        : { username, password };
-      const result = await api.post(needsSetup ? '/auth/setup' : '/auth/login', payload);
+      // Creating the first admin is FirstRun.jsx's job now; this form only ever signs in.
+      const result = await api.post('/auth/login', { username, password });
       if (result.mfaRequired) {
         setMfaToken(result.mfaToken);
         setBusy(false);
@@ -180,6 +177,9 @@ export default function Login() {
     );
   }
 
+  // A fresh installation (no admin yet): the welcome screen with the steps, then the account form (owner, 2026-11-06).
+  if (needsSetup) return <FirstRun />;
+
   return (
     <div className="auth-screen">
       <div className="auth-card">
@@ -188,9 +188,7 @@ export default function Login() {
         <p className="tagline">
           {mfaToken
             ? 'Enter the 6-digit code from your authenticator app.'
-            : needsSetup
-              ? 'Set up the first admin account to get started.'
-              : 'Sign in to watch over the nursery.'}
+            : 'Sign in to watch over the nursery.'}
         </p>
         {error && <div className="error-banner">{error}</div>}
         {mfaToken ? (
@@ -219,30 +217,6 @@ export default function Login() {
           </form>
         ) : (
         <form onSubmit={handleSubmit}>
-          {needsSetup && (
-            <div style={{ display: 'flex', gap: 10 }}>
-              <div className="field" style={{ flex: 1 }}>
-                <label htmlFor="first-name">First name</label>
-                <input
-                  id="first-name"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  autoComplete="given-name"
-                  required
-                />
-              </div>
-              <div className="field" style={{ flex: 1 }}>
-                <label htmlFor="last-name">Last name</label>
-                <input
-                  id="last-name"
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  autoComplete="family-name"
-                  required
-                />
-              </div>
-            </div>
-          )}
           <div className="field">
             <label htmlFor="username">Username</label>
             <input
@@ -260,13 +234,12 @@ export default function Login() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoComplete={needsSetup ? 'new-password' : 'current-password'}
-              minLength={needsSetup ? 8 : undefined}
+              autoComplete="current-password"
               required
             />
           </div>
           <button className="btn btn-primary" type="submit" disabled={busy}>
-            {busy ? 'Please wait…' : needsSetup ? 'Create admin account' : 'Sign in'}
+            {busy ? 'Please wait…' : 'Sign in'}
           </button>
         </form>
         )}

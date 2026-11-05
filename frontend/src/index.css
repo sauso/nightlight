@@ -2976,8 +2976,7 @@ input[type='range'] {
 .setup-actions .btn { min-height: 44px; flex: 1; }
 .setup-exit { display: block; margin: 12px auto 0; padding: 12px; min-height: 44px; background: none; border: 0; color: var(--accent-text); font: inherit; cursor: pointer; }
 .logo-tile.setup-welcome-icon { display: flex; margin: 0 auto; }
-/* The guide's own caregiver form (SetupCaregivers) and the admin's photo on the Welcome step (SetupOwnPhoto). */
-.setup-ownphoto { display: flex; align-items: center; justify-content: center; gap: 14px; }
+/* The guide's own caregiver form (SetupCaregivers); the first-run account form (FirstRun) uses the same classes so the two look alike. */
 .setup-caregivers__photo { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .setup-caregivers__added { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .setup-caregivers__added li { padding: 10px 12px; background: var(--bg-elevated-2); border-radius: 10px; color: var(--text-primary); }

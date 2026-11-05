@@ -69,6 +69,8 @@ const videosPlaying = (page) =>
 {
   const { context, page, go, shot } = await open(EMPTY, PHONE);
   await go('/');
+  // The welcome screen with the steps comes first; the account form (the screenshot) is the screen after it.
+  await page.getByRole('button', { name: 'Get started' }).click();
   await page.getByRole('button', { name: 'Create admin account' }).waitFor();
   await page.getByLabel('First name').fill('Sam');
   await page.getByLabel('Last name').fill('Rivera');

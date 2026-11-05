@@ -7,12 +7,13 @@ import AddCameraFlow from '../components/AddCameraFlow.jsx';
 import CameraTile from '../components/CameraTile.jsx';
 import SetupStepShell from '../components/SetupStepShell.jsx';
 import AppHeader from '../components/AppHeader.jsx';
-import Logo from '../components/Logo.jsx';
 import TailscaleCard from '../components/TailscaleCard.jsx';
 import SetupCaregivers from '../components/SetupCaregivers.jsx';
-import SetupOwnPhoto from '../components/SetupOwnPhoto.jsx';
 
-const STEPS = ['welcome', 'children', 'camera', 'monitor_test', 'caregivers', 'remote', 'review'];
+// The guide starts at "Add your child". The Welcome screen, with the steps, now comes BEFORE the first admin account is created
+// (FirstRun.jsx, owner 2026-11-06), so it is not a step here. The server still stores `welcome` as the first activeStep of a new
+// installation (its contract is unchanged), which is shown as the first step.
+const STEPS = ['children', 'camera', 'monitor_test', 'caregivers', 'remote', 'review'];
 const terminal = (status) => ['legacy_completed', 'completed_limited', 'completed'].includes(status);
 const normalChrome = (status) => ['legacy_completed', 'completed'].includes(status);
 const publish = (state) => window.dispatchEvent(new CustomEvent('setup-state-changed', { detail: state }));
@@ -21,7 +22,7 @@ export default function Setup() {
   const navigate = useNavigate();
   const { kids, cameras, loaded: camerasLoaded, error: camerasError, refresh } = useCameras();
   const [setup, setSetup] = useState(null);
-  const [step, setStep] = useState('welcome');
+  const [step, setStep] = useState('children');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [childName, setChildName] = useState('');
@@ -52,7 +53,8 @@ export default function Setup() {
       if (!mounted.current) return;
       setSetup(current);
       const next = terminal(current.status) ? 'review' : current.activeStep;
-      setStep(STEPS.includes(next) ? next : 'welcome');
+      // `welcome` (a new installation's stored first step) and anything unknown open on the first real step.
+      setStep(STEPS.includes(next) ? next : 'children');
     } catch (err) {
       if (mounted.current) setError(err.message);
     }
@@ -186,12 +188,12 @@ export default function Setup() {
   const assigned = cameras.filter((camera) => camera.child_id && !camera.disabled);
   const camera = assigned.find((item) => item.id === selectedCamera);
   const reviewOnly = setup.status === 'legacy_completed' || setup.status === 'completed';
-  const back = step === 'welcome' || (step === 'review' && terminal(setup.status))
+  // No Back on the first step (there is nothing before it any more), nor on the review page of a finished or limited setup.
+  const back = (step === 'children' && !terminal(setup.status)) || (step === 'review' && terminal(setup.status))
     ? null : () => move(terminal(setup.status) ? 'review' : STEPS[STEPS.indexOf(step) - 1]);
   const canFinishFull = verified || setup.readiness.ready;
   const reviewChild = kids.find((item) => item.id === selectedChild);
-  const primary = step === 'welcome' ? { label: 'Get started', onClick: () => move('children') }
-    : step === 'children' ? kids.length
+  const primary = step === 'children' ? kids.length
       ? { label: 'Continue', disabled: !selectedChild, onClick: () => move('camera') }
       : { label: busy ? 'Adding…' : 'Continue', disabled: !childName.trim(), form: 'setup-child-form' }
     : step === 'camera' && assigned.length ? { label: 'Check picture', disabled: !selectedCamera, onClick: () => move('monitor_test') }
@@ -210,12 +212,6 @@ export default function Setup() {
     <>
     {normalChrome(setup.status) && <AppHeader title="Setup" back={{ to: '/settings', label: 'Settings' }} />}
     <SetupStepShell step={step} error={error} busy={busy} onBack={back} onExit={normalChrome(setup.status) ? null : saveAndExit} onRetry={load} primary={primary} terminal={normalChrome(setup.status)} subtitle={step === 'review' && canFinishFull && reviewChild ? `Nightlight is ready to monitor ${reviewChild.name}.` : undefined}>
-      {step === 'welcome' && <>
-        <Logo size={72} className="setup-welcome-icon" />
-        <ul className="setup-checklist"><li>Add your child</li><li>Connect your camera</li><li>Test your monitor</li><li>Invite caregivers (optional)</li><li>Watch from anywhere (optional)</li></ul>
-        <p>You can save your progress and finish later.</p>
-        <SetupOwnPhoto />
-      </>}
       {step === 'children' && <>
         {kids.length > 0 && <>
           <p>Choose the child who will use this camera.</p>

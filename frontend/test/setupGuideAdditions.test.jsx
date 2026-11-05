@@ -1,23 +1,20 @@
-// Two additions to the setup guide (owner, 2026-11-05): add caregivers inside the guide instead of jumping to Settings, and the
-// admin's own photo on the Welcome step. Both go through requests that already existed (POST /auth/users and PUT /auth/me), so
-// these tests are about what the guide SENDS and what it does with the answer, including the failure paths.
+// Adding caregivers inside the setup guide instead of jumping to Settings (owner, 2026-11-05). It goes through a request that
+// already existed (POST /auth/users), so these tests are about what the guide SENDS and what it does with the answer, including
+// the failure paths. (The admin's own photo moved to the first-run account form: see firstRun.test.jsx.)
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { renderAs, ADMIN } from './helpers/render.jsx';
 import SetupCaregivers from '../src/components/SetupCaregivers.jsx';
-import SetupOwnPhoto from '../src/components/SetupOwnPhoto.jsx';
 import { api } from '../src/lib/api.js';
 import * as imageResize from '../src/lib/imageResize.js';
 import { resetDemoStatusForTests } from '../src/lib/demoStatus.js';
 
 let postSpy;
-let putSpy;
 
 beforeEach(() => {
   resetDemoStatusForTests();
   vi.spyOn(api, 'get').mockResolvedValue({ demo: false });
   postSpy = vi.spyOn(api, 'post').mockResolvedValue({ id: 'u-new' });
-  putSpy = vi.spyOn(api, 'put').mockResolvedValue({});
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -108,44 +105,5 @@ describe('adding caregivers inside the guide', () => {
     await screen.findByText(/read-only/);
     expect(screen.getByLabelText('Username').disabled).toBe(true);
     expect(postSpy).not.toHaveBeenCalled();
-  });
-});
-
-describe('the admin photo on the Welcome step', () => {
-  beforeEach(() => vi.spyOn(imageResize, 'fileToAvatarDataUrl').mockResolvedValue('data:image/png;base64,PICKED'));
-
-  test('★ picking a photo saves it to your own account (only the photo) and refreshes the signed-in user', async () => {
-    const view = renderAs({ ...ADMIN, photo: null }, <SetupOwnPhoto />);
-    fireEvent.change(await screen.findByLabelText('Add photo'), { target: { files: [new File(['x'], 'p.png', { type: 'image/png' })] } });
-    await waitFor(() => expect(putSpy).toHaveBeenCalledWith('/auth/me', { photo: 'data:image/png;base64,PICKED' }, expect.anything()));
-    await waitFor(() => expect(view.auth.refresh).toHaveBeenCalled());
-    expect(await screen.findByText('Saved ✓')).toBeTruthy();
-  });
-
-  test('a failed save says why and does not claim success', async () => {
-    putSpy.mockRejectedValue(new Error('Photo too big'));
-    renderAs({ ...ADMIN, photo: null }, <SetupOwnPhoto />);
-    fireEvent.change(await screen.findByLabelText('Add photo'), { target: { files: [new File(['x'], 'p.png', { type: 'image/png' })] } });
-    expect(await screen.findByRole('alert')).toHaveTextContent('Photo too big');
-    expect(screen.queryByText('Saved ✓')).toBeNull();
-  });
-
-  test('with a photo there is Remove, which clears it; with none there is not', async () => {
-    const { user, unmount } = renderAs({ ...ADMIN, photo: 'data:image/png;base64,AAA' }, <SetupOwnPhoto />);
-    await user.click(await screen.findByRole('button', { name: 'Remove' }));
-    await waitFor(() => expect(putSpy).toHaveBeenCalledWith('/auth/me', { photo: null }, expect.anything()));
-    unmount();
-    renderAs({ ...ADMIN, photo: null }, <SetupOwnPhoto />);
-    await screen.findByLabelText('Add photo');
-    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
-  });
-
-  test('a read-only demo offers no photo control at all', async () => {
-    resetDemoStatusForTests();
-    api.get.mockResolvedValue({ demo: { label: 'demo' } });
-    const { container } = renderAs({ ...ADMIN, photo: null }, <SetupOwnPhoto />);
-    await waitFor(() => expect(api.get).toHaveBeenCalled());
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(container.querySelector('.setup-ownphoto')).toBeNull();
   });
 });
