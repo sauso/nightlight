@@ -11,7 +11,7 @@ import NtfyIcon from '../components/icons/NtfyIcon.jsx';
 // Push notifications is now a hub, like the top-level Settings screen: one row per provider, each
 // drilling into its own config page. An alert fires to every provider that's enabled. State comes
 // from /notifications/status so each row can show On / Off / Not set up at a glance (see badgeFor).
-const PERI = 'var(--accent)';
+const PERI = 'var(--accent-line)';
 const BACK = { state: { from: { to: '/settings/integrations/notifications', label: 'Push notifications' } } };
 
 const PROVIDERS = [
