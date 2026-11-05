@@ -206,15 +206,31 @@ describe('setup steps', () => {
     expect(api.post).toHaveBeenCalledWith('/children', expected);
   });
 
-  test('the optional steps save progress before leaving for settings', async () => {
+  test('★ the caregivers step is part of the guide: no jump to Settings, and Skip saves progress and moves on', async () => {
+    // Owner, 2026-11-05: "Add a caregiver account" used to leave for Settings, which broke the guide's feel.
     state = initial('in_progress', 'caregivers');
     const view = wizard();
-    await view.user.click(await screen.findByRole('button', { name: 'Add a caregiver account' }));
+    expect(await screen.findByLabelText('Username'), 'the form is on the step itself').toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add a caregiver account' })).toBeNull();
+    await view.user.click(screen.getByRole('button', { name: 'Skip for now' }));
     expect(setupApi.progress).toHaveBeenCalledWith('remote', 0);
-    expect(screen.getByTestId('path')).toHaveTextContent('/settings/users/new');
+    expect(screen.getByTestId('path')).not.toHaveTextContent('/settings');
   });
 
-  test.each([['caregivers', 'Add a caregiver account'], ['remote', 'Maybe later']])('a refused progress save on the %s step keeps the admin on the wizard', async (step, label) => {
+  test('★ adding a caregiver in the guide turns the footer into Continue, and Continue still saves progress', async () => {
+    state = initial('in_progress', 'caregivers');
+    api.post.mockResolvedValue({ id: 'u-new' });
+    const view = wizard();
+    await view.user.type(await screen.findByLabelText('Username'), 'nanny');
+    await view.user.type(screen.getByLabelText('Password'), 'correct horse');
+    await view.user.click(screen.getByRole('button', { name: 'Add caregiver' }));
+    expect(await screen.findByRole('button', { name: 'Continue' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Skip for now' })).toBeNull();
+    await view.user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(setupApi.progress).toHaveBeenCalledWith('remote', 0);
+  });
+
+  test.each([['caregivers', 'Skip for now'], ['remote', 'Maybe later']])('a refused progress save on the %s step keeps the admin on the wizard', async (step, label) => {
     // Save-before-navigate must be enforced, not just ordered by luck: a failed save may not leave the page (#947 review).
     state = initial('in_progress', step);
     setupApi.progress.mockRejectedValueOnce(new Error('Could not save'));
