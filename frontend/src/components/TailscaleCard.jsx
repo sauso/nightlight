@@ -5,6 +5,7 @@ import { useDemoStatus } from '../lib/demoStatus.js';
 import { useTailscale } from '../lib/useTailscale.js';
 import { blockerMessage, videoTestMessage } from '../lib/tailscaleCopy.js';
 import { probeLowLatency } from '../lib/webrtcProbe.js';
+import { copyText } from '../lib/copyText.js';
 import LoadFailed from './LoadFailed.jsx';
 import Modal from './Modal.jsx';
 
@@ -55,7 +56,7 @@ export default function TailscaleCard({ compact = false, publicHostSet = false, 
   const [confirm, setConfirm] = useState(null);
   const [probe, setProbe] = useState(null);
   const [testing, setTesting] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState(null); // null | 'copied' | 'manual' (see lib/copyText.js)
   const probeRef = useRef(null);
   const previousState = useRef(null);
   const region = useRef(null);
@@ -108,8 +109,7 @@ export default function TailscaleCard({ compact = false, publicHostSet = false, 
   }
 
   async function copyAddress(address) {
-    try { await navigator.clipboard.writeText(address); setCopied(true); }
-    catch { setCopied(false); }
+    setCopied(await copyText(address));
   }
 
   const address = secureAddress(view?.dns_name);
@@ -176,7 +176,8 @@ export default function TailscaleCard({ compact = false, publicHostSet = false, 
         <div className="tailscale-actions"><button className="btn btn-secondary" type="button" disabled={disabled} onClick={() => copyAddress(address)}>Copy</button>
           {readOnly ? <span className="btn btn-primary" aria-disabled="true">Open</span>
             : <a className={`btn ${view.video_address_pending ? 'btn-secondary' : 'btn-primary'}`} data-tailscale-primary={view.video_address_pending ? undefined : ''} href={address} target="_blank" rel="noreferrer">Open</a>}</div>
-        {copied && <p role="status">Address copied.</p>}
+        {copied === 'copied' && <p role="status">Address copied.</p>}
+        {copied === 'manual' && <p role="status">Couldn't copy. Select the address above and copy it.</p>}
         <QrCode value={address} label="Scan to open on your phone" />
       </> : <><p>Waiting for your secure address…</p>{button('Retry', load)}</>}
       <h3>Add someone</h3>

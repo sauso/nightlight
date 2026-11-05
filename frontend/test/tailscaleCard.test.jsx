@@ -73,6 +73,26 @@ test('a card with no onReady still renders (the settings page passes none)', asy
   expect(await screen.findByText('Open')).toBeInTheDocument();
 });
 
+// Owner testing 2026-11-05: Copy did nothing when Nightlight was opened over plain http (no navigator.clipboard).
+test.each([
+  ['over plain http (no clipboard API) the fallback copies', undefined, () => true, 'Address copied.'],
+  ['with the clipboard API', { writeText: vi.fn().mockResolvedValue() }, () => false, 'Address copied.'],
+  ['★ when nothing can copy it tells you to do it by hand', undefined, () => false, "Couldn't copy. Select the address above and copy it."],
+])('the Copy button %s', async (_name, clipboard, exec, message) => {
+  document.execCommand = vi.fn(exec);
+  try {
+    const view = card(ready);
+    const copy = await screen.findByRole('button', { name: 'Copy' });
+    // After the render on purpose: user-event installs its own clipboard stub when the test renders, which would hide the case.
+    Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true });
+    await view.user.click(copy);
+    expect(await screen.findByText(message)).toBeInTheDocument();
+  } finally {
+    delete navigator.clipboard;
+    delete document.execCommand;
+  }
+});
+
 test('turning on sends the boolean setting', async () => {
   const view = card();
   await view.user.click(await screen.findByRole('button', { name: 'Turn on Tailscale' }));
