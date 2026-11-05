@@ -3012,11 +3012,19 @@ input[type='range'] {
 .app-shell:has(> .app-header) > .setup-banner { padding-top: 10px; }
 .setup-banner .btn { width: auto; min-height: 44px; }
 /* The in-progress wizard has no AppHeader (a focused card with its own wordmark; owner's choice, 2026-11-05), so the space the
-   header normally takes is reserved here instead. Phone/tablet: clear the status bar. Desktop (>= 1200px, where the sidebar
-   rail starts 72px down to clear the 60px header): the 76px other pages' content starts at, so the card lines up with the
-   rail. The finished-setup view (--terminal) renders the real header and needs neither. */
+   header normally takes is reserved here instead: clear the status bar on a phone, a little more room on a wide screen. The
+   finished-setup view (--terminal) renders the real header and needs neither. */
 .setup-main:not(.setup-main--terminal) { padding-top: calc(16px + env(safe-area-inset-top, 0px)); }
-@media (min-width: 1200px) { .setup-main:not(.setup-main--terminal) { padding-top: 76px; } }
+@media (min-width: 1200px) { .setup-main:not(.setup-main--terminal) { padding-top: 40px; } }
+/* Owner testing 2026-11-05: while the setup guide runs (Setup.jsx puts `setup-wizard` on <html>) the bottom bar / sidebar is
+   hidden, so a new admin goes through the guide, or Saves and exits, first. The shell then needs neither the 64px under the bar
+   nor the 220px beside it; it keeps room above the gesture bar instead. (This out-ranks the >= 1200px and short-landscape
+   .app-shell rules by specificity, so no media query is repeated.) */
+html.setup-wizard .bottom-nav { display: none; }
+html.setup-wizard .app-shell { padding-left: 0; padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+/* Same test: with no header the page scrolled up behind the transparent status bar, under its icons. An opaque strip the height
+   of the status bar (nothing on a desktop, where there is no inset) hides what scrolls under it. Below the modal overlay (50). */
+html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); background: var(--bg); z-index: 10; }
 .setup-player { max-width: 520px; margin-block: 16px; }
 @media (max-width: 600px) { .setup-banner { flex-wrap: wrap; } }
 .esphome-dates .field { flex: 1 1 140px; min-width: 0; }
