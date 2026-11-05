@@ -33,10 +33,12 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ### Changed
 
 - On a child's settings, on your Account and when an admin edits a caregiver, the avatar itself is now the photo control: a round photo (or initials) with a small camera badge, and tapping it opens the file picker. Tapping draws no extra box around the badge; keyboard focus shows one ring around the avatar. This replaces the separate **Add photo** / **Change photo** buttons; **Remove** stays under the avatar. Saving is unchanged: an existing child's or your own photo still saves as soon as it is chosen, and a new child's photo is kept until the first save.
+- The setup guide's **Invite caregivers** step now adds caregiver accounts in the guide itself instead of jumping to Settings: names, username, password and an optional photo, then **Add another caregiver** or **Continue**. It only creates caregivers; editing and removing stay in Settings → Caregivers.
+- The setup guide's **Welcome** step offers an optional photo for your own account.
 - The app's main colour is now periwinkle (`#8995FF`) instead of violet, and the logo's crescent matches it. Peri is a light colour, so text on a peri button is now the dark navy rather than white, and thin lines, rings and icons on light screens use a slightly deeper periwinkle so they stay visible. A warm gold, peri's opposite, marks a few small highlights: the current step of the setup guide, the "Recommended" badge on the Tailscale card and the camera badge on avatars. The page and card backgrounds keep their lavender tint. The home-screen, browser-tab, iOS and lock-screen icons are re-made in the new colour; the Android/iOS launcher icons and the website still show the old logo for now.
 - New logo: a periwinkle crescent with a sleeping baby. The header shows it as it is, at the same size; the setup guide, About, the sign-in screen and the "Can't reach Nightlight" screen show it on the header colour in the same rounded square (the setup guide's was square). The home-screen, browser-tab, iOS and lock-screen icons are re-made from it. An already-installed home-screen icon changes only when the phone refreshes it or the app is reinstalled, and the phone apps' launcher icons and the website still show the old logo for now.
 - About no longer shows **Setup status and picture check** once setup is fully complete. It stays while setup is unfinished, after a limited setup, and on an installation upgraded from before the setup guide.
-- While the setup guide is open, the bottom bar (the side menu on a wide screen) is hidden, so a new admin goes through the guide or chooses Save and exit first. The navigation returns on Save and exit, when setup finishes, or when the guide sends you to another page. The guide also no longer scrolls behind the phone's status bar.
+- While the setup guide is open, the bottom bar (the side menu on a wide screen) is hidden, so a new admin goes through the guide or chooses Save and exit first. The navigation returns on Save and exit or when setup finishes. The guide also no longer scrolls behind the phone's status bar.
 - The Tailscale card's text now follows one size scale, with the title larger than the headings and address beneath it. Its video button is renamed from "Check it works" to "Test video".
 - When Nightlight can't be reached at its Tailscale address (`.ts.net` or a `100.64.0.0/10` address), the "Can't reach Nightlight" screen suggests checking that Tailscale is switched on instead of the home network. Opened at any other address, the text is unchanged.
 
@@ -64,6 +66,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- The "Advanced settings" link when connecting a camera is smaller, in line with the buttons beside it.
 - "You corrected this" on the sleep card is now readable: light text on the card's dark background, in both light and dark mode.
 - The background-audio icon on a camera tile is the same light violet in light mode as in dark mode. It was a dark violet that was hard to see over the picture.
 - On the Android and iOS apps, the sign-in screen and the "Can't reach Nightlight" screen now have a **Change server** button, so a server you can't sign in to no longer traps you there. A browser shows nothing, as it has no saved server.

@@ -2971,6 +2971,11 @@ input[type='range'] {
 .setup-actions .btn { min-height: 44px; flex: 1; }
 .setup-exit { display: block; margin: 12px auto 0; padding: 12px; min-height: 44px; background: none; border: 0; color: var(--accent-text); font: inherit; cursor: pointer; }
 .logo-tile.setup-welcome-icon { display: flex; margin: 0 auto; }
+/* The guide's own caregiver form (SetupCaregivers) and the admin's photo on the Welcome step (SetupOwnPhoto). */
+.setup-ownphoto { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.setup-caregivers__photo { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.setup-caregivers__added { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.setup-caregivers__added li { padding: 10px 12px; background: var(--bg-elevated-2); border-radius: 10px; color: var(--text-primary); }
 /* The logo (components/Logo.jsx), everywhere but the header: the owner's SVG on the header colour in a rounded square. Owner,
    2026-11-05: the setup guide's was square and About's was rounded; they now share this one tile. The radius is a percentage
    (the old header, About and sign-in tiles were all about 25%), so every size keeps the same shape. The glow is the accent
@@ -3010,7 +3015,9 @@ input[type='range'] {
 .camera-connect__address { margin: 2px 0 12px; font-size: 13px; color: var(--text-secondary); }
 .camera-connect__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
 .camera-connect__actions .btn { width: auto; flex: 1 1 140px; }
-.camera-connect__advanced { min-height: 44px; padding: 0 8px; }
+/* Owner 2026-11-05: "Advanced settings" looked too big. It is a `.linkbtn` (`font: inherit`), so it took the card's size, about
+   20px next to a 15px button. 14px is the design scale's button size; the 44px height keeps the touch target. */
+.camera-connect__advanced { min-height: 44px; padding: 0 8px; font-size: 14px; }
 .camera-manual { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 14px; }
 .camera-manual .camera-card { border: 0; background: none; }
 .camera-manual__form { padding: 0 14px 14px; }

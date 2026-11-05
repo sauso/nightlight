@@ -9,6 +9,8 @@ import SetupStepShell from '../components/SetupStepShell.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Logo from '../components/Logo.jsx';
 import TailscaleCard from '../components/TailscaleCard.jsx';
+import SetupCaregivers from '../components/SetupCaregivers.jsx';
+import SetupOwnPhoto from '../components/SetupOwnPhoto.jsx';
 
 const STEPS = ['welcome', 'children', 'camera', 'monitor_test', 'caregivers', 'remote', 'review'];
 const terminal = (status) => ['legacy_completed', 'completed_limited', 'completed'].includes(status);
@@ -32,6 +34,8 @@ export default function Setup() {
   const [testing, setTesting] = useState(false);
   // The Tailscale card reports when its secure address is live; only then is the step done (see TailscaleCard `ready`).
   const [remoteReady, setRemoteReady] = useState(false);
+  // How many caregivers the guide's own form has created in this visit; the step's footer says Continue once there is one.
+  const [caregiversAdded, setCaregiversAdded] = useState(0);
   const mounted = useRef(false);
   const stepRef = useRef(step);
   const testRef = useRef(null);
@@ -121,10 +125,6 @@ export default function Setup() {
     await move('monitor_test');
   }
 
-  async function leaveFor(next, route) {
-    if (await move(next)) navigate(route);
-  }
-
   async function startTest() {
     setBusy(true); setError(''); setVerified(false); setTesting(false);
     testRef.current = null;
@@ -196,7 +196,7 @@ export default function Setup() {
       : { label: busy ? 'Adding…' : 'Continue', disabled: !childName.trim(), form: 'setup-child-form' }
     : step === 'camera' && assigned.length ? { label: 'Check picture', disabled: !selectedCamera, onClick: () => move('monitor_test') }
     : step === 'monitor_test' && verified ? { label: 'Continue', onClick: () => move(terminal(setup.status) ? 'review' : 'caregivers') }
-    : step === 'caregivers' ? { label: 'Skip for now', onClick: () => move('remote') }
+    : step === 'caregivers' ? { label: caregiversAdded ? 'Continue' : 'Skip for now', onClick: () => move('remote') }
     : step === 'remote' ? { label: remoteReady ? 'Continue' : 'Maybe later', onClick: () => move('review') }
     : step === 'review' && setup.status === 'completed'
       ? { label: 'Open my monitor', onClick: () => navigate('/') }
@@ -214,6 +214,7 @@ export default function Setup() {
         <Logo size={72} className="setup-welcome-icon" />
         <ul className="setup-checklist"><li>Add your child</li><li>Connect your camera</li><li>Test your monitor</li><li>Invite caregivers (optional)</li><li>Watch from anywhere (optional)</li></ul>
         <p>You can save your progress and finish later.</p>
+        <SetupOwnPhoto />
       </>}
       {step === 'children' && <>
         {kids.length > 0 && <>
@@ -257,8 +258,7 @@ export default function Setup() {
         </>}
       </>}
       {step === 'caregivers' && <>
-        <p>An admin can create caregiver accounts in Settings → Caregivers. Caregivers can view the children and live cameras in this installation.</p>
-        <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => leaveFor('remote', '/settings/users/new')}>Add a caregiver account</button>
+        <SetupCaregivers onAdded={setCaregiversAdded} />
       </>}
       {step === 'remote' && <>
         <TailscaleCard compact onReady={setRemoteReady} />
