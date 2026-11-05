@@ -6,14 +6,17 @@
   --bg-elevated-2: #eae3f8;
   --text-primary: #1d1a3a;
   --text-secondary: #625c7f;
-  --accent: #8995ff;
-  --accent-text: #4b57d6;
+  --accent: #5663d6;
+  --accent-text: #4a55c8;
   --accent-soft: #d3d8ff;
-  /* #8995ff ("peri", owner 2026-11-05) is too light for white text (2.69:1) and for thin lines on light surfaces, so: text ON a peri
-     fill is --on-accent; borders, rings and icons on light surfaces use --accent-line; small text uses --accent-text. The
-     complement (warm gold) is for small highlights only. Measured ratios: docs/design-language.md section 1. */
-  --on-accent: #14142a;
-  --accent-line: #6572ee;
+  /* Peri (owner, 2026-11-06): #5663d6 by day, with WHITE text on it (5.06:1); at night the lighter #8995ff with DARK text (6.71:1).
+     The owner chose both; dark text on #5663d6 would only be 3.57:1, so the two themes need different text colours and that is
+     what --on-accent is for: text ON an accent fill is always --on-accent. Borders, rings and icons use --accent-line; small
+     text uses --accent-text (#4a55c8 clears 4.5:1 on cards, the page AND the #eae3f8 inset, where plain #5663d6 only reaches
+     4.06). The complement (warm gold) is for small highlights only. Measured ratios: docs/design-language.md section 1, and
+     test/paletteTokens.test.jsx recomputes them from this block so a colour change cannot silently break readability. */
+  --on-accent: #ffffff;
+  --accent-line: #5663d6;
   --complement: #f2c14e;
   --on-complement: #14142a;
   --bar: #14142a;
@@ -36,6 +39,8 @@
   --bg-elevated-2: #100f1c;
   --text-primary: #e8e2f7;
   --text-secondary: #bcb3d5;
+  --accent: #8995ff;
+  --on-accent: #14142a;
   --accent-text: #a7b1ff;
   --accent-soft: #c5cbff;
   --accent-line: #8995ff;
