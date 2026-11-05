@@ -3039,4 +3039,8 @@ html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; 
 .avatar-editor { position: relative; display: inline-block; flex: none; border-radius: 50%; cursor: pointer; }
 .avatar-editor__input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border-radius: 50%; }
 .avatar-editor__badge { position: absolute; right: -4px; bottom: -4px; display: flex; align-items: center; justify-content: center; background: var(--bg-elevated); border: 2px solid var(--accent); border-radius: 9px; color: var(--accent-text); pointer-events: none; }
-.avatar-editor:focus-within .avatar-editor__badge { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Owner 2026-11-05: clicking the camera drew a second box around the badge. Cause: the ring was on `:focus-within`, and a click
+   focuses the (invisible) file input. A keyboard user still needs to see where focus is (docs/design-language.md, accessibility
+   floor), so the ring is now only for `:focus-visible` (the browser's own test for "focus arrived by keyboard"; a mouse or touch
+   click does not match it) and goes around the whole avatar, not the badge. */
+.avatar-editor:has(.avatar-editor__input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }

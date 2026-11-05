@@ -12,7 +12,7 @@ import Avatar from './Avatar.jsx';
 //
 // Accessibility: the real <input type="file"> is invisible but covers the whole avatar, so a tap, a click and keyboard focus
 // all land on it, and its aria-label gives it its name ("Add photo" / "Change photo"; the label's own text would be the
-// initials). The focus ring is drawn on the badge.
+// initials). Keyboard focus draws a ring around the whole avatar (index.css); a click or tap draws none.
 export default function AvatarEditor({ name, src, color, size = 88, onChange }) {
   const badge = Math.max(24, Math.round(size * 0.34));
   return (
