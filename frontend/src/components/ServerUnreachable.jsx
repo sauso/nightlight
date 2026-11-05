@@ -1,5 +1,6 @@
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { isTailnetHost } from '../lib/tailnetHost.js';
+import ChangeServerLink from './ChangeServerLink.jsx';
 
 // Shown instead of the sign-in form when startup cannot reach the server (#382). Sign-in is only right
 // when the server ANSWERED and said this device is not signed in (a 401): showing the form to someone
@@ -25,6 +26,7 @@ export default function ServerUnreachable({ onRetry, retrying, hostname = window
         <button className="btn btn-primary" type="button" onClick={onRetry} disabled={retrying}>
           {retrying ? 'Trying…' : 'Try again'}
         </button>
+        <ChangeServerLink />
       </div>
     </div>
   );

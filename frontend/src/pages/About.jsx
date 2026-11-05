@@ -5,6 +5,7 @@ import { api } from '../lib/api.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import useSetupStatus from '../lib/useSetupStatus.js';
 
 const LINKS = [
   { label: 'GitHub — Nightlight', url: 'https://github.com/sauso/nightlight' },
@@ -23,6 +24,7 @@ export default function About() {
   const { settings } = useSettings();
   const { user } = useAuth();
   const [info, setInfo] = useState(null);
+  const setupStatus = useSetupStatus(user?.role === 'admin');
 
   useEffect(() => {
     api.get('/about').then(setInfo).catch(() => setInfo({ version: 'unknown' }));
@@ -83,7 +85,11 @@ export default function About() {
           </div>
         </div>
 
-        {user?.role === 'admin' && <div className="card">
+        {/* Owner 2026-11-05: once setup is complete this row is clutter. Only `completed` hides it: a limited setup still needs
+            the picture check, and an install upgraded from before the guide uses this link for its diagnostics (docs/installation.md).
+            While the status is unknown (loading, or the read failed) the row stays hidden, so a finished install never flashes it.
+            The cost: a completed install has no menu path back to the picture check (the /setup address still works). */}
+        {user?.role === 'admin' && setupStatus && setupStatus !== 'completed' && <div className="card">
           <Link className="list-row about-link" to="/setup">Setup status and picture check</Link>
         </div>}
 

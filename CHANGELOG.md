@@ -32,6 +32,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- About no longer shows **Setup status and picture check** once setup is fully complete. It stays while setup is unfinished, after a limited setup, and on an installation upgraded from before the setup guide.
 - While the setup guide is open, the bottom bar (the side menu on a wide screen) is hidden, so a new admin goes through the guide or chooses Save and exit first. The navigation returns on Save and exit, when setup finishes, or when the guide sends you to another page. The guide also no longer scrolls behind the phone's status bar.
 - The Tailscale card's text now follows one size scale, with the title larger than the headings and address beneath it. Its video button is renamed from "Check it works" to "Test video".
 - When Nightlight can't be reached at its Tailscale address (`.ts.net` or a `100.64.0.0/10` address), the "Can't reach Nightlight" screen suggests checking that Tailscale is switched on instead of the home network. Opened at any other address, the text is unchanged.
@@ -60,6 +61,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- On the Android and iOS apps, the sign-in screen and the "Can't reach Nightlight" screen now have a **Change server** button, so a server you can't sign in to no longer traps you there. A browser shows nothing, as it has no saved server.
+- The Tailscale card's **Copy** button now works when Nightlight is open over plain http on your home network. If the browser refuses to copy, the card says to select the address and copy it yourself.
+- The header is the same height on the Live page and on sub-pages. On a phone it was a few pixels taller on Live.
 - The setup guide's remote access step now says "Continue" once Tailscale is connected and its secure address is on, instead of "Maybe later". Before then, or without Tailscale, it still says "Maybe later".
 - On the Android app, the "Setup is still open" banner no longer sits under the status bar.
 - The "Setup is still open" banner now sits below the page header instead of above it, so the header's status-bar space is no longer left as an empty band under the banner. The setup guide, which has no header, now leaves room for the status bar on a phone and lines up with the sidebar on a wide screen.

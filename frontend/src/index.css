@@ -135,6 +135,10 @@ button {
   justify-content: flex-start;
   gap: 12px;
   width: 100%;
+  /* Owner 2026-11-05: the bar was a few pixels taller on the Live page than on a sub-page. The Live row holds the 36px logo, a
+     sub-page row holds the ~30px back button, and the 60px min-height above only hides that while the status-bar padding is
+     small: on a phone (padding of 8px + the inset) the row decides the height. One fixed row height makes both the same. */
+  min-height: 36px;
 }
 
 .app-header__icon {
@@ -647,6 +651,7 @@ body.in-pip .tile-menu-backdrop {
     padding-bottom: 4px;
   }
   .app-header h1 { font-size: 17px; }
+  .app-header__top-row { min-height: 28px; } /* the slim bar's row: the 28px logo, as 36px is on the full bar */
   .app-header__icon { width: 28px; height: 28px; }
   .app-header__theme { width: 26px; height: 26px; }
   .app-header__theme::after { inset: -9px; }

@@ -46,7 +46,45 @@ function mockStatus(needsSetup) {
   vi.spyOn(api, 'get').mockResolvedValue({ needsSetup });
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); delete window.Capacitor; });
+
+// Owner testing 2026-11-05 (Android): a server whose username you do not know left you stuck here, because "Change server"
+// only lived in Settings. The sign-in screen offers it in the native app (and only there: a browser has no saved server).
+describe('★ Change server on the sign-in screen', () => {
+  const native = () => {
+    const ServerConfig = { clear: vi.fn().mockResolvedValue(), restart: vi.fn().mockResolvedValue() };
+    window.Capacitor = { isNativePlatform: () => true, Plugins: { ServerConfig } };
+    return ServerConfig;
+  };
+
+  test('in the native app the button is there on sign-in and on first-run setup, and forgets the server', async () => {
+    const ServerConfig = native();
+    mockStatus(false);
+    const first = mount();
+    await first.user.click(await screen.findByRole('button', { name: 'Change server' }));
+    await waitFor(() => expect(ServerConfig.restart).toHaveBeenCalled());
+    expect(ServerConfig.clear).toHaveBeenCalled();
+    first.unmount();
+    mockStatus(true);
+    mount();
+    expect(await screen.findByRole('button', { name: 'Change server' })).toBeTruthy();
+  });
+
+  test('in a browser there is no Change server button', async () => {
+    mockStatus(false);
+    mount();
+    await screen.findByRole('button', { name: 'Sign in' });
+    expect(screen.queryByRole('button', { name: 'Change server' })).toBeNull();
+  });
+
+  test('the "Can\'t reach" screen offers it too, in the native app', async () => {
+    native();
+    vi.spyOn(api, 'get').mockRejectedValue(new Error('offline'));
+    mount();
+    await screen.findByText(/Can't reach Nightlight/);
+    expect(screen.getByRole('button', { name: 'Change server' })).toBeTruthy();
+  });
+});
 
 describe('which of the three screens is shown', () => {
   test('★ nothing at all until the server says whether setup is needed', async () => {

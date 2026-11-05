@@ -5,6 +5,7 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { useAutoRetry } from '../lib/useAutoRetry.js';
 import ServerUnreachable from '../components/ServerUnreachable.jsx';
+import ChangeServerLink from '../components/ChangeServerLink.jsx';
 
 export default function Login() {
   const [needsSetup, setNeedsSetup] = useState(null);
@@ -268,6 +269,7 @@ export default function Login() {
           </button>
         </form>
         )}
+        <ChangeServerLink />
       </div>
     </div>
   );
