@@ -350,6 +350,17 @@ purpose: the ntfy **topic** (the page itself calls it the only thing keeping a p
 credentials in it (`https://user:pass@host`) are never kept, whatever the field is called, because the
 credential-name check reads field names only. A screen that restores must say which of its fields are not kept.
 
+### Avatar editor (`components/AvatarEditor.jsx`)
+
+Where someone changes a photo (the child's settings, your own Account) the avatar is the control: the round photo, or the
+initials on their colour, with a small camera badge at its bottom-right, and a tap opens the file picker. The badge is a
+rounded square in the card colour with a brand-violet border and a 16px-scale camera icon (`Camera`, sized from the avatar);
+it is decoration (`aria-hidden`), and the invisible file input that covers the avatar carries the name "Add photo" / "Change photo".
+The component is only the picker: resizing, saving, the Saving / Saved text and the Remove button stay with the page, since a
+child's photo and your own go to different endpoints and a new child holds its photo until its first save. Avatars that are only
+shown (lists, headers, the Settings row) stay the plain `Avatar` with no badge. The caregiver edit page (`UserSettings`) has not
+been converted yet.
+
 ### Badges, chips, status
 
 - A protected clip uses a quiet lock badge with the accessible name **Protected** in list metadata.
