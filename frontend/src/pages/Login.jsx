@@ -6,6 +6,7 @@ import { useSettings } from '../lib/SettingsContext.jsx';
 import { useAutoRetry } from '../lib/useAutoRetry.js';
 import ServerUnreachable from '../components/ServerUnreachable.jsx';
 import ChangeServerLink from '../components/ChangeServerLink.jsx';
+import Logo from '../components/Logo.jsx';
 
 export default function Login() {
   const [needsSetup, setNeedsSetup] = useState(null);
@@ -163,7 +164,7 @@ export default function Login() {
     return (
       <div className="auth-screen">
         <div className="auth-card">
-          <img src="/icons/icon-192.png" alt="" className="auth-icon" />
+          <Logo size={84} glow className="auth-icon" />
           <h1>{settings.app_name}</h1>
           <p className="tagline">
             {busy ? 'Opening the read-only demo…' : 'The read-only demo could not be opened.'}
@@ -182,7 +183,7 @@ export default function Login() {
   return (
     <div className="auth-screen">
       <div className="auth-card">
-        <img src="/icons/icon-192.png" alt="" className="auth-icon" />
+        <Logo size={84} glow className="auth-icon" />
         <h1>{settings.app_name}</h1>
         <p className="tagline">
           {mfaToken

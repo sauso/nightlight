@@ -9,13 +9,12 @@ import {
 // App icon shown as the lock-screen / Now Playing artwork (same-origin URLs the OS fetches).
 // Without any artwork, iOS shows a blank tile; without metadata at all it falls back to just
 // the app name.
-// Dedicated Now Playing tile (icons/now-playing-512.png): the app icon's night scene cropped to
-// fill the whole square edge-to-edge - no border/corners at any size (the app icon is a rounded
-// square, so anything short of a full-bleed crop shows its navy corners when enlarged on the lock
-// screen). The ?v= is a cache-buster: this URL is otherwise stable, so the WebView / iOS artwork
+// Dedicated Now Playing tile (icons/now-playing-512.png): the logo on its #14142a ground filling
+// the whole square edge-to-edge - no border/corners at any size (anything short of a full-bleed
+// square shows corners when enlarged on the lock screen). Re-made from the owner's SVG logo on 2026-11-05. The ?v= is a cache-buster: this URL is otherwise stable, so the WebView / iOS artwork
 // cache keeps serving an old image after we change the file. BUMP THIS whenever the file changes.
 export const NOW_PLAYING_ARTWORK = [
-  { src: '/icons/now-playing-512.png?v=4', sizes: '512x512', type: 'image/png' },
+  { src: '/icons/now-playing-512.png?v=5', sizes: '512x512', type: 'image/png' },
 ];
 
 // Own the system media session (Now Playing / lock screen) while this camera is the active

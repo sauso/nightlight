@@ -20,8 +20,10 @@ with Image.open(SOURCE) as original:
     ]:
         logo.resize((size, size), Image.Resampling.LANCZOS).save(OUTPUT / filename, optimize=True)
 
-    # The 32px tab icon spends its pixels on the moon and baby, not the outer margin.
-    logo.crop((70, 115, 955, 945)).resize((32, 32), Image.Resampling.LANCZOS).save(
+    # The 32px tab icon spends its pixels on the moon and baby, not the outer margin. A SQUARE crop (the old one was not,
+    # which stretched the picture a little): the logo's content spans about x 155-894, y 164-854 of the 1024px source
+    # (the owner's SVG, 2026-11-05), so this takes a 810px square around its centre.
+    logo.crop((120, 105, 930, 915)).resize((32, 32), Image.Resampling.LANCZOS).save(
         OUTPUT / "favicon-32.png", optimize=True
     )
 

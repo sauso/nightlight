@@ -1,3 +1,5 @@
+import Logo from './Logo.jsx';
+
 const STEPS = ['children', 'camera', 'monitor_test', 'caregivers', 'remote', 'review'];
 const TITLES = {
   welcome: 'Welcome to Nightlight',
@@ -25,7 +27,7 @@ export default function SetupStepShell({ step, error, busy, onBack, onExit, onRe
       <div className="card setup-card">
         {!terminal && <>
           <div className="setup-head">
-            <div className="setup-wordmark"><img src="/icons/icon-192.png" alt="" />Nightlight</div>
+            <div className="setup-wordmark"><Logo size={32} />Nightlight</div>
             {step !== 'welcome' && step !== 'review' && <span aria-label={`Step ${position} of 6`}>Step {position} of 6</span>}
           </div>
           {step !== 'welcome' && step !== 'review' && <div className="setup-progress" role="progressbar" aria-label={`Step ${position} of 6`} aria-valuenow={position} aria-valuemin={1} aria-valuemax={6}>

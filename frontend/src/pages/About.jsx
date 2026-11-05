@@ -5,6 +5,7 @@ import { api } from '../lib/api.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import Logo from '../components/Logo.jsx';
 import useSetupStatus from '../lib/useSetupStatus.js';
 
 const LINKS = [
@@ -60,7 +61,7 @@ export default function About() {
           </div>
         )}
         <div className="card about-hero">
-          <img src="/icons/icon-192.png" alt="" className="about-hero__icon" />
+          <Logo size={64} glow className="about-hero__icon" />
           <div>
             <div className="about-hero__name">{settings.app_name}</div>
             <div className="camera-tile__sub">
