@@ -2998,12 +2998,25 @@ input[type='range'] {
 .setup-summary { display: grid; gap: 10px; }
 .setup-summary div { display: flex; justify-content: space-between; gap: 10px; padding: 12px; background: var(--bg-elevated-2); border-radius: 10px; }
 .setup-main--terminal { width: 100%; }
-/* Owner testing 2026-11-05 (Android app): the banner renders ABOVE the page header, outside the header's own
-   env(safe-area-inset-top) padding, so it sat under the status bar. It now carries the inset itself. The header keeps its
-   own inset on purpose: it is sticky, so once the banner scrolls away the header must still clear the status bar. The cost is
-   a header-coloured band of inset height under the banner while unscrolled. */
+/* Owner testing 2026-11-05 (Android app), two rounds. The banner is rendered by SetupGate ABOVE the page's header, so:
+   1. it sat under the status bar (the header's env(safe-area-inset-top) padding does not cover it), and
+   2. when #984 gave the banner its own inset the header still added ITS inset too: an empty band the height of the
+      status bar between banner and title (owner's phone screenshot).
+   The banner, the header and the page's main are all direct children of the .app-shell flex column, so the header is moved
+   FIRST with `order` (sticky is unaffected). The banner, still first among the order-0 items, then sits under the header and
+   before the content, and the header covers the status bar once. The banner keeps its own inset only on a page whose header is
+   not a direct child of .app-shell (the :has() test) and on a WebView too old for :has(): there it looks as it did in #984,
+   never worse. */
+.app-shell > .app-header { order: -1; }
 .setup-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: calc(10px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-left)) 10px; background: var(--bg-elevated-2); color: var(--text-primary); border-bottom: 1px solid var(--border); }
+.app-shell:has(> .app-header) > .setup-banner { padding-top: 10px; }
 .setup-banner .btn { width: auto; min-height: 44px; }
+/* The in-progress wizard has no AppHeader (a focused card with its own wordmark; owner's choice, 2026-11-05), so the space the
+   header normally takes is reserved here instead. Phone/tablet: clear the status bar. Desktop (>= 1200px, where the sidebar
+   rail starts 72px down to clear the 60px header): the 76px other pages' content starts at, so the card lines up with the
+   rail. The finished-setup view (--terminal) renders the real header and needs neither. */
+.setup-main:not(.setup-main--terminal) { padding-top: calc(16px + env(safe-area-inset-top, 0px)); }
+@media (min-width: 1200px) { .setup-main:not(.setup-main--terminal) { padding-top: 76px; } }
 .setup-player { max-width: 520px; margin-block: 16px; }
 @media (max-width: 600px) { .setup-banner { flex-wrap: wrap; } }
 .esphome-dates .field { flex: 1 1 140px; min-width: 0; }

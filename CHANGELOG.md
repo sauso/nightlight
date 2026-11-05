@@ -61,6 +61,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 - The setup guide's remote access step now says "Continue" once Tailscale is connected and its secure address is on, instead of "Maybe later". Before then, or without Tailscale, it still says "Maybe later".
 - On the Android app, the "Setup is still open" banner no longer sits under the status bar.
+- The "Setup is still open" banner now sits below the page header instead of above it, so the header's status-bar space is no longer left as an empty band under the banner. The setup guide, which has no header, now leaves room for the status bar on a phone and lines up with the sidebar on a wide screen.
 
 - #932 Protected clips with missing video files can be unprotected and removed. The clip player shows Delete when its caller offers it, and Sleep Detail keeps protection badges in step with changes.
 
