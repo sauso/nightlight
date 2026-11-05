@@ -22,7 +22,7 @@ export default function Avatar({ name, src, color, size = 40 }) {
         alignItems: 'center',
         justifyContent: 'center',
         background: color || 'var(--accent)',
-        color: '#fff',
+        color: color ? '#fff' : 'var(--on-accent)',
         fontWeight: 700,
         fontSize: Math.round(size * 0.4),
       }}

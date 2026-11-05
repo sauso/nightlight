@@ -17,10 +17,23 @@ the deployed frontend live rather than bundling it). There is no separate native
 
 ## 1. Brand colour
 
-One violet, `#7C5CD6`, identifies actions and navigation. Use `--accent` for filled
-buttons, active tabs, switches, sliders, focus rings and icons. Text on a violet
-button is white. Small linked text uses `--accent-text`: a deeper violet by day and
-a lighter tint at night. The header uses the same navy in both themes.
+One periwinkle ("peri"), `#8995FF`, identifies actions and navigation (the owner's choice, 2026-11-05; it was a
+violet, `#7C5CD6`, before, and it is the same colour as the logo's crescent). Peri is a LIGHT colour, which sets
+the rules:
+
+- `--accent` is for **fills**: buttons, the active segment, switches' tracks, selected chips. Text **on** a peri fill is
+  `--on-accent` (the header navy, `#14142A`), never white: white on peri is 2.69:1, below WCAG's 4.5:1.
+- **Lines, rings and icons on a light surface** use `--accent-line`, not `--accent`: focus rings, selected borders, row
+  icons, chevrons. Plain peri on white is also 2.69:1, below the 3:1 non-text target. At night they are the same peri.
+- **Small text** (links, "Saved ✓") uses `--accent-text`: a deeper periwinkle by day, a lighter tint at night.
+- The header uses the same navy in both themes.
+- The **complement** (`--complement`, a warm gold; peri's opposite) is for small highlights only: the current step in
+  the setup progress bar, the "Recommended" badge (`status-badge--highlight`, dark text on gold) and the border of the
+  avatar's camera badge. Not buttons, tabs or links. The gold border is decoration (1.68:1 on white): the badge's
+  own fill and its icon carry the meaning.
+
+The page and card surfaces (`--bg`, `--bg-elevated-2`, `--border`, `--field-bg`) keep their original lavender tint;
+re-toning them towards blue is a separate decision.
 
 ---
 
@@ -43,9 +56,13 @@ These are the owner's approximate day/night palette, grouped at the top of
 | `--bg-elevated-2` | `#EAE3F8` | `#100F1C` | Insets |
 | `--text-primary` | `#1D1A3A` | `#E8E2F7` | Main text |
 | `--text-secondary` | `#625C7F` | `#BCB3D5` | Supporting text |
-| `--accent` | `#7C5CD6` | `#7C5CD6` | Brand actions |
-| `--accent-text` | `#5F3DB7` | `#BCA8F3` | Small linked text |
-| `--accent-soft` | `#D9CDF4` | `#CBBCF0` | Header controls and subtle accents |
+| `--accent` | `#8995FF` | `#8995FF` | Fills: buttons, active segments, selected chips |
+| `--on-accent` | `#14142A` | `#14142A` | Text on an `--accent` fill |
+| `--accent-line` | `#6572EE` | `#8995FF` | Focus rings, selected borders, icons and chevrons on light surfaces |
+| `--accent-text` | `#4B57D6` | `#A7B1FF` | Small linked text |
+| `--accent-soft` | `#D3D8FF` | `#C5CBFF` | Header controls and subtle accents |
+| `--complement` | `#F2C14E` | `#F6D365` | Small highlights only (see section 1) |
+| `--on-complement` | `#14142A` | `#14142A` | Text on a `--complement` fill |
 | `--bar` | `#14142A` | `#14142A` | Header |
 | `--bar-text` | `#E8E2F7` | `#E8E2F7` | Header title |
 | `--live` | `#23734F` | `#8BDBAD` | Live status |
@@ -53,10 +70,14 @@ These are the owner's approximate day/night palette, grouped at the top of
 | `--border` | `#DDD5EE` | `#383450` | Borders |
 | `--field-bg` | `#EAE3F8` | `#100F1C` | Inputs |
 
-The night `--accent-text` has 7.55:1 contrast on cards and 8.63:1 on the
-page. Night live and offline text have 9.65:1 and 8.04:1 on cards; by day
-they have 5.77:1 and 5.92:1 on white cards. White on the brand button is
-4.82:1. These clear WCAG's 4.5:1 normal-text target.
+Measured with the WCAG formula (2026-11-05): `--on-accent` on `--accent` is 6.71:1, in both themes. White on it
+would be 2.69:1, which is why it is not used. By day `--accent-text` is 5.78:1 on white cards, 5.32:1 on the page and
+4.64:1 on inset fields; at night `#A7B1FF` is 7.81:1 on cards, 8.92:1 on the page and 9.37:1 on insets.
+`--accent-line` is 4.04:1 on white and 3.72:1 on the page by day (3:1 is the non-text target), and 5.87:1 on night
+cards. `--on-complement` on `--complement` is 10.76:1 by day and 12.40:1 at night. Night live and offline text have
+9.65:1 and 8.04:1 on cards; by day they have 5.77:1 and 5.92:1 on white cards. These clear WCAG's 4.5:1 normal-text target.
+A new accent use must pick its token by what it is (fill, text on a fill, line, small text), and
+`test/paletteTokens.test.jsx` fails if white text lands on an `--accent` fill or a focus ring uses plain `--accent`.
 
 Sleep-timeline tokens (`--sleep-*`) are categorical data colours. Keep them
 separate from branding.
@@ -307,7 +328,7 @@ by default** (mobile-first: buttons are full-width unless constrained).
 `:disabled` → `opacity: 0.55`. `.icon-btn` is the bare icon button: no background/border,
 `--text-secondary`, `padding: 6px 8px`; `.icon-btn--danger` recolours to `--offline`.
 
-`.btn-primary` uses white text on the fixed violet accent (4.82:1 contrast).
+`.btn-primary` uses navy text (`--on-accent`) on the peri accent (6.71:1 contrast); white would be 2.69:1.
 
 ### Fields
 Label 12px `--text-secondary`, 6px below. Input: full width, `--field-bg`, 1px `--border`, radius
@@ -361,7 +382,7 @@ credential-name check reads field names only. A screen that restores must say wh
 
 Where someone changes a photo (the child's settings, your own Account, an admin editing a caregiver) the avatar is the control: the round photo, or the
 initials on their colour, with a small camera badge at its bottom-right, and a tap opens the file picker. The badge is a
-rounded square in the card colour with a brand-violet border and a 16px-scale camera icon (`Camera`, sized from the avatar);
+rounded square in the card colour with a complement (gold) border and a 16px-scale camera icon (`Camera`, sized from the avatar);
 it is decoration (`aria-hidden`), and the invisible file input that covers the avatar carries the name "Add photo" / "Change photo".
 The component is only the picker: resizing, saving, the Saving / Saved text and the Remove button stay with the page, since a
 child's photo and your own go to different endpoints and a new child holds its photo until its first save. Avatars that are only

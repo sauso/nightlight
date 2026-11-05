@@ -194,8 +194,8 @@ export default function TailscaleCard({ compact = false, publicHostSet = false, 
   }
 
   return <section ref={region} className={compact ? 'tailscale-card tailscale-card--compact' : 'card tailscale-card'} aria-label="Watch from anywhere">
-    {!compact && <div className="tailscale-card__heading"><h2 className="card-title">Watch from anywhere</h2><span className="status-badge status-badge--ok">Recommended</span></div>}
-    {compact && <span className="status-badge status-badge--ok">Recommended</span>}
+    {!compact && <div className="tailscale-card__heading"><h2 className="card-title">Watch from anywhere</h2><span className="status-badge status-badge--highlight">Recommended</span></div>}
+    {compact && <span className="status-badge status-badge--highlight">Recommended</span>}
     {error && view && !confirm && <div className="error-banner" role="alert">{error} {button('Retry', load, false)}</div>}
     {content}
     {view && <details className="tailscale-advanced"><summary>Advanced</summary>

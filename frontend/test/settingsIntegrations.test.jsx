@@ -92,7 +92,7 @@ describe('Integrations hub: the ESPHome row (#506)', () => {
     // The house icon (a mask, so the "E" is cut out), in the same colour as the other rows' icons.
     const icon = screen.getByText('ESPHome').closest('.list-row').querySelector('svg mask');
     expect(icon).not.toBeNull();
-    expect(screen.getByText('ESPHome').closest('.list-row').querySelector('svg path[fill="var(--accent)"]')).not.toBeNull();
+    expect(screen.getByText('ESPHome').closest('.list-row').querySelector('svg path[fill="var(--accent-line)"]')).not.toBeNull();
     await user.click(screen.getByText('ESPHome'));
     expect(await screen.findByText('at /settings/integrations/esphome')).toBeInTheDocument();
   });

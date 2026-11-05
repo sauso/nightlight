@@ -11,7 +11,7 @@ export default function UnsavedNotice({ restored = false, note = '', onDiscard }
     <div role="status" className="camera-tile__sub"
       style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '0 0 14px', color: 'var(--text-primary)' }}>
       <span style={{ flex: 1, minWidth: 180 }}>
-        <span aria-hidden="true" style={{ color: 'var(--accent)' }}>● </span>
+        <span aria-hidden="true" style={{ color: 'var(--accent-line)' }}>● </span>
         <strong>{restored ? 'Unsaved changes restored.' : 'Unsaved changes.'}</strong>{' '}
         They are kept on this device only until you press Save.
         {note ? <> {note}</> : null}

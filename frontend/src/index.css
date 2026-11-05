@@ -6,9 +6,16 @@
   --bg-elevated-2: #eae3f8;
   --text-primary: #1d1a3a;
   --text-secondary: #625c7f;
-  --accent: #7c5cd6;
-  --accent-text: #5f3db7;
-  --accent-soft: #d9cdf4;
+  --accent: #8995ff;
+  --accent-text: #4b57d6;
+  --accent-soft: #d3d8ff;
+  /* #8995ff ("peri", owner 2026-11-05) is too light for white text (2.69:1) and for thin lines on light surfaces, so: text ON a peri
+     fill is --on-accent; borders, rings and icons on light surfaces use --accent-line; small text uses --accent-text. The
+     complement (warm gold) is for small highlights only. Measured ratios: docs/design-language.md section 1. */
+  --on-accent: #14142a;
+  --accent-line: #6572ee;
+  --complement: #f2c14e;
+  --on-complement: #14142a;
   --bar: #14142a;
   --bar-text: #e8e2f7;
   --live: #23734f;
@@ -29,8 +36,10 @@
   --bg-elevated-2: #100f1c;
   --text-primary: #e8e2f7;
   --text-secondary: #bcb3d5;
-  --accent-text: #bca8f3;
-  --accent-soft: #cbbcf0;
+  --accent-text: #a7b1ff;
+  --accent-soft: #c5cbff;
+  --accent-line: #8995ff;
+  --complement: #f6d365;
   --live: #8bdbad;
   --offline: #f4a3ad;
   --border: #383450;
@@ -284,7 +293,7 @@ body.in-pip .tile-menu-backdrop {
 }
 
 .ptr-indicator__icon {
-  color: var(--accent);
+  color: var(--accent-line);
   flex-shrink: 0;
 }
 
@@ -324,7 +333,7 @@ body.in-pip .tile-menu-backdrop {
 .install-banner__btn {
   flex-shrink: 0;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border: none;
   border-radius: 8px;
   padding: 7px 14px;
@@ -547,7 +556,7 @@ body.in-pip .tile-menu-backdrop {
 
 .breathing--connecting .breathing__core { background: var(--accent); }
 .breathing--connecting .breathing__ring {
-  border-color: var(--accent);
+  border-color: var(--accent-line);
   animation: breathe 1.4s ease-in-out infinite;
 }
 
@@ -600,7 +609,7 @@ body.in-pip .tile-menu-backdrop {
 .tailscale-qr figcaption { margin-top: 8px; color: var(--text-secondary); }
 .tailscale-advanced, .remote-advanced { margin-top: 18px; }
 .tailscale-advanced summary, .remote-advanced summary { cursor: pointer; padding: 10px 0; font-weight: 600; }
-.tailscale-advanced summary:focus-visible, .remote-advanced summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tailscale-advanced summary:focus-visible, .remote-advanced summary:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .tailscale-advanced > .btn, .tailscale-advanced form { margin-top: 12px; }
 .tailscale-card--compact { border-top: 1px solid var(--border); padding-top: 16px; }
 
@@ -1132,7 +1141,7 @@ body.in-pip .tile-menu-backdrop {
 }
 .ptz-arrow:active {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent);
 }
 
 /* Background-listening keeps a distinct accent tint over the white, so it's clear at a
@@ -1190,6 +1199,9 @@ body.in-pip .tile-menu-backdrop {
   color: #fff;
 }
 .status-badge--ok { background: var(--live); }
+/* "Recommended" (the Tailscale card): the complement colour, as a small highlight rather than a status (owner, 2026-11-05).
+   Dark text, like any text on a light fill: --on-complement on --complement is 10.8:1 by day and 12.4:1 at night. */
+.status-badge--highlight { background: var(--complement); color: var(--on-complement); }
 .status-badge--bad { background: var(--offline); }
 .status-badge--off { background: var(--text-secondary); }
 .status-badge--sm { padding: 2px 8px; font-size: 11px; }
@@ -1342,7 +1354,7 @@ body.in-pip .tile-menu-backdrop {
 .sleep-refined__item b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
 .sleep-refined__old { text-decoration: line-through; opacity: 0.55; margin-right: 5px; font-variant-numeric: tabular-nums; }
 .sleep-refined__note { flex-basis: 100%; font-size: 11px; color: var(--text-secondary); opacity: 0.8; margin-top: 2px; }
-.sleep-tl__now { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 2px dashed var(--accent); transform: translateX(-1px); }
+.sleep-tl__now { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 2px dashed var(--accent-line); transform: translateX(-1px); }
 /* Hover bubble over the timeline: a follow-the-cursor tooltip with the time, sleep status, and (if a
    sensor was present) the temperature at that moment. The wrap is the mouse/touch target; it must NOT
    clip (unlike the bar, which hides its segment corners). */
@@ -1361,7 +1373,7 @@ body.in-pip .tile-menu-backdrop {
 .sleep-tl__tip-time { font-size: 12.5px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .sleep-tl__tip-status { font-size: 11.5px; color: var(--text-secondary); text-transform: capitalize; }
 .sleep-tl__tip-temp { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--sleep-temp); font-variant-numeric: tabular-nums; }
-.sleep-live-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: #fff; background: var(--accent); vertical-align: 2px; }
+.sleep-live-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--on-accent); background: var(--accent); vertical-align: 2px; }
 .sleep-tl__axis { position: relative; height: 16px; margin-top: 4px; }
 .sleep-tl__tick { position: absolute; top: 0; width: 1px; height: 4px; background: var(--border); transform: translateX(-0.5px); }
 .sleep-tl__tick-label { position: absolute; top: 5px; left: 0; transform: translateX(-50%); font-size: 10px; color: var(--text-secondary); white-space: nowrap; }
@@ -1381,7 +1393,7 @@ body.in-pip .tile-menu-backdrop {
 /* The head is a <button> when the wake has correlated alerts — strip the native chrome so it reads as
    a row, and give it a full-width tap target + a visible focus ring for keyboard users. */
 button.sleep-wakes__head { width: 100%; padding: 0; border: none; background: none; cursor: pointer; text-align: left; font: inherit; color: inherit; border-radius: 8px; }
-button.sleep-wakes__head:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+button.sleep-wakes__head:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 3px; }
 .sleep-wakes__time { font-size: 14px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .sleep-wakes__headright { display: inline-flex; align-items: center; gap: 8px; flex: none; }
 .sleep-wakes__dur { font-size: 13px; color: var(--sleep-wake); font-weight: 600; }
@@ -1393,7 +1405,7 @@ button.sleep-wakes__head:focus-visible { outline: 2px solid var(--accent); outli
 .sleep-wakes__alert { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary); }
 .sleep-wakes__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: default; line-height: 0; }
 button.sleep-wakes__thumbwrap { cursor: pointer; border-radius: 8px; }
-button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .sleep-wakes__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, #23264d, #14162f); }
 .sleep-wakes__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
 .sleep-wakes__play { position: absolute; inset: 0; margin: auto; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(10, 13, 28, 0.62); color: #fff; }
@@ -1415,7 +1427,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent); 
 
 /* Temperature ↔ sleep insight card (Phase 5) */
 .sleep-insight__title { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 10px; }
-.sleep-insight__title svg { color: var(--accent); }
+.sleep-insight__title svg { color: var(--accent-line); }
 .sleep-insight__headline { font-size: 15px; font-weight: 600; color: var(--text-primary); line-height: 1.35; margin-bottom: 12px; text-wrap: balance; }
 .sleep-insight__body { font-size: 13px; color: var(--text-secondary); line-height: 1.45; }
 .sleep-insight__cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -1472,11 +1484,11 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent); 
 .child-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; cursor: pointer; font: inherit; border: 1px solid var(--border); color: var(--text-primary); background: var(--bg-elevated); border-radius: 18px; padding: 15px 16px; margin-bottom: 12px; box-shadow: 0 10px 26px -22px rgba(30, 30, 70, 0.35); transition: transform 0.12s ease, box-shadow 0.12s ease; }
 .child-card:hover { transform: translateY(-1px); box-shadow: 0 14px 32px -22px rgba(30, 30, 70, 0.45); }
 .child-card:active { transform: translateY(0); }
-.child-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.child-card:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .child-card__id { flex: 1; min-width: 0; }
 .child-card__name { display: block; font-family: var(--font-display); font-size: 20px; font-weight: 800; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .child-card__meta { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); margin-top: 4px; }
-.child-card__chev { color: var(--accent); opacity: 0.6; flex-shrink: 0; }
+.child-card__chev { color: var(--accent-line); opacity: 0.6; flex-shrink: 0; }
 
 :root[data-theme='dark'] .child-card { border-color: var(--border); color: var(--text-primary); background: var(--bg-elevated); box-shadow: 0 14px 34px -24px rgba(0, 0, 0, 0.8); }
 :root[data-theme='dark'] .child-card:hover { box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.9); }
@@ -1496,20 +1508,20 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent); 
 @keyframes recpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
 @media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
 .alert-item__meta { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; }
-.alert-item__ico { color: var(--accent); flex-shrink: 0; }
+.alert-item__ico { color: var(--accent-line); flex-shrink: 0; }
 .alert-item__time { font-size: 12px; color: var(--text-secondary); flex-shrink: 0; white-space: nowrap; }
 /* Thumbnail wrapper carries the play/recording overlay. As a <button> (clip ready) it's a bare,
    tappable frame. */
 .alert-item__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: default; line-height: 0; }
 button.alert-item__thumbwrap { cursor: pointer; border-radius: 9px; }
-button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .alert-item__play {
   position: absolute; inset: 0; margin: auto; width: 26px; height: 26px;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%; background: rgba(10, 13, 28, 0.62); color: #fff;
 }
 .alert-item__play--pending { background: rgba(10, 13, 28, 0.5); color: var(--accent-soft); }
-.alert-item__clipflag { color: var(--accent); }
+.alert-item__clipflag { color: var(--accent-line); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 /* Modal clip player */
@@ -1558,11 +1570,11 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent); o
 .clip-cal__day.has-clips { color: var(--text-primary); font-weight: 600; cursor: pointer; }
 .clip-cal__day.has-clips::after {
   content: ''; position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
-  width: 4px; height: 4px; border-radius: 50%; background: var(--accent);
+  width: 4px; height: 4px; border-radius: 50%; background: var(--accent-line);
 }
 .clip-cal__day.has-clips:hover { background: var(--bg-elevated-2); }
-.clip-cal__day.is-sel { background: var(--accent); color: #fff; }
-.clip-cal__day.is-sel::after { background: #fff; }
+.clip-cal__day.is-sel { background: var(--accent); color: var(--on-accent); }
+.clip-cal__day.is-sel::after { background: var(--on-accent); }
 .clip-cal__foot { display: flex; gap: 8px; margin-top: 10px; }
 .clip-cal__all, .clip-cal__done {
   flex: 1; padding: 8px; border-radius: 9px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
@@ -1570,7 +1582,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent); o
 .clip-cal__all { border: 1px solid var(--border); background: none; color: var(--accent-text); }
 .clip-cal__all:hover:not(:disabled) { background: var(--bg-elevated-2); }
 .clip-cal__all:disabled { opacity: 0.4; cursor: default; }
-.clip-cal__done { border: none; background: var(--accent); color: #fff; }
+.clip-cal__done { border: none; background: var(--accent); color: var(--on-accent); }
 .clip-selectall { background: none; border: none; color: var(--accent-text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 2px 4px; margin: 0 0 8px 2px; }
 .clip-row { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
 .clip-row:last-child { border-bottom: none; }
@@ -1578,7 +1590,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent); o
 .clip-row__check { display: inline-flex; flex-shrink: 0; }
 .clip-row__check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .clip-row__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: pointer; line-height: 0; border-radius: 8px; }
-.clip-row__thumbwrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.clip-row__thumbwrap:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .clip-row__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; background: linear-gradient(135deg, #23264d, #14162f); }
 .clip-row__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
 .clip-row__body { flex: 1; min-width: 0; cursor: pointer; }
@@ -1892,7 +1904,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent); o
 }
 
 .field input:focus, .field select:focus, button:focus-visible, a:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-line);
   outline-offset: 2px;
 }
 
@@ -1912,7 +1924,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent); o
 
 .btn-primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .btn-secondary {
@@ -1925,7 +1937,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent); o
    that still need to read clearly in light mode, e.g. the ONVIF fetch / verify buttons. */
 .btn-peri {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 /* Disabled buttons read as greyed-out and unclickable (e.g. while a diagnostics bundle builds). */
@@ -1987,7 +1999,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent); o
 }
 
 .unit-btn--active {
-  border-color: var(--accent);
+  border-color: var(--accent-line);
   color: var(--text-primary);
 }
 
@@ -2222,7 +2234,7 @@ input[type='range'] {
 
 .segmented__btn--active {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 600;
 }
 
@@ -2251,13 +2263,13 @@ input[type='range'] {
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .detect-toggle:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--accent-line);
   color: var(--text-primary);
 }
 .detect-toggle--on {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 600;
 }
 .detect-toggle:disabled {
@@ -2275,7 +2287,7 @@ input[type='range'] {
   justify-content: center;
 }
 .silence-btn--muted {
-  border-color: var(--accent);
+  border-color: var(--accent-line);
   color: var(--accent-text);
 }
 .silence-menu {
@@ -2366,7 +2378,7 @@ input[type='range'] {
   color: var(--text-secondary);
 }
 .timelapse-strip__item--active {
-  border-color: var(--accent);
+  border-color: var(--accent-line);
   color: var(--text-primary);
 }
 .timelapse-strip__item img {
@@ -2436,7 +2448,7 @@ input[type='range'] {
 }
 
 .switch input:focus-visible ~ .switch__track {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-line);
   outline-offset: 2px;
 }
 
@@ -2475,7 +2487,7 @@ input[type='range'] {
 .log-chip--active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .log-viewer__filter-row {
@@ -2496,7 +2508,7 @@ input[type='range'] {
 }
 
 .log-viewer__filter:focus {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-line);
   outline-offset: 2px;
 }
 
@@ -2671,7 +2683,7 @@ input[type='range'] {
   align-items: center;
   gap: 12px;
   background: var(--bg-elevated-2);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--accent-line);
   border-radius: 14px;
   padding: 12px 14px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
@@ -2731,7 +2743,7 @@ input[type='range'] {
   border: 2px solid transparent; border-radius: 8px; overflow: hidden;
   background: var(--bg-elevated-2); color: var(--text-secondary); cursor: pointer;
 }
-.rec-strip__item:hover { border-color: var(--accent); color: var(--text-primary); }
+.rec-strip__item:hover { border-color: var(--accent-line); color: var(--text-primary); }
 .rec-strip__item img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
 .rec-strip__item span:last-child { display: block; padding: 5px 6px; font-size: 11px; line-height: 1.25; }
 /* A recording that couldn't be saved (issue #276). It has no thumbnail to show, so the tile keeps the
@@ -2865,11 +2877,11 @@ input[type='range'] {
 .review-card__icon {
   flex-shrink: 0; width: 34px; height: 34px; border-radius: 10px;
   display: inline-flex; align-items: center; justify-content: center;
-  color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent-line); background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .review-card__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.review-card__go { color: var(--accent); font-size: 20px; padding-right: 12px; }
+.review-card__go { color: var(--accent-line); font-size: 20px; padding-right: 12px; }
 
 .review-card__dismiss {
   order: 2; align-self: flex-start; flex-shrink: 0;
@@ -2946,7 +2958,7 @@ input[type='range'] {
 .setup-progress { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 24px 0; }
 .setup-progress span { height: 7px; border-radius: 99px; background: var(--border); }
 .setup-progress .is-complete { background: var(--accent); }
-.setup-progress .is-current { background: var(--accent-soft); }
+.setup-progress .is-current { background: var(--complement); }
 .setup-intro { text-align: center; margin: 22px 0 28px; }
 .setup-intro h1 { margin: 0 0 6px; font: 800 clamp(24px, 5vw, 32px) var(--font-display); }
 .setup-intro p { margin: 0; color: var(--text-secondary); }
@@ -2981,7 +2993,7 @@ input[type='range'] {
   background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px;
   color: var(--text-primary); font: inherit; text-align: left; cursor: pointer;
 }
-.camera-card.is-selected { border-color: var(--accent); }
+.camera-card.is-selected { border-color: var(--accent-line); }
 /* An already-saved camera: greyed and not tappable. It is still listed so it does not look like a missed camera. */
 .camera-card.is-added { opacity: 0.55; cursor: default; }
 /* min-width 0 lets the text column shrink inside the flex row, so a long product string ends in an ellipsis
@@ -3041,9 +3053,9 @@ html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; 
    reference image's border is green). Size is set inline from the avatar size, so the badge scales with it. */
 .avatar-editor { position: relative; display: inline-block; flex: none; border-radius: 50%; cursor: pointer; }
 .avatar-editor__input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border-radius: 50%; }
-.avatar-editor__badge { position: absolute; right: -4px; bottom: -4px; display: flex; align-items: center; justify-content: center; background: var(--bg-elevated); border: 2px solid var(--accent); border-radius: 9px; color: var(--accent-text); pointer-events: none; }
+.avatar-editor__badge { position: absolute; right: -4px; bottom: -4px; display: flex; align-items: center; justify-content: center; background: var(--bg-elevated); border: 2px solid var(--complement); border-radius: 9px; color: var(--accent-text); pointer-events: none; }
 /* Owner 2026-11-05: clicking the camera drew a second box around the badge. Cause: the ring was on `:focus-within`, and a click
    focuses the (invisible) file input. A keyboard user still needs to see where focus is (docs/design-language.md, accessibility
    floor), so the ring is now only for `:focus-visible` (the browser's own test for "focus arrived by keyboard"; a mouse or touch
    click does not match it) and goes around the whole avatar, not the badge. */
-.avatar-editor:has(.avatar-editor__input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
+.avatar-editor:has(.avatar-editor__input:focus-visible) { outline: 2px solid var(--accent-line); outline-offset: 3px; }

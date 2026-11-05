@@ -16,7 +16,7 @@ import useSetupStatus from '../lib/useSetupStatus.js';
 // last card. Sign out lives on the Account page, not here. Rows that stay under Settings pass
 // state.from so their back button returns here.
 const BACK = { state: { from: { to: '/settings', label: 'Settings' } } };
-const PERI = 'var(--accent)';
+const PERI = 'var(--accent-line)';
 
 function displayName(u) {
   const name = [u?.first_name, u?.last_name].filter(Boolean).join(' ').trim();
