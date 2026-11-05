@@ -62,6 +62,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- "You corrected this" on the sleep card is now readable: light text on the card's dark background, in both light and dark mode.
+- The background-audio icon on a camera tile is the same light violet in light mode as in dark mode. It was a dark violet that was hard to see over the picture.
 - On the Android and iOS apps, the sign-in screen and the "Can't reach Nightlight" screen now have a **Change server** button, so a server you can't sign in to no longer traps you there. A browser shows nothing, as it has no saved server.
 - The Tailscale card's **Copy** button now works when Nightlight is open over plain http on your home network. If the browser refuses to copy, the card says to select the address and copy it yourself.
 - The header is the same height on the Live page and on sub-pages. On a phone it was a few pixels taller on Live.
