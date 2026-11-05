@@ -45,7 +45,7 @@ function QrCode({ value, label }) {
   </figure>;
 }
 
-export default function TailscaleCard({ compact = false, publicHostSet = false }) {
+export default function TailscaleCard({ compact = false, publicHostSet = false, onReady }) {
   const { view, loading, error, busy, consentUrl, load, act, setEnabled } = useTailscale();
   const demo = useDemoStatus();
   const readOnly = demo !== null;
@@ -76,6 +76,11 @@ export default function TailscaleCard({ compact = false, publicHostSet = false }
     previousState.current = focusKey;
   }, [focusKey]);
   useEffect(() => () => probeRef.current?.abort(), []);
+  // Owner testing 2026-11-05: the setup wizard kept offering "Maybe later" on a card that already showed the secure address,
+  // because only this card knows the connection state. "Ready" means the thing the card promises exists: connected AND the
+  // secure address is being served. Connected without the address is still an unfinished step, so it reports false.
+  const ready = view?.state === 'connected' && Boolean(view.serve?.enabled);
+  useEffect(() => { onReady?.(ready); }, [ready, onReady]);
 
   async function signIn() {
     if (!NAME.test(name)) return;
@@ -182,7 +187,7 @@ export default function TailscaleCard({ compact = false, publicHostSet = false }
       {view.video_address_pending && button('Apply now', () => act('apply-video-address'))}
       <h3>Check it works</h3>
       {!camera && <p>No camera is running yet, so there is nothing to test. Add or start a camera first.</p>}
-      <button className="btn btn-secondary" type="button" disabled={disabled || testing || !camera} onClick={testVideo}>{testing ? 'Testing…' : 'Check it works'}</button>
+      <button className="btn btn-secondary" type="button" disabled={disabled || testing || !camera} onClick={testVideo}>{testing ? 'Testing…' : 'Test video'}</button>
       {probe && <p role="status">{videoTestMessage(probe, originIsTailnet)}</p>}
     </>;
   }

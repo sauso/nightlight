@@ -54,6 +54,25 @@ test.each([
   expect(screen.queryByRole('button', { name: 'Turn on Tailscale' })).toBeNull();
 });
 
+// The setup wizard swaps "Maybe later" for "Continue" on this. Ready is connected AND serving the secure address: a card
+// that is connected but still asking for the address is an unfinished step, and must not report done.
+test.each([
+  [base, false], [waiting, false], [{ ...base, enabled: true, state: 'starting' }, false],
+  [connected, false], [{ ...ready, state: 'starting' }, false], [ready, true],
+])('★ onReady reports %j as %s', async (view, expected) => {
+  const onReady = vi.fn();
+  card(view, { onReady });
+  await screen.findByText('Advanced');
+  await waitFor(() => expect(onReady).toHaveBeenLastCalledWith(expected));
+  // And never the opposite value on the way there once the view has loaded.
+  if (!expected) expect(onReady).not.toHaveBeenCalledWith(true);
+});
+
+test('a card with no onReady still renders (the settings page passes none)', async () => {
+  card(ready);
+  expect(await screen.findByText('Open')).toBeInTheDocument();
+});
+
 test('turning on sends the boolean setting', async () => {
   const view = card();
   await view.user.click(await screen.findByRole('button', { name: 'Turn on Tailscale' }));
@@ -96,7 +115,7 @@ test('a rejected HTTPS action shows only a safe approval link and a retry', asyn
 test('a connected probe proves Tailscale only on the tailnet origin', async () => {
   vi.mocked(probeLowLatency).mockResolvedValue({ outcome: 'connected' });
   const view = card(ready);
-  await view.user.click(await screen.findByRole('button', { name: 'Check it works' }));
+  await view.user.click(await screen.findByRole('button', { name: 'Test video' }));
   expect(await screen.findByText("This page isn't open through Tailscale, so this doesn't prove it works away from home. Open your secure address from your phone over Tailscale to check.")).toBeInTheDocument();
   expect(screen.queryByText('Low latency video works through Tailscale.')).toBeNull();
   expect(videoTestMessage({ outcome: 'connected' }, true)).toBe('Low latency video works through Tailscale.');
@@ -190,7 +209,7 @@ test('the video check waits for a ready camera', async () => {
   vi.spyOn(api, 'get').mockImplementation(async () => ready);
   renderAsAdmin(<TailscaleCard />, { cameras: [] });
   expect(await screen.findByText('No camera is running yet, so there is nothing to test. Add or start a camera first.')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Check it works' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Test video' })).toBeDisabled();
 });
 
 test('a failed refresh keeps the last good view', async () => {

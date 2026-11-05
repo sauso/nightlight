@@ -32,6 +32,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- The Tailscale card's text now follows one size scale, with the title larger than the headings and address beneath it. Its video button is renamed from "Check it works" to "Test video".
+- When Nightlight can't be reached at its Tailscale address (`.ts.net` or a `100.64.0.0/10` address), the "Can't reach Nightlight" screen suggests checking that Tailscale is switched on instead of the home network. Opened at any other address, the text is unchanged.
+
 - #969 Ahead of planned remote access, admins can start Tailscale sign-in, choose a neutral machine name, manage private HTTPS Serve, log out and reset a copied node identity through bounded CLI actions.
 
 - #967 Ahead of planned remote access, Nightlight stores a guarded Tailscale enable setting and checks network mode before starting a tunnel daemon.
@@ -55,6 +58,9 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - #943 Settings → General no longer offers theme presets, font choices or colour pickers. Older clients may still send those settings, but this web UI ignores the saved appearance values.
 
 ### Fixed
+
+- The setup guide's remote access step now says "Continue" once Tailscale is connected and its secure address is on, instead of "Maybe later". Before then, or without Tailscale, it still says "Maybe later".
+- On the Android app, the "Setup is still open" banner no longer sits under the status bar.
 
 - #932 Protected clips with missing video files can be unprotected and removed. The clip player shows Delete when its caller offers it, and Sleep Detail keeps protection badges in step with changes.
 

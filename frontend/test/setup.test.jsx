@@ -244,6 +244,31 @@ describe('setup steps', () => {
     expect(screen.getByRole('heading', { name: "You're all set!" })).toBeInTheDocument();
   });
 
+  test('★ remote step: a connected card with its secure address turns "Maybe later" into "Continue"', async () => {
+    api.get.mockImplementation(async (path) => path === '/remote-access/tailscale'
+      ? { enabled: true, state: 'connected', blocker: null, hostname: 'nightlight', dns_name: 'nightlight.example.ts.net',
+        addresses: ['100.101.102.103'], serve: { enabled: true }, video_address_pending: false }
+      : { demo: false });
+    state = initial('in_progress', 'remote');
+    const view = wizard();
+    expect(await screen.findByText('https://nightlight.example.ts.net/')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Maybe later' })).toBeNull();
+    await view.user.click(await screen.findByRole('button', { name: 'Continue' }));
+    expect(setupApi.progress).toHaveBeenCalledWith('review', 0);
+  });
+
+  test('remote step: connected but without the secure address yet is still "Maybe later"', async () => {
+    api.get.mockImplementation(async (path) => path === '/remote-access/tailscale'
+      ? { enabled: true, state: 'connected', blocker: null, hostname: 'nightlight', dns_name: 'nightlight.example.ts.net',
+        addresses: ['100.101.102.103'], serve: { enabled: false }, video_address_pending: false }
+      : { demo: false });
+    state = initial('in_progress', 'remote');
+    wizard();
+    expect(await screen.findByRole('button', { name: 'Turn on the secure address' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Maybe later' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+  });
+
   test.each(['completed', 'legacy_completed'])('%s setup uses the app header and Settings back button', async (status) => {
     state = initial(status, 'review');
     wizard();
