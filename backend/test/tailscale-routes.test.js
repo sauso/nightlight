@@ -118,7 +118,7 @@ test('#967 admin routes, strict body and fixed response shape', async () => {
   const got = await call(route(), { token: adminToken });
   assert.equal(got.status, 200);
   assert.deepEqual(Object.keys(got.body).sort(), ['addresses', 'blocker', 'dns_name', 'enabled', 'host_network',
-    'hostname', 'last_error', 'login_url', 'process', 'serve', 'state', 'video_address_pending']);
+    'hostname', 'last_error', 'login_url', 'online', 'process', 'serve', 'state', 'video_address_pending']);
   assert.equal(got.body.state, 'off');
   assert.equal(got.body.hostname, 'nightlight');
   assert.doesNotMatch(JSON.stringify(got.body), /private\/|pid-|tskey-|@example/);
@@ -337,6 +337,35 @@ test('#969 status vets addresses and DNS while retaining the old fields', async 
   assert.equal(got.body.login_url, null);
   assert.doesNotMatch(JSON.stringify(got.body), /steal/);
   for (const field of ['enabled', 'process', 'blocker', 'host_network']) assert.ok(Object.hasOwn(got.body, field));
+});
+
+// Owner's staging node, 2026-11-05: deleting the device from the tailnet flipped Self.Online true -> false in about two seconds while
+// BackendState stayed "Running" and Health stayed []. The route reports it as `online`: a boolean, or null when it cannot tell.
+test('the status reports Self.Online as a boolean, and null whenever it cannot tell', async () => {
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  // `mount` replaces the shared `server`, and afterEach closes only the LAST one: this test mounts several routers, so each
+  // earlier one is closed first or its listening socket keeps the whole test process from ever exiting.
+  const remount = async (options) => { await server?.close(); server = null; await mount(options); };
+  const view = async (json) => {
+    await remount({ blocker: () => null, status: () => ({ state: 'running', restarts: 0, reason: null }),
+      cli: async (verb) => verb === 'status-peerless' ? { ok: true, json } : { ok: true, json: { Web: {} } } });
+    return (await call(route(), { token: adminToken })).body;
+  };
+  const connected = { BackendState: 'Running', Health: [], Self: { TailscaleIPs: ['100.64.0.1'], DNSName: 'n.example.ts.net.' } };
+  assert.equal((await view({ ...connected, Self: { ...connected.Self, Online: true } })).online, true);
+  const lost = await view({ ...connected, Self: { ...connected.Self, Online: false } });
+  assert.equal(lost.online, false);
+  assert.equal(lost.state, 'connected', 'a lost connection is still BackendState Running: the new field is the only signal');
+  for (const odd of [undefined, null, 'false', 0, 1, {}]) {
+    assert.equal((await view({ ...connected, Self: { ...connected.Self, Online: odd } })).online, null, `Online ${JSON.stringify(odd)} is not a boolean`);
+  }
+  assert.equal((await view({ BackendState: 'Running' })).online, null, 'no Self at all');
+  // An unreadable status and a daemon that is off both say null, never false: nothing was measured.
+  await remount({ blocker: () => null, status: () => ({ state: 'running', restarts: 0, reason: null }), cli: async () => ({ ok: false, code: 'timeout' }) });
+  assert.equal((await call(route(), { token: adminToken })).body.online, null);
+  db.prepare("UPDATE settings SET tailscale_enabled = 0 WHERE id = 'app'").run();
+  await remount({ blocker: () => null, status: () => ({ state: 'stopped', restarts: 0, reason: null }), cli: async () => assert.fail('no CLI call when off') });
+  assert.equal((await call(route(), { token: adminToken })).body.online, null);
 });
 
 // Found in the review of #978 and MEASURED on the real CLI (2026-11-04): a rename leaves the Serve entry under the OLD name.

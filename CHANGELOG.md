@@ -66,6 +66,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- The Tailscale card no longer keeps saying **Connected** after the device is removed from your Tailscale account. An open card now checks again about every 30 seconds, and if Tailscale cannot be reached for two checks in a row it says **Tailscale isn't connected right now** and how to rejoin (Advanced, Reset this device's Tailscale identity, then sign in again). A lost internet connection looks the same, so the message does not name a cause.
 - The "Advanced settings" link when connecting a camera is smaller, in line with the buttons beside it.
 - "You corrected this" on the sleep card is now readable: light text on the card's dark background, in both light and dark mode.
 - The background-audio icon on a camera tile is the same light violet in light mode as in dark mode. It was a dark violet that was hard to see over the picture.

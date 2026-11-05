@@ -47,7 +47,7 @@ function QrCode({ value, label }) {
 }
 
 export default function TailscaleCard({ compact = false, publicHostSet = false, onReady }) {
-  const { view, loading, error, busy, consentUrl, load, act, setEnabled } = useTailscale();
+  const { view, loading, error, busy, consentUrl, load, act, setEnabled, lostConnection } = useTailscale();
   const demo = useDemoStatus();
   const readOnly = demo !== null;
   const { cameras } = useCameras();
@@ -116,6 +116,14 @@ export default function TailscaleCard({ compact = false, publicHostSet = false, 
   const login = httpsLink(view?.login_url);
   const consent = httpsLink(consentUrl || view?.serve?.consent_url);
   const originIsTailnet = view?.dns_name && window.location.hostname === view.dns_name;
+  // Owner's staging node, 2026-11-05: after deleting the device from the tailnet the card kept saying "Connected" (it never looked
+  // again, and the server did not pass on `Self.Online`, which is the only field that flipped). The wording names no cause:
+  // a lost internet connection, a Tailscale outage and a removed device all look the same from here. The remedy was verified by
+  // the owner: Advanced -> Reset puts the card back to "Sign in with Tailscale". The address, Copy and Open stay, since people
+  // on the home network can still use it.
+  const connectedLine = lostConnection
+    ? <div className="form-warning" role="status"><strong>Tailscale isn't connected right now.</strong> This is usually a network problem and fixes itself. If it doesn't come back in a few minutes, or you removed this device from your Tailscale account, open Advanced, use Reset this device's Tailscale identity, then sign in again.</div>
+    : <p role="status">Connected to your Tailscale account.</p>;
   const disabled = busy || readOnly;
   const button = (label, onClick, primary = true, extraDisabled = false) =>
     <button type="button" className={`btn ${primary ? 'btn-primary' : 'btn-secondary'}`} data-tailscale-primary={primary ? '' : undefined}
@@ -156,7 +164,7 @@ export default function TailscaleCard({ compact = false, publicHostSet = false, 
     </>;
   } else if (view.state === 'connected' && !view.serve?.enabled) {
     content = <>
-      <p role="status">Connected to your Tailscale account.</p>
+      {connectedLine}
       {consentUrl ? <>
         <p>Tailscale needs you to approve HTTPS for your account first.</p>
         {consent && (readOnly ? <span className="btn btn-secondary" aria-disabled="true">Open Tailscale approval</span>
@@ -169,7 +177,7 @@ export default function TailscaleCard({ compact = false, publicHostSet = false, 
     </>;
   } else if (view.state === 'connected') {
     content = <>
-      <p role="status">Connected to your Tailscale account.</p>
+      {connectedLine}
       <h3>Your secure address</h3>
       {address ? <>
         <p className="tailscale-address">{address}</p>
