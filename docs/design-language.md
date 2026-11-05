@@ -17,14 +17,16 @@ the deployed frontend live rather than bundling it). There is no separate native
 
 ## 1. Brand colour
 
-One periwinkle ("peri"), `#8995FF`, identifies actions and navigation (the owner's choice, 2026-11-05; it was a
-violet, `#7C5CD6`, before, and it is the same colour as the logo's crescent). Peri is a LIGHT colour, which sets
-the rules:
+One periwinkle ("peri") identifies actions and navigation. By day it is `#5663D6`; at night it is the lighter
+`#8995FF` (the owner's choice, 2026-11-06; it was a violet, `#7C5CD6`, before 2026-11-05). The logo's crescent is the
+day colour, `#5663D6`. The two themes need different text on a peri fill, which sets the rules:
 
 - `--accent` is for **fills**: buttons, the active segment, switches' tracks, selected chips. Text **on** a peri fill is
-  `--on-accent` (the header navy, `#14142A`), never white: white on peri is 2.69:1, below WCAG's 4.5:1.
-- **Lines, rings and icons on a light surface** use `--accent-line`, not `--accent`: focus rings, selected borders, row
-  icons, chevrons. Plain peri on white is also 2.69:1, below the 3:1 non-text target. At night they are the same peri.
+  always `--on-accent`, never a literal colour: **white by day** (5.06:1 on `#5663D6`) and the header navy `#14142A`
+  **at night** (6.71:1 on `#8995FF`). The other pairings fail WCAG's 4.5:1: navy on `#5663D6` is 3.57:1, white on
+  `#8995FF` is 2.69:1.
+- **Lines, rings and icons** use `--accent-line` (the same colour as `--accent` in both themes today; the separate
+  token is there because they have a lower, 3:1 target and may diverge): focus rings, selected borders, row icons, chevrons.
 - **Small text** (links, "Saved ✓") uses `--accent-text`: a deeper periwinkle by day, a lighter tint at night.
 - The header uses the same navy in both themes.
 - The **complement** (`--complement`, a warm gold; peri's opposite) is for small highlights only: the current step in
@@ -56,10 +58,10 @@ These are the owner's approximate day/night palette, grouped at the top of
 | `--bg-elevated-2` | `#EAE3F8` | `#100F1C` | Insets |
 | `--text-primary` | `#1D1A3A` | `#E8E2F7` | Main text |
 | `--text-secondary` | `#625C7F` | `#BCB3D5` | Supporting text |
-| `--accent` | `#8995FF` | `#8995FF` | Fills: buttons, active segments, selected chips |
-| `--on-accent` | `#14142A` | `#14142A` | Text on an `--accent` fill |
-| `--accent-line` | `#6572EE` | `#8995FF` | Focus rings, selected borders, icons and chevrons on light surfaces |
-| `--accent-text` | `#4B57D6` | `#A7B1FF` | Small linked text |
+| `--accent` | `#5663D6` | `#8995FF` | Fills: buttons, active segments, selected chips |
+| `--on-accent` | `#FFFFFF` | `#14142A` | Text on an `--accent` fill |
+| `--accent-line` | `#5663D6` | `#8995FF` | Focus rings, selected borders, icons and chevrons |
+| `--accent-text` | `#4A55C8` | `#A7B1FF` | Small linked text |
 | `--accent-soft` | `#D3D8FF` | `#C5CBFF` | Header controls and subtle accents |
 | `--complement` | `#F2C14E` | `#F6D365` | Small highlights only (see section 1) |
 | `--on-complement` | `#14142A` | `#14142A` | Text on a `--complement` fill |
@@ -70,14 +72,17 @@ These are the owner's approximate day/night palette, grouped at the top of
 | `--border` | `#DDD5EE` | `#383450` | Borders |
 | `--field-bg` | `#EAE3F8` | `#100F1C` | Inputs |
 
-Measured with the WCAG formula (2026-11-05): `--on-accent` on `--accent` is 6.71:1, in both themes. White on it
-would be 2.69:1, which is why it is not used. By day `--accent-text` is 5.78:1 on white cards, 5.32:1 on the page and
-4.64:1 on inset fields; at night `#A7B1FF` is 7.81:1 on cards, 8.92:1 on the page and 9.37:1 on insets.
-`--accent-line` is 4.04:1 on white and 3.72:1 on the page by day (3:1 is the non-text target), and 5.87:1 on night
-cards. `--on-complement` on `--complement` is 10.76:1 by day and 12.40:1 at night. Night live and offline text have
-9.65:1 and 8.04:1 on cards; by day they have 5.77:1 and 5.92:1 on white cards. These clear WCAG's 4.5:1 normal-text target.
-A new accent use must pick its token by what it is (fill, text on a fill, line, small text), and
-`test/paletteTokens.test.jsx` fails if white text lands on an `--accent` fill or a focus ring uses plain `--accent`.
+Measured with the WCAG formula (2026-11-06): `--on-accent` on `--accent` is 5.06:1 by day (white on `#5663D6`) and
+6.71:1 at night (navy on `#8995FF`). By day `--accent-text` (`#4A55C8`) is 6.13:1 on white cards, 5.64:1 on the page and
+4.92:1 on inset fields (plain `#5663D6` would only reach 4.06:1 on an inset, which is why the text token is deeper);
+at night `#A7B1FF` is 7.81:1 on cards, 8.92:1 on the page and 9.37:1 on insets. `--accent-line` is 5.06:1 on white and
+4.65:1 on the page by day (3:1 is the non-text target), and 5.87:1 on night cards. `--on-complement` on `--complement`
+is 10.76:1 by day and 12.40:1 at night. The logo's crescent on its `#14142A` ground is 3.57:1 (a graphic needs 3:1).
+Night live and offline text have 9.65:1 and 8.04:1 on cards; by day they have 5.77:1 and 5.92:1 on white cards. These
+clear WCAG's 4.5:1 normal-text target. A new accent use must pick its token by what it is (fill, text on a fill, line,
+small text). `test/paletteTokens.test.jsx` recomputes these ratios from the stylesheet's own token values and fails if a
+colour change makes any of them too low, if white or near-white text lands on an `--accent` fill, if a focus ring uses
+plain `--accent`, or if the logo's fill stops matching the day accent.
 
 Sleep-timeline tokens (`--sleep-*`) are categorical data colours. Keep them
 separate from branding.
@@ -328,7 +333,7 @@ by default** (mobile-first: buttons are full-width unless constrained).
 `:disabled` → `opacity: 0.55`. `.icon-btn` is the bare icon button: no background/border,
 `--text-secondary`, `padding: 6px 8px`; `.icon-btn--danger` recolours to `--offline`.
 
-`.btn-primary` uses navy text (`--on-accent`) on the peri accent (6.71:1 contrast); white would be 2.69:1.
+`.btn-primary` uses `--on-accent` on the peri accent: white by day (5.06:1), navy at night (6.71:1).
 
 ### Fields
 Label 12px `--text-secondary`, 6px below. Input: full width, `--field-bg`, 1px `--border`, radius
