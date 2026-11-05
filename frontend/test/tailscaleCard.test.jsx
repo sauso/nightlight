@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, expect, test, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, test, vi } from 'vitest';
 import { act, fireEvent, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { renderAsAdmin } from './helpers/render.jsx';
 import TailscaleCard from '../src/components/TailscaleCard.jsx';
@@ -246,6 +246,8 @@ test.each([
   [{ ...base, enabled: true, state: 'starting' }, 3000],
   [{ ...waiting, login_url: 'https://login.tailscale.com/a/token' }, 3000],
   [{ ...ready, video_address_pending: true }, 15000],
+  [ready, 30000], // a connected card looks again (it never did before 2026-11-05)
+  [connected, 30000],
 ])('polls %s every %s ms and stops while hidden or unmounted', async (view, interval) => {
   let hidden = false;
   Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
@@ -265,6 +267,107 @@ test.each([
   hook.unmount();
   await act(async () => { await vi.advanceTimersByTimeAsync(interval); });
   expect(get).toHaveBeenCalledTimes(2);
+});
+
+// Owner's staging node, 2026-11-05: deleting the device from the tailnet flipped the daemon's Self.Online to false within seconds while
+// the card kept saying "Connected" (it never looked again, and the server did not pass the field on). The server now sends `online`
+// (true, false or null) and the card needs TWO readings in a row to say so, because a daemon that has just started can read false.
+describe('a lost connection', () => {
+  const lostView = { ...ready, online: false };
+  const okView = { ...ready, online: true };
+  const hookWith = async (...views) => {
+    const get = vi.spyOn(api, 'get');
+    views.forEach((view) => get.mockResolvedValueOnce(view));
+    get.mockResolvedValue(views[views.length - 1]);
+    vi.useFakeTimers();
+    const hook = renderHook(() => useTailscale());
+    await act(async () => {});
+    return { hook, get, tick: () => act(async () => { await vi.advanceTimersByTimeAsync(30000); }) };
+  };
+
+  test('★ one offline reading says nothing; two in a row say so; the next online reading clears it', async () => {
+    const { hook, tick } = await hookWith(okView, lostView, lostView, okView);
+    expect(hook.result.current.lostConnection).toBe(false);
+    await tick();
+    expect(hook.result.current.lostConnection, 'one reading: could be the daemon reconnecting').toBe(false);
+    await tick();
+    expect(hook.result.current.lostConnection, 'two readings in a row').toBe(true);
+    await tick();
+    expect(hook.result.current.lostConnection, 'back online').toBe(false);
+  });
+
+  test('an offline reading that is not followed by another resets the count', async () => {
+    const { hook, tick } = await hookWith(lostView, okView, lostView, okView);
+    await tick(); await tick(); await tick();
+    expect(hook.result.current.lostConnection).toBe(false);
+  });
+
+  test('★ an unknown reading (null) is never a lost connection, and neither is a connection that is not connected', async () => {
+    const { hook, tick } = await hookWith({ ...ready, online: null }, { ...ready, online: null }, { ...ready, online: null });
+    await tick(); await tick();
+    expect(hook.result.current.lostConnection).toBe(false);
+    hook.unmount();
+    vi.useRealTimers();
+    vi.spyOn(api, 'get').mockResolvedValue({ ...waiting, online: false });
+    const other = renderHook(() => useTailscale());
+    await act(async () => {});
+    await act(async () => { await other.result.current.load(); });
+    await act(async () => { await other.result.current.load(); });
+    expect(other.result.current.view.state).toBe('needs-sign-in');
+    expect(other.result.current.lostConnection, 'needs-sign-in with online false, read repeatedly, is not "lost"').toBe(false);
+  });
+
+  test('★ the answer to an action counts as a reading too (every view goes through one path)', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(okView);
+    const post = vi.spyOn(api, 'post').mockResolvedValue(lostView);
+    const hook = renderHook(() => useTailscale());
+    await act(async () => {});
+    await act(async () => { await hook.result.current.act('apply-video-address'); });
+    expect(hook.result.current.lostConnection).toBe(false);
+    await act(async () => { await hook.result.current.act('apply-video-address'); });
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(hook.result.current.lostConnection).toBe(true);
+  });
+
+  test('★ a background refresh that fails keeps the last view and shows no error; the person\'s own Retry does show it', async () => {
+    const get = vi.spyOn(api, 'get').mockResolvedValueOnce(okView).mockRejectedValue(new Error('offline'));
+    vi.useFakeTimers();
+    const hook = renderHook(() => useTailscale());
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(hook.result.current.view).toEqual(okView);
+    expect(hook.result.current.error, 'a flaky network must not flash a banner every 30 seconds').toBe('');
+    await act(async () => { await hook.result.current.load(); });
+    expect(hook.result.current.error).toBe("Couldn't load Tailscale details.");
+  });
+
+  test('★ the card replaces "Connected" with the notice, names no cause, keeps the address, and says how to rejoin', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (path) => path === '/remote-access/tailscale' ? lostView : { demo: false });
+    vi.useFakeTimers();
+    renderAsAdmin(<TailscaleCard />, { cameras: [camera] });
+    await act(async () => {});
+    expect(screen.getByText('Connected to your Tailscale account.'), 'one reading is not enough').toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(screen.queryByText('Connected to your Tailscale account.')).toBeNull();
+    expect(screen.getByText("Tailscale isn't connected right now.").closest('[role="status"]'), 'announced as a status').not.toBeNull();
+    const text = document.body.textContent;
+    expect(text).toContain("Reset this device's Tailscale identity");
+    expect(text).toContain('sign in again');
+    expect(text, 'it does not claim a cause').not.toMatch(/was deleted|has been deleted|you deleted/i);
+    expect(screen.getByText('https://nightlight.example.ts.net/'), 'the address stays').toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeInTheDocument();
+  });
+
+  test('an online node still says Connected after many refreshes', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (path) => path === '/remote-access/tailscale' ? okView : { demo: false });
+    vi.useFakeTimers();
+    renderAsAdmin(<TailscaleCard />, { cameras: [camera] });
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000 * 4); });
+    expect(screen.getByText('Connected to your Tailscale account.')).toBeInTheDocument();
+    expect(screen.queryByText("Tailscale isn't connected right now.")).toBeNull();
+  });
 });
 
 // Codex review of #978 (verified): the server also says 'not pending' before it has found the address, so a ready line

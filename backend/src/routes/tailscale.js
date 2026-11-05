@@ -21,7 +21,12 @@ function cleanStatus(result) {
   const dns_name = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net$/.test(dns) ? dns : null;
   const state = backendState === 'Running' ? 'connected' :
     (backendState === 'NeedsLogin' || result.json.AuthURL ? 'needs-sign-in' : 'starting');
-  return { state, addresses, dns_name, login_url: approvedLoginUrl(result.json.AuthURL) };
+  // MEASURED 2026-11-05 on the owner's staging node: deleting the device from the tailnet flips `Self.Online` from true to false
+  // within about two seconds while `BackendState` stays "Running" and `Health` stays empty, so this is the only field that says
+  // the node has lost its coordination server. A boolean or null (a daemon that does not say, or a status we could not read):
+  // the card must tell "false" from "unknown". Not a cause: an outage, a Tailscale incident and a removed device all read false.
+  const online = typeof self?.Online === 'boolean' ? self.Online : null;
+  return { state, addresses, dns_name, login_url: approvedLoginUrl(result.json.AuthURL), online };
 }
 
 export function createTailscaleRouter({ database = db, dataDir = process.env.DATA_DIR || '/app/data',
@@ -56,7 +61,7 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
     }
     return { enabled: enabled(), process,
       blocker: blocker(database, { hostNetwork })?.code ?? null, host_network: hostNetwork,
-      state: remote.state, addresses: remote.addresses, dns_name: remote.dns_name,
+      state: remote.state, addresses: remote.addresses, dns_name: remote.dns_name, online: remote.online ?? null,
       login_url: remote.state === 'connected' || remote.state === 'off' ? null :
         (remote.login_url ?? getTailscaleLinks().loginUrl), serve,
       last_error: lastError ?? remote.error ?? (process.state === 'unavailable' && typeof process.reason === 'string' &&
