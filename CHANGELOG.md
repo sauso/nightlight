@@ -32,6 +32,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- While the setup guide is open, the bottom bar (the side menu on a wide screen) is hidden, so a new admin goes through the guide or chooses Save and exit first. The navigation returns on Save and exit, when setup finishes, or when the guide sends you to another page. The guide also no longer scrolls behind the phone's status bar.
 - The Tailscale card's text now follows one size scale, with the title larger than the headings and address beneath it. Its video button is renamed from "Check it works" to "Test video".
 - When Nightlight can't be reached at its Tailscale address (`.ts.net` or a `100.64.0.0/10` address), the "Can't reach Nightlight" screen suggests checking that Tailscale is switched on instead of the home network. Opened at any other address, the text is unchanged.
 

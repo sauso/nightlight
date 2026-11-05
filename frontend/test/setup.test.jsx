@@ -269,6 +269,32 @@ describe('setup steps', () => {
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
   });
 
+  // The navigation (bottom bar / sidebar) is hidden by CSS while this class is on <html>: the page is what decides when.
+  const navHidden = () => document.documentElement.classList.contains('setup-wizard');
+
+  test.each(['not_started', 'in_progress', 'completed_limited'])('★ the navigation is hidden while the guide is running (%s)', async (status) => {
+    state = initial(status, 'review');
+    const view = wizard();
+    await screen.findByRole('heading', { name: "You're all set!" });
+    expect(navHidden()).toBe(true);
+    view.unmount();
+    expect(navHidden(), 'leaving the page gives the navigation back').toBe(false);
+  });
+
+  test.each(['completed', 'legacy_completed'])('★ the finished guide (%s) keeps the navigation', async (status) => {
+    state = initial(status, 'review');
+    wizard();
+    await screen.findByRole('heading', { name: 'Setup' });
+    expect(navHidden()).toBe(false);
+  });
+
+  test('★ Save and exit gives the navigation back', async () => {
+    state = initial('in_progress', 'remote');
+    const view = wizard();
+    await view.user.click(await screen.findByRole('button', { name: 'Save and exit' }));
+    await waitFor(() => expect(navHidden()).toBe(false));
+  });
+
   test.each(['completed', 'legacy_completed'])('%s setup uses the app header and Settings back button', async (status) => {
     state = initial(status, 'review');
     wizard();

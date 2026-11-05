@@ -59,6 +59,17 @@ export default function Setup() {
     return () => { mounted.current = false; testRef.current = null; };
   }, [load]);
 
+  // Owner testing 2026-11-05: while the guide is still running the bottom bar / sidebar is hidden, so a new admin goes through
+  // it (or Saves and exits) first. The navigation lives outside this page (Shell in App.jsx), so the page signals it with a class
+  // on <html>, the way modals use `modal-scroll-locked`; index.css does the hiding. `normalChrome` stays the one answer to "is the
+  // guide still running": the finished view has the real header and keeps the navigation.
+  const wizardActive = Boolean(setup) && !normalChrome(setup.status);
+  useEffect(() => {
+    if (!wizardActive) return undefined;
+    document.documentElement.classList.add('setup-wizard');
+    return () => document.documentElement.classList.remove('setup-wizard');
+  }, [wizardActive]);
+
   useEffect(() => {
     if (kids.length) setSelectedChild((current) => kids.some((child) => child.id === current) ? current : kids[0].id);
     const available = cameras.filter((camera) => camera.child_id && !camera.disabled);
