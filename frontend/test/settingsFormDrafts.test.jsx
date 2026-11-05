@@ -488,7 +488,7 @@ describe('add / edit caregiver', () => {
     await existing.user.type(screen.getByLabelText('Last name'), 'Smith');
     await existing.user.click(screen.getByRole('button', { name: 'Discard changes' }));
     expect(screen.getByLabelText('Last name').value).toBe('');
-    expect(screen.getByText('Change photo')).toBeInTheDocument();
+    expect(screen.getByLabelText('Change photo')).toBeInTheDocument(); // the avatar's file input, named by its aria-label (#990)
   });
 
   test('removing a caregiver clears its draft', async () => {
