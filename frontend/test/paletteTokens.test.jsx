@@ -113,6 +113,45 @@ describe('readability, recomputed from the stylesheet\'s own tokens', () => {
   });
 });
 
+describe('the setup screens (owner, 2026-11-06)', () => {
+  const ruleFor = (selector) => rules.find((rule) => rule.startsWith(`${selector} {`)) || '';
+
+  test('★ the strip under the phone\'s status bar is the navy header colour, never the page colour (light icons vanished on the light page)', () => {
+    const strip = ruleFor('html.setup-wizard body::before');
+    expect(strip, 'the strip rule was found').toContain('position: fixed');
+    expect(strip).toContain('height: env(safe-area-inset-top');
+    expect(strip).toContain('background: var(--bar)');
+    expect(strip).not.toContain('var(--bg)');
+    // --bar is one colour in both themes (defined once, in :root), and it is dark enough for light icons.
+    expect(night['--bar']).toBe(day['--bar']);
+    expect(contrast('#ffffff', day['--bar'])).toBeGreaterThanOrEqual(7);
+  });
+
+  test('★ the avatar is centred on the account and caregiver forms: a column whose items are centred', () => {
+    const photo = ruleFor('.setup-caregivers__photo');
+    expect(photo, 'the rule was found').toContain('display: flex');
+    expect(photo).toContain('flex-direction: column');
+    expect(photo).toContain('align-items: center');
+  });
+});
+
+describe('a lit control keeps its text colour while hovered (owner, 2026-11-06)', () => {
+  // A phone leaves a tapped button in :hover, and `.x:hover` (two selectors' worth of specificity) beat the single-class lit rule, so
+  // a just-tapped Alerts toggle showed white (dark mode) or navy (light mode) text on the accent fill. jsdom cannot apply :hover, so
+  // the test reads the stylesheet: the hover rule must exclude the lit class, and the lit rule must set --on-accent text.
+  test.each([
+    ['.detect-toggle', '.detect-toggle--on'],
+    ['.log-chip', '.log-chip--active'],
+  ])('★ %s:hover leaves the lit %s alone, and the lit rule sets --on-accent text', (base, lit) => {
+    const hover = rules.find((rule) => rule.startsWith(`${base}:hover`));
+    const on = rules.find((rule) => rule.startsWith(`${lit} {`));
+    expect(hover, 'the hover rule was found').toBeTruthy();
+    expect(on, 'the lit rule was found').toBeTruthy();
+    expect(hover.slice(0, hover.indexOf(' {'))).toContain(`:not(${lit})`);
+    expect(on).toContain('color: var(--on-accent)');
+  });
+});
+
 describe('the default avatar', () => {
   test('★ initials on the default peri disc are navy; on a chosen colour they stay white', () => {
     const plain = render(<Avatar name="Nanny McPhee" />).container.querySelector('span');

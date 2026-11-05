@@ -235,6 +235,13 @@ reach" screens show the same tile. The PNGs above are made from the same SVG on 
 (`branding/logo-source.png` is that 1024px render; the standard icons are opaque full-bleed squares, and the OS
 rounds them).
 
+**The setup screens have no header** (the Welcome and Create-your-account screens, then the guide). On a phone,
+`html.setup-wizard` (set by `lib/useSetupChrome.js`) draws a navy `--bar` strip exactly as tall as the status bar and
+nothing else, because the phone draws its status-bar icons light and the page colour hid them by day; on a computer
+the strip has no height. The counter is "Step n of 7": Create your account is Step 1, the Welcome screen is not
+numbered, and the review page is not counted. The avatar in the account and caregiver forms is centred, with Remove
+under it.
+
 ---
 
 ## 5. Layout, spacing, radius

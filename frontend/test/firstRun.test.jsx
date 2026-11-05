@@ -51,16 +51,23 @@ describe('the two screens, in order', () => {
     }
     expect(screen.queryByLabelText('Username')).toBeNull();
     expect(screen.queryByRole('progressbar')).toBeNull();
-    expect(screen.queryByText(/Step \d of 6/)).toBeNull();
+    expect(screen.queryByText(/Step \d of \d/)).toBeNull();
     expect(postSpy).not.toHaveBeenCalled();
   });
 
-  test('★ Get started shows the account form in the guide\'s card, with no step counter, and Back returns to the welcome screen', async () => {
+  test('★ Get started shows the account form in the guide\'s card as Step 1 of 7 (first segment current), and Back returns to the welcome screen', async () => {
     const { user } = mount();
     await toAccount(user);
     expect(screen.getByRole('heading', { name: 'Create your account' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Create admin account' })).toBeTruthy();
-    expect(screen.queryByRole('progressbar')).toBeNull();
+    // Owner 2026-11-06: creating the account is Step 1, not a detour before "step 1". The guide that follows is Steps 2-7.
+    expect(screen.getByText('Step 1 of 7')).toBeTruthy();
+    const bar = screen.getByRole('progressbar', { name: 'Step 1 of 7' });
+    expect(bar.getAttribute('aria-valuemax')).toBe('7');
+    const segments = [...bar.children];
+    expect(segments).toHaveLength(7);
+    expect(segments[0].className).toBe('is-current');
+    expect(segments.slice(1).every((segment) => segment.className === '')).toBe(true);
     expect(screen.getByText('At least 8 characters.')).toBeTruthy();
     await user.type(screen.getByLabelText('Username'), 'nacho');
     await user.click(screen.getByRole('button', { name: 'Back' }));
@@ -70,8 +77,24 @@ describe('the two screens, in order', () => {
   });
 });
 
+describe('the status-bar strip', () => {
+  // index.css draws the navy strip under a phone's status bar when <html> carries `setup-wizard`. These screens have no header,
+  // so without the class the page showed under the light status-bar icons (owner, 2026-11-06).
+  const on = () => document.documentElement.classList.contains('setup-wizard');
+
+  test('★ <html> carries setup-wizard on the welcome screen AND the account screen, and not after the screens are gone', async () => {
+    const { user, unmount } = mount();
+    await screen.findByRole('heading', { name: 'Welcome to Nightlight' });
+    expect(on(), 'welcome').toBe(true);
+    await toAccount(user);
+    expect(on(), 'account').toBe(true);
+    unmount();
+    expect(on(), 'removed on unmount, so a signed-in page has its bottom bar').toBe(false);
+  });
+});
+
 describe('creating the first admin', () => {
-  test('★ sends exactly the names and credentials to /auth/setup (username trimmed), signs in, and lands at /', async () => {
+  test('★ sends exactly the names and credentials to /auth/setup (username trimmed), signs in, and lands at /setup', async () => {
     const { user, auth } = mount();
     await toAccount(user);
     await fillAccount(user, { username: '  nacho  ' });
@@ -80,7 +103,7 @@ describe('creating the first admin', () => {
     expect(postSpy.mock.calls[0][0]).toBe('/auth/setup');
     expect(postSpy.mock.calls[0][1]).toEqual({ username: 'nacho', password: 'longenough1', first_name: 'Nacho', last_name: 'Leone' });
     await waitFor(() => expect(auth.login).toHaveBeenCalledWith('tok-123', ADMIN));
-    expect(await screen.findByText('at /')).toBeTruthy();
+    expect(await screen.findByText('at /setup')).toBeTruthy();
     expect(putSpy, 'no photo picked: nothing else is sent').not.toHaveBeenCalled();
   });
 
@@ -102,7 +125,7 @@ describe('creating the first admin', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('That username is already taken');
     expect(screen.getByLabelText('Username').value).toBe('nacho');
     expect(auth.login).not.toHaveBeenCalled();
-    expect(screen.queryByText('at /')).toBeNull();
+    expect(screen.queryByText('at /setup')).toBeNull();
     expect(screen.getByRole('button', { name: 'Create admin account' }).disabled, 'the button is usable again').toBe(false);
   });
 });
@@ -121,7 +144,7 @@ describe('the optional photo', () => {
     expect(postSpy.mock.calls[0][1], 'the setup request itself never carries the photo').not.toHaveProperty('photo');
     expect(auth.login.mock.invocationCallOrder[0], 'sign in first').toBeLessThan(putSpy.mock.invocationCallOrder[0]);
     await waitFor(() => expect(auth.refresh).toHaveBeenCalled());
-    expect(await screen.findByText('at /')).toBeTruthy();
+    expect(await screen.findByText('at /setup')).toBeTruthy();
   });
 
   test('★ a photo that cannot be saved does not stop the new admin: they are still signed in and taken on', async () => {
@@ -132,7 +155,7 @@ describe('the optional photo', () => {
     await screen.findByLabelText('Change photo');
     await fillAccount(user);
     await user.click(screen.getByRole('button', { name: 'Create admin account' }));
-    expect(await screen.findByText('at /')).toBeTruthy();
+    expect(await screen.findByText('at /setup')).toBeTruthy();
     expect(auth.login).toHaveBeenCalled();
     expect(screen.queryByText('Photo too big'), 'nothing to show: they have left the form').toBeNull();
   });
