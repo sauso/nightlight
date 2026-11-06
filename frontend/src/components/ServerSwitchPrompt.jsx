@@ -32,6 +32,7 @@ export default function ServerSwitchPrompt() {
 
   if (!prompt) return null;
   // Keyed by request, so a newer request that replaces an open dialog starts with fresh busy/error state.
+  if (prompt.kind === 'tailscale-added') return <TailscaleAdded key={prompt.id} prompt={prompt} />;
   return prompt.kind === 'confirm'
     ? <ConfirmSwitch key={prompt.id} prompt={prompt} />
     : <RefusedSwitch key={prompt.id} prompt={prompt} />;
@@ -70,6 +71,25 @@ function ConfirmSwitch({ prompt }) {
         <button type="button" className="btn btn-primary" onClick={doSwitch} disabled={busy}>
           {busy ? 'Switching…' : 'Switch'}
         </button>
+      </div>
+    </Modal>
+  );
+}
+
+// Shown once, the first time the phone saves the server's Tailscale address (lib/nativeBridge.js syncTailscaleEndpoint).
+// It only informs: nothing is asked and nothing changes when it is closed. It says what the person needs for it to work, since
+// the phone cannot reach a Tailscale address unless the Tailscale app is on.
+function TailscaleAdded({ prompt }) {
+  const close = () => dismissServerSwitchPrompt(prompt.id);
+  return (
+    <Modal title="Away from home" onClose={close}>
+      <p style={{ marginTop: 0 }}>
+        When your home address does not answer, this app will now open Nightlight through its Tailscale address. At home
+        nothing changes.
+      </p>
+      <p className="muted">It needs the Tailscale app on this phone, signed in to the same Tailscale network as your server.</p>
+      <div style={ACTIONS_STYLE}>
+        <button type="button" className="btn btn-primary" data-autofocus onClick={close}>OK</button>
       </div>
     </Modal>
   );

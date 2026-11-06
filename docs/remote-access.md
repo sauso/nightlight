@@ -14,6 +14,14 @@ The card has **Test video** once a camera is running. Run it from the secure `.t
 
 Alert links keep pointing at your home address. Nightlight learns that address from an admin's phone app, and it never uses a Tailscale address for this (a `.ts.net` name, an address starting 100.64 to 100.127, or one in Tailscale's IPv6 range), so an admin phone that is away from home does not change where everyone's alert links go. If the only admin phone ever uses the Tailscale address, alert links open the app in place without naming the server, which is how they behave when no address is known.
 
+### The Android app and the Tailscale address
+
+With Tailscale connected and **Secure address** on, the Android app learns the secure address by itself: each time someone signs in or starts the app, it asks the server for it and keeps it beside the address that person set the app up with. The first time, a short message says so. A caregiver's phone does this too. Turn Tailscale or the secure address off and the app drops the saved address the next time it starts and can reach the server.
+
+On start, the app tries both addresses at once. It uses the address it was set up with if that answers within about 3 seconds, and the Tailscale address only if it does not. At home the app therefore never depends on Tailscale, and away from home it waits up to about 3 seconds before it opens through Tailscale. It needs the Tailscale app on the phone, signed in to the same Tailscale network as the server; without it the app shows its "Can't reach your server" screen.
+
+Known limits (2026-11): the two addresses are different web addresses, so each asks for a sign-in the first time you use it. A session that started on the Tailscale address stays on it until the app is next started, even after you get home. An older server, or an app without this feature, is simply left as it was. The iPhone app does not do this yet.
+
 ## Tailscale details and limits
 
 ### How the bundled service works

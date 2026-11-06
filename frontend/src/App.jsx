@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from './lib/AuthContext.jsx';
 import { SettingsProvider } from './lib/SettingsContext.jsx';
 import { CamerasProvider } from './lib/CamerasContext.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
-import { isNativeApp, hasActiveBackgroundAudio } from './lib/nativeBridge.js';
+import { isNativeApp, hasActiveBackgroundAudio, syncTailscaleEndpoint } from './lib/nativeBridge.js';
 import { isReloadHeld } from './lib/reloadGuard.js';
 import { initPushNotifications } from './lib/pushNotifications.js';
 import { applyViewportPolicy } from './lib/viewport.js';
@@ -184,6 +184,12 @@ function Shell() {
   // reach the phone when the app is backgrounded/closed. No-op in a browser.
   useEffect(() => {
     if (user) initPushNotifications();
+  }, [user]);
+
+  // Also once signed in (native app only): ask the server for its Tailscale address and hand it to the shell, which keeps
+  // it for use away from home (lib/nativeBridge.js syncTailscaleEndpoint). Never throws; does nothing in a browser.
+  useEffect(() => {
+    if (user) void syncTailscaleEndpoint();
   }, [user]);
 
   if (loading) return null;

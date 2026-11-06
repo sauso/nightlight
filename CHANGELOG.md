@@ -11,6 +11,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- The Android app now also learns the server's Tailscale address and uses it when your home address does not answer. After you sign in, the app asks the server for its secure Tailscale address and keeps it (a short message says so the first time); at start it uses the address it was set up with if that answers, and the Tailscale one otherwise. A link or alert that names either of the server's two addresses is recognised as the server you are already using, instead of asking whether to switch. Needs the Android app release that goes with it; the web app and the iPhone app are unchanged. See [docs/remote-access.md](docs/remote-access.md#the-android-app-and-the-tailscale-address).
 - Any signed-in user can read the server's Tailscale address (`GET /api/remote-access/tailscale/address`: `{ "url": "https://<name>.ts.net" }`, or `{ "url": null }` when Tailscale is off or has no private HTTPS address, or a 409 when it is not known right now). The phone apps will use it to fall back to Tailscale when your home address does not answer; nothing in the web app uses it yet.
 
 - #977 Settings → Remote Access and the setup guide now lead with a Tailscale option for private viewing away from home, including sign-in, a secure address, viewer steps, a video check and identity controls. The existing own-domain and port-forward guidance remains under Advanced.

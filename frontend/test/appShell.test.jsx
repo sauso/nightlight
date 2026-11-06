@@ -59,6 +59,7 @@ beforeEach(() => {
   vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
   vi.spyOn(nativeBridge, 'hasActiveBackgroundAudio').mockReturnValue(false);
   vi.spyOn(push, 'initPushNotifications').mockResolvedValue(undefined);
+  vi.spyOn(nativeBridge, 'syncTailscaleEndpoint').mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -124,6 +125,17 @@ describe('booting the app', () => {
     mockApi(ADMIN);
     await boot('/');
     await waitFor(() => expect(push.initPushNotifications).toHaveBeenCalled());
+  });
+
+  test('the phone app is told the server\'s Tailscale address once signed in, and not before', async () => {
+    mockApi(null);
+    await boot('/');
+    expect(nativeBridge.syncTailscaleEndpoint).not.toHaveBeenCalled();
+
+    setToken('a-token');
+    mockApi(ADMIN);
+    await boot('/');
+    await waitFor(() => expect(nativeBridge.syncTailscaleEndpoint).toHaveBeenCalled());
   });
 });
 
