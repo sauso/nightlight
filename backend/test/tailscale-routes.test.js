@@ -387,6 +387,57 @@ test('#978 the secure address counts as on only when Serve is set up for the CUR
   assert.equal(await enabled(), true);
 });
 
+// 2026-11-06: the phone apps fall back to this address when the local one does not answer, and DROP a saved address on `url: null`.
+// So the endpoint must tell "definitely not available" (null) from "not known right now" (409), or a daemon restart would erase it.
+test('GET /address: any signed-in user gets the https address only when connected AND Serve is on for the current name', async () => {
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  const proxy = 'http://127.0.0.1:4000';
+  let web = {};
+  await mount({ blocker: () => null, status: () => ({ state: 'running', restarts: 0, reason: null }),
+    cli: async (verb) => verb === 'status-peerless'
+      ? { ok: true, json: { BackendState: 'Running', Self: { TailscaleIPs: ['100.64.0.1'], DNSName: 'new-name.example.ts.net.' } } }
+      : { ok: true, json: { Web: web } } });
+  const address = (token = caregiverToken) => call(`${route()}/address`, { token });
+  web = { 'new-name.example.ts.net:443': { Handlers: { '/': { Proxy: proxy } } } };
+  for (const token of [adminToken, caregiverToken]) {
+    const got = await address(token);
+    assert.equal(got.status, 200);
+    assert.deepEqual(got.body, { url: 'https://new-name.example.ts.net' }, 'exactly the one field: no addresses, hostname or state leak to a caregiver');
+  }
+  assert.equal((await call(`${route()}/address`)).status, 401, 'not signed in');
+  web = {};
+  assert.deepEqual((await address()).body, { url: null }, 'connected, Serve off: definitely not available');
+  web = { 'old-name.example.ts.net:443': { Handlers: { '/': { Proxy: proxy } } } };
+  assert.deepEqual((await address()).body, { url: null }, 'Serve is set up for the OLD name only (#978)');
+});
+
+test('GET /address: Tailscale turned off is a definite null with no CLI call; an unsettled daemon is a 409, never a null', async () => {
+  const remount = async (options) => { await server?.close(); server = null; await mount(options); };
+  const address = () => call(`${route()}/address`, { token: caregiverToken });
+  db.prepare("UPDATE settings SET tailscale_enabled = 0 WHERE id = 'app'").run();
+  await remount({ blocker: () => null, status: () => ({ state: 'stopped', restarts: 0, reason: null }), cli: async () => assert.fail('no CLI call when off') });
+  const off = await address();
+  assert.equal(off.status, 200);
+  assert.deepEqual(off.body, { url: null });
+
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  const running = { state: 'running', restarts: 0, reason: null };
+  const web = { Web: { 'n.example.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:4000' } } } } };
+  const cases = [
+    ['the daemon is still starting', { status: () => ({ state: 'starting', restarts: 0, reason: null }), cli: async () => assert.fail('not asked') }],
+    ['it needs sign-in', { status: () => running, cli: async (verb) => verb === 'status-peerless' ? { ok: true, json: { BackendState: 'NeedsLogin' } } : { ok: true, json: web } }],
+    ['its status cannot be read', { status: () => running, cli: async () => ({ ok: false, code: 'timeout' }) }],
+    ['the CLI throws', { status: () => running, cli: async () => { throw new Error('boom'); } }],
+  ];
+  for (const [label, options] of cases) {
+    await remount({ blocker: () => null, ...options });
+    const got = await address();
+    assert.equal(got.status, 409, label);
+    assert.equal(got.body.code, 'status_unavailable', label);
+    assert.equal(Object.hasOwn(got.body, 'url'), false, `${label}: no url field, so the phone keeps what it has`);
+  }
+});
+
 test('#969 hostname is saved only after CLI success and sign-in uses that name', async () => {
   const calls = [];
   await mount({ blocker: () => null, status: () => ({ state: 'running' }),

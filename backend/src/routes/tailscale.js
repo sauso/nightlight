@@ -41,7 +41,8 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
   let lastError = null;
   const enabled = () => database.prepare("SELECT tailscale_enabled FROM settings WHERE id = 'app'").get()?.tailscale_enabled === 1;
   const hostname = () => database.prepare("SELECT tailscale_hostname FROM settings WHERE id = 'app'").get()?.tailscale_hostname ?? 'nightlight';
-  const view = async () => {
+  // What the daemon says right now, shared by the admin status below and by the signed-in address endpoint further down.
+  const readRemote = async () => {
     const hostNetwork = detector();
     const process = status();
     let remote = { state: !enabled() ? 'off' : process.state === 'unavailable' ? 'error' : 'starting',
@@ -59,6 +60,10 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
       serve = { enabled: Boolean(serving),
         consent_url: getTailscaleLinks().consentUrl };
     }
+    return { hostNetwork, process, remote, serve };
+  };
+  const view = async () => {
+    const { hostNetwork, process, remote, serve } = await readRemote();
     return { enabled: enabled(), process,
       blocker: blocker(database, { hostNetwork })?.code ?? null, host_network: hostNetwork,
       state: remote.state, addresses: remote.addresses, dns_name: remote.dns_name, online: remote.online ?? null,
@@ -75,6 +80,26 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
   router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
     try { res.json(await view()); }
     catch { conflict(res, 'status_unavailable', 'Tailscale status is unavailable.'); }
+  }));
+  // The address the phone apps may fall back to when the local one does not answer (owner, 2026-11-06). ANY signed-in user, not
+  // only admins, because a caregiver's phone needs it as much as an admin's; the answer is a single https address that only
+  // opens from inside the tailnet, and the admin-only status above stays the one place that shows everything else.
+  //
+  // Three answers, and the difference matters because the phone DROPS a saved address on `url: null`:
+  //   * { url: "https://<name>.ts.net" }  Tailscale is connected AND private HTTPS Serve is on for the node's CURRENT name
+  //                                       (the same test as `serve.enabled`, #978).
+  //   * { url: null }                     definitely not available: an admin has Tailscale off, or it is connected with Serve off.
+  //   * 409                               not known right now (the daemon is starting, needs sign-in, or its status could not be
+  //                                       read). The phone keeps what it has: a daemon restart must not erase the address.
+  router.get('/address', requireAuth, asyncHandler(async (req, res) => {
+    if (!enabled()) return res.json({ url: null });
+    try {
+      const { remote, serve } = await readRemote();
+      if (remote.state === 'connected' && remote.dns_name) {
+        return res.json({ url: serve.enabled ? `https://${remote.dns_name}` : null });
+      }
+    } catch { /* falls through to the unknown answer */ }
+    return conflict(res, 'status_unavailable', 'The Tailscale address is not known right now.');
   }));
   router.put('/', requireAuth, requireAdmin, (req, res) => {
     if (!req.body || Array.isArray(req.body) || Object.keys(req.body).length !== 1 ||

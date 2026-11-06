@@ -11,6 +11,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- Any signed-in user can read the server's Tailscale address (`GET /api/remote-access/tailscale/address`: `{ "url": "https://<name>.ts.net" }`, or `{ "url": null }` when Tailscale is off or has no private HTTPS address, or a 409 when it is not known right now). The phone apps will use it to fall back to Tailscale when your home address does not answer; nothing in the web app uses it yet.
+
 - #977 Settings → Remote Access and the setup guide now lead with a Tailscale option for private viewing away from home, including sign-in, a secure address, viewer steps, a video check and identity controls. The existing own-domain and port-forward guidance remains under Advanced.
 
 - #974 Tailscale sign-in now adds its vetted tailnet address to the Low latency video candidates without restarting camera streams. The first addition briefly reconnects Low latency viewers; later address changes wait for viewers to leave, with an admin Apply now action. Checked once on a staging install: Low latency played on a phone over cellular through the tailnet with the router forward closed; long sessions and relayed-only paths are untested.
@@ -32,6 +34,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- Alert links no longer take a Tailscale address (a `.ts.net` name or an address from 100.64.0.0 to 100.127.255.255) as the household's address, whichever admin phone reports it. Until now an admin phone reaching Nightlight over Tailscale would have pointed everyone's alert links at that address. If the only admin phone uses the Tailscale address, alert links open the app in place without naming the server.
 - On a child's settings, on your Account and when an admin edits a caregiver, the avatar itself is now the photo control: a round photo (or initials) with a small camera badge, and tapping it opens the file picker. Tapping draws no extra box around the badge; keyboard focus shows one ring around the avatar. This replaces the separate **Add photo** / **Change photo** buttons; **Remove** stays under the avatar. Saving is unchanged: an existing child's or your own photo still saves as soon as it is chosen, and a new child's photo is kept until the first save.
 - The setup guide's **Add your child** step has the same round avatar, so the first child can have a photo from the start (it is saved together with the child; a colour can be chosen later in the child's settings).
 - The setup guide's **Invite caregivers** step now adds caregiver accounts in the guide itself instead of jumping to Settings: names, username, password and an optional photo, then **Add another caregiver** or **Continue**. It only creates caregivers; editing and removing stay in Settings → Caregivers.
