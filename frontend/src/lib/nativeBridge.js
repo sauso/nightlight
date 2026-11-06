@@ -380,12 +380,47 @@ export async function requestServerSwitch(raw) {
 let offeredTailscaleUrl = null;
 let offeredFor = null;
 
+// What the last ask ended in, so the About page can say WHY no Tailscale address is saved (owner, 2026-11-07: "Not saved" was a
+// dead end). One of: 'saved' | 'server-none' (the server says it has none) | 'unknown' (the server could not say: 409, an older
+// server's 404, no network, an odd body) | 'unreachable' | 'different' | 'refused' (the shell said no, see classifyAddRefusal) |
+// null (not asked in this page load, or signed out). Per page load, like offeredTailscaleUrl; getConnectionRoute only reports it
+// while nothing is saved, so a failed re-ask can never hide an address that IS saved.
+let tailscaleOutcome = null;
+
+// Why the shell refused to save the address, from the sentence it rejected with (ServerConfigPlugin.refusal, in nightlight-mobile).
+// Matching the wording couples the two repos, so the failure mode is chosen: a reworded or unrecognised sentence is 'refused',
+// whose text is generic and never names a cause the shell did not give. "Couldn't reach" is the usual real cause: the address
+// answers only while the PHONE is on Tailscale, and addEndpoint probes it from the phone.
+export function classifyAddRefusal(err) {
+  const message = typeof err?.message === 'string' ? err.message : '';
+  if (/couldn'?t reach/i.test(message)) return 'unreachable';
+  if (/different server/i.test(message)) return 'different';
+  return 'refused';
+}
+
+// The ask in progress, if any. getConnectionRoute waits for it, so About opened while the start-up ask is still running shows its
+// result, not the state from before it (Codex review of the code: About reads once and would otherwise stay stale).
+let syncInFlight = null;
+
 export async function syncTailscaleEndpoint() {
+  const run = askForTailscaleAddress();
+  syncInFlight = run;
+  try {
+    return await run;
+  } finally {
+    if (syncInFlight === run) syncInFlight = null;
+  }
+}
+
+async function askForTailscaleAddress() {
   const p = window.Capacitor?.Plugins?.ServerConfig;
-  if (!p || typeof p.addEndpoint !== 'function' || typeof p.removeEndpoint !== 'function') return null;
-  if (!getToken()) return null;
+  if (!p || typeof p.addEndpoint !== 'function' || typeof p.removeEndpoint !== 'function') { tailscaleOutcome = null; return null; }
+  if (!getToken()) { tailscaleOutcome = null; return null; }
   let url;
   const asAToken = getToken();
+  // The outcome belongs to the sign-in that asked: an ask that finishes after a sign-out (and perhaps a new sign-in) must not write
+  // its result over the new session's state (Codex review of the code), the same rule offeredFor follows.
+  const note = (outcome) => { if (getToken() === asAToken) tailscaleOutcome = outcome; };
   try {
     // A short deadline: this runs at every start and must never hold anything up. No answer just means "no change".
     const res = await api.get('/remote-access/tailscale/address', { timeoutMs: 5000 });
@@ -393,13 +428,16 @@ export async function syncTailscaleEndpoint() {
   } catch {
     offeredTailscaleUrl = null; // nothing is known about what the server offers right now
     offeredFor = null;
+    note('unknown');
     return null;
   }
   offeredTailscaleUrl = typeof url === 'string' ? url : null;
   offeredFor = asAToken;
+  note(url === null ? 'server-none' : 'unknown'); // anything but a string or null is an odd body: not known
   try {
     if (typeof url === 'string') {
       const res = await p.addEndpoint({ url });
+      note('saved');
       if (res?.added === true) { announceTailscaleAdded(); return 'added'; }
       return 'unchanged';
     }
@@ -409,7 +447,8 @@ export async function syncTailscaleEndpoint() {
     }
   } catch (err) {
     // The shell refused (not this server's page, the address did not answer or is another server): it can be tried again
-    // at the next start, and there is nothing the person could do about it now.
+    // at the next start. The person can act on it only if told why, which is the About page's Connection card.
+    if (typeof url === 'string') note(classifyAddRefusal(err));
     console.warn('Tailscale address not saved', err);
   }
   return null;
@@ -421,11 +460,15 @@ export async function syncTailscaleEndpoint() {
 //        'saved'     - the page is on the address the app was set up with;
 //        'other'     - neither (an unexpected state; shown without a name rather than guessed).
 //   tailscaleSaved   - a Tailscale address is stored for this server.
+//   address          - its host (e.g. `x.ts.net`, no scheme), or null when none is saved. Shown on About (owner, 2026-11-07).
+//   why              - when none is saved: the outcome of this page load's ask (see tailscaleOutcome), else null. Never set while
+//                      an address is saved: a failed re-ask does not unsave it.
 // null when this is not the Android shell with the Tailscale feature (a browser, iOS, an older app): nothing is shown then.
 // Comparisons use the canonical origin, like every other address check here. Never throws.
 export async function getConnectionRoute() {
   const p = window.Capacitor?.Plugins?.ServerConfig;
   if (!p || typeof p.addEndpoint !== 'function' || typeof p.get !== 'function') return null;
+  if (syncInFlight) await syncInFlight.catch(() => {}); // the ask may be about to save the address p.get() reports
   let res;
   try {
     res = await p.get();
@@ -438,7 +481,11 @@ export async function getConnectionRoute() {
   let via = 'other';
   if (here && tailscale && here === tailscale) via = 'tailscale';
   else if (here && saved && here === saved) via = 'saved';
-  return { via, tailscaleSaved: Boolean(tailscale) };
+  let address = null;
+  if (tailscale) {
+    try { address = new URL(tailscale).host; } catch { address = null; }
+  }
+  return { via, tailscaleSaved: Boolean(tailscale), address, why: tailscale ? null : tailscaleOutcome };
 }
 
 // --- One sign-in across the server's two addresses (owner, 2026-11-06) ---

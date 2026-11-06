@@ -53,17 +53,58 @@ describe('the Android app Connection card', () => {
   // [[label, value], ...] for the rows of a card.
   const rowsOf = (card) => [...card.querySelectorAll('.list-row')].map((row) => [...row.children].map((c) => c.textContent));
 
-  test('★ on the Tailscale address with it saved', async () => {
-    route({ via: 'tailscale', tailscaleSaved: true });
+  // The muted line under the rows (a direct child of the card, outside the label + value rows).
+  const noteOf = (card) => card.querySelector(':scope > .camera-tile__sub')?.textContent ?? null;
+
+  test('★ on the Tailscale address with it saved: the address itself is shown (owner, 2026-11-07)', async () => {
+    route({ via: 'tailscale', tailscaleSaved: true, address: 'nightlight.example.ts.net', why: null });
     renderAsAdmin(<About />);
-    expect(rowsOf(await connectionCard())).toEqual([
+    const card = await connectionCard();
+    expect(rowsOf(card)).toEqual([
       ['Connected through', 'Tailscale address'],
-      ['Tailscale address', 'Saved for use away from home'],
+      ['Tailscale address', 'nightlight.example.ts.net'],
     ]);
+    expect(noteOf(card)).toBe('Saved for use away from home.');
+  });
+
+  test('a saved address the shell gave no readable host for says "Saved" rather than nothing', async () => {
+    route({ via: 'saved', tailscaleSaved: true, address: null, why: null });
+    renderAsAdmin(<About />);
+    expect(rowsOf(await connectionCard())[1]).toEqual(['Tailscale address', 'Saved']);
+  });
+
+  test('★ not saved: each reason is its own sentence, nothing is guessed when none is known, and a saved address never shows one', async () => {
+    const reasons = {
+      'server-none': /isn't offering one.*Settings → Remote Access/,
+      unknown: /couldn't say just now.*each time it starts/,
+      unreachable: /couldn't reach it. Turn Tailscale on in the phone, then restart/,
+      different: /different server, so it was not saved/,
+      refused: /did not accept the address/,
+    };
+    for (const [why, pattern] of Object.entries(reasons)) {
+      vi.restoreAllMocks();
+      route({ via: 'saved', tailscaleSaved: false, address: null, why });
+      const { unmount } = renderAsAdmin(<About />);
+      const card = await connectionCard();
+      expect(rowsOf(card)[1], why).toEqual(['Tailscale address', 'Not saved']);
+      expect(noteOf(card), why).toMatch(pattern);
+      unmount();
+    }
+    for (const why of [null, 'saved', 'something-new']) {
+      vi.restoreAllMocks();
+      route({ via: 'saved', tailscaleSaved: false, address: null, why });
+      const { unmount } = renderAsAdmin(<About />);
+      expect(noteOf(await connectionCard()), String(why)).toBeNull();
+      unmount();
+    }
+    vi.restoreAllMocks();
+    route({ via: 'saved', tailscaleSaved: true, address: 'a.ts.net', why: 'unreachable' });
+    renderAsAdmin(<About />);
+    expect(noteOf(await connectionCard())).toBe('Saved for use away from home.');
   });
 
   test('★ on the saved address with no Tailscale address saved', async () => {
-    route({ via: 'saved', tailscaleSaved: false });
+    route({ via: 'saved', tailscaleSaved: false, address: null, why: null });
     renderAsAdmin(<About />);
     expect(rowsOf(await connectionCard())).toEqual([
       ['Connected through', 'Saved address'],
@@ -72,9 +113,9 @@ describe('the Android app Connection card', () => {
   });
 
   test('an unrecognised address names nothing but still says whether a Tailscale address is saved', async () => {
-    route({ via: 'other', tailscaleSaved: true });
+    route({ via: 'other', tailscaleSaved: true, address: 'nightlight.example.ts.net', why: null });
     renderAsAdmin(<About />);
-    expect(rowsOf(await connectionCard())).toEqual([['Tailscale address', 'Saved for use away from home']]);
+    expect(rowsOf(await connectionCard())).toEqual([['Tailscale address', 'nightlight.example.ts.net']]);
   });
 
   test('★ the rows are in their own card, not in the header (the header card is the one with the tagline)', async () => {
