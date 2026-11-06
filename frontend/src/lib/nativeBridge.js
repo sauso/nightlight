@@ -370,18 +370,33 @@ export async function requestServerSwitch(raw) {
 //   sends null ONLY for "definitely not available", so a daemon restart can never erase a saved address.
 // Does nothing in a browser, on an iOS shell or an older Android shell (no addEndpoint), or when signed out. Never throws.
 // Returns what happened, for tests: 'added' | 'unchanged' | 'removed' | 'none' | null.
+// The Tailscale address THIS page's own server offered on the last successful ask, or null (none offered, or the ask failed). A
+// saved sign-in carries it (saveNativeSession), so the app binds the token to that address only when it is the one the server
+// itself named: addEndpoint can be called by a page at the saved address, so an address another page planted must never be the
+// one a real sign-in is bound to (Opus review of the code). Per page load, like everything in this module.
+// It belongs to the sign-in whose request fetched it (`offeredFor`): after a sign-out and a new sign-in in the same page load the
+// old answer is never reused for the new token, or an address another page planted before the sign-out could be stamped onto a
+// real sign-in that is saved before its own sync has run (Astra review of the code).
+let offeredTailscaleUrl = null;
+let offeredFor = null;
+
 export async function syncTailscaleEndpoint() {
   const p = window.Capacitor?.Plugins?.ServerConfig;
   if (!p || typeof p.addEndpoint !== 'function' || typeof p.removeEndpoint !== 'function') return null;
   if (!getToken()) return null;
   let url;
+  const asAToken = getToken();
   try {
     // A short deadline: this runs at every start and must never hold anything up. No answer just means "no change".
     const res = await api.get('/remote-access/tailscale/address', { timeoutMs: 5000 });
     url = res?.url;
   } catch {
+    offeredTailscaleUrl = null; // nothing is known about what the server offers right now
+    offeredFor = null;
     return null;
   }
+  offeredTailscaleUrl = typeof url === 'string' ? url : null;
+  offeredFor = asAToken;
   try {
     if (typeof url === 'string') {
       const res = await p.addEndpoint({ url });
@@ -424,6 +439,67 @@ export async function getConnectionRoute() {
   if (here && tailscale && here === tailscale) via = 'tailscale';
   else if (here && saved && here === saved) via = 'saved';
   return { via, tailscaleSaved: Boolean(tailscale) };
+}
+
+// --- One sign-in across the server's two addresses (owner, 2026-11-06) ---
+// The saved address and the Tailscale address are different web origins, each with its own localStorage, so a person had to sign
+// in on each. The Android app can also keep the session token, encrypted, in its own storage (ServerConfig.saveSession /
+// getSession / clearSession; ServerConfigPlugin.kt, SessionRules.kt) and hand it ONLY to the page that is the saved Tailscale
+// address, after checking it is the same server. These three wrap those calls. Every one does nothing in a browser, on iOS or in
+// an app without the methods, and NEVER throws: a failure here must never get in the way of signing in or out.
+// WHY 6 s: the app first reads the page, then asks the page's own server for its id (up to 3 s to connect and 3 s to answer, over a
+// relayed Tailscale link on cellular), then decrypts. 2 s gave up on exactly the slow link this feature is for, and showed the
+// sign-in form (Opus review; the timing is reasoned, not measured on a phone). `loading` holds the screen for at most this long.
+const SESSION_ADOPT_DEADLINE_MS = 6000;
+
+function sessionPlugin() {
+  const p = window.Capacitor?.Plugins?.ServerConfig;
+  return p && typeof p.saveSession === 'function' && typeof p.getSession === 'function' && typeof p.clearSession === 'function' ? p : null;
+}
+
+// Keep this token for the other address. Called after a sign-in, and again once the Tailscale address is known (the app stamps
+// each saved token with the addresses in force when it is saved, so a first sign-in is saved again after that).
+export async function saveNativeSession(token) {
+  const p = sessionPlugin();
+  if (!p || typeof token !== 'string' || !token) return false;
+  try {
+    // `tailscale`: what this page's server offered (see offeredTailscaleUrl). null when nothing is known, and the app then binds
+    // the token to no Tailscale address, so it is not handed out until a save after the server has answered.
+    const res = await p.saveSession({ token, tailscale: offeredFor === token ? offeredTailscaleUrl : null });
+    return res?.saved === true;
+  } catch {
+    return false;
+  }
+}
+
+// Ask for the saved token, for a page that has none. The app answers `{ token }` only to the saved Tailscale address and for
+// every other page says `{ token: null }`. A string comes back, or null. A deadline: signing in must not wait on a slow check.
+export async function adoptNativeSession() {
+  const p = sessionPlugin();
+  if (!p) return null;
+  let timer;
+  try {
+    const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timed out')), SESSION_ADOPT_DEADLINE_MS); });
+    const answer = await Promise.race([p.getSession(), timeout]);
+    return typeof answer?.token === 'string' && answer.token ? answer.token : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Forget the saved token: a sign-out passes none (it clears whatever is saved); a 401 passes the token the server rejected, so only
+// that exact token is dropped and a newer saved sign-in survives.
+export async function clearNativeSession(token) {
+  const p = sessionPlugin();
+  if (!p) return false;
+  try {
+    await p.clearSession(typeof token === 'string' && token ? { token } : {});
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Tell the person, once, that the phone will now also use the Tailscale address. Only when nothing else is asking: it never

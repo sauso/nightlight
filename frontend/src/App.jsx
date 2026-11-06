@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from './lib/AuthContext.jsx';
 import { SettingsProvider } from './lib/SettingsContext.jsx';
 import { CamerasProvider } from './lib/CamerasContext.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
-import { isNativeApp, hasActiveBackgroundAudio, syncTailscaleEndpoint } from './lib/nativeBridge.js';
+import { isNativeApp, hasActiveBackgroundAudio, syncTailscaleEndpoint, saveNativeSession } from './lib/nativeBridge.js';
 import { isReloadHeld } from './lib/reloadGuard.js';
 import { initPushNotifications } from './lib/pushNotifications.js';
 import { applyViewportPolicy } from './lib/viewport.js';
@@ -23,7 +23,7 @@ import Account from './pages/Account.jsx';
 import Settings from './pages/Settings.jsx';
 import NotFound from './pages/NotFound.jsx';
 import { lazyPage } from './lib/lazyPage.jsx';
-import { api } from './lib/api.js';
+import { api, getToken } from './lib/api.js';
 import { setupApi } from './lib/setupApi.js';
 
 // #386: everything not needed to show the Live page, sign in, or reach the primary tabs is split out of
@@ -188,8 +188,12 @@ function Shell() {
 
   // Also once signed in (native app only): ask the server for its Tailscale address and hand it to the shell, which keeps
   // it for use away from home (lib/nativeBridge.js syncTailscaleEndpoint). Never throws; does nothing in a browser.
+  // THEN keep the signed-in token in the app too, now that the Tailscale address is known (the app stamps a saved token with the
+  // addresses in force, so a token saved at sign-in, before it was learned, is saved again here; and a person who was already
+  // signed in before this version is picked up at their next start). Only for a sign-in the server has just confirmed: `user` is
+  // set after /auth/me answered. Not a "backfill when nothing is saved": native storage is written, never probed.
   useEffect(() => {
-    if (user) void syncTailscaleEndpoint();
+    if (user) void syncTailscaleEndpoint().then(() => saveNativeSession(getToken()));
   }, [user]);
 
   if (loading) return null;

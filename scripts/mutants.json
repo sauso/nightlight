@@ -17348,8 +17348,8 @@
   {
     "label": "#562 TTL F1: a 401 no longer tells AuthProvider (an open tab stays on a dead screen)",
     "file": "frontend/src/lib/api.js",
-    "find": "    for (const listener of [...unauthorizedListeners]) listener();",
-    "replace": "    void unauthorizedListeners;",
+    "find": "for (const listener of [...unauthorizedListeners]) listener(rejected);",
+    "replace": "void unauthorizedListeners;",
     "expect": "killed",
     "tests": ["appShell.test.jsx"],
     "namePattern": "#562"
@@ -17357,8 +17357,8 @@
   {
     "label": "#562 TTL F2: AuthProvider never registers for 401s",
     "file": "frontend/src/lib/AuthContext.jsx",
-    "find": "  useEffect(() => onUnauthorized(() => {",
-    "replace": "  useEffect(() => (() => () => {})(() => {",
+    "find": "useEffect(() => onUnauthorized((rejectedToken) => {",
+    "replace": "useEffect(() => (() => () => {})((rejectedToken) => {",
     "expect": "killed",
     "tests": ["appShell.test.jsx"],
     "namePattern": "#562"
@@ -17384,8 +17384,8 @@
   {
     "label": "#562 TTL F5: listeners are called BEFORE the token is cleared",
     "file": "frontend/src/lib/api.js",
-    "find": "  if (res.status === 401) {\n    setToken(null);",
-    "replace": "  if (res.status === 401) {\n    for (const listener of [...unauthorizedListeners]) listener();\n    setToken(null);",
+    "find": "      setToken(null);\n      window.location.hash = '#/login';",
+    "replace": "      for (const listener of [...unauthorizedListeners]) listener(rejected);\n      setToken(null);\n      window.location.hash = '#/login';",
     "expect": "killed",
     "tests": ["lib/api.test.js"],
     "namePattern": "onUnauthorized"
@@ -17402,8 +17402,8 @@
   {
     "label": "#562 TTL F7: listeners are called from the live set, not a copy",
     "file": "frontend/src/lib/api.js",
-    "find": "for (const listener of [...unauthorizedListeners]) listener();",
-    "replace": "for (const listener of unauthorizedListeners) listener();",
+    "find": "for (const listener of [...unauthorizedListeners]) listener(rejected);",
+    "replace": "for (const listener of unauthorizedListeners) listener(rejected);",
     "expect": "killed",
     "tests": ["lib/api.test.js"],
     "namePattern": "registered DURING"
@@ -17429,8 +17429,8 @@
   {
     "label": "#562 TTL F10: AuthProvider's 401 effect returns no cleanup (an unmounted provider is still called)",
     "file": "frontend/src/lib/AuthContext.jsx",
-    "find": "  useEffect(() => onUnauthorized(() => {",
-    "replace": "  useEffect(() => void onUnauthorized(() => {",
+    "find": "useEffect(() => onUnauthorized((rejectedToken) => {",
+    "replace": "useEffect(() => void onUnauthorized((rejectedToken) => {",
     "expect": "killed",
     "tests": ["lib/AuthContext.test.jsx"],
     "namePattern": "unmounts"

@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { api, getToken, setToken, refreshMediaToken, clearMediaToken, onUnauthorized } from './api.js';
+import { saveNativeSession, adoptNativeSession, clearNativeSession } from './nativeBridge.js';
 import { unregisterPushNotifications, resetPushRegistration } from './pushNotifications.js';
 import { useAutoRetry } from './useAutoRetry.js';
 import { clearAllDrafts } from './formDraft.js';
@@ -26,7 +27,35 @@ export function AuthProvider({ children }) {
   const [retrying, setRetrying] = useState(false);
   const [failures, setFailures] = useState(0);
 
+  // One sign-in across the Android app's two addresses (lib/nativeBridge.js adoptNativeSession): a page with no token asks the app
+  // for the saved one, ONCE per page load (refresh() runs again from several screens, and a revoked token must not be fetched
+  // again and again). `loading` stays true while it asks (a 6 s deadline inside adoptNativeSession), so the sign-in form never
+  // flashes before a saved sign-in arrives. The app only ever answers the page on the saved Tailscale address.
+  const adoptedWhenSignedOut = useRef(false);
+  const adoptedAfterRejection = useRef(false);
+  const adoptedToken = useRef(null); // the token this page took from the app, if any
+  // The ask of the app that is in flight (so a second refresh() waits for it instead of showing the sign-in form), and a count of
+  // explicit sign-outs (so an answer that arrives AFTER a sign-out cannot put the person back in). Astra review of the code.
+  const asking = useRef(null);
+  const signOuts = useRef(0);
+
   async function refresh() {
+    if (!getToken() && asking.current) {
+      // Another refresh() is already asking the app and will finish the job (check, set the user, end `loading`).
+      await asking.current;
+      return;
+    }
+    if (!getToken() && !adoptedWhenSignedOut.current) {
+      adoptedWhenSignedOut.current = true;
+      const signOutsBefore = signOuts.current;
+      asking.current = adoptNativeSession();
+      const saved = await asking.current;
+      asking.current = null;
+      if (saved && !getToken() && signOuts.current === signOutsBefore) {
+        adoptedToken.current = saved;
+        setToken(saved); // it still goes through the /auth/me check below
+      }
+    }
     if (!getToken()) {
       setUser(null);
       setUnreachable(false);
@@ -35,6 +64,8 @@ export function AuthProvider({ children }) {
       return;
     }
     setRetrying(true);
+    const sent = getToken(); // the token this check carries, so a rejection below can tell WHICH token was refused
+    const placeBefore = window.location.hash; // api.js sends a 401 to #/login; if the saved sign-in is taken, put the person back
     try {
       const me = await api.get('/auth/me');
       warmIceServersForSignedInUser();
@@ -45,8 +76,34 @@ export function AuthProvider({ children }) {
       setUnreachable(false);
       setFailures(0);
     } catch (err) {
-      if (err?.status === 401) {
-        // The server answered and refused this sign-in: api.js has already cleared the token.
+      if (err?.status === 401 && getToken() && getToken() !== sent) {
+        // This check carried a token that has since been REPLACED by a newer sign-in (api.js ignored its late refusal for that
+        // reason). Nothing to do: the newer sign-in stays, and this answer must not spend the one ask of the app or sign it out
+        // (Opus review: two overlapping refreshes, Account's or the auto-retry's).
+      } else if (err?.status === 401) {
+        // The server answered and refused this sign-in: api.js has already cleared the token (and told the app to drop that
+        // exact token, see the listener below). The app may hold a DIFFERENT, newer saved sign-in (this address kept an old one
+        // while the other address signed in again): take it once and check it. A saved token that is the one just refused was
+        // dropped by the listener, so there is nothing to take and no loop.
+        // (A token this page itself just took from the app and that was refused needs no second look: the app was just told to drop it.)
+        if (!adoptedAfterRejection.current && adoptedToken.current !== sent) {
+          adoptedAfterRejection.current = true;
+          const signOutsBefore = signOuts.current;
+          const saved = await adoptNativeSession();
+          // While the app was being asked, the person signed out (stay signed out) or signed in by hand (that sign-in stays: do not
+          // sign it out below). Both ended this check's business. Astra review of the code.
+          if (signOuts.current !== signOutsBefore || getToken()) return;
+          if (saved && saved !== sent) {
+            adoptedToken.current = saved;
+            setToken(saved);
+            // The refusal above sent the page to #/login (api.js). The person was somewhere (a camera, a setting) and is about to
+            // be signed in again, so put them back: if the saved token is refused too, its own 401 sends them to #/login again.
+            // (A cold start has no fragment at all: that means the home screen, so '' goes back to '#/', not to the sign-in route.)
+            if (!placeBefore.startsWith('#/login')) window.location.hash = placeBefore || '#/';
+            await refresh();
+            return;
+          }
+        }
         setUser(null);
         setUnreachable(false);
         setFailures(0);
@@ -87,7 +144,11 @@ export function AuthProvider({ children }) {
   // locally that push was registered, so signing in again in this same page registers push afresh under the
   // new session instead of hitting initPushNotifications()'s "already registered" early return.
   // The effect returns onUnauthorized's unsubscribe, so an unmounted provider is never called.
-  useEffect(() => onUnauthorized(() => {
+  useEffect(() => onUnauthorized((rejectedToken) => {
+    // The Android app keeps a copy of the token for the other address. Drop it ONLY if it is the token the server just refused,
+    // and only when that request carried a token: a wrong password or MFA code on the sign-in form is a 401 with none, and an old
+    // token's 401 must not delete a newer saved sign-in.
+    if (rejectedToken) void clearNativeSession(rejectedToken);
     clearMediaToken();
     resetPushRegistration();
     setUser(null);
@@ -108,6 +169,9 @@ export function AuthProvider({ children }) {
 
   async function login(token, userObj) {
     setToken(token);
+    // Keep it in the Android app too, for the other address (best effort, never blocks or breaks signing in). The app stamps it
+    // with the addresses known now; the app shell saves it again once the Tailscale address has been learned (App.jsx).
+    void saveNativeSession(token);
     warmIceServersForSignedInUser();
     await refreshMediaToken().catch(() => {});
     setUser(userObj);
@@ -116,6 +180,10 @@ export function AuthProvider({ children }) {
   function logout() {
     // Stop this device receiving alerts (best-effort, while the token is still valid).
     unregisterPushNotifications().catch(() => {});
+    // Forget the Android app's saved copy first, whatever happens to the server call: it needs no network, so an offline sign-out
+    // still ends the sign-in on this phone (the server session stays until it expires, exactly as for the stored token below).
+    void clearNativeSession();
+    signOuts.current += 1; // an ask of the app still in flight must not sign this person back in
     api.post('/auth/logout', {}).catch(() => {}); // best-effort - clear local state regardless
     clearMediaToken();
     // An explicit sign-out: whatever the last person left half-typed must not be offered to the next. A session
