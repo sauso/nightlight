@@ -400,6 +400,32 @@ export async function syncTailscaleEndpoint() {
   return null;
 }
 
+// Which of the server's addresses this phone is using right now, and whether a Tailscale address is saved, for the About page
+// (owner, 2026-11-06: there was no way to SEE that the Tailscale address was saved, or which address a session is on).
+//   via: 'tailscale' - the page is on the saved Tailscale address;
+//        'saved'     - the page is on the address the app was set up with;
+//        'other'     - neither (an unexpected state; shown without a name rather than guessed).
+//   tailscaleSaved   - a Tailscale address is stored for this server.
+// null when this is not the Android shell with the Tailscale feature (a browser, iOS, an older app): nothing is shown then.
+// Comparisons use the canonical origin, like every other address check here. Never throws.
+export async function getConnectionRoute() {
+  const p = window.Capacitor?.Plugins?.ServerConfig;
+  if (!p || typeof p.addEndpoint !== 'function' || typeof p.get !== 'function') return null;
+  let res;
+  try {
+    res = await p.get();
+  } catch {
+    return null;
+  }
+  const here = canonicalOrigin(currentServerOrigin());
+  const saved = canonicalOrigin(res?.url);
+  const tailscale = canonicalOrigin(res?.tailscale);
+  let via = 'other';
+  if (here && tailscale && here === tailscale) via = 'tailscale';
+  else if (here && saved && here === saved) via = 'saved';
+  return { via, tailscaleSaved: Boolean(tailscale) };
+}
+
 // Tell the person, once, that the phone will now also use the Tailscale address. Only when nothing else is asking: it never
 // replaces or closes a switch-server dialog.
 function announceTailscaleAdded() {
