@@ -105,11 +105,12 @@ describe('readability, recomputed from the stylesheet\'s own tokens', () => {
     expect(contrast(t['--accent-soft'], t['--bar'])).toBeGreaterThanOrEqual(4.5);
   });
 
-  test('★ the logo\'s crescent is the day accent (owner, 2026-11-06: the colour updates on the logo as well as everywhere else)', () => {
+  test('★ the logo\'s crescent is #778ffd, its own colour and deliberately NOT the accent (owner, 2026-11-06: "the logo only needs to be 778ffd")', () => {
     const svg = readFileSync(join(process.cwd(), 'public', 'icons', 'nightlight-logo.svg'), 'utf8');
     const fills = [...svg.matchAll(/fill="(#[0-9a-fA-F]{6})"/g)].map((match) => match[1].toLowerCase());
-    expect(fills, 'the logo has its crescent colour').toContain(day['--accent']);
-    expect(fills.filter((fill) => fill !== '#f8f8ff' && fill !== day['--accent']), 'and no other colour than the baby white').toEqual([]);
+    expect(fills, 'the logo has its crescent colour').toContain('#778ffd');
+    expect(fills.filter((fill) => fill !== '#f8f8ff' && fill !== '#778ffd'), 'and no other colour than the baby white').toEqual([]);
+    expect(day['--accent'], 'buttons keep their own colour').not.toBe('#778ffd');
   });
 });
 
@@ -125,6 +126,13 @@ describe('the setup screens (owner, 2026-11-06)', () => {
     // --bar is one colour in both themes (defined once, in :root), and it is dark enough for light icons.
     expect(night['--bar']).toBe(day['--bar']);
     expect(contrast('#ffffff', day['--bar'])).toBeGreaterThanOrEqual(7);
+  });
+
+  test('★ the step bar stays on ONE row for any number of steps (it wrapped the seventh segment under a fixed six columns)', () => {
+    const bar = ruleFor('.setup-progress');
+    expect(bar, 'the rule was found').toContain('display: grid');
+    expect(bar).toContain('grid-auto-flow: column');
+    expect(bar).not.toMatch(/grid-template-columns:\s*repeat\(\d/);
   });
 
   test('★ the avatar is centred on the account and caregiver forms: a column whose items are centred', () => {

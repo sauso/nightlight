@@ -225,7 +225,9 @@ button {
 }
 
 .app-header__back span {
-  line-height: 1;
+  /* 1.3, not 1 (owner, 2026-11-06): `overflow: hidden` (needed for the ellipsis) clips at the line box, and at line-height 1 that
+     box cut the bottom of the "g" in "Settings". The row's fixed 36px height means the taller line does not change the bar. */
+  line-height: 1.3;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2964,7 +2966,9 @@ input[type='range'] {
 .setup-card { padding: clamp(20px, 5vw, 36px); }
 .setup-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-secondary); font-size: 13px; }
 .setup-wordmark { display: flex; align-items: center; gap: 9px; color: var(--text-primary); font: 800 19px var(--font-display); }
-.setup-progress { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin: 24px 0; }
+/* One row however many steps there are (owner, 2026-11-06: with seven steps a fixed six columns wrapped the last one onto a second
+   line). Columns are created per segment, equal width. */
+.setup-progress { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; margin: 24px 0; }
 .setup-progress span { height: 7px; border-radius: 99px; background: var(--border); }
 .setup-progress .is-complete { background: var(--accent); }
 .setup-progress .is-current { background: var(--complement); }
@@ -2983,7 +2987,7 @@ input[type='range'] {
 /* The guide's own caregiver form (SetupCaregivers); the first-run account form (FirstRun) uses the same classes so the two look alike. */
 /* The avatar sits in the middle of the form, with Remove under it (owner, 2026-11-06). Used by the guide's caregiver form and by
    the first-run account form. */
-.setup-caregivers__photo { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 12px; }
+.setup-caregivers__photo { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 24px; }
 .setup-caregivers__added { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .setup-caregivers__added li { padding: 10px 12px; background: var(--bg-elevated-2); border-radius: 10px; color: var(--text-primary); }
 /* The logo (components/Logo.jsx), everywhere but the header: the owner's SVG on the header colour in a rounded square. Owner,
