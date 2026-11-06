@@ -192,6 +192,47 @@ describe('★ the outcome of the last ask, as About reads it (getConnectionRoute
     expect((await nb.getConnectionRoute()).why).toBeNull();
   });
 
+  // Codex review of the code: three orderings the awaited-one-at-a-time tests above cannot see.
+  test('★ About opened while the start-up ask is still running waits for it and shows its result', async () => {
+    let refuse;
+    stubNative({ ...nothingSaved(), addEndpoint: vi.fn(() => new Promise((_, reject) => { refuse = reject; })) });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const ask = nb.syncTailscaleEndpoint();
+    const route = nb.getConnectionRoute(); // opened mid-ask
+    await vi.waitFor(() => expect(refuse).toBeTypeOf('function'));
+    refuse(new Error("Couldn't reach that Tailscale address"));
+    await ask;
+    expect((await route).why).toBe('unreachable');
+  });
+
+  test('★ an ask that finishes after a sign-out and a new sign-in does not overwrite the new session\'s outcome', async () => {
+    let refuse;
+    const addEndpoint = vi.fn()
+      .mockImplementationOnce(() => new Promise((_, reject) => { refuse = reject; }))
+      .mockResolvedValue({ added: false });
+    stubNative({ ...nothingSaved(), addEndpoint });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const first = nb.syncTailscaleEndpoint(); // signed in as "t"
+    await vi.waitFor(() => expect(refuse).toBeTypeOf('function'));
+    localStorage.setItem('nightlight_token', 'u'); // signed out and in again as someone else while it was still asking
+    await nb.syncTailscaleEndpoint();
+    expect((await nb.getConnectionRoute()).why).toBe('saved');
+    refuse(new Error("Couldn't reach that Tailscale address"));
+    await first;
+    expect((await nb.getConnectionRoute()).why, 'the old ask must not write over the new one').toBe('saved');
+  });
+
+  test('a shell that cannot remove an address (so the ask returns early) clears an older reason instead of keeping it', async () => {
+    stubNative({ ...nothingSaved(), addEndpoint: vi.fn().mockRejectedValue(new Error("Couldn't reach that Tailscale address")) });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await nb.syncTailscaleEndpoint();
+    expect((await nb.getConnectionRoute()).why).toBe('unreachable');
+    const partial = stubNative({ ...nothingSaved() });
+    delete partial.removeEndpoint;
+    await nb.syncTailscaleEndpoint();
+    expect((await nb.getConnectionRoute()).why).toBeNull();
+  });
+
   test('nothing has been asked yet in this page load: no reason', async () => {
     stubNative({ ...nothingSaved() });
     expect((await nb.getConnectionRoute()).why).toBeNull();

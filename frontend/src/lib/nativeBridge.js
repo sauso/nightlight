@@ -398,12 +398,29 @@ export function classifyAddRefusal(err) {
   return 'refused';
 }
 
+// The ask in progress, if any. getConnectionRoute waits for it, so About opened while the start-up ask is still running shows its
+// result, not the state from before it (Codex review of the code: About reads once and would otherwise stay stale).
+let syncInFlight = null;
+
 export async function syncTailscaleEndpoint() {
+  const run = askForTailscaleAddress();
+  syncInFlight = run;
+  try {
+    return await run;
+  } finally {
+    if (syncInFlight === run) syncInFlight = null;
+  }
+}
+
+async function askForTailscaleAddress() {
   const p = window.Capacitor?.Plugins?.ServerConfig;
-  if (!p || typeof p.addEndpoint !== 'function' || typeof p.removeEndpoint !== 'function') return null;
+  if (!p || typeof p.addEndpoint !== 'function' || typeof p.removeEndpoint !== 'function') { tailscaleOutcome = null; return null; }
   if (!getToken()) { tailscaleOutcome = null; return null; }
   let url;
   const asAToken = getToken();
+  // The outcome belongs to the sign-in that asked: an ask that finishes after a sign-out (and perhaps a new sign-in) must not write
+  // its result over the new session's state (Codex review of the code), the same rule offeredFor follows.
+  const note = (outcome) => { if (getToken() === asAToken) tailscaleOutcome = outcome; };
   try {
     // A short deadline: this runs at every start and must never hold anything up. No answer just means "no change".
     const res = await api.get('/remote-access/tailscale/address', { timeoutMs: 5000 });
@@ -411,16 +428,16 @@ export async function syncTailscaleEndpoint() {
   } catch {
     offeredTailscaleUrl = null; // nothing is known about what the server offers right now
     offeredFor = null;
-    tailscaleOutcome = 'unknown';
+    note('unknown');
     return null;
   }
   offeredTailscaleUrl = typeof url === 'string' ? url : null;
   offeredFor = asAToken;
-  tailscaleOutcome = url === null ? 'server-none' : 'unknown'; // anything but a string or null is an odd body: not known
+  note(url === null ? 'server-none' : 'unknown'); // anything but a string or null is an odd body: not known
   try {
     if (typeof url === 'string') {
       const res = await p.addEndpoint({ url });
-      tailscaleOutcome = 'saved';
+      note('saved');
       if (res?.added === true) { announceTailscaleAdded(); return 'added'; }
       return 'unchanged';
     }
@@ -431,7 +448,7 @@ export async function syncTailscaleEndpoint() {
   } catch (err) {
     // The shell refused (not this server's page, the address did not answer or is another server): it can be tried again
     // at the next start. The person can act on it only if told why, which is the About page's Connection card.
-    if (typeof url === 'string') tailscaleOutcome = classifyAddRefusal(err);
+    if (typeof url === 'string') note(classifyAddRefusal(err));
     console.warn('Tailscale address not saved', err);
   }
   return null;
@@ -451,6 +468,7 @@ export async function syncTailscaleEndpoint() {
 export async function getConnectionRoute() {
   const p = window.Capacitor?.Plugins?.ServerConfig;
   if (!p || typeof p.addEndpoint !== 'function' || typeof p.get !== 'function') return null;
+  if (syncInFlight) await syncInFlight.catch(() => {}); // the ask may be about to save the address p.get() reports
   let res;
   try {
     res = await p.get();
