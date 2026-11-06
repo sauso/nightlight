@@ -98,6 +98,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 - The Record button and other video controls no longer cover the camera in Picture-in-Picture. Fullscreen camera controls stay clear of the status and gesture bars in the Android app with the matching app update; older app builds still show the bars.
 
+### Security
+
+- Two third-party libraries are updated to their fixed versions: `follow-redirects` 1.16.2 (GitHub flagged 1.16.0 and 1.16.1: a custom credential header could be forwarded to another site on a redirect) and `qs` 6.16.2 (building a query string with comma-joined arrays could throw an uncaught error). Nightlight's own code does not reach either flaw: its proxies to the camera server on the same machine do not turn on redirect following, and it never calls the affected `qs` function. No settings change; the update is in the next image.
+
 ## [0.45.1] - 2026-11-03
 
 ### Security
