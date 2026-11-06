@@ -136,6 +136,68 @@ describe('★ syncTailscaleEndpoint: what the server says decides what the phone
   });
 });
 
+// Owner, 2026-11-07: About says WHY no Tailscale address is saved. The ask's outcome is kept and reported by getConnectionRoute,
+// but only while nothing is saved. The shell's refusal sentences below are the real ones (ServerConfigPlugin.refusal in
+// nightlight-mobile); the wording is matched, so an unrecognised sentence must fall to the generic 'refused', never to a cause.
+describe('★ the outcome of the last ask, as About reads it (getConnectionRoute.why)', () => {
+  const nothingSaved = () => ({ get: vi.fn().mockResolvedValue({ url: HOME, tailscale: null }) });
+  const whyAfter = async (native) => {
+    stubNative({ ...nothingSaved(), ...native });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await nb.syncTailscaleEndpoint();
+    return (await nb.getConnectionRoute()).why;
+  };
+
+  test('★ each way the shell can refuse maps to its own reason, and an unknown sentence to the generic one', async () => {
+    const cases = [
+      ["Couldn't reach that Tailscale address", 'unreachable'],
+      ['That address is a different server', 'different'],
+      ["Couldn't read this server's identity", 'refused'],
+      ['Not available on this page', 'refused'],
+      ['Something the shell never said', 'refused'],
+    ];
+    for (const [sentence, why] of cases) {
+      expect(await whyAfter({ addEndpoint: vi.fn().mockRejectedValue(new Error(sentence)) }), sentence).toBe(why);
+    }
+    expect(nb.classifyAddRefusal(undefined)).toBe('refused'); // a rejection with no message at all
+    expect(nb.classifyAddRefusal('Couldn\'t reach')).toBe('refused'); // a bare string is not an Error: no guessing
+  });
+
+  test('★ the server saying it has none is "server-none"; a reply that says nothing definite is "unknown"', async () => {
+    answer = { status: 200, body: { url: null } };
+    expect(await whyAfter({})).toBe('server-none');
+    for (const next of [{ status: 409, body: {} }, { status: 404, body: {} }, new TypeError('Failed to fetch'), { status: 200, body: { url: 5 } }]) {
+      answer = next;
+      expect(await whyAfter({}), JSON.stringify(next)).toBe('unknown');
+    }
+    // A removeEndpoint that throws does not change what the server said.
+    answer = { status: 200, body: { url: null } };
+    expect(await whyAfter({ removeEndpoint: vi.fn().mockRejectedValue(new Error('Not available on this page')) })).toBe('server-none');
+  });
+
+  test('★ a saved address wins: no reason and the host is reported, even if the last ask failed', async () => {
+    const saved = { get: vi.fn().mockResolvedValue({ url: HOME, tailscale: TS }), addEndpoint: vi.fn().mockRejectedValue(new Error("Couldn't reach that Tailscale address")) };
+    stubNative(saved);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await nb.syncTailscaleEndpoint();
+    expect(await nb.getConnectionRoute()).toMatchObject({ tailscaleSaved: true, address: 'nightlight.example.ts.net', why: null });
+  });
+
+  test('★ a good save is "saved", and signing out clears what was learned', async () => {
+    stubNative({ ...nothingSaved() });
+    await nb.syncTailscaleEndpoint();
+    expect((await nb.getConnectionRoute()).why).toBe('saved');
+    localStorage.removeItem('nightlight_token');
+    await nb.syncTailscaleEndpoint();
+    expect((await nb.getConnectionRoute()).why).toBeNull();
+  });
+
+  test('nothing has been asked yet in this page load: no reason', async () => {
+    stubNative({ ...nothingSaved() });
+    expect((await nb.getConnectionRoute()).why).toBeNull();
+  });
+});
+
 describe('★ syncTailscaleEndpoint: where it does nothing', () => {
   test('in a browser (no native shell): no request at all', async () => {
     expect(await nb.syncTailscaleEndpoint()).toBeNull();

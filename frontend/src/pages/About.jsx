@@ -19,7 +19,18 @@ const LINKS = [
   { label: 'Got an idea?', url: 'https://github.com/sauso/nightlight/issues/new?template=feature_request.yml' },
 ];
 
-const ISOLATION_DOCS_URL = 'https://github.com/sauso/nightlight/blob/main/docs/operations.md#media-isolation';
+// Why the Android app has no Tailscale address saved, keyed by the outcome of its last ask (nativeBridge.js tailscaleOutcome).
+// No entry (not asked yet this run, or 'saved') shows no line: the app never guesses a cause. The shell's own refusal is not shown
+// word for word; each line is fixed text a person can act on. "Settings -> Remote Access" is the admin-only hub row.
+const TAILSCALE_WHY = {
+  'server-none': "This server isn't offering one. An admin can turn it on in Settings → Remote Access.",
+  unknown: "The server couldn't say just now. The app asks again each time it starts.",
+  unreachable: "The server offered one, but this phone couldn't reach it. Turn Tailscale on in the phone, then restart the app.",
+  different: 'That address belongs to a different server, so it was not saved.',
+  refused: 'The app did not accept the address the server offered.',
+};
+
+const ISOLATION_DOCS_URL ='https://github.com/sauso/nightlight/blob/main/docs/operations.md#media-isolation';
 
 const DONATE_URL ='https://www.paypal.com/donate/?hosted_button_id=VGCB7WFYPJQ3G';
 
@@ -103,10 +114,20 @@ export default function About() {
                 <span className="camera-tile__sub">{route.via === 'tailscale' ? 'Tailscale address' : 'Saved address'}</span>
               </div>
             )}
+            {/* Owner 2026-11-07: the address itself (it only said "saved"), and when none is saved, WHY, so "Not saved" is not
+                a dead end. The host wraps so a long name cannot push the label off the row. The address is on screen, so a
+                screenshot of this card shows the person's tailnet name (docs/remote-access.md). */}
             <div className="list-row">
               <span>Tailscale address</span>
-              <span className="camera-tile__sub">{route.tailscaleSaved ? 'Saved for use away from home' : 'Not saved'}</span>
+              <span className="camera-tile__sub" style={{ overflowWrap: 'anywhere', textAlign: 'right' }}>
+                {route.tailscaleSaved ? (route.address || 'Saved') : 'Not saved'}
+              </span>
             </div>
+            {(route.tailscaleSaved || TAILSCALE_WHY[route.why]) && (
+              <div className="camera-tile__sub" style={{ paddingTop: 4 }}>
+                {route.tailscaleSaved ? 'Saved for use away from home.' : TAILSCALE_WHY[route.why]}
+              </div>
+            )}
           </div>
         )}
 

@@ -28,24 +28,24 @@ afterEach(() => {
 describe('★ getConnectionRoute', () => {
   test('★ on the saved address, with no Tailscale address saved', async () => {
     stubNative(vi.fn().mockResolvedValue({ url: HERE, tailscale: null }));
-    expect(await nb.getConnectionRoute()).toEqual({ via: 'saved', tailscaleSaved: false });
+    expect(await nb.getConnectionRoute()).toEqual({ via: 'saved', tailscaleSaved: false, address: null, why: null });
   });
 
   test('★ on the saved address, with a Tailscale address saved', async () => {
     stubNative(vi.fn().mockResolvedValue({ url: HERE, tailscale: TS }));
-    expect(await nb.getConnectionRoute()).toEqual({ via: 'saved', tailscaleSaved: true });
+    expect(await nb.getConnectionRoute()).toEqual({ via: 'saved', tailscaleSaved: true, address: 'nightlight.example.ts.net', why: null });
   });
 
   test('★ on the Tailscale address: the page IS the saved Tailscale address', async () => {
     stubNative(vi.fn().mockResolvedValue({ url: OTHER, tailscale: HERE }));
-    expect(await nb.getConnectionRoute()).toEqual({ via: 'tailscale', tailscaleSaved: true });
+    expect(await nb.getConnectionRoute()).toEqual({ via: 'tailscale', tailscaleSaved: true, address: window.location.host, why: null });
   });
 
   test('on neither it says "other" rather than guessing a name, and still reports what is saved', async () => {
     stubNative(vi.fn().mockResolvedValue({ url: OTHER, tailscale: TS }));
-    expect(await nb.getConnectionRoute()).toEqual({ via: 'other', tailscaleSaved: true });
+    expect(await nb.getConnectionRoute()).toEqual({ via: 'other', tailscaleSaved: true, address: 'nightlight.example.ts.net', why: null });
     stubNative(vi.fn().mockResolvedValue({ url: null, tailscale: null }));
-    expect(await nb.getConnectionRoute()).toEqual({ via: 'other', tailscaleSaved: false });
+    expect(await nb.getConnectionRoute()).toEqual({ via: 'other', tailscaleSaved: false, address: null, why: null });
   });
 
   test('addresses are compared canonically (case, default port, a trailing slash)', async () => {
@@ -64,6 +64,6 @@ describe('★ getConnectionRoute', () => {
 
   test('an odd value from the shell (not a string) counts as nothing saved, not as a match', async () => {
     stubNative(vi.fn().mockResolvedValue({ url: 5, tailscale: {} }));
-    expect(await nb.getConnectionRoute()).toEqual({ via: 'other', tailscaleSaved: false });
+    expect(await nb.getConnectionRoute()).toEqual({ via: 'other', tailscaleSaved: false, address: null, why: null });
   });
 });
