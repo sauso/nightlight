@@ -378,6 +378,79 @@ describe('★ a 401 clears exactly the token that was refused', () => {
     expect(SC.saveSession).toHaveBeenLastCalledWith({ token: 'a.b.c', tailscale: null });
   });
 
+  test('★ the Tailscale address a server offered is never reused for a different sign-in in the same page load', async () => {
+    const SC = stubNative({ addEndpoint: vi.fn().mockResolvedValue({ added: true }), removeEndpoint: vi.fn().mockResolvedValue({ removed: false }) });
+    stubFetch((url) => (String(url).startsWith('/api/remote-access/tailscale/address') ? { body: { url: 'https://planted.example.ts.net' } } : { body: {} }));
+    setToken('first.token.value');
+    await nb.syncTailscaleEndpoint();
+    setToken(null); // signed out...
+    setToken('second.token.value'); // ...and a new sign-in, saved BEFORE its own sync has run
+    await nb.saveNativeSession('second.token.value');
+    expect(SC.saveSession).toHaveBeenLastCalledWith({ token: 'second.token.value', tailscale: null });
+    await nb.syncTailscaleEndpoint(); // its own ask: now the claim belongs to it
+    await nb.saveNativeSession('second.token.value');
+    expect(SC.saveSession).toHaveBeenLastCalledWith({ token: 'second.token.value', tailscale: 'https://planted.example.ts.net' });
+  });
+
+  // A /auth/me that refuses the stale token and accepts the newer one, with a getSession the test answers by hand.
+  function heldAppAnswer(extraStub = {}) {
+    let answer;
+    const SC = stubNative({ getSession: vi.fn(() => new Promise((resolve) => { answer = resolve; })), ...extraStub });
+    stubFetch((url, init, auth) => {
+      if (String(url) !== '/api/auth/me') return { body: {} };
+      return auth === 'Bearer newer.token.value' ? { body: ME } : { status: 401, body: {} };
+    });
+    return { SC, answer: (token) => answer({ token }) };
+  }
+
+  test('★ signing out while the app is being asked (after a refusal) is not undone by its answer', async () => {
+    const { SC, answer } = heldAppAnswer();
+    setToken('stale.token.value');
+    renderProvider();
+    await waitFor(() => expect(SC.getSession).toHaveBeenCalledTimes(1));
+    await click('sign out');
+    await act(async () => { answer('newer.token.value'); });
+    await act(async () => {});
+    expect(getToken()).toBeNull();
+    expect(screen.getByTestId('user')).toHaveTextContent('none');
+  });
+
+  test('★ signing out while the app is being asked (no token at start) is not undone by its answer', async () => {
+    const { SC, answer } = heldAppAnswer();
+    renderProvider();
+    await waitFor(() => expect(SC.getSession).toHaveBeenCalledTimes(1));
+    await click('sign out');
+    await act(async () => { answer('newer.token.value'); });
+    await act(async () => {});
+    expect(getToken()).toBeNull();
+    expect(screen.getByTestId('user')).toHaveTextContent('none');
+  });
+
+  test('★ a sign-in made while the app is being asked (after a refusal) is kept, not signed out by the answer', async () => {
+    const { SC, answer } = heldAppAnswer();
+    setToken('stale.token.value');
+    renderProvider();
+    await waitFor(() => expect(SC.getSession).toHaveBeenCalledTimes(1));
+    await click('sign in');
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('by-hand'));
+    await act(async () => { answer('newer.token.value'); });
+    await act(async () => {});
+    expect(screen.getByTestId('user')).toHaveTextContent('by-hand');
+    expect(getToken()).toBe('new.token.value');
+  });
+
+  test('★ a second refresh while the app is being asked waits for it: the sign-in form is not shown in between', async () => {
+    const { SC, answer } = heldAppAnswer();
+    renderProvider();
+    await waitFor(() => expect(SC.getSession).toHaveBeenCalledTimes(1));
+    await click('refresh');
+    expect(screen.getByTestId('loading'), 'still waiting on the app').toHaveTextContent('true');
+    expect(SC.getSession).toHaveBeenCalledTimes(1);
+    await act(async () => { answer('newer.token.value'); });
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('nacho'));
+    expect(screen.getByTestId('loading')).toHaveTextContent('false');
+  });
+
   test('★ a sign-in made while the app is still being asked is not overwritten by the answer', async () => {
     let answer;
     stubNative({ getSession: vi.fn(() => new Promise((resolve) => { answer = resolve; })) });

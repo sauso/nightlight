@@ -34,12 +34,24 @@ export function AuthProvider({ children }) {
   const adoptedWhenSignedOut = useRef(false);
   const adoptedAfterRejection = useRef(false);
   const adoptedToken = useRef(null); // the token this page took from the app, if any
+  // The ask of the app that is in flight (so a second refresh() waits for it instead of showing the sign-in form), and a count of
+  // explicit sign-outs (so an answer that arrives AFTER a sign-out cannot put the person back in). Astra review of the code.
+  const asking = useRef(null);
+  const signOuts = useRef(0);
 
   async function refresh() {
+    if (!getToken() && asking.current) {
+      // Another refresh() is already asking the app and will finish the job (check, set the user, end `loading`).
+      await asking.current;
+      return;
+    }
     if (!getToken() && !adoptedWhenSignedOut.current) {
       adoptedWhenSignedOut.current = true;
-      const saved = await adoptNativeSession();
-      if (saved && !getToken()) {
+      const signOutsBefore = signOuts.current;
+      asking.current = adoptNativeSession();
+      const saved = await asking.current;
+      asking.current = null;
+      if (saved && !getToken() && signOuts.current === signOutsBefore) {
         adoptedToken.current = saved;
         setToken(saved); // it still goes through the /auth/me check below
       }
@@ -76,8 +88,12 @@ export function AuthProvider({ children }) {
         // (A token this page itself just took from the app and that was refused needs no second look: the app was just told to drop it.)
         if (!adoptedAfterRejection.current && adoptedToken.current !== sent) {
           adoptedAfterRejection.current = true;
+          const signOutsBefore = signOuts.current;
           const saved = await adoptNativeSession();
-          if (saved && saved !== sent && !getToken()) {
+          // While the app was being asked, the person signed out (stay signed out) or signed in by hand (that sign-in stays: do not
+          // sign it out below). Both ended this check's business. Astra review of the code.
+          if (signOuts.current !== signOutsBefore || getToken()) return;
+          if (saved && saved !== sent) {
             adoptedToken.current = saved;
             setToken(saved);
             // The refusal above sent the page to #/login (api.js). The person was somewhere (a camera, a setting) and is about to
@@ -167,6 +183,7 @@ export function AuthProvider({ children }) {
     // Forget the Android app's saved copy first, whatever happens to the server call: it needs no network, so an offline sign-out
     // still ends the sign-in on this phone (the server session stays until it expires, exactly as for the stored token below).
     void clearNativeSession();
+    signOuts.current += 1; // an ask of the app still in flight must not sign this person back in
     api.post('/auth/logout', {}).catch(() => {}); // best-effort - clear local state regardless
     clearMediaToken();
     // An explicit sign-out: whatever the last person left half-typed must not be offered to the next. A session

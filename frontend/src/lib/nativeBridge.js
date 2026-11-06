@@ -374,22 +374,29 @@ export async function requestServerSwitch(raw) {
 // saved sign-in carries it (saveNativeSession), so the app binds the token to that address only when it is the one the server
 // itself named: addEndpoint can be called by a page at the saved address, so an address another page planted must never be the
 // one a real sign-in is bound to (Opus review of the code). Per page load, like everything in this module.
+// It belongs to the sign-in whose request fetched it (`offeredFor`): after a sign-out and a new sign-in in the same page load the
+// old answer is never reused for the new token, or an address another page planted before the sign-out could be stamped onto a
+// real sign-in that is saved before its own sync has run (Astra review of the code).
 let offeredTailscaleUrl = null;
+let offeredFor = null;
 
 export async function syncTailscaleEndpoint() {
   const p = window.Capacitor?.Plugins?.ServerConfig;
   if (!p || typeof p.addEndpoint !== 'function' || typeof p.removeEndpoint !== 'function') return null;
   if (!getToken()) return null;
   let url;
+  const asAToken = getToken();
   try {
     // A short deadline: this runs at every start and must never hold anything up. No answer just means "no change".
     const res = await api.get('/remote-access/tailscale/address', { timeoutMs: 5000 });
     url = res?.url;
   } catch {
     offeredTailscaleUrl = null; // nothing is known about what the server offers right now
+    offeredFor = null;
     return null;
   }
   offeredTailscaleUrl = typeof url === 'string' ? url : null;
+  offeredFor = asAToken;
   try {
     if (typeof url === 'string') {
       const res = await p.addEndpoint({ url });
@@ -458,7 +465,7 @@ export async function saveNativeSession(token) {
   try {
     // `tailscale`: what this page's server offered (see offeredTailscaleUrl). null when nothing is known, and the app then binds
     // the token to no Tailscale address, so it is not handed out until a save after the server has answered.
-    const res = await p.saveSession({ token, tailscale: offeredTailscaleUrl });
+    const res = await p.saveSession({ token, tailscale: offeredFor === token ? offeredTailscaleUrl : null });
     return res?.saved === true;
   } catch {
     return false;
