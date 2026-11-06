@@ -50,11 +50,11 @@ describe('the Android app Connection card', () => {
   };
   // The card the rows are in: the header card holds only who and what this is.
   const connectionCard = async () => (await screen.findByText('Connection')).closest('.card');
-  // [[label, value], ...] for the rows of a card.
-  const rowsOf = (card) => [...card.querySelectorAll('.list-row')].map((row) => [...row.children].map((c) => c.textContent));
+  // [[label, value], ...] for the facts of a card (a small label over its value).
+  const rowsOf = (card) => [...card.querySelectorAll('.fact')].map((fact) => [fact.querySelector('.fact__label').textContent, fact.querySelector('.fact__value').textContent]);
 
-  // The muted line under the rows (a direct child of the card, outside the label + value rows).
-  const noteOf = (card) => card.querySelector(':scope > .camera-tile__sub')?.textContent ?? null;
+  // The muted line under a fact's value (the saved note or the reason).
+  const noteOf = (card) => card.querySelector('.fact__note')?.textContent ?? null;
 
   test('★ on the Tailscale address with it saved: the address itself is shown (owner, 2026-11-07)', async () => {
     route({ via: 'tailscale', tailscaleSaved: true, address: 'nightlight.example.ts.net', why: null });

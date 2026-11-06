@@ -2149,6 +2149,18 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
   margin-bottom: 2px;
 }
 
+/* A fact: a small label over its value, in a card (About -> Connection). The label is the field label (12px secondary), the value
+   is the input-text size (15px), so a long value such as a tailnet name has the whole card width and wraps only at a limit (owner
+   2026-11-07: the label-and-value-on-one-line row broke the name mid-word). The rows are divided like .list-row. */
+.fact {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.fact:last-child { border-bottom: none; }
+.fact__label { font-size: 12px; color: var(--text-secondary); }
+.fact__value { font-size: 15px; font-weight: 500; margin-top: 2px; overflow-wrap: anywhere; }
+.fact__note { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+
 .about-link {
   text-decoration: none;
   color: var(--text-primary);
