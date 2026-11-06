@@ -54,7 +54,8 @@ function Probe() {
       <span data-testid="loading">{String(ctx.loading)}</span>
       <span data-testid="user">{ctx.user ? ctx.user.username : 'none'}</span>
       <button onClick={() => ctx.refresh()}>refresh</button>
-      <button onClick={() => ctx.login('new.token.value', ME)}>sign in</button>
+      {/* A DIFFERENT user from the one /auth/me returns (ME), so a test can tell "signed in by hand" from "checked by /auth/me". */}
+      <button onClick={() => ctx.login('new.token.value', { id: 'u2', username: 'by-hand', role: 'admin' })}>sign in</button>
       <button onClick={() => ctx.logout()}>sign out</button>
     </div>
   );
@@ -227,6 +228,31 @@ describe('★ a page with no token asks the app once', () => {
 });
 
 describe('★ a 401 clears exactly the token that was refused', () => {
+  test('★ a LATE refusal of an old token does not end a newer sign-in (Codex review)', async () => {
+    const SC = stubNative();
+    let release;
+    globalThis.fetch = vi.fn(async (url) => {
+      if (String(url).startsWith('/api/children')) {
+        await new Promise((resolve) => { release = resolve; }); // held until the test lets it go
+        return { ok: false, status: 401, text: async () => '{}' };
+      }
+      return { ok: true, status: 200, text: async () => JSON.stringify(ME) };
+    });
+    setToken('old.token.value');
+    renderProvider();
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('nacho'));
+    const late = api.get('/children').catch(() => {}); // carries the OLD token
+    await waitFor(() => expect(release).toBeTypeOf('function'));
+    setToken('newer.token.value'); // the person signs in again while that request is out
+    window.location.hash = '#/cameras';
+    release();
+    await late;
+    expect(getToken(), 'the newer sign-in must survive the refusal of an old token').toBe('newer.token.value');
+    expect(window.location.hash).toBe('#/cameras');
+    expect(screen.getByTestId('user')).toHaveTextContent('nacho');
+    expect(SC.clearSession).not.toHaveBeenCalled();
+  });
+
   test('★ a wrong password (a 401 with no token) clears nothing in the app', async () => {
     const SC = stubNative();
     stubFetch(() => ({ status: 401, body: { error: 'Invalid username or password' } }));
@@ -261,6 +287,76 @@ describe('★ a 401 clears exactly the token that was refused', () => {
     // The refusal told the app to drop the STALE token only; the newer saved one was not named.
     expect(SC.clearSession).toHaveBeenCalledWith({ token: 'stale.token.value' });
     expect(SC.clearSession).not.toHaveBeenCalledWith({ token: 'newer.token.value' });
+  });
+
+  test('★ taking the newer saved sign-in puts the person back where they were, not on the sign-in route', async () => {
+    stubNative({ getSession: vi.fn().mockResolvedValue({ token: 'newer.token.value' }) });
+    stubFetch((url, init, auth) => {
+      if (!String(url).startsWith('/api/auth/me')) return { body: {} };
+      return auth === 'Bearer newer.token.value' ? { body: ME } : { status: 401, body: {} };
+    });
+    window.location.hash = '#/cameras';
+    setToken('stale.token.value');
+    renderProvider();
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('nacho'));
+    expect(window.location.hash).toBe('#/cameras');
+  });
+
+  test('★ a cold start has no route at all: taking the saved sign-in lands on the home screen, not the sign-in route', async () => {
+    stubNative({ getSession: vi.fn().mockResolvedValue({ token: 'newer.token.value' }) });
+    stubFetch((url, init, auth) => {
+      if (!String(url).startsWith('/api/auth/me')) return { body: {} };
+      return auth === 'Bearer newer.token.value' ? { body: ME } : { status: 401, body: {} };
+    });
+    window.location.hash = '';
+    setToken('stale.token.value');
+    renderProvider();
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('nacho'));
+    expect(window.location.hash).toBe('#/');
+  });
+
+  test('★ the app is asked at most once per page load after a refusal, even for a later sign-in that is refused', async () => {
+    const SC = stubNative({ getSession: vi.fn().mockResolvedValue({ token: 'newer.token.value' }) });
+    stubFetch((url, init, auth) => {
+      // EXACT match: '/api/auth/media-token' also starts with '/api/auth/me'. login() fetches the media token, and refusing THAT
+      // request signed the person out before the refresh below, which then (correctly) took the signed-out path. Found by a debug run.
+      if (String(url) !== '/api/auth/me') return { body: {} };
+      return auth === 'Bearer newer.token.value' ? { body: ME } : { status: 401, body: {} };
+    });
+    setToken('stale.token.value');
+    renderProvider();
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('nacho'));
+    expect(SC.getSession).toHaveBeenCalledTimes(1);
+    await click('sign in'); // signs in with 'new.token.value'; its /auth/me check is refused below
+    // login() finishes with setUser AFTER it has fetched the media token: wait for that, or it could land AFTER the refusal below
+    // and put the person back in. The user it sets is a different one from /auth/me's, so waiting for it is exact.
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('by-hand'));
+    await click('refresh');
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('none'));
+    expect(SC.getSession, 'a second refusal must not ask the app again').toHaveBeenCalledTimes(1);
+  });
+
+  test('★ a sign-in made while the app is still being asked is not overwritten by the answer', async () => {
+    let answer;
+    stubNative({ getSession: vi.fn(() => new Promise((resolve) => { answer = resolve; })) });
+    stubFetch((url) => (String(url).startsWith('/api/auth/me') ? { body: ME } : { body: {} }));
+    renderProvider();
+    await act(async () => {});
+    await click('sign in'); // the person signs in by hand while the app is still being asked
+    await act(async () => { answer({ token: 'saved.token.value' }); });
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
+    expect(getToken()).toBe('new.token.value');
+  });
+
+  test('a saved sign-in that is refused too leaves the person on the sign-in route', async () => {
+    stubNative({ getSession: vi.fn().mockResolvedValue({ token: 'newer.token.value' }) });
+    stubFetch(() => ({ status: 401, body: {} }));
+    window.location.hash = '#/cameras';
+    setToken('stale.token.value');
+    renderProvider();
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
+    expect(screen.getByTestId('user')).toHaveTextContent('none');
+    expect(window.location.hash).toBe('#/login');
   });
 
   test('★ a web token the server refuses, with the SAME token saved: signed out, asked once, no loop', async () => {

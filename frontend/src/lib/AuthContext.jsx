@@ -53,6 +53,7 @@ export function AuthProvider({ children }) {
     }
     setRetrying(true);
     const sent = getToken(); // the token this check carries, so a rejection below can tell WHICH token was refused
+    const placeBefore = window.location.hash; // api.js sends a 401 to #/login; if the saved sign-in is taken, put the person back
     try {
       const me = await api.get('/auth/me');
       warmIceServersForSignedInUser();
@@ -75,6 +76,10 @@ export function AuthProvider({ children }) {
           if (saved && saved !== sent && !getToken()) {
             adoptedToken.current = saved;
             setToken(saved);
+            // The refusal above sent the page to #/login (api.js). The person was somewhere (a camera, a setting) and is about to
+            // be signed in again, so put them back: if the saved token is refused too, its own 401 sends them to #/login again.
+            // (A cold start has no fragment at all: that means the home screen, so '' goes back to '#/', not to the sign-in route.)
+            if (!placeBefore.startsWith('#/login')) window.location.hash = placeBefore || '#/';
             await refresh();
             return;
           }
