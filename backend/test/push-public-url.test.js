@@ -121,7 +121,10 @@ describe('★ a Tailscale origin never becomes the household public URL', () => 
     assert.equal(getGlobal(), GOOD);
   });
 
-  for (const [label, origin] of [['a .ts.net name', TS_NAME], ['a 100.64.0.0/10 address', TS_IP]]) {
+  // The last two were stored as the household address before the review of #1001 (a DNS name may end in a dot; Tailscale's own
+  // IPv6 range is fd7a:115c:a1e0::/48).
+  for (const [label, origin] of [['a .ts.net name', TS_NAME], ['a 100.64.0.0/10 address', TS_IP],
+    ['a .ts.net name with a trailing dot', 'https://nightlight-1.example-tailnet.ts.net.'], ['a Tailscale IPv6 address', 'http://[fd7a:115c:a1e0::1]:4000']]) {
     test(`★ THE FIX: an admin registering from ${label} does not set it`, () => {
       registerToken('tok-a', 'android', 'u-admin', origin, makeSession(db, 'u-admin'));
       assert.equal(getGlobal(), null, 'the Tailscale origin was stored as the household address');

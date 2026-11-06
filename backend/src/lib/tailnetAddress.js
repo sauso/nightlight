@@ -19,7 +19,10 @@ export function vettedTailnetIPv4(list) {
 export function isTailnetOrigin(origin) {
   let host;
   try { host = new URL(origin).hostname.toLowerCase(); } catch { return false; }
-  return host.endsWith('.ts.net') || vettedTailnetIPv4([host]) !== null;
+  // A trailing DNS dot ("x.ts.net.") is the same name; and Tailscale's own IPv6 range is fd7a:115c:a1e0::/48 (a URL host shows an
+  // IPv6 address in brackets). Both found by the review of #1001 (verified: they were stored as the household address).
+  host = host.replace(/\.$/, '');
+  return host.endsWith('.ts.net') || vettedTailnetIPv4([host]) !== null || host.startsWith('[fd7a:115c:a1e0:');
 }
 
 export function getTailnetAddress() { return address; }

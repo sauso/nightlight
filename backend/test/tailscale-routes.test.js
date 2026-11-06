@@ -393,7 +393,7 @@ test('GET /address: any signed-in user gets the https address only when connecte
   db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
   const proxy = 'http://127.0.0.1:4000';
   let web = {};
-  await mount({ blocker: () => null, status: () => ({ state: 'running', restarts: 0, reason: null }),
+  await mount({ addressCacheMs: 0, blocker: () => null, status: () => ({ state: 'running', restarts: 0, reason: null }),
     cli: async (verb) => verb === 'status-peerless'
       ? { ok: true, json: { BackendState: 'Running', Self: { TailscaleIPs: ['100.64.0.1'], DNSName: 'new-name.example.ts.net.' } } }
       : { ok: true, json: { Web: web } } });
@@ -428,14 +428,41 @@ test('GET /address: Tailscale turned off is a definite null with no CLI call; an
     ['it needs sign-in', { status: () => running, cli: async (verb) => verb === 'status-peerless' ? { ok: true, json: { BackendState: 'NeedsLogin' } } : { ok: true, json: web } }],
     ['its status cannot be read', { status: () => running, cli: async () => ({ ok: false, code: 'timeout' }) }],
     ['the CLI throws', { status: () => running, cli: async () => { throw new Error('boom'); } }],
+    // Codex review of #1001 (verified): the node is connected and named, but the Serve read itself failed. `serve.enabled` is then
+    // false for lack of an answer, which must not reach the phone as "no private address" (it would drop the saved one).
+    ['the status is fine but the Serve read failed', { status: () => running, cli: async (verb) => verb === 'status-peerless'
+      ? { ok: true, json: { BackendState: 'Running', Self: { TailscaleIPs: ['100.64.0.1'], DNSName: 'n.example.ts.net.' } } }
+      : { ok: false, code: 'timeout' } }],
   ];
   for (const [label, options] of cases) {
-    await remount({ blocker: () => null, ...options });
+    await remount({ addressCacheMs: 0, blocker: () => null, ...options });
     const got = await address();
     assert.equal(got.status, 409, label);
     assert.equal(got.body.code, 'status_unavailable', label);
     assert.equal(Object.hasOwn(got.body, 'url'), false, `${label}: no url field, so the phone keeps what it has`);
   }
+});
+
+// Codex review of #1001 (verified by running): 30 concurrent signed-in callers ran each CLI verb 30 times. Callers now share one
+// daemon read and a finished one is reused for a few seconds; the admin's on/off intent is still read fresh on every request.
+test('GET /address: concurrent callers share one daemon read, and turning Tailscale off still shows at once', async () => {
+  db.prepare("UPDATE settings SET tailscale_enabled = 1 WHERE id = 'app'").run();
+  const seen = { 'status-peerless': 0, 'serve-status': 0 };
+  await mount({ blocker: () => null, status: () => ({ state: 'running', restarts: 0, reason: null }),
+    cli: async (verb) => {
+      seen[verb]++;
+      await sleep(20);
+      return verb === 'status-peerless'
+        ? { ok: true, json: { BackendState: 'Running', Self: { TailscaleIPs: ['100.64.0.1'], DNSName: 'n.example.ts.net.' } } }
+        : { ok: true, json: { Web: { 'n.example.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:4000' } } } } } };
+    } });
+  const results = await Promise.all(Array.from({ length: 30 }, () => call(`${route()}/address`, { token: caregiverToken })));
+  assert.ok(results.every((got) => got.status === 200 && got.body.url === 'https://n.example.ts.net'));
+  assert.deepEqual(seen, { 'status-peerless': 1, 'serve-status': 1 }, 'one read for all thirty callers');
+  await call(`${route()}/address`, { token: caregiverToken });
+  assert.deepEqual(seen, { 'status-peerless': 1, 'serve-status': 1 }, 'a call inside the window reuses it');
+  db.prepare("UPDATE settings SET tailscale_enabled = 0 WHERE id = 'app'").run();
+  assert.deepEqual((await call(`${route()}/address`, { token: caregiverToken })).body, { url: null }, 'off is not served from the cache');
 });
 
 test('#969 hostname is saved only after CLI success and sign-in uses that name', async () => {

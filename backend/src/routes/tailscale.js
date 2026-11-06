@@ -35,6 +35,7 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
   stop = stopTailscale, status = getTailscaleStatus, hasLiveProcess = hasLiveTailscaleProcess,
   verify = verifyToken, onEnqueued = () => {}, cli = runTailscaleCli,
   pendingVideoAddress = videoAddressPending, applyVideoAddress = applyVideoAddressNow,
+  addressCacheMs = 5000,
   write = (value) => database.prepare("UPDATE settings SET tailscale_enabled = ? WHERE id = 'app'").run(value) } = {}) {
   const router = Router();
   let tail = Promise.resolve();
@@ -48,9 +49,13 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
     let remote = { state: !enabled() ? 'off' : process.state === 'unavailable' ? 'error' : 'starting',
       addresses: [], dns_name: null, login_url: null };
     let serve = { enabled: false, consent_url: getTailscaleLinks().consentUrl };
+    // false only when the serve-status read itself failed: `serve.enabled` is then false for lack of an answer, which the admin
+    // status shows as "not on" but which /address must not report as "off" (Codex review of #1001, verified).
+    let serveKnown = true;
     if (enabled() && process.state === 'running') {
       remote = cleanStatus(await cli('status-peerless'));
       const served = await cli('serve-status');
+      serveKnown = served.ok === true;
       const web = served.ok ? served.json?.Web : null;
       // Lead review of #978 (Codex, verified): after a rename Tailscale leaves the Serve entry under the OLD name (measured
       // 2026-11-04), so 'any :443 entry' reported the secure address as on while the NEW name served nothing. The entry must
@@ -60,7 +65,7 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
       serve = { enabled: Boolean(serving),
         consent_url: getTailscaleLinks().consentUrl };
     }
-    return { hostNetwork, process, remote, serve };
+    return { hostNetwork, process, remote, serve, serveKnown };
   };
   const view = async () => {
     const { hostNetwork, process, remote, serve } = await readRemote();
@@ -91,14 +96,29 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
   //   * { url: null }                     definitely not available: an admin has Tailscale off, or it is connected with Serve off.
   //   * 409                               not known right now (the daemon is starting, needs sign-in, or its status could not be
   //                                       read). The phone keeps what it has: a daemon restart must not erase the address.
+  //
+  // Each answer costs two CLI runs, so concurrent callers share one read and a finished read is reused for a few seconds
+  // (Codex review of #1001: 30 concurrent callers ran the CLI 60 times). Only the DAEMON read is shared: the admin's on/off
+  // intent is read fresh on every request, so turning Tailscale off shows at once.
+  let addressRead = null;
+  let addressReadAt = 0;
+  const readAddress = () => {
+    const now = Date.now();
+    if (!addressRead || now - addressReadAt >= addressCacheMs) {
+      addressReadAt = now;
+      addressRead = readRemote().then(({ remote, serve, serveKnown }) => {
+        if (remote.state === 'connected' && remote.dns_name && serveKnown) {
+          return { known: true, url: serve.enabled ? `https://${remote.dns_name}` : null };
+        }
+        return { known: false };
+      }, () => ({ known: false }));
+    }
+    return addressRead;
+  };
   router.get('/address', requireAuth, asyncHandler(async (req, res) => {
     if (!enabled()) return res.json({ url: null });
-    try {
-      const { remote, serve } = await readRemote();
-      if (remote.state === 'connected' && remote.dns_name) {
-        return res.json({ url: serve.enabled ? `https://${remote.dns_name}` : null });
-      }
-    } catch { /* falls through to the unknown answer */ }
+    const answer = await readAddress();
+    if (answer.known) return res.json({ url: answer.url });
     return conflict(res, 'status_unavailable', 'The Tailscale address is not known right now.');
   }));
   router.put('/', requireAuth, requireAdmin, (req, res) => {
