@@ -10,6 +10,7 @@ import Logo from '../components/Logo.jsx';
 import useSetupStatus from '../lib/useSetupStatus.js';
 
 const LINKS = [
+  { label: 'Website', url: 'https://nightlightbaby.app/' },
   { label: 'GitHub — Nightlight', url: 'https://github.com/sauso/nightlight' },
   { label: 'GitHub — Mobile app', url: 'https://github.com/sauso/nightlight-mobile' },
   { label: 'Changelog', url: 'https://github.com/sauso/nightlight/blob/main/CHANGELOG.md' },

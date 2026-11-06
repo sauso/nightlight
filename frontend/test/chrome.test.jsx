@@ -243,6 +243,16 @@ describe('ErrorBoundary', () => {
 // --- About --------------------------------------------------------------------------------------
 
 describe('About', () => {
+  test('the Links list starts with the project website, opened safely in a new tab', () => {
+    vi.spyOn(api, 'get').mockResolvedValue({ version: '0.45.0' });
+    renderAsAdmin(<About />);
+    const site = screen.getByRole('link', { name: 'Website' });
+    expect(site).toHaveAttribute('href', 'https://nightlightbaby.app/');
+    expect(site).toHaveAttribute('target', '_blank');
+    expect(site).toHaveAttribute('rel', 'noreferrer');
+    const labels = screen.getAllByRole('link').map((a) => a.textContent);
+    expect(labels.indexOf('Website')).toBeLessThan(labels.indexOf('GitHub — Nightlight'));
+  });
   test('Got an idea? opens the enhancement issue form safely', () => {
     vi.spyOn(api, 'get').mockResolvedValue({ version: '0.45.0' });
     renderAsAdmin(<About />);
