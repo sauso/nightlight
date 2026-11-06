@@ -105,31 +105,31 @@ export default function About() {
         {/* The Android app, owner 2026-11-06: which address this session is using, and whether the Tailscale address is saved
             for use away from home (docs/remote-access.md). Not shown in a browser or on an app without the feature (`route`
             is null there). An address that is neither of the server's two names nothing, only whether one is saved. */}
+        {/* Owner 2026-11-07, after two layouts that read badly on a phone (label and value on one line broke the tailnet name
+            mid-word; a label over each value looked unlike the rest of the app and the name outranked its card): laid out like
+            the Remote Access card (TailscaleCard.jsx): a 16px title with a badge, a 14px sub-heading, the address in the same
+            bold wrapping style, and a muted line under it saying what that means or, when none is saved, WHY, so "Not saved" is
+            not a dead end. The badge is "which address this session is using". The address is on screen, so a screenshot of
+            this card shows the person's tailnet name (docs/remote-access.md). The look lives in index.css next to the
+            Remote Access rules it shares. */}
         {route && (
-          <div className="card">
-            <div className="card-title">Connection</div>
-            {/* Owner 2026-11-07: each item is a small label over its value (the field-label pattern, docs/design-language.md
-                "Fact"), not a label and value on one line: the first layout wrapped the label onto two lines and broke the
-                tailnet name mid-word on a phone. */}
-            {route.via !== 'other' && (
-              <div className="fact">
-                <div className="fact__label">Connected through</div>
-                <div className="fact__value">{route.via === 'tailscale' ? 'Tailscale address' : 'Saved address'}</div>
-              </div>
-            )}
-            {/* Owner 2026-11-07: the address itself (it only said "saved"), and when none is saved, WHY, so "Not saved" is not
-                a dead end. The host wraps so a long name cannot push the label off the row. The address is on screen, so a
-                screenshot of this card shows the person's tailnet name (docs/remote-access.md). */}
-            <div className="fact">
-              <div className="fact__label">Tailscale address</div>
-              <div className="fact__value">{route.tailscaleSaved ? (route.address || 'Saved') : 'Not saved'}</div>
-              {(route.tailscaleSaved || TAILSCALE_WHY[route.why]) && (
-                <div className="fact__note">
-                  {route.tailscaleSaved ? 'Saved for use away from home.' : TAILSCALE_WHY[route.why]}
-                </div>
+          <section className="card about-connection" aria-label="Connection">
+            <div className="about-connection__heading">
+              <h2 className="card-title">Connection</h2>
+              {route.via !== 'other' && (
+                <span className="status-badge status-badge--off">
+                  {route.via === 'tailscale' ? 'Using Tailscale' : 'Using saved address'}
+                </span>
               )}
             </div>
-          </div>
+            <h3>Your secure address</h3>
+            <p className="tailscale-address">{route.tailscaleSaved ? (route.address || 'Saved') : 'Not saved'}</p>
+            {(route.tailscaleSaved || TAILSCALE_WHY[route.why]) && (
+              <p className="tailscale-hint">
+                {route.tailscaleSaved ? 'Saved for use away from home.' : TAILSCALE_WHY[route.why]}
+              </p>
+            )}
+          </section>
         )}
 
         {/* Owner 2026-11-05: once setup is complete this row is clutter. Only `completed` hides it: a limited setup still needs
