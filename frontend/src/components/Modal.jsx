@@ -118,7 +118,12 @@ function makeRestInert(overlay) {
 // INSIDE the card, under the title. Before this prop the callers set the page's `.error-banner`, which sits
 // in <main> underneath the overlay: the person tapped Remove, nothing happened, and the only explanation
 // was behind the dark scrim. An empty/absent `error` renders nothing, so every existing caller is unchanged.
-export default function Modal({ title, onClose, children, placement = 'bottom', headerAction = null, wide = false, dismissible = true, error = '' }) {
+//
+// `focusDialog` is for a notice that OPENS BY ITSELF (nobody tapped anything to get it: a server message, a link). Focus
+// goes to the dialog, not to its button: a browser draws the keyboard focus ring on a button that script focuses with no
+// tap or key before it, so the OK button showed a ring nobody asked for (owner, 2026-11-06). The dialog is still announced
+// by a screen reader (role, name), Tab reaches the buttons and shows the ring there, which is what the ring is for.
+export default function Modal({ title, onClose, children, placement = 'bottom', headerAction = null, wide = false, dismissible = true, error = '', focusDialog = false }) {
   const top = placement === 'top';
   const titleId = useId();
   const overlayRef = useRef(null);
@@ -151,7 +156,7 @@ export default function Modal({ title, onClose, children, placement = 'bottom', 
     // in the header is the way OUT, not where someone wants to start, so it is only chosen when it is all there is.
     if (!card.contains(document.activeElement)) {
       const all = tabbablesIn(card);
-      const target = card.querySelector('[data-autofocus]') || all.find((el) => !el.closest('.modal-card__actions')) || all[0] || card;
+      const target = focusDialog ? card : card.querySelector('[data-autofocus]') || all.find((el) => !el.closest('.modal-card__actions')) || all[0] || card;
       target.focus({ preventScroll: true });
     }
 

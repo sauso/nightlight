@@ -112,7 +112,10 @@ describe('★ #559 an unsaved server: refuse', () => {
     // The header's ✕ (the Modal's own close) and OK: nothing else.
     const names = within(dialog).getAllByRole('button').map((b) => b.getAttribute('aria-label') || b.textContent);
     expect(names.sort()).toEqual(['Close', 'OK']);
-    expect(within(dialog).getByRole('button', { name: 'OK' })).toHaveFocus();
+    // A notice that opens by itself focuses the DIALOG, not OK: script focus on a button nobody tapped draws the keyboard focus ring
+    // on it (owner, 2026-11-06). Tab still reaches the buttons, and the ring belongs there.
+    expect(dialog).toHaveFocus();
+    expect(within(dialog).getByRole('button', { name: 'OK' })).not.toHaveFocus();
 
     await userEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -190,6 +193,7 @@ describe('★ the Tailscale address notice', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Away from home' });
     expect(dialog.textContent).toMatch(/Tailscale address/);
     expect(dialog.textContent).toMatch(/Tailscale app on this phone/);
+    expect(dialog, 'opens by itself: focus on the dialog, so OK shows no ring nobody asked for').toHaveFocus();
     expect(within(dialog).queryByRole('button', { name: 'Switch' })).toBeNull();
     await userEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());

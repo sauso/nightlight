@@ -2832,8 +2832,12 @@ input[type='range'] {
   max-height: 100%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  /* A bottom sheet sits on the screen edge, where a phone's gesture bar and rounded corners are: the usual 16px of card
+     padding left the last button looking jammed against it (owner, 2026-11-06, on a phone). Every sheet from the bottom gets
+     the same extra room, plus the device's own bottom inset where there is one. */
+  padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px));
 }
-.modal-overlay--top .modal-card { border-radius: 0 0 20px 20px; }
+.modal-overlay--top .modal-card { border-radius: 0 0 20px 20px; padding-bottom: 16px; }
 
 .modal-card__head {
   display: flex;
@@ -2853,6 +2857,7 @@ input[type='range'] {
     max-width: min(1040px, 92vw);
     max-height: 92vh;
     border-radius: 16px;
+    padding-bottom: 16px; /* a centred dialog has no screen edge under it */
   }
   /* The sheet caps the video at 60vh so it can't push the controls off a phone screen; centred in a
      desktop dialog there's room to let it use the height it's given. */

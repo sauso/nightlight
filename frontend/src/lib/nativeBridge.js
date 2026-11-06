@@ -428,8 +428,18 @@ export async function getConnectionRoute() {
 
 // Tell the person, once, that the phone will now also use the Tailscale address. Only when nothing else is asking: it never
 // replaces or closes a switch-server dialog.
+// "Once" is once per web address (the flag is in this page's localStorage, which is per origin). The phone forgets a server's
+// Tailscale address on Change server (by design: it belongs to the server being left), so switching away and back learns it
+// again and the app reports "added" every time; without this flag the message came back on every switch (owner, 2026-11-06).
+const TAILSCALE_ANNOUNCED_KEY = 'nightlight_tailscale_announced';
 function announceTailscaleAdded() {
   if (serverPrompt) return;
+  try {
+    if (localStorage.getItem(TAILSCALE_ANNOUNCED_KEY)) return;
+    localStorage.setItem(TAILSCALE_ANNOUNCED_KEY, '1'); // set only when it is about to be shown, so a busy moment does not use it up
+  } catch {
+    // Storage refused: show it rather than never telling anyone.
+  }
   setServerPrompt({ id: ++serverRequestSeq, kind: 'tailscale-added', origin: null, entry: null });
 }
 

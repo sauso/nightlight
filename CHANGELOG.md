@@ -72,6 +72,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- In the Android app, the **Away from home** message (the app has learned your server's Tailscale address) no longer comes back every time you switch server: it is shown once for each address the app is used at. Messages that open by themselves (this one, and "Server not saved in this app") no longer draw a focus ring around their OK button; the ring still appears when you reach a button with the keyboard. Every sheet that slides up from the bottom (all dialogs on a phone) now has more room under its last button, so it no longer looks jammed against the bottom of the screen.
 - The setup guide's step bar now stays on one line with seven steps (the last segment had wrapped onto a second line), and the photo on the account and caregiver forms has more space above the name fields.
 - In a sub-page's header the bottom of the "g" in the back label (for example "Settings") is no longer cut off.
 - On a phone, a Motion / Sound / Alerts toggle on a camera's menu (and a filter chip in the log viewer) that you had just tapped showed its label in the wrong colour on the filled button (white in dark mode, navy in light mode) until you tapped somewhere else. A lit toggle now keeps its own colours.
