@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ExternalLink, Heart } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
+import { getConnectionRoute } from '../lib/nativeBridge.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
@@ -29,6 +30,14 @@ export default function About() {
 
   useEffect(() => {
     api.get('/about').then(setInfo).catch(() => setInfo({ version: 'unknown' }));
+  }, []);
+
+  // The Android app only (null elsewhere): which address this session is on, and whether the Tailscale one is saved.
+  const [route, setRoute] = useState(null);
+  useEffect(() => {
+    let live = true;
+    getConnectionRoute().then((value) => { if (live) setRoute(value); });
+    return () => { live = false; };
   }, []);
 
   const version = info?.version;
@@ -81,6 +90,18 @@ export default function About() {
             {(info?.mediaIsolation === 'on' || info?.mediaIsolation === 'off') && (
               <div className="camera-tile__sub">
                 Media isolation: {info.mediaIsolation}
+              </div>
+            )}
+            {/* The Android app, owner 2026-11-06: which address this session is using, and whether the Tailscale address
+                is saved for use away from home (docs/remote-access.md). Not shown in a browser or on an app without it. */}
+            {route && route.via !== 'other' && (
+              <div className="camera-tile__sub">
+                Connected through: {route.via === 'tailscale' ? 'Tailscale address' : 'saved address'}
+              </div>
+            )}
+            {route && (
+              <div className="camera-tile__sub">
+                Tailscale address: {route.tailscaleSaved ? 'saved for use away from home' : 'not saved'}
               </div>
             )}
           </div>

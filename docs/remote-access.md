@@ -18,6 +18,8 @@ Alert links keep pointing at your home address. Nightlight learns that address f
 
 With Tailscale connected and **Secure address** on, the Android app learns the secure address by itself: each time someone signs in or starts the app, it asks the server for it and keeps it beside the address that person set the app up with. The first time, a short message says so. A caregiver's phone does this too. Turn Tailscale or the secure address off and the app drops the saved address the next time it starts and can reach the server.
 
+To see what the app is doing, open **Settings → About** in the app: **Connected through** says whether this session is on the saved address or the Tailscale address, and **Tailscale address** says whether one is saved for use away from home.
+
 On start, the app tries both addresses at once. It uses the address it was set up with if that answers within about 3 seconds, and the Tailscale address only if it does not. At home the app therefore never depends on Tailscale, and away from home it waits up to about 3 seconds before it opens through Tailscale. It needs the Tailscale app on the phone, signed in to the same Tailscale network as the server; without it the app shows its "Can't reach your server" screen.
 
 Known limits (2026-11): the two addresses are different web addresses, so each asks for a sign-in the first time you use it. A session that started on the Tailscale address stays on it until the app is next started, even after you get home. An older server, or an app without this feature, is simply left as it was. The iPhone app does not do this yet.
