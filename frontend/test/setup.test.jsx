@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { screen, waitFor, act } from '@testing-library/react';
+import { screen, waitFor, act, fireEvent } from '@testing-library/react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import { SetupGate } from '../src/App.jsx';
 import Setup from '../src/pages/Setup.jsx';
 import { setupApi } from '../src/lib/setupApi.js';
 import { api } from '../src/lib/api.js';
+import * as imageResize from '../src/lib/imageResize.js';
 
 vi.mock('../src/lib/setupApi.js', () => ({ setupApi: {
   read: vi.fn(), progress: vi.fn(), startTest: vi.fn(), confirm: vi.fn(), complete: vi.fn(),
@@ -201,6 +202,47 @@ describe('setup steps', () => {
     if (date) await view.user.type(screen.getByLabelText('Date of birth (optional)'), date);
     await view.user.click(screen.getByRole('button', { name: 'Continue' }));
     expect(api.post).toHaveBeenCalledWith('/children', expected);
+  });
+
+  describe('the first child\'s photo (owner, 2026-11-06)', () => {
+    const pick = () => fireEvent.change(screen.getByLabelText('Add photo'), { target: { files: [new File(['x'], 'p.png', { type: 'image/png' })] } });
+
+    test('★ a picked photo is held, then sent in the same POST /children that creates the child; no photo means no photo field', async () => {
+      const spy = vi.spyOn(imageResize, 'fileToAvatarDataUrl').mockResolvedValue('data:image/png;base64,KID');
+      try {
+        const view = wizard({ kids: [], cameras: [] });
+        await view.user.type(await screen.findByRole('textbox', { name: "Child's name" }), 'A child');
+        pick();
+        await screen.findByLabelText('Change photo');
+        expect(api.post, 'nothing is sent until Continue').not.toHaveBeenCalled();
+        await view.user.click(screen.getByRole('button', { name: 'Continue' }));
+        expect(api.post).toHaveBeenCalledWith('/children', { name: 'A child', photo: 'data:image/png;base64,KID' });
+      } finally { spy.mockRestore(); }
+    });
+
+    test('Remove drops the picked photo, so it is not sent', async () => {
+      const spy = vi.spyOn(imageResize, 'fileToAvatarDataUrl').mockResolvedValue('data:image/png;base64,KID');
+      try {
+        const view = wizard({ kids: [], cameras: [] });
+        await view.user.type(await screen.findByRole('textbox', { name: "Child's name" }), 'A child');
+        pick();
+        await view.user.click(await screen.findByRole('button', { name: 'Remove' }));
+        await view.user.click(screen.getByRole('button', { name: 'Continue' }));
+        expect(api.post).toHaveBeenCalledWith('/children', { name: 'A child' });
+      } finally { spy.mockRestore(); }
+    });
+
+    test('an unreadable photo says why and adds no photo to the child', async () => {
+      const spy = vi.spyOn(imageResize, 'fileToAvatarDataUrl').mockRejectedValue(new Error('That image is too large'));
+      try {
+        const view = wizard({ kids: [], cameras: [] });
+        await view.user.type(await screen.findByRole('textbox', { name: "Child's name" }), 'A child');
+        pick();
+        expect(await screen.findByRole('alert')).toHaveTextContent('That image is too large');
+        await view.user.click(screen.getByRole('button', { name: 'Continue' }));
+        expect(api.post).toHaveBeenCalledWith('/children', { name: 'A child' });
+      } finally { spy.mockRestore(); }
+    });
   });
 
   test('★ the caregivers step is part of the guide: no jump to Settings, and Skip saves progress and moves on', async () => {

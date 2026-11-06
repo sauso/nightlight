@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { setupApi } from '../lib/setupApi.js';
 import { useSetupChrome } from '../lib/useSetupChrome.js';
+import { fileToAvatarDataUrl } from '../lib/imageResize.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import AddCameraFlow from '../components/AddCameraFlow.jsx';
 import CameraTile from '../components/CameraTile.jsx';
@@ -10,6 +11,7 @@ import SetupStepShell from '../components/SetupStepShell.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import TailscaleCard from '../components/TailscaleCard.jsx';
 import SetupCaregivers from '../components/SetupCaregivers.jsx';
+import AvatarEditor from '../components/AvatarEditor.jsx';
 
 // The guide starts at "Add your child". The Welcome screen, with the steps, now comes BEFORE the first admin account is created
 // (FirstRun.jsx, owner 2026-11-06), so it is not a step here. The server still stores `welcome` as the first activeStep of a new
@@ -27,6 +29,9 @@ export default function Setup() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [childName, setChildName] = useState('');
+  // Held here until the child is created: the first child does not exist yet, so there is nothing to PUT a photo to. It travels
+  // in the same POST /children (which accepts `photo`), so a photo can never be saved for a child that failed to be created.
+  const [childPhoto, setChildPhoto] = useState(null);
   const [birthday, setBirthday] = useState('');
   const [selectedChild, setSelectedChild] = useState('');
   const [selectedCamera, setSelectedCamera] = useState('');
@@ -111,12 +116,20 @@ export default function Setup() {
     event.preventDefault();
     setBusy(true); setError('');
     try {
-      const child = await api.post('/children', { name: childName.trim(), ...(birthday ? { birthday } : {}) });
+      const child = await api.post('/children', { name: childName.trim(), ...(birthday ? { birthday } : {}), ...(childPhoto ? { photo: childPhoto } : {}) });
       setSelectedChild(child.id);
       await refresh();
       await move('camera');
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
+  }
+
+  async function pickChildPhoto(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setError('');
+    try { setChildPhoto(await fileToAvatarDataUrl(file)); } catch (err) { setError(err.message); }
   }
 
   async function addedCamera(camera) {
@@ -219,6 +232,10 @@ export default function Setup() {
         </>}
         {kids.length === 0 && <form id="setup-child-form" onSubmit={addChild}>
           <p>Add the first child to group their camera and alerts.</p>
+          <div className="setup-caregivers__photo">
+            <AvatarEditor name={childName.trim() || 'Child'} src={childPhoto} size={64} onChange={pickChildPhoto} />
+            {childPhoto && <button type="button" className="icon-btn" onClick={() => setChildPhoto(null)}>Remove</button>}
+          </div>
           <div className="field"><label htmlFor="setup-child-name">Child's name</label>
             <input id="setup-child-name" required value={childName} onChange={(event) => setChildName(event.target.value)} /></div>
           <div className="field"><label htmlFor="setup-child-birthday">Date of birth (optional)</label>
