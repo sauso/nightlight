@@ -144,13 +144,17 @@ async function exchange(method, url, body, headers, signal, as) {
   }
 
   if (res.status === 401) {
+    // The token THIS request carried (null for a request that carried none: a wrong password or MFA code on the sign-in form is
+    // a 401 too). The listeners get it so the Android app can drop its saved copy of exactly that token and no other: a 401 for a
+    // request with no token, or for an old token, must not wipe a newer saved sign-in (review of the one-sign-in plan).
+    const rejected = headers.Authorization ? headers.Authorization.slice('Bearer '.length) : null;
     setToken(null);
     window.location.hash = '#/login';
     // After the token is cleared, so a listener sees the signed-out state. Behind the `signal.aborted`
     // check above on purpose: a request that already timed out must not sign anyone out (#562 keeps that).
     // Over a copy, so who is called is fixed when the 401 arrives: a listener registered by another listener
     // during this loop (a re-render subscribing again) waits for the next 401 instead of running now.
-    for (const listener of [...unauthorizedListeners]) listener();
+    for (const listener of [...unauthorizedListeners]) listener(rejected);
   }
 
   let data = null;
