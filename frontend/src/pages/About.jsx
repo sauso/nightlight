@@ -108,26 +108,27 @@ export default function About() {
         {route && (
           <div className="card">
             <div className="card-title">Connection</div>
+            {/* Owner 2026-11-07: each item is a small label over its value (the field-label pattern, docs/design-language.md
+                "Fact"), not a label and value on one line: the first layout wrapped the label onto two lines and broke the
+                tailnet name mid-word on a phone. */}
             {route.via !== 'other' && (
-              <div className="list-row">
-                <span>Connected through</span>
-                <span className="camera-tile__sub">{route.via === 'tailscale' ? 'Tailscale address' : 'Saved address'}</span>
+              <div className="fact">
+                <div className="fact__label">Connected through</div>
+                <div className="fact__value">{route.via === 'tailscale' ? 'Tailscale address' : 'Saved address'}</div>
               </div>
             )}
             {/* Owner 2026-11-07: the address itself (it only said "saved"), and when none is saved, WHY, so "Not saved" is not
                 a dead end. The host wraps so a long name cannot push the label off the row. The address is on screen, so a
                 screenshot of this card shows the person's tailnet name (docs/remote-access.md). */}
-            <div className="list-row">
-              <span>Tailscale address</span>
-              <span className="camera-tile__sub" style={{ overflowWrap: 'anywhere', textAlign: 'right' }}>
-                {route.tailscaleSaved ? (route.address || 'Saved') : 'Not saved'}
-              </span>
+            <div className="fact">
+              <div className="fact__label">Tailscale address</div>
+              <div className="fact__value">{route.tailscaleSaved ? (route.address || 'Saved') : 'Not saved'}</div>
+              {(route.tailscaleSaved || TAILSCALE_WHY[route.why]) && (
+                <div className="fact__note">
+                  {route.tailscaleSaved ? 'Saved for use away from home.' : TAILSCALE_WHY[route.why]}
+                </div>
+              )}
             </div>
-            {(route.tailscaleSaved || TAILSCALE_WHY[route.why]) && (
-              <div className="camera-tile__sub" style={{ paddingTop: 4 }}>
-                {route.tailscaleSaved ? 'Saved for use away from home.' : TAILSCALE_WHY[route.why]}
-              </div>
-            )}
           </div>
         )}
 

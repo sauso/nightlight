@@ -324,6 +324,13 @@ Other pages and sub-pages have no header theme button; use Account → Appearanc
 The back label uses up to about 35% of the bar, then ends with an ellipsis to leave room
 for the page title. This width is estimated from phone screenshots, not measured on devices.
 
+### Fact: a label over its value
+`.fact` (label `.fact__label` 12px `--text-secondary`, value `.fact__value` 15px weight 500, optional `.fact__note` 12px
+`--text-secondary`), divided by the same hairline as `.list-row`. Use it for read-only details in a card (Settings → About →
+Connection), especially a long value such as an address: it gets the whole card width. Do not put a 16px label and a small value on one
+line (`.list-row`) for these: on a phone the label wrapped and the value broke mid-word. Spacing and look are checked on a phone, not by
+a test.
+
 ### Buttons
 `.btn` — inline-flex, `gap: 6px`, radius 10px, `padding: 12px 18px`, 14px/600, and **`width: 100%`
 by default** (mobile-first: buttons are full-width unless constrained).
