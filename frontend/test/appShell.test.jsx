@@ -142,13 +142,23 @@ describe('booting the app', () => {
 describe('one sign-in across the Android app\'s two addresses', () => {
   test('★ the sign-in is saved in the app AFTER the Tailscale address has been learned, with the token the server confirmed', async () => {
     const order = [];
-    vi.spyOn(nativeBridge, 'syncTailscaleEndpoint').mockImplementation(async () => { order.push('sync'); return null; });
+    // The sync is held until the test lets it finish, so "saved before the sync RESOLVED" is observable. (A spy that only noted it
+    // was CALLED passed for `void sync(); void save()`, which saves a first sign-in before the address is known: Opus review.)
+    let finishSync;
+    vi.spyOn(nativeBridge, 'syncTailscaleEndpoint').mockImplementation(() => new Promise((resolve) => {
+      order.push('sync started');
+      finishSync = () => { order.push('sync done'); resolve(null); };
+    }));
     vi.spyOn(nativeBridge, 'saveNativeSession').mockImplementation(async () => { order.push('save'); return true; });
     setToken('a-token');
     mockApi(ADMIN);
     await boot('/');
+    await waitFor(() => expect(order).toEqual(['sync started']));
+    await new Promise((resolve) => setTimeout(resolve, 50)); // time for a wrongly early save to happen
+    expect(order, 'nothing is saved while the sync is still out').toEqual(['sync started']);
+    finishSync();
     await waitFor(() => expect(nativeBridge.saveNativeSession).toHaveBeenCalledWith('a-token'));
-    expect(order).toEqual(['sync', 'save']);
+    expect(order).toEqual(['sync started', 'sync done', 'save']);
   });
 
   test('nothing is saved while nobody is signed in', async () => {

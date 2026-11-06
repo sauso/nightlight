@@ -370,6 +370,12 @@ export async function requestServerSwitch(raw) {
 //   sends null ONLY for "definitely not available", so a daemon restart can never erase a saved address.
 // Does nothing in a browser, on an iOS shell or an older Android shell (no addEndpoint), or when signed out. Never throws.
 // Returns what happened, for tests: 'added' | 'unchanged' | 'removed' | 'none' | null.
+// The Tailscale address THIS page's own server offered on the last successful ask, or null (none offered, or the ask failed). A
+// saved sign-in carries it (saveNativeSession), so the app binds the token to that address only when it is the one the server
+// itself named: addEndpoint can be called by a page at the saved address, so an address another page planted must never be the
+// one a real sign-in is bound to (Opus review of the code). Per page load, like everything in this module.
+let offeredTailscaleUrl = null;
+
 export async function syncTailscaleEndpoint() {
   const p = window.Capacitor?.Plugins?.ServerConfig;
   if (!p || typeof p.addEndpoint !== 'function' || typeof p.removeEndpoint !== 'function') return null;
@@ -380,8 +386,10 @@ export async function syncTailscaleEndpoint() {
     const res = await api.get('/remote-access/tailscale/address', { timeoutMs: 5000 });
     url = res?.url;
   } catch {
+    offeredTailscaleUrl = null; // nothing is known about what the server offers right now
     return null;
   }
+  offeredTailscaleUrl = typeof url === 'string' ? url : null;
   try {
     if (typeof url === 'string') {
       const res = await p.addEndpoint({ url });
@@ -432,7 +440,10 @@ export async function getConnectionRoute() {
 // getSession / clearSession; ServerConfigPlugin.kt, SessionRules.kt) and hand it ONLY to the page that is the saved Tailscale
 // address, after checking it is the same server. These three wrap those calls. Every one does nothing in a browser, on iOS or in
 // an app without the methods, and NEVER throws: a failure here must never get in the way of signing in or out.
-const SESSION_ADOPT_DEADLINE_MS = 2000;
+// WHY 6 s: the app first reads the page, then asks the page's own server for its id (up to 3 s to connect and 3 s to answer, over a
+// relayed Tailscale link on cellular), then decrypts. 2 s gave up on exactly the slow link this feature is for, and showed the
+// sign-in form (Opus review; the timing is reasoned, not measured on a phone). `loading` holds the screen for at most this long.
+const SESSION_ADOPT_DEADLINE_MS = 6000;
 
 function sessionPlugin() {
   const p = window.Capacitor?.Plugins?.ServerConfig;
@@ -445,7 +456,9 @@ export async function saveNativeSession(token) {
   const p = sessionPlugin();
   if (!p || typeof token !== 'string' || !token) return false;
   try {
-    const res = await p.saveSession({ token });
+    // `tailscale`: what this page's server offered (see offeredTailscaleUrl). null when nothing is known, and the app then binds
+    // the token to no Tailscale address, so it is not handed out until a save after the server has answered.
+    const res = await p.saveSession({ token, tailscale: offeredTailscaleUrl });
     return res?.saved === true;
   } catch {
     return false;

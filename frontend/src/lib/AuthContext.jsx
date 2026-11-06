@@ -29,7 +29,7 @@ export function AuthProvider({ children }) {
 
   // One sign-in across the Android app's two addresses (lib/nativeBridge.js adoptNativeSession): a page with no token asks the app
   // for the saved one, ONCE per page load (refresh() runs again from several screens, and a revoked token must not be fetched
-  // again and again). `loading` stays true while it asks (a 2 s deadline inside adoptNativeSession), so the sign-in form never
+  // again and again). `loading` stays true while it asks (a 6 s deadline inside adoptNativeSession), so the sign-in form never
   // flashes before a saved sign-in arrives. The app only ever answers the page on the saved Tailscale address.
   const adoptedWhenSignedOut = useRef(false);
   const adoptedAfterRejection = useRef(false);
@@ -64,7 +64,11 @@ export function AuthProvider({ children }) {
       setUnreachable(false);
       setFailures(0);
     } catch (err) {
-      if (err?.status === 401) {
+      if (err?.status === 401 && getToken() && getToken() !== sent) {
+        // This check carried a token that has since been REPLACED by a newer sign-in (api.js ignored its late refusal for that
+        // reason). Nothing to do: the newer sign-in stays, and this answer must not spend the one ask of the app or sign it out
+        // (Opus review: two overlapping refreshes, Account's or the auto-retry's).
+      } else if (err?.status === 401) {
         // The server answered and refused this sign-in: api.js has already cleared the token (and told the app to drop that
         // exact token, see the listener below). The app may hold a DIFFERENT, newer saved sign-in (this address kept an old one
         // while the other address signed in again): take it once and check it. A saved token that is the one just refused was

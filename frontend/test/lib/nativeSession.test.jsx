@@ -87,7 +87,7 @@ describe('★ the helpers', () => {
   test('saveNativeSession hands the exact token over and reports whether it was kept', async () => {
     const SC = stubNative();
     expect(await nb.saveNativeSession('a.b.c')).toBe(true);
-    expect(SC.saveSession).toHaveBeenCalledWith({ token: 'a.b.c' });
+    expect(SC.saveSession).toHaveBeenCalledWith({ token: 'a.b.c', tailscale: null }); // nothing offered by the server is known yet
     SC.saveSession.mockResolvedValueOnce({ saved: false });
     expect(await nb.saveNativeSession('a.b.c')).toBe(false);
     SC.saveSession.mockResolvedValueOnce({});
@@ -113,12 +113,12 @@ describe('★ the helpers', () => {
     await expect(nb.adoptNativeSession()).resolves.toBeNull();
   });
 
-  test('★ adoptNativeSession gives up after 2 s: a slow app must not hold sign-in up', async () => {
+  test('★ adoptNativeSession gives up after 6 s: a slow app must not hold sign-in up, but a slow link gets time to answer', async () => {
     vi.useFakeTimers();
     stubNative({ getSession: vi.fn(() => new Promise(() => {})) });
     let answer = 'pending';
     nb.adoptNativeSession().then((value) => { answer = value; });
-    await vi.advanceTimersByTimeAsync(1900);
+    await vi.advanceTimersByTimeAsync(5900);
     expect(answer).toBe('pending');
     await vi.advanceTimersByTimeAsync(200);
     expect(answer).toBeNull();
@@ -162,7 +162,7 @@ describe('★ signing in and out', () => {
     expect(SC.saveSession).not.toHaveBeenCalled(); // nothing to save before a sign-in
     await click('sign in');
     expect(SC.saveSession).toHaveBeenCalledTimes(1);
-    expect(SC.saveSession).toHaveBeenCalledWith({ token: 'new.token.value' });
+    expect(SC.saveSession).toHaveBeenCalledWith({ token: 'new.token.value', tailscale: null });
   });
 
   test('★ a sign-out clears the saved copy with no token, even when the server call fails (offline)', async () => {
@@ -334,6 +334,48 @@ describe('★ a 401 clears exactly the token that was refused', () => {
     await click('refresh');
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('none'));
     expect(SC.getSession, 'a second refusal must not ask the app again').toHaveBeenCalledTimes(1);
+  });
+
+  test('★ a refusal that arrives after a newer sign-in replaced that token changes nothing and does not spend the ask', async () => {
+    const SC = stubNative({ getSession: vi.fn().mockResolvedValue({ token: 'newer.token.value' }) });
+    let release;
+    // The first /auth/me (stale token) is held, a newer sign-in lands, then the old check is refused.
+    globalThis.fetch = vi.fn(async (url, init) => {
+      const auth = init?.headers?.Authorization ?? null;
+      if (String(url) === '/api/auth/me' && auth === 'Bearer stale.token.value') {
+        await new Promise((resolve) => { release = resolve; });
+        return { ok: false, status: 401, text: async () => '{}' };
+      }
+      return { ok: true, status: 200, text: async () => JSON.stringify(String(url) === '/api/auth/me' ? ME : {}) };
+    });
+    setToken('stale.token.value');
+    renderProvider();
+    await waitFor(() => expect(typeof release).toBe('function'));
+    await click('sign in');
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('by-hand'));
+    await act(async () => { release(); });
+    await act(async () => {});
+    expect(screen.getByTestId('user'), 'the newer sign-in stays').toHaveTextContent('by-hand');
+    expect(getToken()).toBe('new.token.value');
+    expect(SC.getSession, 'the one ask of the app is not spent on a check that no longer matters').not.toHaveBeenCalled();
+  });
+
+  test('★ a saved sign-in carries the Tailscale address the server itself offered, and none when it could not be read', async () => {
+    const SC = stubNative({ addEndpoint: vi.fn().mockResolvedValue({ added: true }), removeEndpoint: vi.fn().mockResolvedValue({ removed: false }) });
+    let offered = { url: 'https://real.example.ts.net' };
+    stubFetch((url) => (String(url).startsWith('/api/remote-access/tailscale/address') ? (offered instanceof Error ? { status: 409, body: {} } : { body: offered }) : { body: {} }));
+    setToken('a.b.c');
+    await nb.syncTailscaleEndpoint();
+    await nb.saveNativeSession('a.b.c');
+    expect(SC.saveSession).toHaveBeenLastCalledWith({ token: 'a.b.c', tailscale: 'https://real.example.ts.net' });
+    offered = new Error('409'); // the server cannot say right now: nothing is known, so no address is claimed
+    await nb.syncTailscaleEndpoint();
+    await nb.saveNativeSession('a.b.c');
+    expect(SC.saveSession).toHaveBeenLastCalledWith({ token: 'a.b.c', tailscale: null });
+    offered = { url: null }; // the server offers none
+    await nb.syncTailscaleEndpoint();
+    await nb.saveNativeSession('a.b.c');
+    expect(SC.saveSession).toHaveBeenLastCalledWith({ token: 'a.b.c', tailscale: null });
   });
 
   test('★ a sign-in made while the app is still being asked is not overwritten by the answer', async () => {
