@@ -10,6 +10,7 @@ import Logo from '../components/Logo.jsx';
 import useSetupStatus from '../lib/useSetupStatus.js';
 
 const LINKS = [
+  { label: 'Website', url: 'https://nightlightbaby.app/' },
   { label: 'GitHub — Nightlight', url: 'https://github.com/sauso/nightlight' },
   { label: 'GitHub — Mobile app', url: 'https://github.com/sauso/nightlight-mobile' },
   { label: 'Changelog', url: 'https://github.com/sauso/nightlight/blob/main/CHANGELOG.md' },
@@ -58,8 +59,8 @@ export default function About() {
         {/* #553: isolation is off although it was asked for: either the host could not give it (`fallback`) or PUID/PGID
             is the media user's id (`id-clash`, which the admin can fix). The camera programs run as the app's own
             user. Loud, but admins only (a caregiver cannot fix a container). The operator's own switch (`disabled`)
-            and PUID=0 (`root`) keep the quiet line below. A server that sends no reason (an older one) shows no
-            banner. The sentence comes from the server's fixed table, never from the environment. */}
+            and PUID=0 (`root`) show no banner: the plain "Media isolation: Off" line for those is on Settings -> Logs
+            (components/ServerCard.jsx). A server that sends no reason (an older one) shows no banner. The sentence comes from the server's fixed table, never from the environment. */}
         {user?.role === 'admin' && info?.mediaIsolation === 'off'
           && (info?.mediaIsolationReason === 'fallback' || info?.mediaIsolationReason === 'id-clash') && (
           <div className="form-warning" role="status">
@@ -84,28 +85,30 @@ export default function About() {
             <div className="camera-tile__sub">
               Self-hosted baby monitor — no cloud, no subscription.
             </div>
-            {/* #553: whether ffmpeg and MediaMTX run as a separate user. Shown only when the server says (an older
-                server sends no field). 'off' is not an error: it is the documented fallback on a host that cannot
-                do it, or the kill switch (docs/operations.md, "Media isolation"). */}
-            {(info?.mediaIsolation === 'on' || info?.mediaIsolation === 'off') && (
-              <div className="camera-tile__sub">
-                Media isolation: {info.mediaIsolation}
-              </div>
-            )}
-            {/* The Android app, owner 2026-11-06: which address this session is using, and whether the Tailscale address
-                is saved for use away from home (docs/remote-access.md). Not shown in a browser or on an app without it. */}
-            {route && route.via !== 'other' && (
-              <div className="camera-tile__sub">
-                Connected through: {route.via === 'tailscale' ? 'Tailscale address' : 'saved address'}
-              </div>
-            )}
-            {route && (
-              <div className="camera-tile__sub">
-                Tailscale address: {route.tailscaleSaved ? 'saved for use away from home' : 'not saved'}
-              </div>
-            )}
+            {/* Owner 2026-11-06: the header kept growing (media isolation, then the Android connection lines) and was crowded.
+                It is now only who and what this is. The connection lines are the card below; the "Media isolation: on/off"
+                line is on Settings -> Logs for admins (components/ServerCard.jsx): it means nothing to a caregiver. */}
           </div>
         </div>
+
+        {/* The Android app, owner 2026-11-06: which address this session is using, and whether the Tailscale address is saved
+            for use away from home (docs/remote-access.md). Not shown in a browser or on an app without the feature (`route`
+            is null there). An address that is neither of the server's two names nothing, only whether one is saved. */}
+        {route && (
+          <div className="card">
+            <div className="card-title">Connection</div>
+            {route.via !== 'other' && (
+              <div className="list-row">
+                <span>Connected through</span>
+                <span className="camera-tile__sub">{route.via === 'tailscale' ? 'Tailscale address' : 'Saved address'}</span>
+              </div>
+            )}
+            <div className="list-row">
+              <span>Tailscale address</span>
+              <span className="camera-tile__sub">{route.tailscaleSaved ? 'Saved for use away from home' : 'Not saved'}</span>
+            </div>
+          </div>
+        )}
 
         {/* Owner 2026-11-05: once setup is complete this row is clutter. Only `completed` hides it: a limited setup still needs
             the picture check, and an install upgraded from before the guide uses this link for its diagnostics (docs/installation.md).

@@ -590,16 +590,16 @@ add it as a variable on the container: it is deliberately not in the template.
 **What it does.** FFmpeg, ffprobe and MediaMTX read video from your cameras, so they handle data that the camera (or
 whoever has taken over the camera) controls. With isolation on, they run as a separate user inside the container (id
 `1700`, with no extra privileges), so a fault in one of them cannot read the database or the secrets. Off, they run as
-the same user as the app, which is how Nightlight worked before. **Settings → About** shows one line, "Media
-isolation: on" or "off", for what this start decided; `GET /api/about` reports it as `mediaIsolation`.
+the same user as the app, which is how Nightlight worked before. **Settings → Logs** (admins only) shows one line under **Server**, "Media
+isolation: On" or "Off", for what this start decided; `GET /api/about` reports it as `mediaIsolation`.
 
 **When About warns you.** "Off" has four different causes, and two of them are worth a warning. `GET /api/about`
 reports which as `mediaIsolationReason` (`null` when isolation is on), with a fixed sentence in `mediaIsolationDetail`
 when there is something to fix:
 
-- `disabled`: you turned it off with `NIGHTLIGHT_MEDIA_ISOLATION`. That is your choice, so About shows only the quiet
-  line.
-- `root`: `PUID=0`. Isolation stays off by design when the app runs as root, so About shows only the quiet line.
+- `disabled`: you turned it off with `NIGHTLIGHT_MEDIA_ISOLATION`. That is your choice, so there is no warning, only the
+  quiet line under Settings → Logs → Server.
+- `root`: `PUID=0`. Isolation stays off by design when the app runs as root, so there is no warning, only the quiet line under Settings → Logs → Server.
 - `id-clash`: `PUID` or `PGID` is `1700`, the media user's own id. You can fix this, so **admins see a warning at the
   top of About** telling them to change it to another number and re-create the container.
 - `fallback`: isolation was on (the default) but the host could not provide it. **Admins see a warning at the top of

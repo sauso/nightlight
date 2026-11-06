@@ -72,7 +72,7 @@ Replace `/path/to/your/data` with a persistent folder on your host.
 
 **`NIGHTLIGHT_MEDIA_ISOLATION`** (optional, default blank, which means on) runs FFmpeg, ffprobe and MediaMTX as a separate user inside the container, so a camera stream that takes one over cannot read the database or your secrets. You don't need to set anything.
 - Range: `0`, `off` or `false` turns it off. Anything else, blank included, leaves it on. It is read when the container starts, so re-create the container after changing it.
-- If your host can't support it (rootless Docker or Podman, a share that ignores `chmod`, NFS with `root_squash`), the container still starts, runs without it, and logs one `media isolation is off` warning. **Settings → About** shows "Media isolation: on" or "off".
+- If your host can't support it (rootless Docker or Podman, a share that ignores `chmod`, NFS with `root_squash`), the container still starts, runs without it, and logs one `media isolation is off` warning. **Settings → Logs → Server** (admins only) shows "Media isolation: On" or "Off"; if it could not start, admins also get a warning at the top of **Settings → About**.
 - New recordings are then owned by user `1700` rather than `PUID`, so a non-root backup job or SMB user can't read the new ones from the folder. Existing recordings keep their owner.
 - What it doesn't protect against: [Media isolation](operations.md#media-isolation).
 
