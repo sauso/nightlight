@@ -70,6 +70,18 @@ describe('★ syncTailscaleEndpoint: what the server says decides what the phone
     expect(nb.getServerSwitchPrompt()).toMatchObject({ kind: 'tailscale-added' });
   });
 
+  test('★ switching away and back learns the address again, but the person is told only the first time', async () => {
+    // Change server forgets a server's Tailscale address by design, so every return reports "added" again (owner, 2026-11-06:
+    // the message came back on every switch).
+    const SC = stubNative();
+    expect(await nb.syncTailscaleEndpoint()).toBe('added');
+    expect(nb.getServerSwitchPrompt()).toMatchObject({ kind: 'tailscale-added' });
+    nb.dismissServerSwitchPrompt(nb.getServerSwitchPrompt().id);
+    expect(await nb.syncTailscaleEndpoint()).toBe('added'); // the shell says "added" again
+    expect(SC.addEndpoint).toHaveBeenCalledTimes(2);
+    expect(nb.getServerSwitchPrompt()).toBeNull();
+  });
+
   test('an address the phone already had changes nothing and tells nobody', async () => {
     const SC = stubNative({ addEndpoint: vi.fn().mockResolvedValue({ added: false }) });
     expect(await nb.syncTailscaleEndpoint()).toBe('unchanged');

@@ -427,6 +427,15 @@ On phone widths a **sheet**, not a centred dialog: overlay `rgba(10, 13, 28, 0.7
 `max-width: 440`, hugging the bottom edge (`placement="top"` for the top), rounded 20px on the inner
 side only, title 18px, `✕` close button with `aria-label="Close"`.
 
+A bottom sheet has **28px plus the device's bottom inset** (`env(safe-area-inset-bottom)`) under its last control, not the
+card's usual 16px: on a phone the sheet sits on the screen edge, by the gesture bar and rounded corners, and 16px looked
+jammed against it. A `placement="top"` sheet and a centred `wide` dialog keep 16px.
+
+**`focusDialog`** is for a notice that opens by itself (a server message, a link: nobody tapped anything to get it). Focus goes
+to the dialog, not to a button: a browser draws the keyboard focus ring on a button that script focuses with no tap or key before
+it, which looked like a defect on the OK button. A screen reader still announces the dialog (role and name) and Tab reaches the
+buttons, which show the global ring as always. A dialog the person opened keeps focus on its first field or action.
+
 **`wide` opts a modal into a desktop treatment**: at ≥1024px it becomes a centred dialog,
 `max-width: min(1040px, 92vw)`, `max-height: 92vh`, 16px all round. Only the video player uses it — a
 440px sheet wastes a desktop screen on a video, but a confirmation must stay narrow at any width. Don't

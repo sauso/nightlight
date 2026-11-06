@@ -82,14 +82,14 @@ function ConfirmSwitch({ prompt }) {
 function TailscaleAdded({ prompt }) {
   const close = () => dismissServerSwitchPrompt(prompt.id);
   return (
-    <Modal title="Away from home" onClose={close}>
+    <Modal title="Away from home" onClose={close} focusDialog>
       <p style={{ marginTop: 0 }}>
         When your home address does not answer, this app will now open Nightlight through its Tailscale address. At home
         nothing changes.
       </p>
       <p className="muted">It needs the Tailscale app on this phone, signed in to the same Tailscale network as your server.</p>
       <div style={ACTIONS_STYLE}>
-        <button type="button" className="btn btn-primary" data-autofocus onClick={close}>OK</button>
+        <button type="button" className="btn btn-primary" onClick={close}>OK</button>
       </div>
     </Modal>
   );
@@ -100,12 +100,12 @@ function TailscaleAdded({ prompt }) {
 function RefusedSwitch({ prompt }) {
   const close = () => dismissServerSwitchPrompt(prompt.id);
   return (
-    <Modal title="Server not saved in this app" onClose={close}>
+    <Modal title="Server not saved in this app" onClose={close} focusDialog>
       <p style={{ marginTop: 0 }}>An alert or link is from a server this app hasn’t been connected to:</p>
       <p><strong style={ORIGIN_STYLE}>{prompt.origin}</strong></p>
       <p>Nothing has changed. If it’s your server, add it first from Settings → Change server.</p>
       <div style={ACTIONS_STYLE}>
-        <button type="button" className="btn" data-autofocus onClick={close}>OK</button>
+        <button type="button" className="btn" onClick={close}>OK</button>
       </div>
     </Modal>
   );
