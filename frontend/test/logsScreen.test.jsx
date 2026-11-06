@@ -499,9 +499,11 @@ describe('Settings → Logs', () => {
   // Owner 2026-11-06: "Media isolation: on/off" moved here from the About header (it meant nothing to a caregiver). The page is
   // admin-only (AdminProtected, App.jsx), so a caregiver never reaches it.
   describe('the Server card (media isolation)', () => {
+    // `about` is the reply for /about, or an Error to reject with. Every other path answers with the shape its card unwraps
+    // (a blanket [] made Camera history read `undefined.length` once, which vitest counts as an error and fails the job).
     const withAbout = (about) => vi.spyOn(api, 'get').mockImplementation((path) => {
       const p = String(path);
-      if (p.startsWith('/about')) return Promise.resolve(about);
+      if (p.startsWith('/about')) return about instanceof Error ? Promise.reject(about) : Promise.resolve(about);
       if (p.startsWith('/logs')) return Promise.resolve({ lines: [] });
       if (p.startsWith('/events')) return Promise.resolve({ events: [] });
       return Promise.resolve([]);
@@ -528,7 +530,7 @@ describe('Settings → Logs', () => {
         unmount();
       }
       vi.restoreAllMocks();
-      vi.spyOn(api, 'get').mockImplementation((path) => (String(path).startsWith('/about') ? Promise.reject(new Error('down')) : Promise.resolve([])));
+      withAbout(new Error('down'));
       renderAsAdmin(<SettingsLogs />);
       await screen.findByText('Report a problem');
       await act(async () => {});
