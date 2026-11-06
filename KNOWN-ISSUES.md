@@ -1811,7 +1811,7 @@ database. A backup job that needs the database has to run as root, or copy the f
 **What you see:** After upgrading, recordings, clips and timelapses made from then on are owned by uid `1700`
 (group `1700`, mode `660`) instead of `PUID`, and a non-root backup job or an SMB user cannot read the new ones
 from the folder. Or, on some hosts, the start-up log has
-`[entrypoint] warning: media isolation is off: <reason>` and **Settings → About** says "Media isolation: off".
+`[entrypoint] warning: media isolation is off: <reason>` and **Settings → Logs → Server** (admins) says "Media isolation: Off"; when the host could not provide it, admins also get a warning at the top of **Settings → About**.
 
 **Why:** On purpose (#553). FFmpeg, ffprobe and MediaMTX parse whatever a camera sends, so they now run as a
 separate, unprivileged user and cannot read the database or the secrets. The warning means the container could not

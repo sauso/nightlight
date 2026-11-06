@@ -58,8 +58,8 @@ export default function About() {
         {/* #553: isolation is off although it was asked for: either the host could not give it (`fallback`) or PUID/PGID
             is the media user's id (`id-clash`, which the admin can fix). The camera programs run as the app's own
             user. Loud, but admins only (a caregiver cannot fix a container). The operator's own switch (`disabled`)
-            and PUID=0 (`root`) keep the quiet line below. A server that sends no reason (an older one) shows no
-            banner. The sentence comes from the server's fixed table, never from the environment. */}
+            and PUID=0 (`root`) show no banner: the plain "Media isolation: Off" line for those is on Settings -> Logs
+            (components/ServerCard.jsx). A server that sends no reason (an older one) shows no banner. The sentence comes from the server's fixed table, never from the environment. */}
         {user?.role === 'admin' && info?.mediaIsolation === 'off'
           && (info?.mediaIsolationReason === 'fallback' || info?.mediaIsolationReason === 'id-clash') && (
           <div className="form-warning" role="status">
