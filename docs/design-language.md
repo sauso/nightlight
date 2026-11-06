@@ -18,8 +18,8 @@ the deployed frontend live rather than bundling it). There is no separate native
 ## 1. Brand colour
 
 One periwinkle ("peri") identifies actions and navigation. By day it is `#5663D6`; at night it is the lighter
-`#8995FF` (the owner's choice, 2026-11-06; it was a violet, `#7C5CD6`, before 2026-11-05). The logo's crescent is the
-day colour, `#5663D6`. The two themes need different text on a peri fill, which sets the rules:
+`#8995FF` (the owner's choice, 2026-11-06; it was a violet, `#7C5CD6`, before 2026-11-05). The logo's crescent is its
+own colour, `#778FFD` (the owner, 2026-11-06), lighter than the day accent. The two themes need different text on a peri fill, which sets the rules:
 
 - `--accent` is for **fills**: buttons, the active segment, switches' tracks, selected chips. Text **on** a peri fill is
   always `--on-accent`, never a literal colour: **white by day** (5.06:1 on `#5663D6`) and the header navy `#14142A`
@@ -77,12 +77,12 @@ Measured with the WCAG formula (2026-11-06): `--on-accent` on `--accent` is 5.06
 4.92:1 on inset fields (plain `#5663D6` would only reach 4.06:1 on an inset, which is why the text token is deeper);
 at night `#A7B1FF` is 7.81:1 on cards, 8.92:1 on the page and 9.37:1 on insets. `--accent-line` is 5.06:1 on white and
 4.65:1 on the page by day (3:1 is the non-text target), and 5.87:1 on night cards. `--on-complement` on `--complement`
-is 10.76:1 by day and 12.40:1 at night. The logo's crescent on its `#14142A` ground is 3.57:1 (a graphic needs 3:1).
+is 10.76:1 by day and 12.40:1 at night. The logo's crescent on its `#14142A` ground is 6.13:1 (a graphic needs 3:1).
 Night live and offline text have 9.65:1 and 8.04:1 on cards; by day they have 5.77:1 and 5.92:1 on white cards. These
 clear WCAG's 4.5:1 normal-text target. A new accent use must pick its token by what it is (fill, text on a fill, line,
 small text). `test/paletteTokens.test.jsx` recomputes these ratios from the stylesheet's own token values and fails if a
 colour change makes any of them too low, if white or near-white text lands on an `--accent` fill, if a focus ring uses
-plain `--accent`, or if the logo's fill stops matching the day accent.
+plain `--accent`, or if the logo's fill stops being `#778FFD`.
 
 Sleep-timeline tokens (`--sleep-*`) are categorical data colours. Keep them
 separate from branding.
