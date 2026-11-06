@@ -152,14 +152,21 @@ describe('★ syncTailscaleEndpoint: where it does nothing', () => {
     }
   });
 
-  test('the notice never replaces a switch-server dialog that is already open', async () => {
+  test('★ the notice never replaces a switch-server dialog that is already open, whichever kind it is', async () => {
     const SC = stubNative({ list: vi.fn().mockResolvedValue({ servers: [HOME, 'https://other.example'], active: HOME, tailscale: null }) });
+    // A confirm dialog ("Switch server?")...
     expect(await nb.requestServerSwitch('https://other.example')).toBe('asked');
-    const dialog = nb.getServerSwitchPrompt();
-    expect(dialog.kind).toBe('confirm');
+    const confirm = nb.getServerSwitchPrompt();
+    expect(confirm.kind).toBe('confirm');
     expect(await nb.syncTailscaleEndpoint()).toBe('added'); // the address was still saved
     expect(SC.addEndpoint).toHaveBeenCalledTimes(1);
-    expect(nb.getServerSwitchPrompt()).toBe(dialog);
+    expect(nb.getServerSwitchPrompt()).toBe(confirm);
+    // ...and a refusal ("Server not saved in this app"), which is the one a narrower guard would let the notice replace.
+    expect(await nb.requestServerSwitch('https://unsaved.example')).toBe('refused');
+    const refused = nb.getServerSwitchPrompt();
+    expect(refused.kind).toBe('refused');
+    await nb.syncTailscaleEndpoint();
+    expect(nb.getServerSwitchPrompt()).toBe(refused);
   });
 
   test('the notice only informs: it cannot be "confirmed" as a server switch', async () => {
