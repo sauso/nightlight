@@ -1,6 +1,6 @@
 import { afterEach, describe, test, expect, vi } from 'vitest';
 import * as nativeBridge from '../src/lib/nativeBridge.js';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import About from '../src/pages/About.jsx';
 import { api } from '../src/lib/api.js';
@@ -42,43 +42,60 @@ test('the link stays hidden while the status is unknown (no flash on a finished 
 
 // Owner 2026-11-06: in the Android app the About page says which address the session is on and whether the Tailscale address is
 // saved (there was no way to see either). Nothing is shown in a browser or an app without the feature.
-describe('the Android app connection lines', () => {
+// Owner 2026-11-06 (tidy): the lines moved out of the crowded header into their own "Connection" card, as label + value rows.
+describe('the Android app Connection card', () => {
   const route = (value) => {
     mockSetup('completed');
     return vi.spyOn(nativeBridge, 'getConnectionRoute').mockResolvedValue(value);
   };
+  // The card the rows are in: the header card holds only who and what this is.
+  const connectionCard = async () => (await screen.findByText('Connection')).closest('.card');
+  // [[label, value], ...] for the rows of a card.
+  const rowsOf = (card) => [...card.querySelectorAll('.list-row')].map((row) => [...row.children].map((c) => c.textContent));
 
   test('★ on the Tailscale address with it saved', async () => {
     route({ via: 'tailscale', tailscaleSaved: true });
     renderAsAdmin(<About />);
-    expect(await screen.findByText('Connected through: Tailscale address')).toBeInTheDocument();
-    expect(screen.getByText('Tailscale address: saved for use away from home')).toBeInTheDocument();
+    expect(rowsOf(await connectionCard())).toEqual([
+      ['Connected through', 'Tailscale address'],
+      ['Tailscale address', 'Saved for use away from home'],
+    ]);
   });
 
   test('★ on the saved address with no Tailscale address saved', async () => {
     route({ via: 'saved', tailscaleSaved: false });
     renderAsAdmin(<About />);
-    expect(await screen.findByText('Connected through: saved address')).toBeInTheDocument();
-    expect(screen.getByText('Tailscale address: not saved')).toBeInTheDocument();
+    expect(rowsOf(await connectionCard())).toEqual([
+      ['Connected through', 'Saved address'],
+      ['Tailscale address', 'Not saved'],
+    ]);
   });
 
   test('an unrecognised address names nothing but still says whether a Tailscale address is saved', async () => {
     route({ via: 'other', tailscaleSaved: true });
     renderAsAdmin(<About />);
-    expect(await screen.findByText('Tailscale address: saved for use away from home')).toBeInTheDocument();
-    expect(screen.queryByText(/Connected through/)).not.toBeInTheDocument();
+    expect(rowsOf(await connectionCard())).toEqual([['Tailscale address', 'Saved for use away from home']]);
   });
 
-  test('★ nothing in a browser or an app without the feature, and a caregiver sees the same lines as an admin', async () => {
+  test('★ the rows are in their own card, not in the header (the header card is the one with the tagline)', async () => {
+    route({ via: 'saved', tailscaleSaved: true });
+    renderAsAdmin(<About />);
+    const card = await connectionCard();
+    const header = screen.getByText(/Self-hosted baby monitor/).closest('.card');
+    expect(header).not.toBe(card);
+    expect(within(header).queryByText(/Connected through|Tailscale address/)).not.toBeInTheDocument();
+  });
+
+  test('★ nothing in a browser or an app without the feature, and a caregiver sees the same card as an admin', async () => {
     route(null);
     renderAsAdmin(<About />);
     await screen.findByText(/Self-hosted baby monitor/);
-    expect(screen.queryByText(/Connected through/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Tailscale address:/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Connection')).not.toBeInTheDocument();
+    expect(screen.queryByText('Connected through')).not.toBeInTheDocument();
     vi.restoreAllMocks();
     route({ via: 'saved', tailscaleSaved: true });
     renderAsCaregiver(<About />);
-    expect(await screen.findByText('Connected through: saved address')).toBeInTheDocument();
+    expect(rowsOf(await connectionCard())[0]).toEqual(['Connected through', 'Saved address']);
   });
 });
 
