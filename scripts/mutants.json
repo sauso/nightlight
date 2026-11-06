@@ -2557,7 +2557,7 @@
   {
     "label": "push public URL: any device, not just an admin's, may set the global address",
     "file": "backend/src/lib/push.js",
-    "find": "if (origin && isAdminUser(userId)) {",
+    "find": "if (origin && isAdminUser(userId) && !isTailnetOrigin(origin)) {",
     "replace": "if (origin) {",
     "expect": "killed",
     "tests": [
@@ -2788,8 +2788,8 @@
   {
     "label": "push public URL: the stored global value and the admin-device fallback swap precedence",
     "file": "backend/src/lib/push.js",
-    "find": "return stored || newestAdminDeviceBaseUrl();",
-    "replace": "return newestAdminDeviceBaseUrl() || stored;",
+    "find": "return (stored && !isTailnetOrigin(stored) ? stored : null) || newestAdminDeviceBaseUrl();",
+    "replace": "return newestAdminDeviceBaseUrl() || (stored && !isTailnetOrigin(stored) ? stored : null);",
     "expect": "killed",
     "tests": [
       "push-public-url.test.js"
@@ -2898,8 +2898,8 @@
   {
     "label": "push public URL: the fallback returns the raw stored value instead of the canonical origin",
     "file": "backend/src/lib/push.js",
-    "find": "if (origin) return origin;",
-    "replace": "if (origin) return base_url;",
+    "find": "if (origin && !isTailnetOrigin(origin)) return origin;",
+    "replace": "if (origin && !isTailnetOrigin(origin)) return base_url;",
     "expect": "killed",
     "tests": [
       "push-public-url.test.js"

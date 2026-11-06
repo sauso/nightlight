@@ -191,6 +191,10 @@ const ROUTE_GATES = {
   'GET /api/remote-access/tailscale': ADMIN,
   'PUT /api/remote-access/tailscale': ADMIN,
   'POST /api/remote-access/tailscale/actions': ADMIN,
+  // 2026-11-06: the one non-admin route here. Any signed-in user (a caregiver included) may read the single https address the phone
+  // app falls back to; it carries no other Tailscale detail and the address only opens from inside the tailnet. Who gains access:
+  // caregivers, to that one address.
+  'GET /api/remote-access/tailscale/address': SIGNED_IN,
   'GET /api/esphome/devices': ADMIN,
   'POST /api/esphome/devices': ADMIN,
   'PUT /api/esphome/devices/:id': ADMIN,
