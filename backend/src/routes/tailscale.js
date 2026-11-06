@@ -35,21 +35,27 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
   stop = stopTailscale, status = getTailscaleStatus, hasLiveProcess = hasLiveTailscaleProcess,
   verify = verifyToken, onEnqueued = () => {}, cli = runTailscaleCli,
   pendingVideoAddress = videoAddressPending, applyVideoAddress = applyVideoAddressNow,
+  addressCacheMs = 5000,
   write = (value) => database.prepare("UPDATE settings SET tailscale_enabled = ? WHERE id = 'app'").run(value) } = {}) {
   const router = Router();
   let tail = Promise.resolve();
   let lastError = null;
   const enabled = () => database.prepare("SELECT tailscale_enabled FROM settings WHERE id = 'app'").get()?.tailscale_enabled === 1;
   const hostname = () => database.prepare("SELECT tailscale_hostname FROM settings WHERE id = 'app'").get()?.tailscale_hostname ?? 'nightlight';
-  const view = async () => {
+  // What the daemon says right now, shared by the admin status below and by the signed-in address endpoint further down.
+  const readRemote = async () => {
     const hostNetwork = detector();
     const process = status();
     let remote = { state: !enabled() ? 'off' : process.state === 'unavailable' ? 'error' : 'starting',
       addresses: [], dns_name: null, login_url: null };
     let serve = { enabled: false, consent_url: getTailscaleLinks().consentUrl };
+    // false only when the serve-status read itself failed: `serve.enabled` is then false for lack of an answer, which the admin
+    // status shows as "not on" but which /address must not report as "off" (Codex review of #1001, verified).
+    let serveKnown = true;
     if (enabled() && process.state === 'running') {
       remote = cleanStatus(await cli('status-peerless'));
       const served = await cli('serve-status');
+      serveKnown = served.ok === true;
       const web = served.ok ? served.json?.Web : null;
       // Lead review of #978 (Codex, verified): after a rename Tailscale leaves the Serve entry under the OLD name (measured
       // 2026-11-04), so 'any :443 entry' reported the secure address as on while the NEW name served nothing. The entry must
@@ -59,6 +65,10 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
       serve = { enabled: Boolean(serving),
         consent_url: getTailscaleLinks().consentUrl };
     }
+    return { hostNetwork, process, remote, serve, serveKnown };
+  };
+  const view = async () => {
+    const { hostNetwork, process, remote, serve } = await readRemote();
     return { enabled: enabled(), process,
       blocker: blocker(database, { hostNetwork })?.code ?? null, host_network: hostNetwork,
       state: remote.state, addresses: remote.addresses, dns_name: remote.dns_name, online: remote.online ?? null,
@@ -75,6 +85,41 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
   router.get('/', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
     try { res.json(await view()); }
     catch { conflict(res, 'status_unavailable', 'Tailscale status is unavailable.'); }
+  }));
+  // The address the phone apps may fall back to when the local one does not answer (owner, 2026-11-06). ANY signed-in user, not
+  // only admins, because a caregiver's phone needs it as much as an admin's; the answer is a single https address that only
+  // opens from inside the tailnet, and the admin-only status above stays the one place that shows everything else.
+  //
+  // Three answers, and the difference matters because the phone DROPS a saved address on `url: null`:
+  //   * { url: "https://<name>.ts.net" }  Tailscale is connected AND private HTTPS Serve is on for the node's CURRENT name
+  //                                       (the same test as `serve.enabled`, #978).
+  //   * { url: null }                     definitely not available: an admin has Tailscale off, or it is connected with Serve off.
+  //   * 409                               not known right now (the daemon is starting, needs sign-in, or its status could not be
+  //                                       read). The phone keeps what it has: a daemon restart must not erase the address.
+  //
+  // Each answer costs two CLI runs, so concurrent callers share one read and a finished read is reused for a few seconds
+  // (Codex review of #1001: 30 concurrent callers ran the CLI 60 times). Only the DAEMON read is shared: the admin's on/off
+  // intent is read fresh on every request, so turning Tailscale off shows at once.
+  let addressRead = null;
+  let addressReadAt = 0;
+  const readAddress = () => {
+    const now = Date.now();
+    if (!addressRead || now - addressReadAt >= addressCacheMs) {
+      addressReadAt = now;
+      addressRead = readRemote().then(({ remote, serve, serveKnown }) => {
+        if (remote.state === 'connected' && remote.dns_name && serveKnown) {
+          return { known: true, url: serve.enabled ? `https://${remote.dns_name}` : null };
+        }
+        return { known: false };
+      }, () => ({ known: false }));
+    }
+    return addressRead;
+  };
+  router.get('/address', requireAuth, asyncHandler(async (req, res) => {
+    if (!enabled()) return res.json({ url: null });
+    const answer = await readAddress();
+    if (answer.known) return res.json({ url: answer.url });
+    return conflict(res, 'status_unavailable', 'The Tailscale address is not known right now.');
   }));
   router.put('/', requireAuth, requireAdmin, (req, res) => {
     if (!req.body || Array.isArray(req.body) || Object.keys(req.body).length !== 1 ||

@@ -5,6 +5,7 @@ import db from '../db.js';
 import { storeSnapshot } from './pushSnapshots.js';
 import { sessionAgeCondition } from '../middleware/auth.js';
 import { stripTrailingSlashes } from './stripTrailingSlashes.js';
+import { isTailnetOrigin } from './tailnetAddress.js';
 
 // Push notifications via Firebase Cloud Messaging. The service-account credential is a secret,
 // so it is NEVER baked into the (public) image — it's mounted as a file into the data dir. If
@@ -249,7 +250,12 @@ export function registerToken(token, platform, userId, baseUrl, sessionId) {
   // not a per-device hint. A caregiver's own address is still stored on their own token above (it is
   // only ever used to build links delivered to that same device). Decided from the database here,
   // not passed in by the caller, so no future caller can forget the check.
-  if (origin && isAdminUser(userId)) {
+  //
+  // Never from a Tailscale origin (2026-11-06): a phone that falls back to the Tailscale address while its owner is away registers
+  // under that origin, and one admin phone away from home would then point EVERY household member's alert links at the .ts.net
+  // address, including phones that are at home. That device's own token above still keeps its own origin (its alerts are only
+  // ever sent to that device), so its alerts keep working; only the shared value ignores it.
+  if (origin && isAdminUser(userId) && !isTailnetOrigin(origin)) {
     try {
       db.prepare('UPDATE settings SET public_base_url = ? WHERE id = ?').run(origin, 'app');
     } catch {
@@ -275,7 +281,9 @@ export function getPublicBaseUrl() {
     const stored = normalizeBaseUrl(
       db.prepare('SELECT public_base_url FROM settings WHERE id = ?').get('app')?.public_base_url
     );
-    return stored || newestAdminDeviceBaseUrl();
+    // A stored Tailscale origin (learned before the rule in registerToken existed) is passed over on READ too, so the fix does
+    // not wait for the next registration; the fallback then finds the newest admin device that is not on Tailscale.
+    return (stored && !isTailnetOrigin(stored) ? stored : null) || newestAdminDeviceBaseUrl();
   } catch {
     return null;
   }
@@ -296,7 +304,7 @@ function newestAdminDeviceBaseUrl() {
     .all();
   for (const { base_url } of rows) {
     const origin = normalizeBaseUrl(base_url);
-    if (origin) return origin;
+    if (origin && !isTailnetOrigin(origin)) return origin;
   }
   return null;
 }

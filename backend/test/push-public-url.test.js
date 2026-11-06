@@ -109,6 +109,62 @@ describe('★ registerToken: only an admin device can set the household public U
   });
 });
 
+// 2026-11-06 (phone apps fall back to the Tailscale address when away): an admin phone reached over Tailscale registers under a
+// .ts.net origin. The household's alert links must keep following the LOCAL address, so that one registration cannot re-point
+// everyone else. Paired fixtures: each test below differs from its twin ONLY in the origin.
+describe('★ a Tailscale origin never becomes the household public URL', () => {
+  const TS_NAME = 'https://nightlight-1.example-tailnet.ts.net';
+  const TS_IP = 'http://100.101.102.103:4000';
+
+  test('control — the same admin registration from a local origin sets it', () => {
+    registerToken('tok-a', 'android', 'u-admin', GOOD, makeSession(db, 'u-admin'));
+    assert.equal(getGlobal(), GOOD);
+  });
+
+  // The last two were stored as the household address before the review of #1001 (a DNS name may end in a dot; Tailscale's own
+  // IPv6 range is fd7a:115c:a1e0::/48).
+  for (const [label, origin] of [['a .ts.net name', TS_NAME], ['a 100.64.0.0/10 address', TS_IP],
+    ['a .ts.net name with a trailing dot', 'https://nightlight-1.example-tailnet.ts.net.'], ['a Tailscale IPv6 address', 'http://[fd7a:115c:a1e0::1]:4000']]) {
+    test(`★ THE FIX: an admin registering from ${label} does not set it`, () => {
+      registerToken('tok-a', 'android', 'u-admin', origin, makeSession(db, 'u-admin'));
+      assert.equal(getGlobal(), null, 'the Tailscale origin was stored as the household address');
+      assert.equal(getPublicBaseUrl(), null);
+    });
+
+    test(`★ THE FIX: ... and cannot REPLACE the local address already stored (${label})`, () => {
+      setGlobal(GOOD);
+      registerToken('tok-a', 'android', 'u-admin', origin, makeSession(db, 'u-admin'));
+      assert.equal(getGlobal(), GOOD);
+      assert.equal(getPublicBaseUrl(), GOOD);
+    });
+
+    test(`that device still keeps its OWN origin on its token, so its own alerts keep working (${label})`, () => {
+      registerToken('tok-a', 'android', 'u-admin', origin, makeSession(db, 'u-admin'));
+      assert.equal(tokenRow('tok-a').base_url, normalizeBaseUrl(origin));
+    });
+
+    test(`★ THE FIX: a value learned BEFORE this rule is passed over on read, and the newest non-Tailscale admin device is used (${label})`, () => {
+      insertLegacyToken('tok-old', 'u-admin', GOOD, '2026-01-01 00:00:00');
+      insertLegacyToken('tok-new', 'u-admin', origin, '2026-06-01 00:00:00'); // newer, so it would win the fallback if not skipped
+      setGlobal(origin);
+      assert.equal(getPublicBaseUrl(), GOOD);
+    });
+  }
+
+  test('a household whose only admin device is on Tailscale has no public URL (links open in place), not the .ts.net one', () => {
+    insertLegacyToken('tok-new', 'u-admin', TS_NAME, '2026-06-01 00:00:00');
+    assert.equal(getPublicBaseUrl(), null);
+  });
+
+  test('lookalikes are NOT Tailscale: a name merely ending in ts.net, and addresses just outside 100.64.0.0/10', () => {
+    for (const origin of ['https://nots.net', 'https://ts.net.evil.example', 'http://100.63.255.255', 'http://100.128.0.1', 'http://10.0.0.5']) {
+      setGlobal(null);
+      registerToken('tok-a', 'android', 'u-admin', origin, makeSession(db, 'u-admin'));
+      assert.equal(getGlobal(), normalizeBaseUrl(origin), `${origin} was wrongly treated as a Tailscale origin`);
+    }
+  });
+});
+
 describe('★ getPublicBaseUrl: the "newest device" fallback ignores non-admin devices too', () => {
   // The fallback only applies when the global cell is empty, which is the state right after an upgrade.
   const adminTokenWithGlobalCleared = () => {

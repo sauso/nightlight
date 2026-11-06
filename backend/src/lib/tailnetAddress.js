@@ -13,6 +13,18 @@ export function vettedTailnetIPv4(list) {
   }) ?? null;
 }
 
+// True when a web origin ("https://x.ts.net", "http://100.101.102.103:4000") names a Tailscale host: a `.ts.net` name or an address in
+// 100.64.0.0/10. Used to keep such an origin from becoming the server's GLOBAL public address (lib/push.js): a phone that is
+// away and reaches us over Tailscale is not telling us where the household's alert links should point.
+export function isTailnetOrigin(origin) {
+  let host;
+  try { host = new URL(origin).hostname.toLowerCase(); } catch { return false; }
+  // A trailing DNS dot ("x.ts.net.") is the same name; and Tailscale's own IPv6 range is fd7a:115c:a1e0::/48 (a URL host shows an
+  // IPv6 address in brackets). Both found by the review of #1001 (verified: they were stored as the household address).
+  host = host.replace(/\.$/, '');
+  return host.endsWith('.ts.net') || vettedTailnetIPv4([host]) !== null || host.startsWith('[fd7a:115c:a1e0:');
+}
+
 export function getTailnetAddress() { return address; }
 export function tailnetAddressEpoch() { return epoch; }
 export function setTailnetAddress(value) {
