@@ -263,7 +263,22 @@ async function advertisedOrigin() {
   }
 }
 
-// What is showing: null, or { id, kind: 'confirm' | 'refused', origin, entry }. `origin` is the canonical
+// The addresses the phone has saved FOR THE SERVER IN USE, canonical: the one it was set up with, and the Tailscale one the
+// server told it about (see syncTailscaleEndpoint). The page may be on either, depending on where the phone is, so a link
+// that names the other one is the same server, not a request to switch. An older shell has no `tailscale` field and a
+// list that cannot be read gives []: both just mean "no extra address".
+async function ownAddresses() {
+  const p = window.Capacitor?.Plugins?.ServerConfig;
+  if (!p) return [];
+  try {
+    const res = await p.list();
+    return [res?.active, res?.tailscale].map((value) => canonicalOrigin(value)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+// What is showing: null, or { id, kind: 'confirm' | 'refused' | 'tailscale-added', origin, entry }. `origin` is the canonical
 // origin (all the dialog ever shows, never a full URL); `entry` is the saved-list string a confirm would switch
 // to. Read through useSyncExternalStore by components/ServerSwitchPrompt.jsx, mounted once at the app root.
 let serverPrompt = null;
@@ -335,11 +350,61 @@ export async function requestServerSwitch(raw) {
   if (!target) { setServerPrompt(null); return 'invalid'; }
   if (target === canonicalOrigin(currentServerOrigin())) { setServerPrompt(null); return 'same'; }
   if (!window.Capacitor?.Plugins?.ServerConfig) { setServerPrompt(null); return 'unavailable'; }
-  const [advertised, entry] = await Promise.all([advertisedOrigin(), savedServerFor(target)]);
+  const [advertised, entry, own] = await Promise.all([advertisedOrigin(), savedServerFor(target), ownAddresses()]);
   if (seq !== serverRequestSeq) return 'superseded';
   if (advertised && advertised === target) { setServerPrompt(null); return 'same'; }
+  // The server in use has two addresses on this phone (home and Tailscale): naming either is naming itself.
+  if (own.includes(target)) { setServerPrompt(null); return 'same'; }
   setServerPrompt(entry ? { id: seq, kind: 'confirm', origin: target, entry } : { id: seq, kind: 'refused', origin: target });
   return entry ? 'asked' : 'refused';
+}
+
+// --- The server's Tailscale address, for use away from home (owner, 2026-11-06) ---
+// The phone opens the address it was set up with, and falls back to the server's Tailscale address when that one does not
+// answer (MainActivity, EndpointChooser). The server tells the phone that address: GET /api/remote-access/tailscale/address,
+// which any signed-in user may read. This asks once per start and passes the answer to the native shell, which does the
+// checking (same server id, `https://<name>.ts.net` only) and the saving:
+//   { url: "https://x.ts.net" } -> addEndpoint; the person is told once, the first time it is saved;
+//   { url: null }               -> removeEndpoint: the server no longer offers one (Tailscale turned off there);
+//   anything else (409 "not known right now", an older server's 404, no network, an odd body) -> nothing changes. The server
+//   sends null ONLY for "definitely not available", so a daemon restart can never erase a saved address.
+// Does nothing in a browser, on an iOS shell or an older Android shell (no addEndpoint), or when signed out. Never throws.
+// Returns what happened, for tests: 'added' | 'unchanged' | 'removed' | 'none' | null.
+export async function syncTailscaleEndpoint() {
+  const p = window.Capacitor?.Plugins?.ServerConfig;
+  if (!p || typeof p.addEndpoint !== 'function' || typeof p.removeEndpoint !== 'function') return null;
+  if (!getToken()) return null;
+  let url;
+  try {
+    // A short deadline: this runs at every start and must never hold anything up. No answer just means "no change".
+    const res = await api.get('/remote-access/tailscale/address', { timeoutMs: 5000 });
+    url = res?.url;
+  } catch {
+    return null;
+  }
+  try {
+    if (typeof url === 'string') {
+      const res = await p.addEndpoint({ url });
+      if (res?.added === true) { announceTailscaleAdded(); return 'added'; }
+      return 'unchanged';
+    }
+    if (url === null) {
+      const res = await p.removeEndpoint();
+      return res?.removed === true ? 'removed' : 'none';
+    }
+  } catch (err) {
+    // The shell refused (not this server's page, the address did not answer or is another server): it can be tried again
+    // at the next start, and there is nothing the person could do about it now.
+    console.warn('Tailscale address not saved', err);
+  }
+  return null;
+}
+
+// Tell the person, once, that the phone will now also use the Tailscale address. Only when nothing else is asking: it never
+// replaces or closes a switch-server dialog.
+function announceTailscaleAdded() {
+  if (serverPrompt) return;
+  setServerPrompt({ id: ++serverRequestSeq, kind: 'tailscale-added', origin: null, entry: null });
 }
 
 // The window event the native shell fires when it is holding a server request from a tapped link, for an app
