@@ -324,12 +324,13 @@ Other pages and sub-pages have no header theme button; use Account → Appearanc
 The back label uses up to about 35% of the bar, then ends with an ellipsis to leave room
 for the page title. This width is estimated from phone screenshots, not measured on devices.
 
-### Fact: a label over its value
-`.fact` (label `.fact__label` 12px `--text-secondary`, value `.fact__value` 15px weight 500, optional `.fact__note` 12px
-`--text-secondary`), divided by the same hairline as `.list-row`. Use it for read-only details in a card (Settings → About →
-Connection), especially a long value such as an address: it gets the whole card width. Do not put a 16px label and a small value on one
-line (`.list-row`) for these: on a phone the label wrapped and the value broke mid-word. Spacing and look are checked on a phone, not by
-a test.
+### A read-only detail card (title, badge, sub-heading, value)
+For a card that only reports something (Settings → About → Connection, and the Remote Access card it mirrors), use the Remote
+Access card's look: a 16px/800 title with a `.status-badge` on the right, a 14px/700 sub-heading, the value in
+`.tailscale-address` (15px/600, wraps anywhere), and a muted `.tailscale-hint` line under it. In CSS the About card is
+`.about-connection`, grouped with `.tailscale-card` so the two change together. Two layouts were tried and dropped (owner,
+2026-11-07): a 16px label and a small value on one `.list-row` (on a phone the label wrapped and a long address broke mid-word),
+and a 12px label over each value (it looked unlike every other card). Spacing and look are checked on a phone, not by a test.
 
 ### Buttons
 `.btn` — inline-flex, `gap: 6px`, radius 10px, `padding: 12px 18px`, 14px/600, and **`width: 100%`

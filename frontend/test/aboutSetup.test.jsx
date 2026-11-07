@@ -50,27 +50,25 @@ describe('the Android app Connection card', () => {
   };
   // The card the rows are in: the header card holds only who and what this is.
   const connectionCard = async () => (await screen.findByText('Connection')).closest('.card');
-  // [[label, value], ...] for the facts of a card (a small label over its value).
-  const rowsOf = (card) => [...card.querySelectorAll('.fact')].map((fact) => [fact.querySelector('.fact__label').textContent, fact.querySelector('.fact__value').textContent]);
-
-  // The muted line under a fact's value (the saved note or the reason).
-  const noteOf = (card) => card.querySelector('.fact__note')?.textContent ?? null;
+  // The card mirrors the Remote Access card (owner 2026-11-07): a badge by the title for the address in use, the address
+  // under a sub-heading, and a muted line under that (the saved note or the reason).
+  const badgeOf = (card) => card.querySelector('.status-badge')?.textContent ?? null;
+  const addressOf = (card) => card.querySelector('.tailscale-address').textContent;
+  const noteOf = (card) => card.querySelector('.tailscale-hint')?.textContent ?? null;
 
   test('★ on the Tailscale address with it saved: the address itself is shown (owner, 2026-11-07)', async () => {
     route({ via: 'tailscale', tailscaleSaved: true, address: 'nightlight.example.ts.net', why: null });
     renderAsAdmin(<About />);
     const card = await connectionCard();
-    expect(rowsOf(card)).toEqual([
-      ['Connected through', 'Tailscale address'],
-      ['Tailscale address', 'nightlight.example.ts.net'],
-    ]);
+    expect(badgeOf(card)).toBe('Using Tailscale');
+    expect(addressOf(card)).toBe('nightlight.example.ts.net');
     expect(noteOf(card)).toBe('Saved for use away from home.');
   });
 
   test('a saved address the shell gave no readable host for says "Saved" rather than nothing', async () => {
     route({ via: 'saved', tailscaleSaved: true, address: null, why: null });
     renderAsAdmin(<About />);
-    expect(rowsOf(await connectionCard())[1]).toEqual(['Tailscale address', 'Saved']);
+    expect(addressOf(await connectionCard())).toBe('Saved');
   });
 
   test('★ not saved: each reason is its own sentence, nothing is guessed when none is known, and a saved address never shows one', async () => {
@@ -86,7 +84,7 @@ describe('the Android app Connection card', () => {
       route({ via: 'saved', tailscaleSaved: false, address: null, why });
       const { unmount } = renderAsAdmin(<About />);
       const card = await connectionCard();
-      expect(rowsOf(card)[1], why).toEqual(['Tailscale address', 'Not saved']);
+      expect(addressOf(card), why).toBe('Not saved');
       expect(noteOf(card), why).toMatch(pattern);
       unmount();
     }
@@ -106,16 +104,17 @@ describe('the Android app Connection card', () => {
   test('★ on the saved address with no Tailscale address saved', async () => {
     route({ via: 'saved', tailscaleSaved: false, address: null, why: null });
     renderAsAdmin(<About />);
-    expect(rowsOf(await connectionCard())).toEqual([
-      ['Connected through', 'Saved address'],
-      ['Tailscale address', 'Not saved'],
-    ]);
+    const card = await connectionCard();
+    expect(badgeOf(card)).toBe('Using saved address');
+    expect(addressOf(card)).toBe('Not saved');
   });
 
   test('an unrecognised address names nothing but still says whether a Tailscale address is saved', async () => {
     route({ via: 'other', tailscaleSaved: true, address: 'nightlight.example.ts.net', why: null });
     renderAsAdmin(<About />);
-    expect(rowsOf(await connectionCard())).toEqual([['Tailscale address', 'nightlight.example.ts.net']]);
+    const card = await connectionCard();
+    expect(badgeOf(card)).toBeNull();
+    expect(addressOf(card)).toBe('nightlight.example.ts.net');
   });
 
   test('★ the rows are in their own card, not in the header (the header card is the one with the tagline)', async () => {
@@ -124,7 +123,7 @@ describe('the Android app Connection card', () => {
     const card = await connectionCard();
     const header = screen.getByText(/Self-hosted baby monitor/).closest('.card');
     expect(header).not.toBe(card);
-    expect(within(header).queryByText(/Connected through|Tailscale address/)).not.toBeInTheDocument();
+    expect(within(header).queryByText(/Using saved address|Your secure address/)).not.toBeInTheDocument();
   });
 
   test('★ nothing in a browser or an app without the feature, and a caregiver sees the same card as an admin', async () => {
@@ -132,11 +131,11 @@ describe('the Android app Connection card', () => {
     renderAsAdmin(<About />);
     await screen.findByText(/Self-hosted baby monitor/);
     expect(screen.queryByText('Connection')).not.toBeInTheDocument();
-    expect(screen.queryByText('Connected through')).not.toBeInTheDocument();
+    expect(screen.queryByText('Your secure address')).not.toBeInTheDocument();
     vi.restoreAllMocks();
     route({ via: 'saved', tailscaleSaved: true });
     renderAsCaregiver(<About />);
-    expect(rowsOf(await connectionCard())[0]).toEqual(['Connected through', 'Saved address']);
+    expect(badgeOf(await connectionCard())).toBe('Using saved address');
   });
 });
 
