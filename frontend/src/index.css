@@ -593,22 +593,25 @@ body.in-pip .tile-menu-backdrop {
 }
 
 /* The same steps sit in Settings and the narrower setup card. Let long DNS names wrap on a phone. */
-.tailscale-card, .about-connection { min-width: 0; }
-.tailscale-card__heading, .about-connection__heading, .tailscale-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.tailscale-card__heading, .about-connection__heading { justify-content: space-between; }
-.tailscale-card__heading .card-title, .about-connection__heading .card-title { margin: 0; }
+.tailscale-card, .about-card { min-width: 0; }
+.tailscale-card__heading, .about-card__heading, .tailscale-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tailscale-card__heading, .about-card__heading { justify-content: space-between; }
+.tailscale-card__heading .card-title, .about-card__heading .card-title { margin: 0; }
 .tailscale-card .btn, .remote-advanced summary, .tailscale-advanced summary { min-height: 44px; }
 .tailscale-actions .btn { flex: 1 1 130px; width: auto; }
-.tailscale-card p, .tailscale-card li, .about-connection p { line-height: 1.5; }
+.tailscale-card p, .tailscale-card li, .about-card p { line-height: 1.5; }
+/* About's Support and safety text sits under the title (the Connection card's text follows an h3, which carries its own margin). */
+.about-card__text { margin: 12px 0; }
+.about-card__text:last-child { margin-bottom: 0; }
 /* Owner testing 2026-11-05: the card's content outranked its own title. The title is the 12px grey .card-title, the h3s fell
    back to the browser default (~18px) and the address was 17.6px. Everything here now sits on the design-language scale
    (docs/design-language.md §3): title 16 (sheet-title size), sub-heading 14, address 15, body 14. The wizard shows the same
    card without the title; its step heading above it is the larger one, so the order still reads title > sub-heading > text. */
-/* Settings -> About -> Connection (.about-connection) deliberately shares this look: the owner asked on 2026-11-07 for it to mirror
+/* Settings -> About -> Connection (.about-card) deliberately shares this look: the owner asked on 2026-11-07 for it to mirror
    the Remote Access card, after two layouts of its own read badly on a phone. Change the two together. */
-.tailscale-card, .about-connection { font-size: 14px; }
-.tailscale-card__heading .card-title, .about-connection__heading .card-title { font-size: 16px; font-weight: 800; color: var(--text-primary); }
-.tailscale-card h3, .about-connection h3 { font-size: 14px; font-weight: 700; margin: 18px 0 6px; }
+.tailscale-card, .about-card { font-size: 14px; }
+.tailscale-card__heading .card-title, .about-card__heading .card-title { font-size: 16px; font-weight: 800; color: var(--text-primary); }
+.tailscale-card h3, .about-card h3 { font-size: 14px; font-weight: 700; margin: 18px 0 6px; }
 .tailscale-address { overflow-wrap: anywhere; font-weight: 600; font-size: 15px; }
 .tailscale-hint { color: var(--text-secondary); font-size: 0.875rem; }
 .tailscale-qr { width: min(180px, 100%); margin: 16px auto; text-align: center; }

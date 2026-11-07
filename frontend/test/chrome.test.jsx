@@ -403,7 +403,8 @@ describe('About', () => {
   test('carries the safety disclaimer', () => {
     vi.spyOn(api, 'get').mockResolvedValue({ version: '0.29.0' });
     renderAsAdmin(<About />);
-    expect(screen.getByText('Not a safety device.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Not a safety device' })).toBeInTheDocument();
+    expect(screen.getByText(/substitute for adult supervision/)).toBeInTheDocument();
   });
 });
 

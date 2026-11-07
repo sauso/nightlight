@@ -113,8 +113,8 @@ export default function About() {
             this card shows the person's tailnet name (docs/remote-access.md). The look lives in index.css next to the
             Remote Access rules it shares. */}
         {route && (
-          <section className="card about-connection" aria-label="Connection">
-            <div className="about-connection__heading">
+          <section className="card about-card" aria-label="Connection">
+            <div className="about-card__heading">
               <h2 className="card-title">Connection</h2>
               {route.via !== 'other' && (
                 <span className="status-badge status-badge--off">
@@ -124,10 +124,10 @@ export default function About() {
             </div>
             <h3>Your secure address</h3>
             <p className="tailscale-address">{route.tailscaleSaved ? (route.address || 'Saved') : 'Not saved'}</p>
-            {(route.tailscaleSaved || TAILSCALE_WHY[route.why]) && (
-              <p className="tailscale-hint">
-                {route.tailscaleSaved ? 'Saved for use away from home.' : TAILSCALE_WHY[route.why]}
-              </p>
+            {/* Owner 2026-11-07: a saved address needs no line ("Saved for use away from home." told nobody anything the
+                address itself did not); the line is only for the reason none is saved. */}
+            {!route.tailscaleSaved && TAILSCALE_WHY[route.why] && (
+              <p className="tailscale-hint">{TAILSCALE_WHY[route.why]}</p>
             )}
           </section>
         )}
@@ -140,36 +140,38 @@ export default function About() {
           <Link className="list-row about-link" to="/setup">Setup status and picture check</Link>
         </div>}
 
-        <div className="card">
-          <div className="card-title">Links</div>
+        {/* Owner 2026-11-07: Links, Support and the safety notice take the Connection card's look (a 16px bold title, 14px
+            text) so the cards on this page read as one set; before, they kept the small grey title and 16px rows. */}
+        <section className="card about-card" aria-label="Links">
+          <div className="about-card__heading"><h2 className="card-title">Links</h2></div>
           {LINKS.map(({ label, url }) => (
             <a key={url} className="list-row about-link" href={url} target="_blank" rel="noreferrer">
               <span>{label}</span>
               <ExternalLink size={15} aria-hidden="true" />
             </a>
           ))}
-        </div>
+        </section>
 
-        <div className="card">
-          <div className="card-title">Support the project</div>
-          <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
+        <section className="card about-card" aria-label="Support the project">
+          <div className="about-card__heading"><h2 className="card-title">Support the project</h2></div>
+          <p className="about-card__text">
             Nightlight is free and open source. If it helps you keep watch over your
             little ones, consider supporting its development.
-          </div>
+          </p>
           <a className="btn btn-primary" href={DONATE_URL} target="_blank" rel="noreferrer">
             <Heart size={16} aria-hidden="true" />
             Donate via PayPal
           </a>
-        </div>
+        </section>
 
-        <div className="card">
-          <div className="camera-tile__sub">
-            <strong>Not a safety device.</strong> Nightlight is a convenience tool — not a
-            medical device, and not certified for safety monitoring of any kind. Streams
-            can drop, apps can be stopped by the operating system, networks fail. Never
-            use it as a substitute for adult supervision.
-          </div>
-        </div>
+        <section className="card about-card" aria-label="Not a safety device">
+          <div className="about-card__heading"><h2 className="card-title">Not a safety device</h2></div>
+          <p className="about-card__text">
+            Nightlight is a convenience tool — not a medical device, and not certified for
+            safety monitoring of any kind. Streams can drop, apps can be stopped by the
+            operating system, networks fail. Never use it as a substitute for adult supervision.
+          </p>
+        </section>
       </main>
     </>
   );
