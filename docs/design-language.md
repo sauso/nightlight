@@ -327,8 +327,9 @@ for the page title. This width is estimated from phone screenshots, not measured
 ### A read-only detail card (title, badge, sub-heading, value)
 For a card that only reports something (Settings → About → Connection, and the Remote Access card it mirrors), use the Remote
 Access card's look: a 16px/800 title with a `.status-badge` on the right, a 14px/700 sub-heading, the value in
-`.tailscale-address` (15px/600, wraps anywhere), and a muted `.tailscale-hint` line under it. In CSS the About card is
-`.about-connection`, grouped with `.tailscale-card` so the two change together. Two layouts were tried and dropped (owner,
+`.tailscale-address` (15px/600, wraps anywhere), and, only when there is something to explain, a muted `.tailscale-hint` line under it. In CSS the About cards are
+`.about-card`, grouped with `.tailscale-card` so the two change together. Every card on the About page (Connection, Links,
+Support the project, Not a safety device) uses it: a 16px/800 title, 14px text, so the page reads as one set. Two layouts were tried and dropped (owner,
 2026-11-07): a 16px label and a small value on one `.list-row` (on a phone the label wrapped and a long address broke mid-word),
 and a 12px label over each value (it looked unlike every other card). Spacing and look are checked on a phone, not by a test.
 

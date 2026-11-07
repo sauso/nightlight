@@ -62,7 +62,8 @@ describe('the Android app Connection card', () => {
     const card = await connectionCard();
     expect(badgeOf(card)).toBe('Using Tailscale');
     expect(addressOf(card)).toBe('nightlight.example.ts.net');
-    expect(noteOf(card)).toBe('Saved for use away from home.');
+    // Owner 2026-11-07: a saved address needs no line under it.
+    expect(noteOf(card)).toBeNull();
   });
 
   test('a saved address the shell gave no readable host for says "Saved" rather than nothing', async () => {
@@ -98,7 +99,7 @@ describe('the Android app Connection card', () => {
     vi.restoreAllMocks();
     route({ via: 'saved', tailscaleSaved: true, address: 'a.ts.net', why: 'unreachable' });
     renderAsAdmin(<About />);
-    expect(noteOf(await connectionCard())).toBe('Saved for use away from home.');
+    expect(noteOf(await connectionCard())).toBeNull();
   });
 
   test('★ on the saved address with no Tailscale address saved', async () => {
