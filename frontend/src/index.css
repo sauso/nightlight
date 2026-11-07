@@ -612,6 +612,9 @@ body.in-pip .tile-menu-backdrop {
 .tailscale-card, .about-card { font-size: 14px; }
 .tailscale-card__heading .card-title, .about-card__heading .card-title { font-size: 16px; font-weight: 800; color: var(--text-primary); }
 .tailscale-card h3, .about-card h3 { font-size: 14px; font-weight: 700; margin: 18px 0 6px; }
+/* Owner 2026-11-07: the sub-heading on About is Inter, like the address and text under it (headings h1-h3 are Nunito by default,
+   design-language.md section 3). Only the card TITLES stay Nunito. The Remote Access card keeps the default for now. */
+.about-card h3 { font-family: var(--font-body); }
 .tailscale-address { overflow-wrap: anywhere; font-weight: 600; font-size: 15px; }
 .tailscale-hint { color: var(--text-secondary); font-size: 0.875rem; }
 .tailscale-qr { width: min(180px, 100%); margin: 16px auto; text-align: center; }

@@ -118,7 +118,7 @@ export default function About() {
               <h2 className="card-title">Connection</h2>
               {route.via !== 'other' && (
                 <span className="status-badge status-badge--off">
-                  {route.via === 'tailscale' ? 'Using Tailscale' : 'Using saved address'}
+                  {route.via === 'tailscale' ? 'Using Tailscale' : 'Using local address'}
                 </span>
               )}
             </div>
