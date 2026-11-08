@@ -368,7 +368,8 @@ export async function requestServerSwitch(raw) {
 //   { url: null }               -> removeEndpoint: the server no longer offers one (Tailscale turned off there);
 //   anything else (409 "not known right now", an older server's 404, no network, an odd body) -> nothing changes. The server
 //   sends null ONLY for "definitely not available", so a daemon restart can never erase a saved address.
-// Does nothing in a browser, on an iOS shell or an older Android shell (no addEndpoint), or when signed out. Never throws.
+// Does nothing in a browser, in an app built before the feature (no addEndpoint; both the Android and the iOS shell have it since
+// 2026-11), or when signed out. Never throws.
 // Returns what happened, for tests: 'added' | 'unchanged' | 'removed' | 'none' | null.
 // The Tailscale address THIS page's own server offered on the last successful ask, or null (none offered, or the ask failed). A
 // saved sign-in carries it (saveNativeSession), so the app binds the token to that address only when it is the one the server
@@ -463,7 +464,8 @@ async function askForTailscaleAddress() {
 //   address          - its host (e.g. `x.ts.net`, no scheme), or null when none is saved. Shown on About (owner, 2026-11-07).
 //   why              - when none is saved: the outcome of this page load's ask (see tailscaleOutcome), else null. Never set while
 //                      an address is saved: a failed re-ask does not unsave it.
-// null when this is not the Android shell with the Tailscale feature (a browser, iOS, an older app): nothing is shown then.
+// null when this is not a shell with the Tailscale feature (a browser, an app built before it): nothing is shown then. The Android
+// and iOS shells both have it; the feature is detected by the shell's methods, never by platform.
 // Comparisons use the canonical origin, like every other address check here. Never throws.
 export async function getConnectionRoute() {
   const p = window.Capacitor?.Plugins?.ServerConfig;
