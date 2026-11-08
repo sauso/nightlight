@@ -106,7 +106,7 @@ describe('the Android app Connection card', () => {
     route({ via: 'saved', tailscaleSaved: false, address: null, why: null });
     renderAsAdmin(<About />);
     const card = await connectionCard();
-    expect(badgeOf(card)).toBe('Using saved address');
+    expect(badgeOf(card)).toBe('Using local address');
     expect(addressOf(card)).toBe('Not saved');
   });
 
@@ -124,7 +124,7 @@ describe('the Android app Connection card', () => {
     const card = await connectionCard();
     const header = screen.getByText(/Self-hosted baby monitor/).closest('.card');
     expect(header).not.toBe(card);
-    expect(within(header).queryByText(/Using saved address|Your secure address/)).not.toBeInTheDocument();
+    expect(within(header).queryByText(/Using local address|Your secure address/)).not.toBeInTheDocument();
   });
 
   test('★ nothing in a browser or an app without the feature, and a caregiver sees the same card as an admin', async () => {
@@ -136,7 +136,7 @@ describe('the Android app Connection card', () => {
     vi.restoreAllMocks();
     route({ via: 'saved', tailscaleSaved: true });
     renderAsCaregiver(<About />);
-    expect(badgeOf(await connectionCard())).toBe('Using saved address');
+    expect(badgeOf(await connectionCard())).toBe('Using local address');
   });
 });
 

@@ -329,7 +329,9 @@ For a card that only reports something (Settings → About → Connection, and t
 Access card's look: a 16px/800 title with a `.status-badge` on the right, a 14px/700 sub-heading, the value in
 `.tailscale-address` (15px/600, wraps anywhere), and, only when there is something to explain, a muted `.tailscale-hint` line under it. In CSS the About cards are
 `.about-card`, grouped with `.tailscale-card` so the two change together. Every card on the About page (Connection, Links,
-Support the project, Not a safety device) uses it: a 16px/800 title, 14px text, so the page reads as one set. Two layouts were tried and dropped (owner,
+Support the project, Not a safety device) uses it: a 16px/800 title, 14px text, so the page reads as one set. The
+sub-heading on About is set in Inter (owner, 2026-11-07), an exception to "`h1`–`h3` are Nunito" in section 3; only the card
+titles stay Nunito there. The Remote Access card's sub-heading is still Nunito. Two layouts were tried and dropped (owner,
 2026-11-07): a 16px label and a small value on one `.list-row` (on a phone the label wrapped and a long address broke mid-word),
 and a 12px label over each value (it looked unlike every other card). Spacing and look are checked on a phone, not by a test.
 
