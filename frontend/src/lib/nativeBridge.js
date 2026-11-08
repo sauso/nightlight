@@ -494,8 +494,10 @@ export async function getConnectionRoute() {
 // The saved address and the Tailscale address are different web origins, each with its own localStorage, so a person had to sign
 // in on each. The Android app can also keep the session token, encrypted, in its own storage (ServerConfig.saveSession /
 // getSession / clearSession; ServerConfigPlugin.kt, SessionRules.kt) and hand it ONLY to the page that is the saved Tailscale
-// address, after checking it is the same server. These three wrap those calls. Every one does nothing in a browser, on iOS or in
-// an app without the methods, and NEVER throws: a failure here must never get in the way of signing in or out.
+// address, after checking it is the same server. The iOS app does the same in the Keychain (ServerConfigPlugin.swift,
+// SessionRules.swift; added in the 2026-11 iPhone release): the feature is switched on by the shell having all three methods,
+// never by platform. These three wrap those calls. Every one does nothing in a browser or in an app without the methods (an
+// older app), and NEVER throws: a failure here must never get in the way of signing in or out.
 // WHY 6 s: the app first reads the page, then asks the page's own server for its id (up to 3 s to connect and 3 s to answer, over a
 // relayed Tailscale link on cellular), then decrypts. 2 s gave up on exactly the slow link this feature is for, and showed the
 // sign-in form (Opus review; the timing is reasoned, not measured on a phone). `loading` holds the screen for at most this long.
