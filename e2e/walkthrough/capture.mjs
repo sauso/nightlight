@@ -69,6 +69,8 @@ const videosPlaying = (page) =>
 {
   const { context, page, go, shot } = await open(EMPTY, PHONE);
   await go('/');
+  // The welcome screen with the steps comes first; the account form (the screenshot) is the screen after it.
+  await page.getByRole('button', { name: 'Get started' }).click();
   await page.getByRole('button', { name: 'Create admin account' }).waitFor();
   await page.getByLabel('First name').fill('Sam');
   await page.getByLabel('Last name').fill('Rivera');
@@ -128,6 +130,10 @@ for (const [suffix, form] of [['mobile', PHONE], ['desktop', DESKTOP]]) {
   // The add-camera form, filled with example values and not saved.
   await go('/cameras');
   await page.getByRole('button', { name: '+ Add camera' }).click();
+  // Since #945 the Add camera screen starts with a search for cameras on the network and keeps the full form behind the
+  // "Add a camera manually" card. A fresh seeded container finds no camera, so open the manual card, which is what a
+  // person with a camera the search cannot see does.
+  await page.getByRole('button', { name: /Add a camera manually/ }).click();
   await page.getByLabel('Name', { exact: true }).fill('Nursery cam');
   await page.getByLabel('Camera IP address').fill('192.168.1.50');
   await page.getByLabel('RTSP port').fill('554');

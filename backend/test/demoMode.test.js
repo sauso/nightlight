@@ -31,10 +31,18 @@ before(async () => {
   router.post('/api/auth/logout', record('logout'));
   router.post('/api/auth/media-token', record('media-token'));
   router.post('/api/auth/setup', record('setup')); // real route, same prefix, NOT allowlisted
+  router.get('/api/setup', record('get-setup'));
+  router.patch('/api/setup/progress', record('setup-progress'));
+  router.post('/api/setup/monitor-tests', record('setup-test'));
+  router.post('/api/setup/monitor-tests/:id/confirm', record('setup-confirm'));
+  router.post('/api/setup/complete', record('setup-complete'));
   router.put('/api/auth/me/password', record('change-password'));
   router.delete('/api/cameras/cam-1', record('delete-cam'));
   router.put('/api/settings', record('put-settings'));
   router.get('/api/diagnostics', record('diagnostics'));
+  router.get('/api/remote-access', record('remote-access'));
+  router.get('/api/remote-access/tailscale', record('tailscale-get'));
+  router.put('/api/remote-access/tailscale', record('tailscale-put'));
   router.get('/api/logs', record('logs'));
   router.delete('/api/logs', record('delete-logs'));
   router.get('/api/auth/sessions', record('sessions'));
@@ -48,6 +56,11 @@ before(async () => {
     res.json({ ok: true });
   });
   router.get('/api/cameras', record('list-cameras'));
+  router.get('/api/cameras/discover/:scanId', record('discovery-get'));
+  router.post('/api/cameras/discover', record('discovery-post'));
+  router.get('/api/cameras/clips/protected', record('protected-clips'));
+  router.put('/api/cameras/alerts/:id/protected', record('protect-alert'));
+  router.put('/api/recordings/:id/protected', record('protect-wake'));
   router.get('/api/health', record('health'));
 
   // Mounted at '/' with demoGuard as global middleware, matching index.js's real registration
@@ -58,6 +71,14 @@ before(async () => {
 
 after(async () => {
   await server?.close();
+});
+
+test('#967 demo blocks tunnel status and enable', async () => {
+  process.env.DEMO_MODE = 'true';
+  assert.equal((await call(`${server.url}/api/remote-access/tailscale`)).status, 403);
+  assert.equal((await call(`${server.url}/api/remote-access/tailscale`, { method: 'PUT', body: { enabled: true } })).status, 403);
+  assert.equal(hits['tailscale-get'], undefined);
+  assert.equal(hits['tailscale-put'], undefined);
 });
 
 beforeEach(() => {
@@ -215,6 +236,25 @@ describe('demoGuard — DEMO_MODE=true, blocked GETs (server internals / cross-v
     assert.equal(hits.diagnostics, undefined);
   });
 
+  test('camera discovery GET and POST are blocked before LAN addresses are exposed', async () => {
+    assert.equal((await call(`${server.url}/api/cameras/discover/scan-1`)).status, 403);
+    assert.equal((await call(`${server.url}/api/cameras/discover`, { method: 'POST' })).status, 403);
+    assert.equal(hits['discovery-get'], undefined);
+    assert.equal(hits['discovery-post'], undefined);
+  });
+
+  test('GET /api/remote-access is blocked, handler never invoked', async () => {
+    const res = await call(`${server.url}/api/remote-access`);
+    assert.equal(res.status, 403);
+    assert.equal(hits['remote-access'], undefined);
+  });
+
+  test('HEAD /api/remote-access is blocked before the GET handler', async () => {
+    const res = await call(`${server.url}/api/remote-access`, { method: 'HEAD' });
+    assert.equal(res.status, 403);
+    assert.equal(hits['remote-access'], undefined);
+  });
+
   test('GET /api/logs is blocked, handler never invoked', async () => {
     const res = await call(`${server.url}/api/logs`);
     assert.equal(res.status, 403);
@@ -258,6 +298,17 @@ describe('demoGuard — DEMO_MODE=true, blocked GETs (server internals / cross-v
 describe('demoGuard — DEMO_MODE=true, ordinary reads pass through', () => {
   beforeEach(() => { process.env.DEMO_MODE = 'true'; });
 
+  test('setup can be read, but every setup write is blocked before its handler', async () => {
+    // WHY #941: a demo visitor is an admin, so the global write guard is essential.
+    assert.equal((await call(`${server.url}/api/setup`)).status, 200);
+    assert.equal(hits['get-setup'], 1);
+    for (const [path, method] of [
+      ['/api/setup/progress', 'PATCH'], ['/api/setup/monitor-tests', 'POST'],
+      ['/api/setup/monitor-tests/anything/confirm', 'POST'], ['/api/setup/complete', 'POST'],
+    ]) assert.equal((await call(`${server.url}${path}`, { method })).status, 403);
+    for (const key of ['setup-progress', 'setup-test', 'setup-confirm', 'setup-complete']) assert.equal(hits[key], undefined);
+  });
+
   test('an unrelated GET passes through', async () => {
     const res = await call(`${server.url}/api/cameras`);
     assert.equal(res.status, 200);
@@ -268,6 +319,15 @@ describe('demoGuard — DEMO_MODE=true, ordinary reads pass through', () => {
     const res = await call(`${server.url}/api/health`);
     assert.equal(res.status, 200);
     assert.equal(hits.health, 1);
+  });
+
+  test('protected clip list is a read, while both protect writes are blocked', async () => {
+    assert.equal((await call(`${server.url}/api/cameras/clips/protected`)).status, 200);
+    assert.equal(hits['protected-clips'], 1);
+    assert.equal((await call(`${server.url}/api/cameras/alerts/1/protected`, { method: 'PUT' })).status, 403);
+    assert.equal((await call(`${server.url}/api/recordings/1/protected`, { method: 'PUT' })).status, 403);
+    assert.equal(hits['protect-alert'], undefined);
+    assert.equal(hits['protect-wake'], undefined);
   });
 });
 

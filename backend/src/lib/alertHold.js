@@ -1,6 +1,6 @@
 import db from '../db.js';
 import { logger } from './logger.js';
-import { childWindowKeyNow } from './sleepAnalysis.js';
+import { childTracksSleep, childWindowKeyNow } from './sleepAnalysis.js';
 import { isChildAsleep } from './wakeWatcher.js';
 
 // #919: owner/design choice, not measured. The watcher's existing onset needs 15 quiet minutes.
@@ -15,9 +15,14 @@ export function shouldHold(camera, nowMs = Date.now()) {
       FROM cameras c LEFT JOIN children k ON k.id = c.child_id WHERE c.id = ?`).get(camera.id);
     if (!row?.child_id || row.hold_alerts_until_asleep !== 1) return false;
     const childId = row.child_id;
+    // #919: the setting needs Track sleep; without it the watcher cannot detect asleep, so allow alerts.
+    if (!childTracksSleep(childId)) return false;
     const asleep = isChildAsleep(childId);
-    // #919: belt and braces, fail open: an unarmed watcher also has no window key below.
-    if (asleep !== false) return false;
+    if (asleep === true) return false;
+    // Owner decision, 2026-11-10: alerts reached a phone before the window opened on staging.
+    // Outside the gate the watcher cannot report asleep, so hold without a clock, cap, or per-alert log.
+    if (asleep === undefined) return true;
+    // The 45-minute cap is a design choice, not measured, and applies only inside the gate.
     const key = childWindowKeyNow(childId);
     if (key === null) return false;
     let entry = firstHeld.get(childId);

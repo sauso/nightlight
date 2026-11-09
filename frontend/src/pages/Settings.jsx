@@ -1,21 +1,22 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  SlidersHorizontal, Plug, ScrollText, Users, Camera,
-  Info, Server, ChevronRight, Clapperboard,
+  SlidersHorizontal, Plug, Globe, ScrollText, Users, Video,
+  Info, Server, ChevronRight, ListChecks,
 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { isNativeApp, changeServer } from '../lib/nativeBridge.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
+import useSetupStatus from '../lib/useSetupStatus.js';
 
 // Settings is a hub. Account sits at the top in its own card (like the mockup); system config
-// (General / Camera controls / Integrations / Logs) is admin-only; About + Change server share the
+// (General / Camera and Recording / Caregivers / Integrations / Remote Access / Logs) is admin-only; About + Change server share the
 // last card. Sign out lives on the Account page, not here. Rows that stay under Settings pass
 // state.from so their back button returns here.
 const BACK = { state: { from: { to: '/settings', label: 'Settings' } } };
-const PERI = 'var(--peri)';
+const PERI = 'var(--accent-line)';
 
 function displayName(u) {
   const name = [u?.first_name, u?.last_name].filter(Boolean).join(' ').trim();
@@ -52,12 +53,12 @@ function Row({ Icon, iconSize = 20, label, desc, trailing, onClick }) {
 }
 
 const ADMIN_ITEMS = [
+  { key: 'setup', to: '/setup', Icon: ListChecks, label: 'Setup & diagnostics', desc: 'Finish setup or check the camera picture' },
   { key: 'general', to: '/settings/general', Icon: SlidersHorizontal, label: 'General', desc: 'App name, timezone, theme, font, colours, temperature unit' },
-  { key: 'camera', to: '/settings/camera', Icon: Camera, label: 'Camera controls', desc: 'PTZ step size and offline-camera alerts' },
-  { key: 'recording', to: '/settings/recording', Icon: Clapperboard, label: 'Recording', desc: 'Automatic clips, on-demand recording, retention and storage' },
+  { key: 'camera-recording', to: '/settings/camera-recording', Icon: Video, label: 'Camera and Recording', desc: 'Camera Controls, Recording Settings and Clip Management' },
   { key: 'caregivers', to: '/settings/users', Icon: Users, label: 'Caregivers', desc: 'Manage caregiver logins and active sessions' },
   { key: 'integrations', to: '/settings/integrations', Icon: Plug, label: 'Integrations', desc: 'Notifications and MQTT' },
-  { key: 'clips', to: '/settings/clips', Icon: Clapperboard, label: 'Clip management', desc: 'Browse recorded clips by date; bulk-delete' },
+  { key: 'remote-access', to: '/settings/remote-access', Icon: Globe, label: 'Remote Access', desc: 'Check how you reach Nightlight from outside your home' },
   { key: 'logs', to: '/settings/logs', Icon: ScrollText, label: 'Logs', desc: 'Camera history and server logs' },
 ];
 
@@ -65,6 +66,7 @@ export default function Settings() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const setupStatus = useSetupStatus(isAdmin);
   const [version, setVersion] = useState(null);
 
   useEffect(() => {
@@ -98,7 +100,7 @@ export default function Settings() {
 
         {isAdmin && (
           <div className="card">
-            {ADMIN_ITEMS.map((it) => (
+            {ADMIN_ITEMS.filter((it) => it.key !== 'setup' || ['not_started', 'in_progress', 'completed_limited'].includes(setupStatus)).map((it) => (
               <Row
                 key={it.key}
                 {...it}

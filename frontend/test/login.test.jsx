@@ -46,7 +46,45 @@ function mockStatus(needsSetup) {
   vi.spyOn(api, 'get').mockResolvedValue({ needsSetup });
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); delete window.Capacitor; });
+
+// Owner testing 2026-11-05 (Android): a server whose username you do not know left you stuck here, because "Change server"
+// only lived in Settings. The sign-in screen offers it in the native app (and only there: a browser has no saved server).
+describe('★ Change server on the sign-in screen', () => {
+  const native = () => {
+    const ServerConfig = { clear: vi.fn().mockResolvedValue(), restart: vi.fn().mockResolvedValue() };
+    window.Capacitor = { isNativePlatform: () => true, Plugins: { ServerConfig } };
+    return ServerConfig;
+  };
+
+  test('in the native app the button is there on sign-in and on first-run setup, and forgets the server', async () => {
+    const ServerConfig = native();
+    mockStatus(false);
+    const first = mount();
+    await first.user.click(await screen.findByRole('button', { name: 'Change server' }));
+    await waitFor(() => expect(ServerConfig.restart).toHaveBeenCalled());
+    expect(ServerConfig.clear).toHaveBeenCalled();
+    first.unmount();
+    mockStatus(true);
+    mount();
+    expect(await screen.findByRole('button', { name: 'Change server' })).toBeTruthy();
+  });
+
+  test('in a browser there is no Change server button', async () => {
+    mockStatus(false);
+    mount();
+    await screen.findByRole('button', { name: 'Sign in' });
+    expect(screen.queryByRole('button', { name: 'Change server' })).toBeNull();
+  });
+
+  test('the "Can\'t reach" screen offers it too, in the native app', async () => {
+    native();
+    vi.spyOn(api, 'get').mockRejectedValue(new Error('offline'));
+    mount();
+    await screen.findByText(/Can't reach Nightlight/);
+    expect(screen.getByRole('button', { name: 'Change server' })).toBeTruthy();
+  });
+});
 
 describe('which of the three screens is shown', () => {
   test('★ nothing at all until the server says whether setup is needed', async () => {
@@ -59,7 +97,8 @@ describe('which of the three screens is shown', () => {
     expect(screen.queryByRole('button', { name: /Sign in|Create admin/ })).toBeNull();
 
     resolveStatus({ needsSetup: true });
-    expect(await screen.findByRole('button', { name: 'Create admin account' })).toBeTruthy();
+    // A fresh install opens on the welcome screen (FirstRun.jsx); the account form comes after "Get started".
+    expect(await screen.findByRole('button', { name: 'Get started' })).toBeTruthy();
   });
 
   test('an established install gets the sign-in form', async () => {
@@ -69,12 +108,16 @@ describe('which of the three screens is shown', () => {
     expect(screen.queryByLabelText('First name'), 'no name fields once an admin exists').toBeNull();
   });
 
-  test('a fresh install gets the setup form, with the names it needs', async () => {
+  test('★ a fresh install opens on the welcome screen with the steps, and only then asks for the account (names included)', async () => {
     mockStatus(true);
-    mount();
+    const { user } = mount();
+    expect(await screen.findByRole('heading', { name: 'Welcome to Nightlight' })).toBeTruthy();
+    expect(screen.getByText('Add your child')).toBeTruthy();
+    expect(screen.queryByLabelText('Username'), 'no account form yet').toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Get started' }));
     expect(await screen.findByLabelText('First name')).toBeTruthy();
     expect(screen.getByLabelText('Last name')).toBeTruthy();
-    expect(screen.getByText(/Set up the first admin account/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Create your account' })).toBeTruthy();
   });
 
   test('★ #382: a failed status check says the server cannot be reached; it does NOT show sign-in', async () => {
@@ -92,7 +135,7 @@ describe('which of the three screens is shown', () => {
     const get = vi.spyOn(api, 'get').mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ needsSetup: true });
     const { user } = mount();
     await user.click(await screen.findByRole('button', { name: 'Try again' }));
-    expect(await screen.findByLabelText('First name'), 'the setup form, not a guessed sign-in').toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Welcome to Nightlight' }), 'the first-run welcome screen, not a guessed sign-in').toBeTruthy();
     expect(get).toHaveBeenCalledTimes(2);
     expect(screen.queryByText(/Can't reach/)).toBeNull();
   });
@@ -292,6 +335,16 @@ describe('signing in', () => {
     expect((await screen.findByLabelText('Username')).getAttribute('autocomplete')).toBe('username');
     expect(screen.getByLabelText('Password').getAttribute('autocomplete')).toBe('current-password');
   });
+
+  test('★ the username is not auto-capitalised, auto-corrected or spell-checked (iOS turned "sam" into "Sam")', async () => {
+    // A phone keyboard reads these attributes; jsdom cannot show the keyboard, so the attributes are the
+    // observable behaviour. Dropping `autoCapitalize` brings the capital back on iOS with nothing else red.
+    mount();
+    const username = await screen.findByLabelText('Username');
+    expect(username.getAttribute('autocapitalize')).toBe('none');
+    expect(username.getAttribute('autocorrect')).toBe('off');
+    expect(username.getAttribute('spellcheck')).toBe('false');
+  });
 });
 
 describe('first-run setup', () => {
@@ -302,6 +355,7 @@ describe('first-run setup', () => {
 
   test('posts the names alongside the credentials, to /auth/setup', async () => {
     const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Get started' }));
     await user.type(await screen.findByLabelText('First name'), 'Nacho');
     await user.type(screen.getByLabelText('Last name'), 'Leone');
     await user.type(screen.getByLabelText('Username'), 'nacho');
@@ -311,12 +365,16 @@ describe('first-run setup', () => {
     await waitFor(() => expect(postSpy).toHaveBeenCalledWith('/auth/setup', {
       username: 'nacho', password: 'longenough1', first_name: 'Nacho', last_name: 'Leone',
     }));
+    // Creating the first admin is Step 1 of the guide, so it goes straight on to /setup (Step 2) rather than to / and the gate's
+    // redirect. (A normal sign-in still lands at /; see the tests above.)
+    expect(await screen.findByText('at /setup')).toBeInTheDocument();
   });
 
   test('★ the first password has a minimum length; signing in does not', async () => {
     // The floor belongs on the screen that CREATES a password. Putting it on the sign-in form would
     // lock out anyone whose existing password predates the rule, which is not a security improvement.
-    mount();
+    const { user } = mount();
+    await user.click(await screen.findByRole('button', { name: 'Get started' }));
     expect((await screen.findByLabelText('Password')).getAttribute('minlength')).toBe('8');
     expect(screen.getByLabelText('Password').getAttribute('autocomplete')).toBe('new-password');
   });

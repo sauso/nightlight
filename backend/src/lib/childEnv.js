@@ -58,15 +58,16 @@ export function childEnv({ mediamtx = false, extra = {}, parent = process.env } 
   return { ...env, ...extra };
 }
 
-// MEDIA ISOLATION (#553). When it is on, every child runs as the media user (uid:gid 1700:1700, no capabilities,
-// no-new-privs) through media-exec.sh, which is exactly one `umask 007; exec setpriv ... -- "$@"` (see its header).
+// MEDIA ISOLATION (#553). When it is on, media children run as the media user (uid:gid 1700:1700,
+// no capabilities, no-new-privs) through media-exec.sh. Opus plan review of #965 adds one
+// separate tunnel-daemon path below: it must keep the app uid for its private state.
 //
 // WHO DECIDES. backend/entrypoint.sh, as root, before the app exists: it dry-runs the whole chain (the app's own drop
 // to PUID with CAP_SETUID/SETGID/KILL as ambient capabilities, then this wrapper) and exports MEDIA_ISOLATION=on only
 // if all of it worked, otherwise MEDIA_ISOLATION=off and the usual su-exec start. It always exports one of the two,
 // so a value an operator put in the environment never reaches here. The app only reports what it was given: Node
 // cannot drop capabilities, so a fallback decided HERE ("run unwrapped") would hand SETUID/SETGID/KILL to every child.
-// That is why, when it is on, EVERY call below is wrapped and there is no unwrapped path at all.
+// That is why, when it is on, every call below uses a wrapper that drops those capabilities.
 // NIGHTLIGHT_MEDIA_ISOLATION (the switch, read only by the entrypoint) and MEDIA_ISOLATION are not in ALLOWED_NAMES,
 // so no child sees either.
 //
@@ -74,6 +75,7 @@ export function childEnv({ mediamtx = false, extra = {}, parent = process.env } 
 // image (this file is /app/src/lib/childEnv.js), backend/media-exec.sh in a checkout. The entrypoint finds it the same
 // way, next to itself, so the dry run tests the very file this spawns.
 export const MEDIA_EXEC_PATH = fileURLToPath(new URL('../../media-exec.sh', import.meta.url));
+export const APP_EXEC_PATH = fileURLToPath(new URL('../../app-exec.sh', import.meta.url));
 // The media user and group. Must equal the ids in media-exec.sh, the Dockerfile (nlmedia) and entrypoint.sh (MEDIA_ID).
 export const MEDIA_UID = 1700;
 export const MEDIA_GID = 1700;
@@ -95,4 +97,16 @@ export function spawnChild(command, args, options = {}, { mediamtx = false, extr
     return spawn(MEDIA_EXEC_PATH, [command, ...(args ?? [])], { ...rest, env: childEnv({ mediamtx, extra }) });
   }
   return spawn(command, args, { ...rest, env: childEnv({ mediamtx, extra }) });
+}
+
+// Opus plan review of #965: tailscaled needs the app uid for private state, but an isolated app
+// carries ambient capabilities and the media group. Keep this a separate named path so ordinary
+// media children cannot accidentally opt out of their uid 1700 boundary.
+export function spawnAsApp(command, args, options = {}, { extra = {} } = {}) {
+  const { env: _ignored, ...rest } = options;
+  const env = childEnv({ extra });
+  if (mediaIsolationOn()) {
+    return spawn(APP_EXEC_PATH, [String(process.getuid()), String(process.getgid()), command, ...(args ?? [])], { ...rest, env });
+  }
+  return spawn(command, args, { ...rest, env });
 }

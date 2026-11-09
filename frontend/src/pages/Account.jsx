@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Sun, Moon, Monitor } from 'lucide-react';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
-import { getTheme, setTheme } from '../lib/theme.js';
+import { getTheme, setTheme, subscribeTheme } from '../lib/theme.js';
 import Modal from '../components/Modal.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Switch from '../components/Switch.jsx';
-import Avatar from '../components/Avatar.jsx';
+import AvatarEditor from '../components/AvatarEditor.jsx';
 import TwoFactorSection from '../components/TwoFactorSection.jsx';
 import { fileToAvatarDataUrl } from '../lib/imageResize.js';
 import { useLater } from '../lib/useLater.js';
@@ -42,6 +42,7 @@ export default function Account() {
   const [error, setError] = useState('');
   const [photoStatus, setPhotoStatus] = useState(''); // '' | 'saving' | 'saved'
   const [theme, setThemeState] = useState(getTheme());
+  useEffect(() => subscribeTheme(() => setThemeState(getTheme())), []);
   const later = useLater(); // the name and password "saved" ticks: cancelled when the page goes away (#855)
   const photoTimerRef = useRef(null); // the "Photo saved" tick's 2 s timer (#855), cancelled on unmount
   const mountedRef = useRef(true); // false once the page is gone: a save still in flight must not start the timer then
@@ -197,19 +198,22 @@ export default function Account() {
         <div className="card">
           <form onSubmit={saveName}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
-              <Avatar name={[nameForm.first_name, nameForm.last_name].filter(Boolean).join(' ') || user?.username} src={user?.photo} size={56} />
+              <AvatarEditor name={[nameForm.first_name, nameForm.last_name].filter(Boolean).join(' ') || user?.username} src={user?.photo} size={64} onChange={onPhoto} />
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 600 }}>{user?.username}</div>
                 <div className="camera-tile__sub" style={{ textTransform: 'capitalize' }}>{user?.role}</div>
-                <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
-                  <label className="icon-btn" style={{ padding: 0, cursor: 'pointer' }}>
-                    {photoStatus === 'saving' ? 'Saving…' : photoStatus === 'saved' ? 'Saved ✓' : (user?.photo ? 'Change photo' : 'Add photo')}
-                    <input type="file" accept="image/*" onChange={onPhoto} style={{ display: 'none' }} />
-                  </label>
-                  {user?.photo && (
-                    <button type="button" className="icon-btn" style={{ padding: 0 }} onClick={() => savePhoto(null)}>Remove</button>
-                  )}
-                </div>
+                {(photoStatus || user?.photo) && (
+                  <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+                    {photoStatus && (
+                      <span className="camera-tile__sub" style={{ color: 'var(--accent-text)' }}>
+                        {photoStatus === 'saving' ? 'Saving…' : 'Saved ✓'}
+                      </span>
+                    )}
+                    {user?.photo && (
+                      <button type="button" className="icon-btn" style={{ padding: 0 }} onClick={() => savePhoto(null)}>Remove</button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             <div className="onvif-box__row">

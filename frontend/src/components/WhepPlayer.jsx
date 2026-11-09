@@ -3,6 +3,7 @@ import { getToken } from '../lib/api.js';
 import { resolveWhepResource } from '../lib/whep.js';
 import { getIceServersWithin } from '../lib/iceServers.js';
 import StreamUnavailableNotice from './StreamUnavailableNotice.jsx';
+import { useVideoFrameProgress } from '../lib/useVideoFrameProgress.js';
 import { useNowPlayingSession, NOW_PLAYING_ARTWORK } from '../lib/useNowPlaying.js';
 
 // Re-exported for backwards compatibility with any importer that reached for it here; the
@@ -53,6 +54,8 @@ export default function WhepPlayer({
   cameraName,
   isBackgroundAudio = false,
   statusUnknown = false,
+  frameTestId,
+  onFrames,
 }) {
   const videoRef = useRef(null);
   // Audio lives on its own <audio> element, separate from <video> - Chrome treats
@@ -68,6 +71,7 @@ export default function WhepPlayer({
   const [errorMsg, setErrorMsg] = useState('');
   const [needsGesture, setNeedsGesture] = useState(false);
   const [reconnectKey, setReconnectKey] = useState(0);
+  useVideoFrameProgress(videoRef, active && state === 'live', frameTestId, onFrames, `${mediamtxPath}:${reconnectKey}`);
 
   // Keep the <audio> element's muted flag in sync with the mute toggle, and retry
   // playback (e.g. after the user unmutes) since some browsers pause on unmute otherwise.

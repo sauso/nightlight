@@ -1,3 +1,6 @@
+# #971: the Tailscale version and both verified tarball digests are committed in
+# Stage 4, not fetched as metadata during a build. Bump them only in a reviewed
+# PR; the weekly rebuild must retain the reviewed pin.
 # Runtime Node tracks the 24 major again. It was previously pinned to 24.18.1 to dodge a hard
 # abort: 24.19.0 added per-object environment cleanup hooks to node::ObjectWrap
 # (nodejs/node#63642), and better-sqlite3 <= 11 subclassed ObjectWrap, so its wrapped objects
@@ -42,7 +45,29 @@ RUN apk add --no-cache python3 make g++
 COPY backend/package.json backend/package-lock.json ./
 RUN npm ci --omit=dev
 
-# --- Stage 4: combined runtime (app + MediaMTX + FFmpeg) ---
+# --- Stage 4: reviewed Tailscale static binaries ---
+# #971: version and both vendor SHA-256 values were captured on 2026-11-04 and
+# verified by recomputing the tarballs. No vendor signature exists for static
+# tarballs. Both embed public tag object 78838476 (v1.104.5), whose commit is
+# 73a48057aaf5f60e4f770b398e9b7af576b01dbe. A version bump requires a
+# reviewed PR updating these pins; the weekly rebuild never moves them.
+# BUILDPLATFORM runs wget/tar natively for either target arch, so no QEMU is needed.
+FROM --platform=$BUILDPLATFORM node:24-alpine AS tailscale-binaries
+ARG TARGETARCH
+RUN case "$TARGETARCH" in amd64|arm64) ;; *) echo TAILSCALE_UNSUPPORTED_ARCH >&2; exit 1 ;; esac
+RUN apk add --no-cache wget
+ENV TAILSCALE_VERSION=1.104.5 \
+    TAILSCALE_SHA256_AMD64=720cbbccbfc03d8b55df72afc19e5a72e31b0f65934700aa6fa38074d4ad7bf7 \
+    TAILSCALE_SHA256_ARM64=e900b0e6e25023a1e504b2c237ce2a32ea0535e006f8c1a1097a490886493b6c
+COPY scripts/fetch-tailscale.sh /tmp/fetch-tailscale.sh
+RUN case "$TARGETARCH" in \
+      amd64) sha="$TAILSCALE_SHA256_AMD64" ;; \
+      arm64) sha="$TAILSCALE_SHA256_ARM64" ;; \
+      *) echo TAILSCALE_UNSUPPORTED_ARCH >&2; exit 1 ;; \
+    esac && \
+    sh /tmp/fetch-tailscale.sh "$TARGETARCH" "$TAILSCALE_VERSION" "$sha" /tailscale-bin
+
+# --- Stage 5: combined runtime (app + MediaMTX + FFmpeg) ---
 FROM node:24-alpine
 WORKDIR /app
 
@@ -87,6 +112,12 @@ RUN addgroup -g 1700 nlmedia \
 
 COPY --from=mediamtx-binary /mediamtx /usr/local/bin/mediamtx
 RUN chmod +x /usr/local/bin/mediamtx
+COPY --from=tailscale-binaries --chown=0:0 --chmod=0755 /tailscale-bin/tailscale /tailscale-bin/tailscaled /usr/local/bin/
+COPY --chown=0:0 licenses/tailscale/ /usr/share/licenses/tailscale/
+# Notices are data: readable by everyone, executable by nobody (COPY --chmod would also strip the directory's x bit).
+RUN chmod 0644 /usr/share/licenses/tailscale/* && tailscaled --version && tailscale version --daemon=false && \
+    test "$(stat -c '%u:%g:%a' /usr/local/bin/tailscale)" = 0:0:755 && \
+    test "$(stat -c '%u:%g:%a' /usr/local/bin/tailscaled)" = 0:0:755
 
 # Just the finished dependency tree from the build stage - no npm ci, no toolchain, no
 # node-gyp/npm caches. package.json comes along so anything that reads the app version at
@@ -116,8 +147,8 @@ RUN chmod +x ./entrypoint.sh
 # and 0755: the media user can run them and cannot change them. (The app user owns /app itself, its home, so it could
 # replace them; an app that holds CAP_SETUID gains nothing by that. Root-owned code the app cannot replace is a later
 # phase of #553.)
-COPY backend/media-exec.sh backend/media-probe.sh ./
-RUN chmod 755 ./media-exec.sh ./media-probe.sh
+COPY backend/media-exec.sh backend/app-exec.sh backend/media-probe.sh ./
+RUN chmod 755 ./media-exec.sh ./app-exec.sh ./media-probe.sh
 
 ENV DATA_DIR=/app/data
 # Express behaves differently outside production mode - most importantly, its default

@@ -151,6 +151,10 @@ function populate(kind, id, { cameraTablesToo = true } = {}) {
   const refs = referencing(kind);
   for (const { table, col, cols } of refs) {
     const given = { [col]: id };
+    // #932: removal is a privacy delete, so the schema-wide purge fixture includes protected
+    // alert and wake clips on both the removed entity and its untouched control.
+    if (table === 'detection_events') given.protected = 1;
+    if (table === 'recordings') Object.assign(given, { protected: 1, kind: 'wake', status: 'ready' });
     for (const c of cols) {
       // mediamtx_path is a stream name, not a file: only these three columns hold paths under CLIPS_DIR.
       if (!/^(path|thumb_path|clip_path)$/.test(c.name)) continue;

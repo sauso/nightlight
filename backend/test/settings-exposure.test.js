@@ -84,6 +84,15 @@ after(async () => {
 });
 
 describe('GET /settings unauthenticated', () => {
+  test('does not expose setup state to the login screen', async () => {
+    // WHY #941: a new persistent state table must not widen the public settings response.
+    db.prepare("UPDATE setup_state SET active_step = 'private-marker' WHERE id = 'app'").run();
+    const r = await get();
+    assert.equal(r.status, 200);
+    assert.ok(!JSON.stringify(r.body).includes('private-marker'));
+    assert.ok(!('status' in r.body));
+    assert.ok(!('activeStep' in r.body));
+  });
   test('returns nothing beyond the public presentation fields', async () => {
     const r = await get();
     assert.equal(r.status, 200);
@@ -205,6 +214,32 @@ describe('PUT /settings answers with the same allow-list', () => {
       !JSON.stringify(r.body).includes('LEAK-'),
       `a planted secret came back from a save: ${JSON.stringify(r.body)}`
     );
+  });
+});
+
+describe('GET /settings never carries the server id (#937)', () => {
+  // settings.server_id is served by /api/health and announced on the network, so it is not a secret; it is kept out
+  // of this route anyway, so the allow-lists stay the only way a column gets here and the id has ONE public home.
+  // The allow-list tests above already fail for any new column; this names the column so a failure says which.
+  const MARK = 'LEAK-server-id-937';
+  let saved;
+  before(() => { saved = db.prepare("SELECT server_id FROM settings WHERE id = 'app'").get().server_id; });
+  beforeEach(() => db.prepare("UPDATE settings SET server_id = ? WHERE id = 'app'").run(MARK));
+  after(() => db.prepare("UPDATE settings SET server_id = ? WHERE id = 'app'").run(saved));
+
+  test('not to an anonymous caller, a caregiver or an admin', async () => {
+    for (const [who, token] of [['anonymous', undefined], ['caregiver', caregiverToken], ['admin', adminToken]]) {
+      const r = await get(token);
+      assert.equal(r.status, 200);
+      assert.ok(!('server_id' in r.body), `${who}: server_id key in GET /settings`);
+      assert.ok(!JSON.stringify(r.body).includes(MARK), `${who}: the planted server id reached GET /settings`);
+    }
+  });
+
+  test('not in the PUT reply to an admin', async () => {
+    const r = await call(`${server.url}/api/settings`, { method: 'PUT', token: adminToken, body: { app_name: 'Nightlight' } });
+    assert.equal(r.status, 200);
+    assert.ok(!JSON.stringify(r.body).includes(MARK), 'the planted server id came back from a save');
   });
 });
 

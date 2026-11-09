@@ -54,7 +54,7 @@ export default function SettingsCamera() {
 
   return (
     <>
-      <AppHeader title="Camera controls" back={{ to: '/settings', label: 'Settings' }} />
+      <AppHeader title="Camera controls" back={{ to: '/settings/camera-recording', label: 'Camera and Recording' }} />
       <main className="app-main">
         {error && <div className="error-banner">{error}</div>}
         {saved && <div className="saved-banner">Saved ✓</div>}

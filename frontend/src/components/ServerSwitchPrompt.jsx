@@ -32,6 +32,7 @@ export default function ServerSwitchPrompt() {
 
   if (!prompt) return null;
   // Keyed by request, so a newer request that replaces an open dialog starts with fresh busy/error state.
+  if (prompt.kind === 'tailscale-added') return <TailscaleAdded key={prompt.id} prompt={prompt} />;
   return prompt.kind === 'confirm'
     ? <ConfirmSwitch key={prompt.id} prompt={prompt} />
     : <RefusedSwitch key={prompt.id} prompt={prompt} />;
@@ -75,17 +76,36 @@ function ConfirmSwitch({ prompt }) {
   );
 }
 
+// Shown once, the first time the phone saves the server's Tailscale address (lib/nativeBridge.js syncTailscaleEndpoint).
+// It only informs: nothing is asked and nothing changes when it is closed. It says what the person needs for it to work, since
+// the phone cannot reach a Tailscale address unless the Tailscale app is on.
+function TailscaleAdded({ prompt }) {
+  const close = () => dismissServerSwitchPrompt(prompt.id);
+  return (
+    <Modal title="Away from home" onClose={close} focusDialog>
+      <p style={{ marginTop: 0 }}>
+        When your home address does not answer, this app will now open Nightlight through its Tailscale address. At home
+        nothing changes.
+      </p>
+      <p className="muted">It needs the Tailscale app on this phone, signed in to the same Tailscale network as your server.</p>
+      <div style={ACTIONS_STYLE}>
+        <button type="button" className="btn btn-primary" onClick={close}>OK</button>
+      </div>
+    </Modal>
+  );
+}
+
 // Deliberately has no "add it" button: adding a server stays a step the person takes on the setup screen,
 // never one an alert or link can lead them into.
 function RefusedSwitch({ prompt }) {
   const close = () => dismissServerSwitchPrompt(prompt.id);
   return (
-    <Modal title="Server not saved in this app" onClose={close}>
+    <Modal title="Server not saved in this app" onClose={close} focusDialog>
       <p style={{ marginTop: 0 }}>An alert or link is from a server this app hasn’t been connected to:</p>
       <p><strong style={ORIGIN_STYLE}>{prompt.origin}</strong></p>
       <p>Nothing has changed. If it’s your server, add it first from Settings → Change server.</p>
       <div style={ACTIONS_STYLE}>
-        <button type="button" className="btn" data-autofocus onClick={close}>OK</button>
+        <button type="button" className="btn" onClick={close}>OK</button>
       </div>
     </Modal>
   );

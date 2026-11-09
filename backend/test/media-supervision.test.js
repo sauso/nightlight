@@ -54,6 +54,7 @@ mock.module('../src/lib/rtspProbe.js', { exports: { ffprobeAudioCodec: async () 
 mock.module('../src/lib/mediamtx.js', {
   exports: {
     hlsPathName: (p) => `${p}-hls`,
+    mediamtxRtspUrl: (p) => `rtsp://127.0.0.2:8554/${p}`,
     upsertPath: async () => {},
     isPathConfiguredCorrectly: async () => true,
   },
@@ -72,6 +73,14 @@ const { startSegmenter, stopSegmenter, stopAllSegmenters, runFfmpeg } = await im
 const settle = () => new Promise((resolve) => setImmediate(resolve)); // real setImmediate: only setTimeout is mocked
 const lines = (needle) => logger.getRecent().filter((l) => l.includes(needle));
 const spawnsFor = (needle) => spawned.filter((p) => p.args.some((a) => String(a).includes(needle)));
+
+test('the clip segmenter reads internal RTSP over TCP', () => {
+  startSegmenter('transport-check', 'path_transport');
+  const args = spawnsFor('rtsp://127.0.0.2:8554/path_transport').at(-1)?.args;
+  assert.ok(args, 'clip segmenter did not use the internal RTSP URL');
+  assert.deepEqual(args.slice(args.indexOf('-rtsp_transport'), args.indexOf('-rtsp_transport') + 2), ['-rtsp_transport', 'tcp']);
+  stopSegmenter('transport-check');
+});
 function track(promise) {
   const s = { settled: false, ok: undefined, error: undefined };
   promise.then(() => Object.assign(s, { settled: true, ok: true }), (error) => Object.assign(s, { settled: true, ok: false, error }));

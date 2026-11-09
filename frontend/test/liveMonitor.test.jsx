@@ -21,6 +21,7 @@ import { screen, within } from '@testing-library/react';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import LiveMonitor from '../src/components/LiveMonitor.jsx';
 import { api } from '../src/lib/api.js';
+import { setTheme } from '../src/lib/theme.js';
 
 const CAMS = [
   { id: 'c1', name: 'Nursery', mediamtx_path: 'p1', child_id: 'kid-1' },
@@ -32,6 +33,22 @@ const KIDS = [{ id: 'kid-1', name: 'Child B' }, { id: 'kid-2', name: 'Child A' }
 const mount = (opts = {}) => renderAsAdmin(<LiveMonitor />, { cameras: CAMS, kids: KIDS, ...opts });
 
 afterEach(() => vi.restoreAllMocks());
+
+describe('Live-only theme toggle', () => {
+  test('Live shows the toggle and switches the theme', async () => {
+    setTheme('light');
+    const { user } = mount({ cameras: [] });
+    await user.click(screen.getByRole('button', { name: 'Switch to dark mode' }));
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
+    expect(screen.getByRole('button', { name: 'Switch to light mode' })).toBeInTheDocument();
+  });
+
+  test('the mounted monitor has no toggle on another route', () => {
+    const { container } = mount({ cameras: [], route: '/settings' });
+    // The inactive monitor is inert, so role queries cannot see its DOM even if the button exists.
+    expect(container.querySelector('.app-header__theme')).toBeNull();
+  });
+});
 
 describe('★★ which cameras reach the grid', () => {
   test('every enabled camera gets a tile', () => {

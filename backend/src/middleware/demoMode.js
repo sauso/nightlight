@@ -55,10 +55,14 @@ const MUTATION_ALLOWLIST = new Set([
 // router ever grows a second matching GET route, add it here explicitly.
 const GET_BLOCKLIST = new Set([
   '/api/diagnostics',
+  '/api/remote-access',
+  '/api/remote-access/tailscale',
   '/api/logs',
   '/api/auth/sessions',
   '/api/auth/sessions/all',
 ]);
+// Scan ids are dynamic, but each response exposes private LAN addresses (#945).
+const DISCOVERY_GET_BLOCKLIST = /^\/api\/cameras\/discover\/[^/]+$/;
 
 // The one GET that mutates, found in design review: GET /children/:id/sleep/:date?store=1 (admin
 // only) calls computeAndStoreNight() — the server side of the real "Recompute this night -> Save
@@ -82,7 +86,7 @@ export function demoGuard(req, res, next) {
   // HEAD is covered alongside GET: Express serves HEAD via the GET handler when no explicit HEAD
   // route exists, so without this a HEAD request would still run the full (expensive, internals-
   // leaking) handler body while only the response body was withheld.
-  if ((method === 'GET' || method === 'HEAD') && GET_BLOCKLIST.has(path)) {
+  if ((method === 'GET' || method === 'HEAD') && (GET_BLOCKLIST.has(path) || DISCOVERY_GET_BLOCKLIST.test(path))) {
     return res.status(403).json({ error: BLOCKED_MESSAGE });
   }
 

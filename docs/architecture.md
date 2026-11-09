@@ -21,7 +21,7 @@ HLS can't carry at all — WebRTC can). This drives a specific pipeline, in orde
 1. **FFmpeg** (`backend/src/lib/transcoder.js`, one process per camera) pulls each camera's
    RTSP feed, copies video untouched, and produces **two audio tracks**: track 0 copied as-is
    (for WebRTC, which can't decode AAC), track 1 transcoded to AAC (for HLS, which can't carry
-   the original codec). It publishes the result into MediaMTX via RTSP on `127.0.0.1:8554`.
+   the original codec). It publishes the result into MediaMTX via RTSP on `127.0.0.2:8554`.
 2. **MediaMTX** (`backend/src/lib/mediamtxProcess.js`, spawned as a child process, config baked
    into the image at `mediamtx/mediamtx.yml`) re-publishes that stream as WebRTC (WHEP) and HLS.
    Each camera's path has no pull source configured — it's publisher-only; FFmpeg pushes into
@@ -30,6 +30,14 @@ HLS can't carry at all — WebRTC can). This drives a specific pipeline, in orde
    local ports, and serves the built frontend + REST API on the single public port (4000).
 4. **Frontend** picks WebRTC (`WhepPlayer.jsx`, "Low latency") or HLS (`HlsPlayer.jsx`,
    "Compatibility") per camera tile, toggled by the user.
+
+`GET /api/remote-access` (`backend/src/routes/remoteAccess.js`, `lib/remoteAccess.js`) reports the admin's configured network access and calling-device network; DNS checks only configured `PUBLIC_HOST` names.
+
+`GET` and `PUT /api/remote-access/tailscale` are admin-only status and enable-setting routes. The `PUT` serialises requests, checks live admin access again when each request begins, and stores intent only after the supervisor starts. After the server listens and `markBootComplete()` runs, `bootTailscale()` checks the network and starts the supervisor only when intent is enabled. The detector and supervisor recheck conditions on every launch.
+
+`POST /api/remote-access/tailscale/actions` accepts a fixed action name for sign-in, hostname, HTTPS Serve, logout, node reset or `apply-video-address`. It rechecks the live admin session when a queued action begins; daemon enable preconditions do not apply to `apply-video-address`. `tailscaleCli.js` owns the fixed CLI arguments, private socket, output and time bounds, URL validation and one-at-a-time mutation guard. Both status readers use `status --json --peers=false` so the peer map cannot consume the 16 KB output budget. It waits up to 3 seconds for the LocalAPI socket at the start of each CLI call (so a status read can wait that long, twice, if the socket never appears), on top of the verb timeout: the real daemon creates the socket about 300 ms after spawn (measured 2026-11-03). Status exposes only vetted tailnet IPv4 addresses, a DNS name, `video_address_pending` and safe codes; login and HTTPS consent links remain admin-only. Reset stops the daemon and removes only `private/tailscale` before starting a fresh node. The image bundles Tailscale 1.104.5 in userspace mode. HTTPS Serve answered 200 with a valid certificate without an approval link on a tailnet that already had HTTPS enabled (measured 2026-11-04). Renaming the node changed its address immediately but left the Serve entry under the old name, so enable HTTPS again after a rename. Low latency viewing over the tailnet worked from a phone on cellular with the router's UDP forward closed, on one staging install and one phone: the MediaMTX log showed the remote candidate as `127.0.0.1`, which is how tailnet forwarding presents (measured 2026-11-04). Long sessions, relayed-only (DERP) paths and other devices are not yet tested. This is not a released feature.
+
+`videoAddressSync.js` polls every 15 seconds. It keeps the last vetted address during a CLI error or `Starting`, clears it on logout, reset, `NeedsLogin` or daemon shutdown, and marks pending only when that tailnet address is absent from MediaMTX's last advertised hosts. The first address applies immediately; later changes wait for zero WebRTC sessions (an API error counts as busy). `apply-video-address` bypasses that viewer gate. A full-list `PATCH /v3/config/global/patch` reloads only MediaMTX's API and WebRTC servers while preserving the process and camera paths (measured with MediaMTX 1.21.3). A failed patch retries from 30 seconds up to 10 minutes; neither the poll nor backoff is configurable. The tailnet candidate uses the existing UDP port and needs no router forward. An operator bind through `MTX_WEBRTCLOCALUDPADDRESS` to a specific host, as on the hosted demo, leaves no listener on `127.0.0.1` for userspace forwarding, so that candidate cannot work there. The sync stops before shutdown awaits other services.
 
 ## Child process environment (`backend/src/lib/childEnv.js`, #553)
 
@@ -50,12 +58,19 @@ child. This narrows what a child *inherits*; it does not stop a child reading th
 | `MTX_WEBRTCLOCALUDPADDRESS` | no | yes | the operator's own value when they set one: it wins, and `WEBRTC_UDP_PORT` is then ignored with a warning; otherwise `:<port>` from a valid `WEBRTC_UDP_PORT`; otherwise unset, so MediaMTX keeps `:8189` from `mediamtx.yml` |
 | `HOME`, `LIBVA_*`, `NVIDIA_*`, `HTTP(S)_PROXY`, `LD_LIBRARY_PATH`, `RTSP_*` | no | no | nothing in the app documents or sets them (ffmpeg runs with software decoding; cameras are reached directly on the LAN; `RTSP_*` is MediaMTX's legacy override prefix, which it still reads: use the `MTX_*` spelling) |
 
+| Process | User and privileges | Environment |
+|---|---|---|
+| `tailscaled` | app uid, capabilities and extra groups dropped | same `PATH`, `TZ`, `LANG`, `LC_ALL` allowlist; no `MTX_*`, `PORT` or `HOME` |
+| `tailscale` CLI | app uid, capabilities and extra groups dropped | same allowlist; it needs the private daemon socket and receives no application secrets |
+
 A name that is unset in the backend stays unset in the child. A caller-supplied `env` option is ignored.
+
+`tailscaled` is network-facing. Its app uid lets it read the database and `.jwt_secret`, so its state in `private/tailscale` must be app-owned and mode 0700; a share that ignores chmod prevents it from starting. Its state files are mode 0600. Its LocalAPI socket is mode 0666 inside a 0700 runtime directory (measured 2026-11-03). It opens separate automatic IPv4 and IPv6 wildcard UDP ports. Logged out, it opens only UDP; connected, it also opens one TCP listener on a random wildcard port. A LAN connect scan of ports 1024-65535 found only port 4000 open (measured 2026-11-04). The network check ignores the daemon-owned TCP socket by inode and still counts every other qualifying TCP listener; if its fd directory cannot be read, none is exempted. Its output goes only to the console after redaction. It uses `--no-logs-no-support`, which prevents upload to Tailscale's log service. The image contains root-owned 0755 `tailscale` and `tailscaled` binaries and the upstream licence notices in `/usr/share/licenses/tailscale/`. The two binaries add about 78 MB on disk for amd64 (44 MB + 34 MB) and about 73 MB for arm64 (41 MB + 32 MB), and about 41 MB and 38 MB to the download (the sizes of the vendor tarballs; measured 2026-11-04). Maintainers watch Tailscale security bulletins; a version and digest update requires a reviewed PR. Weekly image rebuilds retain the pinned version.
 
 **To add a variable:** add the name to `ALLOWED_NAMES` in `childEnv.js` with a comment saying which setup
 needs it, add a row to the table above, and update `backend/test/child-env.test.js` (it pins the list on
 purpose). For a per-launch computed value (MediaMTX's) pass it as `extra` instead. **To add a new spawn
-site:** call `spawnChild()`, never `child_process` directly; the source test in `child-env.test.js` fails
+site:** call `spawnChild()` for media processes, or `spawnAsApp()` only for the tunnel daemon and bounded CLI runner; never `child_process` directly. The source test in `child-env.test.js` fails
 on any other import of it under `backend/src`.
 
 **What the allowlist does not do:**
@@ -196,6 +211,13 @@ for a silenced camera, one outside its schedule, and a disabled one (which runs 
 panel falls back to guessing the reason from the camera row only if the field is absent. Its one restated
 condition, manual recording availability, mirrors `can_record` in `routes/cameras.js`, and
 `recording-readiness.test.js` fails if the two disagree.
+
+**Live alert hold (`backend/src/lib/alertHold.js`).** Motion and sound detectors call `shouldHold` after
+schedule and cooldown checks. With Track sleep and Hold alerts until asleep on, alerts are dropped outside
+the sleep window because the watcher cannot detect sleep there; no cap clock starts. Inside the window,
+the first held alert starts a per-child, per-window 45-minute clock, after which alerts may pass even
+without detected sleep. Detected sleep allows alerts immediately. The hold does not affect the
+`alerting_now` readiness field or camera-offline, long-silence and sleep-report alerts.
 
 ## Auth (`backend/src/middleware/auth.js`, `backend/src/routes/auth.js`)
 
@@ -467,7 +489,10 @@ trusted in the span it was computed in. `GET /review/:date` adds `settings: { ke
 Not covered by the key: a night with no usable saved context, whose key is `''` before and after a settings change.
 
 **Deleting a child or a camera is `lib/entityPurge.js`** (#540, #554), and it deletes everything that belongs to
-it. Most of the history tables have **no foreign key** to `children` / `cameras` (deliberately: `bed_transitions`,
+it. `detection_events.protected` and `recordings.protected` are 0/1 clip flags. The protected-list and
+admin toggle routes are `GET /api/cameras/clips/protected`, `PUT /api/cameras/alerts/:id/protected` and
+`PUT /api/recordings/:id/protected`.
+Most of the history tables have **no foreign key** to `children` / `cameras` (deliberately: `bed_transitions`,
 `activity_samples`, `detection_events`, `camera_events`, `sensor_readings`, `sleep_nights`, `sleep_reviews`), so
 the database will not cascade for you. **A new table or column that names a child or camera (`child_id`,
 `camera_id`) must be added to `entityPurge.js`**, or `backend/test/entity-purge.test.js` fails: it finds every such
@@ -660,7 +685,7 @@ which the six-capability hardening does not grant).
   camera-facing programs, not the app.
 - **One uid for all media processes.** A taken-over ffmpeg can signal or `ptrace` the others (MediaMTX, other
   cameras' ffmpeg); there is no per-camera separation.
-- **MediaMTX's API on `127.0.0.1:9997` and its RTSP port `127.0.0.1:8554` have no password.** A taken-over media process
+- **MediaMTX's API on `127.0.0.2:9997` and its RTSP port `127.0.0.2:8554` have no password.** A taken-over media process
   can add, change or remove stream paths and read or publish a camera's stream. It cannot learn a camera's address or
   password from them: MediaMTX is never given one (every path is registered as publisher-only and FFmpeg pulls the
   camera itself; `backend/test/mediamtx-never-given-credentials.test.js` pins that, and it was read back from a real
@@ -726,7 +751,7 @@ React + react-router, no Redux/state library — three context providers (`AuthC
 main dashboard; `pages/` holds the four management screens (Children, Cameras, Account,
 Settings). The Settings **hub itself is reachable by caregivers** — its route carries no admin
 guard (`App.jsx`) — but it's role-aware internally: admin-only rows are hidden for a caregiver,
-and every Settings *sub*-route (general, camera, recording, mqtt, push providers, users, logs,
+and every Settings *sub*-route (general, camera-recording, camera, recording, mqtt, push providers, users, logs,
 clips) is individually `AdminProtected`. `lib/api.js` is a thin fetch wrapper that attaches the
 JWT and redirects to `#/login` on a 401. Every request also carries a timeout (30 s by default, so a
 stalled connection fails with a "took too long to respond" error instead of hanging); a call the server
@@ -755,7 +780,7 @@ a new deploy has replaced, the reload is what fixes it too (the app also reloads
 
 **Unsaved form edits survive the background reload (#377).** `App.jsx` reloads the page after 15 s in the
 background to repair stale media connections, and that empties React state. The child form, the camera form
-Settings → Recording, Settings → General, Settings → Integrations → MQTT, the Gotify, ntfy and Pushover pages and the caregiver form therefore store what is different from the saved values in `sessionStorage`
+Settings → Camera and Recording → Recording, Settings → General, Settings → Integrations → MQTT, the Gotify, ntfy and Pushover pages and the caregiver form therefore store what is different from the saved values in `sessionStorage`
 (`lib/formDraft.js`, kept in step by `lib/useFormDraft.js`) and restore it on mount. Rules that must hold:
 **no secret is ever written** (each form passes an allow-list of fields, credential-named keys are dropped
 even if allowed, a value that is a URL with credentials in it is dropped whatever its key, and a camera

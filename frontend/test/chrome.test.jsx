@@ -243,6 +243,24 @@ describe('ErrorBoundary', () => {
 // --- About --------------------------------------------------------------------------------------
 
 describe('About', () => {
+  test('the Links list starts with the project website, opened safely in a new tab', () => {
+    vi.spyOn(api, 'get').mockResolvedValue({ version: '0.45.0' });
+    renderAsAdmin(<About />);
+    const site = screen.getByRole('link', { name: 'Website' });
+    expect(site).toHaveAttribute('href', 'https://nightlightbaby.app/');
+    expect(site).toHaveAttribute('target', '_blank');
+    expect(site).toHaveAttribute('rel', 'noreferrer');
+    const labels = screen.getAllByRole('link').map((a) => a.textContent);
+    expect(labels.indexOf('Website')).toBeLessThan(labels.indexOf('GitHub — Nightlight'));
+  });
+  test('Got an idea? opens the enhancement issue form safely', () => {
+    vi.spyOn(api, 'get').mockResolvedValue({ version: '0.45.0' });
+    renderAsAdmin(<About />);
+    const idea = screen.getByRole('link', { name: 'Got an idea?' });
+    expect(idea).toHaveAttribute('href', 'https://github.com/sauso/nightlight/issues/new?template=feature_request.yml');
+    expect(idea).toHaveAttribute('target', '_blank');
+    expect(idea).toHaveAttribute('rel', 'noreferrer');
+  });
   test('shows the app name from settings and the version from the server', async () => {
     vi.spyOn(api, 'get').mockResolvedValue({ version: '0.29.0' });
     renderAsAdmin(<About />, { settings: { app_name: 'Nursery' } });
@@ -289,21 +307,20 @@ describe('About', () => {
     expect(await screen.findByText('main')).toBeInTheDocument();
   });
 
-  test('#553 shows whether media isolation is on or off, and nothing when an older server sends no field', async () => {
-    vi.spyOn(api, 'get').mockResolvedValue({ version: '0.44.0', mediaIsolation: 'on' });
-    const { unmount } = renderAsAdmin(<About />);
-    expect(await screen.findByText('Media isolation: on')).toBeInTheDocument();
-    unmount();
-
-    vi.spyOn(api, 'get').mockResolvedValue({ version: '0.44.0', mediaIsolation: 'off' });
-    const second = renderAsAdmin(<About />);
-    expect(await screen.findByText('Media isolation: off')).toBeInTheDocument();
-    second.unmount();
-
-    vi.spyOn(api, 'get').mockResolvedValue({ version: '0.43.0' });
-    renderAsAdmin(<About />);
-    await screen.findByText(/Version 0\.43\.0/);
-    expect(screen.queryByText(/Media isolation/)).not.toBeInTheDocument();
+  // Owner 2026-11-06: the quiet "Media isolation: on/off" line left the About header (it meant nothing to a caregiver and crowded the
+  // card); admins see it on Settings -> Logs (ServerCard, tested in logsScreen.test.jsx). The WARNING banner below stays here.
+  test('#553 About no longer shows the quiet media isolation line, for an admin or a caregiver, whatever the state', async () => {
+    for (const mediaIsolation of ['on', 'off', undefined]) {
+      vi.spyOn(api, 'get').mockResolvedValue({ version: '0.44.0', mediaIsolation });
+      const admin = renderAsAdmin(<About />);
+      await screen.findByText(/Version 0\.44\.0/);
+      expect(screen.queryByText(/Media isolation/), `admin, ${mediaIsolation}`).not.toBeInTheDocument();
+      admin.unmount();
+      const caregiver = renderAsCaregiver(<About />);
+      await screen.findByText(/Version 0\.44\.0/);
+      expect(screen.queryByText(/Media isolation/), `caregiver, ${mediaIsolation}`).not.toBeInTheDocument();
+      caregiver.unmount();
+    }
   });
 
   // The loud banner is for isolation that is off although it was asked for: a host that could not give it (`fallback`)
@@ -321,7 +338,7 @@ describe('About', () => {
     const link = within(banner).getByRole('link');
     expect(link).toHaveAttribute('href', expect.stringContaining('docs/operations.md#media-isolation'));
     expect(link).toHaveAttribute('rel', 'noreferrer');
-    expect(screen.getByText('Media isolation: off')).toBeInTheDocument();
+    expect(screen.queryByText('Media isolation: off'), 'the quiet line moved to Settings -> Logs').not.toBeInTheDocument();
   });
 
   test('#553 an ID CLASH (PUID or PGID is 1700) warns an admin too, with the sentence that says what to change', async () => {
@@ -339,7 +356,7 @@ describe('About', () => {
         version: '0.45.0', mediaIsolation: 'off', mediaIsolationReason: reason, mediaIsolationDetail: 'Some sentence.',
       });
       const { unmount } = renderAsCaregiver(<About />);
-      await screen.findByText('Media isolation: off');
+      await screen.findByText(/Version 0\.45\.0/);
       expect(screen.queryByRole('status'), reason).not.toBeInTheDocument();
       expect(screen.queryByText(/could not start/), reason).not.toBeInTheDocument();
       unmount();
@@ -359,7 +376,7 @@ describe('About', () => {
     for (const extra of quiet) {
       vi.spyOn(api, 'get').mockResolvedValue({ version: '0.45.0', ...extra });
       const { unmount } = renderAsAdmin(<About />);
-      await screen.findByText(`Media isolation: ${extra.mediaIsolation}`);
+      await screen.findByText(/Version 0\.45\.0/);
       expect(screen.queryByRole('status'), JSON.stringify(extra)).not.toBeInTheDocument();
       unmount();
     }
@@ -368,7 +385,8 @@ describe('About', () => {
   test('every outbound link opens safely, for either role', () => {
     vi.spyOn(api, 'get').mockResolvedValue({ version: '0.29.0' });
     const { unmount } = renderAsAdmin(<About />);
-    const links = screen.getAllByRole('link');
+    // Outbound = leaves the app. The admin-only 'Setup status' link (#944) is an in-app route and stays in the SPA.
+    const links = screen.getAllByRole('link').filter((a) => /^https?:/.test(a.getAttribute('href')));
     expect(links.length).toBeGreaterThanOrEqual(5); // 4 links + donate
     for (const a of links) {
       expect(a).toHaveAttribute('target', '_blank');
@@ -385,7 +403,8 @@ describe('About', () => {
   test('carries the safety disclaimer', () => {
     vi.spyOn(api, 'get').mockResolvedValue({ version: '0.29.0' });
     renderAsAdmin(<About />);
-    expect(screen.getByText('Not a safety device.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Not a safety device' })).toBeInTheDocument();
+    expect(screen.getByText(/substitute for adult supervision/)).toBeInTheDocument();
   });
 });
 

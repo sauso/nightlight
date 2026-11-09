@@ -430,6 +430,52 @@ describe('★ reconcileClipRing — the single start-or-stop decision every call
 // --- enqueueClip: the guards ----------------------------------------------------------------------
 
 describe('★ enqueueClip refuses in every case where a clip would be empty or unsafe', () => {
+  test('a protected event is never marked pending or queued with a running segmenter', async () => {
+    const c = cam({ detect_record_clips: 1 });
+    startClipCapture(c);
+    assert.equal(isSegmenterRunning('cam-1'), true, 'precondition: the guard must be tested past the ring check');
+    const id = newEvent();
+    const rel = `cam-1/${id}.mp4`;
+    const file = path.join(path.resolve(CLIPS_DIR), rel);
+    const thumb = file.replace(/\.mp4$/, '.jpg');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'original clip');
+    fs.writeFileSync(thumb, 'original thumb');
+    ev.setClipReady(id, rel, 5, 13);
+    db.prepare('UPDATE detection_events SET protected = 1 WHERE id = ?').run(id);
+    const before = db.prepare('SELECT * FROM detection_events WHERE id = ?').get(id);
+    enqueueClip(c, id);
+    assert.equal(clipStatus(id), 'ready');
+    assert.deepEqual(holdOwners('cam-1'), []);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(fs.readFileSync(file, 'utf8'), 'original clip');
+    assert.equal(fs.readFileSync(thumb, 'utf8'), 'original thumb');
+    assert.deepEqual(db.prepare('SELECT * FROM detection_events WHERE id = ?').get(id), before);
+  });
+
+  test('a queued event protected before its job starts is never extracted', async () => {
+    const ids = [];
+    for (const cameraId of ['cam-1', 'cam-2', 'cam-3']) {
+      db.prepare('DELETE FROM cameras WHERE id = ?').run(cameraId);
+      makeCamera(db, { id: cameraId, name: cameraId, extra: { detect_record_clips: 1 } });
+      const c = db.prepare('SELECT * FROM cameras WHERE id = ?').get(cameraId);
+      startClipCapture(c);
+      const id = ev.recordDetectionEvent(cameraId, cameraId, ev.ALERT.MOTION);
+      ids.push(id);
+      enqueueClip(c, id);
+    }
+    const last = ids.at(-1);
+    assert.equal(clipStatus(last), 'pending', 'precondition: third capture waits behind two running jobs');
+    db.prepare('UPDATE detection_events SET protected = 1 WHERE id = ?').run(last);
+    await settled(ids[0]);
+    await settled(ids[1]);
+    const deadline = Date.now() + 10000;
+    while (holdOwners('cam-3').includes(clipHoldOwner(last)) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.deepEqual(holdOwners('cam-3'), []);
+    assert.equal(clipStatus(last), 'pending', 'a protected queued clip reached extraction');
+  });
   test('a camera without detection clips enabled is never captured, even with a ring running', () => {
     // The ring may well be running for the OTHER feature (on-demand). That must not turn every
     // detection into a saved clip — `detect_record_clips` is the per-camera opt-in and this is the

@@ -1,4 +1,6 @@
+import { isIP } from 'node:net';
 import { logger } from './logger.js';
+import { isLoopbackAddress, isLoopbackExposed } from './loopbackExposure.js';
 
 // Turning the TRUST_PROXY environment variable into a value Express will accept.
 //
@@ -75,18 +77,29 @@ function isIpOrCidr(p) {
   return v4 || v6;
 }
 
+function guardLoopback(app) {
+  // Express compiles this function when the setting is applied. Guard each hop at request time:
+  // the daemon can start or stop while a connection and this app remain alive.
+  const base = app.get('trust proxy fn');
+  // A hop that is not a canonical IP at all (`0x7f000001`, `127.1`) is refused too while exposed: proxy-addr
+  // reads some of those as loopback, and a real socket or proxy always reports a canonical address.
+  app.set('trust proxy fn', (addr, i) => !(isLoopbackExposed() && (isLoopbackAddress(addr) || !isIP(addr))) && base(addr, i));
+}
+
 /** Apply it to an Express app, logging whatever the operator needs to know. */
 export function applyTrustProxy(app, raw) {
   const { value, warning } = parseTrustProxy(raw);
   if (warning) logger.error(`[http] ${warning}`);
   try {
     app.set('trust proxy', value);
+    guardLoopback(app);
   } catch (err) {
     // Belt and braces. parseTrustProxy should have caught anything proxy-addr rejects, but a startup
     // crash here is an outage that no restart can clear — so if validation ever misses a case, degrade
     // to the safe default instead of taking the monitor down.
     logger.error(`[http] TRUST_PROXY was rejected by Express (${err.message}) — using '${DEFAULT_TRUST_PROXY}'.`);
     app.set('trust proxy', DEFAULT_TRUST_PROXY);
+    guardLoopback(app);
     return DEFAULT_TRUST_PROXY;
   }
   if (raw?.trim()) logger.info(`[http] trust proxy = ${JSON.stringify(value)} (from TRUST_PROXY)`);

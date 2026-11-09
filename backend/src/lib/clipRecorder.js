@@ -8,6 +8,7 @@ import { killIfSpawned, isKillError, execFailureBackoff, describeExecFailure } f
 import { CLIPS_DIR, resolveClipsDir } from './clipsDir.js';
 import { statMediaFile, unlinkMediaFile, safeSegmentNames } from './mediaFiles.js';
 import { ensureClipsFolder, writeInputFile } from './mediaLayout.js';
+import { mediamtxRtspUrl } from './mediamtx.js';
 
 // Event-recording capture core (Stage 1, "Option A"; shipped in 0.17.0).
 //
@@ -102,7 +103,7 @@ function segmenterArgs(pathName, ringDir) {
     '-nostdin',
     '-loglevel', 'warning',
     '-rtsp_transport', 'tcp',
-    '-i', `rtsp://127.0.0.1:8554/${pathName}`,
+    '-i', mediamtxRtspUrl(pathName),
     '-map', '0:v:0',
     '-map', '0:a:0?', // the camera's ORIGINAL audio (clean copy); optional so a silent camera records video-only
     '-c', 'copy',
@@ -638,8 +639,21 @@ export async function probeClip(file) {
 // (Phase 2 passes the eventId; the spike passes a timestamp). Returns { file, thumb, segments, probe }.
 export async function extractClip(
   cameraId,
-  { preRollSec = 5, postRollSec = 15, at = Date.now(), outBase = String(Date.now()), settleMs = null } = {}
+  {
+    preRollSec = 5, postRollSec = 15, at = Date.now(), outBase = String(Date.now()), settleMs = null,
+    isOutputProtected = () => false,
+  } = {}
 ) {
+  // #932: this generic cutter removes an existing output name before encoding, so a replayed alert id
+  // must not be able to overwrite a protected clip. The CALLER supplies the check (clipCapture.js knows
+  // the database). It is a parameter, not an import, for two measured reasons: this capture core must
+  // not import db.js (a test that sets DATA_DIR after importing it created /app/data and failed CI on
+  // clips-dir-normalisation.test.js), and it must not gain an await before the first guard (a lazy
+  // import() here hung recordings-lifecycle.test.js).
+  if (isOutputProtected()) {
+    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${outBase} skipped`);
+    throw new Error('protected clip output');
+  }
   const entry = segmenters.get(cameraId);
   if (!entry) throw new Error(`no segmenter running for camera ${cameraId}`);
   const ringDir = entry.ringDir;
@@ -670,6 +684,11 @@ export async function extractClip(
   // app-only folder beside it, read-only to the media user (mediaLayout.js).
   const outDir = ensureClipsFolder([safeId], { leaf: true });
   const listDir = ensureClipsFolder([CONCAT_SUBDIR, safeId]);
+
+  if (isOutputProtected()) {
+    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${outBase} skipped`);
+    throw new Error('protected clip output');
+  }
 
   // concat demuxer list. Absolute paths + `-safe 0`; single-quote-escape for safety. The names come from
   // selectRingSegments, i.e. only ever `seg-YYYYMMDD-HHMMSS.mkv`, so none can carry a newline or a quote.

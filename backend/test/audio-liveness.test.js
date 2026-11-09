@@ -76,7 +76,7 @@ describe('probeVideoFlowing (#369 claim 19): a diagnosis, never proof', () => {
       '-read_intervals', '%+5',
       '-show_entries', 'packet=codec_type',
       '-of', 'csv=p=0',
-      '-i', 'rtsp://127.0.0.1:8554/cam_v-sub',
+      '-i', 'rtsp://127.0.0.2:8554/cam_v-sub',
     ]);
     // #553: spawnChild adds the allowlisted env to every spawn; what this test pins is the stdio wiring.
     const { env, ...rest } = spawned[0].opts;
@@ -165,6 +165,7 @@ describe('probeAudioFlowing (characterization: unchanged by #369, first direct t
     onSpawn = (proc) => queueMicrotask(() => proc.stdout.emit('data', Buffer.from('0.02\n0.04\n0.06\n')));
     assert.equal(await probeAudioFlowing('cam_a'), true);
     assert.deepEqual(spawned[0].args.slice(0, 6), ['-v', 'error', '-rtsp_transport', 'tcp', '-select_streams', 'a:0']);
+    assert.ok(spawned[0].args.includes('rtsp://127.0.0.2:8554/cam_a'));
     assert.deepEqual(spawned[0].signals, ['SIGKILL']);
   });
 

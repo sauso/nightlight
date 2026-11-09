@@ -4,7 +4,7 @@ import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
-import Avatar from '../components/Avatar.jsx';
+import AvatarEditor from '../components/AvatarEditor.jsx';
 import Modal from '../components/Modal.jsx';
 import Switch from '../components/Switch.jsx';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
@@ -221,20 +221,14 @@ export default function ChildSettings() {
             {unsaved && <UnsavedNotice restored={restored} onDiscard={discardDraft} />}
 
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-              <Avatar name={form.name || 'Child'} src={form.photo} color={form.color} size={88} />
-              <div style={{ display: 'flex', gap: 8 }}>
-                <label className="btn btn-secondary" style={{ width: 'auto', cursor: 'pointer' }}>
-                  {form.photo ? 'Change photo' : 'Add photo'}
-                  <input type="file" accept="image/*" onChange={onPhoto} style={{ display: 'none' }} />
-                </label>
-                {form.photo && (
-                  <button type="button" className="btn btn-secondary" style={{ width: 'auto' }} onClick={removePhoto}>
-                    Remove
-                  </button>
-                )}
-              </div>
+              <AvatarEditor name={form.name || 'Child'} src={form.photo} color={form.color} size={88} onChange={onPhoto} />
+              {form.photo && (
+                <button type="button" className="icon-btn" onClick={removePhoto}>
+                  Remove
+                </button>
+              )}
               {photoStatus && (
-                <div className="camera-tile__sub" style={{ color: 'var(--peri)' }}>
+                <div className="camera-tile__sub" style={{ color: 'var(--accent-text)' }}>
                   {photoStatus === 'saving' ? 'Saving photo…' : 'Photo saved ✓'}
                 </div>
               )}
@@ -283,7 +277,7 @@ export default function ChildSettings() {
                 Estimate this child's nightly sleep from their cameras' movement &amp; sound. Wake-ups are
                 also recorded (without alerting you)
                 {isAdmin ? (
-                  <> — length and retention are under <Link to="/settings/recording">Settings › Recording</Link>.</>
+                  <> — length and retention are under <Link to="/settings/recording">Settings › Camera and Recording › Recording</Link>.</>
                 ) : (
                   <> — an admin can change their length and retention.</>
                 )}
@@ -297,9 +291,10 @@ export default function ChildSettings() {
                         onChange={(e) => setForm({ ...form, hold_alerts_until_asleep: e.target.checked })} />
                     </label>
                     <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                      During this child's sleep window, hold motion and sound alerts until about 15 quiet minutes
-                      show they are asleep, or 45 minutes pass after the first held alert. Held alerts are not sent
-                      later. Camera-offline alerts are never held. Off by default.
+                      Hold this child's motion and sound alerts until sleep is detected. Outside the sleep window,
+                      the hold has no time limit; an evening crying spell or daytime nap may be silent. Inside the
+                      window, alerts resume after 45 minutes from the first held alert even without detected sleep.
+                      Held alerts are not sent later. Camera-offline alerts are never held. Not a safety device. Off by default.
                       {!isAdmin && ' Only an admin can change this setting.'}
                     </div>
                   </div>

@@ -263,7 +263,22 @@ async function advertisedOrigin() {
   }
 }
 
-// What is showing: null, or { id, kind: 'confirm' | 'refused', origin, entry }. `origin` is the canonical
+// The addresses the phone has saved FOR THE SERVER IN USE, canonical: the one it was set up with, and the Tailscale one the
+// server told it about (see syncTailscaleEndpoint). The page may be on either, depending on where the phone is, so a link
+// that names the other one is the same server, not a request to switch. An older shell has no `tailscale` field and a
+// list that cannot be read gives []: both just mean "no extra address".
+async function ownAddresses() {
+  const p = window.Capacitor?.Plugins?.ServerConfig;
+  if (!p) return [];
+  try {
+    const res = await p.list();
+    return [res?.active, res?.tailscale].map((value) => canonicalOrigin(value)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+// What is showing: null, or { id, kind: 'confirm' | 'refused' | 'tailscale-added', origin, entry }. `origin` is the canonical
 // origin (all the dialog ever shows, never a full URL); `entry` is the saved-list string a confirm would switch
 // to. Read through useSyncExternalStore by components/ServerSwitchPrompt.jsx, mounted once at the app root.
 let serverPrompt = null;
@@ -335,11 +350,224 @@ export async function requestServerSwitch(raw) {
   if (!target) { setServerPrompt(null); return 'invalid'; }
   if (target === canonicalOrigin(currentServerOrigin())) { setServerPrompt(null); return 'same'; }
   if (!window.Capacitor?.Plugins?.ServerConfig) { setServerPrompt(null); return 'unavailable'; }
-  const [advertised, entry] = await Promise.all([advertisedOrigin(), savedServerFor(target)]);
+  const [advertised, entry, own] = await Promise.all([advertisedOrigin(), savedServerFor(target), ownAddresses()]);
   if (seq !== serverRequestSeq) return 'superseded';
   if (advertised && advertised === target) { setServerPrompt(null); return 'same'; }
+  // The server in use has two addresses on this phone (home and Tailscale): naming either is naming itself.
+  if (own.includes(target)) { setServerPrompt(null); return 'same'; }
   setServerPrompt(entry ? { id: seq, kind: 'confirm', origin: target, entry } : { id: seq, kind: 'refused', origin: target });
   return entry ? 'asked' : 'refused';
+}
+
+// --- The server's Tailscale address, for use away from home (owner, 2026-11-06) ---
+// The phone opens the address it was set up with, and falls back to the server's Tailscale address when that one does not
+// answer (MainActivity, EndpointChooser). The server tells the phone that address: GET /api/remote-access/tailscale/address,
+// which any signed-in user may read. This asks once per start and passes the answer to the native shell, which does the
+// checking (same server id, `https://<name>.ts.net` only) and the saving:
+//   { url: "https://x.ts.net" } -> addEndpoint; the person is told once, the first time it is saved;
+//   { url: null }               -> removeEndpoint: the server no longer offers one (Tailscale turned off there);
+//   anything else (409 "not known right now", an older server's 404, no network, an odd body) -> nothing changes. The server
+//   sends null ONLY for "definitely not available", so a daemon restart can never erase a saved address.
+// Does nothing in a browser, in an app built before the feature (no addEndpoint; both the Android and the iOS shell have it since
+// 2026-11), or when signed out. Never throws.
+// Returns what happened, for tests: 'added' | 'unchanged' | 'removed' | 'none' | null.
+// The Tailscale address THIS page's own server offered on the last successful ask, or null (none offered, or the ask failed). A
+// saved sign-in carries it (saveNativeSession), so the app binds the token to that address only when it is the one the server
+// itself named: addEndpoint can be called by a page at the saved address, so an address another page planted must never be the
+// one a real sign-in is bound to (Opus review of the code). Per page load, like everything in this module.
+// It belongs to the sign-in whose request fetched it (`offeredFor`): after a sign-out and a new sign-in in the same page load the
+// old answer is never reused for the new token, or an address another page planted before the sign-out could be stamped onto a
+// real sign-in that is saved before its own sync has run (Astra review of the code).
+let offeredTailscaleUrl = null;
+let offeredFor = null;
+
+// What the last ask ended in, so the About page can say WHY no Tailscale address is saved (owner, 2026-11-07: "Not saved" was a
+// dead end). One of: 'saved' | 'server-none' (the server says it has none) | 'unknown' (the server could not say: 409, an older
+// server's 404, no network, an odd body) | 'unreachable' | 'different' | 'refused' (the shell said no, see classifyAddRefusal) |
+// null (not asked in this page load, or signed out). Per page load, like offeredTailscaleUrl; getConnectionRoute only reports it
+// while nothing is saved, so a failed re-ask can never hide an address that IS saved.
+let tailscaleOutcome = null;
+
+// Why the shell refused to save the address, from the sentence it rejected with (ServerConfigPlugin.refusal, in nightlight-mobile).
+// Matching the wording couples the two repos, so the failure mode is chosen: a reworded or unrecognised sentence is 'refused',
+// whose text is generic and never names a cause the shell did not give. "Couldn't reach" is the usual real cause: the address
+// answers only while the PHONE is on Tailscale, and addEndpoint probes it from the phone.
+export function classifyAddRefusal(err) {
+  const message = typeof err?.message === 'string' ? err.message : '';
+  if (/couldn'?t reach/i.test(message)) return 'unreachable';
+  if (/different server/i.test(message)) return 'different';
+  return 'refused';
+}
+
+// The ask in progress, if any. getConnectionRoute waits for it, so About opened while the start-up ask is still running shows its
+// result, not the state from before it (Codex review of the code: About reads once and would otherwise stay stale).
+let syncInFlight = null;
+
+export async function syncTailscaleEndpoint() {
+  const run = askForTailscaleAddress();
+  syncInFlight = run;
+  try {
+    return await run;
+  } finally {
+    if (syncInFlight === run) syncInFlight = null;
+  }
+}
+
+async function askForTailscaleAddress() {
+  const p = window.Capacitor?.Plugins?.ServerConfig;
+  if (!p || typeof p.addEndpoint !== 'function' || typeof p.removeEndpoint !== 'function') { tailscaleOutcome = null; return null; }
+  if (!getToken()) { tailscaleOutcome = null; return null; }
+  let url;
+  const asAToken = getToken();
+  // The outcome belongs to the sign-in that asked: an ask that finishes after a sign-out (and perhaps a new sign-in) must not write
+  // its result over the new session's state (Codex review of the code), the same rule offeredFor follows.
+  const note = (outcome) => { if (getToken() === asAToken) tailscaleOutcome = outcome; };
+  try {
+    // A short deadline: this runs at every start and must never hold anything up. No answer just means "no change".
+    const res = await api.get('/remote-access/tailscale/address', { timeoutMs: 5000 });
+    url = res?.url;
+  } catch {
+    offeredTailscaleUrl = null; // nothing is known about what the server offers right now
+    offeredFor = null;
+    note('unknown');
+    return null;
+  }
+  offeredTailscaleUrl = typeof url === 'string' ? url : null;
+  offeredFor = asAToken;
+  note(url === null ? 'server-none' : 'unknown'); // anything but a string or null is an odd body: not known
+  try {
+    if (typeof url === 'string') {
+      const res = await p.addEndpoint({ url });
+      note('saved');
+      if (res?.added === true) { announceTailscaleAdded(); return 'added'; }
+      return 'unchanged';
+    }
+    if (url === null) {
+      const res = await p.removeEndpoint();
+      return res?.removed === true ? 'removed' : 'none';
+    }
+  } catch (err) {
+    // The shell refused (not this server's page, the address did not answer or is another server): it can be tried again
+    // at the next start. The person can act on it only if told why, which is the About page's Connection card.
+    if (typeof url === 'string') note(classifyAddRefusal(err));
+    console.warn('Tailscale address not saved', err);
+  }
+  return null;
+}
+
+// Which of the server's addresses this phone is using right now, and whether a Tailscale address is saved, for the About page
+// (owner, 2026-11-06: there was no way to SEE that the Tailscale address was saved, or which address a session is on).
+//   via: 'tailscale' - the page is on the saved Tailscale address;
+//        'saved'     - the page is on the address the app was set up with;
+//        'other'     - neither (an unexpected state; shown without a name rather than guessed).
+//   tailscaleSaved   - a Tailscale address is stored for this server.
+//   address          - its host (e.g. `x.ts.net`, no scheme), or null when none is saved. Shown on About (owner, 2026-11-07).
+//   why              - when none is saved: the outcome of this page load's ask (see tailscaleOutcome), else null. Never set while
+//                      an address is saved: a failed re-ask does not unsave it.
+// null when this is not a shell with the Tailscale feature (a browser, an app built before it): nothing is shown then. The Android
+// and iOS shells both have it; the feature is detected by the shell's methods, never by platform.
+// Comparisons use the canonical origin, like every other address check here. Never throws.
+export async function getConnectionRoute() {
+  const p = window.Capacitor?.Plugins?.ServerConfig;
+  if (!p || typeof p.addEndpoint !== 'function' || typeof p.get !== 'function') return null;
+  if (syncInFlight) await syncInFlight.catch(() => {}); // the ask may be about to save the address p.get() reports
+  let res;
+  try {
+    res = await p.get();
+  } catch {
+    return null;
+  }
+  const here = canonicalOrigin(currentServerOrigin());
+  const saved = canonicalOrigin(res?.url);
+  const tailscale = canonicalOrigin(res?.tailscale);
+  let via = 'other';
+  if (here && tailscale && here === tailscale) via = 'tailscale';
+  else if (here && saved && here === saved) via = 'saved';
+  let address = null;
+  if (tailscale) {
+    try { address = new URL(tailscale).host; } catch { address = null; }
+  }
+  return { via, tailscaleSaved: Boolean(tailscale), address, why: tailscale ? null : tailscaleOutcome };
+}
+
+// --- One sign-in across the server's two addresses (owner, 2026-11-06) ---
+// The saved address and the Tailscale address are different web origins, each with its own localStorage, so a person had to sign
+// in on each. The Android app can also keep the session token, encrypted, in its own storage (ServerConfig.saveSession /
+// getSession / clearSession; ServerConfigPlugin.kt, SessionRules.kt) and hand it ONLY to the page that is the saved Tailscale
+// address, after checking it is the same server. The iOS app does the same in the Keychain (ServerConfigPlugin.swift,
+// SessionRules.swift; added in the 2026-11 iPhone release): the feature is switched on by the shell having all three methods,
+// never by platform. These three wrap those calls. Every one does nothing in a browser or in an app without the methods (an
+// older app), and NEVER throws: a failure here must never get in the way of signing in or out.
+// WHY 6 s: the app first reads the page, then asks the page's own server for its id (up to 3 s to connect and 3 s to answer, over a
+// relayed Tailscale link on cellular), then decrypts. 2 s gave up on exactly the slow link this feature is for, and showed the
+// sign-in form (Opus review; the timing is reasoned, not measured on a phone). `loading` holds the screen for at most this long.
+const SESSION_ADOPT_DEADLINE_MS = 6000;
+
+function sessionPlugin() {
+  const p = window.Capacitor?.Plugins?.ServerConfig;
+  return p && typeof p.saveSession === 'function' && typeof p.getSession === 'function' && typeof p.clearSession === 'function' ? p : null;
+}
+
+// Keep this token for the other address. Called after a sign-in, and again once the Tailscale address is known (the app stamps
+// each saved token with the addresses in force when it is saved, so a first sign-in is saved again after that).
+export async function saveNativeSession(token) {
+  const p = sessionPlugin();
+  if (!p || typeof token !== 'string' || !token) return false;
+  try {
+    // `tailscale`: what this page's server offered (see offeredTailscaleUrl). null when nothing is known, and the app then binds
+    // the token to no Tailscale address, so it is not handed out until a save after the server has answered.
+    const res = await p.saveSession({ token, tailscale: offeredFor === token ? offeredTailscaleUrl : null });
+    return res?.saved === true;
+  } catch {
+    return false;
+  }
+}
+
+// Ask for the saved token, for a page that has none. The app answers `{ token }` only to the saved Tailscale address and for
+// every other page says `{ token: null }`. A string comes back, or null. A deadline: signing in must not wait on a slow check.
+export async function adoptNativeSession() {
+  const p = sessionPlugin();
+  if (!p) return null;
+  let timer;
+  try {
+    const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timed out')), SESSION_ADOPT_DEADLINE_MS); });
+    const answer = await Promise.race([p.getSession(), timeout]);
+    return typeof answer?.token === 'string' && answer.token ? answer.token : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Forget the saved token: a sign-out passes none (it clears whatever is saved); a 401 passes the token the server rejected, so only
+// that exact token is dropped and a newer saved sign-in survives.
+export async function clearNativeSession(token) {
+  const p = sessionPlugin();
+  if (!p) return false;
+  try {
+    await p.clearSession(typeof token === 'string' && token ? { token } : {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Tell the person, once, that the phone will now also use the Tailscale address. Only when nothing else is asking: it never
+// replaces or closes a switch-server dialog.
+// "Once" is once per web address (the flag is in this page's localStorage, which is per origin). The phone forgets a server's
+// Tailscale address on Change server (by design: it belongs to the server being left), so switching away and back learns it
+// again and the app reports "added" every time; without this flag the message came back on every switch (owner, 2026-11-06).
+const TAILSCALE_ANNOUNCED_KEY = 'nightlight_tailscale_announced';
+function announceTailscaleAdded() {
+  if (serverPrompt) return;
+  try {
+    if (localStorage.getItem(TAILSCALE_ANNOUNCED_KEY)) return;
+    localStorage.setItem(TAILSCALE_ANNOUNCED_KEY, '1'); // set only when it is about to be shown, so a busy moment does not use it up
+  } catch {
+    // Storage refused: show it rather than never telling anyone.
+  }
+  setServerPrompt({ id: ++serverRequestSeq, kind: 'tailscale-added', origin: null, entry: null });
 }
 
 // The window event the native shell fires when it is holding a server request from a tapped link, for an app
@@ -446,6 +674,21 @@ export function hasNativePip() {
   return !!pipPlugin();
 }
 
+// Fullscreen otherwise leaves Android's status and gesture bars painted over the camera
+// controls (owner screenshots, 11-01). The live web UI also reaches older APKs and iOS,
+// so only a native build with the matching plugin may change the system bars.
+export async function setNativeImmersive(enabled) {
+  const immersive = window.Capacitor?.Plugins?.Immersive;
+  if (!isNativeApp() || !immersive) return false;
+  try {
+    await immersive.setEnabled({ enabled });
+    return true;
+  } catch (err) {
+    console.warn('Immersive.setEnabled failed', err);
+    return false;
+  }
+}
+
 // Whether the PiP button had to enter fullscreen itself to get a clean float (i.e. the
 // tile wasn't already fullscreen). Leaving PiP uses this to return the user to where they
 // were: exit fullscreen back to the dashboard if we entered it for them, or stay in
@@ -469,7 +712,7 @@ function removeListener(handleOrPromise) {
 }
 
 // Native Android PiP enter/leave. The web app uses this to hide the on-video overlay
-// buttons (mute/settings/fullscreen) while floating - they only waste space in the tiny
+// controls and panels while floating - they only waste space in the tiny
 // window. Returns an unsubscribe fn; no-op off-native.
 export function onPipModeChanged(callback) {
   const p = pipPlugin();

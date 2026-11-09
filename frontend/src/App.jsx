@@ -1,10 +1,10 @@
-import { useEffect } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/AuthContext.jsx';
 import { SettingsProvider } from './lib/SettingsContext.jsx';
 import { CamerasProvider } from './lib/CamerasContext.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
-import { isNativeApp, hasActiveBackgroundAudio } from './lib/nativeBridge.js';
+import { isNativeApp, hasActiveBackgroundAudio, syncTailscaleEndpoint, saveNativeSession } from './lib/nativeBridge.js';
 import { isReloadHeld } from './lib/reloadGuard.js';
 import { initPushNotifications } from './lib/pushNotifications.js';
 import { applyViewportPolicy } from './lib/viewport.js';
@@ -23,6 +23,8 @@ import Account from './pages/Account.jsx';
 import Settings from './pages/Settings.jsx';
 import NotFound from './pages/NotFound.jsx';
 import { lazyPage } from './lib/lazyPage.jsx';
+import { api, getToken } from './lib/api.js';
+import { setupApi } from './lib/setupApi.js';
 
 // #386: everything not needed to show the Live page, sign in, or reach the primary tabs is split out of
 // the entry chunk (see lib/lazyPage.jsx). Eager on purpose: Login, the Children / Cameras / Settings /
@@ -33,12 +35,15 @@ const NightReview = lazyPage(() => import('./pages/NightReview.jsx'));
 const SleepDetail = lazyPage(() => import('./pages/SleepDetail.jsx'));
 const ChildSettings = lazyPage(() => import('./pages/ChildSettings.jsx'));
 const CameraSettings = lazyPage(() => import('./pages/CameraSettings.jsx'));
+const Setup = lazyPage(() => import('./pages/Setup.jsx'));
 const DetectionSettings = lazyPage(() => import('./pages/DetectionSettings.jsx'));
 const SettingsGeneral = lazyPage(() => import('./pages/SettingsGeneral.jsx'));
 const SettingsCamera = lazyPage(() => import('./pages/SettingsCamera.jsx'));
+const SettingsCameraRecording = lazyPage(() => import('./pages/SettingsCameraRecording.jsx'));
 const SettingsRecording = lazyPage(() => import('./pages/SettingsRecording.jsx'));
 const SettingsMqtt = lazyPage(() => import('./pages/SettingsMqtt.jsx'));
 const SettingsIntegrations = lazyPage(() => import('./pages/SettingsIntegrations.jsx'));
+const SettingsRemoteAccess = lazyPage(() => import('./pages/SettingsRemoteAccess.jsx'));
 const SettingsEsphome = lazyPage(() => import('./pages/SettingsEsphome.jsx'));
 const SettingsPush = lazyPage(() => import('./pages/SettingsPush.jsx'));
 const SettingsPushPushover = lazyPage(() => import('./pages/SettingsPushPushover.jsx'));
@@ -98,6 +103,49 @@ function useReloadAfterBackground() {
   }, []);
 }
 
+export function SetupGate({ user, children }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [state, setState] = useState(null);
+  const [demo, setDemo] = useState(null);
+  const [checkedUserId, setCheckedUserId] = useState(null);
+
+  useEffect(() => {
+    if (user?.role !== 'admin') { setState(null); setDemo(null); setCheckedUserId(null); return undefined; }
+    let cancelled = false;
+    Promise.all([setupApi.read(), api.get('/auth/status')]).then(([next, auth]) => {
+      if (cancelled) return;
+      // WHY: a setup progress event can beat an earlier GET response on a slow connection.
+      setState((old) => old && old.rowVersion > next.rowVersion ? old : next);
+      setDemo(!!auth.demo);
+      setCheckedUserId(user.id);
+    }).catch(() => {});
+    const changed = (event) => {
+      if (event.detail) setState((old) => old && old.rowVersion > event.detail.rowVersion
+        ? old : ({ ...old, ...event.detail }));
+    };
+    window.addEventListener('setup-state-changed', changed);
+    return () => { cancelled = true; window.removeEventListener('setup-state-changed', changed); };
+  }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    // WHY: only the fresh handoff redirects. An in-progress visit is always optional,
+    // including after Save and exit or a page refresh.
+    if (user?.role === 'admin' && checkedUserId === user.id && demo === false && state?.status === 'not_started' && location.pathname !== '/setup') {
+      navigate('/setup', { replace: true });
+    }
+  }, [user?.id, user?.role, checkedUserId, demo, state?.status, location.pathname, navigate]);
+
+  return <>
+    {user?.role === 'admin' && checkedUserId === user.id && demo === false && ['in_progress', 'completed_limited'].includes(state?.status) && location.pathname !== '/setup' && (
+      <div className="setup-banner" role="status">
+        <span>Setup is still open.</span> <button className="btn btn-secondary" type="button" onClick={() => navigate('/setup')}>Finish setting up</button>
+      </div>
+    )}
+    {children}
+  </>;
+}
+
 // Exported for tests. These two are the ONLY thing standing between a caregiver and every
 // admin screen, and the loading branch matters as much as the role one: returning null rather
 // than redirecting is what stops a page refresh bouncing a signed-in user to the login screen
@@ -138,6 +186,16 @@ function Shell() {
     if (user) initPushNotifications();
   }, [user]);
 
+  // Also once signed in (native app only): ask the server for its Tailscale address and hand it to the shell, which keeps
+  // it for use away from home (lib/nativeBridge.js syncTailscaleEndpoint). Never throws; does nothing in a browser.
+  // THEN keep the signed-in token in the app too, now that the Tailscale address is known (the app stamps a saved token with the
+  // addresses in force, so a token saved at sign-in, before it was learned, is saved again here; and a person who was already
+  // signed in before this version is picked up at their next start). Only for a sign-in the server has just confirmed: `user` is
+  // set after /auth/me answered. Not a "backfill when nothing is saved": native storage is written, never probed.
+  useEffect(() => {
+    if (user) void syncTailscaleEndpoint().then(() => saveNativeSession(getToken()));
+  }, [user]);
+
   if (loading) return null;
 
   // #382: a stored sign-in could not be checked because the server did not answer. Without this the
@@ -157,9 +215,11 @@ function Shell() {
             <Protected>
               <CamerasProvider>
                 <div className="app-shell">
+                  <SetupGate user={user}>
                   <LiveMonitor />
                   <Routes>
                     <Route path="/" element={null} />
+                    <Route path="/setup" element={<AdminProtected><Setup /></AdminProtected>} />
                     {/* Retired tabs redirect to the new child-centred structure. */}
                     <Route path="/family" element={<Navigate to="/children" replace />} />
                     <Route path="/alerts" element={<Navigate to="/children" replace />} />
@@ -189,9 +249,13 @@ function Shell() {
                         the config sub-pages stay admin-gated. */}
                     <Route path="/settings" element={<Settings />} />
                     <Route path="/settings/general" element={<AdminProtected><SettingsGeneral /></AdminProtected>} />
+                    <Route path="/settings/camera-recording" element={<AdminProtected><SettingsCameraRecording /></AdminProtected>} />
+                    {/* These existing URLs stay stable for direct links and bookmarks; unlike
+                        Integrations, the new sub-menu does not move its child routes. */}
                     <Route path="/settings/camera" element={<AdminProtected><SettingsCamera /></AdminProtected>} />
                     <Route path="/settings/recording" element={<AdminProtected><SettingsRecording /></AdminProtected>} />
                     <Route path="/settings/integrations" element={<AdminProtected><SettingsIntegrations /></AdminProtected>} />
+                    <Route path="/settings/remote-access" element={<AdminProtected><SettingsRemoteAccess /></AdminProtected>} />
                     <Route path="/settings/integrations/mqtt" element={<AdminProtected><SettingsMqtt /></AdminProtected>} />
                     <Route path="/settings/integrations/esphome" element={<AdminProtected><SettingsEsphome /></AdminProtected>} />
                     <Route path="/settings/integrations/notifications" element={<AdminProtected><SettingsPush /></AdminProtected>} />
@@ -213,6 +277,7 @@ function Shell() {
                     <Route path="*" element={<NotFound />} />
                   </Routes>
                   <NavBar />
+                  </SetupGate>
                 </div>
               </CamerasProvider>
             </Protected>

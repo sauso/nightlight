@@ -2,6 +2,14 @@
 
 Nightlight runs as a single Docker container on a Linux host that can reach your cameras. It supports `amd64` and `arm64`. Host networking is the simple default; there is a dedicated-IP option if you'd rather avoid port clashes (see [networking](networking.md)).
 
+## First run
+
+A fresh installation opens on a **Welcome to Nightlight** screen that lists the steps of the setup guide. **Get started** leads to **Create your account**, which is Step 1 of 7: first and last name, a username, a password of at least 8 characters and an optional photo (**Back** returns to the welcome screen). Creating the account takes you straight on to the rest of the setup guide: **Add your child** (Step 2; name, an optional photo and an optional date of birth), **Connect your camera**, **Test your monitor**, **Invite caregivers** (optional), **Watch from anywhere** (optional), then **You're all set!**. The child's date of birth is optional. The camera step searches your network and shows each camera on its own card. Pick one and enter its login; Nightlight finds its stream settings. You can also open the separate **Add a camera manually** card. The picture check confirms that video frames move in your browser.
+
+While the setup guide is open, the bottom bar (the side menu on a wide screen) is hidden so the guide is what you see. **Save and exit** brings it back, as does finishing setup. You can choose **Save and exit** during setup and use the live view. The next admin visit shows **Finish setting up**; opening it resumes at the saved step. While setup is unfinished, **Settings → Setup & diagnostics** also opens it. **Continue with limited setup** lets you finish without a successful picture check and keeps the reminder visible. You can skip the caregiver and remote access steps without blocking completion. The **Invite caregivers** step creates caregiver accounts right there: first and last name, a username, a password of at least 8 characters and an optional photo, then **Add another caregiver** or **Continue**. It only creates caregivers (admin accounts, editing and removing stay in **Settings → Caregivers**); caregivers can see all children. The **Watch from anywhere** step shows the Tailscale card in place. Once full setup is complete, the Settings setup row and the **About → Setup status and picture check** link both disappear (the page itself still opens at `/#/setup`). While setup is unfinished, or after a limited setup, an admin reaches the picture check from that About link. Existing installations are treated as already set up and use that About link for diagnostics without changing their setup state unless a picture check succeeds.
+
+The picture check is tied to the current sign-in and lasts ten minutes. A server restart clears it, so run the check again if completion asks for it. See [adding a camera](cameras.md#adding-a-camera) and [picture check](cameras.md#picture-check).
+
 ## What you need
 
 - **An always-on Linux box on the same network as your cameras.** A Raspberry Pi, an Unraid server, anything running Docker.
@@ -64,7 +72,7 @@ Replace `/path/to/your/data` with a persistent folder on your host.
 
 **`NIGHTLIGHT_MEDIA_ISOLATION`** (optional, default blank, which means on) runs FFmpeg, ffprobe and MediaMTX as a separate user inside the container, so a camera stream that takes one over cannot read the database or your secrets. You don't need to set anything.
 - Range: `0`, `off` or `false` turns it off. Anything else, blank included, leaves it on. It is read when the container starts, so re-create the container after changing it.
-- If your host can't support it (rootless Docker or Podman, a share that ignores `chmod`, NFS with `root_squash`), the container still starts, runs without it, and logs one `media isolation is off` warning. **Settings → About** shows "Media isolation: on" or "off".
+- If your host can't support it (rootless Docker or Podman, a share that ignores `chmod`, NFS with `root_squash`), the container still starts, runs without it, and logs one `media isolation is off` warning. **Settings → Logs → Server** (admins only) shows "Media isolation: On" or "Off"; if it could not start, admins also get a warning at the top of **Settings → About**.
 - New recordings are then owned by user `1700` rather than `PUID`, so a non-root backup job or SMB user can't read the new ones from the folder. Existing recordings keep their owner.
 - What it doesn't protect against: [Media isolation](operations.md#media-isolation).
 
@@ -74,7 +82,7 @@ Replace `/path/to/your/data` with a persistent folder on your host.
 - **If you deployed before this was added**, add `--stop-timeout 30` yourself (or `stop_grace_period: 30s` under the service in Compose, or the Unraid template's "Extra Parameters" field).
 - Nothing else breaks without it. A recording lost this way is marked failed rather than disappearing silently.
 
-**Recordings.** Nightlight records video three ways: **automatic clips** attached to motion and sound alerts (opt-in per camera), **wake clips** saved silently when your child wakes up, and **on-demand recordings** you capture with the Record button. They have different retention rules, so read [recording](recording.md) before moving clips to another mount or setting `CLIPS_DIR`; it also covers every setting under *Settings → Recording*. Video defaults to `<data dir>/clips`. You can point it at your array instead with a `/recordings` mount plus `CLIPS_DIR`.
+**Recordings.** Nightlight records video three ways: **automatic clips** attached to motion and sound alerts (opt-in per camera), **wake clips** saved silently when your child wakes up, and **on-demand recordings** you capture with the Record button. They have different retention rules, so read [recording](recording.md) before moving clips to another mount or setting `CLIPS_DIR`; it also covers every setting under *Settings → Camera and Recording → Recording*. Video defaults to `<data dir>/clips`. You can point it at your array instead with a `/recordings` mount plus `CLIPS_DIR`.
 
 ## Docker Compose
 
@@ -91,6 +99,8 @@ The options above apply here too (the Compose file sets the stop timeout for you
 ## First sign-in
 
 From any phone or laptop on the same network, open `http://<server-ip>:4000`. The first time you visit, you'll be asked to create the administrator account. **Do this first, from a trusted device.** Then add your children (the Children tab), add your cameras (the Cameras tab, by IP via ONVIF or by RTSP details; see [managing cameras](cameras.md#managing-cameras)) and assign each camera to a child.
+
+An installation upgraded from an older version will not enter the new setup guide automatically. This also applies if the old installation never had an administrator account: create that account as usual, then open the guide manually when its Settings entry is available.
 
 ## Networking
 

@@ -1,5 +1,572 @@
 [
   {
+    "label": "#978 Serve counted for any name",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "address === `${remote.dns_name}:443` &&",
+    "replace": "address.endsWith(\":443\") &&",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "the secure address counts as on only when Serve is set up for the CURRENT name"
+  },
+  {
+    "label": "#971 default socket wait is zero",
+    "file": "backend/src/lib/tailscaleCli.js",
+    "find": "const SOCKET_WAIT_MS = 3000;",
+    "replace": "const SOCKET_WAIT_MS = 0;",
+    "expect": "killed",
+    "tests": ["tailscale-cli.test.js"],
+    "namePattern": "the default socket wait covers a daemon that is still starting"
+  },
+  {
+    "label": "#971 CLI socket wait removed",
+    "file": "backend/src/lib/tailscaleCli.js",
+    "find": "  if (exists()) return launch();",
+    "replace": "  return launch();",
+    "expect": "killed",
+    "tests": ["tailscale-cli.test.js"],
+    "namePattern": "a missing LocalAPI socket never spawns the CLI"
+  },
+  {
+    "label": "#971 owned socket exemption removed",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "if (ownedInodes.has(fields[9])) continue;",
+    "replace": "if (false) continue;",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "only socket inodes owned by the live daemon are exempt"
+  },
+  {
+    "label": "#971 all socket inodes exempted",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "if (ownedInodes.has(fields[9])) continue;",
+    "replace": "if (true) continue;",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "only socket inodes owned by the live daemon are exempt"
+  },
+  {
+    "label": "#971 unreadable fd directory exempts every listener",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "try { fds = readdir(dir); } catch { return inodes; }",
+    "replace": "try { fds = readdir(dir); } catch { return { has: () => true }; }",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "only socket inodes owned by the live daemon are exempt"
+  },
+  {
+    "label": "#967 first-admin blocker dropped",
+    "file": "backend/src/lib/tailnetPreconditions.js",
+    "find": "if (!firstAdminExists(db)) return {",
+    "replace": "if (false) return {",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "no users or a lone caregiver blocks Tailscale"
+  },
+  {
+    "label": "#967 host-network blocker dropped",
+    "file": "backend/src/lib/tailnetPreconditions.js",
+    "find": "if (hostNetwork.host || (hostNetwork.unknown && hostNetwork.unknown !== 'not_linux')) return {",
+    "replace": "if (false) return {",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "host network and missing daemon block"
+  },
+  {
+    "label": "#967 missing-daemon blocker dropped",
+    "file": "backend/src/lib/tailnetPreconditions.js",
+    "find": "  try {\n    if (!fs.statSync(binaryPath).isFile()) throw Error('not a file');\n    fs.accessSync(binaryPath, fs.constants.X_OK);\n  }",
+    "replace": "  try { /* missing executable accepted */ }",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "host network and missing daemon block"
+  },
+  {
+    "label": "#967 permissive network default",
+    "file": "backend/src/lib/tailnetPreconditions.js",
+    "find": "hostNetwork = detectHostNetwork()",
+    "replace": "hostNetwork = { host: false, evidence: [], unknown: null }",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js", "tailscale-process.test.js"],
+    "namePattern": "blocker defaults pin|real host detection refuses"
+  },
+  {
+    "label": "#967 physical NIC evidence dropped",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "if (exists(`${entry}/device`, lstat)) evidence.add('physical_nic');",
+    "replace": "if (false) evidence.add('physical_nic');",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "structural evidence is fixed codes"
+  },
+  {
+    "label": "#967 bridge directory evidence dropped",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "['bridge', 'bridge_dir']",
+    "replace": "['missing-bridge', 'bridge_dir']",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "structural evidence is fixed codes"
+  },
+  {
+    "label": "#967 bridge-port directory evidence dropped",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "['brport', 'brport_dir']",
+    "replace": "['missing-brport', 'brport_dir']",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "structural evidence is fixed codes"
+  },
+  {
+    "label": "#967 bonding directory evidence dropped",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "['bonding', 'bonding_dir']",
+    "replace": "['missing-bonding', 'bonding_dir']",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "structural evidence is fixed codes"
+  },
+  {
+    "label": "#967 host interface name evidence dropped",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "if (HOST_NAME.test(name)) evidence.add('host_iface_name');",
+    "replace": "if (false) evidence.add('host_iface_name');",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "structural evidence is fixed codes"
+  },
+  {
+    "label": "#967 foreign listener evidence dropped",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "listener(tcp6, port, true, ownedInodes)) evidence.add('foreign_listener');",
+    "replace": "listener(tcp6, port, true, ownedInodes)) { /* ignored */ }",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "only dialled loopback and wildcard LISTEN sockets"
+  },
+  {
+    "label": "#967 LISTEN state check dropped",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "fields.length < 4 || fields[3] !== '0A'",
+    "replace": "fields.length < 4",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "only dialled loopback and wildcard LISTEN sockets"
+  },
+  {
+    "label": "#967 plain sysfs file counted as interface",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "return lstat(entry).isSymbolicLink() || exists(`${entry}/ifindex`, lstat);",
+    "replace": "return true;",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "plain bonding_masters is ignored"
+  },
+  {
+    "label": "#967 missing loopback accepted",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "if (!names.includes('lo')) return { host: false, evidence: [], unknown: 'no_lo' };",
+    "replace": "if (false) return { host: false, evidence: [], unknown: 'no_lo' };",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "no lo and proc mismatch refuse"
+  },
+  {
+    "label": "#967 proc namespace mismatch accepted",
+    "file": "backend/src/lib/hostNetwork.js",
+    "find": "interfaces.length !== procNames.size || interfaces.some((name) => !procNames.has(name))",
+    "replace": "false",
+    "expect": "killed",
+    "tests": ["host-network.test.js"],
+    "namePattern": "no lo and proc mismatch refuse"
+  },
+  {
+    "label": "#967 in-lock revoked session check dropped",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "if (!live) return res.status(401).json({ error: 'Invalid or expired session' });",
+    "replace": "if (false) return res.status(401).json({ error: 'Invalid or expired session' });",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "queued admin revocation is checked after middleware"
+  },
+  {
+    "label": "#967 in-lock admin role check dropped",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "if (!live) return res.status(401).json({ error: 'Invalid or expired session' });\n      if (live.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });",
+    "replace": "if (!live) return res.status(401).json({ error: 'Invalid or expired session' });\n      if (false) return res.status(403).json({ error: 'Admin access required' });",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "queued admin demotion is checked after middleware"
+  },
+  {
+    "label": "#967 intent persisted before start",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "          start({ db: database, dataDir });",
+    "replace": "          write(1);\n          start({ db: database, dataDir });",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "intent is saved after a started state"
+  },
+  {
+    "label": "#967 strict body accepts extra keys",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "Object.keys(req.body).length !== 1 ||",
+    "replace": "false ||",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "strict body and fixed response shape"
+  },
+  {
+    "label": "#967 disable stops before clearing intent",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "          try { write(0); }\n          catch { return conflict(res, 'could_not_save', 'The Tailscale setting could not be saved.'); }\n          lastError = null; // Opus review of #970: an old action error must not outlive a disable.\n          setTailnetAddress(null);\n          await cancelTailscaleCli();\n          await stop();",
+    "replace": "          await stop();\n          try { write(0); }\n          catch { return conflict(res, 'could_not_save', 'The Tailscale setting could not be saved.'); }\n          lastError = null; // Opus review of #970: an old action error must not outlive a disable.\n          setTailnetAddress(null);\n          await cancelTailscaleCli();",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "intent is saved after a started state"
+  },
+  {
+    "label": "#967 disable leaves daemon running",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "          await stop();\n          if (status().state !== 'off')",
+    "replace": "          /* stop omitted */\n          if (status().state !== 'off')",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "enable is idempotent and disable clears intent"
+  },
+  {
+    "label": "#967 uncertain stop reported as success",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "return res.status(409).json({ ...await view(), error: 'The tunnel daemon may still be running.', code: 'stop_uncertain' });",
+    "replace": "return res.status(200).json({ ...await view(), error: 'The tunnel daemon may still be running.', code: 'stop_uncertain' });",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "wedged stop reports busy and uncertain disable"
+  },
+  {
+    "label": "#967 failed save omits compensating stop",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "          catch {\n            await stop();\n            return conflict(res, 'could_not_save'",
+    "replace": "          catch {\n            /* stop omitted */\n            return conflict(res, 'could_not_save'",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "failed save compensates by stopping"
+  },
+  {
+    "label": "#967 mutation lock removed",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "onEnqueued(req);\n    const current = tail.then(job, job);",
+    "replace": "onEnqueued(req);\n    const current = job();",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "SIGTERM-ignoring fake serialises disable then enable"
+  },
+  {
+    "label": "#967 fresh schema defaults enabled",
+    "file": "backend/src/db.js",
+    "find": "ALTER TABLE settings ADD COLUMN tailscale_enabled INTEGER NOT NULL DEFAULT 0",
+    "replace": "ALTER TABLE settings ADD COLUMN tailscale_enabled INTEGER NOT NULL DEFAULT 1",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "schema flag is hidden from settings GET"
+  },
+  {
+    "label": "#967 demo status block removed",
+    "file": "backend/src/middleware/demoMode.js",
+    "find": "  '/api/remote-access/tailscale',",
+    "replace": "  /* tailscale status exposed */",
+    "expect": "killed",
+    "tests": ["demoMode.test.js"],
+    "namePattern": "demo blocks tunnel status and enable"
+  },
+  {
+    "label": "#965 flag cleared on child exit before final confirmed stop",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "      lastExitCode = code;",
+    "replace": "      lastExitCode = code; setLoopbackExposed(false);",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "exposure stays set through a crash and pending relaunch gap"
+  },
+  {
+    "label": "#965 generation check ignored",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "const current = (g) => generation === g;",
+    "replace": "const current = () => true;",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "late old-generation exit"
+  },
+  {
+    "label": "#965 five-second exposure hold removed",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "}, session?.exposureHoldMs ?? EXPOSURE_HOLD_MS);",
+    "replace": "}, 0);",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "fixed argv, allowlisted env"
+  },
+  {
+    "label": "#965 failed SIGKILL clears exposure",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "if (!sent && proc === child) unavailable(g, 'sigkill_failed');",
+    "replace": "if (!sent && proc === child) { unavailable(g, 'sigkill_failed'); setLoopbackExposed(false); }",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "failed SIGKILL keeps exposure"
+  },
+  {
+    "label": "#965 runtime directory name fixed",
+    "file": "backend/src/lib/tailscaleState.js",
+    "find": "runtimeDir = fsImpl.mkdtempSync(path.join(tmpDir, 'nightlight-tailscale-'));",
+    "replace": "runtimeDir = path.join(tmpDir, 'nightlight-tailscale'); fsImpl.mkdirSync(runtimeDir, { recursive: true });",
+    "expect": "killed",
+    "tests": ["tailscale-state.test.js"],
+    "namePattern": "runtime directories use unpredictable distinct names"
+  },
+  {
+    "label": "#965 state directory mode widened",
+    "file": "backend/src/lib/tailscaleState.js",
+    "find": "const DIR_MODE = 0o700;",
+    "replace": "const DIR_MODE = 0o755;",
+    "expect": "killed",
+    "tests": ["tailscale-state.test.js"],
+    "namePattern": "state and runtime are private"
+  },
+  {
+    "label": "#965 root uid refusal removed",
+    "file": "backend/src/lib/tailscaleState.js",
+    "find": "if (!Number.isSafeInteger(uid) || uid <= 0) refuse('app_is_root');\n    if (!dataDir)",
+    "replace": "if (!dataDir)",
+    "expect": "killed",
+    "tests": ["tailscale-state.test.js"],
+    "namePattern": "state refuses root and an owner mismatch"
+  },
+  {
+    "label": "#965 daemon line reaches diagnostics ring",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "try { (s.consoleSink ?? console.log)(`[tailscale] ${redactLine(line)}`); }",
+    "replace": "try { (s.consoleSink ?? console.log)(`[tailscale] ${redactLine(line)}`); logger.raw('tailscale', line); }",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "daemon output is console-only"
+  },
+  {
+    "label": "#965 daemon console redaction removed",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "`[tailscale] ${redactLine(line)}`",
+    "replace": "`[tailscale] ${line}`",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "daemon output is console-only"
+  },
+  {
+    "label": "#965 support-log upload disable flag dropped",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "'--tun=userspace-networking', '--no-logs-no-support',",
+    "replace": "'--tun=userspace-networking',",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "fixed argv, allowlisted env"
+  },
+  {
+    "label": "#965 userspace networking flag dropped",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "'--tun=userspace-networking', '--no-logs-no-support',",
+    "replace": "'--no-logs-no-support',",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "fixed argv, allowlisted env"
+  },
+  {
+    "label": "#965 media child spawn used for daemon",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "const child = (s.spawnFn ?? spawnAsApp)(s.binary ?? TAILSCALED_BINARY, argv,",
+    "replace": "const child = (s.spawnFn ?? spawnChild)(s.binary ?? TAILSCALED_BINARY, argv,",
+    "expect": "killed",
+    "tests": ["child-env.test.js"],
+    "namePattern": "spawnAsApp is called exactly once"
+  },
+  {
+    "label": "#965 spawnAsApp ignores isolation",
+    "file": "backend/src/lib/childEnv.js",
+    "find": "  if (mediaIsolationOn()) {\n    return spawn(APP_EXEC_PATH,",
+    "replace": "  if (false) {\n    return spawn(APP_EXEC_PATH,",
+    "expect": "killed",
+    "tests": ["child-env.test.js"],
+    "namePattern": "spawnAsApp isolation on wraps"
+  },
+  {
+    "label": "#965 production daemon spawn drops cwd",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "{ cwd: prepared.stateDir, stdio: ['ignore', 'pipe', 'pipe'] });",
+    "replace": "{ stdio: ['ignore', 'pipe', 'pipe'] });",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "fixed argv, allowlisted env"
+  },
+  {
+    "label": "#965 exposure hold default removed",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "export const EXPOSURE_HOLD_MS = 5000;",
+    "replace": "export const EXPOSURE_HOLD_MS = 0;",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "production timing bounds"
+  },
+  {
+    "label": "#965 daemon output budget not reset on start",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "  outputWindowAt = 0; outputLines = 0;",
+    "replace": "  // output budget is accidentally shared between starts",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "new start resets the daemon output budget"
+  },
+  {
+    "label": "#965 redaction runs before input slice",
+    "file": "backend/src/lib/tailscaleProcess.js",
+    "find": "return String(line).slice(0, 1024)",
+    "replace": "return String(line)",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "64 KiB hostile daemon line"
+  },
+  {
+    "label": "#965 state failure reason carries path",
+    "file": "backend/src/lib/tailscaleState.js",
+    "find": "return { ok: true, stateDir };\n  } catch (err) {\n    return { ok: false, reason: failureCode(err) };",
+    "replace": "return { ok: true, stateDir };\n  } catch (err) {\n    return { ok: false, reason: err.message };",
+    "expect": "killed",
+    "tests": ["tailscale-process.test.js"],
+    "namePattern": "status reasons are fixed codes"
+  },
+  {
+    "label": "#963 exposed loopback setup refusal removed",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (!setupBlockedByExposedLoopback(isLoopbackExposed(), req.ip)) return false;",
+    "replace": "  if (true) return false;",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "#963 exposed loopback setup refuses forged forwarded LAN address"
+  },
+  {
+    "label": "#963 caregiver accepted as first admin",
+    "file": "backend/src/lib/tailnetPreconditions.js",
+    "find": "SELECT 1 FROM users WHERE role = 'admin' LIMIT 1",
+    "replace": "SELECT 1 FROM users LIMIT 1",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "#963 no users or a lone caregiver blocks Tailscale"
+  },
+  {
+    "label": "#963 setup guard rejects LAN instead of loopback",
+    "file": "backend/src/routes/auth.js",
+    "find": "  return exposed && isLoopbackAddress(address);",
+    "replace": "  return exposed && !isLoopbackAddress(address);",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "#963 exposed LAN caller is allowed by the setup guard"
+  },
+  {
+    "label": "#963 setup guard only recognises 127.0.0.1",
+    "file": "backend/src/routes/auth.js",
+    "find": "  return exposed && isLoopbackAddress(address);",
+    "replace": "  return exposed && address === '127.0.0.1';",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "#963 exposed LAN caller is allowed by the setup guard"
+  },
+  {
+    "label": "#963 setup guard refuses every caller while exposed",
+    "file": "backend/src/routes/auth.js",
+    "find": "  if (!setupBlockedByExposedLoopback(isLoopbackExposed(), req.ip)) return false;",
+    "replace": "  if (!isLoopbackExposed()) return false;",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "#963 exposed setup from a LAN address is allowed by the route itself"
+  },
+  {
+    "label": "#963 setup guard before the hash removed",
+    "file": "backend/src/routes/auth.js",
+    "find": "  // Refuse before the costly hash, but preserve the existing completed-setup answer above.\n  if (refuseExposedLoopbackSetup(req, res)) return;",
+    "replace": "  // Refuse before the costly hash, but preserve the existing completed-setup answer above.",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "#963 exposed loopback setup refuses forged forwarded LAN address"
+  },
+  {
+    "label": "#963 setup guard after the hash removed",
+    "file": "backend/src/routes/auth.js",
+    "find": "  // The flag can turn on while hashing yields; check again with no await before the INSERT.\n  if (refuseExposedLoopbackSetup(req, res)) return;",
+    "replace": "  // The flag can turn on while hashing yields; check again with no await before the INSERT.",
+    "expect": "killed",
+    "tests": ["tailnet-preconditions.test.js"],
+    "namePattern": "#963 flag turning on during the setup hash refuses the insert"
+  },
+  {
+    "label": "#959 exposed gate removed from proxy wrapper",
+    "file": "backend/src/lib/trustProxy.js",
+    "find": "!(isLoopbackExposed() && (isLoopbackAddress(addr) || !isIP(addr)))",
+    "replace": "!(isLoopbackAddress(addr) || !isIP(addr))",
+    "expect": "killed",
+    "tests": ["trust-proxy.test.js", "loopback-exposure.test.js"],
+    "namePattern": "#959 flag off retains default loopback trust"
+  },
+  {
+    "label": "#959 loopback test removed from client classification",
+    "file": "backend/src/lib/remoteAccess.js",
+    "find": "if (loopbackExposed && isLoopbackAddress(ip)) return 'unknown';",
+    "replace": "if (loopbackExposed) return 'unknown';",
+    "expect": "killed",
+    "tests": ["remoteAccess.test.js"],
+    "namePattern": "#959 exposed loopback is unknown"
+  },
+  {
+    "label": "#959 mapped loopback address ignored",
+    "file": "backend/src/lib/loopbackExposure.js",
+    "find": "if (family === 6) return loopback6.check(addr, 'ipv6') || loopback4.check(addr, 'ipv6');",
+    "replace": "if (family === 6) return loopback6.check(addr, 'ipv6');",
+    "expect": "killed",
+    "tests": ["trust-proxy.test.js", "remoteAccess.test.js"],
+    "namePattern": "#959 compiled trust function rejects every loopback spelling"
+  },
+  {
+    "label": "#945 private address rejection removed",
+    "file": "backend/src/lib/privateAddress.js",
+    "find": "  if (typeof ip !== 'string' || !/^(?:0|[1-9]\\d{0,2})(?:\\.(?:0|[1-9]\\d{0,2})){3}$/.test(ip)) return false;",
+    "replace": "  if (typeof ip !== 'string' || !/^(?:0|[1-9]\\d{0,2})(?:\\.(?:0|[1-9]\\d{0,2})){3}$/.test(ip)) return true;",
+    "expect": "killed",
+    "tests": ["privateAddress.test.js"],
+    "namePattern": "accepts only literal private"
+  },
+  {
+    "label": "#945 concurrent scan guard removed",
+    "file": "backend/src/lib/cameraDiscovery.js",
+    "find": "      if (active) return { scanId: active.scanId, reused: true, endsAt: active.endsAt };",
+    "replace": "      if (false && active) return { scanId: active.scanId, reused: true, endsAt: active.endsAt };",
+    "expect": "killed",
+    "tests": ["cameraDiscovery.test.js"],
+    "namePattern": "scan manager reuses one active scan"
+  },
+  {
+    "label": "#945 Bonjour cleanup skipped",
+    "file": "backend/src/lib/cameraDiscovery.js",
+    "find": "        try { bonjour?.destroy(); } catch { /* the scan has already ended */ }",
+    "replace": "        try { /* skipped destroy */ } catch { /* the scan has already ended */ }",
+    "expect": "killed",
+    "tests": ["cameraDiscovery.test.js"],
+    "namePattern": "abort stops both browsers"
+  },
+  {
+    "label": "#945 camera discovery admin gate removed",
+    "file": "backend/src/routes/cameras.js",
+    "find": "router.post('/discover', requireAdmin, discoveryLimiter, (req, res) => {",
+    "replace": "router.post('/discover', discoveryLimiter, (req, res) => {",
+    "expect": "killed",
+    "tests": ["cameras-discovery-routes.test.js"],
+    "namePattern": "discovery routes require an admin"
+  },
+  {
     "label": "#780 camera save starts the transcoder before saving the new address",
     "file": "backend/src/routes/cameras.js",
     "find": "  const updatedRows = db.prepare(`UPDATE cameras SET name = ?, rtsp_url = ?, child_id = ?, mqtt_topic = ?,\r\n      talk_backend = ?, talk_username = ?, talk_password = ?, sub_rtsp_url = ?,\r\n      discovery_source = ?, onvif_capable = ?, onvif_motion_capable = ?, onvif_device_url = ?, backchannel_supported = ?,\r\n      ptz_supported = ?, onvif_profile_token = ?, onvif_username = ?, onvif_password = ?\r\n    WHERE id = ?`).run(\r\n    keepFresh('name', name?.trim() || existing.name),\r\n    keepFresh('rtsp_url', newRtsp),\r\n    keepFresh('child_id', child_id !== undefined ? child_id || null : existing.child_id),\r\n    keepFresh('mqtt_topic', mqtt_topic !== undefined ? mqtt_topic?.trim() || null : existing.mqtt_topic),\r\n    keepFresh('talk_backend', talkBackend),\r\n    keepFresh('talk_username', talkUser),\r\n    keepFresh('talk_password', talkPass),\r\n    keepFresh('sub_rtsp_url', subUrl),\r\n    keepFresh('discovery_source', discSource),\r\n    keepFresh('onvif_capable', onvifCapable),\r\n    keepFresh('onvif_motion_capable', onvifMotionCapable),\r\n    keepFresh('onvif_device_url', onvifUrl),\r\n    keepFresh('backchannel_supported', backchannel),\r\n    keepFresh('ptz_supported', ptz),\r\n    keepFresh('onvif_profile_token', profileToken),\r\n    keepFresh('onvif_username', onvifUser),\r\n    keepFresh('onvif_password', onvifPass),\r\n    req.params.id\r\n  ).changes;\r\n",
@@ -577,8 +1144,8 @@
   {
     "label": "★ pruneWakeClips: sweeps MANUAL keepsakes too",
     "file": "backend/src/lib/recordings.js",
-    "find": "        WHERE kind = 'wake' AND created_at < datetime('now', ?)",
-    "replace": "        WHERE created_at < datetime('now', ?)",
+    "find": "        WHERE kind = 'wake' AND protected = 0 AND created_at < datetime('now', ?)",
+    "replace": "        WHERE protected = 0 AND created_at < datetime('now', ?)",
     "expect": "killed",
     "tests": [
       "recordings-lifecycle.test.js"
@@ -946,8 +1513,8 @@
   {
     "label": "routes/recordings: DELETE reports success for an id that does not exist",
     "file": "backend/src/routes/recordings.js",
-    "find": "  if (!row) return res.status(404).json({ error: 'No recording for this id' });\r\n  deleteRecording(req.params.id);",
-    "replace": "  deleteRecording(req.params.id);",
+    "find": "  if (!row) return res.status(404).json({ error: 'No recording for this id' });\r\n  // #932: direct deletion needs an explicit unlock; child/camera purge still removes all owned data.",
+    "replace": "  // #932: direct deletion needs an explicit unlock; child/camera purge still removes all owned data.",
     "expect": "killed",
     "tests": [
       "recordings-routes.test.js"
@@ -1990,7 +2557,7 @@
   {
     "label": "push public URL: any device, not just an admin's, may set the global address",
     "file": "backend/src/lib/push.js",
-    "find": "if (origin && isAdminUser(userId)) {",
+    "find": "if (origin && isAdminUser(userId) && !isTailnetOrigin(origin)) {",
     "replace": "if (origin) {",
     "expect": "killed",
     "tests": [
@@ -2221,8 +2788,8 @@
   {
     "label": "push public URL: the stored global value and the admin-device fallback swap precedence",
     "file": "backend/src/lib/push.js",
-    "find": "return stored || newestAdminDeviceBaseUrl();",
-    "replace": "return newestAdminDeviceBaseUrl() || stored;",
+    "find": "return (stored && !isTailnetOrigin(stored) ? stored : null) || newestAdminDeviceBaseUrl();",
+    "replace": "return newestAdminDeviceBaseUrl() || (stored && !isTailnetOrigin(stored) ? stored : null);",
     "expect": "killed",
     "tests": [
       "push-public-url.test.js"
@@ -2331,8 +2898,8 @@
   {
     "label": "push public URL: the fallback returns the raw stored value instead of the canonical origin",
     "file": "backend/src/lib/push.js",
-    "find": "if (origin) return origin;",
-    "replace": "if (origin) return base_url;",
+    "find": "if (origin && !isTailnetOrigin(origin)) return origin;",
+    "replace": "if (origin && !isTailnetOrigin(origin)) return base_url;",
     "expect": "killed",
     "tests": [
       "push-public-url.test.js"
@@ -2468,8 +3035,8 @@
   {
     "label": "demo frontend: hidden live header duplicates the routed page banner",
     "file": "frontend/src/components/LiveMonitor.jsx",
-    "find": "      <AppHeader title={settings.app_name} showDemoBanner={isActive} />",
-    "replace": "      <AppHeader title={settings.app_name} />",
+    "find": "      <AppHeader title={settings.app_name} showDemoBanner={isActive} showThemeToggle={isActive} />",
+    "replace": "      <AppHeader title={settings.app_name} showThemeToggle={isActive} />",
     "expect": "killed",
     "tests": ["demoMode.test.jsx"],
     "namePattern": "DOM sibling after the header"
@@ -3092,7 +3659,7 @@
   {
     "label": "#455 M4: backend qs lock regresses below its advisory floor",
     "file": "backend/package-lock.json",
-    "find": "\"version\": \"6.16.0\"",
+    "find": "\"version\": \"6.16.2\"",
     "replace": "\"version\": \"6.15.3\"",
     "expect": "killed",
     "tests": ["dependency-hygiene.test.js"],
@@ -13171,8 +13738,8 @@
   {
     "label": "#563 app gate: a NEW unguarded app-level route in index.js",
     "file": "backend/src/index.js",
-    "find": "app.get('/api/health', (req, res) => res.json({ ok: true }));",
-    "replace": "app.get('/api/health', (req, res) => res.json({ ok: true }));\napp.get('/api/debug/logs', (req, res) => res.json(logger.getRecent()));",
+    "find": "app.get('/api/health', healthHandler);",
+    "replace": "app.get('/api/health', healthHandler);\napp.get('/api/debug/logs', (req, res) => res.json(logger.getRecent()));",
     "expect": "killed",
     "tests": ["route-permissions.test.js"]
   },
@@ -13683,7 +14250,7 @@
   {
     "label": "W5 role UI M14: a 403 on a clip or recording delete shows the generic 'try again' instead of the server's reason",
     "file": "frontend/src/components/ClipPlayerModal.jsx",
-    "find": "  return err?.status === 403 && err.message ? err.message : fallback;",
+    "find": "  return (err?.status === 403 || err?.status === 409) && err.message ? err.message : fallback;",
     "replace": "  return fallback;",
     "expect": "killed",
     "tests": ["mediaCards.test.jsx"],
@@ -15950,7 +16517,7 @@
   },
   {
     "label": "#378 CameraSettings: a failed remove goes to the page banner under the overlay, not the dialog",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "setRemoveError(err.message);",
     "replace": "setPageError(err.message);",
     "expect": "killed",
@@ -15959,7 +16526,7 @@
   },
   {
     "label": "#378 CameraSettings: opening the dialog keeps the previous failure",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "onClick={() => { setRemoveError(''); setRemoving(true); }}",
     "replace": "onClick={() => { setRemoving(true); }}",
     "expect": "killed",
@@ -16013,7 +16580,7 @@
   },
   {
     "label": "#383 CameraSettings: Back and the landing go to the retired /family again",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "const back = location.state?.from || { to: '/cameras', label: 'Cameras' };",
     "replace": "const back = { to: '/family', label: 'Family' };",
     "expect": "killed",
@@ -16022,7 +16589,7 @@
   },
   {
     "label": "#383 CameraSettings: the landing ignores where the page was opened from",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "const back = location.state?.from || { to: '/cameras', label: 'Cameras' };",
     "replace": "const back = { to: '/cameras', label: 'Cameras' };",
     "expect": "killed",
@@ -16346,7 +16913,7 @@
   },
   {
     "label": "#378 CameraSettings: a retry keeps the previous failure on screen while it runs",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "setRemoveBusy(true); setPageError(''); setRemoveError('');",
     "replace": "setRemoveBusy(true); setPageError('');",
     "expect": "killed",
@@ -16781,8 +17348,8 @@
   {
     "label": "#562 TTL F1: a 401 no longer tells AuthProvider (an open tab stays on a dead screen)",
     "file": "frontend/src/lib/api.js",
-    "find": "    for (const listener of [...unauthorizedListeners]) listener();",
-    "replace": "    void unauthorizedListeners;",
+    "find": "for (const listener of [...unauthorizedListeners]) listener(rejected);",
+    "replace": "void unauthorizedListeners;",
     "expect": "killed",
     "tests": ["appShell.test.jsx"],
     "namePattern": "#562"
@@ -16790,8 +17357,8 @@
   {
     "label": "#562 TTL F2: AuthProvider never registers for 401s",
     "file": "frontend/src/lib/AuthContext.jsx",
-    "find": "  useEffect(() => onUnauthorized(() => {",
-    "replace": "  useEffect(() => (() => () => {})(() => {",
+    "find": "useEffect(() => onUnauthorized((rejectedToken) => {",
+    "replace": "useEffect(() => (() => () => {})((rejectedToken) => {",
     "expect": "killed",
     "tests": ["appShell.test.jsx"],
     "namePattern": "#562"
@@ -16817,8 +17384,8 @@
   {
     "label": "#562 TTL F5: listeners are called BEFORE the token is cleared",
     "file": "frontend/src/lib/api.js",
-    "find": "  if (res.status === 401) {\n    setToken(null);",
-    "replace": "  if (res.status === 401) {\n    for (const listener of [...unauthorizedListeners]) listener();\n    setToken(null);",
+    "find": "      setToken(null);\n      window.location.hash = '#/login';",
+    "replace": "      for (const listener of [...unauthorizedListeners]) listener(rejected);\n      setToken(null);\n      window.location.hash = '#/login';",
     "expect": "killed",
     "tests": ["lib/api.test.js"],
     "namePattern": "onUnauthorized"
@@ -16835,8 +17402,8 @@
   {
     "label": "#562 TTL F7: listeners are called from the live set, not a copy",
     "file": "frontend/src/lib/api.js",
-    "find": "for (const listener of [...unauthorizedListeners]) listener();",
-    "replace": "for (const listener of unauthorizedListeners) listener();",
+    "find": "for (const listener of [...unauthorizedListeners]) listener(rejected);",
+    "replace": "for (const listener of unauthorizedListeners) listener(rejected);",
     "expect": "killed",
     "tests": ["lib/api.test.js"],
     "namePattern": "registered DURING"
@@ -16862,8 +17429,8 @@
   {
     "label": "#562 TTL F10: AuthProvider's 401 effect returns no cleanup (an unmounted provider is still called)",
     "file": "frontend/src/lib/AuthContext.jsx",
-    "find": "  useEffect(() => onUnauthorized(() => {",
-    "replace": "  useEffect(() => void onUnauthorized(() => {",
+    "find": "useEffect(() => onUnauthorized((rejectedToken) => {",
+    "replace": "useEffect(() => void onUnauthorized((rejectedToken) => {",
     "expect": "killed",
     "tests": ["lib/AuthContext.test.jsx"],
     "namePattern": "unmounts"
@@ -17769,7 +18336,7 @@
   },
   {
     "label": "#554 CameraSettings: the Remove dialog stops asking \"Are you sure?\"",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "<strong>Are you sure?</strong>",
     "replace": "<strong>Done?</strong>",
     "expect": "killed",
@@ -17777,7 +18344,7 @@
   },
   {
     "label": "#554 CameraSettings: the Remove dialog drops the event-log line",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "            <li>its event log and temperature and humidity history</li>\n",
     "replace": "",
     "expect": "killed",
@@ -17785,7 +18352,7 @@
   },
   {
     "label": "#554 CameraSettings: the Remove dialog promises adding the camera back restores it",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "You can add the camera again, but none of this comes back.",
     "replace": "You can add the camera again.",
     "expect": "killed",
@@ -19927,7 +20494,7 @@
   },
   {
     "label": "#394 page: the panel is not rendered",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "<RecordingScopePanel cam={cam} />",
     "replace": "null",
     "expect": "killed",
@@ -20516,7 +21083,7 @@
   },
   {
     "label": "#377 camera: Save does not move the baseline, so the draft outlives it",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "      setBaseline({ ...form, rtsp_password: '', talk_password: '' });",
     "replace": "      /* baseline not moved */",
     "expect": "killed",
@@ -20526,7 +21093,7 @@
   },
   {
     "label": "#377 camera: a removed camera's draft is kept",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "      clearDraft(draftKey);\n      await refresh();",
     "replace": "      await refresh();",
     "expect": "killed",
@@ -20536,7 +21103,7 @@
   },
   {
     "label": "#377 camera: the draft is not restored once the camera has loaded",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "    setForm({ ...loaded, ...draft });",
     "replace": "    setForm(loaded);",
     "expect": "killed",
@@ -20546,7 +21113,7 @@
   },
   {
     "label": "#377 camera: Discard changes does not reset the form",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "  function discardDraft() {\n    setForm(baseline);",
     "replace": "  function discardDraft() {\n    setForm(form);",
     "expect": "killed",
@@ -22169,7 +22736,7 @@
   },
   {
     "label": "#738 saving a new camera keeps its old baseline",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "      setBaseline({ ...form, rtsp_password: '', talk_password: '' });",
     "replace": "      if (!isNew) setBaseline({ ...form, rtsp_password: '', talk_password: '' });",
     "expect": "killed",
@@ -22178,7 +22745,7 @@
   },
   {
     "label": "#738 RTSP host is omitted from camera drafts",
-    "file": "frontend/src/pages/CameraSettings.jsx",
+    "file": "frontend/src/components/CameraForm.jsx",
     "find": "'name', 'rtsp_host', 'rtsp_port'",
     "replace": "'name', 'rtsp_port'",
     "expect": "killed",
@@ -22944,8 +23511,8 @@
   {
     "label": "#553 phase 1 spawnChild: isolation on is ignored (the program is spawned unwrapped)",
     "file": "backend/src/lib/childEnv.js",
-    "find": "  if (mediaIsolationOn()) {",
-    "replace": "  if (false) {",
+    "find": "  if (mediaIsolationOn()) {\n    return spawn(MEDIA_EXEC_PATH,",
+    "replace": "  if (false) {\n    return spawn(MEDIA_EXEC_PATH,",
     "expect": "killed",
     "tests": ["media-exec.test.js"],
     "namePattern": "on: the wrapper is spawned"
@@ -24625,13 +25192,13 @@
     "namePattern": "#919 first held alert"
   },
   {
-    "label": "#919 unarmed state is held",
+    "label": "#919 outside the window is allowed",
     "file": "backend/src/lib/alertHold.js",
-    "find": "if (asleep !== false) return false;",
-    "replace": "if (asleep !== false) return true;",
+    "find": "if (asleep === undefined) return true;",
+    "replace": "if (asleep === undefined) return false;",
     "expect": "killed",
     "tests": ["alert-hold.test.js"],
-    "namePattern": "#919 reads child assignment"
+    "namePattern": "#919 outside the gate holds"
   },
   {
     "label": "#919 option flag ignored",
@@ -24652,13 +25219,13 @@
     "namePattern": "#919"
   },
   {
-    "label": "#919 timer cleared on unarm",
+    "label": "#919 outside the window starts a cap clock",
     "file": "backend/src/lib/alertHold.js",
-    "find": "if (asleep !== false) return false;",
-    "replace": "if (asleep !== false) { firstHeld.delete(childId); return false; }",
+    "find": "if (asleep === undefined) return true;",
+    "replace": "if (asleep === undefined) { firstHeld.set(childId, { key: 0, firstAt: nowMs, expired: false }); return true; }",
     "expect": "killed",
     "tests": ["alert-hold.test.js"],
-    "namePattern": "#919 reads child assignment"
+    "namePattern": "#919 outside the gate holds"
   },
   {
     "label": "#919 fail open removed",
@@ -24672,11 +25239,29 @@
   {
     "label": "#919 night key from currentNightDate alone",
     "file": "backend/src/lib/alertHold.js",
-    "find": "import { childWindowKeyNow } from './sleepAnalysis.js';",
-    "replace": "import { currentNightDate as childWindowKeyNow } from './sleepAnalysis.js';",
+    "find": "import { childTracksSleep, childWindowKeyNow } from './sleepAnalysis.js';",
+    "replace": "import { childTracksSleep, currentNightDate as childWindowKeyNow } from './sleepAnalysis.js';",
     "expect": "killed",
     "tests": ["alert-hold.test.js"],
-    "namePattern": "#919 lead margin"
+    "namePattern": "#919 outside the gate has no clock"
+  },
+  {
+    "label": "#919 an asleep child is held",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "if (asleep === true) return false;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 outside the gate holds"
+  },
+  {
+    "label": "#919 Track sleep off is held",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "if (!childTracksSleep(childId)) return false;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 outside the gate holds"
   },
   {
     "label": "#919 frame-diff hold checked before camera schedule",
@@ -24695,5 +25280,571 @@
     "expect": "killed",
     "tests": ["sound-digital-silence.test.js"],
     "namePattern": "#919 snoozed sound"
+  },
+  {
+    "label": "#932 expired alert selection ignores protection",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "WHERE protected = 0 AND clip_path IS NOT NULL AND created_at < datetime('now', ?)",
+    "replace": "WHERE clip_path IS NOT NULL AND created_at < datetime('now', ?)",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "retention age skips a protected clip"
+  },
+  {
+    "label": "#932 size eviction includes protected alert",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "WHERE protected = 0 AND clip_status = 'ready' AND clip_path IS NOT NULL ORDER BY id ASC",
+    "replace": "WHERE clip_status = 'ready' AND clip_path IS NOT NULL ORDER BY id ASC",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "cap total and eviction exclude protected bytes"
+  },
+  {
+    "label": "#932 cap total includes protected alert bytes",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "WHERE protected = 0 AND clip_status = 'ready' AND clip_path IS NOT NULL\"",
+    "replace": "WHERE clip_status = 'ready' AND clip_path IS NOT NULL\"",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "cap total and eviction exclude protected bytes"
+  },
+  {
+    "label": "#932 backstop age deletes protected alert",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "DELETE FROM detection_events WHERE protected = 0 AND created_at < datetime('now', ?)",
+    "replace": "DELETE FROM detection_events WHERE created_at < datetime('now', ?)",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "backstop age keeps protected row"
+  },
+  {
+    "label": "#932 backstop count deletes protected alert",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "DELETE FROM detection_events WHERE protected = 0 AND id NOT IN (",
+    "replace": "DELETE FROM detection_events WHERE id NOT IN (",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "backstop count excludes protected rows"
+  },
+  {
+    "label": "#932 clear history deletes protected rows",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "DELETE FROM detection_events WHERE protected = 0').run().changes",
+    "replace": "DELETE FROM detection_events').run().changes",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "clear history retains protected alert"
+  },
+  {
+    "label": "#932 clear history removes protected snapshots",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "if (!id || !db.prepare('SELECT 1 FROM detection_events WHERE id = ? AND protected <> 0').get(id)) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "clear history retains protected alert"
+  },
+  {
+    "label": "#932 wake retention includes protected clips",
+    "file": "backend/src/lib/recordings.js",
+    "find": "WHERE kind = 'wake' AND protected = 0 AND created_at < datetime('now', ?)",
+    "replace": "WHERE kind = 'wake' AND created_at < datetime('now', ?)",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "wake retention deletes only unprotected"
+  },
+  {
+    "label": "#932 alert single delete ignores protection",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (isProtectedEvent(req.params.id)) return res.status(409).json({ error: 'This clip is protected. Unprotect it first.' });",
+    "replace": "if (false) return res.status(409).json({ error: 'This clip is protected. Unprotect it first.' });",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "admin protect routes validate role"
+  },
+  {
+    "label": "#932 recording single delete ignores protection",
+    "file": "backend/src/routes/recordings.js",
+    "find": "if (row.protected) return res.status(409).json({ error: 'This clip is protected. Unprotect it first.' });",
+    "replace": "if (false) return res.status(409).json({ error: 'This clip is protected. Unprotect it first.' });",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "admin protect routes validate role"
+  },
+  {
+    "label": "#932 bulk delete skips protected alerts",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (isProtectedEvent(id)) { skipped_protected++; continue; }",
+    "replace": "if (false) { skipped_protected++; continue; }",
+    "expect": "killed",
+    "tests": ["clips-delete-route.test.js"],
+    "namePattern": "bulk delete skips a protected clip"
+  },
+  {
+    "label": "#932 aged snapshot selection includes protected rows",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "SELECT id FROM detection_events WHERE protected = 0 AND created_at < datetime('now', ?) AND snapshot = 1",
+    "replace": "SELECT id FROM detection_events WHERE created_at < datetime('now', ?) AND snapshot = 1",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "backstop age keeps protected row"
+  },
+  {
+    "label": "#932 count snapshot selection includes protected rows",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "WHERE protected = 0 AND snapshot = 1 AND id NOT IN (",
+    "replace": "WHERE snapshot = 1 AND id NOT IN (",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "backstop count excludes protected rows"
+  },
+  {
+    "label": "#932 count clip selection includes protected rows",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "WHERE protected = 0 AND clip_path IS NOT NULL AND id NOT IN (",
+    "replace": "WHERE clip_path IS NOT NULL AND id NOT IN (",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "backstop count excludes protected rows"
+  },
+  {
+    "label": "#932 aged clip selection includes protected rows",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "SELECT clip_path FROM detection_events WHERE protected = 0 AND created_at < datetime('now', ?) AND clip_path IS NOT NULL",
+    "replace": "SELECT clip_path FROM detection_events WHERE created_at < datetime('now', ?) AND clip_path IS NOT NULL",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "backstop age keeps protected row"
+  },
+  {
+    "label": "#932 count delete population includes protected ids",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "DELETE FROM detection_events WHERE protected = 0 AND id NOT IN (\n     SELECT id FROM detection_events WHERE protected = 0 ORDER BY id DESC LIMIT ?",
+    "replace": "DELETE FROM detection_events WHERE protected = 0 AND id NOT IN (\n     SELECT id FROM detection_events ORDER BY id DESC LIMIT ?",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "count backstop counts only unprotected rows"
+  },
+  {
+    "label": "#932 count snapshot population includes protected ids",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "SELECT id FROM detection_events WHERE protected = 0 AND snapshot = 1 AND id NOT IN (\n     SELECT id FROM detection_events WHERE protected = 0 ORDER BY id DESC LIMIT ?",
+    "replace": "SELECT id FROM detection_events WHERE protected = 0 AND snapshot = 1 AND id NOT IN (\n     SELECT id FROM detection_events ORDER BY id DESC LIMIT ?",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "count backstop counts only unprotected rows"
+  },
+  {
+    "label": "#932 count clip population includes protected ids",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "SELECT clip_path FROM detection_events WHERE protected = 0 AND clip_path IS NOT NULL AND id NOT IN (\n     SELECT id FROM detection_events WHERE protected = 0 ORDER BY id DESC LIMIT ?",
+    "replace": "SELECT clip_path FROM detection_events WHERE protected = 0 AND clip_path IS NOT NULL AND id NOT IN (\n     SELECT id FROM detection_events ORDER BY id DESC LIMIT ?",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "count backstop counts only unprotected rows"
+  },
+  {
+    "label": "#932 capture enqueue refuses protected event",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "if (isProtectedEvent(eventId)) {\n    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${eventId} skipped`);\n    return;\n  }",
+    "replace": "if (false) {\n    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${eventId} skipped`);\n    return;\n  }",
+    "expect": "killed",
+    "tests": ["clip-capture.test.js"],
+    "namePattern": "a protected event is never marked pending"
+  },
+  {
+    "label": "#932 capture queued job rechecks protection",
+    "file": "backend/src/lib/clipCapture.js",
+    "find": "if (isProtectedEvent(eventId)) {\n        if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${eventId} skipped`);\n        return;\n      }",
+    "replace": "if (false) {\n        if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${eventId} skipped`);\n        return;\n      }",
+    "expect": "killed",
+    "tests": ["clip-capture.test.js"],
+    "namePattern": "a queued event protected before its job starts"
+  },
+  {
+    "label": "#932 extraction rechecks protection after settle",
+    "file": "backend/src/lib/clipRecorder.js",
+    "find": "if (isOutputProtected()) {\n    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${outBase} skipped`);\n    throw new Error('protected clip output');\n  }\n\n  // concat demuxer list.",
+    "replace": "if (false) {\n    if (process.env.DEBUG_CLIPS) logger.raw('DEBUG', `[clip] protected event ${outBase} skipped`);\n    throw new Error('protected clip output');\n  }\n\n  // concat demuxer list.",
+    "expect": "killed",
+    "tests": ["clip-recorder.test.js"],
+    "namePattern": "a clip protected during the settle wait"
+  },
+  {
+    "label": "#932 protected alert list filters ordinary rows",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "WHERE protected <> 0 AND clip_status = 'ready' AND clip_path IS NOT NULL\n                      ORDER BY id DESC",
+    "replace": "WHERE clip_status = 'ready' AND clip_path IS NOT NULL\n                      ORDER BY id DESC",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "protected list and storage counters exclude ordinary"
+  },
+  {
+    "label": "#932 protected wake list filters ordinary rows",
+    "file": "backend/src/lib/recordings.js",
+    "find": "r.status = 'ready' AND r.protected <> 0",
+    "replace": "r.status = 'ready'",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "protected list and storage counters exclude ordinary"
+  },
+  {
+    "label": "#932 protected wake storage excludes ordinary rows",
+    "file": "backend/src/lib/clipStorage.js",
+    "find": "kind='wake' AND protected<>0",
+    "replace": "kind='wake'",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "protected list and storage counters exclude ordinary"
+  },
+  {
+    "label": "#932 nonzero protected alert blocks single deletion",
+    "file": "backend/src/lib/detectionEvents.js",
+    "find": "return !!db.prepare('SELECT protected FROM detection_events WHERE id = ?').get(id)?.protected;",
+    "replace": "return db.prepare('SELECT protected FROM detection_events WHERE id = ?').get(id)?.protected === 1;",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "nonzero protected flags consistently survive"
+  },
+  {
+    "label": "#932 malformed bulk id cannot abort valid deletion",
+    "file": "backend/src/routes/cameras.js",
+    "find": "if (!(typeof id === 'string' || (typeof id === 'number' && Number.isFinite(id)))) continue;",
+    "replace": "if (false) continue;",
+    "expect": "killed",
+    "tests": ["protected-clips.test.js"],
+    "namePattern": "bulk delete ignores malformed ids"
+  },
+  {
+    "label": "#937 server id backfill runs on every boot (IS NULL guard removed)",
+    "file": "backend/src/db.js",
+    "find": "WHERE id = 'app' AND server_id IS NULL",
+    "replace": "WHERE id = 'app'",
+    "expect": "killed",
+    "tests": ["server-identity.test.js"],
+    "namePattern": "stable across restarts",
+    "note": "Every restart would give the server a new identity, so no phone would recognise it."
+  },
+  {
+    "label": "#937 /api/health back to { ok: true } only",
+    "file": "backend/src/index.js",
+    "find": "app.get('/api/health', healthHandler);",
+    "replace": "app.get('/api/health', (req, res) => res.json({ ok: true }));",
+    "expect": "killed",
+    "tests": ["route-permissions.test.js", "mdns-announce.test.js"]
+  },
+  {
+    "label": "#937 health fallback removed (a failed identity read becomes a failed liveness probe)",
+    "file": "backend/src/lib/serverIdentity.js",
+    "find": "return { ok: true };",
+    "replace": "throw err;",
+    "expect": "killed",
+    "tests": ["health-route.test.js", "server-identity.test.js"]
+  },
+  {
+    "label": "#937 TXT record gains a field",
+    "file": "backend/src/lib/mdnsAnnounce.js",
+    "find": "txt: { v: '1', id },",
+    "replace": "txt: { v: '1', id, ver: '1' },",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "publishes exactly this"
+  },
+  {
+    "label": "#937 host left to the library default (the machine's host name is broadcast)",
+    "file": "backend/src/lib/mdnsAnnounce.js",
+    "find": "host: `nightlight-${short}.local`,",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "publishes exactly this"
+  },
+  {
+    "label": "#937 MDNS_ANNOUNCE off ignored",
+    "file": "backend/src/lib/mdnsAnnounce.js",
+    "find": "if (!enabled) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "MDNS_ANNOUNCE off"
+  },
+  {
+    "label": "#937 no listener for 'error' on the underlying mDNS emitter (a failed bind crashes the process)",
+    "file": "backend/src/lib/mdnsAnnounce.js",
+    "find": "mdns.on('error', (err) => onFatal(s, err));",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "underlying mDNS socket"
+  },
+  {
+    "label": "#937 library error callback not passed (its default is throw)",
+    "file": "backend/src/lib/mdnsAnnounce.js",
+    "find": "s.bonjour = createBonjour({}, (err) => onNonFatal(s, err));",
+    "replace": "s.bonjour = createBonjour({});",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "error callback"
+  },
+  {
+    "label": "#937 no-up watchdog never armed (a silent name collision goes unreported)",
+    "file": "backend/src/lib/mdnsAnnounce.js",
+    "find": "armWatchdog(s);",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "no `up` within 10 s"
+  },
+  {
+    "label": "#937 stop has no cap (a goodbye that never completes holds shutdown for ever)",
+    "file": "backend/src/lib/mdnsAnnounce.js",
+    "find": "cap = setTimeout(finish, STOP_CAP_MS);",
+    "replace": "cap = null;",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "never completes"
+  },
+  {
+    "label": "#937 shutdown no longer awaits the mDNS goodbye before process.exit",
+    "file": "backend/src/index.js",
+    "find": "await mdnsStopped;",
+    "replace": "void mdnsStopped;",
+    "expect": "killed",
+    "tests": ["mdns-announce.test.js"],
+    "namePattern": "awaits it just before process.exit"
+  },
+  {
+    "label": "#941 existing settings row mistaken for fresh setup",
+    "file": "backend/src/db.js",
+    "find": "['settings', 'users', 'children', 'cameras']",
+    "replace": "['users', 'children', 'cameras']",
+    "expect": "killed",
+    "tests": ["setup-state.test.js"],
+    "namePattern": "old rows and demo mode"
+  },
+  {
+    "label": "#941 camera address edit leaves playback proof valid",
+    "file": "backend/src/lib/setupState.js",
+    "find": "row.rtsp_url, row.sub_rtsp_url, row.child_id, row.disabled,",
+    "replace": "null, row.sub_rtsp_url, row.child_id, row.disabled,",
+    "expect": "killed",
+    "tests": ["setup-state.test.js"],
+    "namePattern": "camera edit, reassignment"
+  },
+  {
+    "label": "#941 monitor confirmation can be replayed",
+    "file": "backend/src/lib/setupState.js",
+    "find": "!proof || proof.verifiedAt || proof.expiresAtMs <= clock()",
+    "replace": "!proof || proof.expiresAtMs <= clock()",
+    "expect": "killed",
+    "tests": ["setup-state.test.js"],
+    "namePattern": "one-shot"
+  },
+  {
+    "label": "#941 full completion accepts missing playback proof",
+    "file": "backend/src/lib/setupState.js",
+    "find": "if (!limited && !ready.ready)",
+    "replace": "if (false && !ready.ready)",
+    "expect": "killed",
+    "tests": ["setup-routes.test.js"],
+    "namePattern": "completion needs proof"
+  },
+  {
+    "label": "#941 readiness accepts a picture check before confirmation",
+    "file": "backend/src/lib/setupState.js",
+    "find": "proof.verifiedAt && proof.sessionId === sessionId",
+    "replace": "proof.sessionId === sessionId",
+    "expect": "killed",
+    "tests": ["setup-state.test.js"],
+    "namePattern": "attestation is session and camera bound"
+  },
+  {
+    "label": "#969 login URL path validation removed",
+    "file": "backend/src/lib/tailscaleCli.js",
+    "find": "!url.port && /^\\/a\\/[A-Za-z0-9_-]+\\/?$/.test(url.pathname) &&",
+    "replace": "!url.port && /^\\/[ab]\\/[A-Za-z0-9_-]+\\/?$/.test(url.pathname) &&",
+    "expect": "killed",
+    "tests": ["tailscale-cli.test.js"],
+    "namePattern": "hostile URLs and hostnames"
+  },
+  {
+    "label": "#969 CLI mutation serialisation removed",
+    "file": "backend/src/lib/tailscaleCli.js",
+    "find": "if (mutates && mutation) return Promise.resolve({ ok: false, code: 'busy' });",
+    "replace": "if (false) return Promise.resolve({ ok: false, code: 'busy' });",
+    "expect": "killed",
+    "tests": ["tailscale-cli.test.js"],
+    "namePattern": "mutations serialise"
+  },
+  {
+    "label": "#969 queued admin session gate removed",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "if (!live?.id) return res.status(401).json({ error: 'Invalid or expired session' });",
+    "replace": "if (false) return res.status(401).json({ error: 'Invalid or expired session' });",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "action queue rechecks a revoked session"
+  },
+  {
+    "label": "#969 reset state scope widened",
+    "file": "backend/src/lib/tailscaleState.js",
+    "find": "fsImpl.rmSync(stateDir, { recursive: true });",
+    "replace": "fsImpl.rmSync(privateDir, { recursive: true });",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "reset removes only Tailscale state"
+  },
+  {
+    "label": "#969 Serve target changed",
+    "file": "backend/src/lib/tailscaleCli.js",
+    "find": "['serve', '--bg', '--https=443', 'http://127.0.0.1:4000']",
+    "replace": "['serve', '--bg', '--https=443', 'http://127.0.0.1:4001']",
+    "expect": "killed",
+    "tests": ["tailscale-cli.test.js"],
+    "namePattern": "Serve uses the exact private argv"
+  },
+  {
+    "label": "#974 tailnet range accepts 100.128",
+    "file": "backend/src/lib/tailnetAddress.js",
+    "find": "Number(parts[1]) <= 127",
+    "replace": "Number(parts[1]) <= 128",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "hostile tailnet addresses"
+  },
+  {
+    "label": "#974 tailnet-only pending inverted",
+    "file": "backend/src/lib/videoAddressSync.js",
+    "find": "Boolean(address && !hosts.includes(address))",
+    "replace": "Boolean(address && hosts.includes(address))",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "pending tracks the tailnet host"
+  },
+  {
+    "label": "#974 viewers gate removed",
+    "file": "backend/src/lib/videoAddressSync.js",
+    "find": "if (stopRequested || viewers !== 0) return false;",
+    "replace": "if (stopRequested) return false;",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "first address applies with viewers"
+  },
+  {
+    "label": "#974 unknown viewers treated as idle",
+    "file": "backend/src/lib/videoAddressSync.js",
+    "find": "try { viewers = await countViewers(); } catch { return false; }",
+    "replace": "try { viewers = await countViewers(); } catch { viewers = 0; }",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "first address applies with viewers"
+  },
+  {
+    "label": "#974 first address waits for viewers",
+    "file": "backend/src/lib/videoAddressSync.js",
+    "find": "if (!firstAddress) {",
+    "replace": "if (true) {",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "first address applies with viewers"
+  },
+  {
+    "label": "#974 retry backoff does not double",
+    "file": "backend/src/lib/videoAddressSync.js",
+    "find": "retryMs = Math.min(MAX_RETRY_MS, retryMs * 2);",
+    "replace": "retryMs = Math.min(MAX_RETRY_MS, retryMs);",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "first address applies with viewers"
+  },
+  {
+    "label": "#974 Apply now waits for viewers",
+    "file": "backend/src/lib/videoAddressSync.js",
+    "find": "const applyNow = async () => {",
+    "replace": "const applyNow = async () => { if (await countViewers() !== 0) return false;",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "Apply now ignores viewers"
+  },
+  {
+    "label": "#974 PATCH omits computed hosts",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "webrtcAdditionalHosts: hosts",
+    "replace": "webrtcAdditionalHosts: []",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "advertised hosts preserve operator fallback"
+  },
+  {
+    "label": "#974 success hold removed",
+    "file": "backend/src/lib/videoAddressSync.js",
+    "find": "const SUCCESS_HOLD_MS = 60_000;",
+    "replace": "const SUCCESS_HOLD_MS = 0;",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "successful apply holds repeated pending checks"
+  },
+  {
+    "label": "#974 cleared address epoch ignored",
+    "file": "backend/src/lib/videoAddressSync.js",
+    "find": "if (tailnetAddressEpoch() !== epoch) return getTailnetAddress();",
+    "replace": "/* stale status is accepted */",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "a late status read cannot restore"
+  },
+  {
+    "label": "#974 busy Apply now mapped to patch failure",
+    "file": "backend/src/routes/tailscale.js",
+    "find": "if (applied === null) return res.status(409).json({ ...await view(), applied: false,",
+    "replace": "if (applied === false) return res.status(409).json({ ...await view(), applied: false,",
+    "expect": "killed",
+    "tests": ["tailscale-routes.test.js"],
+    "namePattern": "Apply now is admin-only"
+  },
+  {
+    "label": "#974 tailnet first octet unchecked",
+    "file": "backend/src/lib/tailnetAddress.js",
+    "find": "parts[0] === '100' &&",
+    "replace": "true &&",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "hostile tailnet addresses"
+  },
+  {
+    "label": "#974 PATCH without a deadline",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "signal: AbortSignal.timeout(5000),",
+    "replace": "/* no deadline */",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "advertised hosts preserve operator fallback"
+  },
+  {
+    "label": "#974 shutdown omits video address stop",
+    "file": "backend/src/index.js",
+    "find": "stopVideoAddressSync();",
+    "replace": "/* video address sync left running */",
+    "expect": "killed",
+    "tests": ["suite-exits-cleanly.test.js"],
+    "namePattern": "shutdown\\(\\) calls stopVideoAddressSync"
+  },
+  {
+    "label": "#974 peerless status wrongly takes mutation lock",
+    "file": "backend/src/lib/tailscaleCli.js",
+    "find": "['status', 'status-peerless', 'serve-status'].includes(verb)",
+    "replace": "['status', 'serve-status'].includes(verb)",
+    "expect": "killed",
+    "tests": ["tailscale-cli.test.js"],
+    "namePattern": "peerless status runs while"
+  },
+  {
+    "label": "#974 tailnet-only hosts hide missing host IP",
+    "file": "backend/src/lib/mediamtxProcess.js",
+    "find": "return hosts.some((host) => host !== tailnet);",
+    "replace": "return hosts.length > 0;",
+    "expect": "killed",
+    "tests": ["video-address-sync.test.js"],
+    "namePattern": "a tailnet-only candidate still reports"
   }
 ]

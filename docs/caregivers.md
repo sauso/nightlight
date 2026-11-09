@@ -20,13 +20,14 @@ destroy or reconfigure.**
 | Add a child; turn a child's sleep tracking on or off; change their bedtime and wake time; choose the camera their sleep is measured from | No | Yes |
 | Answer the morning sleep review (the review shows who last answered it) | Yes | Yes |
 | Delete an alert clip, a recording or a wake clip | No | Yes |
+| See which clips are protected; protect or unprotect alert and wake clips | See only | Yes |
 | Delete a timelapse | No | Yes |
 | Delete a child and everything recorded for them (nights, reviews, bed transitions, recordings, timelapses) | No | Yes |
 | Change global settings (detection, notifications, providers, recording retention) | No | Yes |
 | Manage caregiver/admin accounts and sessions | No | Yes |
 
 Deleting by hand is not the same as **retention**: the automatic sweep of old alert clips and wake clips
-(Settings → Recording, admin only to configure) runs on a timer on every install, whoever is signed in.
+(Settings → Camera and Recording → Recording, admin only to configure) runs on a timer on every install, whoever is signed in.
 
 ### Rearranging the live grid
 
@@ -65,7 +66,7 @@ camera are shown, greyed out, with a note); the server refuses them too, so a pa
 permission gets a refusal rather than a change.
 
 The **Settings** hub itself is visible to caregivers too — its admin-only pages (general,
-camera controls, recording, MQTT, push providers, users, logs, clip storage) are simply hidden
+Camera and Recording, integrations, users and logs) are simply hidden
 for them rather than the whole screen being off-limits.
 
 **Changing someone’s role takes effect immediately** — on their very next action, on every device

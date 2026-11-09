@@ -4,6 +4,10 @@ Nightlight is made for your home network first: add your cameras, watch them fro
 
 ## Networking modes
 
+Bundled Tailscale 1.104.5 uses userspace networking and needs the container to have its own address through bridge, ipvlan or macvlan; host networking is refused. It opens separate automatic IPv4 and IPv6 UDP ports. Logged out, it opens only UDP; connected, it also opens one TCP listener on a random wildcard port that accepted no outside connection: a LAN connect scan of ports 1024-65535 found only port 4000 open (measured 2026-11-04). The network check ignores that daemon-owned socket by inode, still counts every other qualifying TCP listener on `127.0.0.1` or a wildcard, ignores Docker DNS on `127.0.0.11`, and cannot detect UDP-only loopback services in a shared namespace. No router port forward is needed for Tailscale because Tailscale's DERP relays can carry connections when a direct path is unavailable (a phone reaching a test server through a relay played live video on 2026-11-03; not yet re-tested with this image). HTTPS Serve answered 200 with a valid certificate without an approval link when the tailnet already had HTTPS enabled (measured 2026-11-04); after a node rename, enable HTTPS again because the Serve entry stays under the old name. Nightlight adds the vetted 100.x address to MediaMTX's WebRTC host list. Low latency viewing over the tailnet worked from a phone on cellular with the router's UDP forward closed, on one staging install and one phone: the MediaMTX log showed the remote candidate as `127.0.0.1`, which is how tailnet forwarding presents (measured 2026-11-04). Long sessions, relayed-only (DERP) paths and other devices are not yet tested. This is not a released feature.
+
+Signing in to Tailscale adds a WebRTC candidate on the next 15-second poll and briefly disconnects Low latency viewers once; cameras and recordings continue. Later address changes wait for zero Low latency viewers, or an admin can use **Apply now**. A failed update retries after 30 seconds, doubling to at most 10 minutes. These intervals are fixed. The tailnet candidate uses the same UDP port as the LAN candidate, without a router forward. A specific-host `MTX_WEBRTCLOCALUDPADDRESS` bind (including the hosted demo's) leaves no UDP listener on `127.0.0.1`, so the tailnet candidate cannot work with that bind.
+
 Nightlight needs its own routable IP on your LAN so WebRTC has no NAT/ICE trouble: MediaMTX advertises that IP to browsers. There are two supported ways to provide one:
 
 - **Host networking (the default, and the simplest).** The container shares the host's IP (`--network host`, or `<Network>host</Network>` in the Unraid template). There's nothing to configure; it's what the quick start and the template use. The trade-off is that it binds its ports (4000, plus MediaMTX's) directly on the host, which clashes if something else there already uses them.
@@ -18,9 +22,9 @@ Nightlight needs its own routable IP on your LAN so WebRTC has no NAT/ICE troubl
 | Host itself can reach the container | Yes (it *is* the host) | Yes | **No** (Linux kernel limitation); use ipvlan instead if a reverse proxy runs on the host |
 | Multiple instances on one host | Awkward: only one can hold port 4000 | Easy: each gets its own IP | Easy: each gets its own IP |
 
-For web and video, only the app port and WebRTC media UDP port are meant to be reachable; the media server's other listeners are off or loopback-only, except its known RTSP media UDP ports 8000/8001, which remain open pending hardening.
+For web and video, only the app port and WebRTC media UDP port are meant to be reachable. The media server's other listeners are off or bound to its internal loopback address (`127.0.0.2`); RTSP uses TCP only, with no UDP media ports.
 
-Either way, the app is served on port **4000** (change it with the `PORT` environment variable if you need to). For **remote / internet** access, see [Remote / internet access](remote-access.md#remote--internet-access-watching-from-outside-your-home-network); that part is the same in both modes.
+Either way, the app is served on port **4000** (change it with the `PORT` environment variable if you need to). The bundled Tailscale HTTPS Serve control requires port 4000. For **remote / internet** access, see [Remote / internet access](remote-access.md#remote--internet-access-watching-from-outside-your-home-network); that part is the same in both modes.
 
 ### Running more than one instance (e.g. staging + production)
 
@@ -35,11 +39,47 @@ Watching **both remotely in Low latency (WebRTC)** takes one extra step, because
 
 **Compatibility (HLS)** needs none of this. It's all HTTP over 443, so both instances work remotely with no extra port forwarding.
 
+## Finding your server automatically
+
+Nightlight announces itself on your home network (mDNS, the same way printers and smart speakers are found), so a phone can find it without anyone typing an address. The phone app's side of this is planned and not built yet; today the announcement is only visible to network-browsing tools. It is on by default.
+
+Whether a phone can hear it depends on how the container is networked:
+
+| How the container is networked | Can a phone find it? |
+|---|---|
+| Host networking (the default) | Yes, from the same network as the server |
+| Its own LAN address (ipvlan or macvlan) | Yes, from that network |
+| Docker's default bridge network | **No**: the announcement stays inside Docker. Enter the address instead |
+| Phone on a different VLAN or subnet | Only if your router passes mDNS between them (often called an mDNS reflector or repeater). Most home routers don't |
+
+These were measured on one Unraid server with a PC and a phone. Wi-Fi with client isolation, guest networks and some mesh systems may block it too. The server can't tell whether anyone can hear it, so its log says it is announcing either way. In testing, a PC took between 5 seconds and just over a minute to find it.
+
+Finding [cameras](cameras.md#finding-cameras) follows the same multicast rules in the other direction. Nightlight can browse mDNS and send ONVIF WS-Discovery probes only where that traffic reaches the cameras. Docker's default bridge does not expose LAN multicast; another VLAN needs a router that relays mDNS, while WS-Discovery usually stays on one network segment. Camera searches run only when an admin starts one (the setup guide starts one when its camera step opens).
+
+**`MDNS_ANNOUNCE`** turns it on or off. Default: on (unset or blank). `false`, `0`, `no` or `off`, in any case, turn it off, and then nothing listens on UDP port 5353 at all. Any other value leaves it on and logs a warning. It is read at start, so restart the container after changing it.
+
+**What is announced.** Anyone on your network can see:
+
+- the service type `_nightlight._tcp` and the port Nightlight listens on;
+- a random server id, made once and kept in the database, so a restored backup keeps it;
+- a name made from the start of that id, such as `Nightlight-1a2b3c4d`. The machine's own host name is not announced;
+- the IPv4 address of every network interface the container can see. With host networking that includes Docker's internal addresses; a phone is expected to try each one.
+
+The name a phone will show is your **App name** (Settings → General), which it reads from `/api/health`. Like the sign-in screen, that is visible without signing in, so don't use a child's name or your family name there. `/api/health` answers with the same id, the app name and `"ok": true`, and never the version.
+
+Known limits:
+
+- **Changed network interfaces need a restart.** The announcement keeps the addresses the server started with.
+- **Two servers started from one copy of the database share an id**, so only one of them is announced and the other logs a warning about 10 seconds after it starts. A way to give a copy its own identity is planned. Nothing relies on the id for security yet.
+- **If UDP port 5353 can't be used**, the server logs one warning and carries on. Everything else works, and you can always connect by address.
+
 ## Watching away from home
 
 Don't expose Nightlight directly to the public internet without understanding authentication, HTTPS and network restrictions. A VPN is often the simplest way to reach your home network securely.
 
 If you use a reverse proxy such as SWAG, use HTTPS and set `TRUST_PROXY` to the address your proxy connects from, for proxies you control only. The default, `loopback`, trusts only a proxy on the same host, so a proxy that reaches Nightlight by its LAN IP is not trusted until you set it. Details: [`TRUST_PROXY`](remote-access.md#trust_proxy--telling-nightlight-your-real-client-addresses).
+
+While a tunnel daemon is attached, Nightlight ignores forwarded addresses from loopback connections.
 
 To watch **low-latency** video away from home:
 
@@ -52,6 +92,8 @@ To watch **low-latency** video away from home:
 Low-latency video can still need a reachable UDP port even when the website itself loads fine through HTTPS. On iPhone and iPad, background audio works in low-latency mode only. More: [remote access](remote-access.md#remote--internet-access-watching-from-outside-your-home-network).
 
 ## What connects to the outside
+
+**Settings → Remote Access** itself contacts nothing outside your network; the server only looks up the host names you entered in `PUBLIC_HOST` through DNS. **Test from this device** makes the same connection as live video from your device to your Nightlight server, including contact with the configured STUN server when STUN is enabled. It does not use an external reachability service.
 
 **STUN.** By default the browser and MediaMTX use Google's `stun.l.google.com:19302` to work out a public address for WebRTC. Google can see public IP and connection-timing metadata; it does **not** relay your video (it isn't a TURN server). On your own network STUN isn't needed. Set `STUN_SERVERS` to an empty value to switch it off, or point it at a server you control. HLS compatibility playback never uses STUN.
 

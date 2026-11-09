@@ -26,10 +26,8 @@ import { lastCompletedNightDate } from '/app/src/lib/sleepAnalysis.js';
 // review kid's own story if they shared a night.
 //
 // ⚠️ WHAT THIS CANNOT SEED (2026-10-27). The review screen's "That's right" needs the live recompute to find a
-// wake, and that needs an ENABLED camera with activity samples for the child. A camera row would make the
-// first-run spec's "No cameras yet" fail (that spec runs after this seed and asserts an empty dashboard; a
-// disabled camera is not scored, so it cannot be a workaround). So every seeded night has no activity, the
-// screen opens on its time field, and the "That's right" button itself is covered by the unit tests
+// wake, and that needs an enabled camera with activity samples for the child. This fixture seeds
+// nights without camera activity, so the screen opens on its time field. The "That's right" button is covered by the unit tests
 // (frontend/test/MorningReview.test.jsx) while the e2e proves the same request body over the real wire.
 const CHILDREN = [
   { id: 'e2e-review-kid', name: 'Review Kid' },

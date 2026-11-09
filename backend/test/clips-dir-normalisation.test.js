@@ -18,10 +18,26 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROBE = path.join(here, 'helpers', 'clips-dir-probe.mjs');
-const { resolveClipsDir } = await import('../src/lib/clipRecorder.js');
 
 const tmpDirs = [];
 after(() => { for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true }); });
+
+test('importing clipRecorder for CLIPS_DIR does not open the database (#932)', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'nightlight-clips-import-'));
+  tmpDirs.push(base);
+  const dataFile = path.join(base, 'not-a-directory');
+  fs.writeFileSync(dataFile, 'x');
+  const previousDataDir = process.env.DATA_DIR;
+  try {
+    process.env.DATA_DIR = dataFile;
+    const recorder = await import('../src/lib/clipRecorder.js');
+    assert.equal(typeof recorder.CLIPS_DIR, 'string');
+    assert.equal(typeof recorder.resolveClipsDir, 'function');
+  } finally {
+    if (previousDataDir === undefined) delete process.env.DATA_DIR;
+    else process.env.DATA_DIR = previousDataDir;
+  }
+});
 
 // Run the probe with a given raw CLIPS_DIR. `makeValue(base)` receives a fresh temp dir and returns the
 // env value, so a case can spell the same directory with or without a trailing separator, or relative.
@@ -92,7 +108,8 @@ test('★ path traversal is still refused after normalisation, for every spellin
   }
 });
 
-test('resolveClipsDir: strips trailing separators, resolves relatives, defaults under the data dir', () => {
+test('resolveClipsDir: strips trailing separators, resolves relatives, defaults under the data dir', async () => {
+  const { resolveClipsDir } = await import('../src/lib/clipRecorder.js');
   const abs = path.resolve('some', 'recordings');
   assert.equal(resolveClipsDir(abs + path.sep, '/d'), abs);
   assert.equal(resolveClipsDir(abs + '/', '/d'), abs, '"/" is a separator on every platform');
@@ -107,14 +124,16 @@ test('resolveClipsDir: strips trailing separators, resolves relatives, defaults 
 // Regression (review of 0.36.0): the value used to be trim()med and the TRIMMED text used, so an existing
 // install whose CLIPS_DIR is a real Linux folder with a trailing space moved to a different (empty) folder on
 // upgrade. trim() may only decide "blank = unset"; a non-blank value goes to path.resolve untouched.
-test('resolveClipsDir keeps surrounding spaces of a non-blank value (a legal Linux folder name)', () => {
+test('resolveClipsDir keeps surrounding spaces of a non-blank value (a legal Linux folder name)', async () => {
+  const { resolveClipsDir } = await import('../src/lib/clipRecorder.js');
   assert.equal(resolveClipsDir('/data/clips ', '/d'), path.resolve('/data/clips '));
   assert.notEqual(resolveClipsDir('/data/clips ', '/d'), path.resolve('/data/clips'));
   assert.equal(resolveClipsDir(' /data/clips', '/d'), path.resolve(' /data/clips'), 'a leading space too');
   assert.equal(resolveClipsDir('/data/clips /', '/d'), path.resolve('/data/clips '),'a space before a trailing slash stays');
 });
 
-test('resolveClipsDir never returns a trailing separator (the property every guard relies on)', () => {
+test('resolveClipsDir never returns a trailing separator (the property every guard relies on)', async () => {
+  const { resolveClipsDir } = await import('../src/lib/clipRecorder.js');
   for (const raw of ['/a/b/', '/a/b//', '/a/b/.', '/a/b/../b/', 'rel/', undefined, '']) {
     const got = resolveClipsDir(raw, '/data');
     assert.equal(got, path.resolve(got), 'not a fixed point of path.resolve');

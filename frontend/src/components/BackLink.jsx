@@ -18,6 +18,7 @@ export default function BackLink({ fallback }) {
       className="app-header__back"
       onClick={() => navigate(from.to)}
       aria-label={`Back to ${from.label}`}
+      title={from.label}
     >
       <ChevronLeft size={22} aria-hidden="true" />
       <span>{from.label}</span>

@@ -8,6 +8,7 @@ import {
   getRecordingVideoFile,
   getRecordingThumbFile,
   deleteRecording,
+  setWakeClipProtected,
 } from '../lib/recordings.js';
 
 // On-demand ("Record" button) recordings. Kept out of the clip/alert routes for the same reason they
@@ -35,6 +36,12 @@ router.get('/:id/thumb', requireAuthQueryOrHeader, (req, res) => {
   serveMediaFile(req, res, joinPath(file.root, file.path), { contentType: 'image/jpeg', root: file.root });
 });
 
+router.put('/:id/protected', requireAuth, requireAdmin, (req, res) => {
+  if (typeof req.body?.protected !== 'boolean') return res.status(400).json({ error: 'protected must be a boolean' });
+  if (!setWakeClipProtected(req.params.id, req.body.protected)) return res.status(404).json({ error: 'No ready wake clip for this id' });
+  res.json({ protected: req.body.protected });
+});
+
 // Deleting a recording (a manual one or a wake clip) is admin-only (owner decision 2026-10-10, #552): a
 // caregiver can watch and act in the moment, which includes pressing Record, but not destroy, and a
 // manual recording has no automatic retention, so a delete is the only thing that ever removes it and
@@ -43,8 +50,10 @@ router.get('/:id/thumb', requireAuthQueryOrHeader, (req, res) => {
 // unpopulated req.user and refuse everyone, admins included, with a 403 where an anonymous caller should
 // get 401 (same note as timelapses.js).
 router.delete('/:id', requireAuth, requireAdmin, (req, res) => {
-  const row = db.prepare('SELECT id FROM recordings WHERE id = ?').get(req.params.id);
+  const row = db.prepare('SELECT id, protected FROM recordings WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No recording for this id' });
+  // #932: direct deletion needs an explicit unlock; child/camera purge still removes all owned data.
+  if (row.protected) return res.status(409).json({ error: 'This clip is protected. Unprotect it first.' });
   deleteRecording(req.params.id);
   res.json({ ok: true });
 });

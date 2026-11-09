@@ -8,27 +8,23 @@ logLevel: info
 # extra parameters) keeps this from growing unbounded.
 
 # --- RTSP input (FFmpeg publishes each camera's transcoded stream here) ---
-# Loopback only, like every other MediaMTX port - nothing external ever needs to reach
-# this. Without an explicit bind address, MediaMTX defaults to listening on all network
-# interfaces, and RTSP has no authentication of its own - left at the default, anyone on
-# the LAN could watch (or potentially publish to) a camera directly, bypassing the app's
-# login entirely.
-# KNOWN, tolerated for now: MediaMTX 1.21.3 also opens the RTSP UDP media ports 8000/8001 on all
-# interfaces whatever rtspAddress says (#952 tracks closing them). They carry no stream without an
-# RTSP session, which only the loopback listener above can create.
+# #952, measured 2026-11-03: the planned userspace tailnet forwards to 127.0.0.1 only.
+# Keep internal services on 127.0.0.2 so the backend can reach them without that forwarding.
+# TCP-only RTSP also closes MediaMTX's default UDP 8000/8001 and multicast listeners.
 rtsp: yes
-rtspAddress: 127.0.0.1:8554
+rtspTransports: [tcp]
+rtspAddress: 127.0.0.2:8554
 
 # --- API (used by the backend to register/remove RTSP camera sources) ---
 api: yes
-apiAddress: 127.0.0.1:9997
+apiAddress: 127.0.0.2:9997
 
 # --- WebRTC output (used by the browser to watch low-latency live video) ---
 webrtc: yes
-# Loopback only: the Node backend proxies this under /live (with login required),
+# Internal loopback: the Node backend proxies this under /live (with login required),
 # so browsers never need to reach this port directly. The actual audio/video (ICE/UDP)
 # is a separate mechanism and is unaffected by this — it still reaches the browser directly.
-webrtcAddress: 127.0.0.1:8889
+webrtcAddress: 127.0.0.2:8889
 
 # Static UDP port that carries the actual audio/video. For LAN-only use this needs no
 # extra setup. For internet access, forward THIS port (UDP) on your router to this
@@ -52,7 +48,7 @@ webrtcICEServers2: []
 # --- HLS output (pure HTTP/TCP - for remote viewing through the reverse proxy on
 # port 443 only, trading some latency for not needing any UDP port forwarded at all) ---
 hls: yes
-hlsAddress: 127.0.0.1:8888
+hlsAddress: 127.0.0.2:8888
 # mpegts, not lowLatency: this is MediaMTX's own "maximum compatibility" variant.
 # lowLatency (LL-HLS) has known player compatibility issues, including Safari
 # specifically requiring HTTPS to play it at all — the opposite of what

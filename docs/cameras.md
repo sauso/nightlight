@@ -4,7 +4,7 @@ Add and edit cameras from the **Cameras** tab (admin only). This page covers whi
 
 ## Managing cameras
 
-A camera's address is entered as separate fields: **IP address**, **RTSP port** (usually 554), **stream path** and the camera's **username / password**. Nightlight assembles the `rtsp://` URL itself, so the password never appears in a URL on screen.
+For a camera found on the network, enter its username and password; Nightlight finds the stream settings. For manual setup, enter the **IP address**, **RTSP port** (usually 554), **stream path** and camera login as separate fields. Nightlight assembles the `rtsp://` URL itself, so the password never appears in a URL on screen.
 
 ### Which cameras work
 
@@ -16,9 +16,30 @@ Nightlight works with **ONVIF / RTSP** cameras in general: video, audio and, on 
 
 ### Adding a camera
 
+On a new installation, the setup guide opens after the first admin signs in. Choose **Add your child**, then **Connect your camera**. Pick a camera found on your network or open **Add a camera manually**. The guide assigns the camera to the child you chose. You can leave the guide and return through **Settings → Setup & diagnostics** while setup is open; **Cameras → Add camera** uses the same cards.
+
+### Finding cameras
+
+The setup guide starts a search when you reach its camera step. From **Cameras → Add camera**, press **Find cameras on my network**. Nightlight shows a card for each Thingino camera advertising `_thingino._tcp` over mDNS or ONVIF camera responding to WS-Discovery. Results can appear throughout the 30-second search. Each card shows the camera name and address; a camera already saved has a greyed **Already added** card that cannot be selected. Only an admin can start a search.
+
+Pick a camera card to edit its name and enter its username and password. Nightlight asks you to choose a child only when several are available and the setup guide has not already selected one. Press **Add camera** to let Nightlight find the stream settings over ONVIF and test the stream before saving. A wrong login shows the camera's message; repeated wrong attempts can temporarily lock some cameras out. If the camera does not answer the ONVIF request, open **Advanced settings** or **Enter the stream details yourself** to enter its address and stream path. The separate **Add a camera manually** card is always below the found cameras. A camera that does not advertise either service may still be added there.
+
+| Nightlight's network connection | Can discovery find cameras? |
+| --- | --- |
+| Host networking, same network segment | Usually, if the camera advertises either service |
+| A container with its own LAN address, same segment | Usually, if multicast reaches it |
+| Docker's default bridge | No: multicast stays inside Docker |
+| Camera on another VLAN | WS-Discovery usually cannot cross. Thingino mDNS may work if the router relays mDNS |
+
+Cameras that do not advertise either service will not appear; add them manually. The advertised Thingino service types were read from firmware source and measured on one LAN with four cameras. Other firmware versions are untested. In that measurement, results varied by up to about 35 seconds; a search may miss a late camera, so search again or enter its address manually. See [networking](networking.md#finding-your-server-automatically) for the same multicast limits when finding Nightlight itself.
+
 - **Via ONVIF (easiest):** type the camera's IP and press **Fetch port & path from ONVIF**. Nightlight queries the camera and fills in the port and stream path for you, and detects whether it supports pan/tilt and two-way audio. It looks the camera up at the IP you typed; it doesn't scan your network for cameras. Most cameras answer without a login. If yours needs one, fill in the username and password before you fetch, and keep them entered when you Save.
 - **Manually:** type the IP, port, path and login yourself (see the camera's manual for its RTSP path, for example `/stream1`).
 - On **Save**, Nightlight briefly tests the stream first and won't store a camera it can't reach (wrong login, path or IP). It tells you why. If the camera just happens to be offline right then, you can choose **Save anyway**.
+
+### Picture check
+
+In **Test your monitor**, choose **Run picture check**. Nightlight waits for successive video frames to be presented in the signed-in admin's own browser. A connection or playlist by itself does not pass the check. This is a report from that browser, not a measurement made by the server. It does not prove the picture will keep working on another device or later. Once the picture is confirmed, the check stays valid for ten minutes. An unconfirmed check expires ten minutes after it starts. If the check cannot pass, you can continue with limited setup and try it again from **Settings → Setup & diagnostics**. After full completion, use **About → Setup status and picture check** instead. A server restart clears a passed check until you run it again.
 
 ### What you see on a camera
 

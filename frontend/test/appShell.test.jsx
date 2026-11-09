@@ -59,6 +59,7 @@ beforeEach(() => {
   vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
   vi.spyOn(nativeBridge, 'hasActiveBackgroundAudio').mockReturnValue(false);
   vi.spyOn(push, 'initPushNotifications').mockResolvedValue(undefined);
+  vi.spyOn(nativeBridge, 'syncTailscaleEndpoint').mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -124,6 +125,47 @@ describe('booting the app', () => {
     mockApi(ADMIN);
     await boot('/');
     await waitFor(() => expect(push.initPushNotifications).toHaveBeenCalled());
+  });
+
+  test('the phone app is told the server\'s Tailscale address once signed in, and not before', async () => {
+    mockApi(null);
+    await boot('/');
+    expect(nativeBridge.syncTailscaleEndpoint).not.toHaveBeenCalled();
+
+    setToken('a-token');
+    mockApi(ADMIN);
+    await boot('/');
+    await waitFor(() => expect(nativeBridge.syncTailscaleEndpoint).toHaveBeenCalled());
+  });
+});
+
+describe('one sign-in across the Android app\'s two addresses', () => {
+  test('★ the sign-in is saved in the app AFTER the Tailscale address has been learned, with the token the server confirmed', async () => {
+    const order = [];
+    // The sync is held until the test lets it finish, so "saved before the sync RESOLVED" is observable. (A spy that only noted it
+    // was CALLED passed for `void sync(); void save()`, which saves a first sign-in before the address is known: Opus review.)
+    let finishSync;
+    vi.spyOn(nativeBridge, 'syncTailscaleEndpoint').mockImplementation(() => new Promise((resolve) => {
+      order.push('sync started');
+      finishSync = () => { order.push('sync done'); resolve(null); };
+    }));
+    vi.spyOn(nativeBridge, 'saveNativeSession').mockImplementation(async () => { order.push('save'); return true; });
+    setToken('a-token');
+    mockApi(ADMIN);
+    await boot('/');
+    await waitFor(() => expect(order).toEqual(['sync started']));
+    await new Promise((resolve) => setTimeout(resolve, 50)); // time for a wrongly early save to happen
+    expect(order, 'nothing is saved while the sync is still out').toEqual(['sync started']);
+    finishSync();
+    await waitFor(() => expect(nativeBridge.saveNativeSession).toHaveBeenCalledWith('a-token'));
+    expect(order).toEqual(['sync started', 'sync done', 'save']);
+  });
+
+  test('nothing is saved while nobody is signed in', async () => {
+    vi.spyOn(nativeBridge, 'saveNativeSession').mockResolvedValue(true);
+    mockApi(null);
+    await boot('/');
+    expect(nativeBridge.saveNativeSession).not.toHaveBeenCalled();
   });
 });
 
@@ -296,9 +338,13 @@ describe('the route table', () => {
   test('each settings sub-route lands on its own screen', async () => {
     for (const [route, heading] of [
       ['/settings', 'Settings'],
+      ['/settings/camera-recording', 'Camera and Recording'],
       ['/settings/camera', 'Camera controls'],
+      ['/settings/recording', 'Recording'],
+      ['/settings/clips', 'Clip Management'],
       ['/settings/integrations', 'Integrations'],
       ['/settings/integrations/mqtt', 'MQTT'],
+      ['/settings/remote-access', 'Remote Access'],
       ['/settings/integrations/esphome', 'ESPHome'],
       ['/settings/integrations/notifications', 'Push notifications'],
       ['/settings/logs', 'Logs'],
@@ -389,6 +435,7 @@ describe('the route table', () => {
       ['/children', 'Children'],
       ['/cameras', 'Cameras'],
       ['/settings/integrations/mqtt', 'MQTT'],
+      ['/settings/remote-access', 'Remote Access'],
       ['/family', 'Children'], // retired, redirects: must still redirect, not fall through to `*`
     ]) {
       const { unmount } = await openAt(route);
@@ -409,9 +456,11 @@ describe('the route table', () => {
   });
 
   test.each([
+    ['/settings/camera-recording', 'Camera and Recording'],
     ['/settings/integrations', 'Integrations'],
     ['/settings/integrations/mqtt', 'MQTT'],
     ['/settings/integrations/esphome', 'ESPHome'],
+    ['/settings/remote-access', 'Remote Access'],
   ])('admin-only %s sends a CAREGIVER home without showing it', async (route, heading) => {
     setToken('a-token');
     mockApi(CAREGIVER);
@@ -432,6 +481,7 @@ describe('the route table', () => {
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByText('About')).toBeInTheDocument();
     expect(screen.queryByText('MQTT')).not.toBeInTheDocument();
+    expect(screen.queryByText('Remote Access')).not.toBeInTheDocument();
   });
 });
 

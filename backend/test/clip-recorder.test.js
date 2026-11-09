@@ -26,6 +26,7 @@ process.env.PATH = emptyBinDir;
 useTempDataDir();
 
 const { default: db } = await import('../src/db.js');
+const ev = await import('../src/lib/detectionEvents.js');
 const {
   CLIPS_DIR, startSegmenter, stopSegmenter, stopAllSegmenters, isSegmenterRunning,
   holdRing, releaseRing, extractClip, probeClip, ringOldestStartMs, ringHasFootageFor,
@@ -257,6 +258,26 @@ describe('★ the janitor prunes the ring, and a hold stops it', () => {
 // --- extraction refusals ----------------------------------------------------------------------------
 
 describe('extractClip refuses before it spawns anything', () => {
+  test('a clip protected during the settle wait is never overwritten', async () => {
+    startSegmenter(CAM, 'somepath');
+    segment('seg-20260101-000010.mkv', 3000);
+    const id = ev.recordDetectionEvent(CAM, 'Test camera', ev.ALERT.MOTION);
+    const rel = path.join(CAM, `${id}.mp4`);
+    const file = path.join(path.resolve(CLIPS_DIR), rel);
+    const thumb = file.replace(/\.mp4$/, '.jpg');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'original clip');
+    fs.writeFileSync(thumb, 'original thumb');
+    ev.setClipReady(id, rel, 5, 13);
+    let locked = false;
+    const extraction = extractClip(CAM, { at: Date.now() - 4000, outBase: String(id), settleMs: 0, isOutputProtected: () => locked });
+    // The first guard has run synchronously; this change lands during the settle await.
+    queueMicrotask(() => { locked = true; });
+    await assert.rejects(extraction, /protected clip output/);
+    assert.equal(fs.readFileSync(file, 'utf8'), 'original clip');
+    assert.equal(fs.readFileSync(thumb, 'utf8'), 'original thumb');
+    assert.equal(db.prepare('SELECT clip_status FROM detection_events WHERE id = ?').get(id).clip_status, 'ready');
+  });
   test('★ no segmenter for the camera', async () => {
     await assert.rejects(() => extractClip(CAM, { settleMs: 0 }), /no segmenter running/);
   });

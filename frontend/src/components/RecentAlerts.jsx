@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useHomeTime } from '../lib/useHomeTime.js';
 import Modal from './Modal.jsx';
+import { ProtectedBadge } from './ClipProtection.jsx';
 
 // Detection alerts (motion now, sound later) — see backend lib/detectionEvents.js ALERT.
 const TYPE_META = {
@@ -34,6 +35,7 @@ export default function RecentAlerts() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [confirming, setConfirming] = useState(false);
   const [clearBusy, setClearBusy] = useState(false);
+  const [clearNote, setClearNote] = useState('');
 
   async function load() {
     try {
@@ -61,6 +63,7 @@ export default function RecentAlerts() {
       await api.del('/cameras/alerts');
       setConfirming(false);
       await load();
+      setClearNote('Recent alerts cleared. Protected alerts are kept.');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -84,7 +87,7 @@ export default function RecentAlerts() {
       {confirming && (
         <Modal title="Clear recent alerts" placement="top" onClose={() => (clearBusy ? null : setConfirming(false))}>
           <p style={{ marginTop: 0 }}>
-            Clear all recent alerts? This permanently deletes the alert history and can't be undone.
+            Clear all recent alerts? This permanently deletes unprotected alert history and can't be undone. Protected alerts are kept.
           </p>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button className="btn" type="button" onClick={() => setConfirming(false)} disabled={clearBusy}>
@@ -98,6 +101,7 @@ export default function RecentAlerts() {
       )}
 
       {error && <div className="error-banner">{error}</div>}
+      {clearNote && !error && <div className="camera-tile__sub" role="status">{clearNote}</div>}
 
       {loaded && alerts.length === 0 && !error ? (
         <div className="event-log__empty">
@@ -116,6 +120,7 @@ export default function RecentAlerts() {
                   <div className="event-log__line">
                     <span className="event-log__camera">{ev.camera_name}</span>
                     <span className="event-log__type">{meta.label}</span>
+                    {!!ev.protected && <ProtectedBadge />}
                   </div>
                   {ev.detail && <div className="event-log__detail">{ev.detail}</div>}
                 </div>
@@ -129,7 +134,7 @@ export default function RecentAlerts() {
       )}
 
       <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-        Movement detected on your cameras (kept for up to 30 days). Enable and tune motion
+        Movement detected on your cameras (kept for up to 30 days unless protected). Enable and tune motion
         detection per camera in Cameras → edit.
       </div>
     </div>

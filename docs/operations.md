@@ -180,7 +180,7 @@ start whatever you do, so the database and secrets stay owner-only.
 ### Health check
 
 The image defines a Docker `HEALTHCHECK`: every 30 seconds it requests `GET /api/health` (no login
-needed; it answers `{"ok":true}`) on the port the app listens on (`PORT`, default 4000), with a
+needed; the check looks only at the status, and the reply starts `{"ok":true`) on the port the app listens on (`PORT`, default 4000), with a
 5 second timeout. After 3 failures in a row the container is marked **unhealthy**; failures during
 the first **120 seconds** after start do not count, because MediaMTX and the detectors start slowly.
 `docker ps`, `docker inspect` and Unraid's Docker tab show it.
@@ -363,7 +363,9 @@ at `private/backup-*.db` (and run it as root).
 After upgrading:
 
 1. Check `docker logs nightlight` for a clean startup with no error lines.
-2. `curl http://<host>:4000/api/health` should return `{"ok":true}`.
+2. `curl http://<host>:4000/api/health` should return `{"ok":true,"app":"nightlight","id":"…","name":"…"}`:
+   the server's random id and your app name ([why](networking.md#finding-your-server-automatically)). Older
+   versions return `{"ok":true}` alone, which is also healthy.
 3. Open the app and confirm at least one camera is streaming.
 
 ## 6. Rolling back
@@ -588,16 +590,16 @@ add it as a variable on the container: it is deliberately not in the template.
 **What it does.** FFmpeg, ffprobe and MediaMTX read video from your cameras, so they handle data that the camera (or
 whoever has taken over the camera) controls. With isolation on, they run as a separate user inside the container (id
 `1700`, with no extra privileges), so a fault in one of them cannot read the database or the secrets. Off, they run as
-the same user as the app, which is how Nightlight worked before. **Settings → About** shows one line, "Media
-isolation: on" or "off", for what this start decided; `GET /api/about` reports it as `mediaIsolation`.
+the same user as the app, which is how Nightlight worked before. **Settings → Logs** (admins only) shows one line under **Server**, "Media
+isolation: On" or "Off", for what this start decided; `GET /api/about` reports it as `mediaIsolation`.
 
 **When About warns you.** "Off" has four different causes, and two of them are worth a warning. `GET /api/about`
 reports which as `mediaIsolationReason` (`null` when isolation is on), with a fixed sentence in `mediaIsolationDetail`
 when there is something to fix:
 
-- `disabled`: you turned it off with `NIGHTLIGHT_MEDIA_ISOLATION`. That is your choice, so About shows only the quiet
-  line.
-- `root`: `PUID=0`. Isolation stays off by design when the app runs as root, so About shows only the quiet line.
+- `disabled`: you turned it off with `NIGHTLIGHT_MEDIA_ISOLATION`. That is your choice, so there is no warning, only the
+  quiet line under Settings → Logs → Server.
+- `root`: `PUID=0`. Isolation stays off by design when the app runs as root, so there is no warning, only the quiet line under Settings → Logs → Server.
 - `id-clash`: `PUID` or `PGID` is `1700`, the media user's own id. You can fix this, so **admins see a warning at the
   top of About** telling them to change it to another number and re-create the container.
 - `fallback`: isolation was on (the default) but the host could not provide it. **Admins see a warning at the top of
@@ -698,7 +700,7 @@ make the container a sandbox, and it does not stop everything:
   at a compromised app.
 - **All the media programs share one user.** One taken-over FFmpeg can signal or inspect the others, MediaMTX and
   other cameras' FFmpeg included.
-- **MediaMTX's control API (`127.0.0.1:9997`) and its RTSP port (`127.0.0.1:8554`) have no password.** A taken-over
+- **MediaMTX's control API (`127.0.0.2:9997`) and its RTSP port (`127.0.0.2:8554`) have no password.** A taken-over
   media program can add, change or remove stream paths, and read or publish a camera's stream. It cannot get a camera's
   address or password from them: MediaMTX is never told them (FFmpeg connects to the camera itself). A password on the
   API would not help while all the media programs share one user, which can already signal or inspect MediaMTX. The
@@ -747,7 +749,7 @@ browser you happen to be using.
   stays put sees no change. Clock format (12 or 24 hour) and date order follow the device's own language
   settings, not the timezone.
 - **Where it applies:** the alert and camera-history lists (the exact time is in the tooltip on each row
-  and in the clip player), **Clip Management** (clips are grouped under their home-time **day**, and the
+  and in the clip player), **Settings → Camera and Recording → Clip management** (clips are grouped under their home-time **day**, and the
   date filter and its "today" use home days, so two people never see the same clip on different days),
   the **Recordings** card, a camera tile's **silenced until** time, and the nightly timelapse dates (a
   night is a calendar date worked out in home time, so it never shifts).

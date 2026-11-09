@@ -4,6 +4,10 @@ Start with `docker logs -f nightlight` and [known issues](../KNOWN-ISSUES.md). F
 
 ## Video and playback
 
+### The camera connected but there is no picture
+
+During setup, open **Settings → Setup & diagnostics**, then choose **Run picture check** and watch the camera tile. After full setup is complete, an admin opens it from **About → Setup status and picture check**. A connected camera or a loaded playlist does not mean video frames reached this browser. Check the stream path and login under **Cameras**, then try again. If this browser still shows no picture, try the tile's Compatibility mode or another browser or device. During unfinished setup, you can use **Continue with limited setup** and return to the check later. The check only reports frames shown in the admin's browser; it does not test the server's decoder or other devices.
+
 ### Page loads but video doesn't
 
 If video won't connect from a phone but the pages load fine, confirm the device is on the same
@@ -25,7 +29,10 @@ but if it persists, power-cycle or update that camera's firmware. See
 The app could not get an answer from the server (it is restarting, off, or this device is not on
 the home network), so it does not know whether you are signed in and does not ask for a password
 that could not be checked anyway. Confirm the server is running and the phone is on a network that
-can reach it.
+can reach it. If you opened Nightlight at its Tailscale address (ending in `.ts.net`), the screen says to
+check that Tailscale is switched on for the device instead: switching it off on a phone is the usual cause.
+That wording only appears once Nightlight's own page has loaded. If the phone's browser or the app shows
+its own timeout message first, the same cause applies.
 
 It retries by itself (after 5 seconds, then 10, 20, and every 30 seconds from then on), and you
 can press **Try again** at any time. Once the server answers, you land in the app or on the sign-in
@@ -67,7 +74,7 @@ native apps, not the browser/PWA; see [Mobile apps](mobile.md#mobile-apps-androi
 For advanced MediaMTX path diagnostics, check its API from inside the container. It is loopback-only, so a browser cannot reach it directly:
 
 ```bash
-docker exec nightlight wget -qO- http://127.0.0.1:9997/v3/paths/list
+docker exec nightlight wget -qO- http://127.0.0.2:9997/v3/paths/list
 ```
 
 An empty `"items":[]` list when cameras are configured in the app can mean MediaMTX and the app's

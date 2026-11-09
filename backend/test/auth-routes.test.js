@@ -468,6 +468,15 @@ describe('POST /setup — only before there is an account', () => {
     assert.notEqual(row.password_hash, 'a-long-enough-password', 'the password was stored in plain text');
     assert.ok(bcrypt.compareSync('a-long-enough-password', row.password_hash), 'the stored hash does not verify');
     assert.ok(db.prepare('SELECT * FROM sessions WHERE id = ?').get(jwt.decode(res.body.token).sid));
+    // WHY #941: creating the first admin must not silently mark a fresh wizard completed.
+    assert.equal(db.prepare("SELECT status FROM setup_state WHERE id = 'app'").get().status, 'not_started');
+    const { default: setupRouter } = await import('../src/routes/setup.js');
+    const setupServer = await mountRouter('/api/setup', setupRouter);
+    try {
+      const handoff = await call(`${setupServer.url}/api/setup`, { token: res.body.token });
+      assert.equal(handoff.status, 200);
+      assert.equal(handoff.body.status, 'not_started');
+    } finally { await setupServer.close(); }
   });
 
   test('a short password is refused', async () => {

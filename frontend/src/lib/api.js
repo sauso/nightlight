@@ -88,7 +88,7 @@ export const SLOW_REQUEST_TIMEOUT_MS = 90000;
 // streams (the ESPHome CSV export). It is an option on THIS function, not a second fetch helper, so the Bearer
 // header, the timeout, the late-answer guard and the 401 sign-out are the one copy of that code. An error answer
 // is still read as JSON, so a refusal ({ "error": "..." }) reads exactly as it does on every other call.
-async function request(method, url, body, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, as } = {}) {
+async function request(method, url, body, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, as, signal } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -97,6 +97,9 @@ async function request(method, url, body, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_
   // connection for the browser's per-origin pool) and rejects a race - the race is what guarantees
   // the caller is released even if the fetch implementation ignores the signal.
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
   let timer;
   const timedOut = new Promise((_, reject) => {
     timer = setTimeout(() => {
@@ -116,6 +119,7 @@ async function request(method, url, body, { timeoutMs = DEFAULT_REQUEST_TIMEOUT_
     return await Promise.race([timedOut, exchange(method, url, body, headers, controller.signal, as)]);
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
   }
 }
 
@@ -140,13 +144,24 @@ async function exchange(method, url, body, headers, signal, as) {
   }
 
   if (res.status === 401) {
-    setToken(null);
-    window.location.hash = '#/login';
-    // After the token is cleared, so a listener sees the signed-out state. Behind the `signal.aborted`
-    // check above on purpose: a request that already timed out must not sign anyone out (#562 keeps that).
-    // Over a copy, so who is called is fixed when the 401 arrives: a listener registered by another listener
-    // during this loop (a re-render subscribing again) waits for the next 401 instead of running now.
-    for (const listener of [...unauthorizedListeners]) listener();
+    // The token THIS request carried (null for a request that carried none: a wrong password or MFA code on the sign-in form is
+    // a 401 too). The listeners get it so the Android app can drop its saved copy of exactly that token and no other: a 401 for a
+    // request with no token, or for an old token, must not wipe a newer saved sign-in (review of the one-sign-in plan).
+    const rejected = headers.Authorization ? headers.Authorization.slice('Bearer '.length) : null;
+    // A refusal of a token that is no longer THE token (the person signed in again, with another token, while this request was out)
+    // is about a session that has already been replaced: it must not sign out the newer sign-in (Codex review of the one-sign-in
+    // work; before this a request sent with token A could end sign-in B). A request that carried NO token (a wrong password) still
+    // takes the path below, exactly as before.
+    const replaced = rejected !== null && getToken() !== rejected;
+    if (!replaced) {
+      setToken(null);
+      window.location.hash = '#/login';
+      // After the token is cleared, so a listener sees the signed-out state. Behind the `signal.aborted`
+      // check above on purpose: a request that already timed out must not sign anyone out (#562 keeps that).
+      // Over a copy, so who is called is fixed when the 401 arrives: a listener registered by another listener
+      // during this loop (a re-render subscribing again) waits for the next 401 instead of running now.
+      for (const listener of [...unauthorizedListeners]) listener(rejected);
+    }
   }
 
   let data = null;
@@ -183,6 +198,7 @@ export const api = {
   // A GET whose successful answer is a file, as text (see `as` on request). Slow by default: a long export streams.
   getText: (url, opts) => request('GET', url, undefined, { timeoutMs: SLOW_REQUEST_TIMEOUT_MS, ...opts, as: 'text' }),
   post: (url, body, opts) => request('POST', url, body, opts),
+  patch: (url, body, opts) => request('PATCH', url, body, opts),
   put: (url, body, opts) => request('PUT', url, body, opts),
   del: (url, opts) => request('DELETE', url, undefined, opts),
   // Absolute, token-carrying URL for media the browser fetches itself (<img>/<video>,

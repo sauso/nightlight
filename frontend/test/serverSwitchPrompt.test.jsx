@@ -15,7 +15,7 @@ import ServerSwitchPrompt from '../src/components/ServerSwitchPrompt.jsx';
 import App from '../src/App.jsx';
 import { api, setToken } from '../src/lib/api.js';
 import * as push from '../src/lib/pushNotifications.js';
-import { SERVER_REQUEST_EVENT, dismissServerSwitchPrompt, getServerSwitchPrompt } from '../src/lib/nativeBridge.js';
+import { SERVER_REQUEST_EVENT, dismissServerSwitchPrompt, getServerSwitchPrompt, syncTailscaleEndpoint } from '../src/lib/nativeBridge.js';
 
 const GOOD = 'https://good.example';
 
@@ -112,7 +112,10 @@ describe('★ #559 an unsaved server: refuse', () => {
     // The header's ✕ (the Modal's own close) and OK: nothing else.
     const names = within(dialog).getAllByRole('button').map((b) => b.getAttribute('aria-label') || b.textContent);
     expect(names.sort()).toEqual(['Close', 'OK']);
-    expect(within(dialog).getByRole('button', { name: 'OK' })).toHaveFocus();
+    // A notice that opens by itself focuses the DIALOG, not OK: script focus on a button nobody tapped draws the keyboard focus ring
+    // on it (owner, 2026-11-06). Tab still reaches the buttons, and the ring belongs there.
+    expect(dialog).toHaveFocus();
+    expect(within(dialog).getByRole('button', { name: 'OK' })).not.toHaveFocus();
 
     await userEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -169,5 +172,32 @@ describe('★ #559 mounted outside the sign-in gate', () => {
     render(<HashRouter><App /></HashRouter>);
     expect(await screen.findByRole('dialog', { name: 'Switch server?' })).toBeInTheDocument();
     expect(document.querySelector('.app-shell, .login-page, form')).toBeNull();
+  });
+});
+
+// The message the person sees the first time the phone saves the server's Tailscale address (owner, 2026-11-06). Whether it
+// appears, and when not, is pinned in test/lib/tailscaleEndpoint.test.js; this pins what it says and that closing it changes
+// nothing.
+describe('★ the Tailscale address notice', () => {
+  afterEach(() => setToken(null));
+
+  test('★ says what the phone will do and what it needs, and OK closes it without switching anything', async () => {
+    setToken('a-token');
+    globalThis.fetch.mockImplementation(async () => ({ status: 200, ok: true, text: async () => JSON.stringify({ url: 'https://n.example.ts.net' }) }));
+    const SC = stubNative();
+    SC.addEndpoint = vi.fn().mockResolvedValue({ added: true });
+    SC.removeEndpoint = vi.fn();
+    render(<ServerSwitchPrompt />);
+    await act(async () => { await syncTailscaleEndpoint(); });
+
+    const dialog = await screen.findByRole('dialog', { name: 'Away from home' });
+    expect(dialog.textContent).toMatch(/Tailscale address/);
+    expect(dialog.textContent).toMatch(/Tailscale app on this phone/);
+    expect(dialog, 'opens by itself: focus on the dialog, so OK shows no ring nobody asked for').toHaveFocus();
+    expect(within(dialog).queryByRole('button', { name: 'Switch' })).toBeNull();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'OK' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(SC.save).not.toHaveBeenCalled();
+    expect(SC.restart).not.toHaveBeenCalled();
   });
 });

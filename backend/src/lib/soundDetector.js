@@ -1,7 +1,7 @@
 import { spawnChild } from './childEnv.js';
 import { logger } from './logger.js';
 import { forwardProcessLines } from './processOutput.js';
-import { getPathStatus } from './mediamtx.js';
+import { getPathStatus, mediamtxRtspUrl } from './mediamtx.js';
 import { inActiveWindow } from './detectSchedule.js';
 import { shouldHold } from './alertHold.js';
 import { fireDetectionAlert } from './detectionAlert.js';
@@ -20,7 +20,7 @@ import { openObservation } from './observationClock.js';
 // white-noise machine / fan is learned continuously (not a one-time boot calibration).
 // An alert fires when loudness stays a sensitivity-controlled margin ABOVE that ambient for
 // sound_confirm_s, rate-limited by sound_cooldown_s and gated by the same quiet-hours schedule as
-// motion. Never touches the WebRTC/HLS pipeline — a separate, tiny reader off 127.0.0.1:8554.
+// motion. Never touches the WebRTC/HLS pipeline — a separate, tiny reader off 127.0.0.2:8554.
 //
 // This file is now only the PLUMBING — ffmpeg lifecycle, restart/back-off, logging. Everything that
 // decides what the ambient floor is and when to alert lives in soundBaseline.js, which is pure and
@@ -149,7 +149,7 @@ export async function startSoundDetector(camera) {
       // drops everything under ERROR again. See ffmpegSideChannel.js.
       ...SIDE_CHANNEL_LOG_ARGS,
       '-rtsp_transport', 'tcp',
-      '-i', `rtsp://127.0.0.1:8554/${path}`,
+      '-i', mediamtxRtspUrl(path),
       '-vn',
       '-af', TAPS.filter,
       '-ac', '1', // mono

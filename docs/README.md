@@ -10,14 +10,19 @@ New here? Start with the [main README](../README.md), then choose the guide that
 - [Cameras and caregivers](cameras.md) — add cameras and share access
 - [Adding caregivers](caregivers.md) — what caregivers and admins can each do, and how long a sign-in lasts (`SESSION_TTL_DAYS`)
 - [Networking and remote access](networking.md) — LAN options, WebRTC, STUN, HTTPS and privacy
-- [Reverse proxy and remote access](remote-access.md) — SWAG, `TRUST_PROXY`, `STUN_SERVERS`, `CLOUDFLARE_ANALYTICS`, watching away from home
+- [Watch from anywhere](remote-access.md) — Tailscale, SWAG, `TRUST_PROXY`, `STUN_SERVERS`, `CLOUDFLARE_ANALYTICS`, Settings → Remote Access, watching away from home
 - [Troubleshooting](troubleshooting.md) — common problems and first checks
 - [Known issues](../KNOWN-ISSUES.md) — documented limitations and workarounds
 
 ## Everyday features
 
+The Live page header button flips between light and dark. On every other page, change the theme
+under Account → Appearance, where System follows your device again.
+On About, **Got an idea?** opens a GitHub issue; you need a GitHub account. The idea form appears
+after the next release to `main`; until then, the link opens a plain new issue.
+
 - [Visual walkthrough](#visual-walkthrough) — setup, live view, sleep, alerts, notifications and a caregiver's view
-- [Camera controls](camera-controls.md) — PTZ and offline alerts
+- [Camera controls](camera-controls.md) — PTZ and offline alerts under Settings → Camera and Recording
 - [Sleep tracking](sleep-tracking.md) — how nights are estimated, corrected and reviewed, and its known limits
 - [Recording](recording.md) — clips, wake events, manual recordings and retention
 - [Your home screen and the mobile apps](mobile.md) — install as an app, Android and iOS, push on the apps
@@ -42,13 +47,13 @@ A short tour of Nightlight with a made-up household: two children, Avery and Ril
 
 ### 1. Create the admin account
 
-The first time you open Nightlight it asks you to create the admin account. This is the only time you see this screen.
+The first time you open Nightlight, a welcome screen lists the setup steps. The first step creates the admin account, shown here as step 1 of 7. This is the only time you see these screens.
 
 ![First-run setup on a phone](screenshots/setup-mobile.png)
 
 ### 2. Watch live
 
-The Live tab shows every camera. On a wide screen the navigation moves from the bottom of the screen to a side bar on the left.
+The Live tab shows every camera. On a wide screen the navigation moves from the bottom of the screen to a side bar on the left. The phone image was captured without a picture, so its tiles say "No signal"; a camera that is working shows its video there, as in the desktop image.
 
 ![Live view on a phone](screenshots/live-mobile.png)
 
@@ -82,7 +87,7 @@ Motion and sound alerts are listed on the child's page, each with a snapshot fro
 
 ### 7. Add a camera
 
-Enter the camera's address and stream details, or use the ONVIF button to fill them in. This form holds example values and was not saved. See [Cameras and caregivers](cameras.md).
+**Find cameras on my network** searches for cameras and offers each one it finds. To add a camera by hand, open **Add a camera manually**, enter its address and stream details, or use the ONVIF button to fill them in. This form holds example values and was not saved. See [Cameras and caregivers](cameras.md).
 
 ![Add camera on a phone](screenshots/add-camera-mobile.png)
 

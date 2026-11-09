@@ -152,10 +152,10 @@ describe('#562 viewport browser: the two locking tokens go, nothing else changes
     expect(applyViewportPolicy(none, false, false)).toBe(false);
     expect(none.head.querySelectorAll('meta')).toHaveLength(0);
     // Hostile: another meta whose content LOOKS like a locked viewport.
-    const doc = docWith(['description', SHIPPED], ['viewport', SHIPPED], ['theme-color', '#12172B']);
+    const doc = docWith(['description', SHIPPED], ['viewport', SHIPPED], ['theme-color', '#14142A']);
     applyViewportPolicy(doc, false, false);
     expect(doc.querySelector('meta[name="description"]').getAttribute('content')).toBe(SHIPPED);
-    expect(doc.querySelector('meta[name="theme-color"]').getAttribute('content')).toBe('#12172B');
+    expect(doc.querySelector('meta[name="theme-color"]').getAttribute('content')).toBe('#14142A');
     expect(viewportOf(doc)).toEqual([RELAXED]);
     // A viewport meta with no content attribute gains none.
     const bare = docWith(['viewport']);

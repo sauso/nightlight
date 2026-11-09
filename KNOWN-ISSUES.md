@@ -172,7 +172,7 @@ could disconnect a stream that was still working.
 **What to do:** check the streaming server from inside the container (the same check as in the
 the [troubleshooting guide](docs/troubleshooting.md)):
 ```bash
-docker exec nightlight wget -qO- http://127.0.0.1:9997/v3/paths/list
+docker exec nightlight wget -qO- http://127.0.0.2:9997/v3/paths/list
 ```
 If that hangs too, MediaMTX is wedged. Since issue #479 Nightlight restarts it for you: every 30 seconds
 it asks MediaMTX's API one question, and when **nothing** has answered for **3 minutes in a row** it stops
@@ -1177,7 +1177,7 @@ alert cannot fire sooner than **Motion cooldown** after it, whatever happened to
   longer re-arms an alert (it did, before).
 - **An alert that was silenced** (outside the alert schedule, or by snoozing the camera) does not start a
   cooldown, so one can fire as soon as the schedule opens or the snooze ends (unchanged).
-- **Hold alerts until asleep (#919):** held live motion and sound alerts are dropped, not queued, and the hold does not stamp their cooldown. A restart resets both the watcher's quiet count and the 45-minute clock, allowing up to another 45 minutes of holding. A camera reassigned between two tracked children while both windows are open can retain its asleep latch and let the new child's alerts through early. `alerting_now` still reports true during a hold because it only reads snooze and the Alert schedule. The 45-minute cap is a design choice, not measured; a child who cries without settling can be alerted only after it. Demo sample events bypass the live alert path.
+- **Hold alerts until asleep (#919):** held live motion and sound alerts are dropped, not queued, and the hold does not stamp their cooldown. Outside the sleep window the watcher cannot detect sleep, so the hold has no time limit: an evening crying spell or daytime nap can be silent. A restart resets both the watcher's quiet count and the inside-window 45-minute clock, allowing up to another 45 minutes of holding inside the window. A camera reassigned between two tracked children while both windows are open can retain its asleep latch and let the new child's alerts through early. `alerting_now` still reports true during a hold because it only reads snooze and the Alert schedule. The 45-minute cap is a design choice, not measured; inside the window, a child who cries without settling can be alerted only after it. This is not a safety device. Demo sample events bypass the live alert path.
 - **A backward step of the server's clock** (a time-sync correction) silences the frame-diff alert for at most
   one cooldown, counted from the first video frame analysed after the step (at 5 frames a second that is
   immediate; if frames stop for ten minutes after the step it starts at the next frame). The ONVIF and MQTT
@@ -1811,7 +1811,7 @@ database. A backup job that needs the database has to run as root, or copy the f
 **What you see:** After upgrading, recordings, clips and timelapses made from then on are owned by uid `1700`
 (group `1700`, mode `660`) instead of `PUID`, and a non-root backup job or an SMB user cannot read the new ones
 from the folder. Or, on some hosts, the start-up log has
-`[entrypoint] warning: media isolation is off: <reason>` and **Settings → About** says "Media isolation: off".
+`[entrypoint] warning: media isolation is off: <reason>` and **Settings → Logs → Server** (admins) says "Media isolation: Off"; when the host could not provide it, admins also get a warning at the top of **Settings → About**.
 
 **Why:** On purpose (#553). FFmpeg, ffprobe and MediaMTX parse whatever a camera sends, so they now run as a
 separate, unprivileged user and cannot read the database or the secrets. The warning means the container could not

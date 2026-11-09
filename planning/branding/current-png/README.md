@@ -1,5 +1,9 @@
 # Nightlight current PNG artwork
 
+> **Historic (2026-11-05):** these are the PREVIOUS illustrated artwork. The web app now uses the SVG logo
+> (`frontend/public/icons/nightlight-logo.svg`) and icons made from it; see `docs/design-language.md` section 4.3.
+> The Android and iOS app icons still use this older artwork until the mobile repo is updated.
+
 This folder packages the existing Nightlight artwork without redrawing or restyling it.
 The files are byte-for-byte copies of the PNG assets currently used by the web and mobile
 applications. No live application assets have been changed.

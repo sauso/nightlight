@@ -17,8 +17,22 @@
 // WHAT IT DOES NOT PROVE: real Safari playback, or the hls.js/MediaSource branch (not reachable in jsdom; it
 // stays on the coverage exclude list in vite.config.js for that reason). Not run on a phone.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, act } from '@testing-library/react';
+import { render, act, waitFor } from '@testing-library/react';
 import HlsPlayer from '../src/components/HlsPlayer.jsx';
+
+vi.mock('hls.js', () => {
+  class FakeHls {
+    static instances = [];
+    static Events = { MANIFEST_PARSED: 'manifest', ERROR: 'error' };
+    static isSupported() { return true; }
+    constructor() { this.handlers = {}; FakeHls.instances.push(this); }
+    loadSource() {}
+    attachMedia() {}
+    on(event, callback) { this.handlers[event] = callback; }
+    destroy() {}
+  }
+  return { default: FakeHls };
+});
 
 const WATCHED = ['loadedmetadata', 'error'];
 
@@ -59,8 +73,66 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete HTMLVideoElement.prototype.requestVideoFrameCallback;
+  delete HTMLVideoElement.prototype.cancelVideoFrameCallback;
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+test('picture check waits for successive presented frames and ignores an old test id', () => {
+  const callbacks = [];
+  HTMLVideoElement.prototype.requestVideoFrameCallback = vi.fn((callback) => { callbacks.push(callback); return callbacks.length; });
+  HTMLVideoElement.prototype.cancelVideoFrameCallback = vi.fn();
+  const onFrames = vi.fn();
+  const view = render(<HlsPlayer mediamtxPath="camera" active muted frameTestId="first" onFrames={onFrames} />);
+  const video = view.container.querySelector('video');
+  act(() => { video.dispatchEvent(new Event('loadedmetadata')); });
+  expect(onFrames).not.toHaveBeenCalled();
+  const stale = callbacks.shift();
+  view.rerender(<HlsPlayer mediamtxPath="camera" active muted frameTestId="second" onFrames={onFrames} />);
+  act(() => { stale(0, { presentedFrames: 1 }); stale(1, { presentedFrames: 2 }); });
+  expect(onFrames).not.toHaveBeenCalled();
+  act(() => { callbacks.shift()(2, { presentedFrames: 3 }); });
+  expect(onFrames).not.toHaveBeenCalled();
+  act(() => { callbacks.shift()(3, { presentedFrames: 4 }); });
+  expect(onFrames).toHaveBeenCalledExactlyOnceWith('second');
+});
+
+test('fallback ignores the native HLS metadata seek and needs later time progress', () => {
+  const onFrames = vi.fn();
+  const view = render(<HlsPlayer mediamtxPath="camera" active muted frameTestId="test" onFrames={onFrames} />);
+  const video = view.container.querySelector('video');
+  act(() => { video.dispatchEvent(new Event('loadedmetadata')); });
+  act(() => {
+    video.dispatchEvent(new Event('loadedmetadata'));
+    video.currentTime = 40;
+    video.dispatchEvent(new Event('seeking'));
+    video.dispatchEvent(new Event('seeked'));
+    vi.advanceTimersByTime(1500);
+  });
+  expect(onFrames).not.toHaveBeenCalled();
+  act(() => { video.currentTime = 41; vi.advanceTimersByTime(500); });
+  expect(onFrames).not.toHaveBeenCalled();
+  act(() => { video.currentTime = 42; vi.advanceTimersByTime(500); });
+  expect(onFrames).toHaveBeenCalledExactlyOnceWith('test');
+});
+
+test('an HLS playlist alone does not pass the picture check', async () => {
+  vi.useRealTimers();
+  HTMLMediaElement.prototype.canPlayType.mockReturnValue('');
+  const { default: FakeHls } = await import('hls.js');
+  FakeHls.instances.length = 0;
+  const callbacks = [];
+  HTMLVideoElement.prototype.requestVideoFrameCallback = vi.fn((callback) => { callbacks.push(callback); return callbacks.length; });
+  const onFrames = vi.fn();
+  render(<HlsPlayer mediamtxPath="camera" active muted frameTestId="test" onFrames={onFrames} />);
+  await waitFor(() => expect(FakeHls.instances).toHaveLength(1));
+  act(() => { FakeHls.instances[0].handlers.manifest(); });
+  expect(onFrames).not.toHaveBeenCalled();
+  act(() => { callbacks.shift()(0, { presentedFrames: 1 }); });
+  expect(onFrames).not.toHaveBeenCalled();
+  act(() => { callbacks.shift()(1, { presentedFrames: 2 }); });
+  expect(onFrames).toHaveBeenCalledExactlyOnceWith('test');
 });
 
 // React itself attaches its own listeners to a <video> for the media events; they are the same on every

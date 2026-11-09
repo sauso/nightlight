@@ -33,8 +33,7 @@ const everythingStored = () => [localStorage, sessionStorage]
 const MARK = 'PLANTED-SECRET-377';
 
 const SETTINGS = {
-  app_name: 'Nightlight', accent_color: '#f4c56a', live_color: '#7FBFA3', offline_color: '#E08585',
-  timezone: 'Australia/Melbourne', font_choice: 'warm-serif', temp_unit: 'C',
+  app_name: 'Nightlight', timezone: 'Australia/Melbourne', temp_unit: 'C',
 };
 
 let putSpy;
@@ -120,10 +119,10 @@ describe('Settings -> General', () => {
     const name = await screen.findByLabelText('App name');
     await user.clear(name);
     await user.type(name, 'Typing');
-    rerenderWith({ settings: { ...SETTINGS, accent_color: '#123456' } });
+    rerenderWith({ settings: { ...SETTINGS, timezone: 'America/New_York' } });
     expect(screen.getByLabelText('App name').value).toBe('Typing');
     // A field nobody touched still follows the server.
-    expect(screen.getByLabelText(/Accent/).value).toBe('#123456');
+    expect(screen.getByLabelText('Timezone').value).toBe('America/New_York');
   });
 
   test('★ a draft that equals the placeholder survives the wait for the server\'s settings', async () => {
@@ -489,7 +488,7 @@ describe('add / edit caregiver', () => {
     await existing.user.type(screen.getByLabelText('Last name'), 'Smith');
     await existing.user.click(screen.getByRole('button', { name: 'Discard changes' }));
     expect(screen.getByLabelText('Last name').value).toBe('');
-    expect(screen.getByText('Change photo')).toBeInTheDocument();
+    expect(screen.getByLabelText('Change photo')).toBeInTheDocument(); // the avatar's file input, named by its aria-label (#990)
   });
 
   test('removing a caregiver clears its draft', async () => {

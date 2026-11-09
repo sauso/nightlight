@@ -195,7 +195,7 @@ async function run(t, spec, script) {
   logger.clear();
   readyPaths.add(cam.mediamtx_path);
   makeCamera(db, { id: cam.id, name: cam.name, path: cam.mediamtx_path });
-  const url = `rtsp://127.0.0.1:8554/${cam.mediamtx_path}`;
+  const url = `rtsp://127.0.0.2:8554/${cam.mediamtx_path}`;
   const cur = () => detectorProcs.filter((p) => p.args[p.args.indexOf('-i') + 1] === url && !p.ended).at(-1);
   await startMotionDetector(cam);
   await waitFor(() => cur() !== undefined, `${cam.id} spawn`);

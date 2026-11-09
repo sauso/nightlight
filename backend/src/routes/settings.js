@@ -118,6 +118,7 @@ router.get('/clip-storage', requireAuth, requireAdmin, (req, res) => {
   // Wake clips are reported alongside the alert clips they sit next to on disk: they are a NEW
   // automatic consumer, and their length/retention settings only mean something if you can see what
   // they are actually costing.
+  // #932: wakeClips retains its all-wake meaning for existing clients; protected wake use is extra.
   res.json({ ...clipStorageStats(), wakeClips: wakeClipStats() });
 });
 

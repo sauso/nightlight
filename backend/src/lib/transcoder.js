@@ -2,7 +2,7 @@ import { spawnChild } from './childEnv.js';
 import { logger, isNoisyMediaLine } from './logger.js';
 import { recordCameraEvent, EVENT } from './cameraEvents.js';
 import { ffprobeAudioCodec } from './rtspProbe.js';
-import { hlsPathName, upsertPath, isPathConfiguredCorrectly } from './mediamtx.js';
+import { hlsPathName, upsertPath, isPathConfiguredCorrectly, mediamtxRtspUrl } from './mediamtx.js';
 import { killIfSpawned, isKillError, execFailureBackoff, describeExecFailure } from './processGuards.js';
 import { forwardProcessLines } from './processOutput.js';
 
@@ -93,7 +93,7 @@ function buildArgs(rtspUrl, mediamtxPath, aacSource) {
     '-avoid_negative_ts', 'make_zero',
     '-f', 'rtsp',
     '-rtsp_transport', 'tcp',
-    `rtsp://127.0.0.1:8554/${mediamtxPath}`,
+    mediamtxRtspUrl(mediamtxPath),
 
     // --- OUTPUT 2: <path>-hls (HLS / Compatibility) — video copied, audio always AAC ---
     // Some cameras send audio with jittery, occasionally-backward RTP timestamps (logged as "Queue input
@@ -113,7 +113,7 @@ function buildArgs(rtspUrl, mediamtxPath, aacSource) {
     '-avoid_negative_ts', 'make_zero',
     '-f', 'rtsp',
     '-rtsp_transport', 'tcp',
-    `rtsp://127.0.0.1:8554/${hlsPath}`,
+    mediamtxRtspUrl(hlsPath),
   ];
 }
 

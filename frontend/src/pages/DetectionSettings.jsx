@@ -69,7 +69,7 @@ function RecordClipsToggle({ d, apply }) {
       <div className="section-title">Recording</div>
       <EnableToggle checked={d.record_clips} onChange={(v) => apply({ record_clips: v })}
         label="Save a clip when triggered"
-        sub="Records a short video around each alert (uses the pre/post-roll in Settings → Recording). Off by default. A silenced camera or the alert schedule stops the alert, and so its clip." />
+        sub="Records a short video around each alert (uses the pre/post-roll in Settings → Camera and Recording → Recording). Off by default. A silenced camera or the alert schedule stops the alert, and so its clip." />
     </>
   );
 }

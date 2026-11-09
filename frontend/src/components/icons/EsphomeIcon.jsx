@@ -4,7 +4,7 @@ import { useId } from 'react';
 // the same { size, color } shape as MqttIcon so it drops into the same slots (the Integrations hub row).
 //
 // ONE colour, not the logo's own two (a #18BCF2 house and a #F2F4F9 "E"): the house takes `color` (currentColor by
-// default, var(--peri) in the hub) and the "E" is cut out of it, so the row's background shows through the way it
+// default, var(--accent-line) in the hub) and the "E" is cut out of it, so the row's background shows through the way it
 // does in the MQTT icon. That keeps it matching its neighbours and legible in both the light and the dark theme,
 // where a fixed pale "E" would vanish on a light card. The shapes are the logo's own paths, unchanged.
 //

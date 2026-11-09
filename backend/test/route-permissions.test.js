@@ -97,6 +97,12 @@ const ADMIN = 'signed-in+admin'; //    requireAuth, then requireAdmin
 // caregiver can still reach says why on its own line.
 
 const ROUTE_GATES = {
+  // #941: setup state and browser playback attestations are only for a signed-in admin.
+  'GET /api/setup': ADMIN,
+  'PATCH /api/setup/progress': ADMIN,
+  'POST /api/setup/monitor-tests': ADMIN,
+  'POST /api/setup/monitor-tests/:id/confirm': ADMIN,
+  'POST /api/setup/complete': ADMIN,
   // /api/auth — the login screen has to work before anyone can sign in, so its first five are public. Each
   // carries its own rate limiter (not pinned here; login-rate-limit.test.js).
   'GET /api/auth/status': PUBLIC, //            needsSetup + demo flags, read by the login screen
@@ -142,6 +148,8 @@ const ROUTE_GATES = {
   'GET /api/cameras/alerts/:id/clip': MEDIA,
   'GET /api/cameras/:id/snapshot': MEDIA, //                   the bed-zone picker's still; watching (owner). Single-flight per camera (#552): snapshot-single-flight.test.js
   'POST /api/cameras/onvif-probe': ADMIN,
+  'POST /api/cameras/discover': ADMIN, // #945: multicast scan is an admin-only network action
+  'GET /api/cameras/discover/:scanId': ADMIN, // #945: results expose private LAN addresses
   'POST /api/cameras/probe-report': ADMIN,
   'POST /api/cameras/:id/record/start': SIGNED_IN, //           capturing a moment is acting in it (owner)
   'POST /api/cameras/:id/record/stop': SIGNED_IN,
@@ -153,7 +161,9 @@ const ROUTE_GATES = {
   'GET /api/cameras/alerts': SIGNED_IN,
   'DELETE /api/cameras/alerts': ADMIN, //                       the whole alert history
   'DELETE /api/cameras/alerts/:id/clip': ADMIN, //              #538: one alert's clip, irreversibly
+  'PUT /api/cameras/alerts/:id/protected': ADMIN,
   'GET /api/cameras/clips': SIGNED_IN,
+  'GET /api/cameras/clips/protected': ADMIN,
   'GET /api/cameras/:id/sensor-history': SIGNED_IN,
   'GET /api/cameras/:id/activity-history': SIGNED_IN,
   'GET /api/cameras/:id/recording-readiness': ADMIN, //        #394: read-only status for the camera settings page, which is admin-only
@@ -177,6 +187,14 @@ const ROUTE_GATES = {
   'GET /api/logs': ADMIN,
   'DELETE /api/logs': ADMIN,
   'GET /api/diagnostics': ADMIN,
+  'GET /api/remote-access': ADMIN,
+  'GET /api/remote-access/tailscale': ADMIN,
+  'PUT /api/remote-access/tailscale': ADMIN,
+  'POST /api/remote-access/tailscale/actions': ADMIN,
+  // 2026-11-06: the one non-admin route here. Any signed-in user (a caregiver included) may read the single https address the phone
+  // app falls back to; it carries no other Tailscale detail and the address only opens from inside the tailnet. Who gains access:
+  // caregivers, to that one address.
+  'GET /api/remote-access/tailscale/address': SIGNED_IN,
   'GET /api/esphome/devices': ADMIN,
   'POST /api/esphome/devices': ADMIN,
   'PUT /api/esphome/devices/:id': ADMIN,
@@ -216,6 +234,7 @@ const ROUTE_GATES = {
   'GET /api/recordings/child/:childId': SIGNED_IN,
   'GET /api/recordings/:id/video': MEDIA,
   'GET /api/recordings/:id/thumb': MEDIA,
+  'PUT /api/recordings/:id/protected': ADMIN,
   'DELETE /api/recordings/:id': ADMIN, //               #552: a manual recording or a wake clip; no retention for the former
 
   'GET /manifest.webmanifest': PUBLIC, //    the PWA manifest; a browser fetches it without credentials
@@ -235,9 +254,12 @@ const APP_REGISTRATIONS = [
   'use /api/auth authRoutes',
   'use /api/children childrenRoutes',
   'use /api/cameras camerasRoutes',
+  'use /api/setup setupRoutes',
   'use /api/settings settingsRoutes',
   'use /api/logs logsRoutes',
   'use /api/diagnostics diagnosticsRoutes',
+  'use /api/remote-access/tailscale tailscaleRoutes',
+  'use /api/remote-access remoteAccessRoutes',
   'use /api/esphome esphomeRoutes',
   'use /api/events eventsRoutes',
   'use /api/about aboutRoutes',
@@ -249,7 +271,7 @@ const APP_REGISTRATIONS = [
   'use /api/timelapses timelapsesRoutes',
   'use /api/recordings recordingsRoutes',
   'use /manifest.webmanifest manifestRoutes',
-  'get /api/health <handler>', //                                     PUBLIC: a liveness probe
+  'get /api/health healthHandler', //                                 PUBLIC: a liveness probe (+ server id and name, #937)
   'post /api/csp-report express.text() <handler>', //                 PUBLIC: browsers send CSP reports without credentials
   'use express.static()',
   'get * <handler>', //                                               the SPA shell; /api/* falls through to a 404

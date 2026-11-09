@@ -107,6 +107,11 @@ services:
       # Optional. Which port the app listens on - defaults to 4000 if unset. Under host
       # networking (below) this is also the port you reach it on. See .env.example.
       - PORT=${PORT:-}
+      # Optional. Announce this server on the local network (mDNS) so a phone can find it. Blank or unset =
+      # on (the default); false, 0, no or off = off, and nothing listens on UDP 5353. Works with the host
+      # networking below or an own-address network, not from Docker's default bridge. See .env.example and
+      # docs/networking.md, "Finding your server automatically".
+      - MDNS_ANNOUNCE=${MDNS_ANNOUNCE:-}
       # Optional. Set this ONLY if you've mapped a "recordings" volume below to move
       # clips off the same disk as the database - see .env.example and the commented
       # volume line under `volumes:`. Leave unset to keep clips under /app/data.

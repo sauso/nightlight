@@ -2,7 +2,7 @@ import { spawnChild } from './childEnv.js';
 import db from '../db.js';
 import { logger } from './logger.js';
 import { forwardProcessLines } from './processOutput.js';
-import { subPathName, getPathStatus } from './mediamtx.js';
+import { subPathName, getPathStatus, mediamtxRtspUrl } from './mediamtx.js';
 import { inActiveWindow } from './detectSchedule.js';
 import { shouldHold } from './alertHold.js';
 import { fireDetectionAlert } from './detectionAlert.js';
@@ -540,7 +540,7 @@ export async function startMotionDetector(camera) {
       // for why the RELATIVE spelling and -nostats are both load-bearing.
       ...SIDE_CHANNEL_LOG_ARGS,
       '-rtsp_transport', 'tcp',
-      '-i', `rtsp://127.0.0.1:8554/${path}`,
+      '-i', mediamtxRtspUrl(path),
       '-an',
       '-vf', TAPS.filter,
       '-f', 'rawvideo',

@@ -79,9 +79,11 @@ describe('probeMediamtxApi: what counts as silence', () => {
 
   test('w1c: only an API on this machine is supervised (the child killed must be the server that is silent)', () => {
     assert.equal(mediamtx.mediamtxApiIsLocal('http://127.0.0.1:9997'), true);
+    assert.equal(mediamtx.mediamtxApiIsLocal('http://127.0.0.2:9997'), true);
     assert.equal(mediamtx.mediamtxApiIsLocal('http://localhost:9997'), true);
     assert.equal(mediamtx.mediamtxApiIsLocal('http://[::1]:9997'), true);
     assert.equal(mediamtx.mediamtxApiIsLocal('http://10.0.0.5:9997'), false);
+    assert.equal(mediamtx.mediamtxApiIsLocal('http://127.example.com:9997'), false);
     assert.equal(mediamtx.mediamtxApiIsLocal('http://mediamtx.example:9997'), false);
     assert.equal(mediamtx.mediamtxApiIsLocal('not a url'), false);
   });

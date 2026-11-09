@@ -39,14 +39,15 @@ for (const ff of FORM_FACTORS) {
     // The add-camera form (filled with example values, not saved).
     await page.goto('/#/cameras');
     await page.getByRole('button', { name: '+ Add camera' }).click();
+    // #957: the full form starts in a collapsed manual card; no scan wait is needed.
+    await page.getByRole('button', { name: /Add a camera manually/ }).click();
     await page.getByLabel('Name', { exact: true }).fill('Nursery cam');
     await page.getByLabel('Camera IP address').fill('192.168.1.50');
     await page.getByLabel('RTSP port').fill('554');
     await page.getByLabel('Stream path', { exact: true }).fill('/Streaming/Channels/101');
     await page.screenshot({ path: `${SHOTS}/add-camera-${ff.name}.png` });
 
-    // The settings screen. Settings is a hub of sub-pages now; General holds the app name / theme /
-    // etc. and is the closest equivalent to the old single settings page.
+    // The settings screen. General now holds the app name, timezone and temperature unit.
     await page.goto('/#/settings/general');
     await expect(page.getByRole('button', { name: 'Save changes' })).toBeVisible();
     await page.screenshot({ path: `${SHOTS}/settings-${ff.name}.png` });

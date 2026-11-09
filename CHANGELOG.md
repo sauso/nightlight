@@ -9,6 +9,106 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-11-10
+
+### Added
+
+- In the Android app, you now sign in **once** for both of your server's addresses. The app keeps your sign-in, encrypted with a key that stays in the phone's secure keystore, and hands it to the server's Tailscale address (and only that address) the first time you open it there. Signing out, or a sign-in the server refuses, removes the saved copy; a wrong password never does. The app's saved copy is not part of Android's backup or a phone transfer. Needs the Android app release that goes with it; the web app is unchanged. (The iPhone app got the same in its own release, see the iPhone entries below.) See [docs/remote-access.md](docs/remote-access.md#the-phone-apps-and-the-tailscale-address) for what it does not cover.
+- In the Android app, **Settings → About** now shows which address you are **using** (the saved address or the Tailscale address) and whether your secure **Tailscale address** is saved for use away from home, so you can see what the app is using. Nothing is shown in a browser or in an app without the Tailscale feature.
+- The Android app now also learns the server's Tailscale address and uses it when your home address does not answer. After you sign in, the app asks the server for its secure Tailscale address and keeps it (a short message says so the first time); at start it opens the secure Tailscale address first and the address it was set up with if that does not answer. A link or alert that names either of the server's two addresses is recognised as the server you are already using, instead of asking whether to switch. Needs the Android app release that goes with it; the web app is unchanged. (The iPhone app got the same address in its own release, next entry.) See [docs/remote-access.md](docs/remote-access.md#the-phone-apps-and-the-tailscale-address).
+- The iPhone app now learns the server's Tailscale address too, and uses it when your home address does not answer. It learns it after you sign in (a short message says so the first time), opens the secure Tailscale address first at start and the address it was set up with if that does not answer. **Settings → Change server** keeps the Tailscale address, so away from home you can reconnect through it, and saved servers show their name with the address underneath. The iPhone app also keeps one sign-in for both addresses (in the iPhone's Keychain, never synced through iCloud) and moves between the addresses by itself when the network changes, as the Android app does. Needs the iPhone app release that goes with it; the web app is unchanged. See [docs/remote-access.md](docs/remote-access.md#the-phone-apps-and-the-tailscale-address).
+- Any signed-in user can read the server's Tailscale address (`GET /api/remote-access/tailscale/address`: `{ "url": "https://<name>.ts.net" }`, or `{ "url": null }` when Tailscale is off or has no private HTTPS address, or a 409 when it is not known right now). The phone apps use it to learn the secure address; nothing in the web app uses it.
+
+- #977 Settings → Remote Access and the setup guide now lead with a Tailscale option for private viewing away from home, including sign-in, a secure address, viewer steps, a video check and identity controls. The existing own-domain and port-forward guidance remains under Advanced.
+
+- #974 Tailscale sign-in now adds its vetted tailnet address to the Low latency video candidates without restarting camera streams. The first addition briefly reconnects Low latency viewers; later address changes wait for viewers to leave, with an admin Apply now action. Checked once on a staging install: Low latency played on a phone over cellular through the tailnet with the router forward closed; long sessions and relayed-only paths are untested.
+
+- #971 Bundled Tailscale 1.104.5 binaries for the guarded remote-access API, with a fixed download digest for each image architecture. The network check now ignores the connected daemon's own TCP listener by socket ownership while still blocking on other listeners.
+
+- #945 Admins can search for nearby Thingino and ONVIF cameras in setup or Add camera. Each result has its own card; pick one and enter its login while Nightlight finds the stream settings. Cameras already saved appear as greyed **Already added** cards. Searches use LAN multicast and may miss cameras across VLANs, on Docker's default bridge, or cameras that do not advertise; a separate manual card remains available.
+
+- #941 First-run setup guide for admins on fresh installations: add a child and assigned camera, check that video frames reach the browser, or finish with limited setup and return later from Settings → Setup & diagnostics. Save and exit resumes at the saved step without redirecting again. A confirmed picture check lasts ten minutes from confirmation and must be repeated after a server restart. Upgraded and restored installs, even those without an admin account yet, are marked as already set up and are not redirected.
+
+- #937 The server announces itself on the local network (mDNS, `_nightlight._tcp`) so a phone can find it without typing an address (the Android and iPhone apps' **Look for my Nightlight** and "Your server has a new address" use it). It is on by default; set `MDNS_ANNOUNCE=false` to turn it off. It does not work from Docker's default bridge network, or across VLANs without a router that passes mDNS. `/api/health` now also returns a random server id and the app name, both visible without signing in. See [Finding your server automatically](docs/networking.md#finding-your-server-automatically).
+
+- #932 Admins can protect alert and wake clips so automatic cleanup keeps them. Protected clips sit outside the storage cap and can fill the disk; removing a camera or child still deletes their clips. Timelapses and Record-button recordings cannot be protected yet.
+
+- Settings → Remote Access shows how this device connects, the server's setup, and a Low latency video test. A successful test only proves the UDP forward when run from outside the home network.
+
+- A light/dark button at the far right of the Live page header switches the theme on this device. On other pages, use Account → Appearance, where System follows the device again.
+- About now has a **Got an idea?** link to suggest an enhancement on GitHub. A GitHub account is needed; the idea form appears after the next release to `main`.
+
+### Changed
+
+- With **Hold alerts until asleep** on, a child's motion and sound alerts are now held outside the sleep window too. The 45-minute limit applies only inside the window; outside it, alerts remain held until sleep is detected.
+
+- **Settings → About is tidier.** The header card now holds only the app name, version, build and tagline. In the Android app, which address you are connected through and whether the Tailscale address is saved have their own **Connection** card below it. The line "Media isolation: on / off" is gone from About: it means nothing to a caregiver, and admins now find it under **Settings → Logs → Server**. The warning an admin gets when isolation could not start is unchanged and still at the top of About. The **Links** list now starts with the Nightlight website, which was missing.
+- **In the Android app, About now shows the Tailscale address itself, and says why none is saved.** The **Connection** card's **Tailscale address** row shows the address (for example `name.tailnet.ts.net`) instead of only "Saved", and when none is saved a line underneath gives the reason: the server isn't offering one (an admin can turn it on in **Settings → Remote Access**), the server couldn't say just now, the phone couldn't reach the address (turn Tailscale on in the phone and restart the app), or it belongs to a different server. The reason is from the app's last check in this session, so it is blank until that check has run. The address is on screen, so a screenshot of About shows your tailnet name. The card is laid out like **Settings → Remote Access**: a title with a badge saying which address you are using, then your secure address in the same bold style, with a muted line under it only when none is saved (the reason), so a long address wraps inside the card instead of breaking mid-word. The **Links**, **Support the project** and **Not a safety device** cards on the same page now use the same title and text style, so the page looks consistent. The badge reads **Using local address** or **Using Tailscale**, and the sub-heading above the address is in the body font. Works with the app you already have installed; nothing changes on the server.
+- Alert links no longer take a Tailscale address (a `.ts.net` name, an address from 100.64.0.0 to 100.127.255.255, or one in Tailscale's IPv6 range) as the household's address, whichever admin phone reports it. Until now an admin phone reaching Nightlight over Tailscale would have pointed everyone's alert links at that address. If the only admin phone uses the Tailscale address, alert links open the app in place without naming the server.
+- On a child's settings, on your Account and when an admin edits a caregiver, the avatar itself is now the photo control: a round photo (or initials) with a small camera badge, and tapping it opens the file picker. Tapping draws no extra box around the badge; keyboard focus shows one ring around the avatar. This replaces the separate **Add photo** / **Change photo** buttons; **Remove** stays under the avatar. Saving is unchanged: an existing child's or your own photo still saves as soon as it is chosen, and a new child's photo is kept until the first save.
+- The setup guide's **Add your child** step has the same round avatar, so the first child can have a photo from the start (it is saved together with the child; a colour can be chosen later in the child's settings).
+- The setup guide's **Invite caregivers** step now adds caregiver accounts in the guide itself instead of jumping to Settings: names, username, password and an optional photo, then **Add another caregiver** or **Continue**. It only creates caregivers; editing and removing stay in Settings → Caregivers.
+- A fresh installation now opens on the **Welcome to Nightlight** screen with the steps, and only then asks you to create the first admin account. That account form looks like the setup guide's caregiver form and has an optional photo (saved once you are signed in; if saving it fails you are signed in anyway and can add it under Account). The setup guide itself now starts at **Add your child**: the Welcome step and its photo control moved before the account. Creating the account is **Step 1 of 7** (the Welcome screen is not numbered), so **Add your child** is Step 2, and creating the account takes you straight on to it. The photo sits in the middle of that form and of the guide's **Invite caregivers** form. On a phone, the Welcome, account and guide screens have a navy band under the status bar (it was the page colour, which hid the status-bar icons on a light page); it takes no space on a computer.
+- The app's main colour is now periwinkle instead of violet: `#5663D6` in light mode, with white text on buttons, and the lighter `#8995FF` in dark mode, with dark text on buttons. The logo's crescent is `#5663D6`. Small linked text in light mode is a slightly deeper periwinkle so it stays readable on tinted surfaces. A warm gold, peri's opposite, marks a few small highlights: the current step of the setup guide, the "Recommended" badge on the Tailscale card and the camera badge on avatars. The page and card backgrounds keep their lavender tint. The home-screen, browser-tab, iOS and lock-screen icons are re-made in the new colour; the Android/iOS launcher icons and the website still show the old logo for now.
+- New logo: a periwinkle crescent (`#778FFD`, lighter than the app's button colour) with a sleeping baby. The header shows it as it is, at the same size; the setup guide, About, the sign-in screen and the "Can't reach Nightlight" screen show it on the header colour in the same rounded square (the setup guide's was square). The home-screen, browser-tab, iOS and lock-screen icons are re-made from it. An already-installed home-screen icon changes only when the phone refreshes it or the app is reinstalled, and the phone apps' launcher icons and the website still show the old logo for now.
+- About no longer shows **Setup status and picture check** once setup is fully complete. It stays while setup is unfinished, after a limited setup, and on an installation upgraded from before the setup guide.
+- While the setup guide is open, the bottom bar (the side menu on a wide screen) is hidden, so a new admin goes through the guide or chooses Save and exit first. The navigation returns on Save and exit or when setup finishes. The guide also no longer scrolls behind the phone's status bar.
+- The Tailscale card's text now follows one size scale, with the title larger than the headings and address beneath it. Its video button is renamed from "Check it works" to "Test video".
+- When Nightlight can't be reached at its Tailscale address (`.ts.net` or a `100.64.0.0/10` address), the "Can't reach Nightlight" screen suggests checking that Tailscale is switched on instead of the home network. Opened at any other address, the text is unchanged.
+
+- #969 Ahead of planned remote access, admins can start Tailscale sign-in, choose a neutral machine name, manage private HTTPS Serve, log out and reset a copied node identity through bounded CLI actions.
+
+- #967 Ahead of planned remote access, Nightlight stores a guarded Tailscale enable setting and checks network mode before starting a tunnel daemon.
+
+- #965 Ahead of remote access, Nightlight now has a guarded tunnel daemon supervisor. The Tailscale card in **Settings → Remote Access** starts it.
+
+- #963 Ahead of planned remote access, Nightlight refuses first-admin setup through an attached tunnel daemon, and the Tailscale support that follows will require an admin account before it can turn on.
+
+- #959 Ahead of planned remote access, Nightlight now ignores forwarded client addresses from loopback while a tunnel daemon is attached, so tailnet peers cannot choose a different per-address login bucket.
+
+- #944 The setup guide now walks through adding a child, connecting a camera, checking the picture, and optional caregiver and remote access steps. The Settings setup link disappears after full completion; admins can still open picture checks from About. Remote access still needs network setup.
+
+- #943 Nightlight now uses one violet brand colour, a lavender day palette, an indigo night palette, a new moon logo, and locally hosted Inter and Nunito fonts. The Live header still switches day and night.
+
+- Camera controls, Recording and Clip management now sit under one Settings entry, Camera and Recording. Nothing was removed; the pages and their addresses are unchanged.
+
+- #952 Ahead of planned remote access, MediaMTX's internal ports now listen on 127.0.0.2 instead of 127.0.0.1, and its RTSP UDP media ports are closed. If you use `docker exec` to script against ports 9997 or 8554, or set `MEDIAMTX_API` to a local URL, use 127.0.0.2. The app port and WebRTC media port are unchanged.
+
+### Removed
+
+- #943 Settings → General no longer offers theme presets, font choices or colour pickers. Older clients may still send those settings, but this web UI ignores the saved appearance values.
+
+### Fixed
+
+- **Settings → Remote Access:** your secure address now stays on one line on a typical phone. The text shrinks a little on narrow screens (never below 12 px), and a name that is still too long wraps at a dot instead of in the middle of a word. Copy and Open are unchanged.
+- The sign-in page no longer capitalises the first letter of your username on iPhone and iPad. It also turns off auto-correct and spell-check for that field, like the other username fields.
+- In the Android app, the **Away from home** message (the app has learned your server's Tailscale address) no longer comes back every time you switch server: it is shown once for each address the app is used at. Messages that open by themselves (this one, and "Server not saved in this app") no longer draw a focus ring around their OK button; the ring still appears when you reach a button with the keyboard. Every sheet that slides up from the bottom (all dialogs on a phone) now has more room under its last button, so it no longer looks jammed against the bottom of the screen.
+- The setup guide's step bar now stays on one line with seven steps (the last segment had wrapped onto a second line), and the photo on the account and caregiver forms has more space above the name fields.
+- In a sub-page's header the bottom of the "g" in the back label (for example "Settings") is no longer cut off.
+- On a phone, a Motion / Sound / Alerts toggle on a camera's menu (and a filter chip in the log viewer) that you had just tapped showed its label in the wrong colour on the filled button (white in dark mode, navy in light mode) until you tapped somewhere else. A lit toggle now keeps its own colours.
+- The Tailscale card no longer keeps saying **Connected** after the device is removed from your Tailscale account. An open card now checks again about every 30 seconds, and if Tailscale cannot be reached for two checks in a row it says **Tailscale isn't connected right now** and how to rejoin (Advanced, Reset this device's Tailscale identity, then sign in again). A lost internet connection looks the same, so the message does not name a cause.
+- The "Advanced settings" link when connecting a camera is smaller, in line with the buttons beside it.
+- "You corrected this" on the sleep card is now readable: light text on the card's dark background, in both light and dark mode.
+- The background-audio icon on a camera tile is the same light violet in light mode as in dark mode. It was a dark violet that was hard to see over the picture.
+- On the Android and iOS apps, the sign-in screen and the "Can't reach Nightlight" screen now have a **Change server** button, so a server you can't sign in to no longer traps you there. A browser shows nothing, as it has no saved server.
+- The Tailscale card's **Copy** button now works when Nightlight is open over plain http on your home network. If the browser refuses to copy, the card says to select the address and copy it yourself.
+- The header is the same height on the Live page and on sub-pages. On a phone it was a few pixels taller on Live.
+- The setup guide's remote access step now says "Continue" once Tailscale is connected and its secure address is on, instead of "Maybe later". Before then, or without Tailscale, it still says "Maybe later".
+- On the Android app, the "Setup is still open" banner no longer sits under the status bar.
+- The "Setup is still open" banner now sits below the page header instead of above it, so the header's status-bar space is no longer left as an empty band under the banner. The setup guide, which has no header, now leaves room for the status bar on a phone and lines up with the sidebar on a wide screen.
+
+- #932 Protected clips with missing video files can be unprotected and removed. The clip player shows Delete when its caller offers it, and Sleep Detail keeps protection badges in step with changes.
+
+- The Recordings icon now lines up with its heading on a child's page.
+
+- Long back-button names now end with an ellipsis so page titles stay on one line. The Timelapse, Recordings and Room climate headings have a little more space below them.
+
+- The Record button and other video controls no longer cover the camera in Picture-in-Picture. Fullscreen camera controls stay clear of the status and gesture bars in the Android app with the matching app update; older app builds still show the bars.
+
+### Security
+
+- Two third-party libraries are updated to their fixed versions: `follow-redirects` 1.16.2 (GitHub flagged 1.16.0 and 1.16.1: a custom credential header could be forwarded to another site on a redirect) and `qs` 6.16.2 (building a query string with comma-joined arrays could throw an uncaught error). Nightlight's own code does not reach either flaw: its proxies to the camera server on the same machine do not turn on redirect following, and it never calls the affected `qs` function. No settings change; the update is in the next image.
+
 ## [0.45.1] - 2026-11-03
 
 ### Security

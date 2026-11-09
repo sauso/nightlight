@@ -1,53 +1,54 @@
 :root {
-  /* Light is the default palette. Two accent roles, matching the design mockup:
-     --peri (periwinkle, fixed) is the interactive "chrome" colour — active tab, switches,
-     sliders, row icons, back link, drill-in accents. --accent (gold by default, and the one
-     the user can recolour in Settings → General) is the call-to-action colour — primary
-     buttons, the camera-tile glow, temperature/humidity icons. --bar is the navy top bar,
-     the same in both themes. Only the neutrals below flip between light and dark. */
-  --bg: #f0eff5;
+  /* #943: the owner's day/night palette is one tweakable block. Brand actions share --accent;
+     --accent-text is lighter only where small text sits on dark surfaces. */
+  --bg: #f7f4fd;
   --bg-elevated: #ffffff;
-  --bg-elevated-2: #eeedfa;
-  --text-primary: #1b1c33;
-  --text-secondary: #70718f;
-  --accent: #f4c56a;
-  --accent-dim: #cda94f;
-  --peri: #7c83db;
-  --peri-soft: #cfd2f5;
-  --bar: #12143a;
-  --bar-text: #f4f4fb;
-  --live: #6fae90;
-  --offline: #d9707a;
-  --border: #e6e4f0;
-  --field-bg: #ffffff;
+  --bg-elevated-2: #eae3f8;
+  --text-primary: #1d1a3a;
+  --text-secondary: #625c7f;
+  --accent: #5663d6;
+  --accent-text: #4a55c8;
+  --accent-soft: #d3d8ff;
+  /* Peri (owner, 2026-11-06): #5663d6 by day, with WHITE text on it (5.06:1); at night the lighter #8995ff with DARK text (6.71:1).
+     The owner chose both; dark text on #5663d6 would only be 3.57:1, so the two themes need different text colours and that is
+     what --on-accent is for: text ON an accent fill is always --on-accent. Borders, rings and icons use --accent-line; small
+     text uses --accent-text (#4a55c8 clears 4.5:1 on cards, the page AND the #eae3f8 inset, where plain #5663d6 only reaches
+     4.06). The complement (warm gold) is for small highlights only. Measured ratios: docs/design-language.md section 1, and
+     test/paletteTokens.test.jsx recomputes them from this block so a colour change cannot silently break readability. */
+  --on-accent: #ffffff;
+  --accent-line: #5663d6;
+  --complement: #f2c14e;
+  --on-complement: #14142a;
+  --bar: #14142a;
+  --bar-text: #e8e2f7;
+  --live: #23734f;
+  --offline: #aa3f54;
+  --border: #ddd5ee;
+  --field-bg: #eae3f8;
   --radius: 16px;
 
-  --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
-  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-display: 'Nunito', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
   --font-mono: 'SF Mono', 'IBM Plex Mono', Menlo, Consolas, monospace;
 }
 
-/* Dark palette. Theme choice is per-device (see lib/theme.js), which resolves 'system' to a
-   concrete light/dark in JS and stamps it on <html>, so we only need explicit light (:root
-   above) + dark here. --accent / --live / --offline are also set inline by SettingsContext
-   from the user's saved colours, so the values here are just the fallback. --peri and --bar
-   are fixed across both themes. */
+/* lib/theme.js stamps the resolved device choice on <html>; there is no media override. */
 :root[data-theme='dark'] {
-  --bg: #0f1124;
-  --bg-elevated: #181a33;
-  --bg-elevated-2: #1e2140;
-  --text-primary: #eceaf6;
-  --text-secondary: #8d8fb4;
-  --accent: #f4c56a;
-  --accent-dim: #cda94f;
-  --peri: #7c83db;
-  --peri-soft: #cfd2f5;
-  --bar: #12143a;
-  --bar-text: #f4f4fb;
-  --live: #7fc9a3;
-  --offline: #e08585;
-  --border: #282a48;
-  --field-bg: #1e2140;
+  --bg: #14142a;
+  --bg-elevated: #221f3c;
+  --bg-elevated-2: #100f1c;
+  --text-primary: #e8e2f7;
+  --text-secondary: #bcb3d5;
+  --accent: #8995ff;
+  --on-accent: #14142a;
+  --accent-text: #a7b1ff;
+  --accent-soft: #c5cbff;
+  --accent-line: #8995ff;
+  --complement: #f6d365;
+  --live: #8bdbad;
+  --offline: #f4a3ad;
+  --border: #383450;
+  --field-bg: #100f1c;
 }
 
 * { box-sizing: border-box; }
@@ -90,7 +91,7 @@ body {
 
 h1, h2, h3 {
   font-family: var(--font-display);
-  font-weight: 600;
+  font-weight: 800;
   letter-spacing: 0.01em;
   margin: 0;
 }
@@ -124,7 +125,7 @@ button {
 }
 
 .demo-banner a {
-  color: var(--peri);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
@@ -148,6 +149,10 @@ button {
   justify-content: flex-start;
   gap: 12px;
   width: 100%;
+  /* Owner 2026-11-05: the bar was a few pixels taller on the Live page than on a sub-page. The Live row holds the 36px logo, a
+     sub-page row holds the ~30px back button, and the 60px min-height above only hides that while the status-bar padding is
+     small: on a phone (padding of 8px + the inset) the row decides the height. One fixed row height makes both the same. */
+  min-height: 36px;
 }
 
 .app-header__icon {
@@ -166,29 +171,67 @@ button {
   flex-shrink: 0;
 }
 
+.app-header__theme {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  /* The bar stays navy in both themes, while --text-secondary changes with the page. */
+  color: var(--accent-soft);
+  cursor: pointer;
+}
+
+/* #381: keep the icon compact while its touch target reaches 44px. */
+.app-header__theme::after {
+  content: '';
+  position: absolute;
+  inset: -7px;
+}
+
 .app-header h1 {
   font-size: 22px;
   color: var(--bar-text);
 }
 
-/* Labelled back affordance in the header's left slot on sub-pages (see BackLink.jsx). */
+/* Owner's 2026-11-01 phone screenshots: long back labels took about 40% of the bar and wrapped
+   Camera controls / Clip Management. Cap Back at 35% to leave roughly 225dp for the title;
+   this is an estimate from those screenshots, not measured on devices. */
 .app-header__back {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 35%;
   margin-left: -6px;
   padding: 4px 6px 4px 0;
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--peri-soft);
+  color: var(--accent-soft);
   font-size: 15px;
   font-family: inherit;
 }
 
+.app-header__back svg {
+  flex-shrink: 0;
+}
+
 .app-header__back span {
-  line-height: 1;
+  /* 1.3, not 1 (owner, 2026-11-06): `overflow: hidden` (needed for the ellipsis) clips at the line box, and at line-height 1 that
+     box cut the bottom of the "g" in "Settings". The row's fixed 36px height means the taller line does not change the bar. */
+  line-height: 1.3;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .app-main {
@@ -228,15 +271,17 @@ button {
 }
 
 /* While the Android app is floating in Picture-in-Picture, hide the on-video overlay
-   buttons - in the tiny PiP window they only obscure the video (the body gets the
+   buttons and panels - in the tiny PiP window they only obscure the video (the body gets the
    `in-pip` class from LiveMonitor via the native pipModeChanged event). */
 body.in-pip .pip-btn,
 body.in-pip .settings-btn,
 body.in-pip .mute-btn,
 body.in-pip .talk-btn,
+body.in-pip .rec-btn,
 body.in-pip .fullscreen-btn,
 body.in-pip .ptz-btn,
 body.in-pip .ptz-pad,
+body.in-pip .ptz-backdrop,
 body.in-pip .tile-menu,
 body.in-pip .tile-menu-backdrop {
   display: none !important;
@@ -255,7 +300,7 @@ body.in-pip .tile-menu-backdrop {
 }
 
 .ptr-indicator__icon {
-  color: var(--accent);
+  color: var(--accent-line);
   flex-shrink: 0;
 }
 
@@ -295,7 +340,7 @@ body.in-pip .tile-menu-backdrop {
 .install-banner__btn {
   flex-shrink: 0;
   background: var(--accent);
-  color: #21170a;
+  color: var(--on-accent);
   border: none;
   border-radius: 8px;
   padding: 7px 14px;
@@ -410,7 +455,7 @@ body.in-pip .tile-menu-backdrop {
 }
 
 .bottom-nav a.active {
-  color: var(--peri);
+  color: var(--accent-text);
 }
 
 .bottom-nav__icon {
@@ -473,7 +518,7 @@ body.in-pip .tile-menu-backdrop {
 
   .bottom-nav a.active {
     background: var(--bg-elevated-2);
-    color: var(--peri);
+    color: var(--accent-text);
     font-weight: 600;
   }
 
@@ -518,7 +563,7 @@ body.in-pip .tile-menu-backdrop {
 
 .breathing--connecting .breathing__core { background: var(--accent); }
 .breathing--connecting .breathing__ring {
-  border-color: var(--accent);
+  border-color: var(--accent-line);
   animation: breathe 1.4s ease-in-out infinite;
 }
 
@@ -546,6 +591,47 @@ body.in-pip .tile-menu-backdrop {
   padding: 16px;
   margin-bottom: 14px;
 }
+
+/* The same steps sit in Settings and the narrower setup card. Let long DNS names wrap on a phone. */
+.tailscale-card, .about-card { min-width: 0; }
+.tailscale-card__heading, .about-card__heading, .tailscale-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tailscale-card__heading, .about-card__heading { justify-content: space-between; }
+.tailscale-card__heading .card-title, .about-card__heading .card-title { margin: 0; }
+.tailscale-card .btn, .remote-advanced summary, .tailscale-advanced summary { min-height: 44px; }
+.tailscale-actions .btn { flex: 1 1 130px; width: auto; }
+.tailscale-card p, .tailscale-card li, .about-card p { line-height: 1.5; }
+/* About's Support and safety text sits under the title (the Connection card's text follows an h3, which carries its own margin). */
+.about-card__text { margin: 12px 0; }
+.about-card__text:last-child { margin-bottom: 0; }
+/* Owner testing 2026-11-05: the card's content outranked its own title. The title is the 12px grey .card-title, the h3s fell
+   back to the browser default (~18px) and the address was 17.6px. Everything here now sits on the design-language scale
+   (docs/design-language.md §3): title 16 (sheet-title size), sub-heading 14, address 15, body 14. The wizard shows the same
+   card without the title; its step heading above it is the larger one, so the order still reads title > sub-heading > text. */
+/* Settings -> About -> Connection (.about-card) deliberately shares this look: the owner asked on 2026-11-07 for it to mirror
+   the Remote Access card, after two layouts of its own read badly on a phone. Change the two together. */
+.tailscale-card, .about-card { font-size: 14px; }
+.tailscale-card__heading .card-title, .about-card__heading .card-title { font-size: 16px; font-weight: 800; color: var(--text-primary); }
+.tailscale-card h3, .about-card h3 { font-size: 14px; font-weight: 700; margin: 18px 0 6px; }
+/* Owner 2026-11-07: the sub-heading on About is Inter, like the address and text under it (headings h1-h3 are Nunito by default,
+   design-language.md section 3). Only the card TITLES stay Nunito. The Remote Access card keeps the default for now. */
+.about-card h3 { font-family: var(--font-body); }
+/* Owner 2026-11-10: on a phone the address ("https://<name>.<tailnet>.ts.net", about 35-45 characters) ran onto a second line.
+   The font now shrinks with the screen (15px on a desktop, about 13px on a 390px phone, never below 12px) so a typical name stays
+   on one line; a name still too long wraps, at a dot first (TailscaleCard puts a <wbr> after each one), and only mid-word as the
+   last resort (overflow-wrap), so it can never run off the card. The 3.5vw and the 12px floor are judgement, checked against a
+   few fictional names at 320-430px, not measured on every device. */
+.tailscale-address { overflow-wrap: anywhere; font-weight: 600; font-size: clamp(12px, 3.5vw, 15px); }
+.tailscale-hint { color: var(--text-secondary); font-size: 0.875rem; }
+.tailscale-qr { width: min(180px, 100%); margin: 16px auto; text-align: center; }
+.tailscale-qr svg { display: block; width: 100%; height: auto; }
+.tailscale-qr__background { fill: var(--bg-elevated); }
+.tailscale-qr__modules { fill: var(--text-primary); }
+.tailscale-qr figcaption { margin-top: 8px; color: var(--text-secondary); }
+.tailscale-advanced, .remote-advanced { margin-top: 18px; }
+.tailscale-advanced summary, .remote-advanced summary { cursor: pointer; padding: 10px 0; font-weight: 600; }
+.tailscale-advanced summary:focus-visible, .remote-advanced summary:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.tailscale-advanced > .btn, .tailscale-advanced form { margin-top: 12px; }
+.tailscale-card--compact { border-top: 1px solid var(--border); padding-top: 16px; }
 
 .card-grid {
   display: grid;
@@ -594,7 +680,10 @@ body.in-pip .tile-menu-backdrop {
     padding-bottom: 4px;
   }
   .app-header h1 { font-size: 17px; }
+  .app-header__top-row { min-height: 28px; } /* the slim bar's row: the 28px logo, as 36px is on the full bar */
   .app-header__icon { width: 28px; height: 28px; }
+  .app-header__theme { width: 26px; height: 26px; }
+  .app-header__theme::after { inset: -9px; }
 
   .bottom-nav { padding: 2px 8px calc(2px + env(safe-area-inset-bottom)); }
   .bottom-nav a { font-size: 10px; padding: 2px 4px; }
@@ -743,7 +832,7 @@ body.in-pip .tile-menu-backdrop {
 .talk-btn--active {
   background: var(--accent);
   color: #0a0d1c;
-  box-shadow: 0 0 0 3px rgba(245, 217, 168, 0.35);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .pip-btn {
@@ -881,7 +970,7 @@ body.in-pip .tile-menu-backdrop {
 }
 
 .tile-menu__item--active {
-  color: var(--peri);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
@@ -1072,13 +1161,16 @@ body.in-pip .tile-menu-backdrop {
 }
 .ptz-arrow:active {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--on-accent);
 }
 
 /* Background-listening keeps a distinct accent tint over the white, so it's clear at a
    glance the camera is being held alive in the background (not merely unmuted). */
+/* Owner 2026-11-05: washed out and hard to see in light mode, fine in dark. This button sits over the VIDEO, not on a themed
+   surface, so it must not follow the theme: by day `--accent-text` is the dark violet #5F3DB7, which has little contrast on a
+   picture. The night value of `--accent-text` (#BCA8F3, docs/design-language.md tokens) is used in both themes. */
 .mute-btn--bg {
-  color: var(--accent);
+  color: #BCA8F3;
 }
 
 /* Inline warning inside a form (e.g. stream validation failed on save) - softer than the
@@ -1127,6 +1219,9 @@ body.in-pip .tile-menu-backdrop {
   color: #fff;
 }
 .status-badge--ok { background: var(--live); }
+/* "Recommended" (the Tailscale card): the complement colour, as a small highlight rather than a status (owner, 2026-11-05).
+   Dark text, like any text on a light fill: --on-complement on --complement is 10.8:1 by day and 12.4:1 at night. */
+.status-badge--highlight { background: var(--complement); color: var(--on-complement); }
 .status-badge--bad { background: var(--offline); }
 .status-badge--off { background: var(--text-secondary); }
 .status-badge--sm { padding: 2px 8px; font-size: 11px; }
@@ -1147,12 +1242,12 @@ body.in-pip .tile-menu-backdrop {
 }
 .cam-thumb.sm { width: 40px; height: 30px; border-radius: 7px; }
 .cam-thumb.off { filter: grayscale(1) brightness(0.62); }
-.cam-thumb__dot { position: absolute; top: 5px; left: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 3px rgba(111, 174, 144, 0.32); }
+.cam-thumb__dot { position: absolute; top: 5px; left: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 32%, transparent); }
 .cam-row__main { flex: 1; min-width: 0; }
 .cam-row__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .cam-row__name { font-weight: 600; font-size: 15px; }
 .cam-row__meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
-.cam-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--peri); background: rgba(124, 131, 219, 0.12); padding: 2px 9px 2px 3px; border-radius: 999px; }
+.cam-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--accent-text); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 2px 9px 2px 3px; border-radius: 999px; }
 .cam-chip__mini { width: 18px; height: 18px; border-radius: 50%; color: #fff; font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
 
 /* Child hero ("night") card — identity now, last night's sleep later. */
@@ -1165,7 +1260,7 @@ body.in-pip .tile-menu-backdrop {
 /* Enlarged child photo in a modal (tapped from the detail hero). */
 .photo-full { display: block; width: 100%; border-radius: 12px; }
 .night__id { flex: 1; min-width: 0; }
-.night__name { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 600; line-height: 1.1; }
+.night__name { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 800; line-height: 1.1; }
 .night__age { display: block; font-size: 12.5px; color: #b9bdf0; margin-top: 3px; }
 .night__edit { font-size: 12.5px; color: #c7caff; opacity: 0.85; flex-shrink: 0; }
 .night__sleep { display: flex; align-items: center; gap: 11px; margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.1); color: #cdd0ff; }
@@ -1227,7 +1322,7 @@ body.in-pip .tile-menu-backdrop {
 .recompute-diff__was { color: var(--text-secondary); text-decoration: line-through; }
 .recompute-diff__arrow { color: var(--text-secondary); text-align: center; }
 .recompute-diff__now { color: var(--text-primary); font-weight: 600; }
-.recompute-diff__row.is-changed .recompute-diff__now { color: var(--accent); }
+.recompute-diff__row.is-changed .recompute-diff__now { color: var(--accent-text); }
 /* #361 PR 3: "Use the settings this night was saved with". The whole label row is the hit area (a real
    checkbox inside a label), at least 44px tall per the touch-target rule; the help lines are secondary text. */
 .recompute-choice { margin: 0 0 12px; }
@@ -1279,7 +1374,7 @@ body.in-pip .tile-menu-backdrop {
 .sleep-refined__item b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
 .sleep-refined__old { text-decoration: line-through; opacity: 0.55; margin-right: 5px; font-variant-numeric: tabular-nums; }
 .sleep-refined__note { flex-basis: 100%; font-size: 11px; color: var(--text-secondary); opacity: 0.8; margin-top: 2px; }
-.sleep-tl__now { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 2px dashed var(--accent); transform: translateX(-1px); }
+.sleep-tl__now { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 2px dashed var(--accent-line); transform: translateX(-1px); }
 /* Hover bubble over the timeline: a follow-the-cursor tooltip with the time, sleep status, and (if a
    sensor was present) the temperature at that moment. The wrap is the mouse/touch target; it must NOT
    clip (unlike the bar, which hides its segment corners). */
@@ -1298,7 +1393,7 @@ body.in-pip .tile-menu-backdrop {
 .sleep-tl__tip-time { font-size: 12.5px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .sleep-tl__tip-status { font-size: 11.5px; color: var(--text-secondary); text-transform: capitalize; }
 .sleep-tl__tip-temp { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--sleep-temp); font-variant-numeric: tabular-nums; }
-.sleep-live-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: #1b1c33; background: var(--accent); vertical-align: 2px; }
+.sleep-live-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--on-accent); background: var(--accent); vertical-align: 2px; }
 .sleep-tl__axis { position: relative; height: 16px; margin-top: 4px; }
 .sleep-tl__tick { position: absolute; top: 0; width: 1px; height: 4px; background: var(--border); transform: translateX(-0.5px); }
 .sleep-tl__tick-label { position: absolute; top: 5px; left: 0; transform: translateX(-50%); font-size: 10px; color: var(--text-secondary); white-space: nowrap; }
@@ -1318,7 +1413,7 @@ body.in-pip .tile-menu-backdrop {
 /* The head is a <button> when the wake has correlated alerts — strip the native chrome so it reads as
    a row, and give it a full-width tap target + a visible focus ring for keyboard users. */
 button.sleep-wakes__head { width: 100%; padding: 0; border: none; background: none; cursor: pointer; text-align: left; font: inherit; color: inherit; border-radius: 8px; }
-button.sleep-wakes__head:focus-visible { outline: 2px solid var(--peri); outline-offset: 3px; }
+button.sleep-wakes__head:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 3px; }
 .sleep-wakes__time { font-size: 14px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .sleep-wakes__headright { display: inline-flex; align-items: center; gap: 8px; flex: none; }
 .sleep-wakes__dur { font-size: 13px; color: var(--sleep-wake); font-weight: 600; }
@@ -1330,9 +1425,9 @@ button.sleep-wakes__head:focus-visible { outline: 2px solid var(--peri); outline
 .sleep-wakes__alert { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary); }
 .sleep-wakes__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: default; line-height: 0; }
 button.sleep-wakes__thumbwrap { cursor: pointer; border-radius: 8px; }
-button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
+button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .sleep-wakes__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, #23264d, #14162f); }
-.sleep-wakes__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--peri-soft); }
+.sleep-wakes__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
 .sleep-wakes__play { position: absolute; inset: 0; margin: auto; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(10, 13, 28, 0.62); color: #fff; }
 .sleep-wakes__alert-ico { color: var(--sleep-wake); flex: none; }
 .sleep-wakes__alert-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
@@ -1352,7 +1447,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--peri); ou
 
 /* Temperature ↔ sleep insight card (Phase 5) */
 .sleep-insight__title { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 10px; }
-.sleep-insight__title svg { color: var(--accent); }
+.sleep-insight__title svg { color: var(--accent-line); }
 .sleep-insight__headline { font-size: 15px; font-weight: 600; color: var(--text-primary); line-height: 1.35; margin-bottom: 12px; text-wrap: balance; }
 .sleep-insight__body { font-size: 13px; color: var(--text-secondary); line-height: 1.45; }
 .sleep-insight__cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -1388,11 +1483,13 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--peri); ou
    because the text is JSON a person may need to read; vertical resize only so it cannot widen the card. */
 .crib__text { width: 100%; box-sizing: border-box; background: var(--field-bg); border: 1px solid var(--border); color: var(--text-primary); border-radius: 10px; padding: 10px 12px; font: 12px/1.4 monospace; resize: vertical; }
 .btn-sm { padding: 6px 14px; font-size: 12.5px; white-space: nowrap; }
-.linkbtn { background: none; border: none; color: var(--accent); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
+.linkbtn { background: none; border: none; color: var(--accent-text); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
 
 /* Room-climate sensor history (Child detail). Temp + humidity sparklines from sensor_readings. */
 .sensor-card { margin-bottom: 14px; }
-/* .sensor-card__title styling is now the canonical .card-title rule above. */
+/* Room climate inherits the canonical title style above, but its chart starts right below the title;
+   Cameras and Recent alerts have padded rows that supply their own space. */
+.sensor-card__title { margin-bottom: 10px; }
 .sensor-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
 @media (min-width: 560px) { .sensor-grid { grid-template-columns: 1fr 1fr; } }
 .sensor-series__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
@@ -1407,23 +1504,21 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--peri); ou
 .child-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; cursor: pointer; font: inherit; border: 1px solid var(--border); color: var(--text-primary); background: var(--bg-elevated); border-radius: 18px; padding: 15px 16px; margin-bottom: 12px; box-shadow: 0 10px 26px -22px rgba(30, 30, 70, 0.35); transition: transform 0.12s ease, box-shadow 0.12s ease; }
 .child-card:hover { transform: translateY(-1px); box-shadow: 0 14px 32px -22px rgba(30, 30, 70, 0.45); }
 .child-card:active { transform: translateY(0); }
-.child-card:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
+.child-card:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .child-card__id { flex: 1; min-width: 0; }
-.child-card__name { display: block; font-family: var(--font-display); font-size: 20px; font-weight: 600; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.child-card__name { display: block; font-family: var(--font-display); font-size: 20px; font-weight: 800; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .child-card__meta { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); margin-top: 4px; }
-.child-card__chev { color: var(--peri); opacity: 0.6; flex-shrink: 0; }
+.child-card__chev { color: var(--accent-line); opacity: 0.6; flex-shrink: 0; }
 
-:root[data-theme='dark'] .child-card { border: none; color: #eef0ff; background: linear-gradient(165deg, #2c2f63 0%, #191b38 100%); box-shadow: 0 14px 34px -24px rgba(18, 20, 58, 0.8); }
-:root[data-theme='dark'] .child-card:hover { box-shadow: 0 18px 40px -24px rgba(18, 20, 58, 0.9); }
-:root[data-theme='dark'] .child-card__meta { color: #b9bdf0; }
-:root[data-theme='dark'] .child-card__chev { color: #c7caff; }
+:root[data-theme='dark'] .child-card { border-color: var(--border); color: var(--text-primary); background: var(--bg-elevated); box-shadow: 0 14px 34px -24px rgba(0, 0, 0, 0.8); }
+:root[data-theme='dark'] .child-card:hover { box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.9); }
 
 /* Alert list — one card, one row per alert: thumbnail, camera name, motion/sound icon + label, time.
    Shared by the Live "Recent activity" list and each child's detail screen. */
 .alert-item { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-bottom: 1px solid var(--border); }
 .alert-item:last-child { border-bottom: none; }
 .alert-item__thumb { width: 64px; height: 46px; border-radius: 9px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, #23264d, #14162f); }
-.alert-item__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--peri-soft); }
+.alert-item__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
 .alert-item__body { flex: 1; min-width: 0; }
 .alert-item__name { font-weight: 600; font-size: 14.5px; display: flex; align-items: center; gap: 7px; }
 .alert-item__nametext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1433,28 +1528,32 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--peri); ou
 @keyframes recpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
 @media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
 .alert-item__meta { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; }
-.alert-item__ico { color: var(--peri); flex-shrink: 0; }
+.alert-item__ico { color: var(--accent-line); flex-shrink: 0; }
 .alert-item__time { font-size: 12px; color: var(--text-secondary); flex-shrink: 0; white-space: nowrap; }
 /* Thumbnail wrapper carries the play/recording overlay. As a <button> (clip ready) it's a bare,
    tappable frame. */
 .alert-item__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: default; line-height: 0; }
 button.alert-item__thumbwrap { cursor: pointer; border-radius: 9px; }
-button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
+button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .alert-item__play {
   position: absolute; inset: 0; margin: auto; width: 26px; height: 26px;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%; background: rgba(10, 13, 28, 0.62); color: #fff;
 }
-.alert-item__play--pending { background: rgba(10, 13, 28, 0.5); color: var(--peri-soft); }
-.alert-item__clipflag { color: var(--peri); }
+.alert-item__play--pending { background: rgba(10, 13, 28, 0.5); color: var(--accent-soft); }
+.alert-item__clipflag { color: var(--accent-line); }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 /* Modal clip player */
 .clip-player { width: 100%; border-radius: 12px; background: #000; display: block; max-height: 60vh; }
 .clip-player__meta { font-size: 12.5px; color: var(--text-secondary); margin: 10px 0 14px; text-align: center; }
+.clip-player__actions { display: inline-flex; align-items: center; gap: 4px; }
+.clip-player__actions .icon-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+.clip-protected-badge { display: inline-flex; align-items: center; gap: 3px; border-radius: 20px; padding: 1px 6px; color: var(--text-secondary); background: var(--bg-elevated-2); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.clip-protection-note { color: var(--text-secondary); font-size: 12px; line-height: 1.4; margin: -4px 0 12px; text-align: center; }
 .btn-block { display: block; width: 100%; text-align: center; }
 .icon-btn--danger { color: var(--offline); }
-/* Clip Management (Settings) */
+/* Clip Management (Settings → Camera and Recording) */
 .clip-day-select { width: auto; min-width: 140px; padding: 7px 10px; font-size: 13px; }
 
 /* Clip date filter — popup calendar */
@@ -1464,7 +1563,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   background: var(--bg-elevated-2); border: 1px solid var(--border); color: var(--text-primary);
   border-radius: 10px; padding: 7px 12px; font-size: 13px; font-weight: 500; cursor: pointer;
 }
-.clip-datepicker__trigger:hover { border-color: var(--peri-soft); }
+.clip-datepicker__trigger:hover { border-color: var(--accent-soft); }
 .clip-cal {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 50;
   width: 280px; padding: 12px; background: var(--bg-elevated); border: 1px solid var(--border);
@@ -1491,29 +1590,29 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 .clip-cal__day.has-clips { color: var(--text-primary); font-weight: 600; cursor: pointer; }
 .clip-cal__day.has-clips::after {
   content: ''; position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
-  width: 4px; height: 4px; border-radius: 50%; background: var(--peri);
+  width: 4px; height: 4px; border-radius: 50%; background: var(--accent-line);
 }
 .clip-cal__day.has-clips:hover { background: var(--bg-elevated-2); }
-.clip-cal__day.is-sel { background: var(--peri); color: #fff; }
-.clip-cal__day.is-sel::after { background: #fff; }
+.clip-cal__day.is-sel { background: var(--accent); color: var(--on-accent); }
+.clip-cal__day.is-sel::after { background: var(--on-accent); }
 .clip-cal__foot { display: flex; gap: 8px; margin-top: 10px; }
 .clip-cal__all, .clip-cal__done {
   flex: 1; padding: 8px; border-radius: 9px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
 }
-.clip-cal__all { border: 1px solid var(--border); background: none; color: var(--peri); }
+.clip-cal__all { border: 1px solid var(--border); background: none; color: var(--accent-text); }
 .clip-cal__all:hover:not(:disabled) { background: var(--bg-elevated-2); }
 .clip-cal__all:disabled { opacity: 0.4; cursor: default; }
-.clip-cal__done { border: none; background: var(--peri); color: #fff; }
-.clip-selectall { background: none; border: none; color: var(--peri); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 2px 4px; margin: 0 0 8px 2px; }
+.clip-cal__done { border: none; background: var(--accent); color: var(--on-accent); }
+.clip-selectall { background: none; border: none; color: var(--accent-text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 2px 4px; margin: 0 0 8px 2px; }
 .clip-row { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
 .clip-row:last-child { border-bottom: none; }
-.clip-row--sel { background: color-mix(in srgb, var(--peri) 12%, transparent); }
+.clip-row--sel { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .clip-row__check { display: inline-flex; flex-shrink: 0; }
-.clip-row__check input { width: 18px; height: 18px; accent-color: var(--peri); }
+.clip-row__check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .clip-row__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: pointer; line-height: 0; border-radius: 8px; }
-.clip-row__thumbwrap:focus-visible { outline: 2px solid var(--peri); outline-offset: 2px; }
+.clip-row__thumbwrap:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .clip-row__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; background: linear-gradient(135deg, #23264d, #14162f); }
-.clip-row__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--peri-soft); }
+.clip-row__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
 .clip-row__body { flex: 1; min-width: 0; cursor: pointer; }
 .clip-row__name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .clip-row__meta { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
@@ -1522,7 +1621,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 /* In-player "delete this clip?" confirm row */
 .clip-confirm { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 13.5px; }
 .clip-confirm > span { color: var(--text-secondary); }
-/* Recording storage readout (Settings → Recording) */
+/* Recording storage readout (Settings → Camera and Recording → Recording) */
 .storage-readout { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
 .storage-readout code { font-size: 12px; background: var(--field-bg); padding: 1px 5px; border-radius: 5px; }
 /* Full-screen fallback shown by ErrorBoundary when a render throw would otherwise blank
@@ -1657,6 +1756,36 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   background: #000;
 }
 
+/* With Android's bars hidden these insets are 0, so the 10px edge and 54px inner
+   spacing stay as drawn (#381). In a phone browser/PWA the insets clear cutouts;
+   Android WebView reporting non-zero insets in fullscreen is unverified. */
+.camera-tile__video-wrap:fullscreen .mute-btn,
+.camera-tile__video-wrap:fullscreen .talk-btn,
+.camera-tile__video-wrap:fullscreen .rec-btn {
+  top: max(10px, env(safe-area-inset-top, 0px));
+}
+.camera-tile__video-wrap:fullscreen .pip-btn,
+.camera-tile__video-wrap:fullscreen .settings-btn,
+.camera-tile__video-wrap:fullscreen .ptz-btn,
+.camera-tile__video-wrap:fullscreen .fullscreen-btn {
+  bottom: max(10px, env(safe-area-inset-bottom, 0px));
+}
+.camera-tile__video-wrap:fullscreen .talk-btn,
+.camera-tile__video-wrap:fullscreen .settings-btn {
+  left: max(10px, env(safe-area-inset-left, 0px));
+}
+.camera-tile__video-wrap:fullscreen .ptz-btn {
+  left: calc(max(10px, env(safe-area-inset-left, 0px)) + 44px);
+}
+.camera-tile__video-wrap:fullscreen .mute-btn,
+.camera-tile__video-wrap:fullscreen .fullscreen-btn {
+  right: max(10px, env(safe-area-inset-right, 0px));
+}
+.camera-tile__video-wrap:fullscreen .rec-btn,
+.camera-tile__video-wrap:fullscreen .pip-btn {
+  right: calc(max(10px, env(safe-area-inset-right, 0px)) + 44px);
+}
+
 .camera-tile__video-wrap:fullscreen .whep-video {
   width: 100%;
   height: 100%;
@@ -1745,7 +1874,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 }
 
 .camera-tile__reading-icon {
-  color: var(--accent);
+  color: var(--accent-text);
   flex-shrink: 0;
 }
 
@@ -1795,7 +1924,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 }
 
 .field input:focus, .field select:focus, button:focus-visible, a:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-line);
   outline-offset: 2px;
 }
 
@@ -1815,7 +1944,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 
 .btn-primary {
   background: var(--accent);
-  color: #21170a;
+  color: var(--on-accent);
 }
 
 .btn-secondary {
@@ -1827,8 +1956,8 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
 /* Periwinkle fill (same shade as an active segmented toggle / switch) — for secondary actions
    that still need to read clearly in light mode, e.g. the ONVIF fetch / verify buttons. */
 .btn-peri {
-  background: var(--peri);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 /* Disabled buttons read as greyed-out and unclickable (e.g. while a diagnostics bundle builds). */
@@ -1875,31 +2004,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   flex-wrap: wrap;
 }
 
-.preset-btn {
-  display: flex;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  border-radius: 10px;
-  padding: 6px;
-  cursor: pointer;
-  gap: 3px;
-}
-
-.preset-btn span {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  display: block;
-}
-
-.font-row {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
-}
-
-.font-btn {
+.unit-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1913,47 +2018,13 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   min-width: 84px;
 }
 
-.font-btn--active {
-  border-color: var(--accent);
+.unit-btn--active {
+  border-color: var(--accent-line);
   color: var(--text-primary);
 }
 
-.font-btn__sample {
-  font-size: 22px;
-  color: var(--text-primary);
-}
-
-.font-btn__label {
+.unit-btn__label {
   font-size: 11px;
-}
-
-.color-field {
-  margin-bottom: 16px;
-}
-
-.color-field:last-child { margin-bottom: 0; }
-
-.color-field label {
-  display: block;
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-}
-
-.color-field__row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.color-field__row input[type='color'] {
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: none;
-  cursor: pointer;
 }
 
 .empty-state {
@@ -1977,13 +2048,12 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   max-width: 380px;
 }
 
-.auth-icon {
-  display: block;
-  width: 84px;
-  height: 84px;
+/* The size, shape and glow come from the shared logo tile (.logo-tile, defined later in this file); this is only the sign-in
+   screen's spacing. It is `.logo-tile.auth-icon` so its `display: flex` (which lets `margin: 0 auto` centre the tile) wins
+   over `.logo-tile`'s `inline-flex`, which comes later and would otherwise override it. */
+.logo-tile.auth-icon {
+  display: flex;
   margin: 0 auto 18px;
-  border-radius: 22px;
-  box-shadow: 0 8px 30px rgba(245, 217, 168, 0.18);
 }
 
 .auth-card h1 {
@@ -2061,8 +2131,8 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  background: rgba(124, 131, 219, 0.15);
-  color: var(--peri);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent-text);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2085,18 +2155,10 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   gap: 16px;
 }
 
-.about-hero__icon {
-  width: 64px;
-  height: 64px;
-  border-radius: 16px;
-  flex-shrink: 0;
-  box-shadow: 0 8px 30px rgba(245, 217, 168, 0.18);
-}
-
 .about-hero__name {
   font-family: var(--font-display);
   font-size: 20px;
-  font-weight: 600;
+  font-weight: 800;
   margin-bottom: 2px;
 }
 
@@ -2154,13 +2216,13 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--peri); out
   text-align: right;
   font-size: 12px;
   font-weight: 600;
-  color: var(--peri);
+  color: var(--accent-text);
   margin-bottom: 4px;
 }
 
 input[type='range'] {
   width: 100%;
-  accent-color: var(--peri);
+  accent-color: var(--accent);
 }
 
 /* Segmented control (e.g. the Light / Dark / System theme picker in Account). */
@@ -2191,8 +2253,8 @@ input[type='range'] {
 }
 
 .segmented__btn--active {
-  background: var(--peri);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   font-weight: 600;
 }
 
@@ -2220,14 +2282,17 @@ input[type='range'] {
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-.detect-toggle:hover:not(:disabled) {
-  border-color: var(--peri);
+/* `:not(.detect-toggle--on)`: the hover rule out-ranks the lit rule below, and a phone keeps a tapped button in :hover, so a
+   just-tapped lit toggle showed the plain text colour (white in dark mode, navy in light) on the accent fill until you tapped
+   elsewhere (owner, 2026-11-06). Hover is for the unlit buttons; a lit one keeps its own colours. */
+.detect-toggle:hover:not(:disabled):not(.detect-toggle--on) {
+  border-color: var(--accent-line);
   color: var(--text-primary);
 }
 .detect-toggle--on {
-  background: var(--peri);
-  border-color: var(--peri);
-  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
   font-weight: 600;
 }
 .detect-toggle:disabled {
@@ -2245,8 +2310,8 @@ input[type='range'] {
   justify-content: center;
 }
 .silence-btn--muted {
-  border-color: var(--accent-dim);
-  color: var(--accent-dim);
+  border-color: var(--accent-line);
+  color: var(--accent-text);
 }
 .silence-menu {
   display: flex;
@@ -2257,10 +2322,21 @@ input[type='range'] {
 }
 
 /* "Memories" timelapse card on child detail (see components/TimelapseCard.jsx). */
+/* These media sections start directly below their titles; Cameras and Recent alerts have padded rows,
+   so only these in-card titles need extra space. */
 .timelapse-card .card-title {
   display: flex;
   align-items: center;
   gap: 6px;
+  margin-bottom: 10px;
+}
+/* Same centring as the Timelapse title above: without it the Video icon sat on the text baseline,
+   higher than the word (owner screenshot, 2026-11-01). */
+.recordings-card .card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
 }
 .timelapse-hero {
   position: relative;
@@ -2325,7 +2401,7 @@ input[type='range'] {
   color: var(--text-secondary);
 }
 .timelapse-strip__item--active {
-  border-color: var(--peri);
+  border-color: var(--accent-line);
   color: var(--text-primary);
 }
 .timelapse-strip__item img {
@@ -2385,8 +2461,8 @@ input[type='range'] {
 }
 
 .switch input:checked ~ .switch__track {
-  background: var(--peri);
-  border-color: var(--peri);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .switch input:checked ~ .switch__track .switch__thumb {
@@ -2395,7 +2471,7 @@ input[type='range'] {
 }
 
 .switch input:focus-visible ~ .switch__track {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-line);
   outline-offset: 2px;
 }
 
@@ -2426,15 +2502,16 @@ input[type='range'] {
   cursor: pointer;
 }
 
-.log-chip:hover {
+/* Not on the lit chip: same sticky-hover fault as `.detect-toggle` above (hover out-ranks `.log-chip--active`). */
+.log-chip:hover:not(.log-chip--active) {
   color: var(--text-primary);
-  border-color: var(--peri-soft);
+  border-color: var(--accent-soft);
 }
 
 .log-chip--active {
-  background: var(--peri);
-  border-color: var(--peri);
-  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
 }
 
 .log-viewer__filter-row {
@@ -2455,7 +2532,7 @@ input[type='range'] {
 }
 
 .log-viewer__filter:focus {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-line);
   outline-offset: 2px;
 }
 
@@ -2567,9 +2644,9 @@ input[type='range'] {
 .event-log__dot--offline { background: var(--offline); }
 .event-log__dot--online { background: var(--live); }
 .event-log__dot--restart { background: var(--accent); }
-/* A person silencing a camera's alerts (#552): --peri, the chrome-level accent, since it is a person acting
+/* A person silencing a camera's alerts (#552): use the brand accent since it is a person acting
    on the app rather than the camera's own state (offline/online/restart above). */
-.event-log__dot--snooze { background: var(--peri); }
+.event-log__dot--snooze { background: var(--accent); }
 .event-log__dot--motion { background: #e0a57f; }
 .event-log__dot--sound { background: #8fd1e0; }
 
@@ -2630,7 +2707,7 @@ input[type='range'] {
   align-items: center;
   gap: 12px;
   background: var(--bg-elevated-2);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--accent-line);
   border-radius: 14px;
   padding: 12px 14px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
@@ -2690,7 +2767,7 @@ input[type='range'] {
   border: 2px solid transparent; border-radius: 8px; overflow: hidden;
   background: var(--bg-elevated-2); color: var(--text-secondary); cursor: pointer;
 }
-.rec-strip__item:hover { border-color: var(--peri); color: var(--text-primary); }
+.rec-strip__item:hover { border-color: var(--accent-line); color: var(--text-primary); }
 .rec-strip__item img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
 .rec-strip__item span:last-child { display: block; padding: 5px 6px; font-size: 11px; line-height: 1.25; }
 /* A recording that couldn't be saved (issue #276). It has no thumbnail to show, so the tile keeps the
@@ -2768,8 +2845,12 @@ input[type='range'] {
   max-height: 100%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  /* A bottom sheet sits on the screen edge, where a phone's gesture bar and rounded corners are: the usual 16px of card
+     padding left the last button looking jammed against it (owner, 2026-11-06, on a phone). Every sheet from the bottom gets
+     the same extra room, plus the device's own bottom inset where there is one. */
+  padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px));
 }
-.modal-overlay--top .modal-card { border-radius: 0 0 20px 20px; }
+.modal-overlay--top .modal-card { border-radius: 0 0 20px 20px; padding-bottom: 16px; }
 
 .modal-card__head {
   display: flex;
@@ -2789,6 +2870,7 @@ input[type='range'] {
     max-width: min(1040px, 92vw);
     max-height: 92vh;
     border-radius: 16px;
+    padding-bottom: 16px; /* a centred dialog has no screen edge under it */
   }
   /* The sheet caps the video at 60vh so it can't push the controls off a phone screen; centred in a
      desktop dialog there's room to let it use the height it's given. */
@@ -2813,8 +2895,7 @@ input[type='range'] {
 .sleep-wakes__thumb--frame { width: 96px; height: 54px; }
 
 /* Morning review — the "was last night right?" card and the screen behind it.
-   Chrome is --peri (this is something to interact with), not --accent: it is an invitation, not the
-   primary action on the page. The card must read as dismissable at a glance or it becomes nagging. */
+   The icon uses the brand accent to show the card can be opened. */
 .review-card { display: flex; align-items: stretch; padding: 0; overflow: hidden; }
 
 .review-card__body {
@@ -2825,11 +2906,11 @@ input[type='range'] {
 .review-card__icon {
   flex-shrink: 0; width: 34px; height: 34px; border-radius: 10px;
   display: inline-flex; align-items: center; justify-content: center;
-  color: var(--peri); background: rgba(124, 131, 219, 0.12);
+  color: var(--accent-line); background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .review-card__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.review-card__go { color: var(--peri); font-size: 20px; padding-right: 12px; }
+.review-card__go { color: var(--accent-line); font-size: 20px; padding-right: 12px; }
 
 .review-card__dismiss {
   order: 2; align-self: flex-start; flex-shrink: 0;
@@ -2871,11 +2952,14 @@ input[type='range'] {
 .review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .review-actions .btn { flex: 1 1 auto; }
 
-/* "You corrected this" — shown wherever a night's times came from a person rather than the detector. */
+/* "You corrected this" — shown wherever a night's times came from a person rather than the detector.
+   Owner 2026-11-05: hard to read. It is only used on the sleep card (`.night`), which is a dark indigo gradient in BOTH themes,
+   but it was coloured with `--accent-text`, which by day is the dark violet #5F3DB7: dark text on a dark card. Light text on a
+   light veil reads on that card in either theme. If this pill is ever used on a light surface, scope these colours to `.night`. */
 .sleep-corrected {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11.5px; font-weight: 600; color: var(--peri);
-  background: rgba(124, 131, 219, 0.12); padding: 2px 9px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 600; color: #D9CDF4;
+  background: rgba(255, 255, 255, 0.14); padding: 2px 9px; border-radius: 999px;
 }
 
 .sleep-detail__recompute-note {
@@ -2896,4 +2980,123 @@ input[type='range'] {
 .esphome-entities li { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .esphome-entities__name { min-width: 0; overflow-wrap: anywhere; }
 .esphome-dates { display: flex; gap: 10px; flex-wrap: wrap; }
+.setup-main { width: min(100%, 760px); margin-inline: auto; }
+.setup-card { padding: clamp(20px, 5vw, 36px); }
+.setup-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-secondary); font-size: 13px; }
+.setup-wordmark { display: flex; align-items: center; gap: 9px; color: var(--text-primary); font: 800 19px var(--font-display); }
+/* One row however many steps there are (owner, 2026-11-06: with seven steps a fixed six columns wrapped the last one onto a second
+   line). Columns are created per segment, equal width. */
+.setup-progress { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; margin: 24px 0; }
+.setup-progress span { height: 7px; border-radius: 99px; background: var(--border); }
+.setup-progress .is-complete { background: var(--accent); }
+.setup-progress .is-current { background: var(--complement); }
+.setup-intro { text-align: center; margin: 22px 0 28px; }
+.setup-intro h1 { margin: 0 0 6px; font: 800 clamp(24px, 5vw, 32px) var(--font-display); }
+.setup-intro p { margin: 0; color: var(--text-secondary); }
+.setup-content { display: grid; gap: 12px; }
+.setup-content > p { margin: 0; }
+.setup-card .app-main { padding: 0; }
+.setup-card select, .setup-card input { min-height: 44px; }
+.setup-card .btn { min-height: 44px; }
+.setup-actions { display: flex; gap: 10px; margin-top: 24px; }
+.setup-actions .btn { min-height: 44px; flex: 1; }
+.setup-exit { display: block; margin: 12px auto 0; padding: 12px; min-height: 44px; background: none; border: 0; color: var(--accent-text); font: inherit; cursor: pointer; }
+.logo-tile.setup-welcome-icon { display: flex; margin: 0 auto; }
+/* The guide's own caregiver form (SetupCaregivers); the first-run account form (FirstRun) uses the same classes so the two look alike. */
+/* The avatar sits in the middle of the form, with Remove under it (owner, 2026-11-06). Used by the guide's caregiver form and by
+   the first-run account form. */
+.setup-caregivers__photo { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 24px; }
+.setup-caregivers__added { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.setup-caregivers__added li { padding: 10px 12px; background: var(--bg-elevated-2); border-radius: 10px; color: var(--text-primary); }
+/* The logo (components/Logo.jsx), everywhere but the header: the owner's SVG on the header colour in a rounded square. Owner,
+   2026-11-05: the setup guide's was square and About's was rounded; they now share this one tile. The radius is a percentage
+   (the old header, About and sign-in tiles were all about 25%), so every size keeps the same shape. The glow is the accent
+   shadow About and the sign-in screen already had. The header shows the bare SVG (its bar is the same colour). */
+.logo-tile { display: inline-flex; flex-shrink: 0; background: var(--bar); border-radius: 25%; overflow: hidden; }
+.logo-tile img { display: block; width: 100%; height: 100%; }
+.logo-tile--glow { box-shadow: 0 8px 30px color-mix(in srgb, var(--accent) 18%, transparent); }
+.setup-checklist { list-style: none; padding: 0; margin: 8px 0; }
+.setup-checklist li { padding: 9px 0 9px 30px; position: relative; }
+.setup-checklist li::before { content: '✓'; position: absolute; left: 2px; color: var(--accent-text); font-weight: 800; }
+/* Add a camera (#950): the search card, one card per camera found, the login card, the manual card. The camera
+   cards follow the 12px card of the design language and the saved-server rows of the mobile app: a full-width
+   tappable row, name bold on the left, address muted under it, a small badge and a chevron on the right. */
+.camera-discovery { padding: 14px; margin-bottom: 12px; }
+.camera-discovery__title { margin: 0 0 10px; font-size: 16px; font-weight: 700; }
+.camera-list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 8px; }
+.camera-card {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; min-height: 44px; padding: 12px 14px; box-sizing: border-box;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px;
+  color: var(--text-primary); font: inherit; text-align: left; cursor: pointer;
+}
+.camera-card.is-selected { border-color: var(--accent-line); }
+/* An already-saved camera: greyed and not tappable. It is still listed so it does not look like a missed camera. */
+.camera-card.is-added { opacity: 0.55; cursor: default; }
+/* min-width 0 lets the text column shrink inside the flex row, so a long product string ends in an ellipsis
+   instead of pushing the badge off the card or wrapping in the middle of a word. */
+.camera-card__text { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.camera-card__name { font-size: 15px; font-weight: 700; }
+.camera-card__line { font-size: 13px; color: var(--text-secondary); }
+.camera-card__name, .camera-card__line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.camera-card__side { display: flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--text-secondary); }
+.camera-card__chevron { opacity: 0.45; }
+.camera-card__chevron.is-open { transform: rotate(90deg); }
+.camera-connect { padding: 14px; }
+.camera-connect__title { margin: 0; font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
+.camera-connect__address { margin: 2px 0 12px; font-size: 13px; color: var(--text-secondary); }
+.camera-connect__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.camera-connect__actions .btn { width: auto; flex: 1 1 140px; }
+/* Owner 2026-11-05: "Advanced settings" looked too big. It is a `.linkbtn` (`font: inherit`), so it took the card's size, about
+   20px next to a 15px button. 14px is the design scale's button size; the 44px height keeps the touch target. */
+.camera-connect__advanced { min-height: 44px; padding: 0 8px; font-size: 14px; }
+.camera-manual { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 14px; }
+.camera-manual .camera-card { border: 0; background: none; }
+.camera-manual__form { padding: 0 14px 14px; }
+.camera-manual__form .app-main { padding: 0; max-width: none; }
+.setup-summary { display: grid; gap: 10px; }
+.setup-summary div { display: flex; justify-content: space-between; gap: 10px; padding: 12px; background: var(--bg-elevated-2); border-radius: 10px; }
+.setup-main--terminal { width: 100%; }
+/* Owner testing 2026-11-05 (Android app), two rounds. The banner is rendered by SetupGate ABOVE the page's header, so:
+   1. it sat under the status bar (the header's env(safe-area-inset-top) padding does not cover it), and
+   2. when #984 gave the banner its own inset the header still added ITS inset too: an empty band the height of the
+      status bar between banner and title (owner's phone screenshot).
+   The banner, the header and the page's main are all direct children of the .app-shell flex column, so the header is moved
+   FIRST with `order` (sticky is unaffected). The banner, still first among the order-0 items, then sits under the header and
+   before the content, and the header covers the status bar once. The banner keeps its own inset only on a page whose header is
+   not a direct child of .app-shell (the :has() test) and on a WebView too old for :has(): there it looks as it did in #984,
+   never worse. */
+.app-shell > .app-header { order: -1; }
+.setup-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: calc(10px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-left)) 10px; background: var(--bg-elevated-2); color: var(--text-primary); border-bottom: 1px solid var(--border); }
+.app-shell:has(> .app-header) > .setup-banner { padding-top: 10px; }
+.setup-banner .btn { width: auto; min-height: 44px; }
+/* The in-progress wizard has no AppHeader (a focused card with its own wordmark; owner's choice, 2026-11-05), so the space the
+   header normally takes is reserved here instead: clear the status bar on a phone, a little more room on a wide screen. The
+   finished-setup view (--terminal) renders the real header and needs neither. */
+.setup-main:not(.setup-main--terminal) { padding-top: calc(16px + env(safe-area-inset-top, 0px)); }
+@media (min-width: 1200px) { .setup-main:not(.setup-main--terminal) { padding-top: 40px; } }
+/* Owner testing 2026-11-05: while the setup guide runs (Setup.jsx puts `setup-wizard` on <html>) the bottom bar / sidebar is
+   hidden, so a new admin goes through the guide, or Saves and exits, first. The shell then needs neither the 64px under the bar
+   nor the 220px beside it; it keeps room above the gesture bar instead. (This out-ranks the >= 1200px and short-landscape
+   .app-shell rules by specificity, so no media query is repeated.) */
+html.setup-wizard .bottom-nav { display: none; }
+html.setup-wizard .app-shell { padding-left: 0; padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+/* Same test: with no header the page scrolled up behind the transparent status bar, under its icons. An opaque strip the height
+   of the status bar (nothing on a desktop, where there is no inset) hides what scrolls under it. Below the modal overlay (50).
+   NAVY (--bar, the header colour in both themes), not the page colour (owner, 2026-11-06): the phone draws its status-bar icons
+   light, and on the light page colour they disappeared. Also on the screens before the first admin exists (FirstRun.jsx). */
+html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); background: var(--bar); z-index: 10; }
+.setup-player { max-width: 520px; margin-block: 16px; }
+@media (max-width: 600px) { .setup-banner { flex-wrap: wrap; } }
 .esphome-dates .field { flex: 1 1 140px; min-width: 0; }
+/* AvatarEditor (child settings, account): the avatar with a camera badge at its bottom-right. The invisible file input covers
+   the whole avatar so a tap lands on it; the badge is a rounded square in the card colour with a brand-violet border (the
+   reference image's border is green). Size is set inline from the avatar size, so the badge scales with it. */
+.avatar-editor { position: relative; display: inline-block; flex: none; border-radius: 50%; cursor: pointer; }
+.avatar-editor__input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border-radius: 50%; }
+.avatar-editor__badge { position: absolute; right: -4px; bottom: -4px; display: flex; align-items: center; justify-content: center; background: var(--bg-elevated); border: 2px solid var(--complement); border-radius: 9px; color: var(--accent-text); pointer-events: none; }
+/* Owner 2026-11-05: clicking the camera drew a second box around the badge. Cause: the ring was on `:focus-within`, and a click
+   focuses the (invisible) file input. A keyboard user still needs to see where focus is (docs/design-language.md, accessibility
+   floor), so the ring is now only for `:focus-visible` (the browser's own test for "focus arrived by keyboard"; a mouse or touch
+   click does not match it) and goes around the whole avatar, not the badge. */
+.avatar-editor:has(.avatar-editor__input:focus-visible) { outline: 2px solid var(--accent-line); outline-offset: 3px; }

@@ -20,6 +20,8 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { renderAsAdmin } from './helpers/render.jsx';
 import CameraSettings from '../src/pages/CameraSettings.jsx';
+import CameraForm from '../src/components/CameraForm.jsx';
+import { draftKey } from '../src/lib/formDraft.js';
 import { api } from '../src/lib/api.js';
 
 // A fully configured camera as the API returns it to an admin: address in parts, no secrets, a flag
@@ -78,6 +80,7 @@ const saved = async (spy) => {
   await waitFor(() => expect(spy).toHaveBeenCalled());
   return spy.mock.calls[0][1];
 };
+const openManual = async (user) => user.click(screen.getByRole('button', { name: /Add a camera manually/ }));
 
 beforeEach(() => {
   postSpy = vi.spyOn(api, 'post').mockResolvedValue({ id: 'cam-new' });
@@ -85,6 +88,55 @@ beforeEach(() => {
   delSpy = vi.spyOn(api, 'del').mockResolvedValue({});
 });
 afterEach(() => vi.restoreAllMocks());
+
+describe('camera form embedded in setup', () => {
+  test('a selected suggestion fills the add fields without saving or probing', async () => {
+    const view = renderAsAdmin(<CameraForm embedded prefill={{ host: '192.168.1.2', port: 8554, name: 'cam-a' }} />,
+      { kids: KIDS, route: '/setup' });
+    await waitFor(() => expect(screen.getByLabelText('Camera IP address')).toHaveValue('192.168.1.2'));
+    expect(screen.getByLabelText('Name')).toHaveValue('cam-a');
+    expect(screen.getByLabelText('RTSP port')).toHaveValue('8554');
+    expect(postSpy).not.toHaveBeenCalled();
+    view.unmount();
+  });
+  test('initial assignment is clean, Discard keeps it, and the normal add form has no leftover draft', async () => {
+    sessionStorage.clear();
+    const key = draftKey('u-admin', 'camera:new');
+    const view = renderAsAdmin(<CameraForm embedded initialChildId="kid-1" onCreated={vi.fn()} />,
+      { kids: KIDS, route: '/setup' });
+    expect(screen.getByLabelText(/Assign to child/)).toHaveValue('kid-1');
+    expect(screen.queryByText(/Unsaved changes/)).not.toBeInTheDocument();
+    expect(sessionStorage.getItem(key)).toBeNull();
+    await view.user.type(screen.getByLabelText('Name'), 'A camera');
+    await view.user.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(screen.getByLabelText(/Assign to child/)).toHaveValue('kid-1');
+    expect(sessionStorage.getItem(key)).toBeNull();
+    view.unmount();
+    mount({ isNew: true, cam: null });
+    expect(screen.queryByText(/Unsaved changes restored/)).not.toBeInTheDocument();
+  });
+
+  test('an unassigned embedded camera requires an assignment before save', async () => {
+    const view = renderAsAdmin(<CameraForm embedded initialChildId="kid-1" onCreated={vi.fn()} />,
+      { kids: KIDS, route: '/setup' });
+    await view.user.selectOptions(screen.getByLabelText(/Assign to child/), '');
+    await view.user.type(screen.getByLabelText('Name'), 'A camera');
+    await view.user.type(screen.getByLabelText('Camera IP address'), '192.0.2.1');
+    await view.user.click(screen.getByRole('button', { name: 'Add camera' }));
+    expect(await screen.findByText('Assign this camera to a child before continuing setup.')).toBeInTheDocument();
+    expect(postSpy).not.toHaveBeenCalled();
+  });
+});
+
+test('discovery is offered on Add camera and absent on edit', () => {
+  const add = mount({ isNew: true });
+  expect(screen.getByRole('button', { name: 'Find cameras on my network' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Add a camera manually/ })).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByLabelText('Camera IP address')).toBeNull();
+  add.unmount();
+  mount();
+  expect(screen.queryByRole('button', { name: 'Find cameras on my network' })).not.toBeInTheDocument();
+});
 
 describe('loading an existing camera into the form', () => {
   test('every stored field is shown', async () => {
@@ -228,6 +280,7 @@ describe('★ Back and the landing after save/remove agree (#383)', () => {
 describe('adding a camera', () => {
   test('starts empty and POSTs to /cameras', async () => {
     const { user } = mount({ isNew: true });
+    await openManual(user);
     const name = await screen.findByLabelText('Name');
     expect(name.value).toBe('');
     expect(screen.getByLabelText('RTSP port').value, 'the usual RTSP port is offered').toBe('554');
@@ -247,6 +300,7 @@ describe('adding a camera', () => {
     // are the entire point of adding it. Dropping the user back at Family would leave a camera that
     // streams and detects nothing, which looks like the feature not working.
     const { user } = mount({ isNew: true });
+    await openManual(user);
     await user.type(await screen.findByLabelText('Name'), 'Playroom');
     await user.type(screen.getByLabelText('Camera IP address'), '10.0.0.9');
     await user.click(screen.getByRole('button', { name: 'Add camera' }));
@@ -256,14 +310,16 @@ describe('adding a camera', () => {
   test('detection rows are hidden until the camera exists', async () => {
     // There is nothing to configure detection against yet — the routes behind those rows take a
     // camera id.
-    mount({ isNew: true });
+    const { user } = mount({ isNew: true });
+    await openManual(user);
     await screen.findByLabelText('Name');
     expect(screen.queryByText('Motion detection')).toBeNull();
     expect(screen.queryByText('Alert schedule')).toBeNull();
   });
 
   test('and there is nothing to remove yet', async () => {
-    mount({ isNew: true });
+    const { user } = mount({ isNew: true });
+    await openManual(user);
     await screen.findByLabelText('Name');
     expect(screen.queryByRole('button', { name: 'Remove camera' })).toBeNull();
   });
@@ -322,6 +378,7 @@ describe('★ an unreachable camera can still be saved', () => {
       </>,
       { cameras: [CAM, created], kids: KIDS, route: '/cameras/new' }
     );
+    await openManual(user);
     await user.type(await screen.findByLabelText('Name'), 'Playroom');
     await user.type(screen.getByLabelText('Camera IP address'), '10.0.0.9');
     await user.click(screen.getByRole('button', { name: 'Add camera' }));
@@ -418,6 +475,7 @@ describe('the ONVIF fetch', () => {
 
   test('it refuses to probe without an address, rather than asking the server about nothing', async () => {
     const { user } = mount({ isNew: true });
+    await openManual(user);
     await user.click(await screen.findByRole('button', { name: /Fetch port, path/ }));
     expect(await screen.findByText('Enter the camera IP first')).toBeTruthy();
     expect(postSpy).not.toHaveBeenCalled();

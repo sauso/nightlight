@@ -7,10 +7,13 @@ import { WebSocketServer } from 'ws';
 import authRoutes from './routes/auth.js';
 import childrenRoutes from './routes/children.js';
 import camerasRoutes from './routes/cameras.js';
+import setupRoutes from './routes/setup.js';
 import settingsRoutes from './routes/settings.js';
 import manifestRoutes from './routes/manifest.js';
 import logsRoutes from './routes/logs.js';
 import diagnosticsRoutes from './routes/diagnostics.js';
+import remoteAccessRoutes from './routes/remoteAccess.js';
+import tailscaleRoutes from './routes/tailscale.js';
 import esphomeRoutes from './routes/esphome.js';
 import eventsRoutes from './routes/events.js';
 import aboutRoutes from './routes/about.js';
@@ -32,7 +35,7 @@ import { talkConfigured } from './lib/twoWayAudio.js';
 import { handleTalkConnection } from './lib/talkSocket.js';
 import { subConfigured, isSubRunning, startSubStream } from './lib/subStream.js';
 import db from './db.js';
-import { upsertPath, isPathConfiguredCorrectly } from './lib/mediamtx.js';
+import { upsertPath, isPathConfiguredCorrectly, MEDIAMTX_INTERNAL_HOST } from './lib/mediamtx.js';
 import { startTranscoder, stopAllTranscoders, isRunning } from './lib/transcoder.js';
 import { stopAllMotionDetectors, reconcileMotionLeg } from './lib/motionDetector.js';
 import { startOnvifMotion, stopOnvifMotion, isOnvifMotion, onvifMotionWanted, stopAllOnvifMotion } from './lib/onvifMotion.js';
@@ -43,6 +46,7 @@ import { startClipStorage, stopClipStorage } from './lib/clipStorage.js';
 import { initPush } from './lib/push.js';
 import { startMediaMTX, stopMediaMTX, restartMediaMTX } from './lib/mediamtxProcess.js';
 import { startMediamtxApiWatchdog, stopMediamtxApiWatchdog } from './lib/mediamtxApiWatchdog.js';
+import { startVideoAddressSync, stopVideoAddressSync } from './lib/videoAddressSync.js';
 import { recordCameraEvent, EVENT } from './lib/cameraEvents.js';
 import { parseStunServers, writeMediamtxConfig } from './lib/stunServers.js';
 import { refreshMqttConnection, stopMqtt } from './lib/mqttClient.js';
@@ -58,6 +62,10 @@ import { logDataDirModes } from './lib/dataDirModes.js';
 import { applyTrustProxy } from './lib/trustProxy.js';
 import { buildHelmetOptions } from './lib/cspDirectives.js';
 import { safeInterval, installCrashGuards, markBootComplete } from './lib/processGuards.js';
+import { healthHandler } from './lib/serverIdentity.js';
+import { startMdnsAnnounce, stopMdnsAnnounce } from './lib/mdnsAnnounce.js';
+import { stopTailscale } from './lib/tailscaleProcess.js';
+import { bootTailscale } from './lib/tailscaleBoot.js';
 import {
   createCameraWatchdog, createAudioWatchdog, WATCHDOG_INTERVAL_MS, AUDIO_CHECK_INTERVAL_MS,
   createDetectorWatchdog, createRestartRequests, DETECTOR_CHECK_INTERVAL_MS,
@@ -105,6 +113,7 @@ startMediamtxApiWatchdog({
     }
   },
 });
+startVideoAddressSync(); // #974: poll the peerless Tailscale status and patch WebRTC hosts when safe.
 refreshMqttConnection(); // no-ops if no broker is configured
 startSensorSampler(); // persist MQTT temp/humidity over time (Stage-2 sleep-tracking groundwork)
 startActivityTracker(); // bucket motion/sound activity per minute (Stage-2 sleep-tracking timeline)
@@ -193,7 +202,7 @@ app.use(
   requireAuth,
   whepOnlyGuard,
   createProxyMiddleware({
-    target: process.env.MEDIAMTX_WEBRTC_URL || 'http://127.0.0.1:8889',
+    target: process.env.MEDIAMTX_WEBRTC_URL || `http://${MEDIAMTX_INTERNAL_HOST}:8889`,
     changeOrigin: true,
     pathRewrite: { '^/live': '' },
     on: {
@@ -209,7 +218,7 @@ app.use(
   '/hls',
   requireAuthQueryOrHeader,
   createProxyMiddleware({
-    target: process.env.MEDIAMTX_HLS_URL || 'http://127.0.0.1:8888',
+    target: process.env.MEDIAMTX_HLS_URL || `http://${MEDIAMTX_INTERNAL_HOST}:8888`,
     changeOrigin: true,
     pathRewrite: { '^/hls': '' },
     on: {
@@ -237,9 +246,12 @@ app.use(demoGuard);
 app.use('/api/auth', authRoutes);
 app.use('/api/children', childrenRoutes);
 app.use('/api/cameras', camerasRoutes);
+app.use('/api/setup', setupRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/logs', logsRoutes);
 app.use('/api/diagnostics', diagnosticsRoutes);
+app.use('/api/remote-access/tailscale', tailscaleRoutes);
+app.use('/api/remote-access', remoteAccessRoutes);
 app.use('/api/esphome', esphomeRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/about', aboutRoutes);
@@ -252,7 +264,9 @@ app.use('/api/timelapses', timelapsesRoutes);
 app.use('/api/recordings', recordingsRoutes);
 app.use('/manifest.webmanifest', manifestRoutes);
 
-app.get('/api/health', (req, res) => res.json({ ok: true }));
+// #937: still unauthenticated, still `ok: true`, now also this server's id and name (lib/serverIdentity.js says what
+// it never contains). The handler lives there so health-route.test.js can mount this exact function.
+app.get('/api/health', healthHandler);
 
 // CSP violation sink (see the helmet block above). The browser POSTs a report here whenever the policy
 // blocks something; we log it so a regression — e.g. a new dependency pulling in a third-party script —
@@ -311,6 +325,12 @@ const server = app.listen(PORT, () => {
   // start, and the guards exit non-zero instead of leaving a healthy-looking container with no server
   // bound — see the boot/steady-state note in lib/processGuards.js.
   markBootComplete();
+  // Opus plan review of #967: a persisted intent is handled only after the server
+  // has bound and startup guards have entered steady state.
+  bootTailscale({ db, dataDir: DATA_DIR });
+  // #937: announce on the local network only now, once the server accepts connections: a phone that finds it
+  // checks /api/health straight away. Never throws, never blocks; MDNS_ANNOUNCE=false turns it off.
+  startMdnsAnnounce({ port: PORT });
   refreshEsphome();
   startEsphomeSampler();
   // Run the clip-storage guard + retention sweeper BEFORE reconcile, so reconcile only starts
@@ -530,6 +550,16 @@ async function shutdown() {
   // FIRST, before the seconds of awaited stops below: a tick that fired in the middle of them could SIGTERM MediaMTX
   // while a recording is still being cut from it (#479).
   stopMediamtxApiWatchdog();
+  // #974: an in-flight status read must not patch during the awaited stops.
+  stopVideoAddressSync();
+  // #937: the mDNS goodbye, STARTED here so phones drop this server from their list at once, and AWAITED just before
+  // process.exit(0) below: the goodbye is sent in an asynchronous callback, so exiting without waiting can cut it
+  // off. It runs alongside the seconds of awaited stops in between, so it normally adds nothing, and
+  // stopMdnsAnnounce caps it at about 1.5 s (STOP_CAP_MS) even if the callback never comes; it never rejects. The
+  // 23 s worst case below is therefore unchanged (recordings-shutdown.test.js; mdns-announce.test.js pins the cap).
+  const mdnsStopped = stopMdnsAnnounce();
+  // Opus plan review of #965: start the bounded daemon stop before any recording awaits.
+  const tailscaleStopped = stopTailscale();
   // Started HERE, awaited below. The only ordering that actually matters is that an in-flight
   // recording finishes cutting BEFORE stopAllClipCapture takes the ring away; the detector stops are
   // unrelated to it and can overlap.
@@ -594,6 +624,9 @@ async function shutdown() {
   // #373: unref'd, so it could never hold the process open — stopped anyway, for the #286 rule that every
   // periodic job shutdown knows about is stopped explicitly (suite-exits-cleanly.test.js asserts it).
   stopObservationLog();
+  // #937: the mDNS goodbye started at the top of shutdown (see there). Last, so it overlaps everything above.
+  await tailscaleStopped;
+  await mdnsStopped;
   process.exit(0);
 }
 process.on('SIGTERM', shutdown);

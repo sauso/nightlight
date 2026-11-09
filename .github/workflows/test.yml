@@ -25,6 +25,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  tailscale-binaries:
+    name: Pinned Tailscale binaries (native fetch, both target arches)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # #971: this target stage runs on BUILDPLATFORM for both architectures;
+      # the riscv64 failure must carry our marker, not a QEMU or network error.
+      - name: Build pinned amd64 and arm64 binary stages
+        run: |
+          docker build --platform linux/amd64 --target tailscale-binaries -t nightlight-tailscale:amd64 .
+          docker build --platform linux/arm64 --target tailscale-binaries -t nightlight-tailscale:arm64 .
+      - name: Unsupported target architecture fails closed
+        run: |
+          if docker build --progress=plain --platform linux/riscv64 --target tailscale-binaries . > "$RUNNER_TEMP/tailscale-arch.log" 2>&1; then
+            cat "$RUNNER_TEMP/tailscale-arch.log"
+            exit 1
+          fi
+          # Opus review of #972 (verified by running): BuildKit's plain log also echoes the RUN command text, which
+          # contains the marker, so a bare grep passes on ANY failure. Match the real output line only.
+          grep -Eq '^#[0-9]+ [0-9.]+ TAILSCALE_UNSUPPORTED_ARCH$' "$RUNNER_TEMP/tailscale-arch.log" || { cat "$RUNNER_TEMP/tailscale-arch.log"; exit 1; }
+      - name: Wrong digest fails before extraction
+        run: |
+          mkdir -p "$RUNNER_TEMP/tailscale-digest"
+          # Opus review of #972 (verified by running): a script that ran `tar -t` BEFORE the digest check still passed
+          # this step (non-zero exit, marker, empty /out). A `tar` shim that announces itself and fails makes the
+          # ordering observable: it must never be called on bytes whose digest did not match.
+          if docker run --rm -v "$PWD:/repo:ro" -v "$RUNNER_TEMP/tailscale-digest:/out" node:24-alpine \
+            sh -c 'apk add --no-cache wget >/dev/null && mkdir /shim && printf "#!/bin/sh\necho TAR_CALLED >&2\nexit 99\n" > /shim/tar && chmod +x /shim/tar && PATH=/shim:$PATH sh /repo/scripts/fetch-tailscale.sh amd64 1.104.5 "$1" /out' sh \
+              0000000000000000000000000000000000000000000000000000000000000000 \
+              > "$RUNNER_TEMP/tailscale-digest.log" 2>&1; then
+            cat "$RUNNER_TEMP/tailscale-digest.log"
+            exit 1
+          fi
+          grep -q TAILSCALE_DIGEST_MISMATCH "$RUNNER_TEMP/tailscale-digest.log" || { cat "$RUNNER_TEMP/tailscale-digest.log"; exit 1; }
+          if grep -q TAR_CALLED "$RUNNER_TEMP/tailscale-digest.log"; then cat "$RUNNER_TEMP/tailscale-digest.log"; exit 1; fi
+          test -z "$(find "$RUNNER_TEMP/tailscale-digest" -mindepth 1 -print -quit)"
+
   unit:
     runs-on: ubuntu-latest
     steps:
@@ -84,7 +121,57 @@ jobs:
           grep -q '^# skipped 0$' "$RUNNER_TEMP/busybox-media.tap" \
             || { cat "$RUNNER_TEMP/busybox-media.tap"; echo "::error::the media isolation run (as root) skipped tests"; exit 1; }
           tail -9 "$RUNNER_TEMP/busybox-media.tap"
+          docker run --rm --user root -v "$PWD/backend:/w:ro" -w /w node:24-alpine \
+            sh -c 'apk add --no-cache setpriv >/dev/null && node --test --test-reporter=tap test/app-exec-real.test.js' \
+            > "$RUNNER_TEMP/busybox-app.tap" \
+            || { cat "$RUNNER_TEMP/busybox-app.tap"; exit 1; }
+          grep -q '^# skipped 0$' "$RUNNER_TEMP/busybox-app.tap" \
+            || { cat "$RUNNER_TEMP/busybox-app.tap"; echo "::error::the app wrapper run (as root) skipped tests"; exit 1; }
+          tail -9 "$RUNNER_TEMP/busybox-app.tap"
+          docker run --rm --user root -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+            sh -c 'apk add --no-cache setpriv >/dev/null && sh scripts/app-exec.mutants.sh'
           bash scripts/entrypoint-umask.mutants.sh
+          # Opus plan review of #967: sysfs fixtures cannot prove the detector sees
+          # real Docker namespaces. These three modes gate on the measured codes.
+          docker run --rm --network host -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+            node scripts/host-network-probe.mjs host
+          docker run --rm -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+            node scripts/host-network-probe.mjs bridge
+          helper="nightlight-listener-$RANDOM"
+          docker run -d --name "$helper" node:24-alpine \
+            node -e "require('net').createServer().listen(4567, '127.0.0.1')"
+          trap 'docker rm -f "$helper" >/dev/null 2>&1 || true' EXIT
+          sleep 2
+          docker run --rm --network "container:$helper" -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+            node scripts/host-network-probe.mjs shared
+          user_bridge="nightlight-probe-bridge-$RANDOM"
+          docker network create -d bridge "$user_bridge"
+          docker run --rm --network "$user_bridge" -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+            node scripts/host-network-probe.mjs bridge
+          docker network rm "$user_bridge" >/dev/null
+          parent="$(ip route show default 2>/dev/null | awk '{print $5; exit}' || true)"
+          for driver in ipvlan macvlan; do
+            network="nightlight-probe-$driver-$RANDOM"
+            if [ -n "$parent" ] && docker network create -d "$driver" -o "parent=$parent" "$network"; then
+              # Opus fix review of #967: an optional driver may be unavailable
+              # on a runner. Once created, a wrong detector result (exit 42)
+              # must fail this step; a container launch failure is reported.
+              if docker run --rm --network "$network" -v "$PWD:/repo:ro" -w /repo node:24-alpine \
+                node scripts/host-network-probe.mjs bridge; then
+                echo "$driver probe passed"
+              else
+                code=$?
+                if [ "$code" -eq 42 ]; then
+                  echo "::error::$driver detector result is wrong"
+                  exit 1
+                fi
+                echo "::warning::$driver probe container could not run (exit $code)"
+              fi
+              docker network rm "$network" >/dev/null || true
+            else
+              echo "::warning::$driver network could not be created on this runner"
+            fi
+          done
 
   frontend:
     name: Front-end component tests

@@ -3,12 +3,15 @@ import LogViewer from '../components/LogViewer.jsx';
 import EventLog from '../components/EventLog.jsx';
 import RecentAlerts from '../components/RecentAlerts.jsx';
 import DiagnosticsCard from '../components/DiagnosticsCard.jsx';
+import ServerCard from '../components/ServerCard.jsx';
 
 export default function SettingsLogs() {
   return (
     <>
       <AppHeader title="Logs" back={{ to: '/settings', label: 'Settings' }} />
       <main className="app-main">
+
+        <ServerCard />
 
         <DiagnosticsCard title="Report a problem" />
 

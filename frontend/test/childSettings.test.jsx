@@ -310,7 +310,7 @@ describe('what each role is told about clip settings', () => {
       { kids: [KID], route: '/children/kid-1' }
     );
     await screen.findByLabelText('Name');
-    const link = screen.getByRole('link', { name: /Settings › Recording/ });
+    const link = screen.getByRole('link', { name: /Settings › Camera and Recording › Recording/ });
     expect(link.getAttribute('href')).toBe('/settings/recording');
   });
 
@@ -320,7 +320,7 @@ describe('what each role is told about clip settings', () => {
     renderAs(CAREGIVER, <Routes><Route path="/children/:id" element={<ChildSettings />} /></Routes>,
       { kids: [KID], route: '/children/kid-1' });
     await screen.findByLabelText('Name');
-    expect(screen.queryByRole('link', { name: /Settings › Recording/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Settings › Camera and Recording › Recording/ })).toBeNull();
     expect(screen.getByText(/an admin can change their length and retention/)).toBeTruthy();
   });
 

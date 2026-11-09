@@ -495,4 +495,46 @@ describe('Settings → Logs', () => {
       expect(container.querySelector('.log-viewer__box').textContent).toContain('movement 0.031')
     );
   });
+
+  // Owner 2026-11-06: "Media isolation: on/off" moved here from the About header (it meant nothing to a caregiver). The page is
+  // admin-only (AdminProtected, App.jsx), so a caregiver never reaches it.
+  describe('the Server card (media isolation)', () => {
+    // `about` is the reply for /about, or an Error to reject with. Every other path answers with the shape its card unwraps
+    // (a blanket [] made Camera history read `undefined.length` once, which vitest counts as an error and fails the job).
+    const withAbout = (about) => vi.spyOn(api, 'get').mockImplementation((path) => {
+      const p = String(path);
+      if (p.startsWith('/about')) return about instanceof Error ? Promise.reject(about) : Promise.resolve(about);
+      if (p.startsWith('/logs')) return Promise.resolve({ lines: [] });
+      if (p.startsWith('/events')) return Promise.resolve({ events: [] });
+      return Promise.resolve([]);
+    });
+
+    test.each([['on', 'On'], ['off', 'Off']])('★ says media isolation is %s as "%s", with a link to what it means', async (state, shown) => {
+      withAbout({ version: '0.46.0', mediaIsolation: state });
+      renderAsAdmin(<SettingsLogs />);
+      const card = (await screen.findByText('Server')).closest('.card');
+      expect(within(card).getByText('Media isolation').parentElement).toHaveTextContent(shown);
+      const link = within(card).getByRole('link', { name: 'What this means' });
+      expect(link).toHaveAttribute('href', expect.stringContaining('docs/operations.md#media-isolation'));
+      expect(link).toHaveAttribute('rel', 'noreferrer');
+    });
+
+    test('★ no card when an older server sends no field, or an odd value, or the read fails', async () => {
+      for (const about of [{ version: '0.43.0' }, { version: '0.46.0', mediaIsolation: 'maybe' }]) {
+        vi.restoreAllMocks();
+        withAbout(about);
+        const { unmount } = renderAsAdmin(<SettingsLogs />);
+        await screen.findByText('Report a problem');
+        await act(async () => {});
+        expect(screen.queryByText('Server'), JSON.stringify(about)).not.toBeInTheDocument();
+        unmount();
+      }
+      vi.restoreAllMocks();
+      withAbout(new Error('down'));
+      renderAsAdmin(<SettingsLogs />);
+      await screen.findByText('Report a problem');
+      await act(async () => {});
+      expect(screen.queryByText('Server')).not.toBeInTheDocument();
+    });
+  });
 });

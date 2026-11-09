@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useHomeTime } from '../lib/useHomeTime.js';
 import ClipPlayerModal from './ClipPlayerModal.jsx';
+import { ProtectedBadge } from './ClipProtection.jsx';
 
 // A single-card alert list (matching the design mockup): one row per alert — snapshot thumbnail,
 // camera name, a motion/sound type icon + label, and the time. When an alert has a recorded video
@@ -27,6 +28,7 @@ function relTime(d) {
 
 export default function AlertList({ alerts, onChanged, title }) {
   const [clipFor, setClipFor] = useState(null); // the alert whose clip is open in the player
+  const [protection, setProtection] = useState({});
   // Deleting a clip is admin-only (#538; the server refuses a caregiver), so only an admin's player gets
   // the delete action. Everyone can still watch and download. `|| {}`: rendered outside an AuthContext
   // (some tests), nobody is signed in, so nobody is an admin.
@@ -75,6 +77,7 @@ export default function AlertList({ alerts, onChanged, title }) {
                 <div className="alert-item__meta">
                   <Icon size={14} className="alert-item__ico" aria-hidden="true" />
                   {t.label}{ev.detail ? ` · ${ev.detail}` : ''}
+                  {hasClip && !!(protection[ev.id] ?? ev.protected) && <ProtectedBadge />}
                 </div>
               </div>
               <time className="alert-item__time" dateTime={when.toISOString()} title={home.dateTime(when)}>
@@ -86,7 +89,8 @@ export default function AlertList({ alerts, onChanged, title }) {
       </div>
 
       {clipFor && (
-        <ClipPlayerModal ev={clipFor} onClose={() => setClipFor(null)} onDeleted={isAdmin ? onChanged : undefined} />
+        <ClipPlayerModal ev={clipFor} onClose={() => setClipFor(null)} onDeleted={isAdmin ? onChanged : undefined}
+          onProtectedChange={(id, value) => { setProtection((prev) => ({ ...prev, [id]: value })); onChanged?.(id, value); }} />
       )}
     </>
   );

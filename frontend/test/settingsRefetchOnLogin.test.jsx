@@ -124,10 +124,10 @@ describe('settings are re-fetched when the signed-in user changes', () => {
     await waitFor(() => expect(screen.getByTestId('ptz').textContent).toBe('undefined'));
   });
 
-  test('a failed re-fetch does not reset a theme that already loaded', async () => {
+  test('a failed re-fetch does not reset the name that already loaded', async () => {
     // The catch exists so a FIRST failure doesn't block the app from loading. Once real settings have
-    // arrived it must leave them alone: re-applying DEFAULTS would reset the palette and tab title
-    // while `settings` state kept the real values, leaving a branded install half-themed after one
+    // arrived it must leave them alone: re-applying DEFAULTS would reset the tab title
+    // while `settings` state kept the real values, leaving a named install with the default title after one
     // transient blip — no error shown, no retry. Harmless while this only ran at mount; live now that
     // it re-runs on every sign-in.
     let fail = false;
@@ -136,7 +136,7 @@ describe('settings are re-fetched when the signed-in user changes', () => {
         if (fail) return { ok: false, status: 500, text: async () => 'boom' };
         return {
           ok: true, status: 200,
-          text: async () => JSON.stringify({ ...pick(PUBLIC_FIELDS), app_name: 'Casa', accent_color: '#123456' }),
+          text: async () => JSON.stringify({ ...pick(PUBLIC_FIELDS), app_name: 'Casa' }),
         };
       }
       return { ok: true, status: 200, text: async () => '{}' };
@@ -144,7 +144,6 @@ describe('settings are re-fetched when the signed-in user changes', () => {
 
     const { rerender } = renderWithAuth(null);
     await waitFor(() => expect(document.title).toBe('Casa'));
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#123456');
 
     fail = true; // the post-login fetch fails
     const value = {
@@ -159,7 +158,6 @@ describe('settings are re-fetched when the signed-in user changes', () => {
 
     await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
     expect(document.title).toBe('Casa');
-    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#123456');
   });
 
   test('a slow anonymous response cannot overwrite a newer admin one', async () => {
