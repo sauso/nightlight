@@ -10,6 +10,13 @@ import LoadFailed from './LoadFailed.jsx';
 import Modal from './Modal.jsx';
 
 const NETWORK_DOCS = 'https://github.com/sauso/nightlight/blob/main/docs/networking.md';
+
+// Owner 2026-11-10: a long address wrapped mid-word. A <wbr> after each dot gives the browser somewhere sensible to break
+// when it must (see .tailscale-address in index.css, which also shrinks the font so most names stay on one line). It adds no
+// characters: textContent, select-and-copy and the Copy button's value are the address exactly as it was.
+function breakAtDots(text) {
+  return text.split('.').flatMap((part, i, all) => (i < all.length - 1 ? [part, '.', <wbr key={i} />] : [part]));
+}
 const NAME = /^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 // These values are shown as clickable destinations and as QR data. Never let an API error
@@ -180,7 +187,7 @@ export default function TailscaleCard({ compact = false, publicHostSet = false, 
       {connectedLine}
       <h3>Your secure address</h3>
       {address ? <>
-        <p className="tailscale-address">{address}</p>
+        <p className="tailscale-address">{breakAtDots(address)}</p>
         <div className="tailscale-actions"><button className="btn btn-secondary" type="button" disabled={disabled} onClick={() => copyAddress(address)}>Copy</button>
           {readOnly ? <span className="btn btn-primary" aria-disabled="true">Open</span>
             : <a className={`btn ${view.video_address_pending ? 'btn-secondary' : 'btn-primary'}`} data-tailscale-primary={view.video_address_pending ? undefined : ''} href={address} target="_blank" rel="noreferrer">Open</a>}</div>
