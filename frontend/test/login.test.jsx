@@ -335,6 +335,16 @@ describe('signing in', () => {
     expect((await screen.findByLabelText('Username')).getAttribute('autocomplete')).toBe('username');
     expect(screen.getByLabelText('Password').getAttribute('autocomplete')).toBe('current-password');
   });
+
+  test('★ the username is not auto-capitalised, auto-corrected or spell-checked (iOS turned "sam" into "Sam")', async () => {
+    // A phone keyboard reads these attributes; jsdom cannot show the keyboard, so the attributes are the
+    // observable behaviour. Dropping `autoCapitalize` brings the capital back on iOS with nothing else red.
+    mount();
+    const username = await screen.findByLabelText('Username');
+    expect(username.getAttribute('autocapitalize')).toBe('none');
+    expect(username.getAttribute('autocorrect')).toBe('off');
+    expect(username.getAttribute('spellcheck')).toBe('false');
+  });
 });
 
 describe('first-run setup', () => {

@@ -224,6 +224,13 @@ export default function Login() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
+              // WHY: iOS capitalises the first letter of a plain text field, so "sam" was sent as "Sam"
+              // (owner, 2026-11-10, in the iPhone/iPad app, which shows this page). Usernames are typed
+              // exactly, and auto-correct and spell-check have no business altering one either. The
+              // other username fields (first-run, caregivers) already say this; the sign-in page was missed.
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               required
             />
           </div>
