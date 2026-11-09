@@ -47,13 +47,13 @@ A short tour of Nightlight with a made-up household: two children, Avery and Ril
 
 ### 1. Create the admin account
 
-The first time you open Nightlight it asks you to create the admin account. This is the only time you see this screen.
+The first time you open Nightlight, a welcome screen lists the setup steps. The first step creates the admin account, shown here as step 1 of 7. This is the only time you see these screens.
 
 ![First-run setup on a phone](screenshots/setup-mobile.png)
 
 ### 2. Watch live
 
-The Live tab shows every camera. On a wide screen the navigation moves from the bottom of the screen to a side bar on the left.
+The Live tab shows every camera. On a wide screen the navigation moves from the bottom of the screen to a side bar on the left. The phone image was captured without a picture, so its tiles say "No signal"; a camera that is working shows its video there, as in the desktop image.
 
 ![Live view on a phone](screenshots/live-mobile.png)
 
@@ -87,7 +87,7 @@ Motion and sound alerts are listed on the child's page, each with a snapshot fro
 
 ### 7. Add a camera
 
-Enter the camera's address and stream details, or use the ONVIF button to fill them in. This form holds example values and was not saved. See [Cameras and caregivers](cameras.md).
+**Find cameras on my network** searches for cameras and offers each one it finds. To add a camera by hand, open **Add a camera manually**, enter its address and stream details, or use the ONVIF button to fill them in. This form holds example values and was not saved. See [Cameras and caregivers](cameras.md).
 
 ![Add camera on a phone](screenshots/add-camera-mobile.png)
 
