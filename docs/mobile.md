@@ -137,3 +137,21 @@ Good to know:
   under a different address than that, the app treats the link as a server it hasn't been connected to.
   Save the address the alert uses once (**Settings → Change server**) and either works.
 - On iPhone the app never switches server from an alert, so there is nothing to ask.
+
+### Finding your server, and when its address changes
+
+Home routers sometimes hand your server a new address. The apps help with that on both Android and iPhone.
+
+**Look for my Nightlight.** The setup screen can search your Wi-Fi and list the Nightlight servers it finds. Tap one to connect. It only finds home-network (private) addresses such as `192.168.1.20`, so it does not replace typing a secure `https` address. The iPhone asks for **Local Network** access the first time. If you said no, turn it on in the iPhone's **Settings → Nightlight**. Some networks stop devices seeing each other (guest Wi-Fi, "client isolation"); the search then finds nothing and you can still type the address.
+
+**Your server moved.** If the address the app has saved stops answering while the phone is on Wi-Fi, the app looks for the same server on the network and asks **Your server has a new address**. It recognises your server by its server id (a random id your server makes once), not by its name or address. Switching asks you to sign in once at the new address. **Not now** keeps what you had and the app does not offer that address again for 7 days. The app checks at most once every 5 minutes while it is open. Nothing is saved without your tap. The app learns the id the first time it reaches your server after an update, so it needs no set-up.
+
+**A different server at your saved address.** If another device takes over your server's old address (a router giving it out again, say), the app does not open it. It shows the setup screen and looks for your server straight away, even if it checked a few minutes ago. If the saved address simply does not answer and the app knows your server's id, the iPhone also shows the setup screen, not "Can't reach your server".
+
+What this does not cover:
+
+- **The server id is not a password.** Anyone on your network can read it. This protects you from a device that took the address by accident or a lookalike, not from someone deliberately copying your server. Typing your secure `https` address is still the stronger way to connect.
+- **The app trusts a server the first time it learns the id.** A server it has not reached since the update is not protected until it has.
+- **Only home-network addresses of the form `http://192.168.1.20:4000` are checked.** A saved name or `https` address is opened as before.
+- **The check runs when the app builds its screen** (opening the app, a restart, a move between addresses), not on a later reload of the same address while the app stays open.
+- **If your server's id changes** (a new database, or a restore without its data), the app will refuse it. On the setup screen, remove the saved server with the **✕** and add it again.
