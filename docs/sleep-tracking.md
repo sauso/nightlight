@@ -15,7 +15,7 @@ from (a caregiver sees them, greyed out).
 A child can have more than one camera; the night is measured from one of them (see
 [One camera does the measuring](#one-camera-does-the-measuring)).
 
-An admin can also switch on [Hold alerts until asleep](notifications.md#hold-alerts-until-asleep) under **Track sleep**. It is off by default. During the sleep window, motion and sound alerts are dropped until about 15 quiet minutes show the child is asleep, or 45 minutes after the first held alert. The 45 minutes is a design choice, not a measured safety limit. Held alerts are not sent later. Camera-offline alerts continue normally.
+An admin can also switch on [Hold alerts until asleep](notifications.md#hold-alerts-until-asleep) under **Track sleep**. It is off by default. Motion and sound alerts are dropped until the watcher detects sleep. Outside the sleep window there is no sleep signal, so the hold has no time limit: an evening crying spell or daytime nap may be silent. Inside the window, alerts can resume 45 minutes after the first held alert even if sleep is not detected. The 45 minutes is a design choice, not a measured safety limit. Held alerts are not sent later. Camera-offline alerts continue normally. This is not a safety device.
 
 ## What you see
 

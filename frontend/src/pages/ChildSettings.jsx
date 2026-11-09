@@ -291,9 +291,10 @@ export default function ChildSettings() {
                         onChange={(e) => setForm({ ...form, hold_alerts_until_asleep: e.target.checked })} />
                     </label>
                     <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                      During this child's sleep window, hold motion and sound alerts until about 15 quiet minutes
-                      show they are asleep, or 45 minutes pass after the first held alert. Held alerts are not sent
-                      later. Camera-offline alerts are never held. Off by default.
+                      Hold this child's motion and sound alerts until sleep is detected. Outside the sleep window,
+                      the hold has no time limit; an evening crying spell or daytime nap may be silent. Inside the
+                      window, alerts resume after 45 minutes from the first held alert even without detected sleep.
+                      Held alerts are not sent later. Camera-offline alerts are never held. Not a safety device. Off by default.
                       {!isAdmin && ' Only an admin can change this setting.'}
                     </div>
                   </div>
