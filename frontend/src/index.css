@@ -615,7 +615,12 @@ body.in-pip .tile-menu-backdrop {
 /* Owner 2026-11-07: the sub-heading on About is Inter, like the address and text under it (headings h1-h3 are Nunito by default,
    design-language.md section 3). Only the card TITLES stay Nunito. The Remote Access card keeps the default for now. */
 .about-card h3 { font-family: var(--font-body); }
-.tailscale-address { overflow-wrap: anywhere; font-weight: 600; font-size: 15px; }
+/* Owner 2026-11-10: on a phone the address ("https://<name>.<tailnet>.ts.net", about 35-45 characters) ran onto a second line.
+   The font now shrinks with the screen (15px on a desktop, about 13px on a 390px phone, never below 12px) so a typical name stays
+   on one line; a name still too long wraps, at a dot first (TailscaleCard puts a <wbr> after each one), and only mid-word as the
+   last resort (overflow-wrap), so it can never run off the card. The 3.5vw and the 12px floor are judgement, checked against a
+   few fictional names at 320-430px, not measured on every device. */
+.tailscale-address { overflow-wrap: anywhere; font-weight: 600; font-size: clamp(12px, 3.5vw, 15px); }
 .tailscale-hint { color: var(--text-secondary); font-size: 0.875rem; }
 .tailscale-qr { width: min(180px, 100%); margin: 16px auto; text-align: center; }
 .tailscale-qr svg { display: block; width: 100%; height: auto; }

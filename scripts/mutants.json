@@ -25192,13 +25192,13 @@
     "namePattern": "#919 first held alert"
   },
   {
-    "label": "#919 unarmed state is held",
+    "label": "#919 outside the window is allowed",
     "file": "backend/src/lib/alertHold.js",
-    "find": "if (asleep !== false) return false;",
-    "replace": "if (asleep !== false) return true;",
+    "find": "if (asleep === undefined) return true;",
+    "replace": "if (asleep === undefined) return false;",
     "expect": "killed",
     "tests": ["alert-hold.test.js"],
-    "namePattern": "#919 reads child assignment"
+    "namePattern": "#919 outside the gate holds"
   },
   {
     "label": "#919 option flag ignored",
@@ -25219,13 +25219,13 @@
     "namePattern": "#919"
   },
   {
-    "label": "#919 timer cleared on unarm",
+    "label": "#919 outside the window starts a cap clock",
     "file": "backend/src/lib/alertHold.js",
-    "find": "if (asleep !== false) return false;",
-    "replace": "if (asleep !== false) { firstHeld.delete(childId); return false; }",
+    "find": "if (asleep === undefined) return true;",
+    "replace": "if (asleep === undefined) { firstHeld.set(childId, { key: 0, firstAt: nowMs, expired: false }); return true; }",
     "expect": "killed",
     "tests": ["alert-hold.test.js"],
-    "namePattern": "#919 reads child assignment"
+    "namePattern": "#919 outside the gate holds"
   },
   {
     "label": "#919 fail open removed",
@@ -25239,11 +25239,29 @@
   {
     "label": "#919 night key from currentNightDate alone",
     "file": "backend/src/lib/alertHold.js",
-    "find": "import { childWindowKeyNow } from './sleepAnalysis.js';",
-    "replace": "import { currentNightDate as childWindowKeyNow } from './sleepAnalysis.js';",
+    "find": "import { childTracksSleep, childWindowKeyNow } from './sleepAnalysis.js';",
+    "replace": "import { childTracksSleep, currentNightDate as childWindowKeyNow } from './sleepAnalysis.js';",
     "expect": "killed",
     "tests": ["alert-hold.test.js"],
-    "namePattern": "#919 lead margin"
+    "namePattern": "#919 outside the gate has no clock"
+  },
+  {
+    "label": "#919 an asleep child is held",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "if (asleep === true) return false;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 outside the gate holds"
+  },
+  {
+    "label": "#919 Track sleep off is held",
+    "file": "backend/src/lib/alertHold.js",
+    "find": "if (!childTracksSleep(childId)) return false;",
+    "replace": "",
+    "expect": "killed",
+    "tests": ["alert-hold.test.js"],
+    "namePattern": "#919 outside the gate holds"
   },
   {
     "label": "#919 frame-diff hold checked before camera schedule",
