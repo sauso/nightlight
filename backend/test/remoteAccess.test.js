@@ -117,9 +117,9 @@ test('HTTP auth gates and exact empty-configuration response shape', async () =>
     assert.equal((await request(url, { token: caregiverToken })).status, 403);
     const { status, body } = await request(url);
     assert.equal(status, 200);
-    assert.deepEqual(Object.keys(body).sort(), ['advertised_hosts', 'app_port', 'client', 'public_host_set', 'public_hosts', 'stun', 'trust_proxy', 'webrtc_udp_port']);
+    assert.deepEqual(Object.keys(body).sort(), ['advertised_hosts', 'app_port', 'client', 'public_host_count', 'public_host_set', 'public_hosts', 'stun', 'trust_proxy', 'webrtc_udp_port']);
     assert.deepEqual(body, {
-      app_port: 4000, webrtc_udp_port: 8189, public_host_set: false, public_hosts: [],
+      app_port: 4000, webrtc_udp_port: 8189, public_host_set: false, public_host_count: 0, public_hosts: [],
       advertised_hosts: getAdvertisedHosts({}),
       stun: { enabled: true, servers: ['stun:stun.l.google.com:19302'] },
       trust_proxy: 'loopback', client: { network: 'home', via: null },
@@ -154,9 +154,16 @@ test('configured literals, DNS A and AAAA, errors, trimming and ports', async ()
   });
 });
 
+test('public_host_count reports every configured host while public_hosts stays capped at 10', async () => {
+  const hosts = Array.from({ length: 11 }, (_, i) => `203.0.113.${i + 1}`).join(',');
+  const body = await buildRemoteAccess({ env: { PUBLIC_HOST: hosts }, resolver: resolverNever });
+  assert.equal(body.public_hosts.length, 10);
+  assert.equal(body.public_host_count, 11);
+});
+
 test('Cloudflare proxy ranges mark only matching literal and DNS answers', async () => {
   const literals = [
-    ['104.16.0.0', true], ['104.23.255.255', true], ['104.24.0.0', true],
+    ['103.22.203.1', true], ['103.22.204.0', false], ['::ffff:6810:1', true], ['104.16.0.0', true], ['104.23.255.255', true], ['104.24.0.0', true],
     ['104.27.255.255', true], ['104.28.0.0', false], ['104.31.255.255', false], ['104.32.0.0', false], ['104.15.255.255', false],
     ['2606:4700::1', true], ['2606:46ff::1', false],
     ['::ffff:104.16.0.1', true], ['8.8.8.8', false], ['192.168.1.2', false],

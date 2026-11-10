@@ -107,6 +107,9 @@ export async function buildRemoteAccess({ env = process.env, ip, forwardedHeader
     app_port: Number(env.PORT || 4000),
     webrtc_udp_port: overridePort ? Number(overridePort) : udp ? Number(udp.slice(1)) : 8189,
     public_host_set: configuredPublicHosts(env).length > 0,
+    // How many hosts are configured; public_hosts below is capped at 10 (DNS work per request), so the page needs this to avoid
+    // calling an eleventh, unchecked host fine (Codex review of #1025).
+    public_host_count: configuredPublicHosts(env).length,
     public_hosts: publicHosts,
     advertised_hosts: getLastAdvertisedHosts(env),
     stun: { enabled: stunServers.length > 0, servers: stunServers },

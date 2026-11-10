@@ -149,7 +149,7 @@ test('UDP checklist row changes after the this-device test', async () => {
   await run();
   await act(async () => peers[0].connect());
   expect(udp.querySelector('.status-badge')).toHaveTextContent('OK');
-  expect(udp).toHaveTextContent('connected over UDP from outside your home on this device');
+  expect(udp).toHaveTextContent('connected over UDP from an address Nightlight counts as outside your home');
 });
 
 test('Tailscale viewer receives no TRUST_PROXY instruction', async () => {

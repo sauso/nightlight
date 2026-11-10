@@ -8,14 +8,21 @@ export function hostSentence(entry) {
     : `${entry.host} resolves to ${entry.addresses.join(', ')}.`;
 }
 
-export function buildChecklist({ setup, network, via, result, protocol }) {
+export function buildChecklist({ setup, network, via, result, protocol, canTest = true }) {
   if (!setup) return [];
   const hosts = setup.public_hosts || [];
-  const resolved = hosts.length > 0 && hosts.every((entry) => entry.error === null && entry.addresses?.length > 0);
+  // The server looks up at most 10 hosts but `public_host_count` is how many are configured (an older server omits it).
+  // An unchecked host beyond the cap must never read as fine (Codex review of #1025, verified with 11 hosts).
+  const total = setup.public_host_count ?? hosts.length;
+  const capped = total > hosts.length;
+  const resolved = !capped && hosts.length > 0 && hosts.every((entry) => entry.error === null && entry.addresses?.length > 0);
   const error = hosts.find((entry) => entry.error);
   const cloudflare = hosts.find((entry) => entry.behind_cloudflare === true);
   const cloudflareKnown = resolved && hosts.every((entry) => entry.behind_cloudflare === false);
   const remoteResult = network === 'remote' && result && ['connected', 'failed', 'timeout'].includes(result.outcome);
+  const udp = remoteResult && result.outcome === 'connected' && result.protocol?.toLowerCase() === 'udp';
+  // Connected but the selected candidate's transport is unknown: not a failure, not proof either.
+  const udpUnknown = remoteResult && result.outcome === 'connected' && !result.protocol;
   return [
     {
       id: 'https',
@@ -30,7 +37,8 @@ export function buildChecklist({ setup, network, via, result, protocol }) {
       text: !setup.public_host_set ? "PUBLIC_HOST isn't set. Low latency video from outside needs it; Compatibility video doesn't."
         : error ? hostSentence(error)
           : resolved ? `${hosts.map((entry) => entry.host).join(', ')} ${hosts.length === 1 ? 'resolves' : 'resolve'}.`
-            : 'The video hostname could not be checked. Check PUBLIC_HOST and its DNS answers.',
+            : capped ? `Only the first ${hosts.length} of your ${total} video hostnames are looked up here.`
+              : 'The video hostname could not be checked. Check PUBLIC_HOST and its DNS answers.',
     },
     {
       id: 'cloudflare',
@@ -42,11 +50,13 @@ export function buildChecklist({ setup, network, via, result, protocol }) {
     },
     {
       id: 'udp',
-      status: remoteResult ? result.outcome === 'connected' && result.protocol?.toLowerCase() === 'udp' ? 'ok' : 'check' : 'unchecked',
-      text: !remoteResult ? 'Run the test below from mobile data (outside your home).'
-        : result.outcome === 'connected' && result.protocol?.toLowerCase() === 'udp'
-          ? 'The test connected over UDP from outside your home on this device, which is what a working forward looks like.'
-          : "The test didn't connect over UDP from outside. The UDP forward is one possible cause; a camera, DNS or STUN problem are others.",
+      // "Outside your home" is Nightlight's reading of this device's address, which depends on TRUST_PROXY: a forged
+      // forwarded address under a loose setting can read as remote (verified by Codex on #1025), so the OK says so.
+      status: !remoteResult ? 'unchecked' : udpUnknown ? 'unchecked' : udp ? 'ok' : 'check',
+      text: !remoteResult ? `${canTest ? '' : 'Start a camera, then '}${canTest ? 'Run' : 'run'} the test below from mobile data (outside your home).`
+        : udpUnknown ? "The test connected, but Nightlight couldn't tell whether it used UDP. Run it again."
+          : udp ? 'The test connected over UDP from an address Nightlight counts as outside your home, which is what a working forward looks like.'
+            : "The test didn't connect over UDP from outside. The UDP forward is one possible cause; a camera, DNS or STUN problem are others.",
     },
     {
       id: 'proxy',

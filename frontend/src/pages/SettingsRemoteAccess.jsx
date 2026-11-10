@@ -86,7 +86,7 @@ export default function SettingsRemoteAccess() {
   const network = setup?.client?.network || 'unknown';
   const via = setup?.client?.via ?? null;
   const message = testMessage(network, via, result, setup?.webrtc_udp_port);
-  const checklist = buildChecklist({ setup, network, via, result, protocol: window.location.protocol });
+  const checklist = buildChecklist({ setup, network, via, result, protocol: window.location.protocol, canTest: Boolean(camera) });
 
   return <>
     <AppHeader title="Remote Access" back={{ to: '/settings', label: 'Settings' }} />
