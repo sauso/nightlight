@@ -57,7 +57,17 @@ If you prefer to use your own domain, set up a reverse proxy with HTTPS (a VPN i
 
 ### Check your setup in Nightlight
 
-Admins can open **Settings → Remote Access** and expand **Use your own domain or port forward (advanced)**. The first card there shows how Nightlight sees this device: home network, VPN, Tailscale, outside home, or unknown. **Your setup** lists the app and UDP video ports, public hosts and their DNS results, advertised addresses, and whether STUN is on. The checklist links back to this guide.
+Admins can open **Settings → Remote Access** and expand **Use your own domain or port forward (advanced)**. **Where you're connecting from** shows how Nightlight sees this device: home network, VPN, Tailscale, outside home, or unknown. It also shows the address you opened in this browser. Nightlight cannot see a reverse proxy's domain when you open the page from another address. **Your setup** lists the app and UDP video ports, public hosts and their DNS results, advertised addresses, the `TRUST_PROXY` value, and whether STUN is on.
+
+**Setup checklist** shows what Nightlight can check on this visit:
+
+- **HTTPS in front of the app** checks the address this browser opened. Plain HTTP outside your home needs attention. At home, open your own domain to check its HTTPS connection.
+- **Video hostname (`PUBLIC_HOST`)** checks whether every configured video hostname resolves. An unset host or a DNS error needs attention. Resolving does not prove video can connect.
+- **Not behind Cloudflare's proxy** checks resolved addresses against Cloudflare's published proxy ranges (as of 10 November 2026). A proxied video hostname needs a DNS-only (grey cloud) record for UDP video. This is a guide, not proof: Cloudflare can change its ranges, and a cached or split-horizon DNS answer can mislead the check. Older servers and missing DNS answers show **Not checked**.
+- **UDP port forward** changes only after you run **Test from this device** from outside your home, such as on mobile data. A UDP connection then looks like a working forward for this device. A failed test can also come from a camera, DNS or STUN problem.
+- **Reverse proxy addresses** warns when an untrusted forwarded address was seen. A direct client can send a stray header that looks the same. This row never says **OK**: even a trusted-looking address chain could be forged if `TRUST_PROXY` is too broad.
+
+The checklist cannot inspect your router or reverse proxy configuration. Compatibility (HLS) video needs no UDP forward. Keep the raw app port off the internet and use HTTPS. The checklist links back to this guide.
 
 **Test from this device** makes one short Low latency video connection to a running camera, then closes its connection. When the server gives a session address, the test also asks it to end the session (DELETE); otherwise MediaMTX frees it when the connection closes. A successful UDP connection **from outside your home** shows that the port forward works for this device. A TCP connection means video connected, but it does not confirm the UDP forward. A failed or timed-out test points you to the UDP forward and `PUBLIC_HOST`; Compatibility (HLS) remains available without UDP. The test only proves the forward from **outside** your home. A connection from your home network, a VPN, or behind an untrusted proxy cannot prove it, even if the test connects. Try again from mobile data.
 

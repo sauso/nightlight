@@ -141,17 +141,37 @@ test('configured literals, DNS A and AAAA, errors, trimming and ports', async ()
     assert.equal(body.webrtc_udp_port, 8190);
     assert.equal(body.public_host_set, true);
     assert.deepEqual(body.public_hosts, [
-      { host: '203.0.113.7', kind: 'ip', addresses: ['203.0.113.7'], error: null },
-      { host: '2001:db8::7', kind: 'ip', addresses: ['2001:db8::7'], error: null },
-      { host: 'dual.example', kind: 'name', addresses: ['203.0.113.7', '2001:db8::7'], error: null },
-      { host: 'missing.example', kind: 'name', addresses: [], error: 'not_found' },
-      { host: 'nodata.example', kind: 'name', addresses: [], error: 'not_found' },
-      { host: 'failed.example', kind: 'name', addresses: [], error: 'failed' },
+      { host: '203.0.113.7', kind: 'ip', addresses: ['203.0.113.7'], error: null, behind_cloudflare: false },
+      { host: '2001:db8::7', kind: 'ip', addresses: ['2001:db8::7'], error: null, behind_cloudflare: false },
+      { host: 'dual.example', kind: 'name', addresses: ['203.0.113.7', '2001:db8::7'], error: null, behind_cloudflare: false },
+      { host: 'missing.example', kind: 'name', addresses: [], error: 'not_found', behind_cloudflare: false },
+      { host: 'nodata.example', kind: 'name', addresses: [], error: 'not_found', behind_cloudflare: false },
+      { host: 'failed.example', kind: 'name', addresses: [], error: 'failed', behind_cloudflare: false },
     ]);
     assert.deepEqual(calls, ['dual.example', 'missing.example', 'nodata.example', 'failed.example'].map((host) => [host, { all: true, family: 0 }]));
     assert.deepEqual(body.advertised_hosts, getAdvertisedHosts(env));
     assert.deepEqual(body.stun, { enabled: false, servers: [] });
   });
+});
+
+test('Cloudflare proxy ranges mark only matching literal and DNS answers', async () => {
+  const literals = [
+    ['104.16.0.0', true], ['104.23.255.255', true], ['104.24.0.0', true],
+    ['104.27.255.255', true], ['104.28.0.0', false], ['104.31.255.255', false], ['104.32.0.0', false], ['104.15.255.255', false],
+    ['2606:4700::1', true], ['2606:46ff::1', false],
+    ['::ffff:104.16.0.1', true], ['8.8.8.8', false], ['192.168.1.2', false],
+  ];
+  for (const [host, expected] of literals) {
+    const body = await buildRemoteAccess({ env: { PUBLIC_HOST: host }, resolver: resolverNever });
+    assert.equal(body.public_hosts[0].behind_cloudflare, expected, host);
+  }
+  const resolver = async (host) => {
+    if (host === 'empty.example') return [];
+    if (host === 'missing.example') throw Object.assign(new Error('missing'), { code: 'ENOTFOUND' });
+    return [{ address: host === 'cloudflare.example' ? '173.245.48.1' : host === 'mapped.example' ? '::ffff:104.16.0.1' : '8.8.8.8' }];
+  };
+  const body = await buildRemoteAccess({ env: { PUBLIC_HOST: 'cloudflare.example, mapped.example, normal.example, empty.example, missing.example' }, resolver });
+  assert.deepEqual(body.public_hosts.map((entry) => entry.behind_cloudflare), [true, true, false, false, false]);
 });
 
 test('DNS timeout is bounded, and a list over ten is capped', async () => {
