@@ -633,8 +633,8 @@ describe('index.js wiring', () => {
     assert.match(indexSrc, /markBootComplete\(\);/, 'markBootComplete() is never called — every startup fault stays fatal');
     // Order matters: releasing the boot gate before the server binds would reinstate the exact hole.
     assert.ok(
-      indexSrc.indexOf('app.listen') < indexSrc.indexOf('markBootComplete();'),
-      'markBootComplete() must come after app.listen, or a failed start looks healthy'
+      indexSrc.indexOf('listenOrFail(app') !== -1 && indexSrc.indexOf('listenOrFail(app') < indexSrc.indexOf('markBootComplete();'),
+      'markBootComplete() must come after listenOrFail(app, ...) (the app.listen wrapper), or a failed start looks healthy'
     );
   });
 
