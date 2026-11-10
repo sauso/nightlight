@@ -512,8 +512,9 @@ a recording or wake clip) checks that its `UPDATE` still found the row, and dele
 ## API errors (`backend/src/lib/asyncHandler.js`, `backend/src/middleware/errorHandler.js`)
 
 Every API error is JSON in the same shape the routes already use, `{ "error": "<message>" }`, and a
-request never goes unanswered. Express 4 ignores the promise an `async` handler returns, so **every
-`async` route handler is wrapped in `asyncHandler(...)`**: a rejection (or a throw before the handler's
+request never goes unanswered. Express 4 ignored the promise an `async` handler returns (Express 5, which
+Nightlight now runs, forwards a rejection itself), so **every `async` route handler is still wrapped in
+`asyncHandler(...)`**: a rejection (or a throw before the handler's
 own `try/catch`) is passed to `next(err)` and ends at `errorHandler`, which is mounted **last** in
 `index.js` (after every router and the SPA fallback; Express only delivers an error to handlers
 registered after it). `backend/test/async-errors.test.js` walks every router's real stack and fails for an

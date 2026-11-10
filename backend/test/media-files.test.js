@@ -385,6 +385,14 @@ describe('serveMediaFile: the same answers res.sendFile gave, from the open desc
     ['a Range past the end is clamped', { headers: { Range: 'bytes=30-9999' } }],
     ['an unsatisfiable Range (416)', { headers: { Range: 'bytes=500-' } }],
     ['a malformed Range is ignored, the whole file is sent', { headers: { Range: 'bytes=abc' } }],
+    // Malformed shapes, each compared with res.sendFile. They are ignored (200, the whole file) under send 1.x /
+    // range-parser 1.3.0; under Express 4 several of these were a 416 or a partial answer read out by parseInt.
+    ['a position with trailing text (5x-9)', { headers: { Range: 'bytes=5x-9' } }],
+    ['a double dash (--5)', { headers: { Range: 'bytes=--5' } }],
+    ['no dash at all (bytes=5)', { headers: { Range: 'bytes=5' } }],
+    ['an empty range (bytes=-)', { headers: { Range: 'bytes=-' } }],
+    ['one good range and one malformed range: the whole header is ignored', { headers: { Range: 'bytes=0-1,abc' } }],
+    ['spaces around the positions are tolerated', { headers: { Range: 'bytes= 1 - 2 ' } }],
     ['a Range unit nobody knows is ignored', { headers: { Range: 'items=1-2' } }],
     ['several separate ranges: the whole file (send serves one range only)', { headers: { Range: 'bytes=0-1,5-6' } }],
     ['overlapping ranges are combined into one', { headers: { Range: 'bytes=0-3,2-9' } }],
