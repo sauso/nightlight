@@ -20,15 +20,26 @@
 //
 // ⚠️ The /hls block is NOT index.js's /hls route. It mounts createProxyMiddleware with the target,
 // changeOrigin and pathRewrite options index.js uses, plus the two header lines of its proxyRes hook,
-// against a real local upstream. Not covered: the keepUnderPrefix(proxyRes, '/hls') call in that hook (so
-// a redirect's Location is not checked), the requireAuthQueryOrHeader and demo-limiter middleware that
-// run before the proxy, and the /live proxy. index.js cannot be imported (it spawns MediaMTX and FFmpeg),
-// so this pins the library's behaviour at the installed version, not index.js's wiring.
+// against a real local upstream. The last block does the same for the /live (WHEP) shape: POST an SDP
+// offer, a 201 with a relative Location that the hook re-prefixes (a COPY of keepUnderPrefix's rewrite:
+// the real one lives in index.js), PATCH/DELETE, an upstream that is down, and a client that gives up
+// mid-request. Not covered: the real keepUnderPrefix and recordWebrtcSessionOwner calls, the
+// requireAuth, whepOnlyGuard, requireAuthQueryOrHeader and demo-limiter middleware that run before the
+// proxies. index.js cannot be imported (it spawns MediaMTX and FFmpeg), so this pins the library's
+// behaviour at the installed version, not index.js's wiring.
+//
+// Moved to http-proxy-middleware 4.2.1 (httpxy instead of http-proxy) with a side-by-side run of 3.0.7 and
+// 4.2.1 over 28 request shapes against a stand-in MediaMTX: identical status, headers and bodies apart
+// from connection handling. The review of the bump found the one that matters: v4 pools upstream sockets
+// by default and MediaMTX closes idle ones after 30 s, which can fail a request with a 504 (see
+// src/lib/mediaProxyOptions.js). The mounts here use the real shared options, and a test below fails if
+// the proxy starts reusing upstream connections again.
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
+import { MEDIA_PROXY_BASE_OPTIONS } from '../src/lib/mediaProxyOptions.js';
 import { useTempDataDir, cleanupTempDataDirs, makeUser, call } from './helpers/harness.js';
 
 useTempDataDir();
@@ -249,7 +260,7 @@ describe('/hls proxy path (createProxyMiddleware with index.js\'s /hls options; 
     const hls = express();
     hls.use('/hls', createProxyMiddleware({
       target: urlOf(upstream),
-      changeOrigin: true,
+      ...MEDIA_PROXY_BASE_OPTIONS,
       pathRewrite: { '^/hls': '' },
       on: {
         proxyRes(proxyRes) {
@@ -294,6 +305,134 @@ describe('/hls proxy path (createProxyMiddleware with index.js\'s /hls options; 
   test('a redirect from upstream is passed through, not followed', async () => {
     const r = await get('/hls/redirect');
     assert.equal(r.status, 302);
+  });
+});
+
+// index.js's /live (WHEP) proxy options. The hook's Location rewrite is a copy of keepUnderPrefix's behaviour
+// for the shapes MediaMTX sends (a relative path); the point of these tests is what the LIBRARY does around
+// it: the request body and method reach the upstream untouched, the hook may rewrite response headers, an
+// upstream outage is a clean 5xx and not a crash, and a client that goes away does not leave the upstream
+// request open.
+describe('/live (WHEP) proxy path (createProxyMiddleware with index.js\'s /live options; not its auth)', () => {
+  let upstream;
+  let app;
+  const seen = [];
+  const SDP = 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n';
+  let upstreamClosedEarly;
+  before(async () => {
+    upstream = await listen(express().use((req, res) => {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        const body = Buffer.concat(chunks).toString();
+        seen.push({ method: req.method, url: req.url, type: req.headers['content-type'], host: req.headers.host, body });
+        if (req.url === '/cam/slow') {
+          // never answers: the test cancels the request and watches this socket go away.
+          req.socket.on('close', () => { upstreamClosedEarly?.(); });
+          return;
+        }
+        if (req.method === 'POST') {
+          res.writeHead(201, { 'content-type': 'application/sdp', location: '/cam/whep/session-1', etag: '"s1"' });
+          return res.end('v=0\r\nanswer\r\n');
+        }
+        res.writeHead(req.method === 'DELETE' ? 200 : 204);
+        res.end();
+      });
+    }));
+    const live = express();
+    live.use('/live', createProxyMiddleware({
+      target: urlOf(upstream),
+      ...MEDIA_PROXY_BASE_OPTIONS,
+      pathRewrite: { '^/live': '' },
+      on: {
+        proxyRes(proxyRes) {
+          const loc = proxyRes.headers['location'];
+          if (loc && !loc.startsWith('/live')) proxyRes.headers['location'] = `/live${loc.startsWith('/') ? loc : `/${loc}`}`;
+        },
+      },
+    }));
+    app = await listen(live);
+  });
+  after(async () => { await close(app); await close(upstream); });
+
+  const send = (method, path, { body, headers = {} } = {}) => new Promise((resolve, reject) => {
+    const req = http.request(`${urlOf(app)}${path}`, { method, headers }, (res) => {
+      let text = '';
+      res.on('data', (c) => { text += c; });
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: text }));
+    });
+    req.on('error', reject);
+    if (body !== undefined) req.write(body);
+    req.end();
+  });
+
+  test('POST: the SDP offer reaches the upstream byte for byte, and the 201 Location comes back under /live', async () => {
+    const r = await send('POST', '/live/cam/whep', { body: SDP, headers: { 'content-type': 'application/sdp', 'content-length': Buffer.byteLength(SDP) } });
+    assert.equal(r.status, 201);
+    assert.equal(r.headers.location, '/live/cam/whep/session-1');
+    assert.equal(r.headers['content-type'], 'application/sdp');
+    assert.equal(r.body, 'v=0\r\nanswer\r\n');
+    const got = seen.at(-1);
+    assert.deepEqual([got.method, got.url, got.type, got.body], ['POST', '/cam/whep', 'application/sdp', SDP]);
+    assert.equal(got.host, new URL(urlOf(upstream)).host, 'changeOrigin');
+  });
+
+  test('PATCH and DELETE on the session reach the upstream with their method and path', async () => {
+    const patch = await send('PATCH', '/live/cam/whep/session-1', { body: 'a=candidate:1', headers: { 'content-type': 'application/trickle-ice-sdpfrag' } });
+    assert.equal(patch.status, 204);
+    assert.deepEqual([seen.at(-1).method, seen.at(-1).url, seen.at(-1).body], ['PATCH', '/cam/whep/session-1', 'a=candidate:1']);
+    const del = await send('DELETE', '/live/cam/whep/session-1');
+    assert.equal(del.status, 200);
+    assert.deepEqual([seen.at(-1).method, seen.at(-1).url], ['DELETE', '/cam/whep/session-1']);
+  });
+
+  test('each request opens its own upstream connection: no pooled socket for MediaMTX to close under us', async () => {
+    // Three sequential requests from a keep-alive client. With http-proxy-middleware 4's default agent they share
+    // ONE upstream socket (measured 1 of 3, where 3.x gave 3); that pooled socket is what MediaMTX's 30 s idle
+    // close can break. This is the shape of the shared options, not of index.js's wiring (it cannot be imported).
+    let connections = 0;
+    const count = () => { connections += 1; };
+    upstream.on('connection', count);
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    try {
+      for (let i = 0; i < 3; i++) {
+        await new Promise((resolve, reject) => {
+          http.get(`${urlOf(app)}/live/cam/whep/session-1`, { agent }, (res) => { res.resume(); res.on('end', resolve); }).on('error', reject);
+        });
+      }
+    } finally { agent.destroy(); upstream.off('connection', count); }
+    assert.equal(connections, 3, 'the proxy reused an upstream connection (agent: false lost?)');
+  });
+
+  test('an upstream that is down is a 5xx for that request, and the proxy keeps serving', async () => {
+    const dead = await listen(express());
+    const deadUrl = urlOf(dead);
+    await close(dead);
+    const broken = express();
+    broken.use('/live', createProxyMiddleware({ target: deadUrl, ...MEDIA_PROXY_BASE_OPTIONS, pathRewrite: { '^/live': '' } }));
+    const brokenServer = await listen(broken);
+    try {
+      const r = await new Promise((resolve, reject) => {
+        http.get(`${urlOf(brokenServer)}/live/cam/whep`, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)); }).on('error', reject);
+      });
+      assert.ok(r >= 500 && r < 600, `expected a 5xx, got ${r}`);
+      const again = await new Promise((resolve, reject) => {
+        http.get(`${urlOf(brokenServer)}/live/cam/whep`, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)); }).on('error', reject);
+      });
+      assert.ok(again >= 500 && again < 600, 'second request after the failure is still answered');
+    } finally { await close(brokenServer); }
+  });
+
+  test('a client that abandons a request does not leave the upstream connection open', async () => {
+    const closed = new Promise((resolve) => { upstreamClosedEarly = resolve; });
+    await new Promise((resolve) => {
+      const req = http.get(`${urlOf(app)}/live/cam/slow`);
+      req.on('error', () => {});
+      // Give the proxy time to reach the upstream, then give up on the request.
+      setTimeout(() => { req.destroy(); resolve(); }, 300);
+    });
+    const outcome = await Promise.race([closed.then(() => 'closed'), new Promise((r) => setTimeout(() => r('still open'), 3000))]);
+    assert.equal(outcome, 'closed', 'the upstream socket stayed open after the client left');
   });
 });
 

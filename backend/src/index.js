@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware } from 'http-proxy-middleware';
+import { MEDIA_PROXY_BASE_OPTIONS } from './lib/mediaProxyOptions.js';
 import { WebSocketServer } from 'ws';
 import authRoutes from './routes/auth.js';
 import childrenRoutes from './routes/children.js';
@@ -203,7 +204,7 @@ app.use(
   whepOnlyGuard,
   createProxyMiddleware({
     target: process.env.MEDIAMTX_WEBRTC_URL || `http://${MEDIAMTX_INTERNAL_HOST}:8889`,
-    changeOrigin: true,
+    ...MEDIA_PROXY_BASE_OPTIONS, // changeOrigin + agent: false (see the file for why)
     pathRewrite: { '^/live': '' },
     on: {
       proxyRes: (proxyRes, req) => {
@@ -219,7 +220,7 @@ app.use(
   requireAuthQueryOrHeader,
   createProxyMiddleware({
     target: process.env.MEDIAMTX_HLS_URL || `http://${MEDIAMTX_INTERNAL_HOST}:8888`,
-    changeOrigin: true,
+    ...MEDIA_PROXY_BASE_OPTIONS, // changeOrigin + agent: false (see the file for why)
     pathRewrite: { '^/hls': '' },
     on: {
       proxyRes(proxyRes) {
