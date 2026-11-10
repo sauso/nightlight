@@ -25846,5 +25846,50 @@
     "expect": "killed",
     "tests": ["video-address-sync.test.js"],
     "namePattern": "a tailnet-only candidate still reports"
+  },
+  {
+    "label": "#961 tunnel buckets used without the daemon",
+    "file": "backend/src/lib/clientBucket.js",
+    "find": "if (!(isLoopbackExposed() && isLoopbackAddress(req.ip))) return ipKeyGenerator(req.ip);",
+    "replace": "if (false) return ipKeyGenerator(req.ip);",
+    "expect": "killed",
+    "tests": ["client-bucket.test.js"],
+    "namePattern": "without the daemon, spoofed identity"
+  },
+  {
+    "label": "#961 tunnel slot bound removed",
+    "file": "backend/src/lib/clientBucket.js",
+    "find": "hash.readUInt32BE(0) % 64",
+    "replace": "hash.readUInt32BE(0)",
+    "expect": "killed",
+    "tests": ["client-bucket.test.js"],
+    "namePattern": "ten thousand identities occupy exactly"
+  },
+  {
+    "label": "#961 tunnel identity case-sensitive",
+    "file": "backend/src/lib/clientBucket.js",
+    "find": ".update(login.toLowerCase())",
+    "replace": ".update(login)",
+    "expect": "killed",
+    "tests": ["client-bucket.test.js"],
+    "namePattern": "only exposed loopback uses"
+  },
+  {
+    "label": "#961 headerless tunnel peer gets a constant bucket",
+    "file": "backend/src/lib/clientBucket.js",
+    "find": "if (!login) return ipKeyGenerator(req.ip);",
+    "replace": "if (!login) return 'tunnel:none';",
+    "expect": "killed",
+    "tests": ["client-bucket.test.js"],
+    "namePattern": "missing and invalid identities"
+  },
+  {
+    "label": "#961 account limiter stays on the shared address",
+    "file": "backend/src/routes/auth.js",
+    "find": "keyGenerator: (req) => `${clientBucketKey(req)}|${keyGen(req)}`,",
+    "replace": "keyGenerator: (req) => `${clientKey(req)}|${keyGen(req)}`,",
+    "expect": "killed",
+    "tests": ["client-bucket.test.js"],
+    "namePattern": "real login route separates peers"
   }
 ]
