@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- #962 Settings → Remote Access now recognises when you are viewing through Tailscale and explains that the router port-forward test does not apply. It shows reverse-proxy advice only when an untrusted proxy is detected; older servers give a neutral Unknown message.
+
 ## [0.46.0] - 2026-11-10
 
 ### Added

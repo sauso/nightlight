@@ -8,7 +8,7 @@ import {
 
 useTempDataDir();
 const { default: db } = await import('../src/db.js');
-const { classifyClient } = await import('../src/lib/remoteAccess.js');
+const { classifyClient, buildRemoteAccess } = await import('../src/lib/remoteAccess.js');
 const { applyTrustProxy } = await import('../src/lib/trustProxy.js');
 const { setLoopbackExposed } = await import('../src/lib/loopbackExposure.js');
 const { createRemoteAccessRouter } = await import('../src/routes/remoteAccess.js');
@@ -49,11 +49,13 @@ test('#959 admin remote access route labels an exposed loopback caller unknown',
     const bare = await request(url);
     assert.equal(bare.status, 200);
     assert.equal(bare.body.client.network, 'unknown');
+    assert.equal(bare.body.client.via, 'tailscale');
     assert.equal(bare.body.trust_proxy, 'loopback');
     const forged = await request(url, { headers: { 'x-forwarded-for': '192.168.1.50' } });
     assert.equal(forged.body.client.network, 'unknown');
+    assert.equal(forged.body.client.via, 'tailscale');
     setLoopbackExposed(false);
-    assert.equal((await request(url)).body.client.network, 'home', 'flag off: a header-less loopback caller is home as before');
+    assert.deepEqual((await request(url)).body.client, { network: 'home', via: null }, 'flag off: a header-less loopback caller is home as before');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     setLoopbackExposed(false);
@@ -80,6 +82,25 @@ test('an untrusted forwarded chain cannot identify the caller', () => {
   assert.equal(classifyClient({ ip: '100.64.0.1', forwardedHeaderPresent: true, trustedProxyChain: true }), 'vpn');
 });
 
+test('#962 client via identifies a tunnel before an untrusted proxy without changing network', async () => {
+  const cases = [
+    [{ ip: '127.0.0.1', loopbackExposed: true }, 'unknown', 'tailscale'],
+    [{ ip: '::1', loopbackExposed: true, forwardedHeaderPresent: true }, 'unknown', 'tailscale'],
+    [{ ip: '192.168.1.10', loopbackExposed: true, forwardedHeaderPresent: true }, 'unknown', 'proxy'],
+    [{ ip: 'garbage', forwardedHeaderPresent: true }, 'unknown', 'proxy'],
+    [{ ip: '192.168.1.10' }, 'home', null],
+    [{ ip: '100.64.0.1' }, 'vpn', null],
+    [{ ip: '8.8.8.8' }, 'remote', null],
+    [{ ip: '127.0.0.1', loopbackExposed: false }, 'home', null],
+  ];
+  for (const [input, network, via] of cases) {
+    setLoopbackExposed(Boolean(input.loopbackExposed));
+    const client = (await buildRemoteAccess({ env: {}, ...input })).client;
+    assert.equal(client.network, network, JSON.stringify(input));
+    assert.equal(client.via, via, JSON.stringify(input));
+  }
+});
+
 async function withRoute(env, resolver, run, { timeoutMs = 3000, trustProxy = 'loopback' } = {}) {
   const router = createRemoteAccessRouter({ env, resolver, timeoutMs });
   const server = await mountRouter('/api/remote-access', router, {
@@ -101,7 +122,7 @@ test('HTTP auth gates and exact empty-configuration response shape', async () =>
       app_port: 4000, webrtc_udp_port: 8189, public_host_set: false, public_hosts: [],
       advertised_hosts: getAdvertisedHosts({}),
       stun: { enabled: true, servers: ['stun:stun.l.google.com:19302'] },
-      trust_proxy: 'loopback', client: { network: 'home' },
+      trust_proxy: 'loopback', client: { network: 'home', via: null },
     });
   });
 });
@@ -193,10 +214,12 @@ test('Express proxy trust determines whether a forwarded address is usable', asy
   await withRoute({}, resolverNever, async (url) => {
     const { body } = await request(url, { headers: { 'x-forwarded-for': '192.168.1.50' } });
     assert.equal(body.client.network, 'unknown');
+    assert.equal(body.client.via, 'proxy');
     assert.equal(body.trust_proxy, '10.0.0.0/8');
   }, { trustProxy: '10.0.0.0/8' });
   await withRoute({}, resolverNever, async (url) => {
     const { body } = await request(url, { headers: { 'x-forwarded-for': '100.64.0.1' } });
     assert.equal(body.client.network, 'vpn');
+    assert.equal(body.client.via, null);
   });
 });

@@ -73,6 +73,18 @@ test('a card with no onReady still renders (the settings page passes none)', asy
   expect(await screen.findByText('Open')).toBeInTheDocument();
 });
 
+test('#962 current Tailscale confirmation only appears for a ready card with the prop', async () => {
+  for (const [view, viaTailscale, expected] of [
+    [ready, true, true], [ready, false, false], [connected, true, false],
+    [waiting, true, false], [{ ...base, enabled: true, state: 'error' }, true, false],
+  ]) {
+    const rendered = card(view, { viaTailscale });
+    await screen.findByText('Advanced');
+    expect(Boolean(screen.queryByText("You're viewing Nightlight through Tailscale right now."))).toBe(expected);
+    rendered.unmount();
+  }
+});
+
 // Owner testing 2026-11-05: Copy did nothing when Nightlight was opened over plain http (no navigator.clipboard).
 test.each([
   ['over plain http (no clipboard API) the fallback copies', undefined, () => true, 'Address copied.'],

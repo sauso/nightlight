@@ -35,11 +35,11 @@ class Peer {
   fail() { this.connectionState = 'failed'; this.onconnectionstatechange(); }
   close() { this.closed = true; this.connectionState = 'closed'; }
 }
-function mockSetup(data = setup) {
-  vi.spyOn(api, 'get').mockImplementation((path) => Promise.resolve(path === '/remote-access' ? data : path === '/remote-access/tailscale' ? tailscale : { stunServers: [] }));
+function mockSetup(data = setup, tailscaleView = tailscale) {
+  vi.spyOn(api, 'get').mockImplementation((path) => Promise.resolve(path === '/remote-access' ? data : path === '/remote-access/tailscale' ? tailscaleView : { stunServers: [] }));
 }
-function renderPage(data = setup, cameras = [camera]) {
-  mockSetup(data);
+function renderPage(data = setup, cameras = [camera], tailscaleView = tailscale) {
+  mockSetup(data, tailscaleView);
   return renderAsAdmin(<SettingsRemoteAccess />, { cameras });
 }
 async function run() {
@@ -71,10 +71,10 @@ test('admin sees Tailscale first and the four own-domain cards when expanded', a
   expect(screen.getByText('Your own-domain setup is working and stays as it is.')).toBeInTheDocument();
   expect(screen.getByText('Use your own domain or port forward (advanced)').closest('details').open).toBe(false);
   await openAdvanced();
-  for (const title of ["How you're connected right now", 'Your setup', 'Test Low latency video from this device', 'Before watching from outside']) {
+  for (const title of ["Where you're connecting from", 'Your setup', 'Test Low latency video from this device', 'Before watching from outside']) {
     expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument();
   }
-  expect(screen.getByText("Viewers who arrive over Tailscale show as 'Unknown' in the first card below; that's expected.")).toBeInTheDocument();
+  expect(screen.queryByText(/Viewers who arrive over Tailscale show as/)).toBeNull();
   expect(requests).toHaveLength(0);
 });
 
@@ -89,10 +89,39 @@ test.each([
   ['home', "You're on your home network. From here this page can't prove your port forwards work: open it from mobile data to check."],
   ['vpn', "You're connected through a VPN (such as Tailscale). Remote access through your router isn't being tested from here."],
   ['remote', "You're outside your home network. A successful test below shows your port forwards work."],
-  ['unknown', /Nightlight can't tell whether you're at home/],
+  ['unknown', "Nightlight can't tell where you're connecting from."],
 ])('%s network explains the limit', async (network, sentence) => {
   renderPage({ ...setup, client: { network } });
   expect(await screen.findByText(sentence)).toBeInTheDocument();
+});
+
+test.each([
+  ['tailscale', 'Tailscale', "You're connected through your private Tailscale address, so your router isn't involved and the port-forward test below doesn't apply."],
+  ['proxy', 'Unknown', "A reverse proxy sits in front of Nightlight and TRUST_PROXY doesn't trust it, so Nightlight can't tell where you are."],
+  [null, 'Unknown', "Nightlight can't tell where you're connecting from."],
+])('#962 %s connection shows its own badge and guidance', async (via, badge, sentence) => {
+  renderPage({ ...setup, client: { network: 'unknown', via } });
+  await openAdvanced();
+  const section = screen.getByRole('heading', { name: "Where you're connecting from" }).closest('section');
+  expect(section.querySelector('.status-badge')).toHaveTextContent(badge);
+  expect(section).toHaveTextContent(sentence);
+  if (via === 'proxy') expect(section.querySelector(`a[href*="trust_proxy"]`)).not.toBeNull();
+  else expect(document.body.textContent).not.toContain('TRUST_PROXY');
+});
+
+test('#962 the ready Tailscale card confirms this device without opening advanced', async () => {
+  const readyTailscale = { ...tailscale, enabled: true, state: 'connected', dns_name: 'nightlight.example.ts.net', serve: { enabled: true } };
+  renderPage({ ...setup, client: { network: 'unknown', via: 'tailscale' } }, [camera], readyTailscale);
+  expect(await screen.findByText("You're viewing Nightlight through Tailscale right now.")).toBeInTheDocument();
+  expect(screen.getByText('Use your own domain or port forward (advanced)').closest('details').open).toBe(false);
+});
+
+test('#962 an older server without via gives neutral unknown guidance', async () => {
+  renderPage({ ...setup, client: { network: 'unknown' } });
+  await openAdvanced();
+  const section = screen.getByRole('heading', { name: "Where you're connecting from" }).closest('section');
+  expect(section).toHaveTextContent("Nightlight can't tell where you're connecting from.");
+  expect(section.textContent).not.toContain('TRUST_PROXY');
 });
 
 test('setup shows unset PUBLIC_HOST without treating a home visit as an error, and STUN off', async () => {
@@ -164,6 +193,34 @@ test('remote failure names the UDP port and PUBLIC_HOST', async () => {
   expect(await screen.findByText(/Couldn't connect from outside. Check the UDP forward \(port 8189\) and PUBLIC_HOST/)).toBeInTheDocument();
 });
 
+test('#962 Tailscale success describes video without suggesting mobile data', async () => {
+  renderPage({ ...setup, client: { network: 'unknown', via: 'tailscale' } });
+  await run();
+  await act(async () => peers[0].connect());
+  const status = await screen.findByText('Low latency video works through Tailscale.');
+  expect(status).toBeInTheDocument();
+  expect(status.textContent).not.toMatch(/outside your home|mobile data/);
+});
+
+test('#962 Tailscale failure keeps the local connection guidance', async () => {
+  renderPage({ ...setup, client: { network: 'unknown', via: 'tailscale' } });
+  await run();
+  await act(async () => peers[0].fail());
+  expect(await screen.findByText("Couldn't connect. Low latency video isn't working from here (Compatibility mode still works).")).toBeInTheDocument();
+  expect(document.body.textContent).not.toContain('TRUST_PROXY');
+});
+
+test('#962 Tailscale timeout keeps the local connection guidance', async () => {
+  renderPage({ ...setup, client: { network: 'unknown', via: 'tailscale' } });
+  await openAdvanced();
+  const button = await screen.findByRole('button', { name: 'Test from this device' });
+  vi.useFakeTimers();
+  await act(async () => { fireEvent.click(button); await vi.advanceTimersByTimeAsync(1000); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
+  expect(screen.getByText("Couldn't connect. Low latency video isn't working from here (Compatibility mode still works).")).toBeInTheDocument();
+  expect(document.body.textContent).not.toContain('TRUST_PROXY');
+});
+
 test('timeout ends the probe and gives the same remote guidance', async () => {
   renderPage();
   await openAdvanced();
@@ -177,12 +234,16 @@ test('timeout ends the probe and gives the same remote guidance', async () => {
   expect(requests[1].url).toBe('/live/cam/whep/session');
 });
 
-test('unsupported browser gives a plain result', async () => {
+test.each([
+  ['outside home', setup],
+  ['Tailscale', { ...setup, client: { network: 'unknown', via: 'tailscale' } }],
+])('unsupported browser gives a plain result through %s', async (_route, data) => {
   vi.stubGlobal('RTCPeerConnection', undefined);
-  renderPage();
+  renderPage(data);
   await openAdvanced();
   fireEvent.click(await screen.findByRole('button', { name: 'Test from this device' }));
   expect(await screen.findByText("This browser can't make a Low latency connection.")).toBeInTheDocument();
+  if (data.client.via === 'tailscale') expect(document.body.textContent).not.toContain('TRUST_PROXY');
 });
 
 test('double click starts one probe and keeps the button busy', async () => {
