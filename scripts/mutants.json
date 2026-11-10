@@ -25891,5 +25891,23 @@
     "expect": "killed",
     "tests": ["client-bucket.test.js"],
     "namePattern": "real login route separates peers"
+  },
+  {
+    "label": "#979 two-factor tolerance widened to two steps",
+    "file": "backend/src/lib/mfa.js",
+    "find": "const EPOCH_TOLERANCE_SEC = 30;",
+    "replace": "const EPOCH_TOLERANCE_SEC = 60;",
+    "expect": "killed",
+    "tests": ["mfa.test.js"],
+    "namePattern": "RFC 6238 \\(not from otplib\\)"
+  },
+  {
+    "label": "#979 enrolment link promises SHA256 the verifier does not check",
+    "file": "backend/src/lib/mfa.js",
+    "find": "issuer, algorithm: 'SHA1' }",
+    "replace": "issuer, algorithm: 'SHA256' }",
+    "expect": "killed",
+    "tests": ["mfa.test.js"],
+    "namePattern": "keyUri promises only what the verifier checks"
   }
 ]

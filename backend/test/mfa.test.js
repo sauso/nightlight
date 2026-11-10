@@ -127,18 +127,20 @@ test('★ the RFC 6238 reference itself is right: the published SHA1 vector for 
   assert.equal(rfc6238(Buffer.from('12345678901234567890'), 59, 8), '94287082');
 });
 
-test('★ a code computed from RFC 6238 (not from otplib) is accepted for its own step, and a code two steps old is not', () => {
-  const key = crypto.randomBytes(20);
-  const secret = base32(key);
+test('★ a code computed from RFC 6238 (not from otplib) is accepted for its own step; a code two or three steps off is not', () => {
+  // Twenty random keys, not one: a fault in the dynamic-truncation step (the `& 15` offset) only shows for some keys
+  // (about 1 in 16 would hide it with a single key; found by mutating a scratch copy of the library in the review of #1033).
+  const keys = Array.from({ length: 20 }, () => crypto.randomBytes(20));
   // matchTokenStep reads the real clock itself; if a 30 s boundary passes between this test's clock read and its own,
   // the edges (one step back / ahead) shift by a step, so such a run is repeated rather than reported as a failure.
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const now = Math.floor(Date.now() / 1000);
     const step = Math.floor(now / 30);
-    const got = [0, -30, 30, -90, 90].map((offset) => mfa.matchTokenStep(secret, rfc6238(key, now + offset)));
+    const got = keys.map((key) => [0, -30, 30, -60, 60, -90, 90].map((offset) => mfa.matchTokenStep(base32(key), rfc6238(key, now + offset))));
     if (Math.floor(Date.now() / 1000 / 30) !== step) continue;
-    assert.deepEqual(got, [step, step - 1, step + 1, null, null],
-      'current code = its own step; one step back/ahead accepted and reported as their own step; three steps off refused');
+    // 0 = its own step; +-30 s = one step either side, accepted and reported as that step; +-60 s (two steps) and +-90 s refused:
+    // the tolerance is exactly one step (epochTolerance 30), so 60 would accept two steps and was found to survive a mutant before.
+    for (const row of got) assert.deepEqual(row, [step, step - 1, step + 1, null, null, null, null]);
     return;
   }
   assert.fail('the clock crossed a 30 s step boundary on every attempt');
@@ -168,6 +170,16 @@ test('keyUri builds a scannable otpauth URI with the account and issuer', () => 
   assert.match(uri, new RegExp(`secret=${secret}`));
 });
 
+test('★ keyUri promises only what the verifier checks: SHA1, 6 digits, a 30 s period (the defaults, so the URI may omit them)', () => {
+  // verifySync is called with the library defaults (HMAC-SHA1, 6 digits, 30 s). If the URI told an authenticator app to use
+  // SHA256 (or 8 digits, or another period), the app would make codes the server rejects and nobody could finish enrolling.
+  // Found as a surviving mutant ('SHA1' -> 'SHA256' in keyUri) in the review of #1033.
+  const params = new URL(mfa.keyUri('someone', mfa.generateSecret())).searchParams;
+  assert.ok([null, 'SHA1'].includes(params.get('algorithm')), `algorithm=${params.get('algorithm')}`);
+  assert.ok([null, '6'].includes(params.get('digits')), `digits=${params.get('digits')}`);
+  assert.ok([null, '30'].includes(params.get('period')), `period=${params.get('period')}`);
+});
+
 test('keyUri accepts a custom issuer', () => {
   assert.match(mfa.keyUri('nacho', mfa.generateSecret(), 'Nursery'), /issuer=Nursery/);
 });
@@ -178,9 +190,10 @@ test('keyUri percent-encodes a username with spaces', () => {
 });
 
 test('★ keyUri never throws for an awkward username or app name: usernames are free text, and a throw here breaks enrolment', () => {
-  // User names are any non-empty text (see routes/auth.js) and the issuer is the configurable app name. otplib 13.6.0 began
-  // validating generateURI's parameters; a side-by-side run of 13.5.0 and 13.6.0 gave identical URIs for all of these, and this
-  // pins that every one still yields a URI a scanner can parse.
+  // User names are any non-empty text (see routes/auth.js) and the issuer is the configurable app name. otplib 13.6.0's new
+  // generateURI validation covers only type, digits, counter and period (verified by reading its source in the review of #1033);
+  // label and issuer are encoded exactly as before, so this is a pin, not a response to a known risk: a side-by-side run of
+  // 13.5.0 and 13.6.0 gave identical URIs for all of these, and every one must still yield a URI a scanner can parse.
   const secret = mfa.generateSecret();
   const usernames = ['two words', 'a:b', 'a@b.example', 'a/b?c=d#e', '50%', 'é ü ñ', '日本語', 'x'.repeat(255), 'x'.repeat(1000), "o'brien", '"q"', '<t>'];
   const issuers = ['Nightlight', 'My Home Monitor', 'a:b', 'é', 'x'.repeat(255)];
