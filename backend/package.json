@@ -32,10 +32,11 @@
     "uuid": "^14.0.3",
     "ws": "^8.22.1"
   },
-  "//": "overrides: issue #455. firebase-admin's OPTIONAL @google-cloud/storage still pulls gaxios 6, whose uuid ^9 matches GHSA-w5hq-g745-h8pq (npm audit fix cannot clear it). Scoped to gaxios 6 only: uuid 11 keeps CommonJS require() and the v4() gaxios calls; the override goes inert once storage moves to gaxios 7. Guarded by test/dependency-hygiene.test.js.",
+  "//": "overrides: issue #455. firebase-admin's OPTIONAL @google-cloud/storage still pulls gaxios 6, whose uuid ^9 matches GHSA-w5hq-g745-h8pq (npm audit fix cannot clear it). Scoped to gaxios 6 only: uuid 11 keeps CommonJS require() and the v4() gaxios calls; the override goes inert once storage moves to gaxios 7. Guarded by test/dependency-hygiene.test.js. Also rimraf (alerts #15 glob, #17 minimatch): google-gax 5 and gaxios 7.1 list rimraf 5 in their manifests but never require it (grep of their build output finds no use), and rimraf 5 pins glob 10 / minimatch 9, below the fixed 14.0.2 / 11.0.1; firestore 9.4.0 still pins firestore-api 0.2.0 which pulls google-gax 5, so no upgrade clears it. rimraf 6 uses glob 14. Remove this override when google-gax 5 leaves the tree.",
   "overrides": {
     "gaxios@6": {
       "uuid": "^11.1.1"
-    }
+    },
+    "rimraf": "^6.1.4"
   }
 }

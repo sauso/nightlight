@@ -161,6 +161,18 @@ test('T3: #455 qs, uuid, and Playwright advisory floors hold', () => {
   assert.ok(atLeast(playwrightPin(), '1.55.1'), 'e2e/playwright/package.json pins Playwright below 1.55.1');
 });
 
+test('T6: glob and minimatch advisory floors hold (alerts #15 GHSA-3g3m-2fjr-6pw4, #17 GHSA-g3hv-75wg-m249)', () => {
+  // rimraf 5 (listed by google-gax 5 and gaxios 7.1 but never required by them) pins glob 10 / minimatch 9;
+  // package.json's `rimraf` override moves it to rimraf 6, which uses glob 14. Unlike T3 an ABSENT package is fine
+  // (the alert simply disappears once google-gax 5 leaves the tree); every copy that IS in the lock must be fixed.
+  const packages = JSON.parse(read('backend/package-lock.json')).packages;
+  for (const [name, floor] of [['glob', '14.0.2'], ['minimatch', '11.0.1']]) {
+    for (const [key, details] of lockEntriesFor(packages, name)) {
+      assert.ok(atLeast(details.version, floor), `${key} is ${details.version}, below ${floor}`);
+    }
+  }
+});
+
 test('T5: dependency parsers reject misleading fixtures and accept valid coverage', () => {
   assert.deepEqual(npmDependabotDirs(`updates:\n  - target-branch: "dev"\n    package-ecosystem: "docker"\n    directory: "/e2e/playwright"\n`), []);
   assert.deepEqual(npmDependabotDirs(`updates:\n  - package-ecosystem: npm\n    directory: /off\n    open-pull-requests-limit: 0\n`), []);
