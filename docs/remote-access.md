@@ -161,7 +161,7 @@ else out. Setting `TRUST_PROXY` makes the per-source half meaningful as well.
 These rules apply while the Tailscale daemon is attached.
 
 - Nightlight ignores `X-Forwarded-For` from any loopback hop, or any hop that is not a normal IP address, whatever `TRUST_PROXY` says. A proxy that reaches Nightlight by a LAN address is unaffected as long as no hop in its chain is loopback.
-- Remote peers then share one per-address login bucket, so one noisy peer can use that bucket for others. The separate per-account throttle still applies.
+- Sign-in limits for each account use the person's Tailscale identity, so one person's mistakes do not use another person's allowance. The whole tunnel still shares a separate, looser per-address limit. Tagged devices, which have no identity header, share the old account allowance; people signed in through a shared-in device use their own identity. Two people can rarely land in the same one of 64 buckets and share an allowance. A process on the server can forge the identity header, but it cannot evade the shared tunnel limit or the separate account and MFA guess limits this way.
 - Tailscale will not turn on until an admin account exists, and first-admin setup cannot be completed through a tunnel. Finish setup on your home network first. A same-host proxy that reaches Nightlight over loopback also cannot finish setup while the tunnel daemon is attached.
 
 ### `STUN_SERVERS` — which STUN servers Low latency (WebRTC) uses
