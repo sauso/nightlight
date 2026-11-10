@@ -9,13 +9,13 @@ const DOCS = 'https://github.com/sauso/nightlight/blob/main/docs/remote-access.m
 const TRUST_PROXY_DOCS = `${DOCS}#trust_proxy--telling-nightlight-your-real-client-addresses`;
 const STUN_DOCS = `${DOCS}#stun_servers--which-stun-servers-low-latency-webrtc-uses`;
 
-// WHY unknown exists: an untrusted reverse proxy can send X-Forwarded-For, but the server must
-// ignore that address until TRUST_PROXY names the proxy. Guessing home or remote would misstate the test.
+// #962: network stays unknown for tunnel peers and untrusted proxies. The separate via field
+// explains which guidance applies without guessing whether the viewer is at home.
 const NETWORK = {
   home: "You're on your home network. From here this page can't prove your port forwards work: open it from mobile data to check.",
   vpn: "You're connected through a VPN (such as Tailscale). Remote access through your router isn't being tested from here.",
   remote: "You're outside your home network. A successful test below shows your port forwards work.",
-  unknown: "Nightlight can't tell whether you're at home. This usually means a reverse proxy sits in front of it and TRUST_PROXY isn't set to trust it",
+  unknown: "Nightlight can't tell where you're connecting from.",
 };
 const DNS_ERRORS = { not_found: 'name not found', timeout: 'lookup timed out', failed: 'lookup failed' };
 
@@ -31,10 +31,11 @@ function DocsLink({ href = DOCS, children }) {
   return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
 }
 
-function testMessage(network, result, port) {
+function testMessage(network, via, result, port) {
   if (!result) return null;
   if (result.outcome === 'unsupported') return "This browser can't make a Low latency connection.";
   if (result.outcome === 'connected') {
+    if (via === 'tailscale') return 'Low latency video works through Tailscale.';
     if (network === 'remote') {
       return result.protocol?.toLowerCase() === 'udp'
         ? 'Low latency video works from outside your home. Your port forward and PUBLIC_HOST are set up correctly.'
@@ -42,6 +43,7 @@ function testMessage(network, result, port) {
     }
     return "Connected, but you're not outside your home network, so this doesn't prove the forward works. Try again from mobile data.";
   }
+  if (via === 'tailscale') return "Couldn't connect. Low latency video isn't working from here (Compatibility mode still works).";
   return network === 'remote'
     ? `Couldn't connect from outside. Check the UDP forward (port ${port}) and PUBLIC_HOST.`
     : "Couldn't connect. Low latency video isn't working from here (Compatibility mode still works).";
@@ -85,7 +87,8 @@ export default function SettingsRemoteAccess() {
   }
 
   const network = setup?.client?.network || 'unknown';
-  const message = testMessage(network, result, setup?.webrtc_udp_port);
+  const via = setup?.client?.via ?? null;
+  const message = testMessage(network, via, result, setup?.webrtc_udp_port);
 
   return <>
     <AppHeader title="Remote Access" back={{ to: '/settings', label: 'Settings' }} />
@@ -95,11 +98,12 @@ export default function SettingsRemoteAccess() {
       {error && <div className="error-banner" role="alert">{error} <button type="button" className="btn btn-secondary" onClick={load}>Retry</button></div>}
       {setup && <>
         <details className="remote-advanced"><summary>Use your own domain or port forward (advanced)</summary>
-        <p>Viewers who arrive over Tailscale show as 'Unknown' in the first card below; that's expected.</p>
         <section className="card" aria-labelledby="remote-network-title">
-          <h2 id="remote-network-title" className="card-title">How you're connected right now</h2>
-          <span className="status-badge status-badge--off">{network === 'vpn' ? 'VPN' : network === 'home' ? 'Home' : network === 'remote' ? 'Outside home' : 'Unknown'}</span>
-          <p>{NETWORK[network] || NETWORK.unknown}{network === 'unknown' && <> (<DocsLink href={TRUST_PROXY_DOCS}>docs</DocsLink>).</>}</p>
+          <h2 id="remote-network-title" className="card-title">Where you're connecting from</h2>
+          <span className={`status-badge ${via === 'tailscale' ? 'status-badge--ok' : 'status-badge--off'}`}>{via === 'tailscale' ? 'Tailscale' : network === 'vpn' ? 'VPN' : network === 'home' ? 'Home' : network === 'remote' ? 'Outside home' : 'Unknown'}</span>
+          <p>{via === 'tailscale' ? "This looks like a connection through your private Tailscale address. If so, your router isn't involved and the port-forward test below doesn't apply."
+            : via === 'proxy' ? "Nightlight received a forwarded address it doesn't trust, usually from a reverse proxy that TRUST_PROXY doesn't list, so it can't tell where you are."
+              : NETWORK[network] || NETWORK.unknown}{via === 'proxy' && <> (<DocsLink href={TRUST_PROXY_DOCS}>docs</DocsLink>).</>}</p>
         </section>
         <section className="card" aria-labelledby="remote-setup-title">
           <h2 id="remote-setup-title" className="card-title">Your setup</h2>

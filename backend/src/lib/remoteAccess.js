@@ -36,6 +36,14 @@ export function classifyClient({ ip, forwardedHeaderPresent = false, trustedProx
   return home6.check(ip, 'ipv6') ? 'home' : 'remote';
 }
 
+export function classifyClientVia({ ip, forwardedHeaderPresent = false, trustedProxyChain = false, loopbackExposed = isLoopbackExposed() }) {
+  // #962: Serve peers arrive on loopback, which can also carry a forwarded header. Preserve the
+  // existing unknown network classification while showing the tunnel before proxy guidance.
+  if (loopbackExposed && isLoopbackAddress(ip)) return 'tailscale';
+  if (forwardedHeaderPresent && !trustedProxyChain) return 'proxy';
+  return null;
+}
+
 function dnsError(error) {
   if (error?.code === 'ENOTFOUND' || error?.code === 'ENODATA') return 'not_found';
   if (error?.code === 'REMOTE_ACCESS_TIMEOUT') return 'timeout';
@@ -62,6 +70,9 @@ async function resolveEntry(host, resolver, timeoutMs) {
 }
 
 export async function buildRemoteAccess({ env = process.env, ip, forwardedHeaderPresent = false, trustedProxyChain = false, trustProxy, resolver = lookup, timeoutMs = 3000 } = {}) {
+  // The exposed-loopback flag is read when each classifier runs (after the DNS lookups below), exactly as before #962:
+  // snapshotting it here would let `network` differ from the old answer if the daemon attaches during a slow lookup.
+  const client = { ip, forwardedHeaderPresent, trustedProxyChain };
   // More than ten PUBLIC_HOST entries is not a real setup; cap DNS work per request.
   const hosts = configuredPublicHosts(env).slice(0, 10);
   const publicHosts = await Promise.all(hosts.map((host) => resolveEntry(host, resolver, timeoutMs)));
@@ -77,6 +88,6 @@ export async function buildRemoteAccess({ env = process.env, ip, forwardedHeader
     advertised_hosts: getLastAdvertisedHosts(env),
     stun: { enabled: stunServers.length > 0, servers: stunServers },
     trust_proxy: String(trustProxy),
-    client: { network: classifyClient({ ip, forwardedHeaderPresent, trustedProxyChain }) },
+    client: { network: classifyClient(client), via: classifyClientVia(client) },
   };
 }
