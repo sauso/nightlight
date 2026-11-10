@@ -73,12 +73,13 @@ test('a card with no onReady still renders (the settings page passes none)', asy
   expect(await screen.findByText('Open')).toBeInTheDocument();
 });
 
-test('#962 current Tailscale confirmation only appears for a ready card with the prop', async () => {
-  for (const [view, viaTailscale, expected] of [
-    [ready, true, true], [ready, false, false], [connected, true, false],
-    [waiting, true, false], [{ ...base, enabled: true, state: 'error' }, true, false],
+test('#962 the Tailscale confirmation only appears for a ready card opened on its own .ts.net name', async () => {
+  const here = window.location.hostname;
+  for (const [view, expected] of [
+    [{ ...ready, dns_name: here }, true], [ready, false], [{ ...connected, dns_name: here }, false],
+    [{ ...waiting, dns_name: here }, false], [{ ...base, enabled: true, state: 'error', dns_name: here }, false],
   ]) {
-    const rendered = card(view, { viaTailscale });
+    const rendered = card(view);
     await screen.findByText('Advanced');
     expect(Boolean(screen.queryByText("You're viewing Nightlight through Tailscale right now."))).toBe(expected);
     rendered.unmount();
@@ -352,6 +353,18 @@ describe('a lost connection', () => {
     expect(hook.result.current.error, 'a flaky network must not flash a banner every 30 seconds').toBe('');
     await act(async () => { await hook.result.current.load(); });
     expect(hook.result.current.error).toBe("Couldn't load Tailscale details.");
+  });
+
+  test('#962 the "viewing through Tailscale" line goes away with the lost-connection notice', async () => {
+    const here = { ...lostView, dns_name: window.location.hostname };
+    vi.spyOn(api, 'get').mockImplementation(async (path) => path === '/remote-access/tailscale' ? here : { demo: false });
+    vi.useFakeTimers();
+    renderAsAdmin(<TailscaleCard />, { cameras: [camera] });
+    await act(async () => {});
+    expect(screen.getByText("You're viewing Nightlight through Tailscale right now."), 'one reading is not enough').toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(screen.getByText("Tailscale isn't connected right now.")).toBeInTheDocument();
+    expect(screen.queryByText("You're viewing Nightlight through Tailscale right now.")).toBeNull();
   });
 
   test('★ the card replaces "Connected" with the notice, names no cause, keeps the address, and says how to rejoin', async () => {

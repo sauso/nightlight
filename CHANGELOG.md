@@ -11,7 +11,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
-- #962 Settings → Remote Access now recognises when you are viewing through Tailscale and explains that the router port-forward test does not apply. It shows reverse-proxy advice only when an untrusted proxy is detected; older servers give a neutral Unknown message.
+- #962 Settings → Remote Access now says so when a connection looks like it came through Tailscale (a best reading, not proof) and explains that the router port-forward test does not apply, and the Tailscale card confirms when you opened Nightlight on its own secure address. The `TRUST_PROXY` advice appears only when Nightlight sees a forwarded address it does not trust; older servers give a neutral Unknown message.
 
 ## [0.46.0] - 2026-11-10
 

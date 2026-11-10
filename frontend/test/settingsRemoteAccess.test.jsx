@@ -96,8 +96,8 @@ test.each([
 });
 
 test.each([
-  ['tailscale', 'Tailscale', "You're connected through your private Tailscale address, so your router isn't involved and the port-forward test below doesn't apply."],
-  ['proxy', 'Unknown', "A reverse proxy sits in front of Nightlight and TRUST_PROXY doesn't trust it, so Nightlight can't tell where you are."],
+  ['tailscale', 'Tailscale', "This looks like a connection through your private Tailscale address. If so, your router isn't involved and the port-forward test below doesn't apply."],
+  ['proxy', 'Unknown', "Nightlight received a forwarded address it doesn't trust, usually from a reverse proxy that TRUST_PROXY doesn't list, so it can't tell where you are."],
   [null, 'Unknown', "Nightlight can't tell where you're connecting from."],
 ])('#962 %s connection shows its own badge and guidance', async (via, badge, sentence) => {
   renderPage({ ...setup, client: { network: 'unknown', via } });
@@ -110,7 +110,8 @@ test.each([
 });
 
 test('#962 the ready Tailscale card confirms this device without opening advanced', async () => {
-  const readyTailscale = { ...tailscale, enabled: true, state: 'connected', dns_name: 'nightlight.example.ts.net', serve: { enabled: true } };
+  // The line is driven by the page's own origin being the device's .ts.net name (exact), not by the server's `via` guess.
+  const readyTailscale = { ...tailscale, enabled: true, state: 'connected', dns_name: window.location.hostname, serve: { enabled: true } };
   renderPage({ ...setup, client: { network: 'unknown', via: 'tailscale' } }, [camera], readyTailscale);
   expect(await screen.findByText("You're viewing Nightlight through Tailscale right now.")).toBeInTheDocument();
   expect(screen.getByText('Use your own domain or port forward (advanced)').closest('details').open).toBe(false);

@@ -70,8 +70,9 @@ async function resolveEntry(host, resolver, timeoutMs) {
 }
 
 export async function buildRemoteAccess({ env = process.env, ip, forwardedHeaderPresent = false, trustedProxyChain = false, trustProxy, resolver = lookup, timeoutMs = 3000 } = {}) {
-  const loopbackExposed = isLoopbackExposed();
-  const client = { ip, forwardedHeaderPresent, trustedProxyChain, loopbackExposed };
+  // The exposed-loopback flag is read when each classifier runs (after the DNS lookups below), exactly as before #962:
+  // snapshotting it here would let `network` differ from the old answer if the daemon attaches during a slow lookup.
+  const client = { ip, forwardedHeaderPresent, trustedProxyChain };
   // More than ten PUBLIC_HOST entries is not a real setup; cap DNS work per request.
   const hosts = configuredPublicHosts(env).slice(0, 10);
   const publicHosts = await Promise.all(hosts.map((host) => resolveEntry(host, resolver, timeoutMs)));

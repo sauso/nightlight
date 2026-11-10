@@ -93,7 +93,7 @@ export default function SettingsRemoteAccess() {
   return <>
     <AppHeader title="Remote Access" back={{ to: '/settings', label: 'Settings' }} />
     <main className="app-main">
-      <TailscaleCard publicHostSet={Boolean(setup?.public_host_set)} viaTailscale={via === 'tailscale'} />
+      <TailscaleCard publicHostSet={Boolean(setup?.public_host_set)} />
       {loading && !setup && <p>Loading…</p>}
       {error && <div className="error-banner" role="alert">{error} <button type="button" className="btn btn-secondary" onClick={load}>Retry</button></div>}
       {setup && <>
@@ -101,8 +101,8 @@ export default function SettingsRemoteAccess() {
         <section className="card" aria-labelledby="remote-network-title">
           <h2 id="remote-network-title" className="card-title">Where you're connecting from</h2>
           <span className={`status-badge ${via === 'tailscale' ? 'status-badge--ok' : 'status-badge--off'}`}>{via === 'tailscale' ? 'Tailscale' : network === 'vpn' ? 'VPN' : network === 'home' ? 'Home' : network === 'remote' ? 'Outside home' : 'Unknown'}</span>
-          <p>{via === 'tailscale' ? "You're connected through your private Tailscale address, so your router isn't involved and the port-forward test below doesn't apply."
-            : via === 'proxy' ? "A reverse proxy sits in front of Nightlight and TRUST_PROXY doesn't trust it, so Nightlight can't tell where you are."
+          <p>{via === 'tailscale' ? "This looks like a connection through your private Tailscale address. If so, your router isn't involved and the port-forward test below doesn't apply."
+            : via === 'proxy' ? "Nightlight received a forwarded address it doesn't trust, usually from a reverse proxy that TRUST_PROXY doesn't list, so it can't tell where you are."
               : NETWORK[network] || NETWORK.unknown}{via === 'proxy' && <> (<DocsLink href={TRUST_PROXY_DOCS}>docs</DocsLink>).</>}</p>
         </section>
         <section className="card" aria-labelledby="remote-setup-title">
