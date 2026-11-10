@@ -15,6 +15,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- **Routine dependency updates, no behaviour change intended.** Backend: `ws` 8.22.0 → 8.22.1 (the WebSocket library behind two-way talk), `express-rate-limit` 8.7.1 → 8.7.2. Web app: `hls.js` 1.7.3 → 1.7.4 (Compatibility video). Build and test tooling (not part of the image): `vite` 8.3.4 → 8.3.5, `@vitejs/plugin-react` 6.1.1 → 6.1.2, `@testing-library/user-event` 14.6.7 → 14.6.8, and the `docker/login-action` CI step 4.6.0 → 4.7.0.
 - #962 Settings → Remote Access now says so when a connection looks like it came through Tailscale (a best reading, not proof) and explains that the router port-forward test does not apply, and the Tailscale card confirms when you opened Nightlight on its own secure address. The `TRUST_PROXY` advice appears only when Nightlight sees a forwarded address it does not trust; older servers give a neutral Unknown message.
 - The browser tab icon is now the website's rounded Nightlight icon (transparent rounded corners) instead of an opaque square.
 - The four cards under Settings → Remote Access → "Use your own domain or port forward (advanced)" now look like the Tailscale card and Settings → About: a bold 16px title over 14px text, instead of a small grey title over larger text.
