@@ -104,7 +104,7 @@ export default function SettingsRemoteAccess() {
           <p className="about-card__text">{via === 'tailscale' ? "This looks like a connection through your private Tailscale address. If so, your router isn't involved and the port-forward test below doesn't apply."
             : via === 'proxy' ? "Nightlight received a forwarded address it doesn't trust, usually from a reverse proxy that TRUST_PROXY doesn't list, so it can't tell where you are."
               : NETWORK[network] || NETWORK.unknown}{via === 'proxy' && <> (<DocsLink href={TRUST_PROXY_DOCS}>docs</DocsLink>).</>}</p>
-          <p className="about-card__text">You opened Nightlight at <span className="tailscale-address">{window.location.origin}</span></p>
+          <p className="about-card__text">You opened Nightlight at:<br /><span className="tailscale-address">{window.location.origin}</span></p>
         </section>
         <section className="card about-card" aria-labelledby="remote-setup-title">
           <div className="about-card__heading"><h2 id="remote-setup-title" className="card-title">Your setup</h2></div>
