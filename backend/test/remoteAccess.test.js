@@ -8,7 +8,7 @@ import {
 
 useTempDataDir();
 const { default: db } = await import('../src/db.js');
-const { classifyClient } = await import('../src/lib/remoteAccess.js');
+const { classifyClient, buildRemoteAccess } = await import('../src/lib/remoteAccess.js');
 const { applyTrustProxy } = await import('../src/lib/trustProxy.js');
 const { setLoopbackExposed } = await import('../src/lib/loopbackExposure.js');
 const { createRemoteAccessRouter } = await import('../src/routes/remoteAccess.js');
@@ -49,11 +49,13 @@ test('#959 admin remote access route labels an exposed loopback caller unknown',
     const bare = await request(url);
     assert.equal(bare.status, 200);
     assert.equal(bare.body.client.network, 'unknown');
+    assert.equal(bare.body.client.via, 'tailscale');
     assert.equal(bare.body.trust_proxy, 'loopback');
     const forged = await request(url, { headers: { 'x-forwarded-for': '192.168.1.50' } });
     assert.equal(forged.body.client.network, 'unknown');
+    assert.equal(forged.body.client.via, 'tailscale');
     setLoopbackExposed(false);
-    assert.equal((await request(url)).body.client.network, 'home', 'flag off: a header-less loopback caller is home as before');
+    assert.deepEqual((await request(url)).body.client, { network: 'home', via: null }, 'flag off: a header-less loopback caller is home as before');
   } finally {
     await new Promise((resolve) => server.close(resolve));
     setLoopbackExposed(false);
@@ -80,6 +82,25 @@ test('an untrusted forwarded chain cannot identify the caller', () => {
   assert.equal(classifyClient({ ip: '100.64.0.1', forwardedHeaderPresent: true, trustedProxyChain: true }), 'vpn');
 });
 
+test('#962 client via identifies a tunnel before an untrusted proxy without changing network', async () => {
+  const cases = [
+    [{ ip: '127.0.0.1', loopbackExposed: true }, 'unknown', 'tailscale'],
+    [{ ip: '::1', loopbackExposed: true, forwardedHeaderPresent: true }, 'unknown', 'tailscale'],
+    [{ ip: '192.168.1.10', loopbackExposed: true, forwardedHeaderPresent: true }, 'unknown', 'proxy'],
+    [{ ip: 'garbage', forwardedHeaderPresent: true }, 'unknown', 'proxy'],
+    [{ ip: '192.168.1.10' }, 'home', null],
+    [{ ip: '100.64.0.1' }, 'vpn', null],
+    [{ ip: '8.8.8.8' }, 'remote', null],
+    [{ ip: '127.0.0.1', loopbackExposed: false }, 'home', null],
+  ];
+  for (const [input, network, via] of cases) {
+    setLoopbackExposed(Boolean(input.loopbackExposed));
+    const client = (await buildRemoteAccess({ env: {}, ...input })).client;
+    assert.equal(client.network, network, JSON.stringify(input));
+    assert.equal(client.via, via, JSON.stringify(input));
+  }
+});
+
 async function withRoute(env, resolver, run, { timeoutMs = 3000, trustProxy = 'loopback' } = {}) {
   const router = createRemoteAccessRouter({ env, resolver, timeoutMs });
   const server = await mountRouter('/api/remote-access', router, {
@@ -96,12 +117,12 @@ test('HTTP auth gates and exact empty-configuration response shape', async () =>
     assert.equal((await request(url, { token: caregiverToken })).status, 403);
     const { status, body } = await request(url);
     assert.equal(status, 200);
-    assert.deepEqual(Object.keys(body).sort(), ['advertised_hosts', 'app_port', 'client', 'public_host_set', 'public_hosts', 'stun', 'trust_proxy', 'webrtc_udp_port']);
+    assert.deepEqual(Object.keys(body).sort(), ['advertised_hosts', 'app_port', 'client', 'public_host_count', 'public_host_set', 'public_hosts', 'stun', 'trust_proxy', 'webrtc_udp_port']);
     assert.deepEqual(body, {
-      app_port: 4000, webrtc_udp_port: 8189, public_host_set: false, public_hosts: [],
+      app_port: 4000, webrtc_udp_port: 8189, public_host_set: false, public_host_count: 0, public_hosts: [],
       advertised_hosts: getAdvertisedHosts({}),
       stun: { enabled: true, servers: ['stun:stun.l.google.com:19302'] },
-      trust_proxy: 'loopback', client: { network: 'home' },
+      trust_proxy: 'loopback', client: { network: 'home', via: null },
     });
   });
 });
@@ -120,17 +141,44 @@ test('configured literals, DNS A and AAAA, errors, trimming and ports', async ()
     assert.equal(body.webrtc_udp_port, 8190);
     assert.equal(body.public_host_set, true);
     assert.deepEqual(body.public_hosts, [
-      { host: '203.0.113.7', kind: 'ip', addresses: ['203.0.113.7'], error: null },
-      { host: '2001:db8::7', kind: 'ip', addresses: ['2001:db8::7'], error: null },
-      { host: 'dual.example', kind: 'name', addresses: ['203.0.113.7', '2001:db8::7'], error: null },
-      { host: 'missing.example', kind: 'name', addresses: [], error: 'not_found' },
-      { host: 'nodata.example', kind: 'name', addresses: [], error: 'not_found' },
-      { host: 'failed.example', kind: 'name', addresses: [], error: 'failed' },
+      { host: '203.0.113.7', kind: 'ip', addresses: ['203.0.113.7'], error: null, behind_cloudflare: false },
+      { host: '2001:db8::7', kind: 'ip', addresses: ['2001:db8::7'], error: null, behind_cloudflare: false },
+      { host: 'dual.example', kind: 'name', addresses: ['203.0.113.7', '2001:db8::7'], error: null, behind_cloudflare: false },
+      { host: 'missing.example', kind: 'name', addresses: [], error: 'not_found', behind_cloudflare: false },
+      { host: 'nodata.example', kind: 'name', addresses: [], error: 'not_found', behind_cloudflare: false },
+      { host: 'failed.example', kind: 'name', addresses: [], error: 'failed', behind_cloudflare: false },
     ]);
     assert.deepEqual(calls, ['dual.example', 'missing.example', 'nodata.example', 'failed.example'].map((host) => [host, { all: true, family: 0 }]));
     assert.deepEqual(body.advertised_hosts, getAdvertisedHosts(env));
     assert.deepEqual(body.stun, { enabled: false, servers: [] });
   });
+});
+
+test('public_host_count reports every configured host while public_hosts stays capped at 10', async () => {
+  const hosts = Array.from({ length: 11 }, (_, i) => `203.0.113.${i + 1}`).join(',');
+  const body = await buildRemoteAccess({ env: { PUBLIC_HOST: hosts }, resolver: resolverNever });
+  assert.equal(body.public_hosts.length, 10);
+  assert.equal(body.public_host_count, 11);
+});
+
+test('Cloudflare proxy ranges mark only matching literal and DNS answers', async () => {
+  const literals = [
+    ['103.22.203.1', true], ['103.22.204.0', false], ['::ffff:6810:1', true], ['104.16.0.0', true], ['104.23.255.255', true], ['104.24.0.0', true],
+    ['104.27.255.255', true], ['104.28.0.0', false], ['104.31.255.255', false], ['104.32.0.0', false], ['104.15.255.255', false],
+    ['2606:4700::1', true], ['2606:46ff::1', false],
+    ['::ffff:104.16.0.1', true], ['8.8.8.8', false], ['192.168.1.2', false],
+  ];
+  for (const [host, expected] of literals) {
+    const body = await buildRemoteAccess({ env: { PUBLIC_HOST: host }, resolver: resolverNever });
+    assert.equal(body.public_hosts[0].behind_cloudflare, expected, host);
+  }
+  const resolver = async (host) => {
+    if (host === 'empty.example') return [];
+    if (host === 'missing.example') throw Object.assign(new Error('missing'), { code: 'ENOTFOUND' });
+    return [{ address: host === 'cloudflare.example' ? '173.245.48.1' : host === 'mapped.example' ? '::ffff:104.16.0.1' : '8.8.8.8' }];
+  };
+  const body = await buildRemoteAccess({ env: { PUBLIC_HOST: 'cloudflare.example, mapped.example, normal.example, empty.example, missing.example' }, resolver });
+  assert.deepEqual(body.public_hosts.map((entry) => entry.behind_cloudflare), [true, true, false, false, false]);
 });
 
 test('DNS timeout is bounded, and a list over ten is capped', async () => {
@@ -193,10 +241,12 @@ test('Express proxy trust determines whether a forwarded address is usable', asy
   await withRoute({}, resolverNever, async (url) => {
     const { body } = await request(url, { headers: { 'x-forwarded-for': '192.168.1.50' } });
     assert.equal(body.client.network, 'unknown');
+    assert.equal(body.client.via, 'proxy');
     assert.equal(body.trust_proxy, '10.0.0.0/8');
   }, { trustProxy: '10.0.0.0/8' });
   await withRoute({}, resolverNever, async (url) => {
     const { body } = await request(url, { headers: { 'x-forwarded-for': '100.64.0.1' } });
     assert.equal(body.client.network, 'vpn');
+    assert.equal(body.client.via, null);
   });
 });

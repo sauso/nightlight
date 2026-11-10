@@ -185,6 +185,9 @@ export default function TailscaleCard({ compact = false, publicHostSet = false, 
   } else if (view.state === 'connected') {
     content = <>
       {connectedLine}
+      {/* #962: the exact test, not the server's guess: this page was opened on the device's own .ts.net name. The server's
+          `client.via` cannot tell a tunnel peer from a same-host caller, so it only drives the softer advanced-card wording. */}
+      {originIsTailnet && !lostConnection && <p role="status">You're viewing Nightlight through Tailscale right now.</p>}
       <h3>Your secure address</h3>
       {address ? <>
         <p className="tailscale-address">{breakAtDots(address)}</p>

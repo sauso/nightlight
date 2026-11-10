@@ -195,6 +195,7 @@ const ROUTE_GATES = {
   // app falls back to; it carries no other Tailscale detail and the address only opens from inside the tailnet. Who gains access:
   // caregivers, to that one address.
   'GET /api/remote-access/tailscale/address': SIGNED_IN,
+  'GET /api/remote-access/address': SIGNED_IN,
   'GET /api/esphome/devices': ADMIN,
   'POST /api/esphome/devices': ADMIN,
   'PUT /api/esphome/devices/:id': ADMIN,

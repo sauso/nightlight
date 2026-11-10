@@ -9,6 +9,21 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-11-10
+
+### Added
+
+- Phone apps can learn an optional `CUSTOM_URL` after sign-in and use it for alerts and remote access. It needs your own working DNS and HTTPS proxy; a wrong address breaks alert links. The apps sign in separately on that domain. Older apps continue using Tailscale. The address must be a DNS name over HTTPS (IP addresses and numeric spellings of one, such as `127.1`, are refused).
+- Settings → Remote Access now shows the address you opened, the trusted proxy setting, and a live setup checklist for HTTPS, video host DNS, Cloudflare proxy addresses, a this-device UDP test, and untrusted forwarded addresses. The checklist cannot inspect your router or prove a forward from home; DNS and proxy checks can be misled by cached answers or headers.
+
+### Changed
+
+- **Routine dependency updates, no behaviour change intended.** Backend: `ws` 8.22.0 → 8.22.1 (the WebSocket library behind two-way talk), `express-rate-limit` 8.7.1 → 8.7.2. Web app: `hls.js` 1.7.3 → 1.7.4 (Compatibility video), `lucide-react` 1.59.0 → 1.66.0 (icons). Build and test tooling (not part of the image): `vite` 8.3.4 → 8.3.5, `@vitejs/plugin-react` 6.1.1 → 6.1.2, `@testing-library/user-event` 14.6.7 → 14.6.8, and the `docker/login-action` CI step 4.6.0 → 4.7.0.
+- #962 Settings → Remote Access now says so when a connection looks like it came through Tailscale (a best reading, not proof) and explains that the router port-forward test does not apply, and the Tailscale card confirms when you opened Nightlight on its own secure address. The `TRUST_PROXY` advice appears only when Nightlight sees a forwarded address it does not trust; older servers give a neutral Unknown message.
+- The browser tab icon is now the website's rounded Nightlight icon (transparent rounded corners) instead of an opaque square.
+- The four cards under Settings → Remote Access → "Use your own domain or port forward (advanced)" now look like the Tailscale card and Settings → About: a bold 16px title over 14px text, instead of a small grey title over larger text.
+- #961 Sign-in limits for each account now use a person's Tailscale identity while the tunnel is attached and Tailscale supplies one. The tunnel still has a shared request limit. Tagged devices fall back to a shared account allowance, and two people can rarely share one of 64 identity buckets. A process on the server can forge an identity header, but the shared limit and separate account and MFA guess limits still apply.
+
 ## [0.46.0] - 2026-11-10
 
 ### Added

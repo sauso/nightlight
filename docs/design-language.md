@@ -208,7 +208,7 @@ together whenever the artwork changes.**
 
 | File | Resolution | Purpose | Referenced from |
 |---|---|---|---|
-| `favicon-32.png` | 32 × 32 | Browser tab | `index.html` |
+| `favicon-32.png` | 32 × 32, transparent rounded corners | Browser tab (a copy of the website's favicon; not generated, see below) | `index.html` |
 | `apple-touch-icon.png` | 180 × 180 | iOS home screen | `index.html` |
 | `icon-192.png` | 192 × 192 | App icon (home screen, install prompt); not used in the app screens any more | direct reference |
 | `icon-512.png` | 512 × 512 | High-DPI app icon (the Unraid template points at it) | direct reference |
@@ -218,8 +218,9 @@ together whenever the artwork changes.**
 
 Run `node frontend/scripts/make-icons.mjs` after replacing the 1024 × 1024
 `frontend/branding/logo-source.png`. The script uses Python Pillow
-(`python -m pip install Pillow`) and regenerates all seven icons together.
-The favicon crops closer for legibility at 32px. Maskable icons place the
+(`python -m pip install Pillow`) and regenerates six of the seven icons together.
+`favicon-32.png` is the exception (owner, 2026-11-10): it is a copy of the website's rounded `nightlight-website/assets/favicon.png`
+so the two match; re-copy it there when the logo changes. Maskable icons place the
 artwork within the central 80% on navy so launchers can crop the edges.
 Bump the `now-playing-512.png?v=` value in `useNowPlaying.js` after changing
 that image.
@@ -329,7 +330,9 @@ For a card that only reports something (Settings → About → Connection, and t
 Access card's look: a 16px/800 title with a `.status-badge` on the right, a 14px/700 sub-heading, the value in
 `.tailscale-address` (15px/600, wraps anywhere), and, only when there is something to explain, a muted `.tailscale-hint` line under it. In CSS the About cards are
 `.about-card`, grouped with `.tailscale-card` so the two change together. Every card on the About page (Connection, Links,
-Support the project, Not a safety device) uses it: a 16px/800 title, 14px text, so the page reads as one set. The
+Support the project, Not a safety device) uses it: a 16px/800 title, 14px text, so the page reads as one set. So do the four
+cards inside Remote Access → "Use your own domain or port forward (advanced)" (owner, 2026-11-10: the small grey title over
+larger body text read upside down). The
 sub-heading on About is set in Inter (owner, 2026-11-07), an exception to "`h1`–`h3` are Nunito" in section 3; only the card
 titles stay Nunito there. The Remote Access card's sub-heading is still Nunito. Two layouts were tried and dropped (owner,
 2026-11-07): a 16px label and a small value on one `.list-row` (on a phone the label wrapped and a long address broke mid-word),

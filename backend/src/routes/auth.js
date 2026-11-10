@@ -20,6 +20,7 @@ import { normalizePhoto } from '../lib/photo.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { createAccountThrottle } from '../lib/accountThrottle.js';
 import { isLoopbackAddress, isLoopbackExposed } from '../lib/loopbackExposure.js';
+import { clientBucketKey } from '../lib/clientBucket.js';
 
 const router = Router();
 const DATA_DIR = process.env.DATA_DIR || '/app/data';
@@ -66,18 +67,19 @@ function signMediaToken(userId, sessionId) {
 //
 // Two keys now, and a request must pass both:
 //
-//   perAccount — IP + the route-specific account identity. The real brute-force control, and
+//   perAccount — client bucket + the route-specific account identity. The real brute-force control, and
 //     what stops one person's typo (or one account being attacked) from locking anyone else out.
 //     ⚠️ NOT account alone: that would let someone lock a specific user out on purpose by failing
-//     authentication from elsewhere. Including the IP keeps that attacker confined to their own
-//     bucket.
+//     authentication from elsewhere. The source address (or bounded Tailscale identity slot while
+//     the daemon is attached) keeps that attacker confined to their own bucket.
 //   perClient — IP alone, deliberately loose. Caps a spray across many usernames from one source,
 //     which per-account keying on its own would allow. Set high enough that a household sharing one
 //     proxy IP cannot hit it by accident, which is the whole complaint above.
 //
-// Both degrade sensibly when TRUST_PROXY is left at its default: even with every remote user arriving
-// as the same IP, they no longer share an account bucket. Setting TRUST_PROXY (see index.js) makes the
-// per-client key meaningful as well.
+// With TRUST_PROXY at its default, remote users behind a normal proxy still share its address for
+// both limits. While the tunnel daemon is attached, Serve's identity separates the account buckets;
+// the per-client key deliberately remains the shared tunnel address. Setting TRUST_PROXY (see
+// index.js) makes source addresses meaningful for a normal reverse proxy.
 const RATE_WINDOW_MS = 15 * 60 * 1000;
 
 // Per account, per source. 20 was the previous whole-installation budget; it is now per route-specific
@@ -122,13 +124,19 @@ function sessionKey(req) {
 }
 
 function makeAccountLimiter(keyGen) {
+  // #961: only these per-account limits use a peer bucket. Keep the per-client, setup and guest
+  // ceilings on the shared socket address, so a forged identity cannot multiply the 100-per-window
+  // aggregate. /login also has loginThrottle; /me/password, /me/mfa/setup and /me/mfa/disable have
+  // sessionThrottle; valid-token /login/mfa has mfaUserLimiter; /me/mfa/enable has its own per-user
+  // wrong-code limit and per-secret cancel count. Invalid MFA tokens fall back to perClientLimiter;
+  // setup and guest keep their own shared-address limits (unchanged).
   return rateLimit({
     windowMs: RATE_WINDOW_MS,
     limit: PER_ACCOUNT_LIMIT,
     standardHeaders: true,
     legacyHeaders: false,
     message: limiterMessage,
-    keyGenerator: (req) => `${clientKey(req)}|${keyGen(req)}`,
+    keyGenerator: (req) => `${clientBucketKey(req)}|${keyGen(req)}`,
   });
 }
 

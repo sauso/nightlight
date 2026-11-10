@@ -79,6 +79,8 @@ Don't expose Nightlight directly to the public internet without understanding au
 
 If you use a reverse proxy such as SWAG, use HTTPS and set `TRUST_PROXY` to the address your proxy connects from, for proxies you control only. The default, `loopback`, trusts only a proxy on the same host, so a proxy that reaches Nightlight by its LAN IP is not trusted until you set it. Details: [`TRUST_PROXY`](remote-access.md#trust_proxy--telling-nightlight-your-real-client-addresses).
 
+To let the phone apps learn your own HTTPS address and use it for alert links, set `CUSTOM_URL` after configuring DNS and your reverse proxy. It is blank (off) by default and does not configure either service. See [`CUSTOM_URL`](remote-access.md#custom_url--your-own-address-for-the-phone-apps).
+
 While a tunnel daemon is attached, Nightlight ignores forwarded addresses from loopback connections.
 
 To watch **low-latency** video away from home:
