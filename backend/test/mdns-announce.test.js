@@ -354,9 +354,12 @@ describe('index.js wiring', () => {
   };
 
   test('★ the announcer starts inside the listen callback, after markBootComplete, on PORT', () => {
-    const listen = find(['app', '.', 'listen', '(']);
-    assert.ok(listen !== -1, 'no app.listen( in index.js');
-    const open = listen + 3;
+    // index.js listens through listenOrFail(app, PORT, callback) since the Express 5 move (a bind failure reaches
+    // the callback instead of throwing; lib/listenOrFail.js). The callback is the call's third argument, so the
+    // token range below still spans the whole call, which is all this test needs.
+    const listen = find(['listenOrFail', '(']);
+    assert.ok(listen !== -1, 'no listenOrFail( in index.js');
+    const open = listen + 1;
     const end = closeOf(open);
     const boot = callAt('markBootComplete', open, end);
     const start = callAt('startMdnsAnnounce', open, end);

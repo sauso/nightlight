@@ -66,7 +66,7 @@ test('#967 boot with host networking or no admin is unavailable without spawning
 test('#967 index mounts the route first and boots only after markBootComplete in listen callback', () => {
   // Opus fix review of #967: a commented-out call must not satisfy the pin.
   const src = stripCommentsOnly(fs.readFileSync(new URL('../src/index.js', import.meta.url), 'utf8'));
-  const listen = src.indexOf('app.listen(PORT, () => {');
+  const listen = src.indexOf('listenOrFail(app, PORT, () => {');
   const callbackEnd = src.indexOf('\n});', listen);
   const mark = src.indexOf('markBootComplete();', listen);
   const boot = src.indexOf('bootTailscale({ db, dataDir: DATA_DIR });', listen);

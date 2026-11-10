@@ -1,3 +1,7 @@
+// (Written for Express 4, which does not look at the promise an `async` route handler returns. Express 5 DOES
+// forward a rejection to `next(err)` itself; this wrapper is kept anyway: it behaves the same there, the class
+// guard below still enforces it, and nothing has to be unlearned. The history that follows is why it exists.)
+//
 // Express 4 does not look at the promise an `async` route handler returns. If one rejects (or throws
 // before its own try/catch), nothing is listening: the request is left with NO response, the client's
 // spinner never resolves, and behind Cloudflare the user eventually sees a bodiless 524. The process

@@ -66,7 +66,7 @@ test('#506 adapter is the only client import and no source sends device controls
 
 test('#506 connection work starts only after the server listens and boot completes', () => {
   const index = source('index.js');
-  const callback = index.indexOf('app.listen(PORT, () => {');
+  const callback = index.indexOf('listenOrFail(app, PORT, () => {');
   const boot = index.indexOf('markBootComplete();', callback);
   const refresh = index.indexOf('refreshEsphome();', callback);
   assert.ok(callback >= 0 && callback < boot && boot < refresh);

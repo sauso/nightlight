@@ -4,6 +4,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { MEDIA_PROXY_BASE_OPTIONS } from './lib/mediaProxyOptions.js';
+import { listenOrFail } from './lib/listenOrFail.js';
+import { defaultBody } from './middleware/defaultBody.js';
 import { WebSocketServer } from 'ws';
 import authRoutes from './routes/auth.js';
 import childrenRoutes from './routes/children.js';
@@ -236,6 +238,7 @@ app.use(
 );
 
 app.use(express.json());
+app.use(defaultBody); // Express 5 leaves req.body undefined when nothing was parsed; see middleware/defaultBody.js
 
 // Demo-mode guard: when DEMO_MODE=true, blocks every write except log in/out (see
 // middleware/demoMode.js for the full policy and why it's positioned here — after
@@ -303,10 +306,19 @@ app.post('/api/csp-report', express.text({ type: '*/*', limit: '64kb' }), (req, 
 
 // Serve the built React frontend (see Dockerfile — built at image-build time into ./public).
 const publicDir = path.join(__dirname, '..', 'public');
+// ⚠️ Express 5's static serving (send 1.x) refuses a file under ANY dot-folder (`/.well-known/...`), where Express 4
+// only refused a dotfile in the last path segment. frontend/public has only icons/ today, so nothing changes; if a
+// `.well-known/` file is ever added (Android app links, security.txt), serve it with `express.static(dir, { dotfiles: 'allow' })`
+// on a dedicated mount, not by loosening this one.
 app.use(express.static(publicDir));
-app.get('*', (req, res) => {
+// Express 5 (path-to-regexp 8) refuses a bare `*`: the wildcard must be named. `/{*splat}` also matches `/`
+// itself, as the old `*` did, so the SPA still loads at the root.
+app.get('/{*splat}', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
-  res.sendFile(path.join(publicDir, 'index.html')); // fence-ok: the built web app, not a media file
+  // `root`, not a joined absolute path: send 1.x (Express 5) refuses a file whose absolute path has ANY dot-folder in
+  // it (`.local/`, `.claude/worktrees/`) when no root is given, so every deep link and refresh was a 404 for an
+  // install running from such a folder. With a root only the part below it is checked. (Express 4 looked at the last segment.)
+  res.sendFile('index.html', { root: publicDir }); // fence-ok: the built web app, not a media file
 });
 
 // The error handler MUST be registered after every route above (Express only passes an error to handlers
@@ -316,7 +328,9 @@ app.get('*', (req, res) => {
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 4000;
-const server = app.listen(PORT, () => {
+// listenOrFail, not a bare app.listen: Express 5 hands a bind failure (port taken) to the callback instead of
+// throwing, which would leave this process "running" with nothing listening. See lib/listenOrFail.js.
+const server = listenOrFail(app, PORT, () => {
   logger.info(`Baby monitor backend listening on port ${PORT}`);
   // #549: the mask this process (and every FFmpeg/MediaMTX it starts) creates files with, and the database's mode.
   // Read-only and cannot throw; see lib/dataDirModes.js and docs/operations.md, "Who can read the data directory".

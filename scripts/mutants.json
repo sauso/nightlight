@@ -3659,7 +3659,7 @@
   {
     "label": "#455 M4: backend qs lock regresses below its advisory floor",
     "file": "backend/package-lock.json",
-    "find": "\"version\": \"6.16.2\"",
+    "find": "\"version\": \"6.17.1\"",
     "replace": "\"version\": \"6.15.3\"",
     "expect": "killed",
     "tests": ["dependency-hygiene.test.js"],
