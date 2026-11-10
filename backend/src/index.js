@@ -236,6 +236,15 @@ app.use(
 );
 
 app.use(express.json());
+// Express 5's body parser leaves `req.body` UNDEFINED when a request carries no body or a content type it
+// does not parse; Express 4 set it to `{}`. Around a hundred route handlers read `req.body.x` or destructure
+// it, so without this a bodyless POST/PUT/PATCH/DELETE would throw a TypeError (a 500) where it used to get
+// the route's own validation answer (a 400). Restoring the Express 4 value keeps every route's behaviour
+// exactly as it was, instead of guarding each handler one by one.
+app.use((req, res, next) => {
+  if (req.body === undefined) req.body = {};
+  next();
+});
 
 // Demo-mode guard: when DEMO_MODE=true, blocks every write except log in/out (see
 // middleware/demoMode.js for the full policy and why it's positioned here — after
@@ -304,7 +313,9 @@ app.post('/api/csp-report', express.text({ type: '*/*', limit: '64kb' }), (req, 
 // Serve the built React frontend (see Dockerfile — built at image-build time into ./public).
 const publicDir = path.join(__dirname, '..', 'public');
 app.use(express.static(publicDir));
-app.get('*', (req, res) => {
+// Express 5 (path-to-regexp 8) refuses a bare `*`: the wildcard must be named. `/{*splat}` also matches `/`
+// itself, as the old `*` did, so the SPA still loads at the root.
+app.get('/{*splat}', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
   res.sendFile(path.join(publicDir, 'index.html')); // fence-ok: the built web app, not a media file
 });
