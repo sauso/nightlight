@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Changed
+
+- **Routine dependency updates, no behaviour change intended.** Backend: `express-rate-limit` 8.7.2 → 8.7.3 (async rate-limit handler errors are now forwarded). Web app: `lucide-react` 1.66.0 → 1.70.0 (icons). Build and test tooling (not part of the image): `vite` 8.3.5 → 8.3.6, `@vitejs/plugin-react` 6.1.2 → 6.2.1, and the `docker/login-action` CI step 4.7.0 → 4.8.0.
+
 ## [0.47.0] - 2026-11-10
 
 ### Added
