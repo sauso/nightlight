@@ -92,6 +92,8 @@ services:
       # Your public IP or DDNS hostname - only needed for Low Latency (WebRTC) mode
       # to work from outside your home network. Leave unset for LAN-only use.
       - PUBLIC_HOST=${PUBLIC_HOST:-}
+      # Optional HTTPS origin for phone apps and alert links; blank = off. See docs/remote-access.md.
+      - CUSTOM_URL=${CUSTOM_URL:-}
       # Optional. STUN servers for Low Latency (WebRTC), in the browser and in MediaMTX: a comma-separated
       # list of stun:host[:port]. Unset = Google's public server (below). BLANK = no STUN at all (nothing
       # contacts Google; viewing on your own network never needs STUN). Note `-` and not `:-`: a blank

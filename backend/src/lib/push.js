@@ -6,6 +6,7 @@ import { storeSnapshot } from './pushSnapshots.js';
 import { sessionAgeCondition } from '../middleware/auth.js';
 import { stripTrailingSlashes } from './stripTrailingSlashes.js';
 import { isTailnetOrigin } from './tailnetAddress.js';
+import { customUrl } from './customUrl.js';
 
 // Push notifications via Firebase Cloud Messaging. The service-account credential is a secret,
 // so it is NEVER baked into the (public) image — it's mounted as a file into the data dir. If
@@ -277,6 +278,9 @@ export function registerToken(token, platform, userId, baseUrl, sessionId) {
 // admin-only for the same reason registerToken's write is: rows written before that check existed
 // (or by any other route to the table) must not be able to change where the household's links point.
 export function getPublicBaseUrl() {
+  // Operator-set: a wrong or unreachable CUSTOM_URL breaks every alert link; the server cannot test reachability.
+  const custom = customUrl();
+  if (custom) return custom;
   try {
     const stored = normalizeBaseUrl(
       db.prepare('SELECT public_base_url FROM settings WHERE id = ?').get('app')?.public_base_url
@@ -384,11 +388,13 @@ export async function sendToAll(title, body, data = {}, imageBuffer = null, { ta
   // FCM data payload values must all be strings.
   const stringData = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
   const snapshotId = imageBuffer ? storeSnapshot(imageBuffer) : null;
+  const custom = customUrl();
   const messages = rows.map(({ token, base_url }) => {
     // Carry the server this alert came from so a tap can switch the app to it if it's showing a
     // different one. Per-device base_url is exactly the address THIS device uses to reach us, so
     // it's the right thing for this device to point at.
-    const data = base_url ? { ...stringData, server: stripTrailingSlashes(base_url) } : stringData;
+    const target = custom || base_url;
+    const data = target ? { ...stringData, server: stripTrailingSlashes(target) } : stringData;
     const msg = {
       token,
       notification: { title, body },
@@ -396,8 +402,8 @@ export async function sendToAll(title, body, data = {}, imageBuffer = null, { ta
       android: { priority: 'high', notification: { channelId: ANDROID_CHANNEL, ...(tag ? { tag } : {}) } },
       ...(tag ? { apns: { headers: { 'apns-collapse-id': tag } } } : {}),
     };
-    if (snapshotId && base_url) {
-      const url = `${stripTrailingSlashes(base_url)}/api/push/snapshot/${snapshotId}`;
+    if (snapshotId && target) {
+      const url = `${stripTrailingSlashes(target)}/api/push/snapshot/${snapshotId}`;
       msg.notification.image = url;
       msg.android.notification.imageUrl = url;
     }
@@ -441,7 +447,7 @@ export async function sendToAll(title, body, data = {}, imageBuffer = null, { ta
   // Same line as before for the normal case (M = every device we tried, not per batch). When every
   // batch threw there is nothing to report as "sent"; the per-batch errors above already say so.
   if (chunksReturned > 0) {
-    const withImg = snapshotId ? (rows.some((r) => r.base_url) ? ' with image' : ' (image skipped — no device base URL)') : '';
+    const withImg = snapshotId ? (custom || rows.some((r) => r.base_url) ? ' with image' : ' (image skipped — no device base URL)') : '';
     logger.info(`[push] alert sent to ${sent}/${rows.length} device(s)${withImg}`);
   }
 }

@@ -21,7 +21,7 @@
 //
 // NOT covered here, and not verifiable from tests: that an address is actually REACHABLE. Nothing in
 // the server can know that; see normalizeBaseUrl's comment.
-import { test, describe, beforeEach, before, after, mock } from 'node:test';
+import { test, describe, beforeEach, before, after, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,6 +31,11 @@ import {
 } from './helpers/harness.js';
 
 const dataDir = useTempDataDir();
+const originalCustomUrl = process.env.CUSTOM_URL;
+afterEach(() => {
+  if (originalCustomUrl === undefined) delete process.env.CUSTOM_URL;
+  else process.env.CUSTOM_URL = originalCustomUrl;
+});
 
 const { default: db } = await import('../src/db.js');
 const { registerToken, getPublicBaseUrl, normalizeBaseUrl, sendToAll, initPush } = await import('../src/lib/push.js');
@@ -558,6 +563,32 @@ describe("★ sendToAll: each device is sent ITS OWN address, never another devi
       }
     }
   });
+
+  test('CUSTOM_URL overrides every device tap and snapshot URL, including a device with no base', async () => {
+    db.prepare("UPDATE settings SET push_enabled = 1 WHERE id = 'app'").run();
+    registerToken('tok-lan', 'android', 'u-admin', 'http://192.168.1.10:4000', makeSession(db, 'u-admin'));
+    registerToken('tok-none', 'android', 'u-cg', undefined, makeSession(db, 'u-cg'));
+    process.env.CUSTOM_URL = 'HTTPS://Custom.Example/';
+    sendEach.mock.resetCalls();
+    await sendToAll('Motion', 'Motion seen', {}, Buffer.from([0xff, 0xd8, 0xff]));
+    assert.equal(sendEach.mock.callCount(), 1);
+    for (const message of sendEach.mock.calls[0].arguments[0]) {
+      assert.equal(message.data.server, 'https://custom.example');
+      assert.ok(message.notification.image.startsWith('https://custom.example/api/push/snapshot/'));
+      assert.equal(message.android.notification.imageUrl, message.notification.image);
+    }
+  });
+
+  test('an invalid CUSTOM_URL leaves per-device Firebase links alone', async () => {
+    db.prepare("UPDATE settings SET push_enabled = 1 WHERE id = 'app'").run();
+    registerToken('tok-lan', 'android', 'u-admin', GOOD, makeSession(db, 'u-admin'));
+    process.env.CUSTOM_URL = 'https://bad.local';
+    sendEach.mock.resetCalls();
+    await sendToAll('Motion', 'Motion seen', {}, Buffer.from([0xff, 0xd8, 0xff]));
+    const message = sendEach.mock.calls[0].arguments[0][0];
+    assert.equal(message.data.server, GOOD);
+    assert.ok(message.notification.image.startsWith(`${GOOD}/api/push/snapshot/`));
+  });
 });
 
 // #559: GET /api/about reports the address the server's own links carry, so the app can tell "an alert from
@@ -583,6 +614,18 @@ describe('★ #559 GET /api/about reports the address the alert links carry', ()
     assert.equal(res.status, 200);
     return res.body;
   };
+
+  test('CUSTOM_URL wins over stored and tailnet admin addresses and appears in /about', async () => {
+    setGlobal(GOOD);
+    registerToken('tok-tail', 'android', 'u-admin', 'https://name.example.ts.net', makeSession(db, 'u-admin'));
+    process.env.CUSTOM_URL = 'https://custom.example';
+    assert.equal(getPublicBaseUrl(), 'https://custom.example');
+    assert.equal((await about()).publicBaseUrl, 'https://custom.example');
+    process.env.CUSTOM_URL = 'https://bad.local';
+    assert.equal(getPublicBaseUrl(), GOOD);
+    delete process.env.CUSTOM_URL;
+    assert.equal(getPublicBaseUrl(), GOOD);
+  });
 
   test('the stored address is reported, canonical', async () => {
     setGlobal(GOOD);

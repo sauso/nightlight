@@ -15,6 +15,7 @@ import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 const HOME = 'http://192.168.1.50:4000';
 const TS = 'https://nightlight.example.ts.net';
 const ADDRESS_ROUTE = '/api/remote-access/tailscale/address';
+const CUSTOM_ROUTE = '/api/remote-access/address';
 
 let nb;
 let answer; // what GET /api/remote-access/tailscale/address does: { status, body } or a thrown error
@@ -43,7 +44,7 @@ beforeEach(async () => {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const path = new URL(String(input), 'http://localhost').pathname;
     fetched.push(path);
-    if (path === ADDRESS_ROUTE) {
+    if (path === ADDRESS_ROUTE || path === CUSTOM_ROUTE) {
       if (answer instanceof Error) throw answer;
       return { status: answer.status, ok: answer.status >= 200 && answer.status < 300, text: async () => JSON.stringify(answer.body) };
     }
@@ -61,6 +62,29 @@ afterEach(() => {
 });
 
 describe('★ syncTailscaleEndpoint: what the server says decides what the phone keeps', () => {
+  test('a capable shell uses the new route and passes the custom kind, while a 409 changes nothing', async () => {
+    const SC = stubNative({ get: vi.fn().mockResolvedValue({ supportsCustomUrl: true }) });
+    answer = { status: 200, body: { url: 'https://custom.example', kind: 'custom' } };
+    expect(await nb.syncTailscaleEndpoint()).toBe('added');
+    expect(fetched).toEqual([CUSTOM_ROUTE]);
+    expect(SC.addEndpoint).toHaveBeenCalledWith({ url: 'https://custom.example', kind: 'custom' });
+    answer = { status: 409, body: { code: 'status_unavailable' } };
+    expect(await nb.syncTailscaleEndpoint()).toBeNull();
+    expect(SC.removeEndpoint).not.toHaveBeenCalled();
+  });
+
+  test('a capable shell binds a Tailscale kind and removes a definite null; a failed capability read uses the old route', async () => {
+    const SC = stubNative({ get: vi.fn().mockResolvedValue({ supportsCustomUrl: true }) });
+    answer = { status: 200, body: { url: TS, kind: 'tailscale' } };
+    await nb.syncTailscaleEndpoint();
+    expect(SC.addEndpoint).toHaveBeenCalledWith({ url: TS, kind: 'tailscale' });
+    answer = { status: 200, body: { url: null, kind: null } };
+    await nb.syncTailscaleEndpoint();
+    expect(SC.removeEndpoint).toHaveBeenCalledTimes(1);
+    SC.get.mockRejectedValue(new Error('old shell'));
+    await nb.syncTailscaleEndpoint();
+    expect(fetched.at(-1)).toBe(ADDRESS_ROUTE);
+  });
   test('★ an address is handed to the shell exactly as the server sent it, and the person is told once', async () => {
     const SC = stubNative();
     expect(await nb.syncTailscaleEndpoint()).toBe('added');

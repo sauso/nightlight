@@ -66,6 +66,14 @@ describe('the Android app Connection card', () => {
     expect(noteOf(card)).toBeNull();
   });
 
+  test('a custom address names its kind and host', async () => {
+    route({ via: 'tailscale', tailscaleSaved: true, address: 'custom.example', kind: 'custom', why: null });
+    renderAsAdmin(<About />);
+    const card = await connectionCard();
+    expect(badgeOf(card)).toBe('Using your custom address');
+    expect(addressOf(card)).toBe('custom.example');
+  });
+
   test('a saved address the shell gave no readable host for says "Saved" rather than nothing', async () => {
     route({ via: 'saved', tailscaleSaved: true, address: null, why: null });
     renderAsAdmin(<About />);

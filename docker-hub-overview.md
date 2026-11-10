@@ -65,6 +65,7 @@ a trusted device.
   otherwise a comma-separated list of `stun:host[:port]` URLs (anything else is ignored with
   a warning). Viewing on your own network never needs STUN; viewers outside it, behind NAT,
   may. Details: the `STUN_SERVERS` section of the [remote access guide](https://github.com/sauso/nightlight/blob/main/docs/remote-access.md#stun_servers--which-stun-servers-low-latency-webrtc-uses).
+- `CUSTOM_URL` (optional, blank = off) tells supported phone apps and alert links your own HTTPS address. Configure DNS and your reverse proxy first; Nightlight cannot check that the address works. Details: the [remote access guide](https://github.com/sauso/nightlight/blob/main/docs/remote-access.md#custom_url--your-own-address-for-the-phone-apps).
 - The image has a Docker `HEALTHCHECK` (`GET /api/health`, 2 minute start period). It only
   marks the container healthy/unhealthy; nothing restarts it.
 - `CLOUDFLARE_ANALYTICS` is off by default: Cloudflare Web Analytics' beacon, which

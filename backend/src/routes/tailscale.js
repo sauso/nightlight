@@ -115,9 +115,10 @@ export function createTailscaleRouter({ database = db, dataDir = process.env.DAT
     }
     return addressRead;
   };
+  // Both routes use this instance, including its daemon-read cache. The enabled switch stays fresh on every request.
+  router.resolveAddress = async () => !enabled() ? { known: true, url: null } : readAddress();
   router.get('/address', requireAuth, asyncHandler(async (req, res) => {
-    if (!enabled()) return res.json({ url: null });
-    const answer = await readAddress();
+    const answer = await router.resolveAddress();
     if (answer.known) return res.json({ url: answer.url });
     return conflict(res, 'status_unavailable', 'The Tailscale address is not known right now.');
   }));
