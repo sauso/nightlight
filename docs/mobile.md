@@ -150,6 +150,7 @@ Home routers sometimes hand your server a new address. The apps help with that o
 
 What this does not cover:
 
+- **Your own domain is learned after sign-in, not found.** If your server sets `CUSTOM_URL`, the apps learn that address after you sign in and use it away from home, with a separate sign-in on it; **Look for my Nightlight** still lists only home-network addresses and does not work away from home. See [your own address](remote-access.md#the-phone-apps-and-your-own-address).
 - **The server id is not a password.** Anyone on your network can read it. This protects you from a device that took the address by accident or a lookalike, not from someone deliberately copying your server. Typing your secure `https` address is still the stronger way to connect.
 - **The app trusts a server the first time it learns the id.** A server it has not reached since the update is not protected until it has.
 - **Only home-network addresses of the form `http://192.168.1.20:4000` are checked.** A saved name or `https` address is opened as before.
