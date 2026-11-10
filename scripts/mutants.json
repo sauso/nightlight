@@ -25909,5 +25909,14 @@
     "expect": "killed",
     "tests": ["mfa.test.js"],
     "namePattern": "keyUri promises only what the verifier checks"
+  },
+  {
+    "label": "#15 backend glob lock regresses below its advisory floor",
+    "file": "backend/package-lock.json",
+    "find": "\"version\": \"14.0.4\"",
+    "replace": "\"version\": \"10.5.0\"",
+    "expect": "killed",
+    "tests": ["dependency-hygiene.test.js"],
+    "namePattern": "^T6:"
   }
 ]
