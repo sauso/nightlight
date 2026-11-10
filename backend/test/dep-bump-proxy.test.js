@@ -30,13 +30,16 @@
 //
 // Moved to http-proxy-middleware 4.2.1 (httpxy instead of http-proxy) with a side-by-side run of 3.0.7 and
 // 4.2.1 over 28 request shapes against a stand-in MediaMTX: identical status, headers and bodies apart
-// from one thing, which is NOT pinned here because it is a connection detail and not a contract: v4 passes
-// the client's `Connection: keep-alive` through, v3 forced `close`.
+// from connection handling. The review of the bump found the one that matters: v4 pools upstream sockets
+// by default and MediaMTX closes idle ones after 30 s, which can fail a request with a 504 (see
+// src/lib/mediaProxyOptions.js). The mounts here use the real shared options, and a test below fails if
+// the proxy starts reusing upstream connections again.
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
+import { MEDIA_PROXY_BASE_OPTIONS } from '../src/lib/mediaProxyOptions.js';
 import { useTempDataDir, cleanupTempDataDirs, makeUser, call } from './helpers/harness.js';
 
 useTempDataDir();
@@ -257,7 +260,7 @@ describe('/hls proxy path (createProxyMiddleware with index.js\'s /hls options; 
     const hls = express();
     hls.use('/hls', createProxyMiddleware({
       target: urlOf(upstream),
-      changeOrigin: true,
+      ...MEDIA_PROXY_BASE_OPTIONS,
       pathRewrite: { '^/hls': '' },
       on: {
         proxyRes(proxyRes) {
@@ -339,7 +342,7 @@ describe('/live (WHEP) proxy path (createProxyMiddleware with index.js\'s /live 
     const live = express();
     live.use('/live', createProxyMiddleware({
       target: urlOf(upstream),
-      changeOrigin: true,
+      ...MEDIA_PROXY_BASE_OPTIONS,
       pathRewrite: { '^/live': '' },
       on: {
         proxyRes(proxyRes) {
@@ -383,12 +386,30 @@ describe('/live (WHEP) proxy path (createProxyMiddleware with index.js\'s /live 
     assert.deepEqual([seen.at(-1).method, seen.at(-1).url], ['DELETE', '/cam/whep/session-1']);
   });
 
+  test('each request opens its own upstream connection: no pooled socket for MediaMTX to close under us', async () => {
+    // Three sequential requests from a keep-alive client. With http-proxy-middleware 4's default agent they share
+    // ONE upstream socket (measured 1 of 3, where 3.x gave 3); that pooled socket is what MediaMTX's 30 s idle
+    // close can break. This is the shape of the shared options, not of index.js's wiring (it cannot be imported).
+    let connections = 0;
+    const count = () => { connections += 1; };
+    upstream.on('connection', count);
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    try {
+      for (let i = 0; i < 3; i++) {
+        await new Promise((resolve, reject) => {
+          http.get(`${urlOf(app)}/live/cam/whep/session-1`, { agent }, (res) => { res.resume(); res.on('end', resolve); }).on('error', reject);
+        });
+      }
+    } finally { agent.destroy(); upstream.off('connection', count); }
+    assert.equal(connections, 3, 'the proxy reused an upstream connection (agent: false lost?)');
+  });
+
   test('an upstream that is down is a 5xx for that request, and the proxy keeps serving', async () => {
     const dead = await listen(express());
     const deadUrl = urlOf(dead);
     await close(dead);
     const broken = express();
-    broken.use('/live', createProxyMiddleware({ target: deadUrl, changeOrigin: true, pathRewrite: { '^/live': '' } }));
+    broken.use('/live', createProxyMiddleware({ target: deadUrl, ...MEDIA_PROXY_BASE_OPTIONS, pathRewrite: { '^/live': '' } }));
     const brokenServer = await listen(broken);
     try {
       const r = await new Promise((resolve, reject) => {
