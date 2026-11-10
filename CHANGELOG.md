@@ -9,9 +9,11 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-11-10
+
 ### Added
 
-- Phone apps can learn an optional `CUSTOM_URL` after sign-in and use it for alerts and remote access. It needs your own working DNS and HTTPS proxy; a wrong address breaks alert links. The apps sign in separately on that domain. Older apps continue using Tailscale.
+- Phone apps can learn an optional `CUSTOM_URL` after sign-in and use it for alerts and remote access. It needs your own working DNS and HTTPS proxy; a wrong address breaks alert links. The apps sign in separately on that domain. Older apps continue using Tailscale. The address must be a DNS name over HTTPS (IP addresses and numeric spellings of one, such as `127.1`, are refused).
 - Settings → Remote Access now shows the address you opened, the trusted proxy setting, and a live setup checklist for HTTPS, video host DNS, Cloudflare proxy addresses, a this-device UDP test, and untrusted forwarded addresses. The checklist cannot inspect your router or prove a forward from home; DNS and proxy checks can be misled by cached answers or headers.
 
 ### Changed
@@ -21,10 +23,6 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - The browser tab icon is now the website's rounded Nightlight icon (transparent rounded corners) instead of an opaque square.
 - The four cards under Settings → Remote Access → "Use your own domain or port forward (advanced)" now look like the Tailscale card and Settings → About: a bold 16px title over 14px text, instead of a small grey title over larger text.
 - #961 Sign-in limits for each account now use a person's Tailscale identity while the tunnel is attached and Tailscale supplies one. The tunnel still has a shared request limit. Tagged devices fall back to a shared account allowance, and two people can rarely share one of 64 identity buckets. A process on the server can forge an identity header, but the shared limit and separate account and MFA guess limits still apply.
-
-### Fixed
-
-- #1028 Custom addresses now refuse numeric IP spellings such as `127.1`. Phone apps bind a saved sign-in only to a valid Tailscale address, and About labels the address the app actually kept after a new offer is refused.
 
 ## [0.46.0] - 2026-11-10
 
