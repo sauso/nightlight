@@ -11,6 +11,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Added
 
+- Phone apps can learn an optional `CUSTOM_URL` after sign-in and use it for alerts and remote access. It needs your own working DNS and HTTPS proxy; a wrong address breaks alert links. The apps sign in separately on that domain. Older apps continue using Tailscale.
 - Settings → Remote Access now shows the address you opened, the trusted proxy setting, and a live setup checklist for HTTPS, video host DNS, Cloudflare proxy addresses, a this-device UDP test, and untrusted forwarded addresses. The checklist cannot inspect your router or prove a forward from home; DNS and proxy checks can be misled by cached answers or headers.
 
 ### Changed

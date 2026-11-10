@@ -44,7 +44,7 @@ export default function About() {
     api.get('/about').then(setInfo).catch(() => setInfo({ version: 'unknown' }));
   }, []);
 
-  // The Android app only (null elsewhere): which address this session is on, and whether the Tailscale one is saved.
+  // A capable phone app only (null elsewhere): which address this session is on, and whether a secure one is saved.
   const [route, setRoute] = useState(null);
   useEffect(() => {
     let live = true;
@@ -118,7 +118,7 @@ export default function About() {
               <h2 className="card-title">Connection</h2>
               {route.via !== 'other' && (
                 <span className="status-badge status-badge--off">
-                  {route.via === 'tailscale' ? 'Using Tailscale' : 'Using local address'}
+                  {route.via === 'tailscale' ? (route.kind === 'custom' ? 'Using your custom address' : 'Using Tailscale') : 'Using local address'}
                 </span>
               )}
             </div>
@@ -127,7 +127,9 @@ export default function About() {
             {/* Owner 2026-11-07: a saved address needs no line ("Saved for use away from home." told nobody anything the
                 address itself did not); the line is only for the reason none is saved. */}
             {!route.tailscaleSaved && TAILSCALE_WHY[route.why] && (
-              <p className="tailscale-hint">{TAILSCALE_WHY[route.why]}</p>
+              <p className="tailscale-hint">{route.kind === 'custom' && route.why === 'unreachable'
+                ? "The server offered one, but this phone couldn't reach it. Check your HTTPS address, then restart the app."
+                : TAILSCALE_WHY[route.why]}</p>
             )}
           </section>
         )}

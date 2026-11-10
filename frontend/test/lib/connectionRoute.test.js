@@ -8,6 +8,7 @@ const TS = 'https://nightlight.example.ts.net';
 const OTHER = 'http://192.168.1.50:4000';
 
 let nb;
+let api;
 
 function stubNative(get, extra = {}) {
   const ServerConfig = { get, addEndpoint: vi.fn(), removeEndpoint: vi.fn(), list: vi.fn(), ...extra };
@@ -19,33 +20,44 @@ beforeEach(async () => {
   vi.resetModules();
   delete window.Capacitor;
   nb = await import('../../src/lib/nativeBridge.js');
+  ({ api } = await import('../../src/lib/api.js'));
 });
 
 afterEach(() => {
   delete window.Capacitor;
+  localStorage.clear();
+  vi.restoreAllMocks();
 });
 
 describe('★ getConnectionRoute', () => {
+  test('the last capable-shell response supplies the custom kind beside the saved host', async () => {
+    localStorage.setItem('nightlight_token', 't');
+    vi.spyOn(api, 'get').mockResolvedValue({ url: 'https://custom.example', kind: 'custom' });
+    stubNative(vi.fn().mockResolvedValue({ url: OTHER, tailscale: 'https://custom.example', supportsCustomUrl: true }),
+      { addEndpoint: vi.fn().mockResolvedValue({ added: false }) });
+    await nb.syncTailscaleEndpoint();
+    expect(await nb.getConnectionRoute()).toEqual({ via: 'other', tailscaleSaved: true, address: 'custom.example', why: null, kind: 'custom' });
+  });
   test('★ on the saved address, with no Tailscale address saved', async () => {
     stubNative(vi.fn().mockResolvedValue({ url: HERE, tailscale: null }));
-    expect(await nb.getConnectionRoute()).toEqual({ via: 'saved', tailscaleSaved: false, address: null, why: null });
+    expect(await nb.getConnectionRoute()).toEqual({ via: 'saved', tailscaleSaved: false, address: null, why: null, kind: null });
   });
 
   test('★ on the saved address, with a Tailscale address saved', async () => {
     stubNative(vi.fn().mockResolvedValue({ url: HERE, tailscale: TS }));
-    expect(await nb.getConnectionRoute()).toEqual({ via: 'saved', tailscaleSaved: true, address: 'nightlight.example.ts.net', why: null });
+    expect(await nb.getConnectionRoute()).toEqual({ via: 'saved', tailscaleSaved: true, address: 'nightlight.example.ts.net', why: null, kind: null });
   });
 
   test('★ on the Tailscale address: the page IS the saved Tailscale address', async () => {
     stubNative(vi.fn().mockResolvedValue({ url: OTHER, tailscale: HERE }));
-    expect(await nb.getConnectionRoute()).toEqual({ via: 'tailscale', tailscaleSaved: true, address: window.location.host, why: null });
+    expect(await nb.getConnectionRoute()).toEqual({ via: 'tailscale', tailscaleSaved: true, address: window.location.host, why: null, kind: null });
   });
 
   test('on neither it says "other" rather than guessing a name, and still reports what is saved', async () => {
     stubNative(vi.fn().mockResolvedValue({ url: OTHER, tailscale: TS }));
-    expect(await nb.getConnectionRoute()).toEqual({ via: 'other', tailscaleSaved: true, address: 'nightlight.example.ts.net', why: null });
+    expect(await nb.getConnectionRoute()).toEqual({ via: 'other', tailscaleSaved: true, address: 'nightlight.example.ts.net', why: null, kind: null });
     stubNative(vi.fn().mockResolvedValue({ url: null, tailscale: null }));
-    expect(await nb.getConnectionRoute()).toEqual({ via: 'other', tailscaleSaved: false, address: null, why: null });
+    expect(await nb.getConnectionRoute()).toEqual({ via: 'other', tailscaleSaved: false, address: null, why: null, kind: null });
   });
 
   test('addresses are compared canonically (case, default port, a trailing slash)', async () => {
@@ -64,6 +76,6 @@ describe('★ getConnectionRoute', () => {
 
   test('an odd value from the shell (not a string) counts as nothing saved, not as a match', async () => {
     stubNative(vi.fn().mockResolvedValue({ url: 5, tailscale: {} }));
-    expect(await nb.getConnectionRoute()).toEqual({ via: 'other', tailscaleSaved: false, address: null, why: null });
+    expect(await nb.getConnectionRoute()).toEqual({ via: 'other', tailscaleSaved: false, address: null, why: null, kind: null });
   });
 });
