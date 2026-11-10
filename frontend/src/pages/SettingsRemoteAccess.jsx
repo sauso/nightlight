@@ -98,40 +98,42 @@ export default function SettingsRemoteAccess() {
       {error && <div className="error-banner" role="alert">{error} <button type="button" className="btn btn-secondary" onClick={load}>Retry</button></div>}
       {setup && <>
         <details className="remote-advanced"><summary>Use your own domain or port forward (advanced)</summary>
-        <section className="card" aria-labelledby="remote-network-title">
-          <h2 id="remote-network-title" className="card-title">Where you're connecting from</h2>
-          <span className={`status-badge ${via === 'tailscale' ? 'status-badge--ok' : 'status-badge--off'}`}>{via === 'tailscale' ? 'Tailscale' : network === 'vpn' ? 'VPN' : network === 'home' ? 'Home' : network === 'remote' ? 'Outside home' : 'Unknown'}</span>
-          <p>{via === 'tailscale' ? "This looks like a connection through your private Tailscale address. If so, your router isn't involved and the port-forward test below doesn't apply."
+        <section className="card about-card" aria-labelledby="remote-network-title">
+          <div className="about-card__heading">
+            <h2 id="remote-network-title" className="card-title">Where you're connecting from</h2>
+            <span className={`status-badge ${via === 'tailscale' ? 'status-badge--ok' : 'status-badge--off'}`}>{via === 'tailscale' ? 'Tailscale' : network === 'vpn' ? 'VPN' : network === 'home' ? 'Home' : network === 'remote' ? 'Outside home' : 'Unknown'}</span>
+          </div>
+          <p className="about-card__text">{via === 'tailscale' ? "This looks like a connection through your private Tailscale address. If so, your router isn't involved and the port-forward test below doesn't apply."
             : via === 'proxy' ? "Nightlight received a forwarded address it doesn't trust, usually from a reverse proxy that TRUST_PROXY doesn't list, so it can't tell where you are."
               : NETWORK[network] || NETWORK.unknown}{via === 'proxy' && <> (<DocsLink href={TRUST_PROXY_DOCS}>docs</DocsLink>).</>}</p>
         </section>
-        <section className="card" aria-labelledby="remote-setup-title">
-          <h2 id="remote-setup-title" className="card-title">Your setup</h2>
-          <p><strong>App port:</strong> {setup.app_port}</p>
-          <p><strong>UDP video port:</strong> {setup.webrtc_udp_port}</p>
+        <section className="card about-card" aria-labelledby="remote-setup-title">
+          <div className="about-card__heading"><h2 id="remote-setup-title" className="card-title">Your setup</h2></div>
+          <p className="about-card__text"><strong>App port:</strong> {setup.app_port}</p>
+          <p className="about-card__text"><strong>UDP video port:</strong> {setup.webrtc_udp_port}</p>
           <div><strong>Public host(s):</strong>
-            {!setup.public_host_set ? <p>Not set. Low latency video from outside the home needs PUBLIC_HOST.</p> :
+            {!setup.public_host_set ? <p className="about-card__text">Not set. Low latency video from outside the home needs PUBLIC_HOST.</p> :
               <ul>{setup.public_hosts.map((entry) => <li key={entry.host}>{hostSentence(entry)}</li>)}</ul>}
           </div>
-          <p><strong>Advertised addresses:</strong> {setup.advertised_hosts.join(', ') || 'None'}</p>
-          <p><strong>STUN:</strong> {setup.stun.enabled ? 'On' : 'Off'}</p>
-          {setup.stun.enabled && <p>A STUN server can see the public IP of anyone who watches live video from outside; you can turn it off (<DocsLink href={STUN_DOCS}>docs</DocsLink>).</p>}
+          <p className="about-card__text"><strong>Advertised addresses:</strong> {setup.advertised_hosts.join(', ') || 'None'}</p>
+          <p className="about-card__text"><strong>STUN:</strong> {setup.stun.enabled ? 'On' : 'Off'}</p>
+          {setup.stun.enabled && <p className="about-card__text">A STUN server can see the public IP of anyone who watches live video from outside; you can turn it off (<DocsLink href={STUN_DOCS}>docs</DocsLink>).</p>}
         </section>
-        <section className="card" aria-labelledby="remote-test-title">
-          <h2 id="remote-test-title" className="card-title">Test Low latency video from this device</h2>
-          {!camera && <p>No camera is running yet, so there is nothing to test. Add or start a camera first.</p>}
+        <section className="card about-card" aria-labelledby="remote-test-title">
+          <div className="about-card__heading"><h2 id="remote-test-title" className="card-title">Test Low latency video from this device</h2></div>
+          {!camera && <p className="about-card__text">No camera is running yet, so there is nothing to test. Add or start a camera first.</p>}
           <button type="button" className="btn btn-primary" disabled={!camera || busy} onClick={runTest}>{busy ? 'Testing…' : 'Test from this device'}</button>
-          <p>This connects your device to your Nightlight server, the same way live video does. With STUN on, your device also contacts the STUN server, exactly as live video does.</p>
-          {message && <p role="status">{message} {network === 'remote' && (result.outcome === 'failed' || result.outcome === 'timeout') && <DocsLink>Setup guide</DocsLink>}</p>}
+          <p className="about-card__text">This connects your device to your Nightlight server, the same way live video does. With STUN on, your device also contacts the STUN server, exactly as live video does.</p>
+          {message && <p className="about-card__text" role="status">{message} {network === 'remote' && (result.outcome === 'failed' || result.outcome === 'timeout') && <DocsLink>Setup guide</DocsLink>}</p>}
         </section>
-        <section className="card" aria-labelledby="remote-checklist-title">
-          <h2 id="remote-checklist-title" className="card-title">Before watching from outside</h2>
+        <section className="card about-card" aria-labelledby="remote-checklist-title">
+          <div className="about-card__heading"><h2 id="remote-checklist-title" className="card-title">Before watching from outside</h2></div>
           <ul>
             <li>The app port (TCP) must be reachable, normally through an HTTPS reverse proxy. <DocsLink>Setup guide</DocsLink></li>
             <li>For Low latency video, forward UDP {setup.webrtc_udp_port} 1:1 to this server and set PUBLIC_HOST to a DNS-only name or your public IP. A Cloudflare-proxied name will not carry UDP video.</li>
             <li>Compatibility (HLS) video needs no UDP forward.</li>
           </ul>
-          <p>Keep the raw app port off the internet; use HTTPS.</p>
+          <p className="about-card__text">Keep the raw app port off the internet; use HTTPS.</p>
         </section>
         </details>
       </>}
