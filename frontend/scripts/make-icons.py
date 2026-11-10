@@ -20,12 +20,10 @@ with Image.open(SOURCE) as original:
     ]:
         logo.resize((size, size), Image.Resampling.LANCZOS).save(OUTPUT / filename, optimize=True)
 
-    # The 32px tab icon spends its pixels on the moon and baby, not the outer margin. A SQUARE crop (the old one was not,
-    # which stretched the picture a little): the logo's content spans about x 155-894, y 164-854 of the 1024px source
-    # (the owner's SVG, 2026-11-05), so this takes a 810px square around its centre.
-    logo.crop((120, 105, 930, 915)).resize((32, 32), Image.Resampling.LANCZOS).save(
-        OUTPUT / "favicon-32.png", optimize=True
-    )
+    # favicon-32.png is deliberately NOT generated here any more (owner, 2026-11-10: "the fav icon for the server isn't round
+    # like the website, make them the same"). It is a byte-for-byte copy of nightlight-website/assets/favicon.png, a 32px
+    # RGBA icon with transparent rounded corners (radius about 8px); this script's old square RGB crop put an opaque navy
+    # square in the browser tab. If the logo changes, re-copy it from the website repo; running this script leaves it alone.
 
     for size in (192, 512):
         canvas = Image.new("RGB", (size, size), NAVY)
