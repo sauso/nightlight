@@ -20,6 +20,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 - The four cards under Settings → Remote Access → "Use your own domain or port forward (advanced)" now look like the Tailscale card and Settings → About: a bold 16px title over 14px text, instead of a small grey title over larger text.
 - #961 Sign-in limits for each account now use a person's Tailscale identity while the tunnel is attached and Tailscale supplies one. The tunnel still has a shared request limit. Tagged devices fall back to a shared account allowance, and two people can rarely share one of 64 identity buckets. A process on the server can forge an identity header, but the shared limit and separate account and MFA guess limits still apply.
 
+### Fixed
+
+- #1028 Custom addresses now refuse numeric IP spellings such as `127.1`. Phone apps bind a saved sign-in only to a valid Tailscale address, and About labels the address the app actually kept after a new offer is refused.
+
 ## [0.46.0] - 2026-11-10
 
 ### Added

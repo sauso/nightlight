@@ -24,6 +24,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   delete window.Capacitor;
   localStorage.clear();
   vi.restoreAllMocks();
@@ -38,6 +39,28 @@ describe('★ getConnectionRoute', () => {
     await nb.syncTailscaleEndpoint();
     expect(await nb.getConnectionRoute()).toEqual({ via: 'other', tailscaleSaved: true, address: 'custom.example', why: null, kind: 'custom' });
   });
+  test('a refused custom offer cannot relabel the retained Tailscale slot', async () => {
+    localStorage.setItem('nightlight_token', 't');
+    vi.spyOn(api, 'get').mockResolvedValue({ url: 'https://custom.example', kind: 'custom' });
+    const SC = stubNative(vi.fn().mockResolvedValue({ url: OTHER, tailscale: TS, supportsCustomUrl: true }),
+      { addEndpoint: vi.fn().mockRejectedValue(new Error('Address refused')) });
+    vi.stubGlobal('window', { Capacitor: window.Capacitor, location: { origin: TS } });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await nb.syncTailscaleEndpoint();
+    expect(SC.addEndpoint).toHaveBeenCalled();
+    expect(await nb.getConnectionRoute()).toMatchObject({ via: 'tailscale', address: 'nightlight.example.ts.net', kind: 'tailscale' });
+  });
+
+  test('an accepted custom offer is labelled from its retained custom slot', async () => {
+    localStorage.setItem('nightlight_token', 't');
+    vi.spyOn(api, 'get').mockResolvedValue({ url: 'https://custom.example', kind: 'custom' });
+    const SC = stubNative(vi.fn().mockResolvedValue({ url: OTHER, tailscale: 'https://custom.example', supportsCustomUrl: true }),
+      { addEndpoint: vi.fn().mockResolvedValue({ added: true }) });
+    vi.stubGlobal('window', { Capacitor: window.Capacitor, location: { origin: 'https://custom.example' } });
+    await nb.syncTailscaleEndpoint();
+    expect(SC.addEndpoint).toHaveBeenCalledWith({ url: 'https://custom.example', kind: 'custom' });
+    expect(await nb.getConnectionRoute()).toMatchObject({ via: 'tailscale', address: 'custom.example', kind: 'custom' });
+  });
   test('★ on the saved address, with no Tailscale address saved', async () => {
     stubNative(vi.fn().mockResolvedValue({ url: HERE, tailscale: null }));
     expect(await nb.getConnectionRoute()).toEqual({ via: 'saved', tailscaleSaved: false, address: null, why: null, kind: null });
@@ -50,7 +73,7 @@ describe('★ getConnectionRoute', () => {
 
   test('★ on the Tailscale address: the page IS the saved Tailscale address', async () => {
     stubNative(vi.fn().mockResolvedValue({ url: OTHER, tailscale: HERE }));
-    expect(await nb.getConnectionRoute()).toEqual({ via: 'tailscale', tailscaleSaved: true, address: window.location.host, why: null, kind: null });
+    expect(await nb.getConnectionRoute()).toEqual({ via: 'tailscale', tailscaleSaved: true, address: window.location.host, why: null, kind: 'custom' });
   });
 
   test('on neither it says "other" rather than guessing a name, and still reports what is saved', async () => {

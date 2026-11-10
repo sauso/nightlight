@@ -14,6 +14,8 @@ export function parseCustomUrl(raw) {
   const host = shape[1];
   const lower = host.toLowerCase();
   if (!/^[\x00-\x7f]+$/.test(host)) return bad('use the xn-- form for internationalised names');
+  // WHATWG URL treats a numeric final label as IPv4 even when isIP() sees a DNS-shaped name.
+  if (/^(?:0x[0-9a-f]*|[0-9]+)$/i.test(host.split('.').at(-1))) return bad('host must be a DNS name, not a numeric IP spelling');
   if (host.length > 253 || !host.includes('.') || host.endsWith('.') || isIP(host) ||
       lower === 'ts.net' || lower.endsWith('.ts.net') || lower.endsWith('.local') ||
       host.split('.').some((label) => label.length < 1 || label.length > 63 ||
@@ -21,7 +23,12 @@ export function parseCustomUrl(raw) {
     return bad('host must be a DNS name with at least two valid labels, outside .local and .ts.net');
   }
   if (shape[2] && (Number(shape[2]) < 1 || Number(shape[2]) > 65535)) return bad('port must be 1–65535');
-  try { return { url: new URL(value).origin, warning: null }; }
+  try {
+    const url = new URL(value);
+    // Keep the returned host tied to what the operator typed if URL parsing normalises another numeric form.
+    if (url.hostname !== lower) return bad('host changes when parsed as a URL');
+    return { url: url.origin, warning: null };
+  }
   catch { return bad('invalid HTTPS origin'); }
 }
 

@@ -390,6 +390,17 @@ describe('★ a 401 clears exactly the token that was refused', () => {
     expect(SC.saveSession).toHaveBeenCalledWith({ token: 'custom.token.value', tailscale: null });
   });
 
+  test('a Tailscale kind with a custom URL cannot bind a saved sign-in', async () => {
+    const SC = stubNative({ get: vi.fn().mockResolvedValue({ supportsCustomUrl: true }),
+      addEndpoint: vi.fn().mockResolvedValue({ added: true }), removeEndpoint: vi.fn() });
+    stubFetch((url) => String(url) === '/api/remote-access/address'
+      ? { body: { url: 'https://custom.example', kind: 'tailscale' } } : { body: {} });
+    setToken('mismatched.token.value');
+    await nb.syncTailscaleEndpoint();
+    await nb.saveNativeSession('mismatched.token.value');
+    expect(SC.saveSession).toHaveBeenCalledWith({ token: 'mismatched.token.value', tailscale: null });
+  });
+
   test('★ the Tailscale address a server offered is never reused for a different sign-in in the same page load', async () => {
     const SC = stubNative({ addEndpoint: vi.fn().mockResolvedValue({ added: true }), removeEndpoint: vi.fn().mockResolvedValue({ removed: false }) });
     stubFetch((url) => (String(url).startsWith('/api/remote-access/tailscale/address') ? { body: { url: 'https://planted.example.ts.net' } } : { body: {} }));

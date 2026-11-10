@@ -382,6 +382,8 @@ let offeredTailscaleUrl = null;
 // The kind is learned from the new endpoint only when the shell advertises support. A custom address is never a session binding.
 let offeredKind = null;
 let offeredFor = null;
+// A server response must name an actual HTTPS Tailscale host before it can bind a saved sign-in.
+const TAILSCALE_ORIGIN = /^https:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net$/;
 
 // What the last ask ended in, so the About page can say WHY no Tailscale address is saved (owner, 2026-11-07: "Not saved" was a
 // dead end). One of: 'saved' | 'server-none' (the server says it has none) | 'unknown' (the server could not say: 409, an older
@@ -442,8 +444,9 @@ async function askForTailscaleAddress() {
     note('unknown');
     return null;
   }
-  offeredTailscaleUrl = typeof url === 'string' && kind === 'tailscale' ? url : null;
-  offeredKind = typeof url === 'string' && (kind === 'custom' || kind === 'tailscale') ? kind : null;
+  const validTailscaleOffer = typeof url === 'string' && kind === 'tailscale' && TAILSCALE_ORIGIN.test(url);
+  offeredTailscaleUrl = validTailscaleOffer ? url : null;
+  offeredKind = typeof url === 'string' && kind === 'custom' ? 'custom' : validTailscaleOffer ? 'tailscale' : null;
   offeredFor = asAToken;
   note(url === null ? 'server-none' : 'unknown'); // anything but a string or null is an odd body: not known
   try {
@@ -498,10 +501,17 @@ export async function getConnectionRoute() {
   if (here && tailscale && here === tailscale) via = 'tailscale';
   else if (here && saved && here === saved) via = 'saved';
   let address = null;
+  let slotHost = null;
   if (tailscale) {
-    try { address = new URL(tailscale).host; } catch { address = null; }
+    try {
+      const slot = new URL(tailscale);
+      address = slot.host;
+      slotHost = slot.hostname;
+    } catch { address = null; }
   }
-  return { via, tailscaleSaved: Boolean(tailscale), address, why: tailscale ? null : tailscaleOutcome, kind: offeredKind };
+  // The latest offer can be refused while the shell keeps an older slot, so label the route from the retained host.
+  const kind = via === 'tailscale' ? (slotHost?.endsWith('.ts.net') ? 'tailscale' : 'custom') : offeredKind;
+  return { via, tailscaleSaved: Boolean(tailscale), address, why: tailscale ? null : tailscaleOutcome, kind };
 }
 
 // --- One sign-in across the server's two addresses (owner, 2026-11-06) ---
