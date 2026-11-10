@@ -9,11 +9,18 @@
 // processGuards.js exists to prevent. Found by the Express 4 vs 5 comparison of the Express 5 move (reproduced
 // with the port already taken: Express 4 crashed, Express 5 called the callback with the error).
 //
+// After a SUCCESSFUL bind Express 5 leaves that `once('error')` listener on the server, so the first LATER
+// server error (a failed accept, EMFILE) would be handed to an already-spent callback and vanish without a log
+// line; on Express 4 it became an uncaught error the guard logs. It is removed here so a later error is
+// uncaught as before (found by review of the Express 5 move).
+//
 // `fail` is a parameter only so a test can observe the error; the default rethrows it, which is what the
 // boot guard needs to see.
 export function listenOrFail(app, port, onListening, fail = (err) => { throw err; }) {
-  return app.listen(port, (err) => {
+  const server = app.listen(port, (err) => {
     if (err) return fail(err);
+    for (const listener of server.listeners('error')) server.off('error', listener);
     return onListening();
   });
+  return server;
 }

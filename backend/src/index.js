@@ -315,7 +315,10 @@ app.use(express.static(publicDir));
 // itself, as the old `*` did, so the SPA still loads at the root.
 app.get('/{*splat}', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
-  res.sendFile(path.join(publicDir, 'index.html')); // fence-ok: the built web app, not a media file
+  // `root`, not a joined absolute path: send 1.x (Express 5) refuses a file whose absolute path has ANY dot-folder in
+  // it (`.local/`, `.claude/worktrees/`) when no root is given, so every deep link and refresh was a 404 for an
+  // install running from such a folder. With a root only the part below it is checked. (Express 4 looked at the last segment.)
+  res.sendFile('index.html', { root: publicDir }); // fence-ok: the built web app, not a media file
 });
 
 // The error handler MUST be registered after every route above (Express only passes an error to handlers
