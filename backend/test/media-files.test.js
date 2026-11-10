@@ -389,6 +389,12 @@ describe('serveMediaFile: the same answers res.sendFile gave, from the open desc
     // range-parser 1.3.0; under Express 4 several of these were a 416 or a partial answer read out by parseInt.
     ['a position with trailing text (5x-9)', { headers: { Range: 'bytes=5x-9' } }],
     ['a double dash (--5)', { headers: { Range: 'bytes=--5' } }],
+    ['a read-out-of-text position (1-2abc: parseInt used to take 1-2)', { headers: { Range: 'bytes=1-2abc' } }],
+    ['a hex position (0x1-2)', { headers: { Range: 'bytes=0x1-2' } }],
+    ['a plus-signed start', { headers: { Range: 'bytes=+1-2' } }],
+    ['a fractional start', { headers: { Range: 'bytes=1.5-2' } }],
+    ['a leading empty list element (,1-2)', { headers: { Range: 'bytes=,1-2' } }],
+    ['a trailing empty list element (1-2,)', { headers: { Range: 'bytes=1-2,' } }],
     ['no dash at all (bytes=5)', { headers: { Range: 'bytes=5' } }],
     ['an empty range (bytes=-)', { headers: { Range: 'bytes=-' } }],
     ['one good range and one malformed range: the whole header is ignored', { headers: { Range: 'bytes=0-1,abc' } }],

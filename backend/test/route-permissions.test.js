@@ -251,6 +251,7 @@ const APP_REGISTRATIONS = [
   'use /live requireAuth whepOnlyGuard createProxyMiddleware()', //   SIGNED_IN, plus whepOnlyGuard
   'use /hls requireAuthQueryOrHeader createProxyMiddleware()', //      MEDIA: Safari's <video> cannot send a header
   'use express.json()',
+  'use defaultBody', //                                               no gate: Express 5 leaves req.body undefined, this restores Express 4's {}
   'use demoGuard',
   'use /api/auth authRoutes',
   'use /api/children childrenRoutes',
@@ -275,10 +276,12 @@ const APP_REGISTRATIONS = [
   'get /api/health healthHandler', //                                 PUBLIC: a liveness probe (+ server id and name, #937)
   'post /api/csp-report express.text() <handler>', //                 PUBLIC: browsers send CSP reports without credentials
   'use express.static()',
-  'get * <handler>', //                                               the SPA shell; /api/* falls through to a 404
+  'get /{*splat} <handler>', //                                       the SPA shell (Express 5 spelling of the old `*`); /api/* falls through to a 404
   'use errorHandler', //                                              not a gate: turns a thrown/rejected handler into JSON (#544); must stay LAST
 ];
-const APP_HANDED_TO = ['applyTrustProxy'];
+// listenOrFail(app, PORT, ...) only calls app.listen (lib/listenOrFail.js: Express 5 reports a bind failure through the callback);
+// it registers no route, which is what this pin exists to keep true of anything `app` is handed to.
+const APP_HANDED_TO = ['applyTrustProxy', 'listenOrFail'];
 
 const HOW_TO_UPDATE = 'If you changed a route or a gate ON PURPOSE, update ROUTE_GATES / APP_REGISTRATIONS in ' +
   'backend/test/route-permissions.test.js and say in the PR who gains or loses access. Do not regenerate the pin from the code.';
