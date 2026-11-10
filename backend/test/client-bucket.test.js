@@ -42,7 +42,7 @@ test('only exposed loopback uses a case-folded, trimmed peer identity', () => {
   assert.notEqual(key('127.0.0.1', 'a@example.com'), key('127.0.0.1', 'b@example.com'));
 });
 
-test('ten thousand identities occupy at most 64 numeric slots', () => {
+test('ten thousand identities occupy exactly the 64 numeric slots', () => {
   setLoopbackExposed(true);
   const slots = new Set();
   for (let i = 0; i < 10000; i++) {
@@ -50,7 +50,9 @@ test('ten thousand identities occupy at most 64 numeric slots', () => {
     assert.match(bucket, /^tunnel:(\d|[1-5]\d|6[0-3])$/);
     slots.add(bucket);
   }
-  assert.ok(slots.size <= 64);
+  // Exactly 64, not "at most": 10,000 hashes reach every slot, and a smaller modulus (32, 63) would otherwise pass
+  // an upper-bound check while quietly raising the collision rate between household members (Codex review of #1022).
+  assert.equal(slots.size, 64);
 });
 
 test('missing and invalid identities use the shared address key without throwing', () => {

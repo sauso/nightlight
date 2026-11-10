@@ -25863,7 +25863,7 @@
     "replace": "hash.readUInt32BE(0)",
     "expect": "killed",
     "tests": ["client-bucket.test.js"],
-    "namePattern": "ten thousand identities occupy"
+    "namePattern": "ten thousand identities occupy exactly"
   },
   {
     "label": "#961 tunnel identity case-sensitive",
