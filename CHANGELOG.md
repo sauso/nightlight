@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Remote Access now shows the address you opened, the trusted proxy setting, and a live setup checklist for HTTPS, video host DNS, Cloudflare proxy addresses, a this-device UDP test, and untrusted forwarded addresses. The checklist cannot inspect your router or prove a forward from home; DNS and proxy checks can be misled by cached answers or headers.
+
 ### Changed
 
 - #962 Settings → Remote Access now says so when a connection looks like it came through Tailscale (a best reading, not proof) and explains that the router port-forward test does not apply, and the Tailscale card confirms when you opened Nightlight on its own secure address. The `TRUST_PROXY` advice appears only when Nightlight sees a forwarded address it does not trust; older servers give a neutral Unknown message.

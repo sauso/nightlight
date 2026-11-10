@@ -9,7 +9,7 @@ import { resetIceServersCache } from '../src/lib/iceServers.js';
 
 const setup = {
   app_port: 4000, webrtc_udp_port: 8189, public_host_set: true,
-  public_hosts: [{ host: 'example.org', kind: 'name', addresses: ['203.0.113.7'], error: null }],
+  public_hosts: [{ host: 'example.org', kind: 'name', addresses: ['203.0.113.7'], error: null, behind_cloudflare: false }],
   advertised_hosts: ['203.0.113.7', '192.168.1.50'],
   stun: { enabled: true, servers: ['stun:stun.example.org'] }, trust_proxy: 'loopback',
   client: { network: 'remote' },
@@ -71,9 +71,12 @@ test('admin sees Tailscale first and the four own-domain cards when expanded', a
   expect(screen.getByText('Your own-domain setup is working and stays as it is.')).toBeInTheDocument();
   expect(screen.getByText('Use your own domain or port forward (advanced)').closest('details').open).toBe(false);
   await openAdvanced();
-  for (const title of ["Where you're connecting from", 'Your setup', 'Test Low latency video from this device', 'Before watching from outside']) {
+  const titles = ["Where you're connecting from", 'Your setup', 'Setup checklist', 'Test Low latency video from this device'];
+  for (const title of titles) {
     expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument();
   }
+  expect([...document.querySelectorAll('.remote-advanced > section h2')].map((heading) => heading.textContent)).toEqual(titles);
+  expect(screen.queryByRole('heading', { name: 'Before watching from outside' })).toBeNull();
   expect(screen.queryByText(/Viewers who arrive over Tailscale show as/)).toBeNull();
   expect(requests).toHaveLength(0);
 });
@@ -106,7 +109,7 @@ test.each([
   expect(section.querySelector('.status-badge')).toHaveTextContent(badge);
   expect(section).toHaveTextContent(sentence);
   if (via === 'proxy') expect(section.querySelector(`a[href*="trust_proxy"]`)).not.toBeNull();
-  else expect(document.body.textContent).not.toContain('TRUST_PROXY');
+  else expect(section.textContent).not.toContain('TRUST_PROXY');
 });
 
 test('#962 the ready Tailscale card confirms this device without opening advanced', async () => {
@@ -123,6 +126,35 @@ test('#962 an older server without via gives neutral unknown guidance', async ()
   const section = screen.getByRole('heading', { name: "Where you're connecting from" }).closest('section');
   expect(section).toHaveTextContent("Nightlight can't tell where you're connecting from.");
   expect(section.textContent).not.toContain('TRUST_PROXY');
+});
+
+test('connection address, trusted proxy value, docs link and checklist status words appear', async () => {
+  renderPage(); await openAdvanced();
+  const connection = screen.getByRole('heading', { name: "Where you're connecting from" }).closest('section');
+  expect(connection).toHaveTextContent(`You opened Nightlight at ${window.location.origin}`);
+  expect(connection.querySelector('.tailscale-address')).toHaveTextContent(window.location.origin);
+  const details = screen.getByRole('heading', { name: 'Your setup' }).closest('section');
+  expect(details).toHaveTextContent('Trusted proxies (TRUST_PROXY): loopback');
+  expect(details).toHaveTextContent('only a proxy running on this same server, the default');
+  expect(details.querySelector('a[href*="trust_proxy"]')).toHaveTextContent('docs');
+  const checklist = screen.getByRole('heading', { name: 'Setup checklist' }).closest('section');
+  expect([...checklist.querySelectorAll('li .status-badge')].map((badge) => badge.textContent)).toEqual(['Check', 'OK', 'OK', 'Not checked', 'Not checked']);
+});
+
+test('UDP checklist row changes after the this-device test', async () => {
+  renderPage(); await openAdvanced();
+  const checklist = screen.getByRole('heading', { name: 'Setup checklist' }).closest('section');
+  const udp = [...checklist.querySelectorAll('li')].find((item) => item.textContent.includes('UDP port forward'));
+  expect(udp.querySelector('.status-badge')).toHaveTextContent('Not checked');
+  await run();
+  await act(async () => peers[0].connect());
+  expect(udp.querySelector('.status-badge')).toHaveTextContent('OK');
+  expect(udp).toHaveTextContent('connected over UDP from an address Nightlight counts as outside your home');
+});
+
+test('Tailscale viewer receives no TRUST_PROXY instruction', async () => {
+  renderPage({ ...setup, client: { network: 'unknown', via: 'tailscale' } }); await openAdvanced();
+  expect(document.body.textContent).not.toMatch(/TRUST_PROXY (doesn't|needs|must|should)/);
 });
 
 test('setup shows unset PUBLIC_HOST without treating a home visit as an error, and STUN off', async () => {
@@ -142,7 +174,7 @@ test('setup shows IP literal, resolved name, DNS errors, addresses and STUN priv
   ] });
   expect(await screen.findByText('203.0.113.8 is an IP address, advertised as 203.0.113.8.')).toBeInTheDocument();
   for (const text of [/example.org resolves to 203/, /name not found/, /lookup timed out/, /lookup failed/, /203.0.113.7, 192.168.1.50/, /A STUN server can see/]) {
-    expect(screen.getByText(text)).toBeInTheDocument();
+    expect(screen.getAllByText(text).length).toBeGreaterThan(0);
   }
 });
 
@@ -208,7 +240,7 @@ test('#962 Tailscale failure keeps the local connection guidance', async () => {
   await run();
   await act(async () => peers[0].fail());
   expect(await screen.findByText("Couldn't connect. Low latency video isn't working from here (Compatibility mode still works).")).toBeInTheDocument();
-  expect(document.body.textContent).not.toContain('TRUST_PROXY');
+  expect(document.body.textContent).not.toMatch(/TRUST_PROXY (doesn't|needs|must|should)/);
 });
 
 test('#962 Tailscale timeout keeps the local connection guidance', async () => {
@@ -219,7 +251,7 @@ test('#962 Tailscale timeout keeps the local connection guidance', async () => {
   await act(async () => { fireEvent.click(button); await vi.advanceTimersByTimeAsync(1000); });
   await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
   expect(screen.getByText("Couldn't connect. Low latency video isn't working from here (Compatibility mode still works).")).toBeInTheDocument();
-  expect(document.body.textContent).not.toContain('TRUST_PROXY');
+  expect(document.body.textContent).not.toMatch(/TRUST_PROXY (doesn't|needs|must|should)/);
 });
 
 test('timeout ends the probe and gives the same remote guidance', async () => {
@@ -244,7 +276,7 @@ test.each([
   await openAdvanced();
   fireEvent.click(await screen.findByRole('button', { name: 'Test from this device' }));
   expect(await screen.findByText("This browser can't make a Low latency connection.")).toBeInTheDocument();
-  if (data.client.via === 'tailscale') expect(document.body.textContent).not.toContain('TRUST_PROXY');
+  if (data.client.via === 'tailscale') expect(document.body.textContent).not.toMatch(/TRUST_PROXY (doesn't|needs|must|should)/);
 });
 
 test('double click starts one probe and keeps the button busy', async () => {
