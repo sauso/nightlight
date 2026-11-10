@@ -208,7 +208,7 @@ together whenever the artwork changes.**
 
 | File | Resolution | Purpose | Referenced from |
 |---|---|---|---|
-| `favicon-32.png` | 32 × 32 | Browser tab | `index.html` |
+| `favicon-32.png` | 32 × 32, transparent rounded corners | Browser tab (a copy of the website's favicon; not generated, see below) | `index.html` |
 | `apple-touch-icon.png` | 180 × 180 | iOS home screen | `index.html` |
 | `icon-192.png` | 192 × 192 | App icon (home screen, install prompt); not used in the app screens any more | direct reference |
 | `icon-512.png` | 512 × 512 | High-DPI app icon (the Unraid template points at it) | direct reference |
@@ -218,8 +218,9 @@ together whenever the artwork changes.**
 
 Run `node frontend/scripts/make-icons.mjs` after replacing the 1024 × 1024
 `frontend/branding/logo-source.png`. The script uses Python Pillow
-(`python -m pip install Pillow`) and regenerates all seven icons together.
-The favicon crops closer for legibility at 32px. Maskable icons place the
+(`python -m pip install Pillow`) and regenerates six of the seven icons together.
+`favicon-32.png` is the exception (owner, 2026-11-10): it is a copy of the website's rounded `nightlight-website/assets/favicon.png`
+so the two match; re-copy it there when the logo changes. Maskable icons place the
 artwork within the central 80% on navy so launchers can crop the edges.
 Bump the `now-playing-512.png?v=` value in `useNowPlaying.js` after changing
 that image.

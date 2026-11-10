@@ -17,6 +17,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ### Changed
 
 - #962 Settings → Remote Access now says so when a connection looks like it came through Tailscale (a best reading, not proof) and explains that the router port-forward test does not apply, and the Tailscale card confirms when you opened Nightlight on its own secure address. The `TRUST_PROXY` advice appears only when Nightlight sees a forwarded address it does not trust; older servers give a neutral Unknown message.
+- The browser tab icon is now the website's rounded Nightlight icon (transparent rounded corners) instead of an opaque square.
 - The four cards under Settings → Remote Access → "Use your own domain or port forward (advanced)" now look like the Tailscale card and Settings → About: a bold 16px title over 14px text, instead of a small grey title over larger text.
 - #961 Sign-in limits for each account now use a person's Tailscale identity while the tunnel is attached and Tailscale supplies one. The tunnel still has a shared request limit. Tagged devices fall back to a shared account allowance, and two people can rarely share one of 64 identity buckets. A process on the server can forge an identity header, but the shared limit and separate account and MFA guess limits still apply.
 

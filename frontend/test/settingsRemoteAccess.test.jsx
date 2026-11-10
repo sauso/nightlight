@@ -131,7 +131,11 @@ test('#962 an older server without via gives neutral unknown guidance', async ()
 test('connection address, trusted proxy value, docs link and checklist status words appear', async () => {
   renderPage(); await openAdvanced();
   const connection = screen.getByRole('heading', { name: "Where you're connecting from" }).closest('section');
-  expect(connection).toHaveTextContent(`You opened Nightlight at ${window.location.origin}`);
+  expect(connection).toHaveTextContent("You opened Nightlight at:");
+  // The whole address sits on its own line under the label (owner 2026-11-10).
+  const address = connection.querySelector(".tailscale-address");
+  expect(address).toHaveTextContent(window.location.origin);
+  expect(address.previousElementSibling.tagName).toBe("BR");
   expect(connection.querySelector('.tailscale-address')).toHaveTextContent(window.location.origin);
   const details = screen.getByRole('heading', { name: 'Your setup' }).closest('section');
   expect(details).toHaveTextContent('Trusted proxies (TRUST_PROXY): loopback');
