@@ -135,9 +135,11 @@ While on 0.x: **minor** if `[Unreleased]` contains any `### Added`, else **patch
    ⚠️ **Merge duplicate type headings** while you are in there. A release batch is assembled from many
    PRs and each adds its own `### Added` without seeing the others. `check-changelog.mjs` gates it.
 2. Bump `version` in **both** `backend/package.json` and `frontend/package.json`.
-3. **Prune `planning/ROADMAP.md` in the same commit** — anything this release ships comes out of it.
-   This is the only checkpoint that catches drift, and skipping it is how two sections sat there
-   describing already-shipped features after 0.25.0.
+3. **Prune `planning/ROADMAP.md` in the same commit** — anything this release ships is **moved to
+   `planning/ROADMAP-archive.md`** under the same section number and sub-headings, leaving a one-line
+   stub in the roadmap that names the version (code comments cite `ROADMAP §x` as text, so a section is
+   moved, never deleted). This is the only checkpoint that catches drift, and skipping it is how two
+   sections sat there describing already-shipped features after 0.25.0.
 
 ### 2.3 Land it, then promote
 `release-x.y.z` → PR into `dev` → squash-merge. Then the `dev → main` PR.
@@ -227,4 +229,4 @@ not, so read the release's migration block before rolling back across one.
 - Fast-forward local `dev` in both repos.
 - Update memory: PROD version, what shipped, and any gate that caught something.
 - Report: version, the prod SHA, staging resynced, release URL, branches cleaned, which roadmap items
-  closed, **what the definition-of-done gate found**, and anything skipped.
+  closed and were moved to `ROADMAP-archive.md`, **what the definition-of-done gate found**, and anything skipped.
