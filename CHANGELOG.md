@@ -12,6 +12,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 ### Added
 
 - Nightlight now saves two more facts about each night: how many minutes the child stirred in the bed, and a small summary of when each wake-up was and the room's temperature range. They are kept so that a later sleep score can use them after the minute-by-minute data (kept 30 days) is gone. Nothing visible changes yet. Nights stored before this release do not have them. A camera with no bed zone drawn counts all the movement it sees as stirring. See [Two more facts are saved with each night](docs/sleep-tracking.md#two-more-facts-are-saved-with-each-night).
+- The arithmetic for a nightly sleep score is in place, with nothing visible yet: no screen or API shows a score in this release. It compares a night with the child's own recent nights (the last 14 within four weeks, at least 7 before anything is called usual), and for a child with no history yet it uses published night-sleep figures by age (Iglowstein et al., Pediatrics 2003). Those figures are parent-reported time in bed, so until the child has a usual of their own the night's whole span from falling asleep to waking is compared with them, not the minutes asleep; such a score is marked as an early estimate. Every curve is a starting value tuned on two cameras in one house. A new script, `scripts/sleep-score-evidence.mjs`, scores every stored night of a database copy for tuning.
 
 ### Changed
 
