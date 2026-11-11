@@ -108,8 +108,8 @@ wake is confirmed, what was corrected, and whether it came from the stored row. 
 is never guessed from today's settings.
 
 **One eligibility rule per metric.** `toScoringInput` also decides, per metric, whether the value is
-usable (for example: stir rate and longest stretch are not usable when a correction changed the
-span; settling is not usable when the UI would hide the in-bed time). The SAME function feeds both
+usable (for example: stir rate and longest stretch are not usable when a correction moved the
+span by more than 15 minutes; settling is not usable when the UI would hide the in-bed time). The SAME function feeds both
 the night being scored and every night that contributes to the baseline, so a figure rejected for
 scoring can never enter a baseline.
 
@@ -208,9 +208,11 @@ Rules:
   minutes the longest-stretch term is dropped, because a dropout resets it, and the breakdown says
   how many minutes were not observed.
 - **Corrected times.** Handled by the per-metric eligibility rule in section 1: settling follows the
-  UI's in-bed rule (mirrored from `inBed.js`); when a correction changed the span, the
-  longest-stretch term and restlessness are dropped and longest stretch is clamped to the asleep
-  total for display.
+  UI's in-bed rule (mirrored from `inBed.js`); when a correction moved the time asleep or the time
+  up by more than 15 minutes (owner decision 2026-11-12, #1041; before it, any change), the
+  longest-stretch term and restlessness are dropped. Longest stretch is clamped to the asleep
+  total for display on any span correction. A wake the parent gave in the review counts as
+  confirmed, also when it was left as the detector had it.
 - **Age** is the child's age on the night's date; a negative age is treated as no birthday. Fallback
   figures must be NIGHT sleep, because common recommendations (AASM, NSF) are per 24 hours including
   naps. Phase 1b transcribes night-sleep figures by age from a published source (candidate:

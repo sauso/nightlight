@@ -1,8 +1,9 @@
 // ★ THE SLEEP SCORE: the scoring maths (sleep score plan, phase 1b; planning/sleep-score-plan.md, Design 1 and 4).
 //
 // A night gets a 0-100 score from five components, each compared with the child's own recent nights where the
-// plan says so (lib/sleepBaseline.js) and with a fixed curve where it does not. Nothing here is stored and nothing
-// is shown yet: no route calls this file in this phase. The score is worked out ON READ from the night object an
+// plan says so (lib/sleepBaseline.js) and with a fixed curve where it does not. Nothing here is stored. The sleep
+// routes attach the result to every night they return (lib/sleepScoreAttach.js, phase 1c); no screen shows it yet.
+// The score is worked out ON READ from the night object an
 // endpoint is about to return, so it always agrees with the figures shown beside it, and a parent's correction or a
 // retuned curve applies to every night at once with no backfill.
 //
@@ -11,7 +12,7 @@
 //                          correction overlay) into ONE shape, and decides PER METRIC whether the figure may be used.
 //   scoreNight(...)        is pure arithmetic on that shape.
 // The baseline builds every earlier night through the SAME toScoringInput, so a figure this file refuses to score
-// (a longest stretch on a night whose times a parent changed, a settling time the UI hides) can never become part
+// (a longest stretch on a night whose times a parent moved by more than the tolerance, a settling time the UI hides) can never become part
 // of what "usual" means either. That is the whole reason eligibility lives here and not in the two callers.
 //
 // ⚠️ EVERY NUMBER IN SCORE_CONFIG IS A STARTING VALUE. The curves were tuned on two cameras in one house (see the
@@ -25,7 +26,10 @@ import { parseScoringContext, isEvidenceFinal } from './sleepAnalysis.js';
 
 // The formula's version, returned with every score so a client (and, later, a stored history) can tell two
 // formulas apart. Bump it with ANY change to SCORE_CONFIG or to the rules below.
-export const SCORE_VERSION = 1;
+//   1: the first formula (phase 1b, never returned by any route).
+//   2: a time correction drops restlessness and the longest-stretch term only when a time moved by more than
+//      `correction_span_tolerance_minutes` (was: any change); a wake the parent confirmed unchanged is confirmed.
+export const SCORE_VERSION = 2;
 
 // NIGHT sleep by age, for a child with no baseline yet. Transcribed from Table 1 ("Numeric Percentile Values"),
 // column "Nighttime Sleep Duration", sub-column "Mean", of:
@@ -94,6 +98,14 @@ export const SCORE_CONFIG = deepFreeze({
   // When a score is flagged low-confidence. 15 unwatched minutes is also where the longest-stretch term is dropped
   // (a camera dropout resets the stretch counter) and where a night stops counting towards the usual duration.
   low_confidence: { min_coverage: 0.8, max_unwatched_minutes: 15 },
+
+  // How far a parent may move the time asleep or the time up before the detector's longest stretch and stir count
+  // stop describing the night (toScoringInput, "HOW FAR THE SPAN MOVED"). At or under it both figures stay; over
+  // it they are dropped, from the score and from what "usual" is made of. Owner decision, 2026-11-12 (#1041):
+  // before it, a one-minute adjustment dropped them, so a parent who tidies the times most mornings would never
+  // get a restlessness score. 15 is a judgement, not a measurement: no data set it. It matches the 15 unwatched
+  // minutes above (about as much of a night as the score already tolerates not having measured).
+  correction_span_tolerance_minutes: 15,
 
   // Under this age continuity is judged against the child's own baseline only: night waking is ordinary in a young
   // baby and an absolute curve would mark every such night down. 12 months is the plan's line, a judgement, not a
@@ -242,19 +254,37 @@ export function toScoringInput(night, { context = null, nowMs = Date.now() } = {
   const onsetCorrected = corrected && (night.onset_at ?? null) !== (night.algo_onset_at ?? null);
   const wakeCorrected = corrected && (night.wake_at ?? null) !== (night.algo_wake_at ?? null);
   const spanCorrected = onsetCorrected || wakeCorrected;
+  // HOW FAR THE SPAN MOVED (owner decision 2026-11-12, #1041). The detector's longest stretch and stir count were
+  // measured over ITS span. A parent's small adjustment leaves them describing nearly the same night; a large one
+  // does not. So they are dropped only when a time moved by MORE than the tolerance (see SCORE_CONFIG).
+  // ⚠️ THE LARGER of the two moves, not their sum. Each time is its own judgement by the parent ("asleep a little
+  // later", "up a little earlier"), and the rule is meant to forgive a small adjustment to either; a sum would
+  // drop the figures for a parent who nudges both ends by eight minutes, which is exactly the habit the decision
+  // is about. Consequence, accepted: both ends moved by the full tolerance leaves up to twice that many minutes
+  // at the edges that the figures were or were not measured over.
+  // A time supplied where the detector had none (or one that cannot be read) has no distance: it counts as moved.
+  const movedMinutes = (now, algo) => {
+    const a = utcMs(now);
+    const b = utcMs(algo);
+    return Number.isFinite(a) && Number.isFinite(b) ? Math.abs(a - b) / 60000 : Infinity;
+  };
+  const spanMovedMinutes = Math.max(
+    onsetCorrected ? movedMinutes(night.onset_at, night.algo_onset_at) : 0,
+    wakeCorrected ? movedMinutes(night.wake_at, night.algo_wake_at) : 0,
+  );
+  const spanMoved = spanMovedMinutes > SCORE_CONFIG.correction_span_tolerance_minutes;
   // asScoredFromEmpty (sleepReviews.js): the detector saw an empty bed and a parent typed two times. Its wakes (0)
   // and longest stretch (the whole span) were never measured.
   const promotedFromEmpty = night.status === 'ok' && night.algo_status === 'empty';
 
   // Is the wake a real, confirmed one? No wake at all means "still asleep when the window closed", and a skipped
   // early exit (#700) means the detector doubted its own answer: either way the night's length is not settled.
-  // A wake the parent CHANGED is confirmed by them, whatever the detector noted.
-  // ⚠️ KNOWN LIMIT (both reviews of PR #1040): a parent who confirms the detector's wake at the SAME time is not
-  // seen here. The overlay leaves no trace of "a wake was given" when the time did not move (applyCorrection keeps
-  // such a night byte-for-byte as stored), so that night stays `wake_unconfirmed` if the detector doubted it. Fixing
-  // it needs a new key from applyCorrection; filed with the phase that wires the routes.
+  // A wake the parent GAVE is confirmed by them, whatever the detector noted, and whether or not it moved: the
+  // overlay says so with `wake_given` (applyCorrection; #1041). Not `corrected`, which is also true for a review
+  // that only gave the put-down or the time asleep, and not "the wake differs from the detector's", which misses
+  // a parent who looked at the detector's wake and saved it as it was (the edit card's ordinary save).
   const detectorDoubt = fromStored ? night.wake_unconfirmed_at != null : night.wake_unconfirmed != null;
-  const wakeConfirmed = night.wake_at != null && (wakeCorrected || !detectorDoubt);
+  const wakeConfirmed = night.wake_at != null && (night.wake_given === true || !detectorDoubt);
 
   // FINAL OR PROVISIONAL (plan, Design 4). A stored row is judged on its OWN computed_at, never the clock: between
   // the 3-hour horizon and the job's next tick, a row last written before the horizon is still owed a refresh
@@ -299,9 +329,9 @@ export function toScoringInput(night, { context = null, nowMs = Date.now() } = {
   if (asleepMetric.usable && !wakeConfirmed) usualAsleep = metric(null, 'wake_unconfirmed');
   else if (asleepMetric.usable && unwatched) usualAsleep = metric(null, 'unwatched');
 
-  // A changed span leaves the detector's longest stretch and stir count describing a different span; an unwatched
-  // gap resets the stretch counter mid-sleep.
-  const spanReason = spanCorrected ? 'span_corrected' : null;
+  // A span moved past the tolerance leaves the detector's longest stretch and stir count describing a different
+  // span (HOW FAR THE SPAN MOVED, above); an unwatched gap resets the stretch counter mid-sleep.
+  const spanReason = spanMoved ? 'span_corrected' : null;
   const longestReason = spanReason ?? (unwatched ? 'unwatched' : null);
   const tz = ctx ? ctx.tz : null;
 
@@ -333,11 +363,13 @@ export function toScoringInput(night, { context = null, nowMs = Date.now() } = {
     coverage_minutes: coverage,
     coverage_frac: windowMinutes && coverage != null ? coverage / windowMinutes : null,
     corrected,
-    span_corrected: spanCorrected,
+    span_corrected: spanCorrected, // ANY change to the time asleep or the time up
+    span_moved_minutes: spanCorrected ? spanMovedMinutes : 0, // the larger of the two moves; Infinity = no detector time
     promoted_from_empty: promotedFromEmpty,
     wake_confirmed: wakeConfirmed,
     unknown_minutes: unknown,
     // For display only: after a span correction the detector's stretch can exceed the re-derived total (#355).
+    // Clamped on ANY span correction, however small: a stretch longer than the total is wrong at one minute too.
     longest_stretch_display: longest != null && asleep != null && spanCorrected ? Math.min(longest, asleep) : longest,
     metrics,
   };

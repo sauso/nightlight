@@ -1,4 +1,5 @@
-// The sleep score's maths (src/lib/sleepScore.js; sleep score plan, phase 1b). Nothing calls it yet.
+// The sleep score's maths (src/lib/sleepScore.js; sleep score plan, phase 1b). The routes that return it are
+// tested in sleep-score-routes.test.js.
 //
 // EVERY TEST HERE HAS A PRECONDITION AND A LITERAL EXPECTED VALUE, worked out by hand from the curve anchors in
 // SCORE_CONFIG, and each one either sits on a boundary or separates two implementations that are both plausible:
@@ -14,6 +15,10 @@
 //   low confidence at coverage < 80%, > 15 unwatched, no real wake .. "low confidence ..."
 //   duration never credits unwatched minutes ........................ "more than 15 unwatched minutes ..."
 //   a changed span drops longest stretch and restlessness ........... "a corrected span ..."
+//   ...only when a time moved MORE than 15 minutes (15 vs 16; the
+//     larger move, not the sum; no detector time = moved) ........... "a time moved by 15 minutes ...", "a time given ..."
+//   a wake the parent gave (`wake_given`) is confirmed, moved or not;
+//     `corrected` alone is not ...................................... "#1041 ..."
 //   settling follows frontend/src/lib/inBed.js ...................... "settling mirrors ..."
 //   under 12 months / unknown age: continuity against usual only .... "continuity under 12 months ..."
 //   restlessness is the excess over max(usual, floor) ............... "restlessness ..."
@@ -105,7 +110,8 @@ describe('the curves and the whole score', () => {
     ]);
     assert.equal(r.score, 93); // (3500 + 2310 + 1500 + 1500 + 500) / 100 = 93.1
     assert.equal(r.band, 'great');
-    assert.equal(r.version, SCORE_VERSION);
+    // By value: 2 since the 15-minute correction rule (#1041). A formula change must change this line too.
+    assert.deepEqual([r.version, SCORE_VERSION], [2, 2]);
     assert.equal(r.capped_by, null);
     assert.deepEqual([comp(r, 'duration').value, comp(r, 'duration').usual], [600, 600]);
   });
@@ -299,12 +305,37 @@ describe('provisional and low confidence', () => {
     // Only the wake clock is in doubt: the time they fell asleep still counts towards consistency.
     assert.deepEqual(comp(score(stored({ wake_at: null })), 'consistency').terms.map((t) => [t.key, t.available]), [['onset', true], ['wake', false]]);
     assert.deepEqual(score(stored({ wake_unconfirmed_at: '2026-03-11 04:10:00' })).low_confidence_reasons, ['wake_unconfirmed']);
-    // A wake the parent gave is confirmed by them, whatever the detector noted.
+    // A wake the parent gave is confirmed by them, whatever the detector noted. `wake_given` is the overlay's word
+    // for it (applyCorrection, #1041); this fixture was written before the key and said it by the times differing.
     const parentWake = stored({
-      wake_unconfirmed_at: '2026-03-11 04:10:00', corrected: true, wake_at: '2026-03-11 06:40:00',
+      wake_unconfirmed_at: '2026-03-11 04:10:00', corrected: true, wake_given: true, wake_at: '2026-03-11 06:40:00',
       algo_wake_at: '2026-03-11 06:30:00', algo_onset_at: '2026-03-10 19:30:00', algo_in_bed_at: '2026-03-10 19:10:00',
     });
     assert.equal(score(parentWake).low_confidence, false);
+  });
+
+  test('#1041: a wake the parent confirmed at the SAME time is confirmed; a correction that gave no wake is not', () => {
+    // The detector doubted its 06:30 wake (it skipped an exit at 04:10). Every time below equals the detector's.
+    const doubted = {
+      wake_unconfirmed_at: '2026-03-11 04:10:00', corrected: true,
+      algo_onset_at: '2026-03-10 19:30:00', algo_wake_at: '2026-03-11 06:30:00', algo_in_bed_at: '2026-03-10 19:10:00',
+    };
+    const confirmed = toScoringInput(stored({ ...doubted, wake_given: true }), { nowMs: NOW });
+    assert.equal(confirmed.wake_confirmed, true);
+    assert.deepEqual([confirmed.metrics.usual_asleep.usable, confirmed.metrics.wake_clock.value], [true, 1110]); // 06:30
+    assert.deepEqual(score(stored({ ...doubted, wake_given: true })).low_confidence_reasons, []);
+    // Corrected, but only the put-down was given: the wake is still the detector's doubted one.
+    const inBedOnly = toScoringInput(stored({ ...doubted, in_bed_at: '2026-03-10 19:05:00', in_bed_corrected: true }), { nowMs: NOW });
+    assert.equal(inBedOnly.wake_confirmed, false);
+    assert.deepEqual([inBedOnly.metrics.usual_asleep.reason, inBedOnly.metrics.wake_clock.reason], ['wake_unconfirmed', 'wake_unconfirmed']);
+    // A fresh compute says the doubt with `wake_unconfirmed`: the same answer both ways.
+    const fresh = (over) => {
+      const n = { ...stored({ ...doubted, ...over }), in_progress: false, analysis_camera_id: 'cam-a', wake_unconfirmed: '2026-03-11 04:10:00' };
+      delete n.scoring_context;
+      delete n.wake_unconfirmed_at;
+      return toScoringInput(n, { context: CONTEXT, nowMs: NOW }).wake_confirmed;
+    };
+    assert.deepEqual([fresh({ wake_given: true }), fresh({})], [true, false]);
   });
 });
 
@@ -325,6 +356,48 @@ describe('corrections and the put-down', () => {
     // An in-bed-only correction changed no sleep time: both stay.
     const inBedOnly = score(stored({ ...ALGO, in_bed_at: '2026-03-10 19:05:00', in_bed_corrected: true }));
     assert.deepEqual([term(inBedOnly, 'longest_share').available, comp(inBedOnly, 'restlessness').available], [true, true]);
+  });
+
+  test('a time moved by 15 minutes keeps the longest stretch and restlessness; 16 minutes drops both (onset, and wake)', () => {
+    // [longest-stretch term available, restlessness available, minutes the span moved]
+    const kept = (over) => {
+      const night = stored({ ...ALGO, ...over });
+      const r = score(night);
+      return [term(r, 'longest_share').available, comp(r, 'restlessness').available, toScoringInput(night, { nowMs: NOW }).span_moved_minutes];
+    };
+    // The detector's times are 19:30 and 06:30. Later and earlier, at each end.
+    assert.deepEqual(kept({ onset_at: '2026-03-10 19:45:00' }), [true, true, 15]);
+    assert.deepEqual(kept({ onset_at: '2026-03-10 19:46:00' }), [false, false, 16]);
+    assert.deepEqual(kept({ onset_at: '2026-03-10 19:15:00' }), [true, true, 15]);
+    assert.deepEqual(kept({ onset_at: '2026-03-10 19:14:00' }), [false, false, 16]);
+    assert.deepEqual(kept({ wake_at: '2026-03-11 06:15:00' }), [true, true, 15]);
+    assert.deepEqual(kept({ wake_at: '2026-03-11 06:14:00' }), [false, false, 16]);
+    assert.deepEqual(kept({ wake_at: '2026-03-11 06:46:00' }), [false, false, 16]);
+    // The LARGER of the two moves, not their sum: 10 and 10 is 10 (a sum would be 20 and drop them).
+    assert.deepEqual(kept({ onset_at: '2026-03-10 19:40:00', wake_at: '2026-03-11 06:20:00' }), [true, true, 10]);
+    assert.deepEqual(kept({ onset_at: '2026-03-10 19:40:00', wake_at: '2026-03-11 06:14:00' }), [false, false, 16]);
+    // The reason given is unchanged, and the kept figures are scored as on an uncorrected night: 20 stir minutes
+    // in 10 hours is 2 an hour, no excess over the floor.
+    const small = score(stored({ ...ALGO, wake_at: '2026-03-11 06:20:00' }));
+    assert.deepEqual([comp(small, 'restlessness').score, comp(small, 'restlessness').value], [100, 2]);
+    assert.equal(comp(score(stored({ ...ALGO, wake_at: '2026-03-11 06:14:00' })), 'restlessness').reason, 'span_corrected');
+  });
+
+  test('a time given where the detector had none counts as moved, however the night reads', () => {
+    // The detector found no wake (still "asleep" at the window's end); the parent gave 06:30.
+    const night = stored({ ...ALGO, algo_wake_at: null, wake_given: true });
+    const input = toScoringInput(night, { nowMs: NOW });
+    assert.deepEqual([input.span_corrected, input.span_moved_minutes], [true, Infinity]);
+    assert.deepEqual([input.metrics.stir_rate.reason, input.metrics.longest_share.reason], ['span_corrected', 'span_corrected']);
+  });
+
+  test('the stretch shown is clamped to the total on ANY span correction, also one small enough to keep the term', () => {
+    // Wake moved 10 minutes earlier; the re-derived total (here 280) is under the detector's 300-minute stretch.
+    const night = stored({ ...ALGO, wake_at: '2026-03-11 06:20:00', asleep_minutes: 280, longest_stretch_minutes: 300 });
+    const input = toScoringInput(night, { nowMs: NOW });
+    assert.deepEqual([input.longest_stretch_display, input.metrics.longest_stretch.value], [280, 300]);
+    // No span correction: shown as measured.
+    assert.equal(toScoringInput(stored({ asleep_minutes: 280, longest_stretch_minutes: 300 }), { nowMs: NOW }).longest_stretch_display, 300);
   });
 
   test('settling mirrors frontend/src/lib/inBed.js: hidden beside a corrected onset unless the parent gave the put-down too', () => {

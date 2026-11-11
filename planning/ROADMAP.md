@@ -224,10 +224,10 @@ claim. Every weight and curve is a starting value tuned on two cameras in one ho
 
 | # | Phase | Review tier | Status |
 |---|---|---|---|
-| 0 | Documents: this entry, the plan, the roadmap archive | T0 | `IN PROGRESS` |
-| 1a | Save the raw facts (`stir_minutes`, `summary_facts`). Ships first and alone: raw samples are deleted after 30 days, so every night stored without it loses restlessness for good | T2 | `NEXT` |
-| 1b | Scoring maths: baseline, score, age table with citation, evidence script | T2 | `NEXT` |
-| 1c | API: attach `score` on read; `docs/sleep-tracking.md` | T1 | `NEXT` |
+| 0 | Documents: this entry, the plan, the roadmap archive | T0 | `DONE` on `dev` (#1038) |
+| 1a | Save the raw facts (`stir_minutes`, `summary_facts`). Ships first and alone: raw samples are deleted after 30 days, so every night stored without it loses restlessness for good | T2 | `DONE` on `dev` (#1039) |
+| 1b | Scoring maths: baseline, score, age table with citation, evidence script | T2 | `DONE` on `dev` (#1040) |
+| 1c | API: attach `score` on read; `docs/sleep-tracking.md`. Also the wake half of #1041 and the 15-minute correction rule (owner decision 2026-11-12) | T1 | `IN PROGRESS` (this pull request) |
 | 2 | Score UI: ring on the card and detail page, breakdown sheet, per-child switch | T2 | `NEXT` |
 | 3 | Night summary: selection on the server, phrase library in the browser | T1 | `NEXT` |
 | 4 | Live night: "so far" summary, current state | T2 | `HELD` until the score has been used on staging |

@@ -167,7 +167,9 @@ test('★ the put-down night: "in bed" 18:49 lands on in_bed_at ONLY — asleep 
   const shown = (await get('/sleep?nights=60')).body.nights.find((n) => n.night_date === DATE);
   const OVERLAY = ['corrected', 'algo_onset_at', 'algo_wake_at', 'algo_in_bed_at', 'in_bed_corrected'];
   const names = nightsCols().map((c) => c.name);
-  assert.deepEqual(Object.keys(shown).sort(), [...names, ...OVERLAY].sort(), 'the row keeps its columns and gains only the overlay fields');
+  // `score` is the route's, not the overlay's (sleep score plan phase 1c: every night a sleep route returns gains
+  // it; sleep-score-routes.test.js). No `wake_given` here: the parent gave no wake (#1041, pinned just below).
+  assert.deepEqual(Object.keys(shown).sort(), [...names, ...OVERLAY, 'score'].sort(), 'the row keeps its columns and gains only the overlay fields and the score');
   for (const c of names) {
     if (c === 'in_bed_at') continue;
     assert.deepEqual(shown[c], row[c], `${c} must be exactly what the detector stored — only "in bed" was corrected`);
@@ -272,6 +274,23 @@ test('a time-only correction carries no in_bed_corrected key — it is present o
   assert.equal('in_bed_corrected' in out, false);
   assert.equal(out.in_bed_at, sql(at(19, 1)), "the detector's put-down, untouched");
   assert.equal(out.algo_in_bed_at, sql(at(19, 1)));
+});
+
+test('#1041: `wake_given` is on the overlay exactly when the review carries a wake time, moved or not, and moves nothing else', () => {
+  const row = plantNight(finishedNight({ onset_at: sql(at(19, 5)), wake_at: sql(at(6, 30, 1)), in_bed_at: sql(at(19, 1)), asleep_minutes: 500 }));
+  // The wake saved exactly as the detector had it (the edit card's ordinary save): the one trace is the new key.
+  saveNightReview(CHILD, DATE, { trueWakeAt: row.wake_at });
+  const same = applyCorrection(CHILD, storedRow());
+  assert.equal(same.wake_given, true);
+  const OVERLAY = { corrected: true, algo_onset_at: row.onset_at, algo_wake_at: row.wake_at, algo_in_bed_at: row.in_bed_at, wake_given: true };
+  assert.deepEqual(same, { ...row, ...OVERLAY }, 'every stored column as stored; only the overlay keys added');
+  // A moved wake has it too.
+  saveNightReview(CHILD, DATE, { trueWakeAt: sql(at(6, 10, 1)) });
+  assert.equal(applyCorrection(CHILD, storedRow()).wake_given, true);
+  // No wake in the review (the asleep time and the put-down only): the key is absent, not false.
+  saveNightReview(CHILD, DATE, { trueWakeAt: null, trueOnsetAt: sql(at(19, 13)), trueInBedAt: sql(at(18, 49)) });
+  const noWake = applyCorrection(CHILD, storedRow());
+  assert.deepEqual([noWake.corrected, 'wake_given' in noWake], [true, false]);
 });
 
 // --- "in bed" must not be after "asleep", judged on the MERGED review (plan review R2) --------------------

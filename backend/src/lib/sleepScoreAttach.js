@@ -1,0 +1,97 @@
+// ★ THE SLEEP SCORE ON THE API (sleep score plan, phase 1c; planning/sleep-score-plan.md, Design 1 and 6).
+//
+// The one place the sleep routes (routes/children.js: /sleep/live, /sleep?nights=N, /sleep/:date) turn a night they
+// are about to return into that night plus a `score` key. The maths is sleepScore.js and the "usual" is
+// sleepBaseline.js; this file is only the glue, kept out of the route file so the three routes cannot each grow
+// their own copy of it.
+//
+// THE RULE: the score is worked out from the EXACT night object the endpoint returns, after a parent's correction
+// has been laid over it (or without it, where the endpoint itself returns the night without it). So the number
+// always agrees with the figures beside it, and nothing is stored: a correction, a retuned curve or a new night in
+// the baseline shows on the next read.
+//
+// ADDITIVE ONLY. A page open in a browser from before this existed is a deployed client: the night keeps every key
+// it had, with the same value, and gains `score` (and, in one case below, `score_source`).
+//
+// What `score` can be:
+//   - scoreNight's result: { score, band, version, provisional, low_confidence, capped_by, components, ... };
+//   - its no-score form: { score: null, reason, version } (`in_progress`, `not_ok`, `promoted_from_empty`,
+//     `no_sleep_measured`, `no_duration_reference`, `under_12_months_no_baseline`);
+//   - null, when scoring itself failed (see NEVER ALLOWED TO BREAK A SLEEP ROUTE).
+//
+// NOT here, on purpose: the per-child "Show sleep score" switch (phase 2) and the night summary (phase 3).
+
+import { logger } from './logger.js';
+import { sleepBaseline } from './sleepBaseline.js';
+import { scoreNight, toScoringInput, ageMonthsOn } from './sleepScore.js';
+
+// Test seam ONLY (sleep-score-routes.test.js), like failNextSensorShadowPassForTest in sleepAnalysis.js: makes the
+// next score throw, so a test can prove a failing score leaves the route's answer alone. A real failure in there
+// cannot be provoked from outside: every input the routes can hand over is one the maths accepts.
+let failNext = false;
+export function failNextScoreForTest() {
+  failNext = true;
+}
+
+// At most one log line an hour for a failing score. The child's card asks /sleep/live again and again, and the
+// list scores up to 60 nights in one request, so a fault that hits every night would otherwise fill the log.
+const LOG_EVERY_MS = 60 * 60 * 1000;
+let lastLoggedMs = -Infinity;
+export function resetScoreLogForTest() {
+  lastLoggedMs = -Infinity;
+}
+
+// The score for one night object. `context` is toScoringInput's option: for a FRESH compute, the scoring context
+// that compute actually ran with (the caller knows; it is never guessed here). A stored row carries its own.
+function scoreOf(child, night, { context, nowMs }) {
+  if (failNext) {
+    failNext = false;
+    throw new Error('test: the score was made to fail');
+  }
+  const input = toScoringInput(night, { context, nowMs });
+  // A night in progress or not `ok` has no score whatever its history (scoreNight's first two checks, before it
+  // reads the baseline), so the baseline's database read is skipped for it. That is most reads of /sleep/live
+  // through the evening, which the card repeats.
+  if (!input || input.in_progress || input.status !== 'ok') return scoreNight(input, null, null);
+  // The baseline is handed the SAME normalised input, so the night being scored and its "usual" are matched on
+  // one context (camera and window) and cannot disagree about which it is.
+  const baseline = sleepBaseline(child.id, input, { nowMs });
+  return scoreNight(input, baseline, ageMonthsOn(child.birthday, input.night_date));
+}
+
+// `child`: { id, birthday } (the birthday may be null: then there is no age figure, see scoreNight).
+// `night`: the night object the endpoint is about to return, or null (returned as it is).
+// `context`: see scoreOf. Ignored for a stored row.
+// `storedNight`: OLD NIGHTS ON THE DETAIL PAGE (plan, Design 1). A function returning the night's SAVED row as the
+//   endpoint would show it (with the correction overlay, or without for a raw read), or null. It is called only
+//   when the fresh night came back `no_data`: the raw samples are kept 30 days, so an older night can no longer be
+//   worked out, while its saved row still holds the figures the child's card shows. When that row is `ok`, the
+//   score is the SAVED night's and the answer says so with `score_source: 'stored'`, so a page can explain that
+//   the timeline is no longer available. Every other key is the fresh night's, unchanged: the saved figures are
+//   NOT copied over it (a client that wants them reads the list or `?stored=1`).
+//   ⚠️ Any `no_data`, not only an aged-out one: a night whose camera has since been turned off or deleted reads
+//   `no_data` the same way from here, and the saved row is the best answer for it too.
+// `nowMs`: the clock, one reading for the night and its baseline.
+//
+// ⚠️ NEVER ALLOWED TO BREAK A SLEEP ROUTE. The score is an extra on an answer that was already complete. Any error
+// in it is caught, the night is returned with `score: null`, and one fixed sentence is logged: never the error's
+// own text, which can carry a child's id (the same rule as the sensor shadow in sleepAnalysis.js).
+export function attachScore(child, night, { context = null, storedNight = null, nowMs = Date.now() } = {}) {
+  if (!night || typeof night !== 'object') return night;
+  try {
+    if (night.status === 'no_data' && typeof storedNight === 'function') {
+      const saved = storedNight();
+      if (saved && saved.status === 'ok') {
+        return { ...night, score: scoreOf(child, saved, { context: null, nowMs }), score_source: 'stored' };
+      }
+    }
+    return { ...night, score: scoreOf(child, night, { context, nowMs }) };
+  } catch {
+    const now = Date.now();
+    if (now - lastLoggedMs >= LOG_EVERY_MS) {
+      lastLoggedMs = now;
+      logger.warn('[sleep] sleep score skipped: scoring a night failed');
+    }
+    return { ...night, score: null };
+  }
+}

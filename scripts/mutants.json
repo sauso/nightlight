@@ -16259,8 +16259,8 @@
   {
     "label": "sleep/live #683: the fresh last night has no correction laid over it",
     "file": "backend/src/routes/children.js",
-    "find": "night: applyCorrection(req.params.id, computeNight(req.params.id, last)) });",
-    "replace": "night: computeNight(req.params.id, last) });",
+    "find": "const fresh = applyCorrection(req.params.id, computeNight(req.params.id, last));",
+    "replace": "const fresh = computeNight(req.params.id, last);",
     "expect": "killed",
     "tests": [
       "sleep-live-last-night.test.js"
@@ -16270,8 +16270,8 @@
   {
     "label": "sleep/live #683: the fresh last night is STORED by a read (bypasses the job's lock and downgrade guards)",
     "file": "backend/src/routes/children.js",
-    "find": "night: applyCorrection(req.params.id, computeNight(req.params.id, last)) });",
-    "replace": "night: applyCorrection(req.params.id, computeAndStoreNight(req.params.id, last)) });",
+    "find": "const fresh = applyCorrection(req.params.id, computeNight(req.params.id, last));",
+    "replace": "const fresh = applyCorrection(req.params.id, computeAndStoreNight(req.params.id, last));",
     "expect": "killed",
     "tests": [
       "sleep-live-last-night.test.js"

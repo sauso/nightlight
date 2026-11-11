@@ -370,7 +370,9 @@ test('the stored-night endpoints carry scoring_context as one additive string ke
 
   const savedRes = await call(`${server.url}/api/children/${CHILD}/sleep/${DATE}?stored=1`, { token: adminToken });
   assert.equal(savedRes.status, 200);
-  const saved = savedRes.body.night;
+  // `score` (sleep score plan phase 1c) is added by the route to every night it returns, beside the row's own
+  // columns: set aside here, and tested in sleep-score-routes.test.js.
+  const { score: savedScore, ...saved } = savedRes.body.night;
   assert.equal(typeof saved.scoring_context, 'string');
   assert.deepEqual(Object.keys(saved).sort(), [...columns].sort(), '?stored=1 returns the raw row, one key per column');
   assert.deepEqual(saved, row, 'and every value as stored');
@@ -378,6 +380,8 @@ test('the stored-night endpoints carry scoring_context as one additive string ke
   const list = (await call(`${server.url}/api/children/${CHILD}/sleep?nights=14`, { token: adminToken })).body.nights;
   assert.equal(list.length, 1);
   assert.equal(typeof list[0].scoring_context, 'string');
-  assert.deepEqual(list[0], row, 'GET /sleep (getStoredNights) gains the key and changes nothing else');
+  const { score: listScore, ...listed } = list[0];
+  assert.deepEqual(listScore, savedScore, 'the same row, so the same score');
+  assert.deepEqual(listed, row, 'GET /sleep (getStoredNights) gains the key and changes nothing else');
   assert.deepEqual(getStoredNights(CHILD)[0], row);
 });
