@@ -171,7 +171,7 @@ or `{ score: null, reason }`.
 
 | Component | Weight | Measured from | Reference |
 |---|---|---|---|
-| Duration | 35 | `asleep_minutes` | Baseline median when ready; before that, a night-sleep figure for the child's age |
+| Duration | 35 | `asleep_minutes`; before a baseline exists, the span from falling asleep to waking | Baseline median when ready; before that, a night-sleep figure for the child's age (a time in bed, hence the span: owner decision 2026-11-12) |
 | Continuity | 30 | efficiency (asleep / (asleep + awake)), `wake_count`, longest stretch as a share of the span | Absolute curves from 12 months; under 12 months, the child's own baseline only |
 | Settling | 15 | `onset_at - in_bed_at` | Absolute curve |
 | Restlessness | 15 | `stir_minutes` per hour asleep | Excess over max(child's usual, a floor); baseline only |
@@ -183,7 +183,8 @@ Rules:
   above target, 50 at 90 minutes under, 0 at 4 hours under). No steps. All anchors, weights and band
   edges sit in one exported config object with a `SCORE_VERSION`.
 - **Weakest-link cap.** The final score cannot exceed the continuity score plus 40, nor the
-  restlessness score plus 40 when available. Without this, a night with six wake-ups and two hours
+  restlessness score plus 40 when available, nor (owner decision 2026-11-12, after a 20-minute
+  night scored "Fair") the duration score plus 40. Without this, a night with six wake-ups and two hours
   awake still reads "Good", and constant stirring still reads "Great". `capped_by` names the
   component so the breakdown can say so.
 - **Unavailable components are dropped and the rest rescaled.** Known limit, stated in the docs: a
@@ -201,8 +202,8 @@ Rules:
   compute is final when it runs after that point. A corrected (locked) night is final. Otherwise
   `provisional` is true and the UI says the score may still change.
 - **Low confidence** when window coverage is under 80%, `unknown_minutes` exceeds 15, or the wake is
-  unconfirmed. Duration is ALWAYS scored on measured `asleep_minutes`, the same quantity the
-  baseline uses; unwatched minutes are never credited as sleep (crediting them above a threshold
+  unconfirmed. Against the baseline, duration is ALWAYS scored on measured `asleep_minutes`, the
+  same quantity the baseline uses (against the age figure it is the whole span, see the table); unwatched minutes are never credited as sleep (crediting them above a threshold
   would make losing one more minute of evidence raise the score). With more than 15 unwatched
   minutes the longest-stretch term is dropped, because a dropout resets it, and the breakdown says
   how many minutes were not observed.

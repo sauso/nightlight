@@ -39,9 +39,13 @@ export const SCORE_VERSION = 1;
 // sleep duration was calculated from bedtime and wake time". So these are parent-reported USUAL TIME IN BED at
 // night, for 493 Swiss children born 1974-1993. `asleep_minutes` is one night's measured minutes asleep: it leaves
 // out the time taken to fall asleep and every minute counted awake. A normal night therefore reads BELOW these
-// figures, by more the more wake time the camera sees, and a duration score against them is harsh. Known limit,
-// accepted because the figure is used only until the child has seven usable nights, and a score made with it is
-// marked `early_estimate` and carries no band word. The docs must say so with the feature.
+// figures, by more the more wake time the camera sees. So the age figure is NEVER compared with `asleep_minutes`:
+// while it is the reference (an early estimate), duration is the night's whole span from falling asleep to waking
+// (`span_minutes`), the nearest thing a camera has to "bedtime to wake time" (owner decision, 2026-11-12, after the
+// first evidence run gave ordinary nights a duration score of 0 to 25 against it). Still not the same quantity (the
+// span leaves out the time taken to fall asleep, and one night is not a "usual"), which is why a score made with it
+// is marked `early_estimate` and carries no band word. Once the child's own usual is ready, duration is measured
+// minutes asleep against usual minutes asleep, and this table is not read. The docs must say so with the feature.
 export const AGE_NIGHT_SLEEP_HOURS = Object.freeze([
   [1, 11.7], [1.5, 11.6], [2, 11.5], [3, 11.4], [4, 11.2], [5, 11.1], [6, 10.9], [7, 10.7], [8, 10.4], [9, 10.2],
   [10, 9.9], [11, 9.6], [12, 9.3], [13, 9.0], [14, 8.6], [15, 8.3], [16, 7.9],
@@ -70,8 +74,10 @@ export const SCORE_CONFIG = deepFreeze({
   // component is unavailable it is dropped and the others keep their proportions.
   weights: { duration: 35, continuity: 30, settling: 15, restlessness: 15, consistency: 5 },
 
-  // Weakest-link cap (plan, Design 4): the final score may not exceed continuity + this, nor restlessness + this.
-  // Without it a night with long stretches awake still reads "Good" on its duration and settling alone.
+  // Weakest-link cap (plan, Design 4): the final score may not exceed continuity + this, nor restlessness + this,
+  // nor duration + this. Without it a night with long stretches awake still reads "Good" on its duration and
+  // settling alone. Duration joined the list on 2026-11-12 (owner decision): the first evidence run had `ok` nights
+  // of 16 to 30 minutes scoring 40 to 55, because half an hour of unbroken sleep is perfectly continuous.
   cap_margin: 40,
 
   // Band edges, highest first (owner decision). Below the last edge there is no band word.
@@ -242,20 +248,26 @@ export function toScoringInput(night, { context = null, nowMs = Date.now() } = {
 
   // Is the wake a real, confirmed one? No wake at all means "still asleep when the window closed", and a skipped
   // early exit (#700) means the detector doubted its own answer: either way the night's length is not settled.
-  // A wake the parent gave is confirmed by them, whatever the detector noted.
+  // A wake the parent CHANGED is confirmed by them, whatever the detector noted.
+  // ⚠️ KNOWN LIMIT (both reviews of PR #1040): a parent who confirms the detector's wake at the SAME time is not
+  // seen here. The overlay leaves no trace of "a wake was given" when the time did not move (applyCorrection keeps
+  // such a night byte-for-byte as stored), so that night stays `wake_unconfirmed` if the detector doubted it. Fixing
+  // it needs a new key from applyCorrection; filed with the phase that wires the routes.
   const detectorDoubt = fromStored ? night.wake_unconfirmed_at != null : night.wake_unconfirmed != null;
   const wakeConfirmed = night.wake_at != null && (wakeCorrected || !detectorDoubt);
 
   // FINAL OR PROVISIONAL (plan, Design 4). A stored row is judged on its OWN computed_at, never the clock: between
   // the 3-hour horizon and the job's next tick, a row last written before the horizon is still owed a refresh
   // (the #351 lesson, see storeNightBeforeCorrection). A corrected stored night is locked and never re-stored, so
-  // it is final. A fresh compute is final when it runs after the horizon, corrected or not: its detector figures
-  // (awake minutes, wake count) are still recomputed from samples each time.
+  // it is final, but ONLY when the row was written at or after the window's end: a row stored while the night was
+  // still running (an admin store, a seeded demo night) is not locked and will be re-stored (nightIsLocked; Opus
+  // review of PR #1040). A fresh compute is final when it runs after the horizon, corrected or not: its detector
+  // figures (awake minutes, wake count) are still recomputed from samples each time.
   let final = false;
   if (typeof night.window_end === 'string' && Number.isFinite(endMs)) {
     if (fromStored) {
       const computedMs = utcMs(night.computed_at);
-      final = corrected || (Number.isFinite(computedMs) && isEvidenceFinal(night.window_end, computedMs));
+      final = Number.isFinite(computedMs) && ((corrected && computedMs >= endMs) || isEvidenceFinal(night.window_end, computedMs));
     } else final = isEvidenceFinal(night.window_end, nowMs);
   }
 
@@ -295,6 +307,8 @@ export function toScoringInput(night, { context = null, nowMs = Date.now() } = {
 
   const metrics = {
     asleep: asleepMetric,
+    // Falling asleep to waking, every minute of it: what the age figure is compared with (AGE_NIGHT_SLEEP_HOURS).
+    span_minutes: metric(span),
     usual_asleep: usualAsleep,
     awake_minutes: metric(awake),
     wake_count: metric(night.wake_count),
@@ -373,7 +387,9 @@ export function scoreNight(night, baseline, ageMonths) {
   // Its wake count and longest stretch were typed into existence, not measured: no continuity to score.
   if (input.promoted_from_empty) return noScore('promoted_from_empty');
   const m = input.metrics;
-  if (!m.asleep.usable) return noScore('no_sleep_measured');
+  // Zero counts as none: a time correction can clamp the total to 0 on a night that stays `ok` (applyCorrection's
+  // Math.max(0, ...)), and "no sleep" has no score (plan, Known limits). Found by the Codex review of PR #1040.
+  if (!m.asleep.usable || m.asleep.value <= 0) return noScore('no_sleep_measured');
 
   // A birthday after the night is a typo or a placeholder, not an age: treated as no birthday.
   const age = Number.isFinite(ageMonths) && ageMonths >= 0 ? ageMonths : null;
@@ -391,11 +407,18 @@ export function scoreNight(night, baseline, ageMonths) {
     if (age < cfg.infant_months) return noScore('under_12_months_no_baseline');
     durationRef = ageNightSleepMinutes(age);
   }
-  const duration = part('duration', cfg.weights.duration, {
-    score: curveAt(cfg.duration.curve, durationRef - m.asleep.value),
-    value: m.asleep.value,
-    usual: durationRef,
-  });
+  // Like with like: measured minutes asleep against the usual minutes asleep, but the whole span against the age
+  // figure, which is a time in bed (see AGE_NIGHT_SLEEP_HOURS). `basis` tells the breakdown which it was. The span
+  // is always there when the total is on a real night; if it is not, the total stands in rather than no score.
+  const durationValue = earlyEstimate && m.span_minutes.usable ? m.span_minutes.value : m.asleep.value;
+  const duration = {
+    ...part('duration', cfg.weights.duration, {
+      score: curveAt(cfg.duration.curve, durationRef - durationValue),
+      value: durationValue,
+      usual: durationRef,
+    }),
+    basis: earlyEstimate ? 'span_vs_age' : 'asleep_vs_usual',
+  };
 
   // --- Continuity: fixed curves from 12 months when the age is known; otherwise only against the child's own
   // usual. An UNKNOWN age takes the baseline path too: the child may be a baby, and a night with no birthday is
@@ -451,7 +474,11 @@ export function scoreNight(night, baseline, ageMonths) {
     if (!mm.usable) return part(key, 1, { reason: mm.reason });
     const usual = usualOf(metricKey);
     if (usual == null) return part(key, 1, { reason: 'no_baseline', value: mm.value });
-    return part(key, 1, { score: curveAt(cfg.consistency.curve, Math.abs(mm.value - usual)), value: mm.value, usual });
+    // The shorter way round the clock: the number line wraps at noon, so a usual 11:50 and a 12:10 are 20 minutes
+    // apart, not 1420 (a sleep window that ends near noon; Codex review of PR #1040). The MEDIAN of clock times
+    // that straddle noon is still not circular: known limit, such a child's usual wake can read wrong.
+    const apart = Math.abs(mm.value - usual);
+    return part(key, 1, { score: curveAt(cfg.consistency.curve, Math.min(apart, 1440 - apart)), value: mm.value, usual });
   };
   const clockTerms = [clockTerm('onset', 'onset_clock'), clockTerm('wake', 'wake_clock')];
   const consistency = part('consistency', cfg.weights.consistency, {
@@ -462,9 +489,9 @@ export function scoreNight(night, baseline, ageMonths) {
 
   const components = [duration, continuity, settling, restlessness, consistency];
   let score = Math.round(weightedMean(components));
-  // WEAKEST-LINK CAP. Checked in turn, so the LOWER of the two ceilings is the one named.
+  // WEAKEST-LINK CAP. Checked in turn, so the LOWEST of the ceilings is the one named.
   let cappedBy = null;
-  for (const c of [continuity, restlessness]) {
+  for (const c of [duration, continuity, restlessness]) {
     if (c.available && c.score + cfg.cap_margin < score) {
       score = c.score + cfg.cap_margin;
       cappedBy = c.key;

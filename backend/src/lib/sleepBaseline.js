@@ -105,9 +105,11 @@ const priorNightsStmt = db.prepare(
 
 // `night`: the night being scored, as a night object or a toScoringInput result. A night with no readable context
 // (a fresh compute handed over without one, a row from before `scoring_context`) matches nothing and gets an empty
-// baseline: every metric `ready: false`.
-export function sleepBaseline(childId, night, { nowMs = Date.now() } = {}) {
-  const target = toScoringInput(night, { nowMs });
+// baseline: every metric `ready: false`. `context` is toScoringInput's option, for a FRESH compute: the scoring
+// context that compute ran with. Without it a fresh night silently has no usual (Opus review of PR #1040), so a
+// caller holding a fresh compute must pass it here or hand over a toScoringInput result made with it.
+export function sleepBaseline(childId, night, { context = null, nowMs = Date.now() } = {}) {
+  const target = toScoringInput(night, { context, nowMs });
   if (!target || !target.context || !/^\d{4}-\d{2}-\d{2}$/.test(String(target.night_date))) {
     return baselineFromInputs({ context: null }, []);
   }

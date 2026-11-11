@@ -470,8 +470,11 @@ stored nights strictly before the night, within 28 days, lays `applyCorrection` 
 same camera id and window (`scoring_context`; NULL does not qualify), and returns a median and a count per metric,
 `ready` at 7 usable values of that metric. Clock times are wall-clock minutes since noon in each night's own stored
 zone. Known limits: a physical camera move keeps the camera id, so it does not restart the baseline; the age fallback
-(`AGE_NIGHT_SLEEP_HOURS`, Iglowstein et al. 2003, Table 1) is parent-reported time in bed, not minutes asleep, and is
-used only until the usual duration is ready (`early_estimate`, no band word); the continuity curves for children under
+(`AGE_NIGHT_SLEEP_HOURS`, Iglowstein et al. 2003, Table 1) is parent-reported time in bed, not minutes asleep, so it is
+compared with the night's span from falling asleep to waking and is used only until the usual duration is ready
+(`early_estimate`, no band word; the duration component says which with `basis`); the weakest-link cap covers
+duration, continuity and restlessness; consistency measures the shorter way round the clock, but a usual clock time is
+a plain median, so a window that ends near noon can read wrong; the continuity curves for children under
 12 months, or with no birthday, are relative to the child's usual and were not tuned on any infant.
 `scripts/sleep-score-evidence.mjs` scores every stored night of a snapshot copy (tests in
 `backend/test/sleep-score-evidence.test.js`).

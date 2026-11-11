@@ -138,6 +138,15 @@ describe('the curves and the whole score', () => {
     assert.equal(both.capped_by, 'restlessness');
   });
 
+  test('weakest-link cap: duration + 40 too, so twenty unbroken minutes is not a middling night', () => {
+    // 20 minutes asleep against a usual 600: duration 0. Nothing else is wrong with it: no wakes, one stretch, no
+    // stirring. Uncapped: (0 + 3000 + 1500 + 1500 + 500) / 100 = 65.
+    const r = score(stored({ asleep_minutes: 20, awake_minutes: 0, wake_count: 0, longest_stretch_minutes: 20, stir_minutes: 0 }));
+    assert.deepEqual([comp(r, 'duration').score, comp(r, 'continuity').score, comp(r, 'restlessness').score], [0, 100, 100]);
+    assert.equal(r.score, 40);
+    assert.equal(r.capped_by, 'duration');
+  });
+
   test('a missing put-down drops settling and rescales the rest: it is not scored as zero', () => {
     // A 90-minute settle scores 0 and counts: (3500 + 2310 + 0 + 1500 + 500) / 100 = 78.1.
     const slow = score(stored({ in_bed_at: '2026-03-10 18:00:00' }));
@@ -186,17 +195,26 @@ describe('when there is no score, and the age figure', () => {
   test('the age figure: used from 12 months, refused at 11; an early estimate carries no band word', () => {
     const none = baselineOf(USUAL, 6);
     assert.equal(score(stored(), none, 11).reason, 'under_12_months_no_baseline');
-    // At 12 months: 11.7 h = 702 minutes in bed; 600 asleep is 102 under -> 50 - 50 * (12/150) = 46.
-    const r = score(stored(), none, 12);
-    assert.deepEqual([comp(r, 'duration').usual, comp(r, 'duration').score], [702, 46]);
-    // Restlessness and consistency have no usual: (35*46 + 30*77 + 15*100) / 80 = 67.7.
+    // At 12 months: 11.7 h = 702 minutes in bed. That is a time in bed, so it is compared with the SPAN (asleep +
+    // awake = 500 + 100 = 600), never the 500 asleep: 102 under -> 50 - 50 * (12/150) = 46. Against the 500 asleep
+    // it would be 202 under -> 13.
+    const short = { asleep_minutes: 500, awake_minutes: 100, longest_stretch_minutes: 240 };
+    const r = score(stored(short), none, 12);
+    assert.deepEqual([comp(r, 'duration').value, comp(r, 'duration').usual, comp(r, 'duration').score, comp(r, 'duration').basis], [600, 702, 46, 'span_vs_age']);
+    // Continuity: efficiency 500/600 = 0.833 -> 81; longest 240/600 = 0.4 -> 80; 4 wakes -> 80: 80.5 -> 81 (rounded
+    // terms 81, 80, 80 -> 80.5). Restlessness and consistency have no usual: (35*46 + 30*81 + 15*100) / 80 = 69.25.
     assert.deepEqual([comp(r, 'restlessness').reason, comp(r, 'consistency').reason], ['no_baseline', 'no_baseline']);
-    assert.equal(r.score, 68);
+    assert.equal(r.score, 69);
     assert.equal(r.early_estimate, true);
-    assert.equal(r.band, null); // 68 would be "fair"
-    // With the usual ready the same night is not an early estimate and has its word.
+    assert.equal(r.band, null); // 69 would be "fair"
+    // With the usual ready the same night is not an early estimate, is judged on minutes asleep, and has its word.
     const ready = score(stored());
-    assert.deepEqual([ready.early_estimate, ready.band], [false, 'great']);
+    assert.deepEqual([ready.early_estimate, ready.band, comp(ready, 'duration').basis, comp(ready, 'duration').value], [false, 'great', 'asleep_vs_usual', 600]);
+  });
+
+  test('no score for an ok night with zero minutes asleep (a correction can clamp the total to 0)', () => {
+    assert.deepEqual(score(stored({ asleep_minutes: 0 })), { score: null, reason: 'no_sleep_measured', version: SCORE_VERSION });
+    assert.equal(score(stored({ asleep_minutes: 1 })).score !== null, true);
   });
 
   test('age in whole months on the night: the day before the first birthday is 11, the birthday is 12', () => {
@@ -225,6 +243,16 @@ describe('provisional and low confidence', () => {
     // A corrected stored night is locked and never re-stored: final whatever its computed_at.
     const locked = stored({ computed_at: '2026-03-11 07:30:00', corrected: true, algo_onset_at: '2026-03-10 19:30:00', algo_wake_at: '2026-03-11 06:30:00', algo_in_bed_at: '2026-03-10 19:10:00' });
     assert.equal(score(locked).provisional, false);
+    // ...unless it was stored while the night was still running: that row is not locked and will be re-stored.
+    assert.equal(score({ ...locked, computed_at: '2026-03-11 06:59:00' }).provisional, true);
+    assert.equal(score({ ...locked, computed_at: '2026-03-11 07:00:00' }).provisional, false);
+  });
+
+  test('provisional: a corrected FRESH compute is still judged on the clock (its detector figures are recomputed)', () => {
+    const fresh = { ...stored(), in_progress: false, analysis_camera_id: 'cam-a', wake_unconfirmed: null, corrected: true, algo_onset_at: '2026-03-10 19:30:00', algo_wake_at: '2026-03-11 06:30:00' };
+    delete fresh.computed_at;
+    delete fresh.scoring_context;
+    assert.equal(scoreNight(toScoringInput(fresh, { context: CONTEXT, nowMs: Date.UTC(2026, 2, 11, 9, 0, 0) }), baselineOf(), 36).provisional, true);
   });
 
   test('provisional: a fresh compute is final when it runs at or after the horizon', () => {
@@ -256,10 +284,20 @@ describe('provisional and low confidence', () => {
     // 200 unwatched minutes on a night 100 short of usual do not buy the duration back.
     // (100 under usual -> 50 - 50 * (10/150) = 46.7; crediting them would read 100.)
     assert.equal(comp(score(stored({ asleep_minutes: 500, unknown_minutes: 200 })), 'duration').score, 47);
+    // Unwatched minutes say nothing against the stir count: restlessness stays.
+    assert.equal(comp(at16, 'restlessness').available, true);
+    // The longest stretch is a share of the WHOLE span, unwatched minutes included: 300/760 = 0.395 -> 79 (of the
+    // watched 750 it would be 0.4 -> 80).
+    assert.equal(term(score(stored({ unknown_minutes: 10 })), 'longest_share').score, 79);
+    // A row from before the column existed (NULL) is read as no unwatched minutes, not as unknown.
+    const old = score(stored({ unknown_minutes: null }));
+    assert.deepEqual([old.low_confidence, old.unwatched_minutes, term(old, 'longest_share').available], [false, 0, true]);
   });
 
   test('low confidence: no confirmed wake (none at all, or an early exit the detector skipped)', () => {
     assert.deepEqual(score(stored({ wake_at: null })).low_confidence_reasons, ['wake_unconfirmed']);
+    // Only the wake clock is in doubt: the time they fell asleep still counts towards consistency.
+    assert.deepEqual(comp(score(stored({ wake_at: null })), 'consistency').terms.map((t) => [t.key, t.available]), [['onset', true], ['wake', false]]);
     assert.deepEqual(score(stored({ wake_unconfirmed_at: '2026-03-11 04:10:00' })).low_confidence_reasons, ['wake_unconfirmed']);
     // A wake the parent gave is confirmed by them, whatever the detector noted.
     const parentWake = stored({
@@ -281,6 +319,9 @@ describe('corrections and the put-down', () => {
     assert.deepEqual([term(r, 'longest_share').available, term(r, 'longest_share').reason], [false, 'span_corrected']);
     assert.deepEqual([comp(r, 'restlessness').available, comp(r, 'restlessness').reason], [false, 'span_corrected']);
     assert.equal(toScoringInput(night, { nowMs: NOW }).longest_stretch_display, 300);
+    // A moved ONSET changes the span just as a moved wake does.
+    const onsetMoved = score(stored({ ...ALGO, onset_at: '2026-03-10 20:30:00', asleep_minutes: 540 }));
+    assert.deepEqual([term(onsetMoved, 'longest_share').reason, comp(onsetMoved, 'restlessness').reason], ['span_corrected', 'span_corrected']);
     // An in-bed-only correction changed no sleep time: both stay.
     const inBedOnly = score(stored({ ...ALGO, in_bed_at: '2026-03-10 19:05:00', in_bed_corrected: true }));
     assert.deepEqual([term(inBedOnly, 'longest_share').available, comp(inBedOnly, 'restlessness').available], [true, true]);
@@ -328,6 +369,14 @@ describe('what each component is judged against', () => {
     assert.equal(term(score(stored({ wake_count: 1 }), usual, 11), 'wake_count').score, 100);
     // 4 wakes against max(0, floor 1): 3 over -> 50.
     assert.equal(term(score(stored({ wake_count: 4 }), usual, 11), 'wake_count').score, 50);
+    // Above the floor the usual itself is the allowance, no more: 6 wakes against a usual 3 is 3 over -> 50.
+    assert.equal(term(score(stored({ wake_count: 6 }), baselineOf({ ...USUAL, wake_count: 3 }), 11), 'wake_count').score, 50);
+  });
+
+  test('judged against the usual, a SHORTER longest stretch is the worse one', () => {
+    // Tonight's longest stretch is 0.4 of the span. Usual 0.55: 0.15 short -> 50. Usual 0.25: better than usual -> 100.
+    const share = (usual) => term(score(stored(), baselineOf({ ...USUAL, longest_share: usual }), 11), 'longest_share').score;
+    assert.deepEqual([share(0.55), share(0.25)], [50, 100]);
   });
 
   test('restlessness is the excess over max(usual, floor), per hour asleep, and needs a ready usual', () => {
@@ -413,6 +462,14 @@ describe('clock times', () => {
     assert.equal(clockMinutesSinceNoon('2026-03-29 05:00:00', 'America/New_York'), 780);
     assert.equal(clockMinutesSinceNoon('2026-10-03 12:00:00', 'UTC'), 0);
     assert.equal(clockMinutesSinceNoon(null, 'UTC'), null);
+  });
+
+  test('consistency measures the shorter way round the clock: a usual 11:50 and a 12:10 are 20 minutes apart', () => {
+    // The number line wraps at noon: 11:50 is 1430, 12:10 is 10. Twenty minutes -> 100 - 50 * (5/45) = 94; read as
+    // 1420 minutes it would be 0.
+    const r = score(stored({ wake_at: '2026-03-11 12:10:00' }), baselineOf({ ...USUAL, wake_clock: 1430 }));
+    const wake = comp(r, 'consistency').terms.find((t) => t.key === 'wake');
+    assert.deepEqual([wake.value, wake.usual, wake.score], [10, 1430, 94]);
   });
 
   test('the config is frozen: a caller cannot retune the score in passing', () => {
