@@ -333,6 +333,11 @@ export function toScoringInput(night, { context = null, nowMs = Date.now() } = {
   // span (HOW FAR THE SPAN MOVED, above); an unwatched gap resets the stretch counter mid-sleep.
   const spanReason = spanMoved ? 'span_corrected' : null;
   const longestReason = spanReason ?? (unwatched ? 'unwatched' : null);
+  // A correction inside the tolerance keeps the detector's longest stretch, but the total beside it was re-derived
+  // for the new span and can now be the smaller of the two: a stretch cannot be longer than the sleep it is part
+  // of (#355), so the figure that is SCORED and that enters the usual is clamped too, not only the one displayed
+  // (Codex review of PR #1042).
+  const longestKept = longest != null && asleep != null && spanCorrected ? Math.min(longest, asleep) : longest;
   const tz = ctx ? ctx.tz : null;
 
   const metrics = {
@@ -343,8 +348,8 @@ export function toScoringInput(night, { context = null, nowMs = Date.now() } = {
     awake_minutes: metric(awake),
     wake_count: metric(night.wake_count),
     efficiency: metric(asleep != null && awake != null && asleep + awake > 0 ? asleep / (asleep + awake) : null),
-    longest_stretch: metric(longest, longestReason),
-    longest_share: metric(longest != null && span > 0 ? longest / span : null, longestReason),
+    longest_stretch: metric(longestKept, longestReason),
+    longest_share: metric(longestKept != null && span > 0 ? longestKept / span : null, longestReason),
     settle_minutes: settle,
     stir_rate: metric(stir != null && asleep > 0 ? stir / (asleep / 60) : null, spanReason),
     onset_clock: metric(clockMinutesSinceNoon(night.onset_at, tz), tz ? null : 'no_timezone'),
@@ -370,7 +375,7 @@ export function toScoringInput(night, { context = null, nowMs = Date.now() } = {
     unknown_minutes: unknown,
     // For display only: after a span correction the detector's stretch can exceed the re-derived total (#355).
     // Clamped on ANY span correction, however small: a stretch longer than the total is wrong at one minute too.
-    longest_stretch_display: longest != null && asleep != null && spanCorrected ? Math.min(longest, asleep) : longest,
+    longest_stretch_display: longestKept,
     metrics,
   };
 }

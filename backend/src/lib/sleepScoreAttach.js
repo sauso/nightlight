@@ -79,7 +79,9 @@ function scoreOf(child, night, { context, nowMs }) {
 export function attachScore(child, night, { context = null, storedNight = null, nowMs = Date.now() } = {}) {
   if (!night || typeof night !== 'object') return night;
   try {
-    if (night.status === 'no_data' && typeof storedNight === 'function') {
+    // Never for a night still in progress: it has no score (plan, Design 4), whatever an earlier saved row of the
+    // same date says (a window extended after the row was saved, a camera with no data yet; Codex review of #1042).
+    if (night.status === 'no_data' && night.in_progress !== true && typeof storedNight === 'function') {
       const saved = storedNight();
       if (saved && saved.status === 'ok') {
         return { ...night, score: scoreOf(child, saved, { context: null, nowMs }), score_source: 'stored' };

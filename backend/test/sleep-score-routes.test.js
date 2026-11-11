@@ -47,7 +47,7 @@ const { TRANSITION, framesForNight } = await import('../src/lib/bedTransitions.j
 const { saveNightReview, applyCorrection } = await import('../src/lib/sleepReviews.js');
 const { scoreNight, toScoringInput, ageMonthsOn } = await import('../src/lib/sleepScore.js');
 const { sleepBaseline } = await import('../src/lib/sleepBaseline.js');
-const { failNextScoreForTest, resetScoreLogForTest } = await import('../src/lib/sleepScoreAttach.js');
+const { failNextScoreForTest, resetScoreLogForTest, attachScore } = await import('../src/lib/sleepScoreAttach.js');
 const { default: childrenRouter } = await import('../src/routes/children.js');
 const { logger } = await import('../src/lib/logger.js');
 
@@ -360,6 +360,15 @@ test('raw samples gone, saved row kept: the detail read is no_data and its score
   const none = await get(`/sleep/${DATE}?context=auto`);
   assert.deepEqual(none.body.score, { score: null, reason: 'not_ok', version: 2, status: 'no_data' });
   assert.equal('score_source' in none.body, false);
+});
+
+test('a night still in progress never borrows a saved row\'s score, even when it reads no_data', () => {
+  // The fresh night: no data yet, window still open. A saved `ok` row of the same date exists (the window was
+  // extended after it was stored). The saved row must not even be read.
+  const fresh = { night_date: '2026-03-10', status: 'no_data', in_progress: true };
+  let asked = 0;
+  const out = attachScore({ id: 'kid-x', birthday: null }, fresh, { storedNight: () => { asked += 1; return { status: 'ok' }; } });
+  assert.deepEqual([out.score.score, out.score.reason, 'score_source' in out, asked], [null, 'in_progress', false, 0]);
 });
 
 test('a score that throws never fails the route: 200, score null, the night untouched, one log line', async (t) => {

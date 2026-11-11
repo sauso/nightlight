@@ -376,6 +376,10 @@ describe('corrections and the put-down', () => {
     // The LARGER of the two moves, not their sum: 10 and 10 is 10 (a sum would be 20 and drop them).
     assert.deepEqual(kept({ onset_at: '2026-03-10 19:40:00', wake_at: '2026-03-11 06:20:00' }), [true, true, 10]);
     assert.deepEqual(kept({ onset_at: '2026-03-10 19:40:00', wake_at: '2026-03-11 06:14:00' }), [false, false, 16]);
+    // A kept stretch is never longer than the re-derived total it sits in: the wake moved 10 minutes earlier, the
+    // total is now 590, and the detector's 600-minute stretch is scored as 590.
+    const clamped = toScoringInput(stored({ ...ALGO, wake_at: '2026-03-11 06:20:00', asleep_minutes: 590, longest_stretch_minutes: 600 }), { nowMs: NOW });
+    assert.deepEqual([clamped.metrics.longest_stretch.usable, clamped.metrics.longest_stretch.value], [true, 590]);
     // The reason given is unchanged, and the kept figures are scored as on an uncorrected night: 20 stir minutes
     // in 10 hours is 2 an hour, no excess over the floor.
     const small = score(stored({ ...ALGO, wake_at: '2026-03-11 06:20:00' }));
@@ -395,7 +399,8 @@ describe('corrections and the put-down', () => {
     // Wake moved 10 minutes earlier; the re-derived total (here 280) is under the detector's 300-minute stretch.
     const night = stored({ ...ALGO, wake_at: '2026-03-11 06:20:00', asleep_minutes: 280, longest_stretch_minutes: 300 });
     const input = toScoringInput(night, { nowMs: NOW });
-    assert.deepEqual([input.longest_stretch_display, input.metrics.longest_stretch.value], [280, 300]);
+    // Both the figure shown and the figure scored: a stretch cannot be longer than the sleep it is part of.
+    assert.deepEqual([input.longest_stretch_display, input.metrics.longest_stretch.value], [280, 280]);
     // No span correction: shown as measured.
     assert.equal(toScoringInput(stored({ asleep_minutes: 280, longest_stretch_minutes: 300 }), { nowMs: NOW }).longest_stretch_display, 300);
   });
