@@ -310,6 +310,8 @@ test('a final legacy NULL row is left alone by the nightly job, and gains a cont
 // departure) bumped it to '5' with no change here: the night has no `into_bed`, so that guard's witness is never asked.
 // #917 (the ESPHome sensor shadow) added `wake_at_sensor: null` and `sensor_rejects: null` (added keys: this child has
 // no ESPHome rows, so no shadow runs and nothing else moves) and bumped SCORING_ALGO to '6'.
+// The sleep score plan's phase 1a added `stir_minutes: 0` and `summary_facts` (added keys: stored facts about the
+// night that no scoring rule reads, so every older value is as it was and SCORING_ALGO stays '6').
 const GOLDEN = {
   night_date: '2026-07-01',
   window_start: '2026-07-01 09:30:00',
@@ -335,6 +337,8 @@ const GOLDEN = {
   sound_discounted_minutes: 0,
   wake_at_sensor: null,
   sensor_rejects: null,
+  stir_minutes: 0,
+  summary_facts: '{"v":1,"climate":{"temp_min":21.5,"temp_max":21.5},"sleep":{"wakes":[],"room_activity_wakes":0}}',
   climate: {
     temp_avg: 21.5, temp_min: 21.5, temp_max: 21.5, temp_samples: 1,
     humidity_avg: 48, humidity_min: 48, humidity_max: 48, humidity_samples: 1,

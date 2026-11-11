@@ -275,6 +275,8 @@ db.exec(`
     wake_unconfirmed_at TEXT,
     wake_at_sensor TEXT,
     sensor_rejects INTEGER,
+    stir_minutes INTEGER,
+    summary_facts TEXT,
     computed_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (child_id, night_date)
   );
@@ -1072,6 +1074,23 @@ if (!sleepNightsColumns.includes('wake_at_sensor')) {
 }
 if (!sleepNightsColumns.includes('sensor_rejects')) {
   db.exec('ALTER TABLE sleep_nights ADD COLUMN sensor_rejects INTEGER');
+}
+
+// The night's stored facts (sleep score plan, phase 1a; sleepAnalysis.js, "THE NIGHT'S STORED FACTS"). `stir_minutes`
+// is how many minutes of the sleep span had in-bed movement outside a counted wake; `summary_facts` a small versioned
+// JSON text ({ v, climate: { temp_min, temp_max }, sleep: { wakes, room_activity_wakes } }). Both come from the
+// per-minute samples, which are deleted after 30 days, and that is why they are stored: a later sleep score and night
+// summary need them for older nights. Both NULL on every row stored before these columns, and there is NO backfill:
+// the samples behind an old night may already be gone, and a figure worked out from part of a night would be worse
+// than none. A reader must take NULL as "not known", never as zero stirring. Written by upsertNight with the other
+// computed columns; nothing reads them for an onset, a wake, a figure, a push or an alert. Also in the CREATE TABLE
+// above for fresh installs; these are the upgrade path, one guard per column so neither can be skipped because the
+// other exists.
+if (!sleepNightsColumns.includes('stir_minutes')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN stir_minutes INTEGER');
+}
+if (!sleepNightsColumns.includes('summary_facts')) {
+  db.exec('ALTER TABLE sleep_nights ADD COLUMN summary_facts TEXT');
 }
 
 // Quick-silence: a per-camera temporary mute of ALL alerts (motion/sound/ONVIF/MQTT), for when you're
