@@ -211,13 +211,19 @@ const OBSERVED_COLUMNS = [
   'avg_temperature', 'avg_humidity', 'computed_at', 'notified_at', 'notified_wake_at', 'scoring_context',
   'wake_unconfirmed_at',
 ];
+// `summary_facts` (sleep score plan, phase 1a) is the one column that is BOTH: a JSON text whose `climate` part (the
+// room's temperature range) is an observation and whose `sleep` part (the counted wakes) is a claim. It is neither
+// kept whole nor nulled whole, so it sits in neither list and each shape test checks its two parts separately.
+// (`stir_minutes`, added with it, is an ordinary claim and needs no entry anywhere: the default below covers it.)
+const MIXED_COLUMNS = ['summary_facts'];
 
 test('★ a flagged stored row reads exactly like a detector-empty row: every claim column null, every observation kept', async () => {
   const cols = db.prepare("PRAGMA table_info('sleep_nights')").all();
   const names = cols.map((c) => c.name);
   const unknown = OBSERVED_COLUMNS.filter((c) => !names.includes(c));
   assert.deepEqual(unknown, [], `OBSERVED_COLUMNS names column(s) that no longer exist: ${unknown.join(', ')}`);
-  const claims = names.filter((c) => c !== 'status' && !OBSERVED_COLUMNS.includes(c));
+  const claims = names.filter((c) => c !== 'status' && !OBSERVED_COLUMNS.includes(c) && !MIXED_COLUMNS.includes(c));
+  assert.deepEqual(MIXED_COLUMNS.filter((c) => !names.includes(c)), [], 'MIXED_COLUMNS names a column that no longer exists');
 
   // The detector's own empty row, for real. Every column this test calls a claim must be NULL there —
   // this is what ties the classification to the detector rather than to this file's opinion. A new
@@ -232,6 +238,9 @@ test('★ a flagged stored row reads exactly like a detector-empty row: every cl
   for (const c of ['window_start', 'window_end', 'coverage_minutes', 'avg_temperature', 'avg_humidity', 'computed_at']) {
     assert.notEqual(realRow[c], null, `a detector-empty row keeps ${c}, so the overlay must too`);
   }
+  // The mixed column on the detector's own empty row: the room's range is there, and no sleep facts are.
+  assert.deepEqual(JSON.parse(realRow.summary_facts), { v: 1, climate: { temp_min: 19.5, temp_max: 19.5 }, sleep: null },
+    'a detector-empty row stores the temperature range and no sleep facts');
 
   // A hostile `ok` row: a recognisable marker in EVERY column, so anything the overlay forgets to clear
   // shows up by name instead of hiding behind a NULL. child_id/night_date are the join keys and status
@@ -244,6 +253,14 @@ test('★ a flagged stored row reads exactly like a detector-empty row: every cl
     else if (/INT/i.test(c.type)) marker[c.name] = 900000 + i;
     else if (/REAL/i.test(c.type)) marker[c.name] = 1000.25 + i;
     else marker[c.name] = `MARK:${c.name}`;
+  });
+  // The mixed column gets a marker in each PART: a plain `MARK:` text would not parse, and the overlay answers an
+  // unreadable value with null, which would hide whether it keeps the climate part and clears the sleep part.
+  const markedClimate = { temp_min: 900000.5, temp_max: 900001.5 };
+  marker.summary_facts = JSON.stringify({
+    v: 1,
+    climate: markedClimate,
+    sleep: { wakes: [{ start_at: 'MARK:wake_start', minutes: 900002 }], room_activity_wakes: 900003 },
   });
   db.prepare(`INSERT INTO sleep_nights (${names.join(', ')}) VALUES (${names.map((n) => `@${n}`).join(', ')})`).run(marker);
 
@@ -259,6 +276,10 @@ test('★ a flagged stored row reads exactly like a detector-empty row: every cl
   for (const c of OBSERVED_COLUMNS) {
     assert.equal(shown[c], marker[c], `${c} is an observation and must be kept as measured`);
   }
+  assert.ok(!shown.summary_facts.includes('MARK:wake_start') && !shown.summary_facts.includes('900002'),
+    `a wake leaked onto a night the parent said was empty: ${shown.summary_facts}`);
+  assert.deepEqual(JSON.parse(shown.summary_facts), { v: 1, climate: markedClimate, sleep: null },
+    'the temperature range is kept as measured and the sleep facts are cleared');
   assert.equal(shown.algo_status, 'ok');
   assert.equal(shown.algo_onset_at, 'MARK:onset_at', "the detector's own onset rides along");
   assert.equal(shown.algo_wake_at, 'MARK:wake_at');
@@ -292,7 +313,14 @@ test('★ a flagged detail response has exactly the keys a detector-empty one ha
   assert.deepEqual(shownKeys, Object.keys(realEmpty).sort(), 'the same keys as a real detector-empty night');
   for (const k of Object.keys(realEmpty)) {
     if (k === 'status') assert.equal(shown.status, 'empty');
-    else if (realEmpty[k] === null) assert.equal(shown[k], null, `${k} is null on a real empty night, and must be here`);
+    else if (MIXED_COLUMNS.includes(k)) {
+      // Mixed (see MIXED_COLUMNS): this night's own temperature range, and the sleep part exactly as the real empty
+      // night has it (null). Not vacuous: the `ok` night really had sleep facts to clear.
+      const mine = JSON.parse(full[k]);
+      assert.ok(mine.sleep && Array.isArray(mine.sleep.wakes), `precondition: the ok night has sleep facts (${full[k]})`);
+      assert.equal(JSON.parse(realEmpty[k]).sleep, null, 'precondition: a real empty night has none');
+      assert.deepEqual(JSON.parse(shown[k]), { ...mine, sleep: null }, `${k}: the range kept, the sleep facts cleared`);
+    } else if (realEmpty[k] === null) assert.equal(shown[k], null, `${k} is null on a real empty night, and must be here`);
     else assert.deepEqual(shown[k], full[k], `${k} is measured, and must be this night's own measurement`);
   }
 });

@@ -542,6 +542,41 @@ two added fields `wake_at_sensor` and `sensor_rejects` (empty without a sensor, 
 readings around the night's possible wakes, and on a night whose wake you corrected). How it works, how to compare it with your morning reviews, and its limits:
 [The sleep shadow](esphome.md#the-sleep-shadow-for-comparison-only).
 
+### Two more facts are saved with each night
+
+The minute-by-minute data behind a night is kept for 30 days, and a planned sleep score will want to look
+further back than that. So each night now also saves two things that can only be worked out from those
+minutes. **Nothing on screen uses them yet.**
+
+- **Stirring minutes** (`stir_minutes`): how many minutes of the sleep had movement **in the bed** without
+  being part of a counted wake-up. A noise on its own does not count, and neither does movement elsewhere in
+  the room: a bedroom microphone hears the whole house, and household noise should not read as a restless
+  child. The first 30 minutes after falling asleep are left out as settling, and so are minutes the camera
+  had no video for. This is narrower than the "stirring" stretches on the [detail view](#the-detail-view),
+  which still show any brief movement or noise.
+- **A small summary** (`summary_facts`): the room's lowest and highest temperature for the night (when there
+  is a [sensor](#room-temperature-optional)), the start time and length of each counted wake-up, and how many
+  of those wake-ups had movement outside the bed within 3 minutes of them.
+
+Both appear in the night's API answers as added fields; `summary_facts` is a small piece of JSON text.
+
+What to know:
+
+- **Nights saved before this release do not have them**, and cannot be given them later once their minute
+  data has gone. The fields are empty for those nights, which means "not known", not "no stirring".
+- **A camera with no bed zone drawn treats its whole picture as the bed.** All the movement it sees then
+  counts as stirring, including someone walking through the room. Draw the zone over the bed to avoid this.
+  Nothing checks that a zone you drew actually sits on the bed.
+- The figures are comparable from night to night for one camera, not between rooms: how much movement counts
+  was measured on two cameras in one house.
+- A wake-up that runs past the end of the sleep window is only checked for room movement up to the end of
+  the window.
+- A night you marked [No one was in the bed](#no-one-was-in-the-bed-says-the-whole-night-was-wrong-not-just-a-time)
+  shows no stirring minutes and no wake-ups in the summary; the temperature range stays. A night the app saw
+  as an empty bed and you gave times to has none either, because nothing was measured.
+- If you correct a night's times, both stay as the detector measured them, so the summary can list a
+  wake-up outside the times you entered.
+
 ### When the motion camera samples
 
 The movement timeline comes from a frame-by-frame motion leg that
@@ -1044,6 +1079,7 @@ The limits are described beside the behaviour they affect:
 - [A microphone that looks faulty](#a-microphone-that-looks-faulty)
 - [Getting up and returning to bed](#a-child-who-gets-out-and-climbs-straight-back-in-has-not-got-up)
 - [An exit far earlier than usual](#an-exit-far-earlier-than-usual-does-not-end-the-night)
+- [Stirring minutes and the saved summary](#two-more-facts-are-saved-with-each-night)
 - [Motion camera sampling](#when-the-motion-camera-samples)
 - [Review corrections and locks](#known-limits-all-documented-rather-than-fixed)
 - [The detail page and a night's saved settings](#finished-nights-use-the-settings-they-were-saved-with)

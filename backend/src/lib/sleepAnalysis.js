@@ -1140,6 +1140,60 @@ function earlyExitThresholdMin(childId, nightDate, tz, windowEndMs) {
   return LEAD_FACTOR * Math.max(p75, LEAD_FLOOR_MIN);
 }
 
+// ★ THE NIGHT'S STORED FACTS: `stir_minutes` and `summary_facts` (sleep score plan, phase 1a).
+//
+// WHY THEY ARE STORED NOW, before anything reads them: both are worked out from the per-minute samples, and those
+// are deleted after 30 days (RETENTION_DAYS, activityTracker.js). A later sleep score and night summary need them
+// for nights older than that, so they are saved with the night. A night stored before these columns existed has
+// NULL in both and cannot be given them afterwards: there is no backfill, because the minutes are gone.
+//
+// `stir_minutes`: how many minutes of the sleep span had IN-BED movement without being part of a counted wake.
+// The exact rule is beside the loop that counts it (computeNightPass, "STIR MINUTES").
+//
+// `summary_facts`: a small versioned JSON string, the SAME text on a fresh compute and on the stored row (so a
+// reader never has to ask which of the two it was handed; parseSummaryFacts reads either):
+//   { v: 1,
+//     climate: { temp_min, temp_max },            degrees C, each null when the night had no temperature reading
+//     sleep: { wakes: [{ start_at, minutes }],    the COUNTED wakes, so wakes.length === wake_count
+//              room_activity_wakes } }            how many of those had movement outside the bed around them
+// `sleep` is null on a night with no measured sleep (a detector-`empty` night, and a night a parent marked "no one
+// was in the bed": sleepReviews.js asNobodyInBed); `climate` is a measurement of the room and is kept either way.
+// The whole value is null on a night that was not scored (`off`, `no_data`, `no_sleep`).
+//
+// Neither changes how a night is scored: no onset, wake, minute count or status reads them, so SCORING_ALGO is
+// not bumped for them.
+const SUMMARY_FACTS_VERSION = 1;
+// A counted wake "has room activity" when movement outside the bed was seen within this many minutes of it,
+// either side. 3 is the margin the sleep detail page already uses to line a wake up with an alert or a clip
+// (ALERT_MARGIN_MS in frontend/src/pages/SleepDetail.jsx: a wake run is trimmed to its active minutes, and what
+// goes with it can start just before or end just after). The backend had no such constant, so it is named here
+// with the same value, to keep the stored count in step with what the page shows beside each wake. Like that
+// margin it is a judgement, not a measurement: no night set it.
+const ROOM_ACTIVITY_WAKE_MARGIN_MIN = 3;
+
+function summaryFactsJson(climate, sleep) {
+  return JSON.stringify({
+    v: SUMMARY_FACTS_VERSION,
+    climate: { temp_min: climate?.temp_min ?? null, temp_max: climate?.temp_max ?? null },
+    sleep,
+  });
+}
+
+// `summary_facts` as an object, from the stored text or a fresh compute's (the same string). Null for a night
+// without one (NULL: stored before the column, or not scored), for text that does not parse, and for a version
+// this code does not know: a reader must treat all three as "no facts", never guess at another shape.
+export function parseSummaryFacts(raw) {
+  if (typeof raw !== 'string') return null;
+  let facts;
+  try {
+    facts = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!facts || typeof facts !== 'object' || facts.v !== SUMMARY_FACTS_VERSION) return null;
+  return facts;
+}
+
 // Compute (but do not store) a child's sleep summary for the night starting on local date `nightDate`.
 // Returns { status, ...metrics, timeline? } — timeline only when includeTimeline is set (for tuning).
 //
@@ -1393,6 +1447,12 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     // `sensor_rejects` (upsertNight binds them from this object). Nothing reads them for a wake, figure, push or alert.
     wake_at_sensor: null,
     sensor_rejects: null,
+    // The night's stored facts (see "THE NIGHT'S STORED FACTS" above computeNight). ADDED to the response shape,
+    // after the #917 keys as #917 added its own: every older key keeps its value and its order. In `base` for the
+    // reason `in_bed_at` is: upsertNight binds both as named parameters, so every status must carry the keys.
+    // `stir_minutes` is set on an `ok` night only; `summary_facts` on an `ok` and an `empty` one.
+    stir_minutes: null,
+    summary_facts: null,
     climate,
     // #361: present ONLY when a context was passed, so a plain compute's output keeps its exact shape (every
     // API response is built from it). In `base`, so every return below carries it, early ones included.
@@ -2800,6 +2860,9 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
   // [onset, to) range — `state` here, reassigned to `stateMetrics` below if the post-window extension
   // widens the range past totalMin (issue #442).
   let metricsState = state;
+  // The per-minute in-bed peaks that match the metrics range, for the stir count further down: `bedPeakAt` here,
+  // replaced by a longer copy if the post-window extension widens the range (as `metricsState` is).
+  let stirBedPeak = bedPeakAt;
   let { asleep, awake, unknown, wakeCount, longest } = accumulateMetrics(inWake, metricsState, onset, sleepEnd);
 
   // EMPTY BED — nobody slept here. Distinct from no_data ("we couldn't see"): coverage is fine, we
@@ -2859,6 +2922,11 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
         status: 'empty',
         // Deliberately no onset/wake/duration: reporting "11h06m asleep, 0 wakes" for a bed nobody was in
         // is the bug being fixed. The night is a real observation, it just isn't a sleep.
+        //
+        // The stored facts keep the room's temperature range, which was measured whoever was or was not in the
+        // bed, and carry no sleep facts (`sleep: null`). This is also the shape a night a parent marks "no one
+        // was in the bed" is given (sleepReviews.js asNobodyInBed), so the two read alike.
+        summary_facts: summaryFactsJson(climate, null),
       };
     }
   }
@@ -2891,6 +2959,9 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
         .all(...scoreCams, minuteTime(totalMin), minuteTime(metricsEnd));
       const activeMetrics = activeForWake.concat(new Array(metricsEnd - totalMin).fill(false));
       const stateMetrics = state.concat(new Array(metricsEnd - totalMin).fill(null));
+      // The in-bed peaks over the same combined range (stir_minutes reads them): the main loop's, then these
+      // rows', kept by the main loop's own rule (the strongest watched row of the minute).
+      const bedPeakMetrics = bedPeakAt.concat(new Array(metricsEnd - totalMin).fill(0));
       for (const r of extraRows) {
         const i = idxOf(r.t);
         if (i < totalMin || i >= metricsEnd) continue;
@@ -2898,6 +2969,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
         // post-window stall between window end and the departure counts as unknown, not asleep.
         if (!motionSeen(r)) continue;
         const rowActive = isActiveRow(r, i);
+        if (r.motion_peak > bedPeakMetrics[i]) bedPeakMetrics[i] = r.motion_peak;
         if (rowActive) activeMetrics[i] = true;
         // OR-merge, matching the main population loop's own rule for `state` (line ~646) — TWO rows for
         // one minute are real (activity_samples has no uniqueness constraint on camera_id+bucket_start:
@@ -2908,6 +2980,7 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
         stateMetrics[i] = stateMetrics[i] === null ? rowActive : stateMetrics[i] || rowActive;
       }
       metricsState = stateMetrics;
+      stirBedPeak = bedPeakMetrics;
       inWake = new Array(metricsEnd).fill(false);
       markWakeRuns(activeMetrics, onset, metricsEnd, inWake);
       ({ asleep, awake, unknown, wakeCount, longest } = accumulateMetrics(inWake, metricsState, onset, metricsEnd));
@@ -2933,6 +3006,67 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
       // them into one) even as awake_minutes increases — expected to be rare; scored explicitly (plan §7).
       ({ asleep, awake, unknown, wakeCount, longest } = accumulateMetrics(inWake, metricsState, onset, sleepEnd));
     }
+  }
+
+  // ★ STIR MINUTES (`stir_minutes`; see "THE NIGHT'S STORED FACTS" above computeNight for why it is stored).
+  // Counted here, after the wake runs are final (the post-window extension and the midnight episodes above both
+  // rewrite `inWake`), over the same [onset, sleepEnd) the metrics just measured. A minute counts when ALL hold:
+  //   1. it is not part of a counted wake (`inWake`): that minute is already awake time, and counting it again
+  //      would make one long wake read as a restless night as well;
+  //   2. the camera saw IN-BED movement in it: a watched row's in-bed peak over MOTION_ACTIVE, the same line an
+  //      active minute's in-bed term uses (isActiveRow). `bedPeakAt` only ever holds WATCHED rows' peaks (#508:
+  //      an unwatched row contributes nothing), so an unwatched minute reads 0 and cannot count. No separate
+  //      test for "watched" is needed, and none is written: it would be a condition nothing could exercise;
+  //   3. it is at least POST_ONSET_SOUND_WITNESS_MIN minutes after onset. Those first minutes are the settling
+  //      grace this file already has (a child put down and still wriggling, a parent leaning in); the constant
+  //      is reused so the two can never disagree about how long settling lasts.
+  //
+  // ⚠️ NARROWER ON PURPOSE than the detail view's 'stir' segment (`label()` below), which is any active minute
+  // of the span outside a wake and so includes a noise and movement elsewhere in the room. That label is what
+  // the timeline draws and is unchanged. This figure is for judging how restless the CHILD was, and a bedroom
+  // microphone hears the whole house (ONSET_SOUND_MOTION_WITHIN_MIN): household noise, or a parent walking
+  // through, must not read as a restless child. So sound-only minutes and outside-the-bed-only minutes are out.
+  //
+  // ⚠️ KNOWN LIMITS, for someone else's house (docs/sleep-tracking.md):
+  //   - A camera with NO bed zone painted analyses the whole frame as "the bed" (motionDetector.js buildZoneMask
+  //     returns no mask), so ALL movement it sees is in-bed movement and a parent in the room counts here.
+  //   - Nothing validates that a painted zone sits on the bed; a zone that takes in the doorway counts the door.
+  //   - MOTION_ACTIVE was set on two cameras in one house, so the count is comparable night to night for one
+  //     camera, and not between rooms.
+  const stirFrom = onset + POST_ONSET_SOUND_WITNESS_MIN;
+  let stir = 0;
+  for (let i = stirFrom; i < sleepEnd; i++) if (!inWake[i] && stirBedPeak[i] > MOTION_ACTIVE) stir++;
+
+  // ★ THE COUNTED WAKES (`summary_facts.sleep`). The runs of `inWake` inside [onset, sleepEnd): exactly the runs
+  // accumulateMetrics counted, over the same array and range, so `wakes.length === wake_count` by construction.
+  // Deliberately NOT the detail view's `wakes` list (below): that one adds a row for the morning wake and can
+  // stretch the last run to the window's end, so its length can exceed wake_count by one. Stored facts must
+  // agree with the stored count, or a summary would say "woke three times" above a card that says two.
+  // `start_at` is the run's first minute, UTC, in the format every other time here uses; `minutes` its length.
+  //
+  // `room_activity_wakes`: how many of those runs had movement OUTSIDE the bed within
+  // ROOM_ACTIVITY_WAKE_MARGIN_MIN minutes either side. Read from `outAt`, the per-minute signal the detail
+  // view's room-activity blocks (`visits`, of either type) are built from, so "a visit overlaps the wake" and
+  // this test agree: a visit starts and ends on an `outAt` minute, and the one-minute gaps it bridges are
+  // narrower than the margin. `outAt` covers the timeline up to the window's end only (as `visits` does), so
+  // for a wake that runs past the window only its part up to there can match. It says movement was seen, never
+  // who moved: one camera cannot tell a parent from a child out of bed (see the outIntervals note below).
+  //
+  // Cost in the base compute: one pass over the sleep span and at most (run length + 2 * margin) array reads per
+  // wake, over arrays already built. No query, and none of the detail payload is built for it.
+  const countedWakes = [];
+  let roomActivityWakes = 0;
+  for (let i = onset; i < sleepEnd; ) {
+    if (!inWake[i]) { i++; continue; }
+    let k = i;
+    while (k < sleepEnd && inWake[k]) k++;
+    countedWakes.push({ start_at: minuteTime(i), minutes: k - i });
+    // No clamp to the array: an index before 0 or past the window's end reads `undefined`, which is "no movement
+    // seen there", the right answer for a minute the timeline does not hold.
+    for (let j = i - ROOM_ACTIVITY_WAKE_MARGIN_MIN; j < k + ROOM_ACTIVITY_WAKE_MARGIN_MIN; j++) {
+      if (outAt[j]) { roomActivityWakes++; break; }
+    }
+    i = k;
   }
 
   // A movement-only wake of null means "still asleep when the window closed". A transition-derived
@@ -2971,6 +3105,9 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
     // when the guard found nothing. Not counted: discounted minutes before onset (they can move the onset, but no
     // awake time is measured there) and after the wake. The key keeps its place from `base`.
     sound_discounted_minutes: discountedIn(onset, sleepEnd),
+    // The night's stored facts, worked out just above. The keys keep their place from `base`.
+    stir_minutes: stir,
+    summary_facts: summaryFactsJson(climate, { wakes: countedWakes, room_activity_wakes: roomActivityWakes }),
   };
 
   // Periods the child is OUT of the bed — from an out_of_bed event until the next into_bed — used below
@@ -3246,18 +3383,25 @@ function computeNightPass(childId, nightDate, { includeTimeline = false, context
 // shadow did not run this time (the readings pruned, the device removed) goes back to NULL. Bound from computeNight's
 // own keys (`...summary` in computeAndStoreNight). The point of storing them is that the stored values outlive the raw
 // readings' retention; a locked (reviewed) night is never re-stored, so it keeps what it had when it was locked.
+//
+// `stir_minutes` and `summary_facts` (the night's stored facts; see above computeNight) likewise, in both halves, bound
+// from computeNight's own keys: a provisional re-store writes what that compute counted, so the facts always belong to
+// the numbers they are stored beside, and a locked night keeps the detector's. ⚠️ SCORING_ALGO IS NOT BUMPED for these
+// two columns, on purpose: no scoring rule changed and no existing figure moves (pinned by the golden figures in
+// sleep-night-facts.test.js), so a night stored before and after them was scored by the same rules. A row whose
+// `scoring_context` says the current algo can therefore still have NULL here: it was stored before the columns.
 const upsertNight = db.prepare(
   `INSERT INTO sleep_nights
      (child_id, night_date, window_start, window_end, status, onset_at, wake_at,
       onset_at_shadow, wake_at_shadow, onset_at_algo, wake_at_algo,
       asleep_minutes, awake_minutes, wake_count, longest_stretch_minutes, coverage_minutes,
       unknown_minutes, in_bed_at, avg_temperature, avg_humidity, scoring_context, wake_unconfirmed_at,
-      wake_at_sensor, sensor_rejects, computed_at)
+      wake_at_sensor, sensor_rejects, stir_minutes, summary_facts, computed_at)
    VALUES (@child_id, @night_date, @window_start, @window_end, @status, @onset_at, @wake_at,
            @onset_at_shadow, @wake_at_shadow, @onset_at_algo, @wake_at_algo,
            @asleep_minutes, @awake_minutes, @wake_count, @longest_stretch_minutes, @coverage_minutes,
            @unknown_minutes, @in_bed_at, @avg_temperature, @avg_humidity, @scoring_context, @wake_unconfirmed_at,
-           @wake_at_sensor, @sensor_rejects, @computed_at)
+           @wake_at_sensor, @sensor_rejects, @stir_minutes, @summary_facts, @computed_at)
    ON CONFLICT(child_id, night_date) DO UPDATE SET
      window_start=excluded.window_start, window_end=excluded.window_end, status=excluded.status,
      onset_at=excluded.onset_at, wake_at=excluded.wake_at, in_bed_at=excluded.in_bed_at,
@@ -3271,6 +3415,7 @@ const upsertNight = db.prepare(
      scoring_context=excluded.scoring_context,
      wake_unconfirmed_at=excluded.wake_unconfirmed_at,
      wake_at_sensor=excluded.wake_at_sensor, sensor_rejects=excluded.sensor_rejects,
+     stir_minutes=excluded.stir_minutes, summary_facts=excluded.summary_facts,
      computed_at=excluded.computed_at`
 );
 

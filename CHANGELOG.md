@@ -9,6 +9,10 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+### Added
+
+- Nightlight now saves two more facts about each night: how many minutes the child stirred in the bed, and a small summary of when each wake-up was and the room's temperature range. They are kept so that a later sleep score can use them after the minute-by-minute data (kept 30 days) is gone. Nothing visible changes yet. Nights stored before this release do not have them. A camera with no bed zone drawn counts all the movement it sees as stirring. See [Two more facts are saved with each night](docs/sleep-tracking.md#two-more-facts-are-saved-with-each-night).
+
 ### Changed
 
 - **Two medium dependency alerts cleared, no behaviour change.** `glob` 10.5.0 → 14.0.4 and `minimatch` 9.0.9 → 11.0.5 (Dependabot alerts for an abort-signal bypass in `glob` and a slow-pattern denial of service in `minimatch`). They came in through `rimraf` 5, which two of the Google libraries behind push notifications list as a dependency but never call; `rimraf` is now version 6 through a `package.json` override (comment there says when to remove it). A new test keeps both libraries above their fixed versions.

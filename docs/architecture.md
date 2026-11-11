@@ -437,6 +437,24 @@ the bed" (the raw stored row, `?stored=1`, `raw=1` and the store reply keep them
 both null and logs a fixed sentence; #700's history-read counter is restored after the shadow. The rules version becomes
 `'6'` because the returned object changed, although no reported number moved (A/B on both databases).
 
+**Two stored facts per night, read by nothing yet** (sleep score plan, phase 1a; tests in
+`backend/test/sleep-night-facts.test.js`). The per-minute samples are pruned after 30 days, so what a later score and
+night summary need from them is counted in `computeNight` and stored by `upsertNight` in two nullable `sleep_nights`
+columns (guarded `ALTER`s, NULL on older rows, no backfill). `stir_minutes`: minutes of `[onset, sleepEnd)` with an
+in-bed peak over `MOTION_ACTIVE` that are not in a counted wake and are at least `POST_ONSET_SOUND_WITNESS_MIN` after
+onset; sound-only and outside-the-bed-only minutes are excluded on purpose (the detail view's `stir` segment is
+broader and unchanged), and a camera with no bed zone counts all movement (its whole frame is the in-bed channel).
+`summary_facts`: versioned JSON text, the same string on a fresh compute and on the stored row (read it with
+`parseSummaryFacts`): `{ v: 1, climate: { temp_min, temp_max }, sleep: { wakes: [{ start_at, minutes }],
+room_activity_wakes } }`. `wakes` are the runs `accumulateMetrics` counted, so `wakes.length === wake_count` (the
+detail view's `wakes` adds a morning row and is not what is stored); `room_activity_wakes` counts those with an
+`outAt` minute within `ROOM_ACTIVITY_WAKE_MARGIN_MIN` (3, the detail page's alert margin). `stir_minutes` is set on
+an `ok` night only; `summary_facts` on `ok` and on detector-`empty` nights (`sleep: null` there), null otherwise.
+`asNobodyInBed` nulls `stir_minutes` and the `sleep` part and keeps `climate`; a time correction leaves both as
+measured. Unlike #700, #904 and #917, the rules version is NOT bumped for these keys: no rule changed and no existing
+key moved (golden figures captured on the previous source, in the same test file), and a bump would only mark every
+earlier night as scored by other rules.
+
 **The admin Recompute is one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the
 dialog in `frontend/src/components/RecomputeNight.jsx`). `GET /api/children/:id/sleep/:date?context=stored` reads the
 row's `scoring_context` and parses it (no row, `NULL` or unparseable: `400` with `reason: 'no_stored_context'`, never a

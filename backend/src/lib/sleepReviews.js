@@ -1,7 +1,7 @@
 import db from '../db.js';
 import {
   computeNight, lastCompletedNightDate, childTracksSleep, zonedToUtc, toSqlUtc, storeNightBeforeCorrection,
-  displayContextFor,
+  displayContextFor, parseSummaryFacts,
 } from './sleepAnalysis.js';
 import {
   getBedTransitions, getActivitySamples, getPriorTransitionType, setTransitionVerdict, setTransitionReason,
@@ -796,6 +796,11 @@ export function applyCorrection(childId, night) {
 // stored row), because computeNight never returns `empty` for a night with a discounted minute in its span, so
 // there is no count to carry, and none is invented for the parent's span.
 //
+// `stir_minutes` and the `sleep` part of `summary_facts` (sleep score plan, phase 1a) are NOT given a value here: an
+// `empty` night carries them as null (computeNight), and they stay null. Unlike wake_count, a 0 would be read later
+// as a measured, perfectly still night, and nothing was measured over the parent's span. The temperature range in
+// `summary_facts` stays: it is the room's, whoever was in the bed. Pinned in sleep-night-facts.test.js.
+//
 // ⚠️ Only when BOTH times exist and the span is positive (span > 0, so a one-minute span promotes and a zero
 // or negative one does not), and only once the night is over (nightNotOverYet, which reads `in_progress` on a
 // fresh compute and window_end on a stored row). One-sided or in-bed-only corrections on an `empty` night
@@ -850,12 +855,28 @@ export function applyCorrections(childId, nights) {
 // `wake_at_sensor` and `sensor_rejects` (#917, the ESPHome sensor shadow; both columns and computeNight keys) ARE listed:
 // a night shown as empty must not carry a sensor wake (#917 plan review). The stored row keeps them, so the
 // comparison they exist for is not lost (see SENSOR_SHADOW_KEYS above).
+//
+// `stir_minutes` (sleep score plan, phase 1a; a column and a computeNight key) IS listed: minutes of in-bed movement
+// during the sleep are a claim about a sleeping child, and a detector-empty night stores it NULL.
+// `summary_facts` (same phase) is NEITHER wholly a claim nor wholly an observation, so it is not in this list and has
+// its own line in asNobodyInBed: its `sleep` part (the counted wakes) is a claim and is nulled, its `climate` part
+// (the room's temperature range) was measured whoever was in the bed and is kept. That is exactly what a
+// detector-empty night stores (`sleep: null` beside a real `climate`), so the two still read alike.
 const EMPTY_NIGHT_NULLS = [
   'onset_at', 'wake_at', 'in_bed_at',
   'onset_at_shadow', 'wake_at_shadow', 'onset_at_algo', 'wake_at_algo',
-  'asleep_minutes', 'awake_minutes', 'unknown_minutes', 'wake_count', 'longest_stretch_minutes',
+  'asleep_minutes', 'awake_minutes', 'unknown_minutes', 'wake_count', 'longest_stretch_minutes', 'stir_minutes',
   'wake_at_sensor', 'sensor_rejects',
 ];
+// `summary_facts` with its sleep part removed (see the note above EMPTY_NIGHT_NULLS). The text is parsed and written
+// back whole, so a member added to it later is kept unless it is put under `sleep`. A value that does not parse, or
+// has a version this code does not know, becomes null rather than being passed through: what is in it cannot be
+// checked, and leaking a wake list onto a night the parent said was empty is the harmful direction. NULL (a night
+// stored before the column, or never scored) stays NULL.
+function withoutSleepFacts(raw) {
+  const facts = parseSummaryFacts(raw);
+  return facts ? JSON.stringify({ ...facts, sleep: null }) : null;
+}
 // Sleep claims computeNight returns that are NOT sleep_nights columns, so a stored row never has them. Nulled ONLY
 // when present: setting one on a stored row would give the flagged row a key a detector-empty stored row does not
 // have (the PRAGMA shape test in nobody-in-bed.test.js). `sound_discounted_minutes` (#904) counts minutes of the
@@ -889,6 +910,9 @@ function asNobodyInBed(night) {
   const out = { ...night };
   for (const k of EMPTY_NIGHT_NULLS) out[k] = null;
   for (const k of COMPUTED_ONLY_EMPTY_NULLS) if (k in out) out[k] = null;
+  // Only where the key exists (a stored row has the column, a fresh compute the key), so no key is added to a
+  // hand-built night that has neither.
+  if ('summary_facts' in out) out.summary_facts = withoutSleepFacts(out.summary_facts);
   for (const k of SCORED_NIGHT_DETAIL) delete out[k];
   out.status = 'empty';
   out.corrected = true;
