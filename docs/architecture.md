@@ -455,6 +455,27 @@ measured. Unlike #700, #904 and #917, the rules version is NOT bumped for these 
 key moved (golden figures captured on the previous source, in the same test file), and a bump would only mark every
 earlier night as scored by other rules.
 
+**The sleep score's maths, called by nothing yet** (sleep score plan, phase 1b, `planning/sleep-score-plan.md`; tests in
+`backend/test/sleep-score.test.js` and `backend/test/sleep-baseline.test.js`). The score is computed on read and never
+stored. `lib/sleepScore.js` holds `SCORE_VERSION`, the one frozen `SCORE_CONFIG` (weights, curve anchors, the cap
+margin, band edges, thresholds: change any and bump the version), `toScoringInput(night, { context, nowMs })` and the
+pure `scoreNight(night, baseline, ageMonths)`. `toScoringInput` turns a stored row or a fresh `computeNight` result
+(either with the correction overlay) into one shape and decides per metric whether the figure is usable: settling
+follows `frontend/src/lib/inBed.js`; a corrected span drops the longest stretch and the stir rate; more than 15
+unwatched minutes drops the longest stretch; a night with no confirmed wake or more than 15 unwatched minutes is kept
+out of the usual duration. A fresh compute carries no timezone or window, so its caller passes the context it ran with;
+without one the night matches no baseline. `lib/sleepBaseline.js` (`sleepBaseline(childId, night)`) reads the child's
+stored nights strictly before the night, within 28 days, lays `applyCorrection` over each, builds each through the SAME
+`toScoringInput`, keeps the newest 14 that are `ok`, not promoted from `empty`, at least 80% watched and scored from the
+same camera id and window (`scoring_context`; NULL does not qualify), and returns a median and a count per metric,
+`ready` at 7 usable values of that metric. Clock times are wall-clock minutes since noon in each night's own stored
+zone. Known limits: a physical camera move keeps the camera id, so it does not restart the baseline; the age fallback
+(`AGE_NIGHT_SLEEP_HOURS`, Iglowstein et al. 2003, Table 1) is parent-reported time in bed, not minutes asleep, and is
+used only until the usual duration is ready (`early_estimate`, no band word); the continuity curves for children under
+12 months, or with no birthday, are relative to the child's usual and were not tuned on any infant.
+`scripts/sleep-score-evidence.mjs` scores every stored night of a snapshot copy (tests in
+`backend/test/sleep-score-evidence.test.js`).
+
 **The admin Recompute is one caller** (#361 step 3; tests in `backend/test/recompute-stored-context.test.js`, the
 dialog in `frontend/src/components/RecomputeNight.jsx`). `GET /api/children/:id/sleep/:date?context=stored` reads the
 row's `scoring_context` and parses it (no row, `NULL` or unparseable: `400` with `reason: 'no_stored_context'`, never a
