@@ -152,7 +152,9 @@ test('★ the field is ADDED: every other key of the payload is exactly what the
   assert.equal(before.status, 'ok', 'precondition');
   assert.ok(Array.isArray(before.transitions), 'precondition: the night has its adopted markers');
 
-  const { transition_frames, ...rest } = (await get('?detail=1')).body;
+  // `score` (sleep score plan phase 1c) is the route's other added key: set aside the same way (its own tests are
+  // in sleep-score-routes.test.js).
+  const { transition_frames, score: _score, ...rest } = (await get('?detail=1')).body;
   assert.ok(Array.isArray(transition_frames));
   assert.deepEqual(rest, before);
 });

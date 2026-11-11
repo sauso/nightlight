@@ -9,8 +9,9 @@ import { primaryCameraRowFor } from '../lib/primaryCamera.js';
 import {
   getStoredNights, computeNight, computeAndStoreNight, currentNightDate, lastCompletedNightDate,
   childTracksSleep, sleepInsights, nightIsLocked, storeNightBeforeCorrection, reportableSpanMs, MIN_COVERAGE_FRAC, EMPTY_MIN_COVERAGE_FRAC,
-  parseScoringContext, scoringContextChoice, computeNightForDisplay, displayContextFor,
+  parseScoringContext, scoringContextChoice, computeNightForDisplay, displayContextFor, currentScoringContext,
 } from '../lib/sleepAnalysis.js';
+import { attachScore } from '../lib/sleepScoreAttach.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
 import { reconcileClipRing } from '../lib/clipCapture.js';
 import { purgeChild, purgeFailureReason } from '../lib/entityPurge.js';
@@ -281,13 +282,24 @@ router.put('/:id', (req, res) => {
 // window is currently open, otherwise the LAST COMPLETED night (the saved row when it exists, else
 // computed fresh, see below). `scope` tells the UI which it is so it can say "Tonight · so far" vs
 // "Last night". Computed on demand — cheap, always fresh.
+//
+// `night.score` (sleep score plan phase 1c, ADDED on all three sleep routes; every existing key is unchanged): the
+// sleep score of the night object returned, worked out on read from that exact object (lib/sleepScoreAttach.js).
+// WHICH SCORING CONTEXT each answer here hands over (a fresh compute carries no timezone or window of its own, and
+// the score must never guess them):
+//   - `tonight`: a plain compute, so today's (currentScoringContext, read in this same synchronous handler, so it
+//     is the settings the compute just used). The night is in progress, so the answer is always
+//     `{ score: null, reason: 'in_progress' }`;
+//   - `last`, the saved row: none. A stored row carries its own `scoring_context`;
+//   - `last`, computed fresh: a plain compute again, so today's.
 router.get('/:id/sleep/live', (req, res) => {
-  const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
+  const child = db.prepare('SELECT id, birthday FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
   if (!childTracksSleep(req.params.id)) return res.json({ scope: 'off', night: null });
   const current = currentNightDate(req.params.id);
   if (current) {
-    return res.json({ scope: 'tonight', night: computeNight(req.params.id, current) });
+    const tonight = computeNight(req.params.id, current);
+    return res.json({ scope: 'tonight', night: attachScore(child, tonight, { context: currentScoringContext(req.params.id) }) });
   }
   // "Last night" must mean the last COMPLETED night, not "the newest row we happen to have saved" (#683).
   // The row for the night that just ended is only written by the nightly job, a 30-minute timer that
@@ -309,7 +321,7 @@ router.get('/:id/sleep/live', (req, res) => {
     // applyCorrection. A night somebody has told us the truth about must not keep showing the
     // algorithm's version of it.
     const nights = applyCorrections(req.params.id, [stored]);
-    return res.json({ scope: 'last', night: nights[0] || null });
+    return res.json({ scope: 'last', night: attachScore(child, nights[0] || null) });
   }
   // No saved row for it yet: compute that night fresh, exactly like the `tonight` branch above and
   // GET /:id/sleep/:date do. READ-ONLY: nothing is stored here (storing stays the nightly job's and the
@@ -317,7 +329,8 @@ router.get('/:id/sleep/live', (req, res) => {
   // fresh night too, so a night a parent has already corrected is not shown as the detector's version. A
   // fresh `no_data` is returned as it is (the card has wording for it) rather than falling back to an
   // older night, which is the very bug.
-  return res.json({ scope: 'last', night: applyCorrection(req.params.id, computeNight(req.params.id, last)) });
+  const fresh = applyCorrection(req.params.id, computeNight(req.params.id, last));
+  return res.json({ scope: 'last', night: attachScore(child, fresh, { context: currentScoringContext(req.params.id) }) });
 });
 
 // Phase 5: does room temperature correlate with this child's sleep across their recent nights? A
@@ -330,11 +343,16 @@ router.get('/:id/sleep/insights', (req, res) => {
 });
 
 // Recent stored sleep summaries for a child (newest first) — the "last night" card's data source.
+// Each night gains `score` (phase 1c, added): scored from the stored row with its correction laid over it, on the
+// row's own `scoring_context`. One clock reading for the whole list, so two nights cannot be judged at two times.
 router.get('/:id/sleep', (req, res) => {
-  const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
+  const child = db.prepare('SELECT id, birthday FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
   const nights = Math.min(60, Math.max(1, parseInt(req.query.nights, 10) || 14));
-  res.json({ nights: applyCorrections(req.params.id, getStoredNights(req.params.id, nights)) });
+  const nowMs = Date.now();
+  res.json({
+    nights: applyCorrections(req.params.id, getStoredNights(req.params.id, nights)).map((n) => attachScore(child, n, { nowMs })),
+  });
 });
 
 // Compute one night on demand for a specific LOCAL start date ('YYYY-MM-DD'). ?detail=1 includes the
@@ -342,8 +360,25 @@ router.get('/:id/sleep', (req, res) => {
 // timeline (tuning); ?store=1 (admin) persists the recompute; ?stored=1 returns the SAVED row instead
 // of computing anything. ?context=auto|stored|current and ?raw=1 (#361 PR 3, `auto` PR 4a): which settings
 // the night is worked out with, and whether a parent's correction is laid over the answer (see below).
+//
+// `score` (sleep score plan phase 1c, ADDED to every answer here that is a night; no existing key changes): the
+// sleep score of the night object returned, from that exact object (lib/sleepScoreAttach.js). WHICH SCORING
+// CONTEXT each shape hands over, and whether the correction is under the score:
+//   - `?stored=1`: `night.score`, from the saved row as it is (no correction, like the row beside it), on the
+//     row's own `scoring_context`. No row: `night` is null and there is no score;
+//   - `context=stored` (the forced replay): the saved context that replay was just run with (`context` below),
+//     never today's;
+//   - `context=auto`, `context=current`, no param: whatever computeNightForDisplay actually used. It says so:
+//     `scoring_view.applied === 'stored'` means it replayed the saved context (`scoring_view.stored`); anything
+//     else, including no `scoring_view` at all, was a plain compute with today's settings (currentScoringContext);
+//   - `raw=1`: the same context, and the score is of the night WITHOUT the correction, as the night returned is;
+//   - `detail=1` / `debug=1`: the same night with a timeline, so the same score;
+//   - an admin `store=1` that succeeds: the summary just saved, with the context it was computed with (the saved
+//     one for `context=stored`, else today's). A refusal has no night and so no score.
+// On a read whose fresh night is `no_data` while a saved `ok` row exists (its raw samples have aged out, or its
+// camera is gone), the score is the SAVED night's and `score_source: 'stored'` is added (attachScore says why).
 router.get('/:id/sleep/:date', (req, res) => {
-  const child = db.prepare('SELECT id FROM children WHERE id = ?').get(req.params.id);
+  const child = db.prepare('SELECT id, birthday FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(req.params.date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
   // The SAVED row, computed once the morning after and never revisited. This is what the child's
@@ -379,7 +414,7 @@ router.get('/:id/sleep/:date', (req, res) => {
       .prepare('SELECT * FROM sleep_nights WHERE child_id = ? AND night_date = ?')
       .get(req.params.id, req.params.date);
     const contexts = scoringContextChoice(req.params.id, row?.scoring_context ?? null);
-    return res.json({ night: row || null, contexts, locked: nightIsLocked(req.params.id, req.params.date) });
+    return res.json({ night: attachScore(child, row || null), contexts, locked: nightIsLocked(req.params.id, req.params.date) });
   }
   // #361: WHICH SETTINGS the night is worked out with.
   //   - `current`, and an ABSENT param: today's camera, timezone and window. Absent stays `current` for reads AND
@@ -457,7 +492,20 @@ router.get('/:id/sleep/:date', (req, res) => {
     // whose saved row is missing or unscored is still recompute-eligible: comparing the saved row against an
     // overlaid preview would show the parent's times as what Save would store.
     const raw = contextChoice !== undefined && req.query.raw === '1';
-    const shown = raw ? night : applyCorrection(req.params.id, night);
+    const overlaid = raw ? night : applyCorrection(req.params.id, night);
+    // The score, AFTER the correction (or without it for `raw`), from the context this night was really computed
+    // with: see the list above the route. The saved row is only read if the fresh night is `no_data`.
+    const shown = attachScore(child, overlaid, {
+      context: contextChoice === 'stored' ? context
+        : night.scoring_view?.applied === 'stored' ? night.scoring_view.stored
+          : currentScoringContext(req.params.id),
+      storedNight: () => {
+        const row = db
+          .prepare('SELECT * FROM sleep_nights WHERE child_id = ? AND night_date = ?')
+          .get(req.params.id, req.params.date);
+        return row && !raw ? applyCorrection(req.params.id, row) : row;
+      },
+    });
     // `transition_frames` (#907, ADDED to the shape; every existing key is unchanged): the saved bed-transition
     // pictures the sleep detail page may offer on its Room activity rows, [{ id, type, at }]. Built HERE from the
     // finished night, not inside computeNight: it moves no computed number, and `transitions` (the two adopted
@@ -569,8 +617,9 @@ router.get('/:id/sleep/:date', (req, res) => {
   }
   // The raw recompute, not overlaid, like ?stored=1 above: it reports what the detector just SAVED. A
   // parent's correction is untouched by this write (it lives in sleep_reviews) and still applies on the
-  // next normal read of this night.
-  res.json(summary);
+  // next normal read of this night. Its score is likewise the detector's night's, on the context it was just
+  // computed and saved with (the replayed one for `context=stored`, else today's).
+  res.json(attachScore(child, summary, { context: context ?? currentScoringContext(req.params.id) }));
 });
 
 // --- Morning review: what actually happened, from the person who was there --------------------------

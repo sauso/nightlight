@@ -747,6 +747,13 @@ export function applyCorrection(childId, night) {
     out.in_bed_at = r.true_in_bed_at;
     out.in_bed_corrected = true;
   }
+  // `wake_given` (#1041, ADDED; present only then, like `in_bed_corrected`): the review carries a wake time, moved
+  // or not. A wake the parent saw and saved unchanged is an implicit confirmation (see "AN UNCHANGED TIME" above),
+  // but it leaves the night's own fields exactly as stored, so nothing downstream could tell it from a review that
+  // only gave the put-down. The sleep score needs the difference (sleepScore.js toScoringInput: a wake the
+  // detector doubted, `wake_unconfirmed_at`, counts as confirmed once a parent has given one). It changes no
+  // other field and nothing else reads it.
+  if (r.true_wake_at) out.wake_given = true;
   // Nothing about WHEN they slept changed (in bed only, or asleep/wake given but equal to the night's own):
   // nothing about the sleep is re-derived. See "AN UNCHANGED TIME" above.
   const onsetChanged = Boolean(r.true_onset_at) && r.true_onset_at !== night.onset_at;

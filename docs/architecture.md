@@ -455,13 +455,27 @@ measured. Unlike #700, #904 and #917, the rules version is NOT bumped for these 
 key moved (golden figures captured on the previous source, in the same test file), and a bump would only mark every
 earlier night as scored by other rules.
 
-**The sleep score's maths, called by nothing yet** (sleep score plan, phase 1b, `planning/sleep-score-plan.md`; tests in
-`backend/test/sleep-score.test.js` and `backend/test/sleep-baseline.test.js`). The score is computed on read and never
-stored. `lib/sleepScore.js` holds `SCORE_VERSION`, the one frozen `SCORE_CONFIG` (weights, curve anchors, the cap
+**The sleep score: the maths, and the routes that return it** (sleep score plan, phases 1b and 1c,
+`planning/sleep-score-plan.md`; tests in `backend/test/sleep-score.test.js`, `backend/test/sleep-baseline.test.js` and
+`backend/test/sleep-score-routes.test.js`). The score is computed on read and never stored. No screen shows it yet.
+`lib/sleepScoreAttach.js` (`attachScore(child, night, { context, storedNight, nowMs })`) is the one caller of the maths:
+`/sleep/live`, `/sleep?nights=N` and every answer of `/sleep/:date` that is a night pass the exact night object they
+return (after `applyCorrection`, or without it for `?stored=1`, `raw=1` and the store reply) and get it back with an
+added `score` key: `scoreNight`'s result, its `{ score: null, reason, version }` form, or `null` if scoring threw (caught,
+one fixed log line an hour at most, the route still answers). The context a fresh compute is scored with is the one it
+ran with: the route's parsed saved context for `context=stored`, `scoring_view.stored` when `computeNightForDisplay`
+replayed it (`applied === 'stored'`), `currentScoringContext` otherwise; a stored row uses its own `scoring_context`.
+When a read's fresh night is `no_data` and a saved `ok` row exists, the score is the saved row's and
+`score_source: 'stored'` is added; no other key of the fresh night changes. A night in progress or not `ok` skips the
+baseline read. `applyCorrection` adds `wake_given: true` when the review carries a wake time (#1041), which is how a
+wake the parent saved unchanged counts as confirmed.
+`lib/sleepScore.js` holds `lib/sleepScore.js` holds `SCORE_VERSION`, the one frozen `SCORE_CONFIG` (weights, curve anchors, the cap
 margin, band edges, thresholds: change any and bump the version), `toScoringInput(night, { context, nowMs })` and the
 pure `scoreNight(night, baseline, ageMonths)`. `toScoringInput` turns a stored row or a fresh `computeNight` result
 (either with the correction overlay) into one shape and decides per metric whether the figure is usable: settling
-follows `frontend/src/lib/inBed.js`; a corrected span drops the longest stretch and the stir rate; more than 15
+follows `frontend/src/lib/inBed.js`; a span whose asleep or wake time a correction moved by more than
+`correction_span_tolerance_minutes` (15; the larger of the two moves, and a time the detector did not have counts as
+moved) drops the longest stretch and the stir rate; more than 15
 unwatched minutes drops the longest stretch; a night with no confirmed wake or more than 15 unwatched minutes is kept
 out of the usual duration. A fresh compute carries no timezone or window, so its caller passes the context it ran with;
 without one the night matches no baseline. `lib/sleepBaseline.js` (`sleepBaseline(childId, night)`) reads the child's

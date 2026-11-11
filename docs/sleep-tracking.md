@@ -544,7 +544,7 @@ readings around the night's possible wakes, and on a night whose wake you correc
 
 ### Two more facts are saved with each night
 
-The minute-by-minute data behind a night is kept for 30 days, and a planned sleep score will want to look
+The minute-by-minute data behind a night is kept for 30 days, and the [sleep score](#sleep-score) looks
 further back than that. So each night now also saves two things that can only be worked out from those
 minutes. **Nothing on screen uses them yet.**
 
@@ -604,6 +604,161 @@ lingers 5 to 10 minutes after the closing one.
 - **Known limits:** a departure later than 3 hours after the window closes is not seen by any camera, and
   for a camera of this kind the morning review has no recorded *got out / into bed* events after about
   3 hours past the window's end, because nothing past that point feeds the night's numbers.
+
+## Sleep score
+
+Each finished night gets a score from 0 to 100. It answers one question: how did this night compare with
+this child's own recent nights?
+
+**No screen shows the score yet.** In this release the server works it out and returns it with each night
+(see [For developers](#for-developers-the-score-in-the-api) below); the ring on the child's card and the
+detail page come in a later release. There is nothing to turn on and nothing to configure.
+
+The score is an estimate made from what the camera and microphone observed. It is not a medical
+measurement, it says nothing about sleep stages, and it is no reason to worry on its own.
+
+### What goes into it
+
+Five things, each scored 0 to 100 and then combined by weight:
+
+| Part | Weight | What is measured | Compared with |
+| --- | --- | --- | --- |
+| Duration | 35 | Minutes asleep | The child's usual. Full marks at or above it, half at 90 minutes under, none at 4 hours under. |
+| Continuity | 30 | The share of the night spent asleep, the longest unbroken stretch, and the number of wake-ups | Fixed curves from 12 months of age. Under 12 months, or with no birthday entered, the child's usual. |
+| Settling | 15 | Minutes from being put down to falling asleep | A fixed curve: up to 20 minutes is full marks, 45 is half, 90 is none. |
+| Restlessness | 15 | [Stirring minutes](#two-more-facts-are-saved-with-each-night) per hour asleep | Only the amount above the child's usual counts (or above 2 minutes an hour, for a very still sleeper). |
+| Consistency | 5 | The clock time they fell asleep and the time they got up | The child's usual times. Within 15 minutes counts as on time. |
+
+A part that could not be measured is left out and the others keep their proportions. A night with no
+detected put-down, for example, is simply not judged on settling.
+
+**The weakest-link cap.** The score cannot be more than 40 points above the duration part, the continuity
+part or the restlessness part. Without it, a night with long stretches awake could still read "Good"
+because bedtime went well, and twenty unbroken minutes of sleep could read as a middling night.
+
+**The words.** 85 and over is "Great", 70 to 84 is "Good", 55 to 69 is "Fair". Under 55 the number is
+given with no word.
+
+### What "usual" means
+
+"Usual" is the middle value (the median) of the child's own saved nights before this one: the newest 14
+from the last four weeks. A night counts only if sleep was detected, the camera watched at least 80% of
+the sleep window, and it was measured by the same camera with the same sleep window as the night being
+scored. Your [corrections](#correcting-a-night) are included.
+
+Nothing is called usual until there are 7 nights to go on, and that is counted separately for each
+figure. Seven nights of which two have a detected put-down give a usual duration but no usual settling
+time yet.
+
+### The early estimate
+
+Until there are 7 nights, the score is an **early estimate**. Duration is then compared with a published
+figure for the child's age instead of their own usual, and the score carries no word.
+
+The age figures are from Iglowstein and colleagues, *Sleep duration from infancy to adolescence*
+(Pediatrics, 2003). They are what parents reported as their child's usual time in bed at night, not
+minutes asleep. So for an early estimate the night's whole span, from falling asleep to waking, is
+compared with them. It is a rough guide for the first week, nothing more.
+
+An early estimate needs the child's birthday (edit the child to add it), and the child must be at least
+12 months old on that night.
+
+### When there is no score
+
+- The night is still in progress.
+- No sleep was detected, there was too little data, or you said no one was in the bed. The same goes for
+  a night whose corrected times leave no minutes asleep.
+- The detector saw an empty bed and you typed in the times. The wake-ups of that night were never
+  measured, so there is nothing to score.
+- There are fewer than 7 nights to compare with and no birthday is entered.
+- The child is under 12 months old and there are fewer than 7 nights to compare with.
+
+### Provisional and low confidence
+
+A night's figures keep being refined for 3 hours after the sleep window closes. A score worked out before
+then is marked **provisional** and may still change. A saved night you have corrected is locked, so its
+score is final.
+
+A score is marked **low confidence** when the camera watched less than 80% of the sleep window, when more
+than 15 minutes inside the sleep were not watched, or when the wake time is uncertain (no wake was
+detected, or the detector [set aside an early exit](#an-exit-far-earlier-than-usual-does-not-end-the-night)).
+A wake time you gave in the morning review counts as certain, also when you left it as it was. Unwatched
+minutes are never counted as sleep, and with more than 15 of them the longest stretch is left out of the
+score.
+
+### After you correct a night
+
+The score always uses the night as you see it, so a correction changes the score the next time it is
+read, and changes what "usual" means for the nights after it.
+
+If you move the time asleep or the time up by **more than 15 minutes**, that night's restlessness and
+longest stretch are left out of its score and out of the usual: the detector measured them over different
+hours. A smaller adjustment keeps them. The tolerance is fixed at 15 minutes for each of the two times and
+is not a setting.
+
+Settling follows what the page shows: if you changed the time asleep but not the put-down, the night is
+not judged on settling.
+
+### Known limits of the score
+
+- A parent's visit can be counted as the child's wake-up.
+- Sound from another room can be counted as a wake-up. A bedroom microphone hears the whole house.
+- Scores are not comparable between children or between rooms. A camera's angle changes how much movement
+  it sees.
+- A night with no detected put-down is not judged on settling, so it can score higher than the same night
+  with a slow, detected settle.
+- After you correct a time, the number of wake-ups and the minutes awake are still the detector's.
+- Nights saved before stirring minutes were stored have no restlessness figure and never will.
+- Changing the camera a child's sleep is measured from, or the sleep window, starts "usual" again: about
+  a week of early estimates.
+- Physically moving or re-aiming the same camera does **not** start "usual" again. For up to four weeks
+  the usual is partly from the old view.
+- A sleep window that ends near midday can give a wrong usual clock time, because times are counted from
+  noon.
+- Nothing checks that the [zone you drew](#one-camera-does-the-measuring) sits on the bed.
+- Naps are not tracked or scored.
+- A night with no sleep detected has no score at all.
+- Under 12 months, or with no birthday entered, continuity is compared with the child's own usual. Those
+  curves have not been checked against any infant's nights.
+- The age figures are parent-reported times in bed for Swiss children born between 1974 and 1993. They
+  stand in only until the child has a usual of their own.
+- Every weight and curve is a starting value, tuned on two cameras in one house. Expect them to change;
+  when they do, past nights are rescored too, because the score is worked out when it is read and not
+  saved.
+- If the minute-by-minute data for a night has gone (it is kept 30 days), the detail view can no longer
+  draw the night, and the score comes from the saved summary instead.
+
+### For developers: the score in the API
+
+`GET /api/children/:id/sleep/live`, `GET /api/children/:id/sleep?nights=N` and every read of
+`GET /api/children/:id/sleep/:date` add one key, `score`, to each night they return. No existing key
+changed. The score is worked out from the exact night object in the answer: with your correction laid over
+it, or without it where the answer itself leaves it out (`?stored=1`, `raw=1`, and the reply to an admin's
+`store=1`). Nothing is stored.
+
+`score` is one of:
+
+- **A score:** `{ score, band, version, provisional, low_confidence, low_confidence_reasons, capped_by,
+  early_estimate, unwatched_minutes, components }`. `band` is `great`, `good`, `fair` or `null`.
+  `capped_by` names the part that capped the score, or is `null`. `components` lists the five parts, each
+  `{ key, score, weight, available, reason, value, usual }`; continuity and consistency also carry their
+  `terms`, and duration says what it was compared with in `basis` (`asleep_vs_usual` or `span_vs_age`).
+- **No score:** `{ score: null, reason, version }`, where `reason` is `in_progress`, `not_ok` (with the
+  night's `status`), `promoted_from_empty`, `no_sleep_measured`, `no_duration_reference` or
+  `under_12_months_no_baseline`.
+- **`null`:** scoring failed. The night is returned as usual and one line is logged.
+
+`version` is the formula's version (currently `2`). `/sleep/:date?stored=1` has it at `night.score`;
+`night` is `null` there when no row is saved.
+
+A night worked out fresh is scored with the settings it was worked out with: the saved ones for
+`context=stored` and for a night `context=auto` replays, today's otherwise. So "Show with today's
+settings" after a window change is compared with nights measured with today's window, which usually
+means an early estimate.
+
+When a read's fresh night is `no_data` but a saved `ok` row exists (the raw data has aged out, or the
+camera is gone), `score` is the saved night's and the answer also carries `score_source: "stored"`. Every
+other key is still the fresh `no_data` night; read `?stored=1` or the list for the saved figures.
 
 ## Correcting a night
 
@@ -1080,6 +1235,7 @@ The limits are described beside the behaviour they affect:
 - [Getting up and returning to bed](#a-child-who-gets-out-and-climbs-straight-back-in-has-not-got-up)
 - [An exit far earlier than usual](#an-exit-far-earlier-than-usual-does-not-end-the-night)
 - [Stirring minutes and the saved summary](#two-more-facts-are-saved-with-each-night)
+- [The sleep score](#known-limits-of-the-score)
 - [Motion camera sampling](#when-the-motion-camera-samples)
 - [Review corrections and locks](#known-limits-all-documented-rather-than-fixed)
 - [The detail page and a night's saved settings](#finished-nights-use-the-settings-they-were-saved-with)

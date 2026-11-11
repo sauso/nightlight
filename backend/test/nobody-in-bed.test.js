@@ -267,8 +267,12 @@ test('★ a flagged stored row reads exactly like a detector-empty row: every cl
   assert.equal((await put({ nobody_in_bed: true })).status, 200);
   const shown = (await get('/sleep?nights=60')).body.nights.find((n) => n.night_date === DATE);
 
-  assert.deepEqual(Object.keys(shown).sort(), [...names, ...OVERLAY_KEYS].sort(),
-    'the row keeps its columns and gains only the overlay fields');
+  // `score` is the route's, not the overlay's (sleep score plan phase 1c: every night a sleep route returns gains
+  // it). On a night the parent said was empty there is nothing to score, and it says so.
+  assert.deepEqual(Object.keys(shown).sort(), [...names, ...OVERLAY_KEYS, 'score'].sort(),
+    'the row keeps its columns and gains only the overlay fields and the score');
+  assert.equal(shown.score.score, null);
+  assert.deepEqual([shown.score.reason, shown.score.status], ['not_ok', 'empty']);
   assert.equal(shown.status, 'empty');
   for (const c of claims) {
     assert.equal(shown[c], null, `${c} leaked onto a night the parent said was empty (value ${JSON.stringify(shown[c])})`);
@@ -309,7 +313,10 @@ test('★ a flagged detail response has exactly the keys a detector-empty one ha
   // timeline is drawn, so no row can show a frame; sleep-detail-frames.test.js pins that). It is neither the
   // detector's nor the overlay's, so it is set aside before the shape comparison and checked on its own.
   assert.deepEqual(shown.transition_frames, [], 'a flagged night offers no frames');
-  const shownKeys = Object.keys(shown).filter((k) => !OVERLAY_KEYS.includes(k) && k !== 'transition_frames').sort();
+  // `score` (sleep score plan phase 1c) is the route's too, added after the overlay: set aside the same way. No
+  // sleep claim can ride in on it: an `empty` night has no score, only the reason.
+  assert.deepEqual([shown.score.score, shown.score.reason, shown.score.status], [null, 'not_ok', 'empty']);
+  const shownKeys = Object.keys(shown).filter((k) => !OVERLAY_KEYS.includes(k) && k !== 'transition_frames' && k !== 'score').sort();
   assert.deepEqual(shownKeys, Object.keys(realEmpty).sort(), 'the same keys as a real detector-empty night');
   for (const k of Object.keys(realEmpty)) {
     if (k === 'status') assert.equal(shown.status, 'empty');

@@ -1,5 +1,5 @@
 // The sleep score's baseline (src/lib/sleepBaseline.js; sleep score plan, phase 1b): what "usual" is for one child
-// on one night, read from stored nights with corrections laid over them. Nothing calls it yet.
+// on one night, read from stored nights with corrections laid over them. (The routes that use it: sleep-score-routes.test.js.)
 //
 // Each test states its nights and a literal expected median or count, and sits on a boundary or separates two
 // plausible implementations:
@@ -197,6 +197,9 @@ describe('which figures of a qualifying night count', () => {
     review(back(1), { true_wake_at: `${TARGET} 05:30:00` });
     // And only the put-down on another: nothing about the sleep changed, so everything of it still counts.
     review(back(2), { true_in_bed_at: `${back(2)} 19:00:00` });
+    // And a wake moved by ten minutes on a third (06:30 to 06:20): within the 15-minute tolerance, so its longest
+    // stretch and stir count still count (the counts below would be 5, not 6, if any change dropped them).
+    review(back(3), { true_wake_at: `${back(2)} 06:20:00` });
     const b = baseline();
     assert.equal(b.nights, 7);
     assert.equal(b.metrics.asleep.n, 7);

@@ -1,5 +1,5 @@
 // ★ THE SLEEP SCORE'S BASELINE: what "usual" means for one child on one night (sleep score plan, phase 1b;
-// planning/sleep-score-plan.md, Design 3). Read by nothing yet: no route calls it in this phase.
+// planning/sleep-score-plan.md, Design 3). Read by the sleep routes through lib/sleepScoreAttach.js (phase 1c).
 //
 // sleepBaseline(childId, night) reads the child's STORED nights before `night`, lays each parent correction over
 // its row, and returns a median per metric with the number of nights behind it. It is a pure read: nothing is
