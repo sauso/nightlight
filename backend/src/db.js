@@ -1191,6 +1191,13 @@ if (!childrenColumns.includes('sleep_report_show_name')) {
 if (!childrenColumns.includes('hold_alerts_until_asleep')) {
   db.exec('ALTER TABLE children ADD COLUMN hold_alerts_until_asleep INTEGER NOT NULL DEFAULT 0');
 }
+// "Show sleep score" (sleep score plan, phase 2), per child. DEFAULT 1: the score is shown unless an admin turns it
+// off, on a new install and for every child that existed before the column did (alert-hold-migration.test.js).
+// While it is 0 the sleep routes leave `score` out of every night they return for that child
+// (lib/sleepScoreAttach.js); nothing else reads it. An older build ignores the column and returns the score again.
+if (!childrenColumns.includes('show_sleep_score')) {
+  db.exec('ALTER TABLE children ADD COLUMN show_sleep_score INTEGER NOT NULL DEFAULT 1');
+}
 
 // #941: classify before this boot seeds settings. Existing rows (including a restored backup or an
 // unclaimed old install with only settings) mean this is not a new wizard install. INSERT OR IGNORE

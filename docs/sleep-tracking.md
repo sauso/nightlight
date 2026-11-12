@@ -15,6 +15,8 @@ from (a caregiver sees them, greyed out).
 A child can have more than one camera; the night is measured from one of them (see
 [One camera does the measuring](#one-camera-does-the-measuring)).
 
+Under **Track sleep** there is also **Show sleep score** (on by default, admin only): off hides that child's [sleep score](#turning-the-score-off) and changes nothing else.
+
 An admin can also switch on [Hold alerts until asleep](notifications.md#hold-alerts-until-asleep) under **Track sleep**. It is off by default. Motion and sound alerts are dropped until the watcher detects sleep. Outside the sleep window there is no sleep signal, so the hold has no time limit: an evening crying spell or daytime nap may be silent. Inside the window, alerts can resume 45 minutes after the first held alert even if sleep is not detected. The 45 minutes is a design choice, not a measured safety limit. Held alerts are not sent later. Camera-offline alerts continue normally. This is not a safety device.
 
 ## What you see
@@ -22,7 +24,7 @@ An admin can also switch on [Hold alerts until asleep](notifications.md#hold-ale
 ### At a glance, and live
 
 Each child's page summarises last night — total sleep, wake-ups,
-longest stretch — and while a night is in progress it updates as **"Tonight · so far"**, so an
+longest stretch, and the night's [sleep score](#sleep-score) in a small ring — and while a night is in progress it updates as **"Tonight · so far"**, so an
 early-morning wake appears within a minute or two rather than only after the window closes.
 Treat those live figures as provisional: a night in progress is judged only on what has
 happened so far, so a bedtime can be revised later in the evening and the morning wake isn't
@@ -610,12 +612,34 @@ lingers 5 to 10 minutes after the closing one.
 Each finished night gets a score from 0 to 100. It answers one question: how did this night compare with
 this child's own recent nights?
 
-**No screen shows the score yet.** In this release the server works it out and returns it with each night
-(see [For developers](#for-developers-the-score-in-the-api) below); the ring on the child's card and the
-detail page come in a later release. There is nothing to turn on and nothing to configure.
-
 The score is an estimate made from what the camera and microphone observed. It is not a medical
 measurement, it says nothing about sleep stages, and it is no reason to worry on its own.
+
+### Where you see it
+
+- **On the child's card**, as a small ring beside last night's sleep, with the number in it. A night
+  still in progress has no ring.
+- **On the sleep detail page**, in a **Sleep score** card under the date: the ring, the word for the
+  score ("Great", "Good", "Fair", or "Early estimate"), and **How this is scored**.
+- **How this is scored** opens the breakdown: one bar for each of the five parts with its own score, what
+  was measured and the child's usual. A part that was left out says why (for example "No put-down was
+  detected for this night"). The sheet also says when the score was held down by one part, when it may
+  still change, and when it is low confidence.
+- A night with no score shows **No score yet** and the reason.
+
+The ring is one colour whatever the score. The breakdown describes the night; it gives no advice and
+names no cause.
+
+### Turning the score off
+
+Each child has a **Show sleep score** switch in their settings, under **Track sleep**. It is **on by
+default**, for new children and for children who were already there before the score existed. Only an
+admin can change it (a caregiver sees it greyed out).
+
+Off hides the ring, the Sleep score card and the breakdown for that child, for everyone. Nothing else
+changes: the night is still tracked and shown, the morning sleep report is still sent (it never
+contained the score), and the child's "usual" keeps building, so turning the switch back on shows scores
+for past nights too.
 
 ### What goes into it
 
@@ -731,7 +755,8 @@ not judged on settling.
 ### For developers: the score in the API
 
 `GET /api/children/:id/sleep/live`, `GET /api/children/:id/sleep?nights=N` and every read of
-`GET /api/children/:id/sleep/:date` add one key, `score`, to each night they return. No existing key
+`GET /api/children/:id/sleep/:date` add one key, `score`, to each night they return (unless the child's
+[Show sleep score](#turning-the-score-off) switch is off, see the end of this section). No existing key
 changed. The score is worked out from the exact night object in the answer: with your correction laid over
 it, or without it where the answer itself leaves it out (`?stored=1`, `raw=1`, and the reply to an admin's
 `store=1`). Nothing is stored.
@@ -750,6 +775,12 @@ it, or without it where the answer itself leaves it out (`?stored=1`, `raw=1`, a
 
 `version` is the formula's version (currently `2`). `/sleep/:date?stored=1` has it at `night.score`;
 `night` is `null` there when no row is saved.
+
+**When the child's Show sleep score switch is off** (`show_sleep_score` is `0` on the child), the three
+routes return every night **without** the `score` key, and without `score_source`. The key is absent,
+not `null`, so a client can tell "switched off" from "scoring failed". Every other key is unchanged. The
+switch is `show_sleep_score` on `PUT /api/children/:id` and `POST /api/children` (`true`/`false`/`1`/`0`,
+admin only, default on) and is returned on each child as `0` or `1`.
 
 A night worked out fresh is scored with the settings it was worked out with: the saved ones for
 `context=stored` and for a night `context=auto` replays, today's otherwise. So "Show with today's

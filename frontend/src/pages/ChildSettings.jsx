@@ -29,13 +29,15 @@ const CAREGIVER_FIELDS = ['name', 'birthday', 'color', 'photo'];
 // moment it is picked on an existing child (persistPhoto), and as a data: URL it is too big to be worth
 // keeping in storage for the new-child case. A photo chosen for a not-yet-created child is lost on reload.
 // No secret fields exist on this form; the allow-list is still explicit so a future one is not stored by default.
-const DRAFT_FIELDS = ['name', 'birthday', 'color', 'track_sleep', 'sleep_window_start', 'sleep_window_end', 'primary_camera_id', 'sleep_report_enabled', 'sleep_report_show_name', 'hold_alerts_until_asleep'];
+const DRAFT_FIELDS = ['name', 'birthday', 'color', 'track_sleep', 'sleep_window_start', 'sleep_window_end', 'primary_camera_id', 'sleep_report_enabled', 'sleep_report_show_name', 'hold_alerts_until_asleep', 'show_sleep_score'];
 
 const NEW_CHILD = {
   name: '', birthday: '', color: COLORS[0], photo: null,
   track_sleep: true, sleep_window_start: '19:00', sleep_window_end: '07:00', primary_camera_id: '',
   // Both on, as the server defaults them (#397, #398): the nightly report is sent, and it names the child.
   sleep_report_enabled: true, sleep_report_show_name: true, hold_alerts_until_asleep: false,
+  // On, as the server defaults it (sleep score plan, phase 2).
+  show_sleep_score: true,
 };
 
 export default function ChildSettings() {
@@ -89,6 +91,8 @@ export default function ChildSettings() {
       sleep_report_enabled: kid.sleep_report_enabled !== 0 && kid.sleep_report_enabled !== false,
       sleep_report_show_name: kid.sleep_report_show_name !== 0 && kid.sleep_report_show_name !== false,
       hold_alerts_until_asleep: kid.hold_alerts_until_asleep === 1 || kid.hold_alerts_until_asleep === true,
+      // `!== 0` like the report switches: a server from before the column sends nothing, and that means on.
+      show_sleep_score: kid.show_sleep_score !== 0 && kid.show_sleep_score !== false,
     };
     const draft = loadDraft(draftKey, DRAFT_FIELDS);
     setBaseline(loaded);
@@ -350,6 +354,21 @@ export default function ChildSettings() {
                       </div>
                     </div>
                   )}
+                  {/* The sleep score (sleep score plan, phase 2). Per child and admin-only like its neighbours. It
+                      only hides the score: while it is off the server leaves the score out of this child's nights,
+                      and the nights themselves, the report and the baseline are untouched. */}
+                  <div style={{ marginTop: 16 }}>
+                    <label className="child-sleep-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>Show sleep score</span>
+                      <Switch checked={form.show_sleep_score} disabled={!isAdmin}
+                        onChange={(e) => setForm({ ...form, show_sleep_score: e.target.checked })} />
+                    </label>
+                    <div className="camera-tile__sub" style={{ marginTop: 6 }}>
+                      A score from 0 to 100 for each night, on this child's card and sleep page. Off hides it for
+                      everyone; the nights are still tracked the same way. On by default.
+                      {!isAdmin && ' Only an admin can change this setting.'}
+                    </div>
+                  </div>
                   {/* The nightly report (#397, #398). Both are admin-only like the rest of this block, and both are
                       per child: what leaves the house is decided for each child on their own. The second switch is
                       meaningless while the first is off, so it is disabled then rather than hidden. */}

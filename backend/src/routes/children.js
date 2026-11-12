@@ -60,9 +60,13 @@ const primaryNotId = (v) => v !== undefined && v !== null && typeof v !== 'strin
 // SELECT *), which is the additive part: no existing key changes.
 // #919 uses the same strict values and admin comparison for alert holding, with its own 400 message.
 const REPORT_FLAGS = ['sleep_report_enabled', 'sleep_report_show_name'];
-const CHILD_FLAGS = [...REPORT_FLAGS, 'hold_alerts_until_asleep'];
+// "Show sleep score" (sleep score plan, phase 2) joins them: the same strict values, admin-only for the same reason
+// (what a child's pages show is a decision for the household, not for whoever is minding them tonight). While it is
+// off the sleep routes below leave `score` out of every night (lib/sleepScoreAttach.js reads the column itself).
+const CHILD_FLAGS = [...REPORT_FLAGS, 'hold_alerts_until_asleep', 'show_sleep_score'];
 const REPORT_FLAG_INVALID = 'Sleep report settings must be on or off (true or false)';
 const HOLD_FLAG_INVALID = 'Hold alerts until asleep must be on or off (true or false)';
+const SCORE_FLAG_INVALID = 'Show sleep score must be on or off (true or false)';
 const flagInvalid = (v) => v !== undefined && ![true, false, 1, 0].includes(v);
 
 // A child's sleep-tracking state or window changed — (re)evaluate the motion activity leg for each of
@@ -137,6 +141,7 @@ router.post('/', requireAdmin, (req, res) => {
   if (isNotText(name)) return res.status(400).json({ error: NAME_NOT_TEXT });
   if (REPORT_FLAGS.some((k) => flagInvalid(req.body?.[k]))) return res.status(400).json({ error: REPORT_FLAG_INVALID });
   if (flagInvalid(req.body?.hold_alerts_until_asleep)) return res.status(400).json({ error: HOLD_FLAG_INVALID });
+  if (flagInvalid(req.body?.show_sleep_score)) return res.status(400).json({ error: SCORE_FLAG_INVALID });
   if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
   if (badColor(color, null)) return res.status(400).json({ error: COLOR_INVALID });
   if (badBirthday(birthday, null)) return res.status(400).json({ error: BIRTHDAY_INVALID });
@@ -157,8 +162,8 @@ router.post('/', requireAdmin, (req, res) => {
   const id = uuid();
   db.prepare(
     `INSERT INTO children (id, name, birthday, color, photo, track_sleep, sleep_window_start, sleep_window_end,
-                           sleep_report_enabled, sleep_report_show_name, hold_alerts_until_asleep)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                           sleep_report_enabled, sleep_report_show_name, hold_alerts_until_asleep, show_sleep_score)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     name.trim(),
@@ -171,7 +176,9 @@ router.post('/', requireAdmin, (req, res) => {
     // Not sent = on, the default every child has had (POST is admin-only, so there is no role gate to apply).
     req.body?.sleep_report_enabled === undefined ? 1 : req.body.sleep_report_enabled ? 1 : 0,
     req.body?.sleep_report_show_name === undefined ? 1 : req.body.sleep_report_show_name ? 1 : 0,
-    req.body?.hold_alerts_until_asleep ? 1 : 0
+    req.body?.hold_alerts_until_asleep ? 1 : 0,
+    // Not sent = on, the column's default.
+    req.body?.show_sleep_score === undefined ? 1 : req.body.show_sleep_score ? 1 : 0
   );
   res.status(201).json(withCameras(db.prepare('SELECT * FROM children WHERE id = ?').get(id)));
 });
@@ -189,6 +196,7 @@ router.put('/:id', (req, res) => {
   if (sleep_window_end !== undefined && !HHMM.test(sleep_window_end)) return res.status(400).json({ error: 'Wake time must be a time like 07:00' });
   if (REPORT_FLAGS.some((k) => flagInvalid(req.body?.[k]))) return res.status(400).json({ error: REPORT_FLAG_INVALID });
   if (flagInvalid(req.body?.hold_alerts_until_asleep)) return res.status(400).json({ error: HOLD_FLAG_INVALID });
+  if (flagInvalid(req.body?.show_sleep_score)) return res.status(400).json({ error: SCORE_FLAG_INVALID });
   const { primary_camera_id } = req.body || {};
   if (primaryNotId(primary_camera_id)) return res.status(400).json({ error: PRIMARY_NOT_ID });
   // The four sleep values the UPDATE below will write, computed once so the role gate and the write
@@ -254,7 +262,7 @@ router.put('/:id', (req, res) => {
   db.prepare(
     `UPDATE children SET name = ?, birthday = ?, color = ?, photo = ?, track_sleep = ?,
        sleep_window_start = ?, sleep_window_end = ?, primary_camera_id = ?,
-       sleep_report_enabled = ?, sleep_report_show_name = ?, hold_alerts_until_asleep = ? WHERE id = ?`
+       sleep_report_enabled = ?, sleep_report_show_name = ?, hold_alerts_until_asleep = ?, show_sleep_score = ? WHERE id = ?`
   ).run(
     name?.trim() || existing.name,
     birthday !== undefined ? birthday : existing.birthday,
@@ -267,6 +275,7 @@ router.put('/:id', (req, res) => {
     nextReport.sleep_report_enabled,
     nextReport.sleep_report_show_name,
     nextReport.hold_alerts_until_asleep,
+    nextReport.show_sleep_score,
     req.params.id
   );
   // Turning tracking on/off — or moving the window so it no longer contains "now" — changes whether the

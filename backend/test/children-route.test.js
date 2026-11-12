@@ -94,6 +94,42 @@ test('#919 a new child defaults to hold off and rejects a non-boolean', async ()
   assert.equal(good.body.hold_alerts_until_asleep, 0);
 });
 
+// "Show sleep score" (sleep score plan, phase 2): the same rules as the hold switch above, with the opposite default.
+test('show_sleep_score defaults on, validates booleans, and is admin-only', async () => {
+  assert.equal(row().show_sleep_score, 1);
+  const bad = await put({ show_sleep_score: 'false' });
+  assert.equal(bad.status, 400);
+  const denied = await call(`${server.url}/api/children/${KID}`, {
+    method: 'PUT', token: caregiverToken, body: { show_sleep_score: false },
+  });
+  assert.equal(denied.status, 403);
+  assert.equal(denied.body.reason, 'admin_only_fields');
+  assert.deepEqual(denied.body.fields, ['show_sleep_score']);
+  assert.equal(row().show_sleep_score, 1);
+  // A caregiver's form re-sending the stored value changes nothing, so it is not refused.
+  const unchanged = await call(`${server.url}/api/children/${KID}`, {
+    method: 'PUT', token: caregiverToken, body: { name: 'Child C', show_sleep_score: true },
+  });
+  assert.deepEqual([unchanged.status, row().name, row().show_sleep_score], [200, 'Child C', 1]);
+  const allowed = await put({ show_sleep_score: false });
+  assert.equal(allowed.status, 200);
+  assert.equal(row().show_sleep_score, 0);
+  // A write that does not mention it keeps it.
+  await put({ name: 'Child D' });
+  assert.equal(row().show_sleep_score, 0);
+  const get = await call(`${server.url}/api/children`, { token: caregiverToken });
+  assert.equal(get.body.find((child) => child.id === KID).show_sleep_score, 0);
+});
+
+test('a new child shows the sleep score unless the form says otherwise, and a non-boolean is refused', async () => {
+  const bad = await call(`${server.url}/api/children`, { method: 'POST', token, body: { name: 'A child', show_sleep_score: '0' } });
+  assert.equal(bad.status, 400);
+  const good = await call(`${server.url}/api/children`, { method: 'POST', token, body: { name: 'A child' } });
+  assert.deepEqual([good.status, good.body.show_sleep_score], [201, 1]);
+  const off = await call(`${server.url}/api/children`, { method: 'POST', token, body: { name: 'A child', show_sleep_score: false } });
+  assert.deepEqual([off.status, off.body.show_sleep_score], [201, 0]);
+});
+
 test('★★ the photo-only write from the child screen keeps the sleep settings', async () => {
   // The exact payload `persistPhoto` sends. This is the test the file exists for.
   const res = await put({ name: 'Child B', birthday: '2023-04-01', color: '#7FBFA3', photo: null });

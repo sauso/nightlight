@@ -457,7 +457,13 @@ earlier night as scored by other rules.
 
 **The sleep score: the maths, and the routes that return it** (sleep score plan, phases 1b and 1c,
 `planning/sleep-score-plan.md`; tests in `backend/test/sleep-score.test.js`, `backend/test/sleep-baseline.test.js` and
-`backend/test/sleep-score-routes.test.js`). The score is computed on read and never stored. No screen shows it yet.
+`backend/test/sleep-score-routes.test.js`). The score is computed on read and never stored. Phase 2 shows it: `components/ScoreRing.jsx` (a decorative inline SVG; the
+control around it carries the accessible text), on the child's card (`SleepSummaryCard.jsx`) and in
+`components/SleepScoreCard.jsx` on the sleep detail page, whose button opens the breakdown in a `Modal`; every word is in
+`frontend/src/lib/sleepScoreText.js`, which falls back to a neutral line for a reason or component key it does not know.
+The per-child switch `children.show_sleep_score` (default 1, admin-only in `PUT /api/children/:id`) is read inside
+`attachScore` itself, so no route can forget it: while it is 0 the night is returned with no `score` and no
+`score_source` key (absent, not null).
 `lib/sleepScoreAttach.js` (`attachScore(child, night, { context, storedNight, nowMs })`) is the one caller of the maths:
 `/sleep/live`, `/sleep?nights=N` and every answer of `/sleep/:date` that is a night pass the exact night object they
 return (after `applyCorrection`, or without it for `?stored=1`, `raw=1` and the store reply) and get it back with an

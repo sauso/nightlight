@@ -19,8 +19,15 @@
 //     `no_sleep_measured`, `no_duration_reference`, `under_12_months_no_baseline`);
 //   - null, when scoring itself failed (see NEVER ALLOWED TO BREAK A SLEEP ROUTE).
 //
-// NOT here, on purpose: the per-child "Show sleep score" switch (phase 2) and the night summary (phase 3).
+// THE PER-CHILD SWITCH (phase 2): while a child's "Show sleep score" is off (`children.show_sleep_score = 0`), the
+// night is returned exactly as it was before the score existed: NO `score` key and no `score_source`. Absent, not
+// null, so a client can tell "switched off" (nothing to say) from "scoring failed" (null). The switch is read HERE,
+// from the database, and not handed in by the routes: a route that forgot to pass it would show a score the family
+// turned off, and this way no route can forget. This is the one documented exception to ADDITIVE ONLY above.
+//
+// NOT here, on purpose: the night summary (phase 3).
 
+import db from '../db.js';
 import { logger } from './logger.js';
 import { sleepBaseline } from './sleepBaseline.js';
 import { scoreNight, toScoringInput, ageMonthsOn } from './sleepScore.js';
@@ -79,6 +86,12 @@ function scoreOf(child, night, { context, nowMs }) {
 export function attachScore(child, night, { context = null, storedNight = null, nowMs = Date.now() } = {}) {
   if (!night || typeof night !== 'object') return night;
   try {
+    // The child's "Show sleep score" switch, read fresh on every call (see THE PER-CHILD SWITCH above). Only an
+    // explicit 0 hides the score: a child row that cannot be found leaves it on, the column's default. Before any
+    // scoring, so a hidden score costs no baseline read. If this read itself throws, the catch below answers
+    // `score: null`, which every client shows as nothing.
+    const shown = db.prepare('SELECT show_sleep_score FROM children WHERE id = ?').get(child?.id ?? null);
+    if (shown && shown.show_sleep_score === 0) return night;
     // Never for a night still in progress: it has no score (plan, Design 4), whatever an earlier saved row of the
     // same date says (a window extended after the row was saved, a camera with no data yet; Codex review of #1042).
     if (night.status === 'no_data' && night.in_progress !== true && typeof storedNight === 'function') {

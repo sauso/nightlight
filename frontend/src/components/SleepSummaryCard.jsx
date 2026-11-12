@@ -4,6 +4,8 @@ import { Moon, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { showsInBed } from '../lib/inBed.js';
+import { scoreOf, scoreLabel } from '../lib/sleepScoreText.js';
+import ScoreRing from './ScoreRing.jsx';
 
 // Sleep summary in the Child detail hero. Reads the LIVE endpoint: while a night is in progress it shows
 // "Tonight · so far" (recomputed on demand, capped at now — so a morning wake shows within a minute or
@@ -49,6 +51,11 @@ export default function SleepSummaryCard({ childId }) {
   const scope = data?.scope;
   const night = data?.night;
   const tonight = scope === 'tonight';
+
+  // The sleep score (sleep score plan, phase 2), only on a scored (`ok`) night that carries a NUMBER. Every other
+  // case leaves the card exactly as it was before the score existed: a night in progress (`score.score` is null),
+  // a night with no score, a failed score (null), and the child's "Show sleep score" switch off (no `score` key).
+  const score = night?.status === 'ok' ? scoreOf(night) : null;
 
   let body;
   if (data === undefined) {
@@ -135,7 +142,7 @@ export default function SleepSummaryCard({ childId }) {
         {night.corrected ? (
           <div className="night__est"><span className="sleep-corrected">You corrected this</span></div>
         ) : (
-          <div className="night__est">Estimated from movement &amp; sound — not a medical measurement.</div>
+          <div className="night__est">Estimated from movement &amp; sound{score ? ', the score included' : ''} — not a medical measurement.</div>
         )}
       </>
     );
@@ -143,12 +150,21 @@ export default function SleepSummaryCard({ childId }) {
 
   // The whole card is a button into the Sleep detail page (timeline + wake breakdown + date picker).
   // Clickable even with no data, so you can still browse other nights via the date picker there.
+  //
+  // ⚠️ The `aria-label` REPLACES everything inside the button for a screen reader, and the ring is decorative, so
+  // the score has to be said here or it is not said at all: "…history. Sleep score 82, Good" (the number alone
+  // under the lowest band; "early estimate" in place of a band word). With no score the label is what it always was.
+  const label = scope === 'off'
+    ? 'Turn on sleep tracking in settings'
+    : `View sleep detail and history${score ? `. Sleep score ${scoreLabel(score)}` : ''}`;
   return (
     <button type="button" className="night__sleep night__sleep--btn"
       onClick={() => navigate(scope === 'off' ? `/children/${childId}/edit` : `/children/${childId}/sleep`)}
-      aria-label={scope === 'off' ? 'Turn on sleep tracking in settings' : 'View sleep detail and history'}>
+      aria-label={label}>
       <Moon size={18} aria-hidden="true" />
       <div className="night__sleep-body">{body}</div>
+      {/* Beside the duration line. The card is a fixed dark gradient in both themes, hence `surface="dark"`. */}
+      {score && <span className="night__score"><ScoreRing value={score.score} size="sm" surface="dark" /></span>}
       <ChevronRight size={18} aria-hidden="true" className="night__sleep-chev" />
     </button>
   );

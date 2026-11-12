@@ -13,6 +13,8 @@ import RecomputeNight from '../components/RecomputeNight.jsx';
 import ReviewNightButton from '../components/ReviewNightButton.jsx';
 import ReviewReceipt from '../components/ReviewReceipt.jsx';
 import LoadFailed from '../components/LoadFailed.jsx';
+import SleepScoreCard from '../components/SleepScoreCard.jsx';
+import { scoreOf } from '../lib/sleepScoreText.js';
 import { showsInBed } from '../lib/inBed.js';
 import { nightDetailPath, describeSettings } from '../lib/nightView.js';
 
@@ -266,8 +268,9 @@ export default function SleepDetail() {
         <SleepInsights childId={id} tempUnit={settings.temp_unit} childName={kid?.name} />
 
         <div className="sleep-detail__est">
-          <Moon size={13} aria-hidden="true" /> Estimated from movement &amp; sound over the night window — a
-          sleep-pattern guide, not a medical measurement.
+          {/* The score is part of the same estimate, so the line says so whenever a score is on the page. */}
+          <Moon size={13} aria-hidden="true" /> Estimated from movement &amp; sound over the night
+          window{scoreOf(night) ? ', the sleep score included' : ''} — a sleep-pattern guide, not a medical measurement.
         </div>
       </main>
     </>
@@ -298,6 +301,11 @@ function NightBody({ night, error, onRetry, ...rest }) {
       {night?.scoring_view && (
         <SettingsViewLine night={night} onSettingsView={rest.onSettingsView} />
       )}
+      {/* The sleep score (plan phase 2), under the date navigator and above the night for EVERY status: a night
+          whose timeline has aged out reads `no_data` and can still carry its saved score. Always rendered in this
+          slot (it returns nothing when there is nothing to say), so NightContent's position never changes and it
+          keeps its state. It is handed the night on screen, so it follows a switch to today's settings. */}
+      <SleepScoreCard night={night} />
       <NightContent night={night} {...rest} />
     </>
   );
