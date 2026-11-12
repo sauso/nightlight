@@ -10,7 +10,7 @@
 //      on first paint, so every deep link hits this branch for a moment before the data lands.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useNavigate } from 'react-router-dom';
 import { renderAs, renderAsAdmin, renderAsCaregiver, forEachRole } from './helpers/render.jsx';
 import Children from '../src/pages/Children.jsx';
 import ChildDetail from '../src/pages/ChildDetail.jsx';
@@ -118,6 +118,57 @@ describe('a child detail screen', () => {
     expect(screen.queryByText('Child A Room')).toBeNull();
     expect(screen.queryByText('Hallway')).toBeNull();
     expect(screen.getByText('Cameras · 2')).toBeTruthy();
+  });
+
+  // The hero card is tinted by the band of the night the sleep card shows (index.css `.night--<band>`).
+  const withNight = (score) => vi.spyOn(api, 'get').mockImplementation((path) => {
+    if (String(path).includes('/cameras/alerts')) return Promise.resolve([]);
+    if (String(path).includes('/sleep/live')) {
+      return Promise.resolve({ scope: 'last', night: { status: 'ok', night_date: '2026-09-01', onset_at: '2026-09-01 09:10:00', wake_at: '2026-09-01 20:47:00', asleep_minutes: 637, score } });
+    }
+    return Promise.resolve(null);
+  });
+  const SCORE = { score: 82, band: 'good', version: 2, provisional: false, low_confidence: false, low_confidence_reasons: [], capped_by: null, early_estimate: false, components: [] };
+
+  test.each([
+    ['great', { ...SCORE, score: 91, band: 'great' }],
+    ['good', SCORE],
+    ['fair', { ...SCORE, score: 60, band: 'fair' }],
+    ['low', { ...SCORE, score: 48, band: null }],
+    ['early', { ...SCORE, band: null, early_estimate: true }],
+  ])('★ the hero card takes the %s tint class while a score of that band is shown', async (band, score) => {
+    withNight(score);
+    const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    await waitFor(() => expect(container.querySelector('.night').classList.contains(`night--${band}`)).toBe(true));
+    expect(container.querySelector('.night').className).toBe(`night night--${band}`);
+  });
+
+  test('★ switching to another child never leaves the previous child\'s tint on the card while the new sleep request is pending', async () => {
+    // The route stays the same and only :id changes, so ChildDetail is NOT remounted: its state outlives the child.
+    vi.spyOn(api, 'get').mockImplementation((path) => {
+      const p = String(path);
+      if (p.includes('/cameras/alerts')) return Promise.resolve([]);
+      if (p.includes('/children/kid-1/sleep/live')) {
+        return Promise.resolve({ scope: 'last', night: { status: 'ok', night_date: '2026-09-01', onset_at: '2026-09-01 09:10:00', wake_at: '2026-09-01 20:47:00', asleep_minutes: 637, score: SCORE } });
+      }
+      if (p.includes('/children/kid-2/sleep/live')) return new Promise(() => {}); // never settles: the request is pending
+      return Promise.resolve(null);
+    });
+    function Jump() { const go = useNavigate(); return <button type="button" onClick={() => go('/children/kid-2')}>jump</button>; }
+    const { container, user } = renderAsAdmin(
+      <Routes><Route path="/children/:id" element={<><Jump /><ChildDetail /></>} /></Routes>, atChild('kid-1'));
+    await waitFor(() => expect(container.querySelector('.night').className).toBe('night night--good'));
+    await user.click(screen.getByRole('button', { name: 'jump' }));
+    await waitFor(() => expect(container.querySelector('.night__name').textContent).toBe('Child A')); // the new child's page is up
+    expect(container.querySelector('.night').className).toBe('night');
+    expect(screen.queryByText(/asleep/)).toBeNull(); // nor does the card still show the previous child's night
+  });
+
+  test('★ no score (or a night with none) leaves the hero card as the plain gradient: no tint class', async () => {
+    withNight({ score: null, reason: 'in_progress', version: 2 });
+    const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    await screen.findByText('10h 37m asleep');
+    expect(container.querySelector('.night').className).toBe('night');
   });
 
   test('a child with no cameras is told how to assign one, and a caregiver that an admin assigns them', async () => {

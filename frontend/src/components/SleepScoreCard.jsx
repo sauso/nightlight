@@ -6,7 +6,7 @@ import { SettingsContext } from '../lib/SettingsContext.jsx';
 import { nightSummaryText } from '../lib/nightSummaryPhrases.js';
 import {
   scoreOf, scoreQualifier, scoreLabel, componentName, componentDetail, droppedTerms, unavailableText, noScoreText,
-  lowConfidenceText, cappedText,
+  lowConfidenceText, cappedText, bandOf,
 } from '../lib/sleepScoreText.js';
 
 // The night summary and the sleep score on the sleep detail page (sleep score plan, phases 2 and 3): a card under the
@@ -61,7 +61,7 @@ export default function SleepScoreCard({ night }) {
               voice user says ("How this is scored") matches. The class sets a 44px minimum height (it is taller). */}
           <button type="button" className="sleep-score__open" onClick={() => setOpen(true)}
             aria-label={`Sleep score ${scoreLabel(score)}. How this is scored`}>
-            <ScoreRing value={score.score} size="lg" surface="card" />
+            <ScoreRing value={score.score} size="lg" surface="card" band={bandOf(score)} />
             <span className="sleep-score__text">
               {qualifier && <span className="sleep-score__band">{qualifier}</span>}
               <span className="sleep-score__how">How this is scored</span>

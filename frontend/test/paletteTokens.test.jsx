@@ -133,6 +133,23 @@ const sleepDay = day;
 const sleepNight = night;
 const nightRule = rules.find((rule) => rule.startsWith('.night {')) || '';
 const nightTokens = tokens(nightRule);
+// The @supports blocks of the stylesheet (comments already stripped), found by brace matching because they nest rules: the
+// condition, the text inside, and the stylesheet with every such block cut out.
+const supportsBlocks = [];
+let outsideSupports = css;
+{
+  const re = /@supports\s*([^{]*)\{/g;
+  let m;
+  const cuts = [];
+  while ((m = re.exec(css))) {
+    let depth = 1; let i = re.lastIndex;
+    while (i < css.length && depth > 0) { if (css[i] === '{') depth += 1; else if (css[i] === '}') depth -= 1; i += 1; }
+    supportsBlocks.push({ condition: m[1].trim(), inner: css.slice(re.lastIndex, i - 1) });
+    cuts.push([m.index, i]);
+    re.lastIndex = i;
+  }
+  for (const [from, to] of cuts.reverse()) outsideSupports = outsideSupports.slice(0, from) + outsideSupports.slice(to);
+}
 const stops = [...nightRule.matchAll(/linear-gradient\([^)]*?(#[0-9a-fA-F]{6}) 0%, (#[0-9a-fA-F]{6}) 100%\)/g)][0]?.slice(1, 3).map((s) => s.toLowerCase()) || [];
 const [gradientLight, gradientDark] = stops;
 const trackMatch = (rules.find((rule) => rule.startsWith('.score-ring--dark .score-ring__track {')) || '').match(/stroke:\s*rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/);
@@ -217,7 +234,13 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     //   .night  declares the --night-* custom properties (and nothing else of the palette), by design.
     // There are no others on this branch. Custom properties set in JSX style props are out of reach of this check.
     const pinned = /^--(?:bg|bg-elevated|bg-elevated-2|field-bg|text-primary|text-secondary|border|bar|bar-text|on-accent|band-[a-z-]+|sleep-[a-z-]+|night-[a-z-]+)$/;
-    const allowed = (selector, token) => selector === ':root' || selector === ":root[data-theme='dark']" || (selector === '.night' && token.startsWith('--night-'));
+    //   .night--<band> sets --night-tint (the tint colour, one of that band's --band-*-ring tokens) inside the @supports block that
+    //           guards color-mix; the next test and "each band class feeds the tint from its own ring colour" pin its value.
+    const allowed = (selector, token) => {
+      const plain = selector.replace(/^@supports[^{]*\{\s*/, ''); // the first rule of a block carries the block's prefix
+      return selector === ':root' || selector === ":root[data-theme='dark']" || (selector === '.night' && token.startsWith('--night-'))
+        || (/^\.night--(?:great|good|fair|low|early)$/.test(plain) && token === '--night-tint');
+    };
     const stray = [];
     for (const rule of rules) {
       const at = rule.lastIndexOf('{');
@@ -265,6 +288,20 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     }
   });
 
+  // The ring on a themed card sits on the TRACK THE CSS REALLY DRAWS: `.score-ring__track { stroke: var(--border) }`, not the inset
+  // colour the bars will use (the test above). Codex review of #1055: it had been checked only against --bg-elevated-2, and on the
+  // warm trial palette the day rose arc was 2.72:1 on its real track. On the navy design v3 palette every pair clears 3:1 (weakest:
+  // day rose #b85a7e 3.09, day early #7a7496 3.11, day fair #a36a10 3.20), so there is no exception. If a palette change drops a
+  // pair under 3:1 again, the way out is a NAMED, MEASURED exception here and in docs/design-language.md, not a looser floor.
+  test.each([['day', day], ['night', night]])('★ %s: each band arc shows on the card (3:1) and on the --border track the ring draws (3:1)', (_name, t) => {
+    expect(rules.find((r) => r.startsWith('.score-ring__track {')), 'the card ring track is --border').toContain('stroke: var(--border)');
+    for (const band of BANDS) {
+      const arc = t[`--band-${band}`];
+      expect(contrast(arc, t['--bg-elevated']), `${band} arc on the card`).toBeGreaterThanOrEqual(3);
+      expect(contrast(arc, t['--border']), `${band} arc on the --border track`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
   test('★ the night card\'s text tints are readable on its lightest stop, where contrast is lowest (4.5:1)', () => {
     for (const token of ['--night-text', '--night-muted', '--night-link', '--night-number']) {
       expect(nightTokens[token], `${token} is defined on .night`).toMatch(/^#[0-9a-f]{6}$/);
@@ -276,6 +313,85 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     // Lowest contrast on the card is the lightest stop with the band colour laid over it at 12% (the design's "washed corner").
     const washed = tint(day[`--band-${band}-ring`], 0.12, gradientLight);
     expect(contrast(nightTokens['--night-muted'], washed), `muted on the card washed by ${band}`).toBeGreaterThanOrEqual(5);
+  });
+
+  // The child card's band tint (owner approved the colour-scaled design, 2026-11-12): a flat layer of the band's ring colour at
+  // N% over the gradient. Its alpha is read from the stylesheet, so changing it re-runs the readability numbers below.
+  // The tint rules live inside an @supports block (see the next test for why); the alpha is read from the rule that paints it.
+  const tintBlocks = supportsBlocks.filter((b) => /color-mix/.test(b.condition));
+  const tintRules = tintBlocks.flatMap((b) => b.inner.split('}').map((rule) => rule.replace(/\s+/g, ' ').trim()));
+  const tintPaint = tintRules.find((r) => /^\.night--[a-z]+.*\{ background:/.test(r)) || '';
+  const tintAlpha = Number((tintPaint.match(/color-mix\(in srgb, var\(--night-tint\) (\d+)%, transparent\)/) || [])[1]) / 100;
+  const hexToRgb = (hex) => [(parseInt(hex.slice(1), 16) >> 16) & 255, (parseInt(hex.slice(1), 16) >> 8) & 255, parseInt(hex.slice(1), 16) & 255];
+  const blend = (fg, alpha, under) => {
+    const f = hexToRgb(fg); const u = hexToRgb(under);
+    return `#${f.map((v, i) => Math.round(v * alpha + u[i] * (1 - alpha)).toString(16).padStart(2, '0')).join('')}`;
+  };
+
+  test('the tint alpha was read, is subtle, and each band class feeds the tint from its own ring colour', () => {
+    expect(tintAlpha, 'the 12% was read from the tint rule').toBeGreaterThan(0);
+    expect(tintAlpha, 'a wash, not a fill').toBeLessThanOrEqual(0.15);
+    for (const band of BANDS) {
+      const rule = tintRules.find((r) => r.replace(/^@supports[^{]*\{ /, '').startsWith(`.night--${band} {`));
+      expect(rule, `.night--${band} has a rule`).toBeTruthy();
+      expect(rule, `.night--${band} uses its own ring colour`).toContain(`--night-tint: var(--band-${band}-ring)`);
+    }
+    // The wash sits in the background layers, above the gradient, so it can never cover text or take a tap.
+    expect(tintPaint).toMatch(/background: linear-gradient\(color-mix\(.*?\), color-mix\(.*?\)\), linear-gradient\(165deg/);
+  });
+
+  test('★ the tinted background repeats the SAME gradient as the plain card (a drifted copy would change the card only when a score shows)', () => {
+    const tintStops = [...tintPaint.matchAll(/linear-gradient\(165deg, (#[0-9a-fA-F]{6}) 0%, (#[0-9a-fA-F]{6}) 100%\)/g)][0]?.slice(1, 3).map((s) => s.toLowerCase());
+    expect(tintStops, 'the tinted rule has the 165deg gradient').toEqual([gradientLight, gradientDark]);
+  });
+
+  // WHY (Codex review of #1055): a declaration holding var() is valid at parse time on EVERY engine and is only checked when the
+  // value is computed, so on a WebView without color-mix() (iOS 15 to 16.1, Android WebView before Chromium 111) a background built
+  // from color-mix(... var(--night-tint) ...) is "invalid at computed-value time" and the WHOLE background becomes transparent:
+  // white text on the page colour. @supports is decided at parse time, so an engine without color-mix skips the block and keeps
+  // the plain gradient. jsdom cannot show this, so the stylesheet text is what is checked.
+  test('★ every color-mix on the night card sits inside an @supports (color-mix) block; the plain .night rule has none', () => {
+    expect(tintBlocks.length, 'an @supports block that tests color-mix exists').toBeGreaterThan(0);
+    for (const block of tintBlocks) expect(block.condition, 'it tests a background with color-mix').toMatch(/background:\s*color-mix\(/);
+    expect(tintPaint, 'the paint rule was found INSIDE the block').toContain('color-mix');
+    // Outside every @supports block: no rule for the night card may mention color-mix or the tint-fill property, and the base rule
+    // must stay a plain gradient.
+    const outside = outsideSupports.split('}').map((rule) => rule.replace(/\s+/g, ' ').trim());
+    const offenders = outside.filter((rule) => /^\.night(--|\s|\{|$)/.test(rule) && /color-mix|--night-tint/.test(rule));
+    expect(offenders, `night-card tint outside @supports: ${offenders.join(' | ')}`).toEqual([]);
+    expect(nightRule).toMatch(/background: linear-gradient\(165deg, #[0-9a-f]{6} 0%, #[0-9a-f]{6} 100%\)/i);
+    // The base background declaration holds no var() at all: it must stay valid on an engine that cannot compute the tint.
+    expect(nightRule.match(/(?:^|[ ;{])background:[^;]*;/)?.[0], 'the plain card background').not.toContain('var(');
+  });
+
+  test.each(BANDS)('★ %s: the card\'s text and the ring stay readable on the TINTED lightest stop, where contrast is lowest', (band) => {
+    const ring = day[`--band-${band}-ring`];
+    // Worst case for light text: the lightest stop with the tint over it. The tint of the darkest stop is checked too, for the ring.
+    for (const stop of [gradientLight, gradientDark]) {
+      const tinted = blend(ring, tintAlpha, stop);
+      for (const token of ['--night-text', '--night-muted', '--night-link']) {
+        expect(contrast(nightTokens[token], tinted), `${token} on ${stop} tinted with ${band}`).toBeGreaterThanOrEqual(4.5);
+      }
+      // Muted is the 10.5 to 13px text. Measured 2026-11-13 on the navy gradient's lightest stop (#2c2f63) with the 12% tint: great 5.07,
+      // good 5.53, fair 5.68, low 5.87, early 5.17 (6.85 on the bare gradient). Floor of 5:1 (the design's own figure is 5.07), so a
+      // stronger tint or a lighter gradient that eats the margin over the required 4.5:1 fails here before it reaches a phone.
+      expect(contrast(nightTokens['--night-muted'], tinted), `muted on ${stop} tinted with ${band}`).toBeGreaterThanOrEqual(5);
+      // The arc is a graphic (3:1) against the tinted card and against its own track as it composites on it.
+      expect(contrast(ring, tinted), `${band} arc on the tinted ${stop}`).toBeGreaterThanOrEqual(3);
+      expect(contrast(ring, overHex(trackMatch, tinted)), `${band} arc on its track over the tinted ${stop}`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  test('★ the ring arc takes its colour from the band tokens: --band-* on a themed card, --band-*-ring on the night card; the number never', () => {
+    for (const band of BANDS) {
+      expect(rules.find((r) => r.startsWith(`.score-ring--card.score-ring--${band} .score-ring__arc {`)), `card ${band}`).toContain(`stroke: var(--band-${band})`);
+      expect(rules.find((r) => r.startsWith(`.score-ring--dark.score-ring--${band} .score-ring__arc {`)), `dark ${band}`).toContain(`stroke: var(--band-${band}-ring)`);
+    }
+    // TEXT IS NEVER SET IN A BAND COLOUR: no rule that colours text or the number's fill mentions a band token.
+    const textInBand = rules.filter((r) => /(^|[ ;{])(color|fill):\s*var\(--band-/.test(r));
+    expect(textInBand, `text coloured by a band token: ${textInBand.join(' | ')}`).toEqual([]);
+    expect(rules.find((r) => r.startsWith('.score-ring__num {'))).toContain('fill: var(--text-primary)');
+    expect(rules.find((r) => r.startsWith('.score-ring--dark .score-ring__num {'))).toContain('fill: #fff');
   });
 
   test('★ the .night rules take their text colours from the card\'s properties, not from literals', () => {

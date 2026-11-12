@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
@@ -43,6 +43,18 @@ export default function ChildDetail() {
   const [alertsLoaded, setAlertsLoaded] = useState(false);
   const [alertsError, setAlertsError] = useState('');
   const [photoOpen, setPhotoOpen] = useState(false);
+  // The band of the night the sleep card is showing (bandOf: null when it shows no score). The card owns the fetch, so
+  // it reports the band UP and this page puts it on the hero card as a class: a 12% tint of the band colour (index.css,
+  // `.night--<band>`). That is a tiny state lift, not a second fetch, and a card that reports nothing leaves the plain gradient.
+  //
+  // ⚠️ KEYED BY CHILD, because this component is NOT remounted when only the :id changes (same route, new param): a band
+  // reported for child A must never colour child B's card while B's sleep request is still pending (Codex review of #1055).
+  // Two guards: the state remembers WHICH child reported it and is ignored for any other (so there is no frame of the old
+  // tint), and the sleep card is `key`ed by child below (so it also forgets child A's night instead of showing it until B's
+  // request lands).
+  const [reported, setReported] = useState({ id: null, band: null });
+  const onBand = useCallback((band) => setReported({ id, band }), [id]);
+  const nightBand = reported.id === id ? reported.band : null;
 
   async function loadAlerts() {
     const camIds = new Set(cameras.filter((c) => c.child_id === id).map((c) => c.id));
@@ -97,7 +109,7 @@ export default function ChildDetail() {
     <>
       <AppHeader title={kid.name} back={{ to: '/children', label: 'Children' }} />
       <main className="app-main">
-        <div className="night">
+        <div className={nightBand ? `night night--${nightBand}` : 'night'}>
           <div className="night__head">
             <button
               type="button"
@@ -113,7 +125,7 @@ export default function ChildDetail() {
             </button>
             <button type="button" className="night__edit" onClick={() => navigate(`/children/${id}/edit`)}>Edit ›</button>
           </div>
-          <SleepSummaryCard childId={id} />
+          <SleepSummaryCard key={id} childId={id} onBand={onBand} />
         </div>
 
         <MorningReviewCard childId={id} fmtTime={fmtTime} />

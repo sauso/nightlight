@@ -628,7 +628,11 @@ measurement, it says nothing about sleep stages, and it is no reason to worry on
   still change, and when it is low confidence.
 - A night with no score shows **No score yet** and the reason.
 
-The ring is one colour whatever the score. The breakdown describes the night; it gives no advice and
+The ring's arc is coloured by band: green for Great, teal for Good, amber for Fair, a soft rose for a score
+with no band word (under 55), and a neutral grey ring on a dashed track for an early estimate. The colour
+follows the band word the server sends, and it is never the only signal: the number and the word (or
+"Early estimate") are always shown, and no text is set in a band colour. On the child's page the night card
+also takes a faint tint of the same colour. The breakdown describes the night; it gives no advice and
 names no cause.
 
 ### Turning the score off

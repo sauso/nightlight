@@ -4,7 +4,7 @@ import { Moon, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { showsInBed } from '../lib/inBed.js';
-import { scoreOf, scoreLabel } from '../lib/sleepScoreText.js';
+import { scoreOf, scoreLabel, bandOf } from '../lib/sleepScoreText.js';
 import { nightSummaryText } from '../lib/nightSummaryPhrases.js';
 import ScoreRing from './ScoreRing.jsx';
 
@@ -20,7 +20,9 @@ function fmtDur(min) {
   return h ? `${h}h ${m}m` : `${m}m`;
 }
 
-export default function SleepSummaryCard({ childId }) {
+// `onBand` (optional): told the band colour key of the night shown (bandOf), or null when no score is shown, so the
+// child page can tint its hero card (index.css, `.night--<band>`). Without it the card behaves exactly as before.
+export default function SleepSummaryCard({ childId, onBand }) {
   const { settings } = useSettings();
   const navigate = useNavigate();
   const tz = settings.timezone || 'UTC';
@@ -57,6 +59,15 @@ export default function SleepSummaryCard({ childId }) {
   // case leaves the card exactly as it was before the score existed: a night in progress (`score.score` is null),
   // a night with no score, a failed score (null), and the child's "Show sleep score" switch off (no `score` key).
   const score = night?.status === 'ok' ? scoreOf(night) : null;
+  const band = bandOf(score);
+
+  // Report the band up for the hero card's tint, and clear it when the score goes away or the card unmounts, so a tint
+  // never outlives the ring it belongs to (a child switch, a night that loses its score, a failed refresh).
+  useEffect(() => {
+    if (!onBand) return undefined;
+    onBand(band);
+    return () => onBand(null);
+  }, [band, onBand]);
 
   // The night summary's headline (phase 3), ONE line on a scored (`ok`) night, under the duration. Null when the server
   // sent no summary (an older server, a failure), and the card is exactly as it was. It shows with the child's "Show
@@ -176,7 +187,7 @@ export default function SleepSummaryCard({ childId }) {
       <Moon size={18} aria-hidden="true" />
       <div className="night__sleep-body">{body}</div>
       {/* Beside the duration line. The card is a fixed dark gradient in both themes, hence `surface="dark"`. */}
-      {score && <span className="night__score"><ScoreRing value={score.score} size="sm" surface="dark" /></span>}
+      {score && <span className="night__score"><ScoreRing value={score.score} size="sm" surface="dark" band={band} /></span>}
       <ChevronRight size={18} aria-hidden="true" className="night__sleep-chev" />
     </button>
   );

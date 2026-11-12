@@ -105,10 +105,11 @@ more at the corner the ring's 12% band wash lightens, per the design), `--night-
 Everything secondary on the card (age, range, "In bed", the estimate note, the headline) is `--night-muted`; only the
 "Edit" link and the chevron use `--night-link`. The score ring's colours on this card are in "Score ring" below.
 
-### Band colours (tokens defined, used from the next change)
+### Band colours
 
 Five score bands get colours so the ring, the nights strip and the breakdown bars can show how a night went at a glance.
-The tokens exist now (`--band-*` in `index.css`); no component uses them yet. **A colour is never the only signal** (the
+The tokens are `--band-*` in `index.css`. Today only the score ring uses them (see "Score ring"); the strip and the
+breakdown bars follow in later changes. **A colour is never the only signal** (the
 band word and the number always show) and **text is never set in a band colour**: they are marks (rings, bars, dots) only.
 
 | Band | `--band-*` by day (card / inset) | `--band-*` at night (card / inset) | `--band-*-ring` on the night card (card / track) |
@@ -127,6 +128,12 @@ day marks and the early-estimate neutral moved from the 2026-11-12 warm trial, f
 lavender track, under the 3:1 floor), early `#6B6158` to `#7A7496` by day and beige `#CCC3B8` to lavender `#D3CDE6` at night
 (beige on navy looked like a dirty highlight). Swapping the rose for a quieter hue later is a token change.
 `test/paletteTokens.test.jsx` recomputes all three columns from the stylesheet.
+
+**The ring's own track.** The second figure above is the inset the bars will use; on a themed card the ring's track is
+`--border`, so the test also measures each arc against that, and against the card, at 3:1. Every band clears both in both
+themes. The weakest on the track are by day: rose `#B85A7E` on `#DDD5EE` 3.09:1, early estimate `#7A7496` 3.11:1, fair `#A36A10`
+3.20:1 (the warm trial's rose was 2.72:1 there and was fixed by the navy re-tune above, not excused). Should a later palette
+change drop a pair under 3:1 again, name it with its real ratio next to this paragraph and in the test, rather than lowering the floor.
 
 ### Sleep timeline colours
 
@@ -528,20 +535,40 @@ button in `--text-secondary`, not `--offline` red, because it does not claim the
 on the amber "connecting" tempo and never turns red.
 
 ### Score ring (`components/ScoreRing.jsx`)
-The sleep score as a ring with the number in the middle: an inline SVG arc filled to the score out of 100. **One colour
-whatever the score** (the band is said in words beside it; a red or green ring would turn a description into a verdict),
-and **no animation** (section 7). Two sizes, from the type scale: 44px with a 15px number (the child's card) and 64px with
+The sleep score as a ring with the number in the middle: an inline SVG arc filled to the score out of 100. **The arc is
+coloured by band** (owner approved the colour-scaled design, 2026-11-12; it was one colour before, out of caution that a
+red or green ring reads as a verdict) and there is **no animation** (section 7). The band comes from `bandOf(score)` in
+`lib/sleepScoreText.js` and is passed as the optional `band` prop (`great`, `good`, `fair`, `low`, `early`; default none, which
+keeps the old periwinkle arc, so a caller that does not pass one is unchanged). `bandOf` follows the server's own band key
+and repeats none of its edges: `great`/`good`/`fair` as sent, `low` when the server sent a number with no band (under 55, a
+soft rose rather than an alarm red), `early` for an early estimate whatever the key says, and no band at all for a key it does
+not know (a newer server), so a possibly good night is never painted rose. **An early estimate is a neutral arc on a dashed
+track**: provisional by shape, with no colour needed. Three rules hold: **colour is never the only signal** (the number and the
+band word, or "Early estimate", are always beside the ring), **text is never set in a band colour** (the number stays
+`--text-primary` or white; only the arc takes the colour), and the low band is soft, not red. Two sizes, from the type scale: 44px with a 15px number (the child's card) and 64px with
 a 20px number (the sleep detail page). The ring is `aria-hidden`; the control around it carries the score in its name.
 
-`surface` picks the colours. On a `.card`: the arc is `--accent-line` on a `--border` track and the number is
-`--text-primary` (arc 5.06:1 on a day card, 5.87:1 on a night card; 3.57:1 and 4.40:1 against the track; the number 16.65:1
-and 12.53:1).
-On the child's hero card (`.night`), which is the same dark gradient in both themes, the colours are **literals**,
-because the day `--accent-line` is only 2.45:1 there: arc `#A7B1FF` (6.13:1 at the gradient's lightest point,
-`#2C2F63`, and 7.60:1 against its track), number `#FFFFFF` (12.40:1), track near-black at 35% (`rgba(10, 8, 12, 0.35)`, which
-composites to the navy `#202145`), a groove darker than the card; the band ring colours are measured against this track.
-Measured with the WCAG formula, 2026-11-13; contrast only rises towards the darker end
-of the gradient. Still one colour whatever the score until the next change recolours the arc per band (see "Band colours").
+`surface` picks the colours. On a `.card`: the arc is `--band-<band>` (which switches with the theme, contrast in "Band colours")
+on a `--border` track and the number is `--text-primary` (the number 16.65:1 and 12.53:1; with no band the arc is
+`--accent-line`, 5.06:1 on a day card, 5.87:1 on a night card, 3.57:1 and 4.40:1 against the track).
+On the child's hero card (`.night`), which is the same navy gradient in both themes, the colours are **literals or fixed
+tokens**, because the day `--accent-line` is only 2.45:1 there: the arc is `--band-<band>-ring` (the same in both themes;
+with no band, the literal periwinkle `#A7B1FF`, 6.13:1 at the gradient's lightest point, `#2C2F63`, and 7.60:1 against its
+track), the number `#FFFFFF` (12.40:1), the track near-black at 35% (`rgba(10, 8, 12, 0.35)`, which composites to the navy
+`#202145`), a groove darker than the card; the band ring colours are measured against this track.
+Measured with the WCAG formula, 2026-11-13; contrast only rises towards the darker end of the gradient.
+
+**The night card's tint.** While a score is shown, the child page's `.night` card takes a flat 12% wash of the band's ring
+colour over its gradient (class `night--<band>` set by `ChildDetail.jsx`, from the band the sleep card reports; a background
+layer, so it cannot cover text or take a tap; no score means no class and the plain gradient; the class is dropped at once
+when you switch to another child, until that child's own score arrives). The tint rules sit inside an `@supports (background:
+color-mix(...))` block: a `background` holding `color-mix()` and `var()` is valid when parsed on every engine and only fails when
+computed, which on a WebView without `color-mix()` (iOS 15 to 16.1, Android WebView before Chromium 111) would make the whole
+background transparent. Skipping the block keeps the plain gradient there, and only the tint is lost. Re-measured on the TINTED
+lightest stop `#2C2F63` (the worst case; every figure only rises towards `#191B38`): `--night-text` is 8.11 to 9.38:1,
+`--night-muted` 5.07 (great) / 5.53 (good) / 5.68 (fair) / 5.87 (low) / 5.17 (early):1 (6.85:1 on the bare gradient; 4.5:1
+needed), `--night-link` 5.82 to 6.74:1, and the arc against the tinted card 6.79 / 4.63 / 4.32 / 3.27 / 6.08:1
+(a graphic needs 3:1; rose is the weakest). `test/paletteTokens.test.jsx` recomputes them from the stylesheet, including the 12%.
 
 ### Night summary (`components/SleepScoreCard.jsx`, `lib/nightSummaryPhrases.js`)
 A few plain sentences about the night, above the score. On the sleep detail page it is the card under the date navigator,
