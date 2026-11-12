@@ -1463,6 +1463,44 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .sleep-insight__sub { font-size: 11px; color: var(--text-secondary); margin-top: 3px; font-variant-numeric: tabular-nums; }
 .sleep-insight__foot { font-size: 11px; color: var(--text-secondary); line-height: 1.4; margin-top: 12px; }
 
+/* Sleep score ring (components/ScoreRing.jsx). One colour, no animation: see the component for why.
+   On a .card it uses the theme tokens. Measured (WCAG formula, 2026-11-12): the arc, --accent-line, is 5.06:1 on a
+   white card by day and 5.87:1 on a night card, and 3.57:1 / 4.40:1 against its own --border track (3:1 is the
+   target for a graphic); the number is --text-primary, 16.65:1 and 12.53:1. */
+.score-ring { display: block; flex: none; }
+.score-ring__track { stroke: var(--border); }
+.score-ring__arc { stroke: var(--accent-line); }
+.score-ring__num { fill: var(--text-primary); font-family: inherit; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* On the child's hero card (.night), which is the SAME dark gradient in both themes (#2c2f63 to #191b38), so a theme
+   token is wrong there: --accent-line by day (#5663D6) is only 2.45:1 on the gradient's lightest point. LITERALS,
+   measured against that lightest point (#2c2f63), where contrast is lowest; it only rises towards #191b38:
+     arc    #A7B1FF  6.13:1 on the card (3:1 needed), 3.76:1 against the track as it composites there (#4e507c);
+     number #FFFFFF  12.40:1 (4.5:1 needed), the same white as the duration beside it;
+     track  white at 16%, decoration only: the number carries the value. */
+.score-ring--dark .score-ring__track { stroke: rgba(255, 255, 255, 0.16); }
+.score-ring--dark .score-ring__arc { stroke: #a7b1ff; }
+.score-ring--dark .score-ring__num { fill: #fff; }
+/* On the child's card the ring sits beside the heading and the duration line, not centred on the whole card. */
+.night__score { flex: none; align-self: flex-start; line-height: 0; }
+
+/* Sleep score card on the sleep detail page, and its breakdown sheet (components/SleepScoreCard.jsx). */
+.sleep-score__open { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 44px; padding: 4px 0; background: none; border: none; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 10px; }
+.sleep-score__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sleep-score__band { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.sleep-score__how { font-size: 13px; color: var(--accent-text); }
+.sleep-score__chev { flex: none; color: var(--accent-line); }
+.sleep-score__note { font-size: 12px; line-height: 1.45; color: var(--text-secondary); margin: 10px 0 0; }
+.sleep-score__lead { font-size: 13px; line-height: 1.45; color: var(--text-secondary); margin: 0 0 14px; }
+.score-parts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.score-part__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.score-part__name { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.score-part__score { font-size: 13px; font-weight: 600; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.score-part__bar { height: 6px; border-radius: 999px; background: var(--border); margin-top: 6px; overflow: hidden; }
+.score-part__bar span { display: block; height: 100%; border-radius: 999px; background: var(--accent-line); }
+.score-part__detail { font-size: 12px; line-height: 1.45; color: var(--text-secondary); margin-top: 5px; }
+.sleep-score__about-title { font-family: inherit; font-size: 13px; font-weight: 700; color: var(--text-primary); margin: 18px 0 4px; }
+.sleep-score__about { font-size: 12px; line-height: 1.5; color: var(--text-secondary); margin: 0; }
+
 .sleep-detail__est { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding: 0 4px; font-size: 11px; color: var(--text-secondary); }
 
 /* Crib-zone picker: a rectangle drawn over a live still to scope motion + sleep tracking to the crib. */

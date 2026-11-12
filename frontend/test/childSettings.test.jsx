@@ -663,6 +663,44 @@ describe('#919 hold alerts until asleep', () => {
   });
 });
 
+// "Show sleep score" (sleep score plan, phase 2): on by default, admin-only, saved with the form like its neighbours.
+describe('show sleep score', () => {
+  const SCORE = /Show sleep score/;
+
+  test('a child from before the switch shows it ON; a stored 0 shows it OFF', async () => {
+    const first = mount({ kid: KID }); // KID carries no show_sleep_score
+    expect((await screen.findByRole('switch', { name: SCORE })).checked).toBe(true);
+    first.unmount();
+    mount({ kid: { ...KID, show_sleep_score: 0 } });
+    expect((await screen.findByRole('switch', { name: SCORE })).checked).toBe(false);
+  });
+
+  test('an admin turning it off sends false with the save, and nothing before Save is pressed', async () => {
+    const { user } = mount();
+    await user.click(await screen.findByRole('switch', { name: SCORE }));
+    expect(putSpy).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1].show_sleep_score).toBe(false);
+  });
+
+  test('a new child is created with it on', async () => {
+    const { user } = mount({ kid: null, id: 'new' });
+    await user.type(screen.getByLabelText('Name'), 'A child');
+    await user.click(screen.getByRole('button', { name: 'Add child' }));
+    await waitFor(() => expect(postSpy).toHaveBeenCalled());
+    expect(postSpy.mock.calls[0][1].show_sleep_score).toBe(true);
+  });
+
+  test('a caregiver sees it disabled and their save does not send it', async () => {
+    const { user } = mount({ who: CAREGIVER });
+    expect(await screen.findByRole('switch', { name: SCORE })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1]).not.toHaveProperty('show_sleep_score');
+  });
+});
+
 describe('★★ the nightly sleep report choices (#397, #398)', () => {
   const SEND = /Send this child's sleep report/;
   const NAME = /Show this child's name in the report/;
