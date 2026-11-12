@@ -266,6 +266,65 @@ describe('what the library does with what the server sends', () => {
   });
 });
 
+// The three "so far" keys a night still in progress carries (phase 4). The guardrails above already run over their
+// variants; these add what is specific to them: every variant says "so far", none compares with a usual or says the
+// night is over ("overnight"), and a count of 0 and 1 read right.
+describe('the "so far" keys of a night in progress', () => {
+  const SO_FAR = ['total_sleep_so_far', 'wake_ups_so_far', 'longest_stretch_so_far'];
+
+  test('the keys are in the server\'s table, with raw params and no direction (a so-far fact is never a comparison)', () => {
+    for (const key of SO_FAR) {
+      expect(Object.hasOwn(OBSERVATION_PARAMS, key)).toBe(true);
+      expect(OBSERVATION_PARAMS[key]).not.toContain('direction');
+      expect(Object.hasOwn(OBSERVATION_PHRASES, key)).toBe(true);
+    }
+    expect(OBSERVATION_PARAMS.total_sleep_so_far).toEqual(['minutes']);
+    expect(OBSERVATION_PARAMS.wake_ups_so_far).toEqual(['count']);
+    expect(OBSERVATION_PARAMS.longest_stretch_so_far).toEqual(['minutes']);
+  });
+
+  test('every variant says "so far", and none says "overnight", "usual", "than" or "night timeline"', () => {
+    const mine = ALL.filter((p) => SO_FAR.includes(p.key));
+    expect(mine.length).toBeGreaterThanOrEqual(3 * 2); // precondition: the variants are really there
+    for (const p of mine) {
+      expect([label(p), /so far/i.test(p.text)]).toEqual([label(p), true]);
+      expect([label(p), /overnight|usual|\bthan\b|night\s+timeline/i.test(p.text)]).toEqual([label(p), false]);
+    }
+  });
+
+  test('a count of zero, one and many each read right in every variant, and say so far', () => {
+    const line = (count, seed) => nightSummaryText({ headline: { key: 'neutral_so_far' }, seed, observations: [{ key: 'wake_ups_so_far', params: { count } }] }, {}).observations[0];
+    for (let i = 0; i < 30; i++) {
+      const seed = `child-a|${i}`;
+      expect(line(0, seed)).toMatch(/\bno wake-ups\b/i);
+      expect(line(1, seed)).toMatch(/\bone wake-up\b/i);
+      expect(line(1, seed)).not.toMatch(/wake-ups/);
+      expect(line(3, seed)).toMatch(/\b3 wake-ups\b/);
+    }
+  });
+
+  test('a so-far summary reads as plain sentences, in a literal pin for one seed', () => {
+    const t = nightSummaryText({
+      headline: { key: 'neutral_so_far' }, seed: 'child-a|2026-03-10',
+      observations: [
+        { key: 'total_sleep_so_far', params: { minutes: 275 } },
+        { key: 'wake_ups_so_far', params: { count: 2 } },
+        { key: 'longest_stretch_so_far', params: { minutes: 130 } },
+      ],
+    }, {});
+    expect(t.headline).toMatch(/so far/i);
+    expect(t.observations).toHaveLength(3);
+    expect(t.observations[0]).toMatch(/4h 35m/);
+    expect(t.observations[1]).toMatch(/\b2 wake-ups\b/);
+    expect(t.observations[2]).toMatch(/2h 10m/);
+  });
+
+  test('a so-far key with a missing param is dropped, not printed as a half sentence', () => {
+    const t = nightSummaryText({ headline: { key: 'neutral_so_far' }, seed: 's', observations: [{ key: 'total_sleep_so_far', params: {} }, { key: 'longest_stretch_so_far', params: { minutes: null } }] }, {});
+    expect(t.observations).toEqual([]);
+  });
+});
+
 // ------------------------------------------------ on screen --------------------------------------------------------
 
 const SCORE = {

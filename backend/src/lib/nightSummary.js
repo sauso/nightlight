@@ -199,6 +199,31 @@ function wakeCluster(wakes) {
 
 const neutral = (key, observations, seed) => ({ headline: { key }, observations, seed });
 
+// ★ THE FACTS OF A NIGHT STILL IN PROGRESS (phase 4): what has been measured so far, and nothing about how it compares
+// with anything. From the figures the night already carries (the scoring input's metrics), so no number here is new and
+// none can disagree with the figures beside it. The ones the completed night's rules drop are dropped here for the same
+// reasons (a time moved past the tolerance, a wake-up cut out by a correction, an unwatched gap resetting the stretch).
+//   - NEVER a `*_vs_usual` key, a headline class or `building_baseline`: half a night says nothing about "usual".
+//   - The wake-up count and the stretch are the detector's as of now: the wake in progress is not counted, and the stretch
+//     includes the current one only as far as the figures do. "No wake-ups so far" means none counted so far; the
+//     state beside it (nightLiveState.js) says whether the child is awake this minute.
+//   - Listed in a fixed order, which is also the order the completed night ranks them in (total, wake-ups, stretch,
+//     settling), and capped by the same `max_observations`. No onset yet: nothing to say, so none.
+function soFarObservations(night, input) {
+  if (night.status !== 'ok' || !night.onset_at || input.promoted_from_empty) return [];
+  const m = input.metrics;
+  const spanMoved = input.span_moved_minutes > SCORE_CONFIG.correction_span_tolerance_minutes;
+  const counted = spanMoved ? null : countedWakes(parseSummaryFacts(night.summary_facts), input, night);
+  const out = [];
+  if (m.asleep.usable && m.asleep.value > 0) out.push(observation('total_sleep_so_far', { minutes: m.asleep.value }));
+  if (!spanMoved) {
+    if (m.wake_count.usable && !(counted && counted.dropped > 0)) out.push(observation('wake_ups_so_far', { count: m.wake_count.value }));
+    if (m.longest_stretch.usable) out.push(observation('longest_stretch_so_far', { minutes: m.longest_stretch.value }));
+  }
+  if (m.settle_minutes.usable) out.push(observation('settling_time', { minutes: m.settle_minutes.value }));
+  return out.filter(Boolean).slice(0, SUMMARY_CONFIG.max_observations);
+}
+
 // The summary for one night, or null when there is nothing to describe (tracking off, or no data: the page already
 // says so and a summary line would add noise).
 //   night   the night object the endpoint returns: a stored row or a fresh compute, with a correction laid over it.
@@ -215,8 +240,9 @@ export function selectSummary(night, score, ctx = {}) {
   const seed = `${ctx.childId ?? ''}|${night.night_date ?? ''}`;
   const keep = (list) => list.filter(Boolean);
 
-  // A night still in progress: nothing to judge and nothing is final. The headline alone.
-  if (input.in_progress) return neutral('neutral_so_far', [], seed);
+  // A night still in progress: nothing to judge and nothing is final. The neutral headline, and the plain facts so far
+  // (phase 4); no class, no comparison with the usual, no "building a baseline" line.
+  if (input.in_progress) return neutral('neutral_so_far', soFarObservations(night, input), seed);
 
   if (night.status === 'no_sleep') return neutral('neutral_last_night', keep([observation('no_sleep_detected')]), seed);
   if (night.status === 'empty') {

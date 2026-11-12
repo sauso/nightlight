@@ -169,7 +169,7 @@ test('★ the put-down night: "in bed" 18:49 lands on in_bed_at ONLY — asleep 
   const names = nightsCols().map((c) => c.name);
   // `score` is the route's, not the overlay's (sleep score plan phase 1c: every night a sleep route returns gains
   // it; sleep-score-routes.test.js). No `wake_given` here: the parent gave no wake (#1041, pinned just below).
-  assert.deepEqual(Object.keys(shown).sort(), [...names, ...OVERLAY, 'score', 'summary'].sort(), 'the row keeps its columns and gains only the overlay fields, the score and the night summary');
+  assert.deepEqual(Object.keys(shown).sort(), [...names, ...OVERLAY, 'score', 'summary', 'live'].sort(), 'the row keeps its columns and gains only the overlay fields, the score, the night summary and the live state');
   for (const c of names) {
     if (c === 'in_bed_at') continue;
     assert.deepEqual(shown[c], row[c], `${c} must be exactly what the detector stored — only "in bed" was corrected`);

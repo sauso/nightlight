@@ -29,6 +29,8 @@ const { default: db } = await import('../src/db.js');
 const { scoreNight, toScoringInput, SCORE_CONFIG } = await import('../src/lib/sleepScore.js');
 const { selectSummary, SUMMARY_CONFIG } = await import('../src/lib/nightSummary.js');
 const { OBSERVATION_PARAMS, HEADLINE_KEYS } = await import('../src/lib/nightSummaryKeys.js');
+const { SLEEP_THRESHOLDS } = await import('../src/lib/sleepAnalysis.js');
+const { LIVE_STATE_CONFIG } = await import('../src/lib/nightLiveState.js');
 
 after(() => {
   try { db.close(); } catch { /* already closed */ }
@@ -189,12 +191,23 @@ describe('nights with no judgement to make', () => {
     }
   });
 
-  test('in progress: the "so far" headline and no observations, whatever the night holds', () => {
+  test('in progress: the "so far" headline and only the plain so-far facts (phase 4), whatever else the night holds', () => {
     const night = stored({ summary_facts: facts([wakeAt('01:00'), wakeAt('01:10'), wakeAt('01:20')], 3, { temp_min: 19, temp_max: 21 }) });
     const before = Date.UTC(2026, 2, 11, 2, 0, 0); // 02:00, inside the window
     assert.equal(toScoringInput(night, { nowMs: before }).in_progress, true, 'precondition: the window is still open');
     const s = summarise(night, { nowMs: before });
-    assert.deepEqual(s, { headline: { key: 'neutral_so_far' }, observations: [], seed: 'kid-a|2026-03-10' });
+    // The clustered wake-ups, the room movement and the temperature the completed night would add are NOT here: only
+    // the four so-far facts, each from the figures the night carries (600 asleep, 4 wake-ups, longest 300, 20 to settle).
+    assert.deepEqual(s, {
+      headline: { key: 'neutral_so_far' },
+      observations: [
+        { key: 'total_sleep_so_far', params: { minutes: 600 } },
+        { key: 'wake_ups_so_far', params: { count: 4 } },
+        { key: 'longest_stretch_so_far', params: { minutes: 300 } },
+        { key: 'settling_time', params: { minutes: 20 } },
+      ],
+      seed: 'kid-a|2026-03-10',
+    });
     // A fresh compute says so itself.
     assert.deepEqual(selectSummary({ ...night, in_progress: true }, { score: null, reason: 'in_progress' }, { childId: CHILD }).headline,
       { key: 'neutral_so_far' });
@@ -484,5 +497,137 @@ describe('reduced coverage', () => {
     const s = summarise(stored({ coverage_minutes: null }));
     assert.equal(s.headline.key, 'neutral_last_night');
     assert.equal(obs(s, 'reduced_coverage'), undefined);
+  });
+});
+
+// ================================ a night still in progress: the "so far" facts (phase 4) ================================
+//
+// A FRESH compute (computeNight's shape: `in_progress` is the boolean true and `as_of` is the read's time). The headline
+// stays `neutral_so_far` and the observations are plain facts from the figures the night already carries: never a
+// comparison with the usual, never a headline class, never "building a baseline".
+const FRESH_NOW = Date.UTC(2026, 2, 11, 2, 30, 0);
+const fresh = (over = {}) => ({
+  night_date: '2026-03-10',
+  window_start: '2026-03-10 19:00:00',
+  window_end: '2026-03-11 07:00:00',
+  in_progress: true,
+  as_of: '2026-03-11 02:30:00',
+  status: 'ok',
+  onset_at: '2026-03-10 19:30:00',
+  wake_at: null,
+  in_bed_at: '2026-03-10 19:10:00',
+  asleep_minutes: 400,
+  awake_minutes: 20,
+  unknown_minutes: 0,
+  wake_count: 2,
+  longest_stretch_minutes: 210,
+  coverage_minutes: 450,
+  stir_minutes: 10,
+  summary_facts: facts([wakeAt('00:10'), wakeAt('01:30')], 1, { temp_min: 19, temp_max: 21 }),
+  ...over,
+});
+const NO_SCORE = { score: null, reason: 'in_progress', version: 2 };
+const soFar = (night, score = NO_SCORE) =>
+  selectSummary(night, score, { childId: CHILD, input: toScoringInput(night, { nowMs: FRESH_NOW }) });
+const noComparison = (s) => keys(s).filter((k) => k.endsWith('_vs_usual') || k === 'building_baseline');
+
+describe('a night in progress carries so-far facts and nothing that compares', () => {
+  test('a fresh night: the neutral headline and total, wake-ups, longest stretch and settling, each with the figure the night carries', () => {
+    const s = soFar(fresh());
+    assert.deepEqual(s, {
+      headline: { key: 'neutral_so_far' },
+      observations: [
+        { key: 'total_sleep_so_far', params: { minutes: 400 } },
+        { key: 'wake_ups_so_far', params: { count: 2 } },
+        { key: 'longest_stretch_so_far', params: { minutes: 210 } },
+        { key: 'settling_time', params: { minutes: 20 } },
+      ],
+      seed: 'kid-a|2026-03-10',
+    });
+    // Precondition for everything below: the same night, once finished, WOULD say more (its facts carry a room-activity count), so the absence above is a decision.
+    assert.ok(selectSummary({ ...fresh(), in_progress: false }, NO_SCORE, { childId: CHILD, input: toScoringInput({ ...fresh(), in_progress: false }, { nowMs: FRESH_NOW }) })
+      .observations.some((o) => o.key === 'room_activity_near_wakes'), 'precondition: a finished night adds the room-activity line');
+    assert.equal(keys(s).includes('room_activity_near_wakes'), false);
+  });
+
+  test('never a comparison with the usual, a headline class or "building a baseline", even when handed a score that has them', () => {
+    // A full score with every part usable and a usual beside it: a completed night would turn this into "vs usual" lines
+    // and a class. An in-progress night must not read any of it.
+    const hostileScore = {
+      score: 90, band: 'great', early_estimate: false,
+      components: [
+        { key: 'duration', score: 90, available: true, value: 400, usual: 600, basis: 'asleep_vs_usual' },
+        { key: 'continuity', score: 20, available: true, terms: [
+          { key: 'wake_count', available: true, value: 2, usual: 6 },
+          { key: 'longest_share', available: true, value: 0.2, usual: 0.5 },
+        ] },
+        { key: 'restlessness', score: 20, available: true },
+      ],
+    };
+    for (const score of [hostileScore, { ...hostileScore, early_estimate: true }, null, NO_SCORE, { score: null, reason: 'no_duration_reference' }]) {
+      const s = soFar(fresh(), score);
+      assert.equal(s.headline.key, 'neutral_so_far', JSON.stringify(score));
+      assert.deepEqual(noComparison(s), [], JSON.stringify(score));
+      assert.deepEqual(keys(s), ['total_sleep_so_far', 'wake_ups_so_far', 'longest_stretch_so_far', 'settling_time'], JSON.stringify(score));
+    }
+  });
+
+  test('hostile figures: a null parameter drops that one observation (never "null"), and zero wake-ups with a wake in progress is a plain zero', () => {
+    // A null wake count, a null stretch, no put-down and a zero total: nothing is invented to fill them.
+    const gaps = soFar(fresh({ wake_count: null, longest_stretch_minutes: null, in_bed_at: null, asleep_minutes: 0 }));
+    assert.deepEqual(gaps.observations, [], 'every figure missing: no observation at all, and no throw');
+    const partial = soFar(fresh({ wake_count: null, longest_stretch_minutes: 0 }));
+    assert.deepEqual(keys(partial), ['total_sleep_so_far', 'longest_stretch_so_far', 'settling_time']);
+    for (const o of partial.observations) for (const v of Object.values(o.params)) assert.equal(typeof v, 'number');
+    // Zero counted wake-ups while a wake is in progress (wake_at set: the wake touches the last minute, so it is not
+    // counted yet): the count is the figure as measured, with no comparison and no class.
+    const ongoing = soFar(fresh({ wake_count: 0, wake_at: '2026-03-11 02:25:00', summary_facts: facts([]) }));
+    assert.deepEqual(obs(ongoing, 'wake_ups_so_far'), { key: 'wake_ups_so_far', params: { count: 0 } });
+    assert.deepEqual(noComparison(ongoing), []);
+    // An unreadable facts text changes nothing here: the figures are the night's own.
+    assert.deepEqual(keys(soFar(fresh({ summary_facts: 'not json' }))), ['total_sleep_so_far', 'wake_ups_so_far', 'longest_stretch_so_far', 'settling_time']);
+  });
+
+  test('a night with no onset yet keeps no observations, whatever figures it carries', () => {
+    const noOnset = soFar(fresh({ onset_at: null, status: 'no_sleep', asleep_minutes: null, awake_minutes: null, wake_count: null, longest_stretch_minutes: null, summary_facts: null }));
+    assert.deepEqual(noOnset, { headline: { key: 'neutral_so_far' }, observations: [], seed: 'kid-a|2026-03-10' });
+    // Even an `ok` night with figures but no onset (cannot happen from computeNight; this is the guard).
+    assert.deepEqual(soFar(fresh({ onset_at: null })).observations, []);
+    // And a night that is not `ok` (the camera has no data).
+    assert.deepEqual(soFar(fresh({ status: 'no_data' }), NO_SCORE), null, 'no_data stays "nothing to say": no summary at all');
+  });
+
+  test('a parent\'s correction: a time moved past the tolerance drops the wake-ups and the stretch, one inside it cutting out a wake-up drops the count', () => {
+    const base = fresh({ corrected: true, algo_onset_at: '2026-03-10 19:30:00', algo_wake_at: null });
+    // Moved by 30 minutes (> 15): the detector's wake-up count and stretch describe another span.
+    const far = soFar({ ...base, onset_at: '2026-03-10 20:00:00' });
+    assert.deepEqual(keys(far).filter((k) => k !== 'settling_time'), ['total_sleep_so_far']);
+    // Moved by 10 minutes (inside the tolerance) but a counted wake-up now lies before the onset: the count is not quoted.
+    const near = soFar({ ...base, onset_at: '2026-03-10 19:40:00', summary_facts: facts([{ start_at: '2026-03-10 19:32:00', minutes: 5 }, wakeAt('01:30')]) });
+    assert.deepEqual(keys(near).includes('wake_ups_so_far'), false);
+    assert.deepEqual(keys(near).includes('longest_stretch_so_far'), true);
+    // Precondition: with no wake-up cut out, the same correction keeps the count.
+    const kept = soFar({ ...base, onset_at: '2026-03-10 19:40:00', summary_facts: facts([wakeAt('01:30')]) });
+    assert.deepEqual(keys(kept).includes('wake_ups_so_far'), true);
+  });
+
+  test('every so-far key is one the shared table declares, with exactly the params it declares', () => {
+    for (const key of ['total_sleep_so_far', 'wake_ups_so_far', 'longest_stretch_so_far']) {
+      assert.ok(Object.hasOwn(OBSERVATION_PARAMS, key), key);
+      assert.equal(OBSERVATION_PARAMS[key].includes('direction'), false, `${key} is never a comparison`);
+    }
+    for (const o of soFar(fresh()).observations) assert.deepEqual(Object.keys(o.params).sort(), [...OBSERVATION_PARAMS[o.key]].sort(), o.key);
+  });
+
+  test('the 18 headline variants are not touched: still six headline keys', () => {
+    assert.equal(HEADLINE_KEYS.length, 6);
+    assert.ok(HEADLINE_KEYS.includes('neutral_so_far'));
+  });
+});
+
+describe('the live state\'s copy of the wake gap', () => {
+  test('LIVE_STATE_CONFIG.wake_gap_min is sleepAnalysis.js WAKE_GAP_MIN (nightLiveState.js cannot import it without pulling in the database)', () => {
+    assert.equal(typeof SLEEP_THRESHOLDS.WAKE_GAP_MIN, 'number', 'precondition: the source is exported');
+    assert.equal(LIVE_STATE_CONFIG.wake_gap_min, SLEEP_THRESHOLDS.WAKE_GAP_MIN);
   });
 });

@@ -32,12 +32,21 @@
 // the score is worked out even for a hidden child, to derive the headline class from its components; only its
 // appearance in the response is switched. A failing summary leaves the score and the route as they were, with
 // `summary: null`, and never costs the night its score.
+//
+// THE LIVE STATE (phase 4) is the third extra on the same glue: a night still in progress also gets `live`:
+// { state: 'not_asleep_yet' | 'asleep' | 'awake' | 'unknown', since } (lib/nightLiveState.js), and every other night
+// gets `live: null`. ADDITIVE, and like `summary` NOT hidden by the child's switch: it says where the child is now, it
+// is not a score. It reads the night object this function was handed and the clock it was handed (`nowMs`, the route's
+// own default), so it can never disagree with the figures beside it. A failing `live` is `live: null` and costs the
+// night nothing else.
 
 import db from '../db.js';
 import { logger } from './logger.js';
 import { sleepBaseline } from './sleepBaseline.js';
 import { scoreNight, toScoringInput, ageMonthsOn } from './sleepScore.js';
 import { selectSummary } from './nightSummary.js';
+import { liveState } from './nightLiveState.js';
+import { parseSummaryFacts } from './sleepAnalysis.js';
 
 // Test seam ONLY (sleep-score-routes.test.js), like failNextSensorShadowPassForTest in sleepAnalysis.js: makes the
 // next score throw, so a test can prove a failing score leaves the route's answer alone. A real failure in there
@@ -51,6 +60,11 @@ let failNextSummary = false;
 export function failNextSummaryForTest() {
   failNextSummary = true;
 }
+// And for the live state alone.
+let failNextLive = false;
+export function failNextLiveForTest() {
+  failNextLive = true;
+}
 
 // At most one log line an hour for a failing score (and one for a failing summary, each with its own clock: a summary
 // fault must not be hidden behind a score fault's line). The child's card asks /sleep/live again and again, and the
@@ -58,9 +72,11 @@ export function failNextSummaryForTest() {
 const LOG_EVERY_MS = 60 * 60 * 1000;
 let lastLoggedMs = -Infinity;
 let lastSummaryLoggedMs = -Infinity;
+let lastLiveLoggedMs = -Infinity;
 export function resetScoreLogForTest() {
   lastLoggedMs = -Infinity;
   lastSummaryLoggedMs = -Infinity;
+  lastLiveLoggedMs = -Infinity;
 }
 
 // The score for one night object, with the normalised input it was made from (the summary reads both, so neither is
@@ -96,6 +112,26 @@ function summaryOf(child, night, score, input) {
     if (now - lastSummaryLoggedMs >= LOG_EVERY_MS) {
       lastSummaryLoggedMs = now;
       logger.warn('[sleep] night summary skipped: summarising a night failed');
+    }
+    return null;
+  }
+}
+
+// The live state of a night still in progress, or null (any other night, or a failure: its own try/catch and its own
+// hourly log line, so a fault here is neither hidden behind nor blamed on the score).
+function liveOf(night, nowMs) {
+  try {
+    if (failNextLive) {
+      failNextLive = false;
+      throw new Error('test: the live state was made to fail');
+    }
+    if (night.in_progress !== true) return null;
+    return liveState(night, nowMs, parseSummaryFacts(night.summary_facts));
+  } catch {
+    const now = Date.now();
+    if (now - lastLiveLoggedMs >= LOG_EVERY_MS) {
+      lastLiveLoggedMs = now;
+      logger.warn('[sleep] live state skipped: working out the live state of a night failed');
     }
     return null;
   }
@@ -143,14 +179,16 @@ export function attachScore(child, night, { context = null, storedNight = null, 
     // The cost for a hidden child is the baseline read the switch used to save.
     const { score, input } = scoreOf(child, scored, { context: fromSaved ? null : context, nowMs });
     const summary = summaryOf(child, scored, score, input);
-    if (hidden) return { ...night, summary };
-    return fromSaved ? { ...night, score, score_source: 'stored', summary } : { ...night, score, summary };
+    const live = liveOf(night, nowMs);
+    if (hidden) return { ...night, summary, live };
+    return fromSaved ? { ...night, score, score_source: 'stored', summary, live } : { ...night, score, summary, live };
   } catch {
     const now = Date.now();
     if (now - lastLoggedMs >= LOG_EVERY_MS) {
       lastLoggedMs = now;
       logger.warn('[sleep] sleep score skipped: scoring a night failed');
     }
-    return hidden ? { ...night, summary: null } : { ...night, score: null, summary: null };
+    const live = liveOf(night, nowMs);
+    return hidden ? { ...night, summary: null, live } : { ...night, score: null, summary: null, live };
   }
 }
