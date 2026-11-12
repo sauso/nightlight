@@ -61,8 +61,8 @@ If a camera's alerts are kept silenced, on and off, for a long time (more than a
 between renewals included), the admins are sent one notification for it, which names no one; on Pushover, ntfy
 and Gotify everyone on them gets it too. See [Long-silence alerts](camera-controls.md#long-silence-alerts).
 
-On a caregiver's screen the admin-only controls are not shown (sleep tracking, the window and the sleep
-camera are shown, greyed out, with a note); the server refuses them too, so a page opened before an update that changed a
+On a caregiver's screen the admin-only controls are not shown (sleep tracking, the window, the sleep
+camera and Show sleep score are shown, greyed out, with a note); the server refuses them too, so a page opened before an update that changed a
 permission gets a refusal rather than a change.
 
 The **Settings** hub itself is visible to caregivers too — its admin-only pages (general,

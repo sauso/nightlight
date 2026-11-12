@@ -436,6 +436,19 @@ server's own status check timed out, so the camera's state is unknown), the last
 button in `--text-secondary`, not `--offline` red, because it does not claim the camera is down. Its dot stays
 on the amber "connecting" tempo and never turns red.
 
+### Score ring (`components/ScoreRing.jsx`)
+The sleep score as a ring with the number in the middle: an inline SVG arc filled to the score out of 100. **One colour
+whatever the score** (the band is said in words beside it; a red or green ring would turn a description into a verdict),
+and **no animation** (section 7). Two sizes, from the type scale: 44px with a 15px number (the child's card) and 64px with
+a 20px number (the sleep detail page). The ring is `aria-hidden`; the control around it carries the score in its name.
+
+`surface` picks the colours. On a `.card`: the arc is `--accent-line` on a `--border` track and the number is
+`--text-primary` (arc 5.06:1 on a white card by day, 5.87:1 on a night card; 3.57:1 and 4.40:1 against the track).
+On the child's hero card (`.night`), which is the same dark gradient in both themes, the colours are **literals**,
+because the day `--accent-line` is only 2.45:1 there: arc `#A7B1FF` (6.13:1 at the gradient's lightest point,
+`#2C2F63`), number `#FFFFFF` (12.40:1), track white at 16%. Measured with the WCAG formula, 2026-11-12; contrast only
+rises towards the darker end of the gradient.
+
 ### Modal (`components/Modal.jsx`)
 On phone widths a **sheet**, not a centred dialog: overlay `rgba(10, 13, 28, 0.7)`, card
 `max-width: 440`, hugging the bottom edge (`placement="top"` for the top), rounded 20px on the inner

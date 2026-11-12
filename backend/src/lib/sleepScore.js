@@ -2,7 +2,7 @@
 //
 // A night gets a 0-100 score from five components, each compared with the child's own recent nights where the
 // plan says so (lib/sleepBaseline.js) and with a fixed curve where it does not. Nothing here is stored. The sleep
-// routes attach the result to every night they return (lib/sleepScoreAttach.js, phase 1c); no screen shows it yet.
+// routes attach the result to every night they return (lib/sleepScoreAttach.js, phase 1c); the web app shows it (phase 2).
 // The score is worked out ON READ from the night object an
 // endpoint is about to return, so it always agrees with the figures shown beside it, and a parent's correction or a
 // retuned curve applies to every night at once with no backfill.
