@@ -110,7 +110,7 @@ describe('sleepScoreText', () => {
       .toBe('11h 0m from falling asleep to waking. Early estimate: compared with a published figure for this age (11h 24m), until there are enough nights to know what is usual.');
     expect(componentDetail(SCORE.components[2])).toBe('30m from being put down to falling asleep. Usual: 20m.');
     expect(componentDetail(SCORE.components[3])).toBe('1.5 stirring minutes per hour asleep. Usual: 2.0.');
-    expect(componentDetail(SCORE.components[1])).toMatch(/^Asleep for 80% of the time between falling asleep and waking\. Usual: 90%\./);
+    expect(componentDetail(SCORE.components[1])).toMatch(/^Asleep for 80% of the observed time between falling asleep and waking\. Usual: 90%\./);
   });
 
   test('a clock time is the wall-clock time the server sent, whatever zone the browser is in', () => {
@@ -270,7 +270,7 @@ describe('SleepScoreCard: the detail page card and the breakdown sheet', () => {
     });
     const dialog = await open(user);
     expect(within(dialog).getByText('Held down by duration: the overall score cannot sit far above that part.')).toBeInTheDocument();
-    expect(within(dialog).getByText('This score may still change this morning.')).toBeInTheDocument();
+    expect(within(dialog).getByText('This score may still change.')).toBeInTheDocument();
     expect(within(dialog).getByText('Low confidence: the camera did not watch enough of the sleep window.')).toBeInTheDocument();
   });
 

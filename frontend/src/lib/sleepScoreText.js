@@ -144,7 +144,7 @@ export function componentDetail(c) {
     }
     case 'continuity': {
       const value = percentText(c.value);
-      const lead = value ? `Asleep for ${value} of the time between falling asleep and waking.${usual(percentText(c.usual))} ` : '';
+      const lead = value ? `Asleep for ${value} of the observed time between falling asleep and waking.${usual(percentText(c.usual))} ` : '';
       return `${lead}Also counts the longest unbroken stretch and the number of wake-ups.`;
     }
     case 'settling': {

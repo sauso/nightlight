@@ -624,7 +624,7 @@ measurement, it says nothing about sleep stages, and it is no reason to worry on
 - **How this is scored** opens the breakdown: one bar for each of the five parts with its own score, what
   was measured and the child's usual. A part that was left out says why (for example "No put-down was
   detected for this night"). The sheet also says when the score was held down by one part, when it may
-  still change this morning, and when it is low confidence.
+  still change, and when it is low confidence.
 - A night with no score shows **No score yet** and the reason.
 
 The ring is one colour whatever the score. The breakdown describes the night; it gives no advice and

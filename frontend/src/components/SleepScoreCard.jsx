@@ -58,7 +58,7 @@ export default function SleepScoreCard({ night }) {
         </span>
         <ChevronRight size={18} aria-hidden="true" className="sleep-score__chev" />
       </button>
-      {score.provisional && <div className="sleep-score__note">This score may still change this morning.</div>}
+      {score.provisional && <div className="sleep-score__note">This score may still change.</div>}
       {fromSaved && (
         <div className="sleep-score__note">
           The timeline for this night is no longer available. The score comes from the saved night.
@@ -102,14 +102,17 @@ function ScoreBreakdown({ score, fromSaved, onClose }) {
         })}
       </ul>
       {capped && <p className="sleep-score__note">{capped}</p>}
-      {score.provisional && <p className="sleep-score__note">This score may still change this morning.</p>}
+      {score.provisional && <p className="sleep-score__note">This score may still change.</p>}
       {lowConfidence && <p className="sleep-score__note">{lowConfidence}</p>}
       {fromSaved && (
         <p className="sleep-score__note">The timeline for this night is no longer available. The score comes from the saved night.</p>
       )}
       <h3 className="sleep-score__about-title">About the sleep score</h3>
       <p className="sleep-score__about">
-        The score compares this night with this child’s own recent nights. It is an estimate from what the camera and
+        {score.early_estimate
+          ? 'Until there are enough recent nights to know what is usual for this child, the score is an early estimate that uses general figures instead.'
+          : 'The score compares this night with this child’s own recent nights.'}
+        {' '}It is an estimate from what the camera and
         microphone observed, not a medical measurement, and it is not comparable between children or rooms.
       </p>
     </Modal>
