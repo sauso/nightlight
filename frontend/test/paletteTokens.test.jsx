@@ -7,7 +7,7 @@
 // docs/design-language.md section 1.
 import { describe, expect, test } from 'vitest';
 import { render } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import Avatar from '../src/components/Avatar.jsx';
 
@@ -21,10 +21,20 @@ function tokens(block) {
   for (const match of block.matchAll(/(--[a-z0-9-]+):\s*(#[0-9a-fA-F]{6})\s*;/g)) out[match[1]] = match[2].toLowerCase();
   return out;
 }
-const dayBlock = rules.find((rule) => rule.startsWith(':root {') && rule.includes('--accent:'));
-const nightBlock = rules.find((rule) => rule.startsWith(":root[data-theme='dark'] {") && rule.includes('--accent-text'));
-const day = tokens(dayBlock || '');
-const night = { ...day, ...tokens(nightBlock || '') };
+// Every `:root {` rule and every `:root[data-theme='dark'] {` rule, in stylesheet order, LAST declaration of a token winning, which is
+// what the browser does (same specificity, later wins). Reading only the first matching block would miss a later override that
+// the page actually shows (found in review, 2026-11-12). `dark` is the dark rules alone, for "this token is not redefined at night".
+function themeTokens(ruleList) {
+  const dayTokens = {};
+  const dark = {};
+  for (const rule of ruleList) {
+    if (rule.startsWith(':root {')) Object.assign(dayTokens, tokens(rule));
+    else if (rule.startsWith(":root[data-theme='dark'] {")) Object.assign(dark, tokens(rule));
+  }
+  return { day: dayTokens, dark, night: { ...dayTokens, ...dark } };
+}
+const resolved = themeTokens(rules);
+const { day, night, dark: darkOnly } = resolved;
 
 // WCAG 2.x relative luminance and contrast ratio.
 const channel = (value) => { const c = value / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
@@ -111,6 +121,199 @@ describe('readability, recomputed from the stylesheet\'s own tokens', () => {
     expect(fills, 'the logo has its crescent colour').toContain('#778ffd');
     expect(fills.filter((fill) => fill !== '#f8f8ff' && fill !== '#778ffd'), 'and no other colour than the baby white').toEqual([]);
     expect(day['--accent'], 'buttons keep their own colour').not.toBe('#778ffd');
+  });
+});
+
+// The warm palette (owner, 2026-11-12: "too blue"). Everything below is read from the stylesheet, so a colour edit that breaks
+// readability fails here rather than on a phone. The band tokens are defined but no component uses them yet (the next change does).
+const BANDS = ['great', 'good', 'fair', 'low', 'early'];
+// The timeline tokens sit in their own :root rules further down the sheet; themeTokens merges every such rule.
+const sleepDay = day;
+const sleepNight = night;
+const nightRule = rules.find((rule) => rule.startsWith('.night {')) || '';
+const nightTokens = tokens(nightRule);
+const stops = [...nightRule.matchAll(/linear-gradient\([^)]*?(#[0-9a-fA-F]{6}) 0%, (#[0-9a-fA-F]{6}) 100%\)/g)][0]?.slice(1, 3).map((s) => s.toLowerCase()) || [];
+const [gradientLight, gradientDark] = stops;
+const trackMatch = (rules.find((rule) => rule.startsWith('.score-ring--dark .score-ring__track {')) || '').match(/stroke:\s*rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/);
+// The ring's track as it composites over a point of the gradient: the track is translucent, so its colour depends on what is under it.
+const overHex = (rgba, under) => {
+  const base = [(parseInt(under.slice(1), 16) >> 16) & 255, (parseInt(under.slice(1), 16) >> 8) & 255, parseInt(under.slice(1), 16) & 255];
+  const [r, g, b, a] = [Number(rgba[1]), Number(rgba[2]), Number(rgba[3]), Number(rgba[4])];
+  return `#${[r, g, b].map((v, i) => Math.round(v * a + base[i] * (1 - a)).toString(16).padStart(2, '0')).join('')}`;
+};
+
+describe('the warm neutrals and the band colours (owner, 2026-11-12)', () => {
+  test('the warm values were read, and nothing of the old navy/lavender surfaces is left in the token blocks', () => {
+    expect(day['--bg']).toBe('#f8f5f0');
+    expect(night['--bg']).toBe('#1a1618');
+    expect(day['--bg-elevated']).toBe('#fffdf9');
+    expect(night['--bg-elevated']).toBe('#262024');
+    expect(day['--bar'], 'the header is one colour in both themes').toBe('#1f1a1e');
+    expect(night['--bar']).toBe('#1f1a1e');
+    // The old palette, by value: a restored literal in either block is caught.
+    for (const old of ['#14142a', '#221f3c', '#100f1c', '#f7f4fd', '#eae3f8', '#1d1a3a', '#e8e2f7', '#ddd5ee', '#383450']) {
+      expect(JSON.stringify([day, night]), `${old} is gone from the token blocks`).not.toContain(old);
+    }
+  });
+
+  test.each([['day', day], ['night', night]])('★ %s: primary and secondary text are readable on the page, the card and the inset (4.5:1)', (_name, t) => {
+    for (const text of ['--text-primary', '--text-secondary']) {
+      for (const surface of ['--bg', '--bg-elevated', '--bg-elevated-2']) {
+        expect(contrast(t[text], t[surface]), `${text} on ${surface}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  test('the header text and its controls are readable on --bar in both themes (4.5:1)', () => {
+    for (const t of [day, night]) {
+      expect(contrast(t['--bar-text'], t['--bar'])).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(t['--accent-soft'], t['--bar'])).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  test('every band has a card mark, and a ring mark that does not switch with the theme', () => {
+    for (const band of BANDS) {
+      expect(day[`--band-${band}`], `day --band-${band}`).toMatch(/^#[0-9a-f]{6}$/);
+      expect(night[`--band-${band}`], `night --band-${band}`).toMatch(/^#[0-9a-f]{6}$/);
+      expect(day[`--band-${band}-ring`], `--band-${band}-ring`).toMatch(/^#[0-9a-f]{6}$/);
+      // The ring variants live in :root only: the card they sit on is the same in both themes, so the dark block must not redefine them.
+      expect(darkOnly[`--band-${band}-ring`], `--band-${band}-ring must not be redefined at night`).toBeUndefined();
+      expect(night[`--band-${band}-ring`]).toBe(day[`--band-${band}-ring`]);
+    }
+  });
+
+  test('the child card\'s gradient and its ring track were read from the stylesheet', () => {
+    expect(gradientLight, 'gradient start').toBe('#352b3a');
+    expect(gradientDark, 'gradient end').toBe('#1e191f');
+    expect(trackMatch, 'the .score-ring--dark track rule').toBeTruthy();
+    expect(gradientLight, 'the gradient must run light to dark: the start is where contrast is lowest for light marks').not.toBe(gradientDark);
+    expect(luminance(gradientLight)).toBeGreaterThan(luminance(gradientDark));
+  });
+
+  test.each(BANDS)('★ the %s ring colour is a graphic on the night card: 3:1 on both gradient stops and on its track', (band) => {
+    const ring = day[`--band-${band}-ring`];
+    for (const stop of [gradientLight, gradientDark]) {
+      expect(contrast(ring, stop), `${band} ring on the gradient at ${stop}`).toBeGreaterThanOrEqual(3);
+      expect(contrast(ring, overHex(trackMatch, stop)), `${band} ring on its track over ${stop}`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  test.each([['day', day], ['night', night]])('★ %s: every band mark is a graphic on the card and on the inset track (3:1)', (_name, t) => {
+    for (const band of BANDS) {
+      for (const surface of ['--bg-elevated', '--bg-elevated-2']) {
+        expect(contrast(t[`--band-${band}`], t[surface]), `--band-${band} on ${surface}`).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  test('★ the night card\'s text tints are readable on its lightest stop, where contrast is lowest (4.5:1)', () => {
+    for (const token of ['--night-text', '--night-muted', '--night-link']) {
+      expect(nightTokens[token], `${token} is defined on .night`).toMatch(/^#[0-9a-f]{6}$/);
+      expect(contrast(nightTokens[token], gradientLight), `${token} on ${gradientLight}`).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(contrast(nightTokens['--night-muted'], gradientLight), 'the muted tint is the one most text uses').toBeGreaterThanOrEqual(8);
+  });
+
+  test('★ the .night rules take their text colours from the card\'s properties, not from literals (the lavender ladder is gone)', () => {
+    const nightRules = rules.filter((rule) => /^\.night(__|\s|\.)/.test(rule) && !rule.startsWith('.night {'));
+    expect(nightRules.length, 'the .night__* rules were found').toBeGreaterThan(8);
+    const literals = nightRules.filter((rule) => /#[0-9a-fA-F]{3,6}\b/.test(rule));
+    expect(literals, `hex literals in ${literals.join(' | ')}`).toEqual([]);
+    expect(css).not.toMatch(/#(?:eef0ff|cdd0ff|b9bdf0|9fa3e0|8f93d0|2c2f63|191b38)\b/i);
+  });
+
+  test.each([['day', day, sleepDay], ['night', night, sleepNight]])('★ %s: where the wake-up amber is TEXT it is readable on the card and the inset (4.5:1)', (_name, t, sleep) => {
+    expect(sleep['--sleep-asleep'], 'the timeline tokens were read').toMatch(/^#[0-9a-f]{6}$/);
+    for (const surface of ['--bg-elevated', '--bg-elevated-2']) {
+      expect(contrast(sleep['--sleep-wake-text'], t[surface]), `--sleep-wake-text on ${surface}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  // The 15% tint a tag lays over the card (color-mix in srgb), computed here so the tag's own text is measured, not just the card.
+  const tint = (fg, alpha, under) => {
+    const f = [(parseInt(fg.slice(1), 16) >> 16) & 255, (parseInt(fg.slice(1), 16) >> 8) & 255, parseInt(fg.slice(1), 16) & 255];
+    const u = [(parseInt(under.slice(1), 16) >> 16) & 255, (parseInt(under.slice(1), 16) >> 8) & 255, parseInt(under.slice(1), 16) & 255];
+    return `#${f.map((v, i) => Math.round(v * alpha + u[i] * (1 - alpha)).toString(16).padStart(2, '0')).join('')}`;
+  };
+
+  test.each([['day', day, sleepDay], ['night', night, sleepNight]])('★ %s: where the room-activity teal is TEXT it is readable on the card, the inset and its own 15%% tag (4.5:1)', (_name, t, sleep) => {
+    for (const surface of ['--bg-elevated', '--bg-elevated-2']) {
+      expect(contrast(sleep['--sleep-visit-text'], t[surface]), `--sleep-visit-text on ${surface}`).toBeGreaterThanOrEqual(4.5);
+    }
+    // The .sleep-visit-tag sits on a card, never on the page, so the card is what its tint is laid over.
+    expect(contrast(sleep['--sleep-visit-text'], tint(sleep['--sleep-visit'], 0.15, t['--bg-elevated'])), 'on its tag').toBeGreaterThanOrEqual(4.5);
+    expect(contrast(sleep['--sleep-wake-text'], tint(sleep['--sleep-wake'], 0.14, t['--bg-elevated'])), 'the wake-up badge on its tag').toBeGreaterThanOrEqual(4.5);
+  });
+
+  test('★ the room-activity duration, tag and label use the readable teal; the dots and legend swatch keep the bright one', () => {
+    for (const selector of ['.sleep-wakes__dur--visit', '.sleep-visit-tag', '.sleep-refined__label']) {
+      const rule = rules.find((r) => r.startsWith(`${selector} {`));
+      expect(rule, `${selector} has a rule`).toBeTruthy();
+      expect(rule, selector).toMatch(/(^|[ ;{])color: var\(--sleep-visit-text\)/);
+    }
+    for (const selector of ['.sleep-tl__visit', '.sleep-legend__sw--visit']) {
+      expect(rules.find((r) => r.startsWith(`${selector} {`)), selector).toMatch(/background: var\(--sleep-visit\)/);
+    }
+  });
+
+  test('the timeline colours are the approved ones', () => {
+    expect([sleepDay['--sleep-asleep'], sleepDay['--sleep-stir'], sleepDay['--sleep-wake'], sleepDay['--sleep-visit']]).toEqual(['#4b53b5', '#a7ade4', '#f0a257', '#2fa39a']);
+    expect([sleepNight['--sleep-asleep'], sleepNight['--sleep-stir'], sleepNight['--sleep-wake'], sleepNight['--sleep-visit']]).toEqual(['#7c85e6', '#a7ade4', '#f6c899', '#3ec4b8']);
+  });
+
+  test('★ the wake-up duration, badge, icon and "out of bed" tag use the readable amber, never the segment amber', () => {
+    for (const selector of ['.sleep-wakes__dur', '.sleep-wakes__dur--out', '.sleep-wakes__badge', '.sleep-wakes__alert-ico', '.sleep-visit-tag--out']) {
+      const rule = rules.find((r) => r.startsWith(`${selector} {`));
+      expect(rule, `${selector} has a rule`).toBeTruthy();
+      expect(rule, selector).toMatch(/(^|[ ;{])color: var\(--sleep-wake-text\)/);
+    }
+  });
+
+  test('asleep has a 1px card-coloured separator against its neighbours', () => {
+    const rule = rules.find((r) => r.includes('.sleep-seg--asleep + .sleep-seg') && r.includes('.sleep-seg + .sleep-seg--asleep'));
+    expect(rule, 'the separator rule').toBeTruthy();
+    expect(rule).toContain('inset 1px 0 0 var(--bg-elevated)');
+  });
+
+  test('★ every var(--token) the stylesheet reads is defined somewhere (var(--danger, #c0392b) and var(--surface-2, ...) were not, so their fallbacks silently ruled)', () => {
+    const defined = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+    // Properties set at runtime, in JSX style={{ '--x': ... }} or by script, are legitimately absent from the stylesheet.
+    const runtimeSet = new Set();
+    for (const file of ['src']) {
+      const walk = (dir) => readdirSync(dir, { withFileTypes: true }).forEach((entry) => {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.(jsx?|tsx?)$/.test(entry.name)) for (const m of readFileSync(full, 'utf8').matchAll(/['"`](--[a-z0-9-]+)['"`]|setProperty\(\s*['"](--[a-z0-9-]+)/g)) runtimeSet.add(m[1] || m[2]);
+      });
+      walk(join(process.cwd(), file));
+    }
+    const missing = [...new Set([...css.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]))].filter((name) => !defined.has(name) && !runtimeSet.has(name));
+    expect(missing, `tokens read but never defined: ${missing.join(', ')}`).toEqual([]);
+  });
+});
+
+describe('the token reader itself', () => {
+  const read = (text) => themeTokens(text.replace(/\/\*[\s\S]*?\*\//g, '').split('}').map((rule) => rule.replace(/\s+/g, ' ').trim()));
+
+  test('★ a LATER declaration of a token wins, in any :root or dark block, as it does in the browser', () => {
+    const { day: d, night: n, dark } = read(`
+      :root { --bg: #111111; --text-primary: #222222; }
+      :root[data-theme='dark'] { --bg: #333333; }
+      :root { --bg: #444444; }
+      :root[data-theme='dark'] { --bg: #555555; --text-primary: #666666; }
+      :root[data-theme='dark'] { --bg: #777777; }
+    `);
+    expect(d['--bg'], 'a second :root block overrides the first').toBe('#444444');
+    expect(n['--bg'], 'the last dark declaration wins at night').toBe('#777777');
+    expect(n['--text-primary']).toBe('#666666');
+    expect(d['--text-primary'], 'the dark override does not leak into day').toBe('#222222');
+    expect(dark['--bg']).toBe('#777777');
+  });
+
+  test('a token only the day blocks define carries into night, and one defined twice in a block takes the last', () => {
+    const { night: n } = read(':root { --a: #aaaaaa; --a: #bbbbbb; --b: #cccccc; } :root[data-theme=\'dark\'] { --b: #dddddd; }');
+    expect(n['--a']).toBe('#bbbbbb');
+    expect(n['--b']).toBe('#dddddd');
   });
 });
 

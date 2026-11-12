@@ -1,31 +1,71 @@
 :root {
   /* #943: the owner's day/night palette is one tweakable block. Brand actions share --accent;
      --accent-text is lighter only where small text sits on dark surfaces. */
-  --bg: #f7f4fd;
-  --bg-elevated: #ffffff;
-  --bg-elevated-2: #eae3f8;
-  --text-primary: #1d1a3a;
-  --text-secondary: #625c7f;
+  /* Warm neutrals (owner, 2026-11-12: both themes were "too blue"). The page, cards, inset, text and borders are warm
+     greys with a faint rose-brown cast; the brand periwinkle below is unchanged and now marks actions and navigation
+     only, so it stands out against the warmth instead of blending into a blue page. Measured text contrast (WCAG):
+     --text-primary 14.89:1 on --bg by day, --text-secondary 4.97:1 on the --bg-elevated-2 inset (its tightest surface);
+     test/paletteTokens.test.jsx recomputes every text/surface pair from this block. */
+  --bg: #f8f5f0;
+  --bg-elevated: #fffdf9;
+  --bg-elevated-2: #efe8df;
+  --text-primary: #241f24;
+  --text-secondary: #6b6158;
   --accent: #5663d6;
   --accent-text: #4a55c8;
   --accent-soft: #d3d8ff;
-  /* Peri (owner, 2026-11-06): #5663d6 by day, with WHITE text on it (5.06:1); at night the lighter #8995ff with DARK text (6.71:1).
+  /* Peri (owner, 2026-11-06): #5663d6 by day, with WHITE text on it (5.06:1); at night the lighter #8995ff with DARK text (#1a1618, 6.66:1).
      The owner chose both; dark text on #5663d6 would only be 3.57:1, so the two themes need different text colours and that is
      what --on-accent is for: text ON an accent fill is always --on-accent. Borders, rings and icons use --accent-line; small
-     text uses --accent-text (#4a55c8 clears 4.5:1 on cards, the page AND the #eae3f8 inset, where plain #5663d6 only reaches
-     4.06). The complement (warm gold) is for small highlights only. Measured ratios: docs/design-language.md section 1, and
+     text uses --accent-text (#4a55c8 clears 4.5:1 on cards, the page AND the #efe8df inset, where plain #5663d6 only reaches
+     4.16). The complement (warm gold) is for small highlights only. Measured ratios: docs/design-language.md section 1, and
      test/paletteTokens.test.jsx recomputes them from this block so a colour change cannot silently break readability. */
   --on-accent: #ffffff;
   --accent-line: #5663d6;
   --complement: #f2c14e;
-  --on-complement: #14142a;
-  --bar: #14142a;
-  --bar-text: #e8e2f7;
+  --on-complement: #1f1a1e;
+  /* The header is one warm near-black in BOTH themes (owner, 2026-11-12). Its text is #efe8e2 (14.13:1) and its back link
+     --accent-soft/#d3d8ff (12.28:1). index.html's theme-color meta repeats --bar so the phone's status bar matches. */
+  --bar: #1f1a1e;
+  --bar-text: #efe8e2;
   --live: #23734f;
   --offline: #aa3f54;
-  --border: #ddd5ee;
-  --field-bg: #eae3f8;
+  --border: #e5dcd1;
+  --field-bg: #efe8df;
   --radius: 16px;
+
+  /* Score band colours (docs/design-language.md, "Band colours"). Defined here, used by the score ring, strip and breakdown
+     bars from the next change. Two rules that hold wherever they are used: a colour is NEVER the only signal (the band word
+     and the number always show), and TEXT IS NEVER SET IN A BAND COLOUR (they are marks: bars, rings, dots). Contrast is
+     WCAG, measured 2026-11-12 on the design's colours (a mark needs 3:1).
+     --band-*: the mark on a themed card, by day (on --bg-elevated / on the --bg-elevated-2 track):
+       great #1e6b3d 6.41 / 5.36   good #126067 7.14 / 5.97   fair #a36a10 4.47 / 3.73
+       low   #c4688a 3.63 / 3.03   early #6b6158 5.95 / 4.97
+     The dark block gives the night values (on #262024 / #121011):
+       great #a8edbe 11.81 / 14.01  good #5cbfc6 7.40 / 8.78  fair #d99c50 6.71 / 7.96
+       low   #c77790 4.92 / 5.84    early #ccc3b8 9.18 / 10.89
+     --band-*-ring: the ring on the child page's .night card, which is the same dark gradient in both themes, so these do
+     NOT switch. On the gradient's lightest stop #352b3a / against the ring's own track as it composites there (#261f2a):
+       great #a8edbe 9.96 / 11.83   good #5cbfc6 6.24 / 7.41   fair #d99c50 5.66 / 6.72
+       low   #c77790 4.15 / 4.93    early #ccc3b8 7.74 / 9.20
+     (The design's own ring-on-card figures, 7.33 / 4.99 / 4.56 / 3.51 / 5.94, include the 12% band tint it lays over the
+     card, which arrives with the ring; the track figures are identical.) The weakest pairs are the day rose bar (3.03:1 on
+     the inset) and the ring's rose (3.51:1 with the tint): both clear the 3:1 a graphic needs, neither more. */
+  --band-great: #1e6b3d;
+  --band-good: #126067;
+  --band-fair: #a36a10;
+  --band-low: #c4688a;
+  --band-early: #6b6158;
+  --band-great-ring: #a8edbe;
+  --band-good-ring: #5cbfc6;
+  --band-fair-ring: #d99c50;
+  --band-low-ring: #c77790;
+  --band-early-ring: #ccc3b8;
+
+  /* Placeholder ground behind a camera thumbnail before its picture loads: a dark warm gradient in both themes (a camera
+     image is dark whatever the theme). Warm like the rest of the palette; the old navy pair was the last blue left. */
+  --thumb-hi: #2f2733;
+  --thumb-lo: #161115;
 
   --font-display: 'Nunito', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, sans-serif;
@@ -34,21 +74,28 @@
 
 /* lib/theme.js stamps the resolved device choice on <html>; there is no media override. */
 :root[data-theme='dark'] {
-  --bg: #14142a;
-  --bg-elevated: #221f3c;
-  --bg-elevated-2: #100f1c;
-  --text-primary: #e8e2f7;
-  --text-secondary: #bcb3d5;
+  --bg: #1a1618;
+  --bg-elevated: #262024;
+  --bg-elevated-2: #121011;
+  --text-primary: #f0e9e3;
+  --text-secondary: #c4b9af;
   --accent: #8995ff;
-  --on-accent: #14142a;
+  --on-accent: #1a1618;
   --accent-text: #a7b1ff;
   --accent-soft: #c5cbff;
   --accent-line: #8995ff;
   --complement: #f6d365;
   --live: #8bdbad;
   --offline: #f4a3ad;
-  --border: #383450;
-  --field-bg: #100f1c;
+  --border: #3d3439;
+  --field-bg: #121011;
+  /* Band marks on a themed card at night (on --bg-elevated #262024 / the --bg-elevated-2 track #121011); measured ratios
+     are in the --band-* comment in :root. The ring variants do not switch, so they are not repeated here. */
+  --band-great: #a8edbe;
+  --band-good: #5cbfc6;
+  --band-fair: #d99c50;
+  --band-low: #c77790;
+  --band-early: #ccc3b8;
 }
 
 * { box-sizing: border-box; }
@@ -366,7 +413,7 @@ body.in-pip .tile-menu-backdrop {
   height: 36px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.35);
-  background: rgba(10, 13, 28, 0.55);
+  background: rgba(10, 8, 12, 0.55);
   color: var(--text-primary);
   display: flex;
   align-items: center;
@@ -835,7 +882,7 @@ body.in-pip .tile-menu-backdrop {
 
 .talk-btn--active {
   background: var(--accent);
-  color: #0a0d1c;
+  color: var(--on-accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
@@ -1242,7 +1289,7 @@ body.in-pip .tile-menu-backdrop {
 .cam-row:hover { background: var(--bg-elevated-2); }
 .cam-thumb {
   width: 54px; height: 40px; border-radius: 9px; flex-shrink: 0; position: relative;
-  background: radial-gradient(120% 100% at 30% 12%, #2b2f5c 0%, #14162f 78%);
+  background: radial-gradient(120% 100% at 30% 12%, var(--thumb-hi) 0%, var(--thumb-lo) 78%);
 }
 .cam-thumb.sm { width: 40px; height: 30px; border-radius: 7px; }
 .cam-thumb.off { filter: grayscale(1) brightness(0.62); }
@@ -1255,40 +1302,59 @@ body.in-pip .tile-menu-backdrop {
 .cam-chip__mini { width: 18px; height: 18px; border-radius: 50%; color: #fff; font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
 
 /* Child hero ("night") card — identity now, last night's sleep later. */
-.night { background: linear-gradient(165deg, #2c2f63 0%, #191b38 100%); color: #eef0ff; border-radius: 18px; padding: 16px; margin-bottom: 14px; box-shadow: 0 18px 42px -26px rgba(18, 20, 58, 0.8); }
+/* ONE fixed dark gradient in both themes (owner, 2026-11-12), so its text colours are literals that do not follow the theme,
+   kept here as three properties so no rule below repeats a hex. Measured on the gradient's LIGHTEST stop (#352b3a), where
+   contrast is lowest (it only rises towards #1e191f): --night-text white 13.48:1; --night-muted #d6ccd3 8.62:1 (4.5:1
+   needed for small text); --night-link #c7caff 8.55:1 (the periwinkle tint, for the one tappable accent and the chevron).
+   Two warm tints replace the old lavender ladder (#eef0ff, #cdd0ff, #b9bdf0, #9fa3e0, #8f93d0): the dimmest of those
+   (#8f93d0) was the weakest text on the card. test/paletteTokens.test.jsx recomputes these three from this rule. */
+.night { --night-text: #ffffff; --night-muted: #d6ccd3; --night-link: #c7caff; --night-divider: rgba(255, 255, 255, 0.1); background: linear-gradient(165deg, #352b3a 0%, #1e191f 100%); color: var(--night-text); border-radius: 18px; padding: 16px; margin-bottom: 14px; box-shadow: 0 18px 42px -26px rgba(16, 10, 18, 0.8); }
 .night__head { display: flex; align-items: center; gap: 13px; width: 100%; }
 .night__avatar-btn { background: none; border: none; padding: 0; cursor: pointer; flex-shrink: 0; border-radius: 50%; line-height: 0; }
-.night__avatar-btn:focus-visible { outline: 2px solid #c7caff; outline-offset: 3px; }
+.night__avatar-btn:focus-visible { outline: 2px solid var(--night-link); outline-offset: 3px; }
 .night__id-btn { flex: 1; min-width: 0; display: block; background: none; border: none; padding: 0; cursor: pointer; color: inherit; font: inherit; text-align: left; }
 .night__edit { background: none; border: none; cursor: pointer; font-family: inherit; }
 /* Enlarged child photo in a modal (tapped from the detail hero). */
 .photo-full { display: block; width: 100%; border-radius: 12px; }
 .night__id { flex: 1; min-width: 0; }
 .night__name { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 800; line-height: 1.1; }
-.night__age { display: block; font-size: 12.5px; color: #b9bdf0; margin-top: 3px; }
-.night__edit { font-size: 12.5px; color: #c7caff; opacity: 0.85; flex-shrink: 0; }
-.night__sleep { display: flex; align-items: center; gap: 11px; margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.1); color: #cdd0ff; }
-.night__soon { font-size: 12px; color: #9fa3e0; margin-top: 2px; }
+.night__age { display: block; font-size: 12.5px; color: var(--night-muted); margin-top: 3px; }
+.night__edit { font-size: 12.5px; color: var(--night-link); opacity: 0.85; flex-shrink: 0; }
+.night__sleep { display: flex; align-items: center; gap: 11px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--night-divider); color: var(--night-muted); }
+.night__soon { font-size: 12px; color: var(--night-muted); margin-top: 2px; }
 /* "In bed 19:47 · Asleep 20:04" — same weight as the range line above it. Its own class rather than a
    second .night__soon so nothing selecting "the range line" can pick this one up instead. */
-.night__inbed { font-size: 12px; color: #9fa3e0; margin-top: 2px; }
-.night__sleep-head { font-weight: 600; font-size: 13px; color: #cdd0ff; }
-.night__sleep-big { font-size: 22px; font-weight: 700; color: #fff; margin: 1px 0 2px; line-height: 1.1; }
-.night__est { font-size: 10.5px; color: #8f93d0; margin-top: 5px; }
+.night__inbed { font-size: 12px; color: var(--night-muted); margin-top: 2px; }
+.night__sleep-head { font-weight: 600; font-size: 13px; color: var(--night-muted); }
+.night__sleep-big { font-size: 22px; font-weight: 700; color: var(--night-text); margin: 1px 0 2px; line-height: 1.1; }
+.night__est { font-size: 10.5px; color: var(--night-muted); margin-top: 5px; }
 /* The night summary's headline on the child's card: one line, cut with an ellipsis rather than wrapped, because the
    score ring beside it narrows this column at 375px. The text is also in the button's aria-label, so nothing is lost. */
-.night__headline { font-size: 13px; color: #cdd0ff; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.night__headline { font-size: 13px; color: var(--night-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Sleep summary card as a button into the detail page */
-.night__sleep--btn { width: 100%; background: none; border: none; border-top: 1px solid rgba(255, 255, 255, 0.1); text-align: left; cursor: pointer; font: inherit; }
+.night__sleep--btn { width: 100%; background: none; border: none; border-top: 1px solid var(--night-divider); text-align: left; cursor: pointer; font: inherit; }
 .night__sleep-body { flex: 1; min-width: 0; }
-.night__sleep-chev { flex: none; opacity: 0.6; transition: transform 0.15s ease, opacity 0.15s ease; }
+.night__sleep-chev { flex: none; color: var(--night-link); opacity: 0.6; transition: transform 0.15s ease, opacity 0.15s ease; }
 .night__sleep--btn:hover .night__sleep-chev, .night__sleep--btn:focus-visible .night__sleep-chev { opacity: 1; transform: translateX(2px); }
 
 /* --- Sleep detail page --- */
-/* Timeline segment colours (theme-aware) */
-:root { --sleep-asleep: #5b63c4; --sleep-stir: #a7ade4; --sleep-wake: #e0894a; --sleep-awake: #d2d0e2; --sleep-visit: #2fa39a; --sleep-temp: #cf5b39; --sleep-gap: #c7c7c7; }
-:root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-stir: #4a4f86; --sleep-wake: #e89a5c; --sleep-awake: #3c3f60; --sleep-visit: #3ec4b8; --sleep-temp: #ef8a5e; --sleep-gap: #5a5c6e; }
+/* Timeline segment colours (theme-aware; the approved 2026-11-12 design).
+   asleep   #4b53b5 day / #7c85e6 night: 6.45:1 / 4.83:1 on the card.
+   stir     #a7ade4 in both themes (it was a dark #4a4f86 at night, which sank into the card; the lighter value reads on the
+            dark card and sits clearly between asleep and the card either way).
+   wake     the "Awake" segment, out-of-bed dot and wake-up duration: amber #f0a257 day / #f6c899 night.
+   wake-text  the same hue where it is TEXT (a duration, a badge, an icon): by day #f0a257 is only 2.06:1 on a card, far short
+            of the 4.5:1 text needs, so text uses a deeper amber (#9a5410, 5.66:1 on the card, 4.73:1 on the inset); at night
+            the segment colour already clears it (#f6c899, 10.38:1) and is reused.
+   awake    the neutral "before/after sleep" segment, warmed with the palette (a faint step from the track either way).
+   visit    room activity, teal #2fa39a day / #3ec4b8 night (unchanged: today's values were already the design's); bars and dots.
+   visit-text  the same teal where it is TEXT (a duration, a label, the "Movement outside the bed" tag): #2fa39a is only 3.03:1
+            on a day card and about 2.6:1 on its own 15% tag, so by day text uses #17706a (5.80:1 on the card, 4.85:1 on the
+            inset, 4.97:1 on the tag); at night #3ec4b8 already clears it (7.45:1 card, 5.61:1 on the tag) and is reused.
+   temp, gap unchanged except gap's night grey, warmed. */
+:root { --sleep-asleep: #4b53b5; --sleep-stir: #a7ade4; --sleep-wake: #f0a257; --sleep-wake-text: #9a5410; --sleep-awake: #d8cec3; --sleep-visit: #2fa39a; --sleep-visit-text: #17706a; --sleep-temp: #cf5b39; --sleep-gap: #c7c7c7; }
+:root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-stir: #a7ade4; --sleep-wake: #f6c899; --sleep-wake-text: #f6c899; --sleep-awake: #433a40; --sleep-visit: #3ec4b8; --sleep-visit-text: #3ec4b8; --sleep-temp: #ef8a5e; --sleep-gap: #5f565b; }
 
 .sleep-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .sleep-nav__arrow { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
@@ -1321,10 +1387,10 @@ body.in-pip .tile-menu-backdrop {
    token so both themes follow; `is-changed` is what the eye should land on, so only that row uses
    the accent. Digits are tabular so the two columns line up. */
 .sleep-detail__recompute { width: auto; align-self: flex-start; margin-top: 2px; }
-.sleep-detail__recompute-error { font-size: 12px; color: var(--danger, #c0392b); margin-top: 6px; }
+.sleep-detail__recompute-error { font-size: 12px; color: var(--offline); margin-top: 6px; }
 .recompute-diff { display: flex; flex-direction: column; gap: 2px; margin: 12px 0 16px; font-variant-numeric: tabular-nums; }
 .recompute-diff__row { display: grid; grid-template-columns: 1fr auto 16px auto; align-items: baseline; gap: 8px; padding: 7px 10px; border-radius: 8px; font-size: 13px; }
-.recompute-diff__row.is-changed { background: var(--surface-2, rgba(127, 127, 127, 0.08)); }
+.recompute-diff__row.is-changed { background: var(--bg-elevated-2); }
 .recompute-diff__label { color: var(--text-secondary); }
 .recompute-diff__was { color: var(--text-secondary); text-decoration: line-through; }
 .recompute-diff__arrow { color: var(--text-secondary); text-align: center; }
@@ -1351,19 +1417,22 @@ body.in-pip .tile-menu-backdrop {
 .sleep-seg--stir { background: var(--sleep-stir); }
 .sleep-seg--wake { background: var(--sleep-wake); }
 .sleep-seg--awake { background: var(--sleep-awake); }
+/* A 1px card-coloured line between asleep and its neighbours (design, 2026-11-12): at night asleep against awake is only
+   2.15:1, so the colours alone do not separate them. Inset, so it costs no width; drawn on the later segment's left edge. */
+.sleep-seg--asleep + .sleep-seg, .sleep-seg + .sleep-seg--asleep { box-shadow: inset 1px 0 0 var(--bg-elevated); }
 /* Striped, not flat — a flat gray sat too close to --sleep-awake's own light gray to reliably tell
    apart on a thin bar segment (found by adversarial review). A hatch pattern reads as "no data" on
    sight regardless of exact hue, the same convention used for a missing-image placeholder. */
 .sleep-seg--gap { background: repeating-linear-gradient(135deg, var(--sleep-gap), var(--sleep-gap) 4px, var(--bg-elevated-2) 4px, var(--bg-elevated-2) 8px); }
 .sleep-legend__sw--visit { background: var(--sleep-visit); border-radius: 50%; }
 .sleep-legend__sw--out { background: var(--sleep-wake); border-radius: 50%; }
-.sleep-wakes__dur--visit { color: var(--sleep-visit); }
-.sleep-wakes__dur--out { color: var(--sleep-wake); }
+.sleep-wakes__dur--visit { color: var(--sleep-visit-text); }
+.sleep-wakes__dur--out { color: var(--sleep-wake-text); }
 /* Room-activity rows now carry a type tag (child out of the crib vs someone else in the room), so the
    right-hand side groups the tag + duration together. */
 .sleep-visit-right { display: inline-flex; align-items: center; gap: 10px; }
-.sleep-visit-tag { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-visit); background: color-mix(in srgb, var(--sleep-visit) 15%, transparent); padding: 1px 8px; border-radius: 20px; white-space: nowrap; }
-.sleep-visit-tag--out { color: var(--sleep-wake); background: color-mix(in srgb, var(--sleep-wake) 15%, transparent); }
+.sleep-visit-tag { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-visit-text); background: color-mix(in srgb, var(--sleep-visit) 15%, transparent); padding: 1px 8px; border-radius: 20px; white-space: nowrap; }
+.sleep-visit-tag--out { color: var(--sleep-wake-text); background: color-mix(in srgb, var(--sleep-wake) 15%, transparent); }
 /* Out-of-crib room-activity dot on the timeline — the child themselves out (vs teal = someone in the room). */
 .sleep-tl__visit--out { background: var(--sleep-wake); box-shadow: 0 0 0 1px var(--sleep-wake); }
 .sleep-tl__mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-primary); opacity: 0.55; transform: translateX(-1px); }
@@ -1376,7 +1445,7 @@ body.in-pip .tile-menu-backdrop {
 /* "Refined" (transition-corrected) onset/wake shown under the summary while we validate it against the
    live estimate. Struck-through old value + the new one, clearly flagged as experimental. */
 .sleep-refined { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--border); }
-.sleep-refined__label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-visit); }
+.sleep-refined__label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-visit-text); }
 .sleep-refined__item { font-size: 13px; color: var(--text-secondary); }
 .sleep-refined__item b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
 .sleep-refined__old { text-decoration: line-through; opacity: 0.55; margin-right: 5px; font-variant-numeric: tabular-nums; }
@@ -1423,8 +1492,8 @@ button.sleep-wakes__head { width: 100%; padding: 0; border: none; background: no
 button.sleep-wakes__head:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 3px; }
 .sleep-wakes__time { font-size: 14px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .sleep-wakes__headright { display: inline-flex; align-items: center; gap: 8px; flex: none; }
-.sleep-wakes__dur { font-size: 13px; color: var(--sleep-wake); font-weight: 600; }
-.sleep-wakes__badge { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-wake); background: color-mix(in srgb, var(--sleep-wake) 14%, transparent); padding: 1px 7px 1px 5px; border-radius: 20px; }
+.sleep-wakes__dur { font-size: 13px; color: var(--sleep-wake-text); font-weight: 600; }
+.sleep-wakes__badge { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--sleep-wake-text); background: color-mix(in srgb, var(--sleep-wake) 14%, transparent); padding: 1px 7px 1px 5px; border-radius: 20px; }
 .sleep-wakes__chev { color: var(--text-secondary); transition: transform 0.18s ease; flex: none; }
 .sleep-wakes__chev.is-open { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .sleep-wakes__chev { transition: none; } }
@@ -1433,10 +1502,10 @@ button.sleep-wakes__head:focus-visible { outline: 2px solid var(--accent-line); 
 .sleep-wakes__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: default; line-height: 0; }
 button.sleep-wakes__thumbwrap { cursor: pointer; border-radius: 8px; }
 button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
-.sleep-wakes__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, #23264d, #14162f); }
+.sleep-wakes__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, var(--thumb-hi), var(--thumb-lo)); }
 .sleep-wakes__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
 .sleep-wakes__play { position: absolute; inset: 0; margin: auto; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(10, 13, 28, 0.62); color: #fff; }
-.sleep-wakes__alert-ico { color: var(--sleep-wake); flex: none; }
+.sleep-wakes__alert-ico { color: var(--sleep-wake-text); flex: none; }
 .sleep-wakes__alert-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .sleep-wakes__alert-label { font-weight: 600; color: var(--text-primary); }
 .sleep-wakes__alert-meta { font-variant-numeric: tabular-nums; }
@@ -1474,13 +1543,15 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .score-ring__track { stroke: var(--border); }
 .score-ring__arc { stroke: var(--accent-line); }
 .score-ring__num { fill: var(--text-primary); font-family: inherit; font-weight: 700; font-variant-numeric: tabular-nums; }
-/* On the child's hero card (.night), which is the SAME dark gradient in both themes (#2c2f63 to #191b38), so a theme
-   token is wrong there: --accent-line by day (#5663D6) is only 2.45:1 on the gradient's lightest point. LITERALS,
-   measured against that lightest point (#2c2f63), where contrast is lowest; it only rises towards #191b38:
-     arc    #A7B1FF  6.13:1 on the card (3:1 needed), 3.76:1 against the track as it composites there (#4e507c);
-     number #FFFFFF  12.40:1 (4.5:1 needed), the same white as the duration beside it;
-     track  white at 16%, decoration only: the number carries the value. */
-.score-ring--dark .score-ring__track { stroke: rgba(255, 255, 255, 0.16); }
+/* On the child's hero card (.night), which is the SAME dark gradient in both themes (#352b3a to #1e191f), so a theme
+   token is wrong there: --accent-line by day (#5663D6) is only about 2.4:1 on the gradient's lightest point. LITERALS,
+   measured against that lightest point (#352b3a), where contrast is lowest; it only rises towards #1e191f:
+     arc    #A7B1FF  6.66:1 on the card (3:1 needed), 7.91:1 against the track as it composites there (#261f2a);
+     number #FFFFFF  13.48:1 (4.5:1 needed), the same white as the duration beside it;
+     track  near-black at 35% (rgba(10, 8, 12, 0.35)): a groove darker than the card, so the arc reads as lit on it
+            (it was white at 16% on the old navy card). Decoration only: the number carries the value.
+   The arc stays this one periwinkle until the next change recolours it per score band (--band-*-ring). */
+.score-ring--dark .score-ring__track { stroke: rgba(10, 8, 12, 0.35); }
 .score-ring--dark .score-ring__arc { stroke: #a7b1ff; }
 .score-ring--dark .score-ring__num { fill: #fff; }
 /* On the child's card the ring sits beside the heading and the duration line, not centred on the whole card. */
@@ -1517,7 +1588,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .crib__stage:not(.is-ready) { min-height: 160px; }
 .crib__stage.is-ready { cursor: crosshair; }
 .crib__img { display: block; width: 100%; height: auto; -webkit-user-drag: none; }
-.crib__msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 6px; color: #cdd0ff; font-size: 13px; text-align: center; padding: 12px; }
+.crib__msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 6px; color: #d6ccd3; font-size: 13px; text-align: center; padding: 12px; }
 /* The zone grid is painted to a canvas (CribZonePicker.jsx) — it sits over the still and must not
    take the pointer, which the stage handles for the whole picker. */
 .crib__canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
@@ -1551,8 +1622,8 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 /* Children tab — one card per child. Light mode: a clean white card (the dark hero gradient of the
    detail screen reads too heavy repeated down a list on a light background). Dark mode: the same
    gradient as the detail hero, so the two feel of a piece there. */
-.child-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; cursor: pointer; font: inherit; border: 1px solid var(--border); color: var(--text-primary); background: var(--bg-elevated); border-radius: 18px; padding: 15px 16px; margin-bottom: 12px; box-shadow: 0 10px 26px -22px rgba(30, 30, 70, 0.35); transition: transform 0.12s ease, box-shadow 0.12s ease; }
-.child-card:hover { transform: translateY(-1px); box-shadow: 0 14px 32px -22px rgba(30, 30, 70, 0.45); }
+.child-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; cursor: pointer; font: inherit; border: 1px solid var(--border); color: var(--text-primary); background: var(--bg-elevated); border-radius: 18px; padding: 15px 16px; margin-bottom: 12px; box-shadow: 0 10px 26px -22px rgba(40, 28, 30, 0.35); transition: transform 0.12s ease, box-shadow 0.12s ease; }
+.child-card:hover { transform: translateY(-1px); box-shadow: 0 14px 32px -22px rgba(40, 28, 30, 0.45); }
 .child-card:active { transform: translateY(0); }
 .child-card:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .child-card__id { flex: 1; min-width: 0; }
@@ -1560,14 +1631,15 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .child-card__meta { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); margin-top: 4px; }
 .child-card__chev { color: var(--accent-line); opacity: 0.6; flex-shrink: 0; }
 
-:root[data-theme='dark'] .child-card { border-color: var(--border); color: var(--text-primary); background: var(--bg-elevated); box-shadow: 0 14px 34px -24px rgba(0, 0, 0, 0.8); }
+/* Only the shadows differ at night: border, colour and background already come from tokens in the base rule. */
+:root[data-theme='dark'] .child-card { box-shadow: 0 14px 34px -24px rgba(0, 0, 0, 0.8); }
 :root[data-theme='dark'] .child-card:hover { box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.9); }
 
 /* Alert list — one card, one row per alert: thumbnail, camera name, motion/sound icon + label, time.
    Shared by the Live "Recent activity" list and each child's detail screen. */
 .alert-item { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-bottom: 1px solid var(--border); }
 .alert-item:last-child { border-bottom: none; }
-.alert-item__thumb { width: 64px; height: 46px; border-radius: 9px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, #23264d, #14162f); }
+.alert-item__thumb { width: 64px; height: 46px; border-radius: 9px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, var(--thumb-hi), var(--thumb-lo)); }
 .alert-item__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
 .alert-item__body { flex: 1; min-width: 0; }
 .alert-item__name { font-weight: 600; font-size: 14.5px; display: flex; align-items: center; gap: 7px; }
@@ -1661,7 +1733,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
 .clip-row__check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .clip-row__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: pointer; line-height: 0; border-radius: 8px; }
 .clip-row__thumbwrap:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
-.clip-row__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; background: linear-gradient(135deg, #23264d, #14162f); }
+.clip-row__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; background: linear-gradient(135deg, var(--thumb-hi), var(--thumb-lo)); }
 .clip-row__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
 .clip-row__body { flex: 1; min-width: 0; cursor: pointer; }
 .clip-row__name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1780,7 +1852,7 @@ button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-lin
 .onvif-box__err {
   margin-top: 8px;
   font-size: 12px;
-  color: var(--offline, #e08585);
+  color: var(--offline);
 }
 .onvif-box__title {
   font-weight: 600;
@@ -2873,7 +2945,7 @@ input[type='range'] {
   display: flex;
   justify-content: center;
   align-items: flex-end;
-  background: rgba(10, 13, 28, 0.7);
+  background: rgba(10, 8, 12, 0.7);
   /* Keep the sheet clear of the status bar / notch: a top sheet starts below it, and a bottom sheet
      that grows tall (long form, or pushed up by the keyboard) is capped so its top can't slide under. */
   padding-top: env(safe-area-inset-top, 0px);
@@ -3003,12 +3075,12 @@ input[type='range'] {
 .review-actions .btn { flex: 1 1 auto; }
 
 /* "You corrected this" — shown wherever a night's times came from a person rather than the detector.
-   Owner 2026-11-05: hard to read. It is only used on the sleep card (`.night`), which is a dark indigo gradient in BOTH themes,
+   Owner 2026-11-05: hard to read. It is only used on the sleep card (`.night`), which is a dark plum gradient in BOTH themes,
    but it was coloured with `--accent-text`, which by day is the dark violet #5F3DB7: dark text on a dark card. Light text on a
    light veil reads on that card in either theme. If this pill is ever used on a light surface, scope these colours to `.night`. */
 .sleep-corrected {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11.5px; font-weight: 600; color: #D9CDF4;
+  font-size: 11.5px; font-weight: 600; color: var(--night-text);
   background: rgba(255, 255, 255, 0.14); padding: 2px 9px; border-radius: 999px;
 }
 

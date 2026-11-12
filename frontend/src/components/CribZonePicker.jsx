@@ -197,7 +197,7 @@ export default function CribZonePicker({ cameraId, zone, onChange }) {
     const ch = h / ROWS;
     // Read the accent live: it's user-recolourable in Settings, so hardcoding it here would leave
     // the zone gold on somebody's blue theme.
-    const accent = getComputedStyle(stage).getPropertyValue('--accent').trim() || '#7c5cd6';
+    const accent = getComputedStyle(stage).getPropertyValue('--accent').trim() || '#5663d6';
     const cells = cellsRef.current;
     const on = (r, c) => r >= 0 && r < ROWS && c >= 0 && c < COLS && cells[r * COLS + c];
     // Rounding both edges of every cell (rather than a position plus a width) means neighbours land
