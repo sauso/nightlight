@@ -1275,6 +1275,9 @@ body.in-pip .tile-menu-backdrop {
 .night__sleep-head { font-weight: 600; font-size: 13px; color: #cdd0ff; }
 .night__sleep-big { font-size: 22px; font-weight: 700; color: #fff; margin: 1px 0 2px; line-height: 1.1; }
 .night__est { font-size: 10.5px; color: #8f93d0; margin-top: 5px; }
+/* The night summary's headline on the child's card: one line, cut with an ellipsis rather than wrapped, because the
+   score ring beside it narrows this column at 375px. The text is also in the button's aria-label, so nothing is lost. */
+.night__headline { font-size: 13px; color: #cdd0ff; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Sleep summary card as a button into the detail page */
 .night__sleep--btn { width: 100%; background: none; border: none; border-top: 1px solid rgba(255, 255, 255, 0.1); text-align: left; cursor: pointer; font: inherit; }
@@ -1500,6 +1503,11 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .score-part__detail { font-size: 12px; line-height: 1.45; color: var(--text-secondary); margin-top: 5px; }
 .sleep-score__about-title { font-family: inherit; font-size: 13px; font-weight: 700; color: var(--text-primary); margin: 18px 0 4px; }
 .sleep-score__about { font-size: 12px; line-height: 1.5; color: var(--text-secondary); margin: 0; }
+/* Night summary (the same card with a server `summary`): the headline is the card's one prominent line, 17px/600 on the
+   type scale (the compact header's title size), then the observations as a quiet list, then the score under a hairline. */
+.sleep-summary__headline { font-size: 17px; font-weight: 600; line-height: 1.35; color: var(--text-primary); margin: 0 0 10px; text-wrap: balance; }
+.sleep-summary__list { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.45; color: var(--text-secondary); }
+.sleep-summary__score { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
 
 .sleep-detail__est { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding: 0 4px; font-size: 11px; color: var(--text-secondary); }
 

@@ -1,14 +1,18 @@
-import { useState } from 'react';
+import { useContext, useState } from 'react';
 import { Moon, ChevronRight } from 'lucide-react';
 import Modal from './Modal.jsx';
 import ScoreRing from './ScoreRing.jsx';
+import { SettingsContext } from '../lib/SettingsContext.jsx';
+import { nightSummaryText } from '../lib/nightSummaryPhrases.js';
 import {
   scoreOf, scoreQualifier, scoreLabel, componentName, componentDetail, droppedTerms, unavailableText, noScoreText,
   lowConfidenceText, cappedText,
 } from '../lib/sleepScoreText.js';
 
-// The sleep score on the sleep detail page (sleep score plan, phase 2): a card under the date navigator with the
-// ring inside a real button, and the sheet that button opens, which shows how the number was made.
+// The night summary and the sleep score on the sleep detail page (sleep score plan, phases 2 and 3): a card under the
+// date navigator. With a `summary` from the server it is the "Night summary" card: a headline, a few observations,
+// and (when the child's switch shows the score) the ring inside a real button below them. Without a summary it is the
+// phase 2 "Sleep score" card, unchanged. The button opens a sheet that shows how the number was made.
 //
 // IT FOLLOWS THE NIGHT OBJECT IT IS GIVEN, and keeps no copy. The detail page can swap the night under it (another
 // date, the two-minute refresh, "Show with today's settings", a Recompute), and the score is part of that object
@@ -16,8 +20,9 @@ import {
 // another night's figures.
 //
 // WHAT IT SHOWS, by what `night.score` is:
-//   absent  : the child's "Show sleep score" switch is off (the server leaves the key out). Nothing at all.
-//   null    : scoring failed on the server. Nothing at all: there is nothing true to say.
+//   absent  : the child's "Show sleep score" switch is off (the server leaves the key out). No score part; the
+//             summary, if there is one, still shows.
+//   null    : scoring failed on the server. No score part: there is nothing true to say about it.
 //   { score: null, reason } : "No score yet" and the reason in plain words.
 //   a score : the ring, the band word (or "Early estimate"), and the button to the breakdown.
 // Tracking off (`status: 'off'`) shows nothing either: that page already says tracking is off.
@@ -26,45 +31,73 @@ import {
 // never throws: an unknown component is skipped here, an unknown reason gets a neutral line.
 export default function SleepScoreCard({ night }) {
   const [open, setOpen] = useState(false);
+  // The home zone and temperature unit for the summary's times and room temperatures. Read from the context
+  // directly, as useHomeTime does: a screen rendered outside a provider gets the defaults instead of a crash.
+  const settings = useContext(SettingsContext)?.settings;
   if (!night || night.status === 'off') return null;
   const raw = night.score;
-  if (!raw || typeof raw !== 'object') return null;
+  const hasScore = Boolean(raw) && typeof raw === 'object';
+
+  // THE NIGHT SUMMARY (phase 3): the same card, now led by a headline and a few observations from the server's
+  // `summary`. Null (an older server, a failure, a night with nothing to say) leaves the card EXACTLY as it was
+  // before the summary existed. A summary can be present with no score at all: the child's "Show sleep score"
+  // switch hides the score, not the description of the night.
+  const text = nightSummaryText(night.summary, { zone: settings?.timezone, tempUnit: settings?.temp_unit });
+  if (!text && !hasScore) return null;
 
   const score = scoreOf(night);
-  if (!score) {
-    const why = noScoreText(raw.reason);
+  let scorePart = null;
+  if (hasScore) {
+    if (!score) {
+      const why = noScoreText(raw.reason);
+      scorePart = <div className="sleep-insight__body">No score yet.{why ? ` ${why}` : ''}</div>;
+    } else {
+      const qualifier = scoreQualifier(score);
+      // The saved night's score lent to a night that can no longer be drawn (attachScore, `score_source`).
+      const fromSaved = night.score_source === 'stored';
+      scorePart = (
+        <>
+          {/* The ring is decorative, so the button's name carries the number. It ends with the visible text, so what a
+              voice user says ("How this is scored") matches. The class sets a 44px minimum height (it is taller). */}
+          <button type="button" className="sleep-score__open" onClick={() => setOpen(true)}
+            aria-label={`Sleep score ${scoreLabel(score)}. How this is scored`}>
+            <ScoreRing value={score.score} size="lg" surface="card" />
+            <span className="sleep-score__text">
+              {qualifier && <span className="sleep-score__band">{qualifier}</span>}
+              <span className="sleep-score__how">How this is scored</span>
+            </span>
+            <ChevronRight size={18} aria-hidden="true" className="sleep-score__chev" />
+          </button>
+          {score.provisional && <div className="sleep-score__note">This score may still change.</div>}
+          {fromSaved && (
+            <div className="sleep-score__note">
+              The timeline for this night is no longer available. The score comes from the saved night.
+            </div>
+          )}
+          {open && <ScoreBreakdown score={score} fromSaved={fromSaved} onClose={() => setOpen(false)} />}
+        </>
+      );
+    }
+  }
+
+  if (!text) {
     return (
       <div className="card sleep-score">
         <div className="sleep-insight__title"><Moon size={15} aria-hidden="true" /> Sleep score</div>
-        <div className="sleep-insight__body">No score yet.{why ? ` ${why}` : ''}</div>
+        {scorePart}
       </div>
     );
   }
-
-  const qualifier = scoreQualifier(score);
-  // The saved night's score lent to a night that can no longer be drawn (attachScore, `score_source`).
-  const fromSaved = night.score_source === 'stored';
   return (
-    <div className="card sleep-score">
-      <div className="sleep-insight__title"><Moon size={15} aria-hidden="true" /> Sleep score</div>
-      {/* The ring is decorative, so the button's name carries the number. It ends with the visible text, so what a
-          voice user says ("How this is scored") matches. The class sets a 44px minimum height (it is taller). */}
-      <button type="button" className="sleep-score__open" onClick={() => setOpen(true)}
-        aria-label={`Sleep score ${scoreLabel(score)}. How this is scored`}>
-        <ScoreRing value={score.score} size="lg" surface="card" />
-        <span className="sleep-score__text">
-          {qualifier && <span className="sleep-score__band">{qualifier}</span>}
-          <span className="sleep-score__how">How this is scored</span>
-        </span>
-        <ChevronRight size={18} aria-hidden="true" className="sleep-score__chev" />
-      </button>
-      {score.provisional && <div className="sleep-score__note">This score may still change.</div>}
-      {fromSaved && (
-        <div className="sleep-score__note">
-          The timeline for this night is no longer available. The score comes from the saved night.
-        </div>
+    <div className="card sleep-score sleep-summary">
+      <div className="sleep-insight__title"><Moon size={15} aria-hidden="true" /> Night summary</div>
+      <p className="sleep-summary__headline">{text.headline}</p>
+      {text.observations.length > 0 && (
+        <ul className="sleep-summary__list">
+          {text.observations.map((line, i) => <li key={i}>{line}</li>)}
+        </ul>
       )}
-      {open && <ScoreBreakdown score={score} fromSaved={fromSaved} onClose={() => setOpen(false)} />}
+      {scorePart && <div className="sleep-summary__score">{scorePart}</div>}
     </div>
   );
 }

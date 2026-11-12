@@ -619,8 +619,9 @@ measurement, it says nothing about sleep stages, and it is no reason to worry on
 
 - **On the child's card**, as a small ring beside last night's sleep, with the number in it. A night
   still in progress has no ring.
-- **On the sleep detail page**, in a **Sleep score** card under the date: the ring, the word for the
-  score ("Great", "Good", "Fair", or "Early estimate"), and **How this is scored**.
+- **On the sleep detail page**, in the [Night summary](#night-summary) card under the date, below its
+  sentences: the ring, the word for the score ("Great", "Good", "Fair", or "Early estimate"), and
+  **How this is scored**.
 - **How this is scored** opens the breakdown: one bar for each of the five parts with its own score, what
   was measured and the child's usual. A part that was left out says why (for example "No put-down was
   detected for this night"). The sheet also says when the score was held down by one part, when it may
@@ -636,10 +637,11 @@ Each child has a **Show sleep score** switch in their settings, under **Track sl
 default**, for new children and for children who were already there before the score existed. Only an
 admin can change it (a caregiver sees it greyed out).
 
-Off hides the ring, the Sleep score card and the breakdown for that child, for everyone. Nothing else
-changes: the night is still tracked and shown, the morning sleep report is still sent (it never
-contained the score), and the child's "usual" keeps building, so turning the switch back on shows scores
-for past nights too.
+Off hides the ring, the score button and the breakdown for that child, for everyone. Nothing else
+changes: the night is still tracked and shown, the [Night summary](#night-summary) still appears (it
+describes the night, it is not the score), the morning sleep report is still sent (it never contained
+the score), and the child's "usual" keeps building, so turning the switch back on shows scores for past
+nights too.
 
 ### What goes into it
 
@@ -790,6 +792,121 @@ means an early estimate.
 When a read's fresh night is `no_data` but a saved `ok` row exists (the raw data has aged out, or the
 camera is gone), `score` is the saved night's and the answer also carries `score_source: "stored"`. Every
 other key is still the fresh `no_data` night; read `?stored=1` or the list for the saved figures.
+
+## Night summary
+
+Above the score, a few plain sentences about the night: a **headline** and two to four short
+**observations**. For example: "Sleep was mostly steady, with some waking or stirring." followed by
+"Asleep for 10h 0m, less than the usual 10h 40m." and "3 wake-ups were counted overnight."
+
+It describes what was measured and how that compares with this child's own recent nights. It does not say
+why anything happened, gives no advice, and never mentions sleep stages. It is not written by an AI: the
+sentences come from a fixed library of phrases, filled in with the night's own figures. Which phrase a
+night gets is fixed by the child and the date, so the wording does not change each time you open the page.
+Like the score, it is an estimate from what the camera and microphone observed, not a medical
+measurement.
+
+### Where you see it
+
+- **On the sleep detail page**, in a **Night summary** card under the date: the headline, the
+  observations, and below them the score ring and **How this is scored** (see
+  [Sleep score](#sleep-score)). With the child's [Show sleep score](#turning-the-score-off) switch off,
+  the card is the sentences alone.
+- **On the child's card**, the headline on one line under the duration. On a narrow phone a long headline
+  is cut short with "…" rather than wrapped; the full text is on the sleep page.
+- Times are shown in your home timezone and your device's 12 or 24 hour clock, and room temperatures in
+  the unit chosen in Settings.
+
+### The headline
+
+One of four, taken from the same two parts of the score that are about waking and stirring (continuity
+and restlessness), so it cannot disagree with the score:
+
+- **Settled**: both parts are 80 or more and the score is in the top band ("Great").
+- **Typical**: both parts are 65 or more and the score is "Good" or better.
+- **Mixed**: everything in between, including a night with little waking but too little sleep.
+- **Unsettled**: either part is under 50.
+
+While the score is an [early estimate](#the-early-estimate) the overall score is not consulted: only the
+two parts decide. A night that was not watched well enough to judge (under 80% of the sleep window, or
+more than 15 minutes of the sleep unwatched) gets a plain line instead, "Sleep as measured overnight."
+These cut-offs are starting values, set on two cameras in one house.
+
+### What the observations can say
+
+Each is chosen only when the figure behind it exists. At most four are shown: a comparison with the
+child's usual that is not "about the same" comes first (the biggest difference first), then how much of
+the night was not watched, then the plain facts.
+
+- Total time asleep, and against the usual: more, less, or about the same (within the larger of 20
+  minutes and 5% of the usual).
+- Wake-ups, and against the usual (within one wake-up).
+- The longest unbroken stretch, and against the usual (within five points of the night's span).
+- Minutes from being put down to falling asleep.
+- Wake-ups bunched together: at least three of them, and more than half of the night's, within 90
+  minutes of the first.
+- How many wake-ups had movement outside the bed around them. It says movement was seen, never who moved.
+- The room's temperature range.
+- How much of the sleep window the camera watched, when that was low.
+- That there are not yet enough recent nights to say what is usual.
+- That no sleep was detected, or that you said no one was in the bed.
+
+### Nights with no score
+
+- **A night in progress** shows only a "so far" line.
+- **A night with no score for another reason** gets the plain headline and only measured facts, never a
+  verdict.
+- **Times you entered by hand** over a night the detector saw as empty: the summary says so and gives only
+  the total and the two times. The wake-ups of that night were never measured, so it never says "settled"
+  or "no wake-ups".
+
+### After you correct a night
+
+Wake-ups outside the times you gave are left out before any wake-up observation is chosen. If you moved
+the time asleep or the time up by **more than 15 minutes** (the same rule as the score), the summary does
+not mention wake-ups or the longest stretch at all, because the detector measured them over different
+hours.
+
+### Known limits
+
+- Nights saved before 2026-11-11 have no list of wake-up times and no room temperature range, so the
+  observations about bunched wake-ups, movement near wake-ups and temperature never appear for them.
+  This cannot be filled in later: the minute-by-minute data is gone. See
+  [Two more facts are saved with each night](#two-more-facts-are-saved-with-each-night).
+- Everything the score's known limits say about wake-ups applies here too: a parent's visit or a sound
+  from another room can be counted as a wake-up.
+- The wording and the cut-offs have not been tuned beyond one house. Expect them to change.
+- The summary is in English only.
+
+### For developers: the summary in the API
+
+The three sleep routes add one more key to each night, `summary`, beside `score`. No existing key changed.
+Unlike `score`, it is present **whether or not** the child's Show sleep score switch is on; the switch
+only omits `score` and `score_source`. It is worked out from the same night object as the score, so it
+agrees with it.
+
+```json
+{
+  "headline": { "key": "typical" },
+  "observations": [
+    { "key": "total_sleep_vs_usual", "params": { "minutes": 600, "usual_minutes": 640, "direction": "less" } },
+    { "key": "wake_ups", "params": { "count": 3 } }
+  ],
+  "seed": "<child id>|2026-03-10"
+}
+```
+
+The server sends keys and raw numbers, never wording. `minutes` and `count` are numbers; `*_at` are UTC times
+as `YYYY-MM-DD HH:MM:SS`; `min_c` and `max_c` are degrees Celsius; `direction` is `more`, `less` or
+`about_the_same`. The browser picks the sentence from `seed` and the key and formats the figures. A client
+should skip any key it does not know. `headline.key` is `settled`, `typical`, `mixed`, `unsettled`,
+`neutral_last_night` or `neutral_so_far`. Observation keys: `total_sleep`, `total_sleep_vs_usual`, `wake_ups`,
+`wake_ups_vs_usual`, `longest_stretch`, `longest_stretch_vs_usual`, `settling_time`, `wake_clustering`,
+`room_activity_near_wakes`, `temperature_range`, `reduced_coverage`, `building_baseline`, `no_sleep_detected`,
+`times_entered_by_hand`, `sleep_span` and `nobody_in_bed`.
+
+`summary` is `null` when there is nothing to describe (tracking is off, or the night has no data) and when
+building it failed; the night is then returned as usual and one line is logged.
 
 ## Correcting a night
 

@@ -5,6 +5,7 @@ import { api } from '../lib/api.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { showsInBed } from '../lib/inBed.js';
 import { scoreOf, scoreLabel } from '../lib/sleepScoreText.js';
+import { nightSummaryText } from '../lib/nightSummaryPhrases.js';
 import ScoreRing from './ScoreRing.jsx';
 
 // Sleep summary in the Child detail hero. Reads the LIVE endpoint: while a night is in progress it shows
@@ -56,6 +57,13 @@ export default function SleepSummaryCard({ childId }) {
   // case leaves the card exactly as it was before the score existed: a night in progress (`score.score` is null),
   // a night with no score, a failed score (null), and the child's "Show sleep score" switch off (no `score` key).
   const score = night?.status === 'ok' ? scoreOf(night) : null;
+
+  // The night summary's headline (phase 3), ONE line on a scored (`ok`) night, under the duration. Null when the server
+  // sent no summary (an older server, a failure), and the card is exactly as it was. It shows with the child's "Show
+  // sleep score" switch off too: the switch hides the number, not the description of the night.
+  const headline = night?.status === 'ok'
+    ? nightSummaryText(night.summary, { zone: tz, tempUnit: settings.temp_unit })?.headline ?? null
+    : null;
 
   let body;
   if (data === undefined) {
@@ -134,6 +142,8 @@ export default function SleepSummaryCard({ childId }) {
       <>
         <div className="night__sleep-head">{head}</div>
         <div className="night__sleep-big">{fmtDur(night.asleep_minutes)} asleep{tonight ? ' so far' : ''}</div>
+        {/* One line that ends in an ellipsis rather than wrapping: the ring narrows this column on a 375px screen. */}
+        {headline && <div className="night__headline">{headline}</div>}
         <div className="night__soon">{bits.join(' · ')}</div>
         {inBed && <div className="night__inbed">{inBed}</div>}
         {/* Say plainly when these are the times a PERSON gave us rather than the ones we worked out.
@@ -154,9 +164,11 @@ export default function SleepSummaryCard({ childId }) {
   // ⚠️ The `aria-label` REPLACES everything inside the button for a screen reader, and the ring is decorative, so
   // the score has to be said here or it is not said at all: "…history. Sleep score 82, Good" (the number alone
   // under the lowest band; "early estimate" in place of a band word). With no score the label is what it always was.
+  // The headline is said too (phase 3), after the destination and before the score: "…history. A fairly steady night
+  // overall. Sleep score 82, Good". Its own full stop is dropped so the label does not carry two.
   const label = scope === 'off'
     ? 'Turn on sleep tracking in settings'
-    : `View sleep detail and history${score ? `. Sleep score ${scoreLabel(score)}` : ''}`;
+    : `View sleep detail and history${headline ? `. ${headline.replace(/\.$/, '')}` : ''}${score ? `. Sleep score ${scoreLabel(score)}` : ''}`;
   return (
     <button type="button" className="night__sleep night__sleep--btn"
       onClick={() => navigate(scope === 'off' ? `/children/${childId}/edit` : `/children/${childId}/sleep`)}
