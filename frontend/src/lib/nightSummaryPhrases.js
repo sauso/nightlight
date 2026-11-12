@@ -235,7 +235,9 @@ export const OBSERVATION_PHRASES = Object.freeze({
   wake_ups_so_far: {
     by: 'count',
     groups: {
-      zero: ['No wake-ups have been counted so far.', 'There have been no wake-ups so far.'],
+      // COUNTED, in every zero variant: a wake-up in progress right now is not counted until it ends, so "no wake-ups so
+      // far" could sit beside "awake since 2:10 AM" and contradict it.
+      zero: ['No wake-ups have been counted so far.', 'So far, no wake-ups have been counted.'],
       one: ['One wake-up has been counted so far.', 'There has been one wake-up so far.'],
       other: [
         '{count} wake-ups have been counted so far.',

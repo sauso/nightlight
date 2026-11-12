@@ -80,6 +80,10 @@ export function liveState(night, nowMs, facts = null) {
   for (const w of raw) {
     const startMs = utcMs(w?.start_at);
     if (!Number.isFinite(startMs) || typeof w.minutes !== 'number' || !Number.isFinite(w.minutes)) return result('unknown');
+    // A wake that STARTS after as_of cannot have happened yet (a bad list, or a clock that disagrees), so it is ignored:
+    // otherwise its end lies after as_of, passes the hysteresis test and the state would be "awake since" a time later
+    // than the data it was worked out from. A start exactly at as_of is kept.
+    if (startMs > asOfMs) continue;
     wakes.push({ startMs, endMs: startMs + w.minutes * MIN });
   }
   const last = wakes.reduce((a, b) => (a && a.endMs >= b.endMs ? a : b), null);

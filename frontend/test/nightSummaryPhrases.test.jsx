@@ -303,6 +303,17 @@ describe('the "so far" keys of a night in progress', () => {
     }
   });
 
+  test('every zero-count variant says the wake-ups are COUNTED (a wake-up in progress is not counted yet, so "no wake-ups" alone could contradict "awake since")', () => {
+    const zero = OBSERVATION_PHRASES.wake_ups_so_far.groups.zero;
+    expect(zero.length).toBeGreaterThanOrEqual(2); // precondition: there are variants to check
+    for (const text of zero) expect([text, /\bcounted\b/i.test(text)]).toEqual([text, true]);
+    // And what a reader is actually shown, for many seeds.
+    for (let i = 0; i < 30; i++) {
+      const line = nightSummaryText({ headline: { key: 'neutral_so_far' }, seed: `child-a|${i}`, observations: [{ key: 'wake_ups_so_far', params: { count: 0 } }] }, {}).observations[0];
+      expect(line).toMatch(/\bcounted\b/);
+    }
+  });
+
   test('a so-far summary reads as plain sentences, in a literal pin for one seed', () => {
     const t = nightSummaryText({
       headline: { key: 'neutral_so_far' }, seed: 'child-a|2026-03-10',

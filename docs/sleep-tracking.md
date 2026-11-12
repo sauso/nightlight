@@ -899,8 +899,9 @@ Known limits:
 - "No wake-ups so far" means none have been counted yet. The wake-up in progress is counted once it ends.
 - The 4-minute and 6-minute figures are starting values, set from how the detector joins wake-ups and how
   often the page asks; nothing measured them across other homes.
-- Nothing shows this in the app yet: the API returns it (below), and the card and sleep page will use it in
-  a later update.
+- **What the app shows today.** The facts so far appear under the **Night summary** on tonight's sleep page,
+  with the usual "No score yet" line. The child's card still shows only the headline. The where-the-child-is
+  state (`live`) is in the API response only: no screen shows it yet, a later design change will.
 
 ### After you correct a night
 

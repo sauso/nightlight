@@ -96,6 +96,17 @@ test('asleep: since the end of the LATEST counted wake (whatever order the list 
   assert.deepEqual(liveState(night(), AS_OF_MS, factsOf([wake('2026-03-11 00:40:00', 8.5)])), { state: 'asleep', since: '2026-03-11 00:48:30' });
 });
 
+test('a counted wake that starts AFTER as_of is ignored (it cannot have happened yet); one starting exactly at as_of is kept', () => {
+  const future = wake('2026-03-11 02:31:00', 5);
+  // Alone: the night reads as if it had no wakes, never "awake since 02:31".
+  assert.deepEqual(liveState(night(), AS_OF_MS, factsOf([future])), { state: 'asleep', since: '2026-03-10 19:30:00' });
+  // Beside a real earlier wake that ended long ago: that one decides.
+  assert.deepEqual(liveState(night(), AS_OF_MS, factsOf([wake('2026-03-11 00:40:00', 8), future])), { state: 'asleep', since: '2026-03-11 00:48:00' });
+  // One second after as_of is still the future; exactly at as_of it has begun, so awake since as_of.
+  assert.deepEqual(liveState(night(), AS_OF_MS, factsOf([wake('2026-03-11 02:30:01', 5)])), { state: 'asleep', since: '2026-03-10 19:30:00' });
+  assert.deepEqual(liveState(night(), AS_OF_MS, factsOf([wake('2026-03-11 02:30:00', 5)])), { state: 'awake', since: '2026-03-11 02:30:00' });
+});
+
 test('the staleness edge: an as_of 6:00 behind the clock is trusted, 6:01 is unknown; so is one nobody can read', () => {
   assert.equal(LIVE_STATE_CONFIG.stale_after_min, 6, 'precondition: the bound is six minutes');
   const facts = factsOf([]);
