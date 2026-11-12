@@ -1,71 +1,80 @@
 :root {
   /* #943: the owner's day/night palette is one tweakable block. Brand actions share --accent;
      --accent-text is lighter only where small text sits on dark surfaces. */
-  /* Warm neutrals (owner, 2026-11-12: both themes were "too blue"). The page, cards, inset, text and borders are warm
-     greys with a faint rose-brown cast; the brand periwinkle below is unchanged and now marks actions and navigation
-     only, so it stands out against the warmth instead of blending into a blue page. Measured text contrast (WCAG):
-     --text-primary 14.89:1 on --bg by day, --text-secondary 4.97:1 on the --bg-elevated-2 inset (its tightest surface);
+  /* The navy/lavender neutrals (the original palette) are back (owner, 2026-11-13, design v3). A warm-grey trial on
+     2026-11-12 was rejected: the owner wanted the navy background, so the page, cards, inset, text and borders are the
+     original tokens again, and only the ACCENT colours below (bands, timeline) kept what the trial added. Measured text
+     contrast (WCAG): --text-primary 15.31 / 16.65 / 13.35:1 on the page / card / inset by day, 14.32 / 12.53 / 15.04 at
+     night; --text-secondary 5.75 / 6.26 / 5.02:1 by day (the inset is its tightest surface), 9.07 / 7.93 / 9.53 at night.
      test/paletteTokens.test.jsx recomputes every text/surface pair from this block. */
-  --bg: #f8f5f0;
-  --bg-elevated: #fffdf9;
-  --bg-elevated-2: #efe8df;
-  --text-primary: #241f24;
-  --text-secondary: #6b6158;
+  --bg: #f7f4fd;
+  --bg-elevated: #ffffff;
+  --bg-elevated-2: #eae3f8;
+  --text-primary: #1d1a3a;
+  --text-secondary: #625c7f;
   --accent: #5663d6;
   --accent-text: #4a55c8;
   --accent-soft: #d3d8ff;
-  /* Peri (owner, 2026-11-06): #5663d6 by day, with WHITE text on it (5.06:1); at night the lighter #8995ff with DARK text (#1a1618, 6.66:1).
+  /* Peri (owner, 2026-11-06): #5663d6 by day, with WHITE text on it (5.06:1); at night the lighter #8995ff with DARK text (#14142a, 6.71:1).
      The owner chose both; dark text on #5663d6 would only be 3.57:1, so the two themes need different text colours and that is
      what --on-accent is for: text ON an accent fill is always --on-accent. Borders, rings and icons use --accent-line; small
-     text uses --accent-text (#4a55c8 clears 4.5:1 on cards, the page AND the #efe8df inset, where plain #5663d6 only reaches
-     4.16). The complement (warm gold) is for small highlights only. Measured ratios: docs/design-language.md section 1, and
+     text uses --accent-text (#4a55c8 clears 4.5:1 on cards, the page AND the #eae3f8 inset, where plain #5663d6 only reaches
+     4.06). The complement (warm gold) is for small highlights only. Measured ratios: docs/design-language.md section 1, and
      test/paletteTokens.test.jsx recomputes them from this block so a colour change cannot silently break readability. */
   --on-accent: #ffffff;
   --accent-line: #5663d6;
   --complement: #f2c14e;
-  --on-complement: #1f1a1e;
-  /* The header is one warm near-black in BOTH themes (owner, 2026-11-12). Its text is #efe8e2 (14.13:1) and its back link
-     --accent-soft/#d3d8ff (12.28:1). index.html's theme-color meta repeats --bar so the phone's status bar matches. */
-  --bar: #1f1a1e;
-  --bar-text: #efe8e2;
+  --on-complement: #14142a;
+  /* The header is the one navy #14142a in BOTH themes (the original; the warm #1f1a1e of 2026-11-12 is gone). Its text is
+     #e8e2f7 (14.32:1) and its back link --accent-soft/#d3d8ff (12.93:1). index.html's theme-color meta repeats --bar so the
+     phone's status bar matches. */
+  --bar: #14142a;
+  --bar-text: #e8e2f7;
   --live: #23734f;
   --offline: #aa3f54;
-  --border: #e5dcd1;
-  --field-bg: #efe8df;
+  --border: #ddd5ee;
+  --field-bg: #eae3f8;
   --radius: 16px;
 
   /* Score band colours (docs/design-language.md, "Band colours"). Defined here, used by the score ring, strip and breakdown
      bars from the next change. Two rules that hold wherever they are used: a colour is NEVER the only signal (the band word
      and the number always show), and TEXT IS NEVER SET IN A BAND COLOUR (they are marks: bars, rings, dots). Contrast is
-     WCAG, measured 2026-11-12 on the design's colours (a mark needs 3:1).
-     --band-*: the mark on a themed card, by day (on --bg-elevated / on the --bg-elevated-2 track):
-       great #1e6b3d 6.41 / 5.36   good #126067 7.14 / 5.97   fair #a36a10 4.47 / 3.73
-       low   #c4688a 3.63 / 3.03   early #6b6158 5.95 / 4.97
-     The dark block gives the night values (on #262024 / #121011):
-       great #a8edbe 11.81 / 14.01  good #5cbfc6 7.40 / 8.78  fair #d99c50 6.71 / 7.96
-       low   #c77790 4.92 / 5.84    early #ccc3b8 9.18 / 10.89
-     --band-*-ring: the ring on the child page's .night card, which is the same dark gradient in both themes, so these do
-     NOT switch. On the gradient's lightest stop #352b3a / against the ring's own track as it composites there (#261f2a):
-       great #a8edbe 9.96 / 11.83   good #5cbfc6 6.24 / 7.41   fair #d99c50 5.66 / 6.72
-       low   #c77790 4.15 / 4.93    early #ccc3b8 7.74 / 9.20
-     (The design's own ring-on-card figures, 7.33 / 4.99 / 4.56 / 3.51 / 5.94, include the 12% band tint it lays over the
-     card, which arrives with the ring; the track figures are identical.) The weakest pairs are the day rose bar (3.03:1 on
-     the inset) and the ring's rose (3.51:1 with the tint): both clear the 3:1 a graphic needs, neither more. */
+     WCAG, measured 2026-11-13 on the design v3 colours, which are the 2026-11-12 accents re-tuned for the navy surfaces
+     (a mark needs 3:1).
+     --band-*: the mark on a themed card, by day (on --bg-elevated white / on the --bg-elevated-2 track #eae3f8):
+       great #1e6b3d 6.51 / 5.22   good #0f555c 8.49 / 6.81   fair #a36a10 4.54 / 3.64
+       low   #b85a7e 4.37 / 3.51   early #7a7496 4.41 / 3.53
+     Three day marks moved from the warm trial (design v3): good #126067 to #0f555c (so it stays apart from the rose under
+     protanopia), low #c4688a to #b85a7e (it fell to 2.96:1 on the lavender track, under the 3:1 floor), early #6b6158 to
+     #7a7496 (a warm grey read as a stray brown on lilac; lavender grey reads as "no band").
+     The dark block gives the night values (on #221f3c / the #100f1c track):
+       great #a8edbe 11.68 / 14.02  good #5cbfc6 7.31 / 8.78  fair #d99c50 6.64 / 7.97
+       low   #c77790 4.87 / 5.84    early #d3cde6 10.27 / 12.32   (early moved from beige #ccc3b8, which looked like a dirty
+       highlight on navy)
+     --band-*-ring: the ring on the child page's .night card, which is the same navy gradient in both themes, so these do
+     NOT switch. On the gradient's lightest stop #2c2f63 / against the ring's own track as it composites there (#202145):
+       great #a8edbe 9.16 / 11.37   good #5cbfc6 5.74 / 7.12   fair #d99c50 5.21 / 6.46
+       low   #c77790 3.82 / 4.74    early #d3cde6 8.06 / 10.00
+     (The design's own ring-on-card figures, 6.79 / 4.63 / 4.32 / 3.27 / 6.08, include the 12% band tint it lays over the
+     card, which arrives with the ring; the track figures are identical.) The weakest pairs are the day rose bar (3.51:1 on
+     the inset), the day early bar (3.53:1) and the ring's rose (3.27:1 with the tint): all clear the 3:1 a graphic needs,
+     none by much. */
   --band-great: #1e6b3d;
-  --band-good: #126067;
+  --band-good: #0f555c;
   --band-fair: #a36a10;
-  --band-low: #c4688a;
-  --band-early: #6b6158;
+  --band-low: #b85a7e;
+  --band-early: #7a7496;
   --band-great-ring: #a8edbe;
   --band-good-ring: #5cbfc6;
   --band-fair-ring: #d99c50;
   --band-low-ring: #c77790;
-  --band-early-ring: #ccc3b8;
+  --band-early-ring: #d3cde6;
 
-  /* Placeholder ground behind a camera thumbnail before its picture loads: a dark warm gradient in both themes (a camera
-     image is dark whatever the theme). Warm like the rest of the palette; the old navy pair was the last blue left. */
-  --thumb-hi: #2f2733;
-  --thumb-lo: #161115;
+  /* Placeholder ground behind a camera thumbnail before its picture loads: a dark navy gradient in both themes (a camera
+     image is dark whatever the theme). The original navy pair, from before the 2026-11-12 warm trial (the design v3 token
+     map lists #23264d to #14162f as the original camera placeholder). */
+  --thumb-hi: #23264d;
+  --thumb-lo: #14162f;
 
   --font-display: 'Nunito', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, sans-serif;
@@ -74,28 +83,28 @@
 
 /* lib/theme.js stamps the resolved device choice on <html>; there is no media override. */
 :root[data-theme='dark'] {
-  --bg: #1a1618;
-  --bg-elevated: #262024;
-  --bg-elevated-2: #121011;
-  --text-primary: #f0e9e3;
-  --text-secondary: #c4b9af;
+  --bg: #14142a;
+  --bg-elevated: #221f3c;
+  --bg-elevated-2: #100f1c;
+  --text-primary: #e8e2f7;
+  --text-secondary: #bcb3d5;
   --accent: #8995ff;
-  --on-accent: #1a1618;
+  --on-accent: #14142a;
   --accent-text: #a7b1ff;
   --accent-soft: #c5cbff;
   --accent-line: #8995ff;
   --complement: #f6d365;
   --live: #8bdbad;
   --offline: #f4a3ad;
-  --border: #3d3439;
-  --field-bg: #121011;
-  /* Band marks on a themed card at night (on --bg-elevated #262024 / the --bg-elevated-2 track #121011); measured ratios
+  --border: #383450;
+  --field-bg: #100f1c;
+  /* Band marks on a themed card at night (on --bg-elevated #221f3c / the --bg-elevated-2 track #100f1c); measured ratios
      are in the --band-* comment in :root. The ring variants do not switch, so they are not repeated here. */
   --band-great: #a8edbe;
   --band-good: #5cbfc6;
   --band-fair: #d99c50;
   --band-low: #c77790;
-  --band-early: #ccc3b8;
+  --band-early: #d3cde6;
 }
 
 * { box-sizing: border-box; }
@@ -413,7 +422,7 @@ body.in-pip .tile-menu-backdrop {
   height: 36px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.35);
-  background: rgba(10, 8, 12, 0.55);
+  background: rgba(10, 13, 28, 0.55);
   color: var(--text-primary);
   display: flex;
   align-items: center;
@@ -1302,13 +1311,15 @@ body.in-pip .tile-menu-backdrop {
 .cam-chip__mini { width: 18px; height: 18px; border-radius: 50%; color: #fff; font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
 
 /* Child hero ("night") card — identity now, last night's sleep later. */
-/* ONE fixed dark gradient in both themes (owner, 2026-11-12), so its text colours are literals that do not follow the theme,
-   kept here as three properties so no rule below repeats a hex. Measured on the gradient's LIGHTEST stop (#352b3a), where
-   contrast is lowest (it only rises towards #1e191f): --night-text white 13.48:1; --night-muted #d6ccd3 8.62:1 (4.5:1
-   needed for small text); --night-link #c7caff 8.55:1 (the periwinkle tint, for the one tappable accent and the chevron).
-   Two warm tints replace the old lavender ladder (#eef0ff, #cdd0ff, #b9bdf0, #9fa3e0, #8f93d0): the dimmest of those
-   (#8f93d0) was the weakest text on the card. test/paletteTokens.test.jsx recomputes these three from this rule. */
-.night { --night-text: #ffffff; --night-muted: #d6ccd3; --night-link: #c7caff; --night-divider: rgba(255, 255, 255, 0.1); background: linear-gradient(165deg, #352b3a 0%, #1e191f 100%); color: var(--night-text); border-radius: 18px; padding: 16px; margin-bottom: 14px; box-shadow: 0 18px 42px -26px rgba(16, 10, 18, 0.8); }
+/* ONE fixed navy gradient in both themes (the original #2c2f63 to #191b38), so its text colours are literals that do not
+   follow the theme, kept here as four properties so no rule below repeats a hex. Measured on the gradient's LIGHTEST stop
+   (#2c2f63), where contrast is lowest (it only rises towards #191b38): --night-text #eef0ff 10.95:1; --night-muted #b9bdf0
+   6.85:1 (4.5:1 needed for small text; 5.07:1 or more at the corner the ring's 12% band wash lightens, per the design);
+   --night-link #c7caff 7.86:1 (the periwinkle tint, for the one tappable accent and the chevron); --night-number white for
+   the big figure, as in the design. The 2026-11-12 trial collapsed the old lavender ladder (#eef0ff, #cdd0ff, #b9bdf0,
+   #9fa3e0, #8f93d0) to a few tints; that structure stays, because its dimmest step (#8f93d0, 4.28:1, under the 4.5:1 text needs) was the weakest text on
+   the card and one muted tint is easier to keep readable. test/paletteTokens.test.jsx recomputes these from this rule. */
+.night { --night-text: #eef0ff; --night-muted: #b9bdf0; --night-link: #c7caff; --night-number: #ffffff; --night-divider: rgba(255, 255, 255, 0.1); background: linear-gradient(165deg, #2c2f63 0%, #191b38 100%); color: var(--night-text); border-radius: 18px; padding: 16px; margin-bottom: 14px; box-shadow: 0 18px 42px -26px rgba(18, 20, 58, 0.8); }
 .night__head { display: flex; align-items: center; gap: 13px; width: 100%; }
 .night__avatar-btn { background: none; border: none; padding: 0; cursor: pointer; flex-shrink: 0; border-radius: 50%; line-height: 0; }
 .night__avatar-btn:focus-visible { outline: 2px solid var(--night-link); outline-offset: 3px; }
@@ -1326,7 +1337,7 @@ body.in-pip .tile-menu-backdrop {
    second .night__soon so nothing selecting "the range line" can pick this one up instead. */
 .night__inbed { font-size: 12px; color: var(--night-muted); margin-top: 2px; }
 .night__sleep-head { font-weight: 600; font-size: 13px; color: var(--night-muted); }
-.night__sleep-big { font-size: 22px; font-weight: 700; color: var(--night-text); margin: 1px 0 2px; line-height: 1.1; }
+.night__sleep-big { font-size: 22px; font-weight: 700; color: var(--night-number); margin: 1px 0 2px; line-height: 1.1; }
 .night__est { font-size: 10.5px; color: var(--night-muted); margin-top: 5px; }
 /* The night summary's headline on the child's card: one line, cut with an ellipsis rather than wrapped, because the
    score ring beside it narrows this column at 375px. The text is also in the button's aria-label, so nothing is lost. */
@@ -1339,22 +1350,30 @@ body.in-pip .tile-menu-backdrop {
 .night__sleep--btn:hover .night__sleep-chev, .night__sleep--btn:focus-visible .night__sleep-chev { opacity: 1; transform: translateX(2px); }
 
 /* --- Sleep detail page --- */
-/* Timeline segment colours (theme-aware; the approved 2026-11-12 design).
-   asleep   #4b53b5 day / #7c85e6 night: 6.45:1 / 4.83:1 on the card.
-   stir     #a7ade4 in both themes (it was a dark #4a4f86 at night, which sank into the card; the lighter value reads on the
-            dark card and sits clearly between asleep and the card either way).
+/* Timeline segment colours (theme-aware; the 2026-11-12 accents on the original navy surfaces, design v3, 2026-11-13).
+   asleep   #4b53b5 day / #7c85e6 night: 6.55:1 / 4.78:1 on the card.
+   stir     #a7ade4 day / #4a4f86 night, the original pair (v3 map). Day: lavender between asleep and the card. Night: a dim
+            indigo, 2.07:1 on the card and 2.49:1 on the inset, i.e. below 3:1; it is a timeline neighbour, never text, and
+            its order (asleep brighter, stirring dimmer) is what carries it. The 2026-11-12 trial's #a7ade4 at night is gone:
+            it read as a second "asleep" next to #7c85e6 (1.53:1 apart).
    wake     the "Awake" segment, out-of-bed dot and wake-up duration: amber #f0a257 day / #f6c899 night.
-   wake-text  the same hue where it is TEXT (a duration, a badge, an icon): by day #f0a257 is only 2.06:1 on a card, far short
-            of the 4.5:1 text needs, so text uses a deeper amber (#9a5410, 5.66:1 on the card, 4.73:1 on the inset); at night
-            the segment colour already clears it (#f6c899, 10.38:1) and is reused.
-   awake    the neutral "before/after sleep" segment, warmed with the palette (a faint step from the track either way).
-   visit    room activity, teal #2fa39a day / #3ec4b8 night (unchanged: today's values were already the design's); bars and dots.
-   visit-text  the same teal where it is TEXT (a duration, a label, the "Movement outside the bed" tag): #2fa39a is only 3.03:1
-            on a day card and about 2.6:1 on its own 15% tag, so by day text uses #17706a (5.80:1 on the card, 4.85:1 on the
-            inset, 4.97:1 on the tag); at night #3ec4b8 already clears it (7.45:1 card, 5.61:1 on the tag) and is reused.
-   temp, gap unchanged except gap's night grey, warmed. */
-:root { --sleep-asleep: #4b53b5; --sleep-stir: #a7ade4; --sleep-wake: #f0a257; --sleep-wake-text: #9a5410; --sleep-awake: #d8cec3; --sleep-visit: #2fa39a; --sleep-visit-text: #17706a; --sleep-temp: #cf5b39; --sleep-gap: #c7c7c7; }
-:root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-stir: #a7ade4; --sleep-wake: #f6c899; --sleep-wake-text: #f6c899; --sleep-awake: #433a40; --sleep-visit: #3ec4b8; --sleep-visit-text: #3ec4b8; --sleep-temp: #ef8a5e; --sleep-gap: #5f565b; }
+   wake-text  the same hue where it is TEXT (a duration, a badge, an icon): by day #f0a257 is only 2.10:1 on a card, far short
+            of the 4.5:1 text needs, so text uses a deeper amber (#9a5410, 5.75:1 on the card, 4.61:1 on the inset, 5.21:1 on
+            its 14% badge); at night the segment colour already clears it (#f6c899, 10.26:1 card, 7.33:1 badge) and is reused.
+   awake    the neutral "before/after sleep" segment: the ORIGINAL lavender #d2d0e2 day / #3c3f60 night (a faint step from the
+            track either way; the warm greys of the trial are gone with the other warm neutrals).
+   visit    room activity, teal #2fa39a in BOTH themes (design v3: at night the old #3ec4b8 had the same lightness as the
+            Good band's #5cbfc6, ratio 1.01, so they could not be told apart where they sit near each other; #2fa39a is
+            5.14:1 on the night card). By day it is 3.08:1 on the card and 2.47:1 on the lavender track, below 3:1 on the
+            track; it is drawn ABOVE the bar, so it never sits on the track's own colour. Bars and dots only, never text.
+   visit-text  the same teal where it is TEXT (a duration, a label, the "Movement outside the bed" tag): by day text uses
+            #17706a (5.90:1 on the card, 4.73:1 on the inset, 5.06:1 on the 15% tag). At night #2fa39a on the tag would be
+            only 4.14:1, so text keeps the brighter #3ec4b8 (7.37:1 card, 8.85:1 inset, 5.94:1 tag), which is why this
+            token differs from --sleep-visit there.
+   temp, gap unchanged. There is no token for the design's dashed "still to come" / "not counted" edge (#8c86ae at night, 4.62:1
+   on the night card): nothing draws it today, so it arrives with the element that does. */
+:root { --sleep-asleep: #4b53b5; --sleep-stir: #a7ade4; --sleep-wake: #f0a257; --sleep-wake-text: #9a5410; --sleep-awake: #d2d0e2; --sleep-visit: #2fa39a; --sleep-visit-text: #17706a; --sleep-temp: #cf5b39; --sleep-gap: #c7c7c7; }
+:root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-stir: #4a4f86; --sleep-wake: #f6c899; --sleep-wake-text: #f6c899; --sleep-awake: #3c3f60; --sleep-visit: #2fa39a; --sleep-visit-text: #3ec4b8; --sleep-temp: #ef8a5e; --sleep-gap: #5a5c6e; }
 
 .sleep-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .sleep-nav__arrow { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
@@ -1543,13 +1562,15 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .score-ring__track { stroke: var(--border); }
 .score-ring__arc { stroke: var(--accent-line); }
 .score-ring__num { fill: var(--text-primary); font-family: inherit; font-weight: 700; font-variant-numeric: tabular-nums; }
-/* On the child's hero card (.night), which is the SAME dark gradient in both themes (#352b3a to #1e191f), so a theme
-   token is wrong there: --accent-line by day (#5663D6) is only about 2.4:1 on the gradient's lightest point. LITERALS,
-   measured against that lightest point (#352b3a), where contrast is lowest; it only rises towards #1e191f:
-     arc    #A7B1FF  6.66:1 on the card (3:1 needed), 7.91:1 against the track as it composites there (#261f2a);
-     number #FFFFFF  13.48:1 (4.5:1 needed), the same white as the duration beside it;
-     track  near-black at 35% (rgba(10, 8, 12, 0.35)): a groove darker than the card, so the arc reads as lit on it
-            (it was white at 16% on the old navy card). Decoration only: the number carries the value.
+/* On the child's hero card (.night), which is the SAME navy gradient in both themes (#2c2f63 to #191b38), so a theme
+   token is wrong there: --accent-line by day (#5663D6) is only 2.45:1 on the gradient's lightest point. LITERALS,
+   measured against that lightest point (#2c2f63), where contrast is lowest; it only rises towards #191b38:
+     arc    #A7B1FF  6.13:1 on the card (3:1 needed), 7.60:1 against the track as it composites there (#202145);
+     number #FFFFFF  12.40:1 (4.5:1 needed), the same white as the duration beside it;
+     track  near-black at 35% (rgba(10, 8, 12, 0.35)): a groove darker than the card, so the arc reads as lit on it. It
+            composites to a navy (#202145) over the card, so it is not a charcoal; kept from the 2026-11-12 trial because the
+            design v3 ring ratios (--band-*-ring) are measured against exactly this track (white at 16% was the first
+            version, and it left the rose ring at 2.34:1). Decoration only: the number carries the value.
    The arc stays this one periwinkle until the next change recolours it per score band (--band-*-ring). */
 .score-ring--dark .score-ring__track { stroke: rgba(10, 8, 12, 0.35); }
 .score-ring--dark .score-ring__arc { stroke: #a7b1ff; }
@@ -1588,7 +1609,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .crib__stage:not(.is-ready) { min-height: 160px; }
 .crib__stage.is-ready { cursor: crosshair; }
 .crib__img { display: block; width: 100%; height: auto; -webkit-user-drag: none; }
-.crib__msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 6px; color: #d6ccd3; font-size: 13px; text-align: center; padding: 12px; }
+.crib__msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 6px; color: #cdd0ff; font-size: 13px; text-align: center; padding: 12px; }
 /* The zone grid is painted to a canvas (CribZonePicker.jsx) — it sits over the still and must not
    take the pointer, which the stage handles for the whole picker. */
 .crib__canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
@@ -1622,8 +1643,8 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 /* Children tab — one card per child. Light mode: a clean white card (the dark hero gradient of the
    detail screen reads too heavy repeated down a list on a light background). Dark mode: the same
    gradient as the detail hero, so the two feel of a piece there. */
-.child-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; cursor: pointer; font: inherit; border: 1px solid var(--border); color: var(--text-primary); background: var(--bg-elevated); border-radius: 18px; padding: 15px 16px; margin-bottom: 12px; box-shadow: 0 10px 26px -22px rgba(40, 28, 30, 0.35); transition: transform 0.12s ease, box-shadow 0.12s ease; }
-.child-card:hover { transform: translateY(-1px); box-shadow: 0 14px 32px -22px rgba(40, 28, 30, 0.45); }
+.child-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; cursor: pointer; font: inherit; border: 1px solid var(--border); color: var(--text-primary); background: var(--bg-elevated); border-radius: 18px; padding: 15px 16px; margin-bottom: 12px; box-shadow: 0 10px 26px -22px rgba(30, 30, 70, 0.35); transition: transform 0.12s ease, box-shadow 0.12s ease; }
+.child-card:hover { transform: translateY(-1px); box-shadow: 0 14px 32px -22px rgba(30, 30, 70, 0.45); }
 .child-card:active { transform: translateY(0); }
 .child-card:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .child-card__id { flex: 1; min-width: 0; }
@@ -2945,7 +2966,7 @@ input[type='range'] {
   display: flex;
   justify-content: center;
   align-items: flex-end;
-  background: rgba(10, 8, 12, 0.7);
+  background: rgba(10, 13, 28, 0.7);
   /* Keep the sheet clear of the status bar / notch: a top sheet starts below it, and a bottom sheet
      that grows tall (long form, or pushed up by the keyboard) is capped so its top can't slide under. */
   padding-top: env(safe-area-inset-top, 0px);
@@ -3075,7 +3096,7 @@ input[type='range'] {
 .review-actions .btn { flex: 1 1 auto; }
 
 /* "You corrected this" — shown wherever a night's times came from a person rather than the detector.
-   Owner 2026-11-05: hard to read. It is only used on the sleep card (`.night`), which is a dark plum gradient in BOTH themes,
+   Owner 2026-11-05: hard to read. It is only used on the sleep card (`.night`), which is a dark indigo gradient in BOTH themes,
    but it was coloured with `--accent-text`, which by day is the dark violet #5F3DB7: dark text on a dark card. Light text on a
    light veil reads on that card in either theme. If this pill is ever used on a light surface, scope these colours to `.night`. */
 .sleep-corrected {

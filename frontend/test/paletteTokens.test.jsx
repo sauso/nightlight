@@ -124,8 +124,9 @@ describe('readability, recomputed from the stylesheet\'s own tokens', () => {
   });
 });
 
-// The warm palette (owner, 2026-11-12: "too blue"). Everything below is read from the stylesheet, so a colour edit that breaks
-// readability fails here rather than on a phone. The band tokens are defined but no component uses them yet (the next change does).
+// The navy neutrals with the band and timeline accent colours (owner, 2026-11-13, design v3; a warm-grey trial on 2026-11-12 was
+// rejected). Everything below is read from the stylesheet, so a colour edit that breaks readability fails here rather than on a
+// phone. The band tokens are defined but no component uses them yet (the next change does).
 const BANDS = ['great', 'good', 'fair', 'low', 'early'];
 // The timeline tokens sit in their own :root rules further down the sheet; themeTokens merges every such rule.
 const sleepDay = day;
@@ -141,19 +142,39 @@ const overHex = (rgba, under) => {
   const [r, g, b, a] = [Number(rgba[1]), Number(rgba[2]), Number(rgba[3]), Number(rgba[4])];
   return `#${[r, g, b].map((v, i) => Math.round(v * a + base[i] * (1 - a)).toString(16).padStart(2, '0')).join('')}`;
 };
+// A colour laid over another at some opacity (color-mix in srgb does the same in the browser): used for the 15% tag tints and the
+// ring's 12% wash, so the text on them is measured on what is really drawn, not on the bare card.
+const tint = (fg, alpha, under) => {
+  const f = [(parseInt(fg.slice(1), 16) >> 16) & 255, (parseInt(fg.slice(1), 16) >> 8) & 255, parseInt(fg.slice(1), 16) & 255];
+  const u = [(parseInt(under.slice(1), 16) >> 16) & 255, (parseInt(under.slice(1), 16) >> 8) & 255, parseInt(under.slice(1), 16) & 255];
+  return `#${f.map((v, i) => Math.round(v * alpha + u[i] * (1 - alpha)).toString(16).padStart(2, '0')).join('')}`;
+};
+const round2 = (n) => Math.round(n * 100) / 100;
 
-describe('the warm neutrals and the band colours (owner, 2026-11-12)', () => {
-  test('the warm values were read, and nothing of the old navy/lavender surfaces is left in the token blocks', () => {
-    expect(day['--bg']).toBe('#f8f5f0');
-    expect(night['--bg']).toBe('#1a1618');
-    expect(day['--bg-elevated']).toBe('#fffdf9');
-    expect(night['--bg-elevated']).toBe('#262024');
-    expect(day['--bar'], 'the header is one colour in both themes').toBe('#1f1a1e');
-    expect(night['--bar']).toBe('#1f1a1e');
-    // The old palette, by value: a restored literal in either block is caught.
-    for (const old of ['#14142a', '#221f3c', '#100f1c', '#f7f4fd', '#eae3f8', '#1d1a3a', '#e8e2f7', '#ddd5ee', '#383450']) {
-      expect(JSON.stringify([day, night]), `${old} is gone from the token blocks`).not.toContain(old);
+describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)', () => {
+  test('★ the original navy and lavender neutrals are in the token blocks, and none of the warm trial is left', () => {
+    const expected = {
+      day: { '--bg': '#f7f4fd', '--bg-elevated': '#ffffff', '--bg-elevated-2': '#eae3f8', '--field-bg': '#eae3f8', '--text-primary': '#1d1a3a', '--text-secondary': '#625c7f', '--border': '#ddd5ee', '--on-accent': '#ffffff' },
+      night: { '--bg': '#14142a', '--bg-elevated': '#221f3c', '--bg-elevated-2': '#100f1c', '--field-bg': '#100f1c', '--text-primary': '#e8e2f7', '--text-secondary': '#bcb3d5', '--border': '#383450', '--on-accent': '#14142a' },
+    };
+    for (const [name, t] of [['day', day], ['night', night]]) {
+      for (const [token, value] of Object.entries(expected[name])) expect(t[token], `${name} ${token}`).toBe(value);
     }
+    expect(day['--bar'], 'the header is one navy in both themes').toBe('#14142a');
+    expect(night['--bar']).toBe('#14142a');
+    expect(day['--on-complement']).toBe('#14142a');
+    // The warm trial's literals, by value, anywhere in the stylesheet (comments are stripped from `css`): a restored one is caught.
+    for (const warm of ['#1a1618', '#262024', '#121011', '#f8f5f0', '#fffdf9', '#efe8df', '#241f24', '#f0e9e3', '#6b6158', '#c4b9af', '#e5dcd1', '#3d3439', '#1f1a1e', '#efe8e2', '#352b3a', '#1e191f', '#d6ccd3', '#2f2733', '#161115', '#ccc3b8', '#c4688a', '#126067']) {
+      expect(css.toLowerCase(), `${warm} (from the warm trial) is gone from the stylesheet`).not.toContain(warm);
+    }
+    expect(css, 'the warm overlays and shadows are gone').not.toMatch(/rgba\((?:10, 8, 12, 0\.(?:55|7)|40, 28, 30|16, 10, 18)\b/);
+  });
+
+  test('the page\'s theme-color meta is the header navy, as --bar is', () => {
+    const html = readFileSync(join(process.cwd(), 'index.html'), 'utf8');
+    const meta = html.match(/<meta name="theme-color" content="(#[0-9a-fA-F]{6})"/);
+    expect(meta, 'a theme-color meta exists').toBeTruthy();
+    expect(meta[1].toLowerCase()).toBe(day['--bar']);
   });
 
   test.each([['day', day], ['night', night]])('★ %s: primary and secondary text are readable on the page, the card and the inset (4.5:1)', (_name, t) => {
@@ -182,9 +203,47 @@ describe('the warm neutrals and the band colours (owner, 2026-11-12)', () => {
     }
   });
 
+  test('★ the band colours are the approved v3 values (the floors below say they are readable; this says they are the designer\'s)', () => {
+    const pick = (t, suffix = '') => BANDS.map((band) => t[`--band-${band}${suffix}`]);
+    expect(pick(day), 'day marks: great, good, fair, low, early').toEqual(['#1e6b3d', '#0f555c', '#a36a10', '#b85a7e', '#7a7496']);
+    expect(pick(night), 'night marks').toEqual(['#a8edbe', '#5cbfc6', '#d99c50', '#c77790', '#d3cde6']);
+    expect(pick(day, '-ring'), 'ring marks on the navy card').toEqual(['#a8edbe', '#5cbfc6', '#d99c50', '#c77790', '#d3cde6']);
+  });
+
+  test('★ the palette tokens are declared ONLY in the two theme blocks (and --night-* only on .night): a later override elsewhere would change the real colour unseen by these tests', () => {
+    // The token reader above reads exactly `:root` and `:root[data-theme='dark']`, so a declaration anywhere else
+    // (for instance `html[data-theme='dark'] { --bg: ... }`, which has higher specificity) would win in the browser and be invisible
+    // here. Every place that declares one of the pinned tokens is therefore listed; the only deliberate exceptions are named:
+    //   .night  declares the --night-* custom properties (and nothing else of the palette), by design.
+    // There are no others on this branch. Custom properties set in JSX style props are out of reach of this check.
+    const pinned = /^--(?:bg|bg-elevated|bg-elevated-2|field-bg|text-primary|text-secondary|border|bar|bar-text|on-accent|band-[a-z-]+|sleep-[a-z-]+|night-[a-z-]+)$/;
+    const allowed = (selector, token) => selector === ':root' || selector === ":root[data-theme='dark']" || (selector === '.night' && token.startsWith('--night-'));
+    const stray = [];
+    for (const rule of rules) {
+      const at = rule.lastIndexOf('{');
+      if (at < 0) continue;
+      const selector = rule.slice(0, at).trim();
+      for (const [, token] of rule.slice(at + 1).matchAll(/(?:^|[\s;])(--[a-z0-9-]+)\s*:/g)) {
+        if (pinned.test(token) && !allowed(selector, token)) stray.push(`${selector} { ${token} }`);
+      }
+    }
+    expect(stray, `palette tokens declared outside the two theme blocks: ${stray.join(' | ')}`).toEqual([]);
+    // And the night card's gradient is declared once: a second `.night` background rule would repaint it unseen by the stop reader.
+    const gradientRules = rules.filter((rule) => {
+      const at = rule.lastIndexOf('{');
+      return at >= 0 && /\.night(?![\w-])/.test(rule.slice(0, at)) && /background(?:-image)?:[^;]*gradient/.test(rule.slice(at + 1));
+    });
+    expect(gradientRules.length, `.night gradient rules: ${gradientRules.join(' | ')}`).toBe(1);
+  });
+
+  test('★ text is never set in a band colour: no rule uses a --band-* token for `color`', () => {
+    const offenders = rules.filter((rule) => /(^|[ ;{])color:\s*var\(--band-/.test(rule));
+    expect(offenders, `band colour used as text: ${offenders.join(' | ')}`).toEqual([]);
+  });
+
   test('the child card\'s gradient and its ring track were read from the stylesheet', () => {
-    expect(gradientLight, 'gradient start').toBe('#352b3a');
-    expect(gradientDark, 'gradient end').toBe('#1e191f');
+    expect(gradientLight, 'gradient start').toBe('#2c2f63');
+    expect(gradientDark, 'gradient end').toBe('#191b38');
     expect(trackMatch, 'the .score-ring--dark track rule').toBeTruthy();
     expect(gradientLight, 'the gradient must run light to dark: the start is where contrast is lowest for light marks').not.toBe(gradientDark);
     expect(luminance(gradientLight)).toBeGreaterThan(luminance(gradientDark));
@@ -207,19 +266,25 @@ describe('the warm neutrals and the band colours (owner, 2026-11-12)', () => {
   });
 
   test('★ the night card\'s text tints are readable on its lightest stop, where contrast is lowest (4.5:1)', () => {
-    for (const token of ['--night-text', '--night-muted', '--night-link']) {
+    for (const token of ['--night-text', '--night-muted', '--night-link', '--night-number']) {
       expect(nightTokens[token], `${token} is defined on .night`).toMatch(/^#[0-9a-f]{6}$/);
       expect(contrast(nightTokens[token], gradientLight), `${token} on ${gradientLight}`).toBeGreaterThanOrEqual(4.5);
     }
-    expect(contrast(nightTokens['--night-muted'], gradientLight), 'the muted tint is the one most text uses').toBeGreaterThanOrEqual(8);
   });
 
-  test('★ the .night rules take their text colours from the card\'s properties, not from literals (the lavender ladder is gone)', () => {
+  test.each(BANDS)('★ the muted text still clears 5:1 where the ring\'s 12%% %s wash lightens the card (the design\'s figure is 5.07)', (band) => {
+    // Lowest contrast on the card is the lightest stop with the band colour laid over it at 12% (the design's "washed corner").
+    const washed = tint(day[`--band-${band}-ring`], 0.12, gradientLight);
+    expect(contrast(nightTokens['--night-muted'], washed), `muted on the card washed by ${band}`).toBeGreaterThanOrEqual(5);
+  });
+
+  test('★ the .night rules take their text colours from the card\'s properties, not from literals', () => {
     const nightRules = rules.filter((rule) => /^\.night(__|\s|\.)/.test(rule) && !rule.startsWith('.night {'));
     expect(nightRules.length, 'the .night__* rules were found').toBeGreaterThan(8);
     const literals = nightRules.filter((rule) => /#[0-9a-fA-F]{3,6}\b/.test(rule));
     expect(literals, `hex literals in ${literals.join(' | ')}`).toEqual([]);
-    expect(css).not.toMatch(/#(?:eef0ff|cdd0ff|b9bdf0|9fa3e0|8f93d0|2c2f63|191b38)\b/i);
+    // The two dimmest steps of the old lavender ladder: #8f93d0 is 4.28:1 on the card, under what small text needs.
+    expect(css).not.toMatch(/#(?:9fa3e0|8f93d0)\b/i);
   });
 
   test.each([['day', day, sleepDay], ['night', night, sleepNight]])('★ %s: where the wake-up amber is TEXT it is readable on the card and the inset (4.5:1)', (_name, t, sleep) => {
@@ -228,13 +293,6 @@ describe('the warm neutrals and the band colours (owner, 2026-11-12)', () => {
       expect(contrast(sleep['--sleep-wake-text'], t[surface]), `--sleep-wake-text on ${surface}`).toBeGreaterThanOrEqual(4.5);
     }
   });
-
-  // The 15% tint a tag lays over the card (color-mix in srgb), computed here so the tag's own text is measured, not just the card.
-  const tint = (fg, alpha, under) => {
-    const f = [(parseInt(fg.slice(1), 16) >> 16) & 255, (parseInt(fg.slice(1), 16) >> 8) & 255, parseInt(fg.slice(1), 16) & 255];
-    const u = [(parseInt(under.slice(1), 16) >> 16) & 255, (parseInt(under.slice(1), 16) >> 8) & 255, parseInt(under.slice(1), 16) & 255];
-    return `#${f.map((v, i) => Math.round(v * alpha + u[i] * (1 - alpha)).toString(16).padStart(2, '0')).join('')}`;
-  };
 
   test.each([['day', day, sleepDay], ['night', night, sleepNight]])('★ %s: where the room-activity teal is TEXT it is readable on the card, the inset and its own 15%% tag (4.5:1)', (_name, t, sleep) => {
     for (const surface of ['--bg-elevated', '--bg-elevated-2']) {
@@ -256,9 +314,69 @@ describe('the warm neutrals and the band colours (owner, 2026-11-12)', () => {
     }
   });
 
-  test('the timeline colours are the approved ones', () => {
-    expect([sleepDay['--sleep-asleep'], sleepDay['--sleep-stir'], sleepDay['--sleep-wake'], sleepDay['--sleep-visit']]).toEqual(['#4b53b5', '#a7ade4', '#f0a257', '#2fa39a']);
-    expect([sleepNight['--sleep-asleep'], sleepNight['--sleep-stir'], sleepNight['--sleep-wake'], sleepNight['--sleep-visit']]).toEqual(['#7c85e6', '#a7ade4', '#f6c899', '#3ec4b8']);
+  test('★ the timeline colours are the approved v3 ones: asleep, stirring, wake-up amber, before/after-sleep neutral, room activity', () => {
+    const keys = ['--sleep-asleep', '--sleep-stir', '--sleep-wake', '--sleep-awake', '--sleep-visit', '--sleep-visit-text', '--sleep-gap'];
+    expect(keys.map((k) => sleepDay[k])).toEqual(['#4b53b5', '#a7ade4', '#f0a257', '#d2d0e2', '#2fa39a', '#17706a', '#c7c7c7']);
+    // Night room activity is #2fa39a (it was #3ec4b8, the same lightness as the Good band, ratio 1.01), but its TEXT stays #3ec4b8:
+    // #2fa39a on its own 15% tag is only 4.14:1.
+    expect(keys.map((k) => sleepNight[k])).toEqual(['#7c85e6', '#4a4f86', '#f6c899', '#3c3f60', '#2fa39a', '#3ec4b8', '#5a5c6e']);
+    expect(contrast('#2fa39a', tint('#2fa39a', 0.15, night['--bg-elevated'])), 'why night text is not the segment teal').toBeLessThan(4.5);
+  });
+
+  // Known pairs below their floor (design v3, 2026-11-13; docs/design-language.md, "Known pairs below their floor"). Each is two
+  // graphics, never text: either two bar segments that can touch, or a segment on the card or the inset track it is drawn on.
+  // They are named here with their measured ratio so that the list is honest in both directions: a pair that gets worse than its
+  // ratio, or better than the 3:1 floor, fails this test and the doc has to be updated, instead of the exception quietly going
+  // stale (the same pattern as the exceptions in the score-colours change). The first four came from the designer; the review of
+  // that list (2026-11-13) found the rest, and the completeness test below is what stops a list like this being short again.
+  // The timeline-shape follow-up ("v3.1": segments separated by gaps and shape, not by colour alone) fixes most of them.
+  const TIMELINE_PAIRS = [['asleep', '--sleep-asleep'], ['stir', '--sleep-stir'], ['wake', '--sleep-wake'], ['awake', '--sleep-awake'], ['visit', '--sleep-visit']];
+  const SURFACES = { card: '--bg-elevated', track: '--bg-elevated-2' };
+  const timelineColour = (theme, name) => {
+    const t = theme === 'day' ? day : night;
+    const found = TIMELINE_PAIRS.find(([n]) => n === name);
+    return found ? t[found[1]] : t[SURFACES[name]];
+  };
+  const BELOW_FLOOR = [
+    // [theme, a, b, ratio]  (a and b are the names above; `card` is --bg-elevated and `track` is --bg-elevated-2)
+    ['night', 'wake', 'asleep', 2.15], ['night', 'stir', 'asleep', 2.31], ['day', 'stir', 'card', 2.16], ['day', 'visit', 'track', 2.47],
+    ['night', 'stir', 'card', 2.07], ['night', 'stir', 'track', 2.49], ['day', 'stir', 'track', 1.73], ['day', 'wake', 'card', 2.1],
+    ['day', 'awake', 'track', 1.22], ['night', 'awake', 'track', 1.87],
+    ['day', 'awake', 'card', 1.52], ['night', 'awake', 'card', 1.56], ['day', 'wake', 'track', 1.68],
+    ['day', 'stir', 'wake', 1.03], ['day', 'stir', 'awake', 1.42], ['day', 'wake', 'awake', 1.38], ['night', 'stir', 'awake', 1.33],
+  ];
+  const sortedPair = (a, b) => [a, b].sort().join('|');
+
+  test.each(BELOW_FLOOR)('★ known below-floor pair, %s: %s against %s, is still exactly %s:1 and still under 3:1', (theme, a, b, documented) => {
+    const ratio = contrast(timelineColour(theme, a), timelineColour(theme, b));
+    expect(round2(ratio), 'the documented ratio').toBe(documented);
+    expect(ratio, 'below the 3:1 a graphic needs: if this fails the colour was fixed, so remove it from the list here and in the doc').toBeLessThan(3);
+  });
+
+  test('★ the named list is COMPLETE: every pair of bar segments, and every segment or room-activity dot on the card and track, that is under 3:1 is named', () => {
+    // Bar segments can touch one another; every timeline colour sits on the card or its inset track. Room activity is drawn above the
+    // bar (a dot), so it is only measured against the surfaces, not against the other segments.
+    const segments = ['asleep', 'stir', 'wake', 'awake'];
+    const candidates = [];
+    for (const theme of ['day', 'night']) {
+      for (let i = 0; i < segments.length; i += 1) for (let j = i + 1; j < segments.length; j += 1) candidates.push([theme, segments[i], segments[j]]);
+      for (const name of [...segments, 'visit']) for (const surface of ['card', 'track']) candidates.push([theme, name, surface]);
+    }
+    const under = candidates
+      .filter(([theme, a, b]) => contrast(timelineColour(theme, a), timelineColour(theme, b)) < 3)
+      .map(([theme, a, b]) => `${theme}:${sortedPair(a, b)}`).sort();
+    const named = BELOW_FLOOR.map(([theme, a, b]) => `${theme}:${sortedPair(a, b)}`).sort();
+    expect(under, 'a pair under 3:1 that is not named (add it to BELOW_FLOOR and the doc), or a named pair that is no longer under').toEqual(named);
+    expect(new Set(named).size, 'no pair is named twice').toBe(named.length);
+  });
+
+  test('★ the pairs the design measured as clearing 3:1 still do (a spot check, so the completeness list is not the only thing watching them)', () => {
+    expect(contrast(sleepNight['--sleep-visit'], night['--bg-elevated']), 'night room activity on the card').toBeGreaterThanOrEqual(3);
+    expect(contrast(sleepNight['--sleep-visit'], night['--bg-elevated-2']), 'night room activity on the track').toBeGreaterThanOrEqual(3);
+    expect(contrast(sleepDay['--sleep-visit'], day['--bg-elevated']), 'day room activity on the card').toBeGreaterThanOrEqual(3);
+    expect(contrast(sleepDay['--sleep-asleep'], day['--bg-elevated']), 'day asleep on the card').toBeGreaterThanOrEqual(3);
+    expect(contrast(sleepNight['--sleep-asleep'], night['--bg-elevated']), 'night asleep on the card').toBeGreaterThanOrEqual(3);
+    expect(contrast(sleepDay['--sleep-wake'], sleepDay['--sleep-asleep']), 'day wake-up amber against asleep').toBeGreaterThanOrEqual(3);
   });
 
   test('★ the wake-up duration, badge, icon and "out of bed" tag use the readable amber, never the segment amber', () => {
