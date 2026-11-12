@@ -11,6 +11,9 @@
 //   expired samples: the score comes from the saved row .............. "raw samples gone ..."
 //   in progress: no score, with the reason ........................... "/sleep/live: tonight ..."
 //   a failing score never fails the route ............................ "a score that throws ..."
+//   the night summary (phase 3) rides every shape, with the switch off too,
+//     and a failing summary leaves the route and the score alone ..... FIXED_SUMMARY in the shape tests, "switch off ...",
+//                                                                      "a summary that throws ..."
 //   #1041 through the route .......................................... "#1041 ..."
 //   no existing key changes .......................................... `sameButScore` in every shape test
 //
@@ -47,7 +50,7 @@ const { TRANSITION, framesForNight } = await import('../src/lib/bedTransitions.j
 const { saveNightReview, applyCorrection } = await import('../src/lib/sleepReviews.js');
 const { scoreNight, toScoringInput, ageMonthsOn } = await import('../src/lib/sleepScore.js');
 const { sleepBaseline } = await import('../src/lib/sleepBaseline.js');
-const { failNextScoreForTest, resetScoreLogForTest, attachScore } = await import('../src/lib/sleepScoreAttach.js');
+const { failNextScoreForTest, failNextSummaryForTest, resetScoreLogForTest, attachScore } = await import('../src/lib/sleepScoreAttach.js');
 const { default: childrenRouter } = await import('../src/routes/children.js');
 const { logger } = await import('../src/lib/logger.js');
 
@@ -75,7 +78,7 @@ const get = (path) => call(`${server.url}/api/children/${CHILD}${path}`, { token
 // goes through none of the code under test (no attachScore), so "the route's score equals this" is a real check.
 // `context` is what a fresh compute must be scored with; a stored row ignores it.
 const expected = (night, context = null) => {
-  const input = toScoringInput(omit(night, 'score', 'score_source'), { context });
+  const input = toScoringInput(omit(night, 'score', 'score_source', 'summary'), { context });
   return json(scoreNight(input, sleepBaseline(CHILD, input), ageMonthsOn(BIRTHDAY, input.night_date)));
 };
 
@@ -172,6 +175,22 @@ function storeFixedWithUsual() {
   return rowOf();
 }
 const GREAT_96 = [96, 'great', [['duration', 100], ['continuity', 97], ['settling', 80], ['restlessness', 100], ['consistency', 92]]];
+// THE NIGHT SUMMARY of the same night (phase 3, nightSummary.js; the selection itself is tested in night-summary.test.js).
+// By hand: continuity 97 and restlessness 100 with an overall 96 read "settled". Against the usual (600 asleep, 2 wakes,
+// a stretch share of 330/660 = 0.5) the night is 600 asleep (the same), 1 wake-up (one either way is the same: usual
+// 2) and a share of 320/620 = 0.516 (the same). The 30-minute settle is the fourth line (a plain fact; it took longer
+// than the score's ordinary 20). One wake-up is not a cluster, there is no room activity, and the fixture has no
+// temperature sensor.
+const FIXED_SUMMARY = {
+  headline: { key: 'settled' },
+  observations: [
+    { key: 'total_sleep_vs_usual', params: { minutes: 600, usual_minutes: 600, direction: 'about_the_same' } },
+    { key: 'wake_ups_vs_usual', params: { count: 1, usual_count: 2, direction: 'about_the_same' } },
+    { key: 'longest_stretch_vs_usual', params: { minutes: 320, direction: 'about_the_same' } },
+    { key: 'settling_time', params: { minutes: 30 } },
+  ],
+  seed: `${CHILD}|${DATE}`,
+};
 const headline = (score) => [score.score, score.band, score.components.map((c) => [c.key, c.score])];
 
 before(async () => {
@@ -207,8 +226,9 @@ test('/sleep/:date fresh, every read shape: the score is scoreNight on the night
   for (const query of ['', '?context=current', '?context=auto', '?context=current&raw=1']) {
     const r = await get(`/sleep/${DATE}${query}`);
     assert.equal(r.status, 200, query);
-    assert.deepEqual(omit(r.body, 'score'), plain, `${query}: every key the night had, unchanged, and only score added`);
+    assert.deepEqual(omit(r.body, 'score', 'summary'), plain, `${query}: every key the night had, unchanged, and only score and summary added`);
     assert.deepEqual(headline(r.body.score), GREAT_96, query);
+    assert.deepEqual(r.body.summary, FIXED_SUMMARY, `${query}: every read shape carries the summary`);
     // Found its usual: so the compute's own context reached the score (without it there is no baseline, and the
     // score is an early estimate against the age figure, 683 minutes at 37 months).
     assert.deepEqual([r.body.score.early_estimate, comp(r.body.score, 'duration').basis, comp(r.body.score, 'duration').usual],
@@ -220,7 +240,7 @@ test('/sleep/:date fresh, every read shape: the score is scoreNight on the night
   // detail=1: the same night with a timeline (and the frames list), so the same score.
   const detail = await get(`/sleep/${DATE}?detail=1`);
   const withTimeline = computeNight(CHILD, DATE, { includeTimeline: true });
-  assert.deepEqual(omit(detail.body, 'score'), json({ ...withTimeline, transition_frames: framesForNight(withTimeline) }));
+  assert.deepEqual(omit(detail.body, 'score', 'summary'), json({ ...withTimeline, transition_frames: framesForNight(withTimeline) }));
   assert.ok(detail.body.segments.length > 0, 'precondition: this is the timeline shape');
   assert.deepEqual(headline(detail.body.score), GREAT_96);
 });
@@ -232,8 +252,9 @@ test('/sleep?nights=N and ?stored=1: the saved row is scored on its own context,
   const list = await get('/sleep?nights=60');
   assert.equal(list.body.nights.length, 8, 'precondition: the night and its seven usual nights');
   const night = list.body.nights.find((n) => n.night_date === DATE);
-  assert.deepEqual(omit(night, 'score'), json(row), 'the stored row, every column as stored');
+  assert.deepEqual(omit(night, 'score', 'summary'), json(row), 'the stored row, every column as stored');
   assert.deepEqual(headline(night.score), GREAT_96);
+  assert.deepEqual(night.summary, FIXED_SUMMARY, 'the list carries the summary');
   assert.deepEqual(night.score, expected(night));
   // Each usual night is scored too, against the ones before it: the oldest has none, so with no baseline it is an
   // early estimate (its 660-minute span against the age figure, 684 minutes at 36 months: 24 under ->
@@ -244,8 +265,9 @@ test('/sleep?nights=N and ?stored=1: the saved row is scored on its own context,
 
   const stored = await get(`/sleep/${DATE}?stored=1`);
   assert.deepEqual(Object.keys(stored.body).sort(), ['contexts', 'locked', 'night']);
-  assert.deepEqual(omit(stored.body.night, 'score'), json(row));
+  assert.deepEqual(omit(stored.body.night, 'score', 'summary'), json(row));
   assert.deepEqual(headline(stored.body.night.score), GREAT_96);
+  assert.deepEqual(stored.body.night.summary, FIXED_SUMMARY, '?stored=1 carries the summary');
 
   // No saved row: `night` stays null, as before; there is nothing to hang a score on.
   const none = await get(`/sleep/${addDays(DATE, 5)}?stored=1`);
@@ -334,7 +356,7 @@ test('raw samples gone, saved row kept: the detail read is no_data and its score
 
   const r = await get(`/sleep/${DATE}?context=auto&detail=1`);
   assert.equal(r.status, 200);
-  assert.deepEqual(omit(r.body, 'score', 'score_source'), { ...before, transition_frames: [] }, 'the no_data night exactly as before');
+  assert.deepEqual(omit(r.body, 'score', 'score_source', 'summary'), { ...before, transition_frames: [] }, 'the no_data night exactly as before');
   assert.equal(r.body.score_source, 'stored');
   assert.deepEqual(headline(r.body.score), GREAT_96);
   assert.deepEqual(r.body.score, listed.score, 'the same score the list gives the saved row');
@@ -380,7 +402,8 @@ test('a score that throws never fails the route: 200, score null, the night unto
   failNextScoreForTest();
   const detail = await get(`/sleep/${DATE}`);
   assert.equal(detail.status, 200);
-  assert.deepEqual(detail.body, { ...plain, score: null });
+  // A score that failed takes the summary with it (the summary is derived from the score): both null, nothing else moved.
+  assert.deepEqual(detail.body, { ...plain, score: null, summary: null });
 
   // In the list only the night whose score failed loses it (the first scored: the newest). The seven usual nights
   // keep theirs: each has fewer than seven nights before it, so an early estimate. By hand: duration 87 (660
@@ -396,6 +419,38 @@ test('a score that throws never fails the route: 200, score null, the night unto
 
   // The seam is one-shot: the next read is scored again.
   assert.equal((await get(`/sleep/${DATE}`)).body.score.score, 96);
+});
+
+test('a summary that throws never fails the route or costs the night its score: 200, summary null, score 96, one log line of its own', async (t) => {
+  setUpFixed();
+  storeFixedWithUsual();
+  const warn = t.mock.method(logger, 'warn', () => {});
+  const plain = json(computeNight(CHILD, DATE));
+
+  failNextSummaryForTest();
+  const r = await get(`/sleep/${DATE}`);
+  assert.equal(r.status, 200);
+  assert.equal(r.body.summary, null);
+  assert.deepEqual(headline(r.body.score), GREAT_96, 'the score is unaffected by the summary failing');
+  assert.deepEqual(omit(r.body, 'score', 'summary'), plain, 'and so is every other key');
+  // A fixed sentence, once, with its own line (a score fault must not hide it): a second failure inside the hour is silent.
+  failNextSummaryForTest();
+  assert.equal((await get(`/sleep/${DATE}`)).body.summary, null);
+  assert.deepEqual(warn.mock.calls.map((c) => c.arguments), [['[sleep] night summary skipped: summarising a night failed']]);
+  // One-shot: the next read has its summary again.
+  assert.deepEqual((await get(`/sleep/${DATE}`)).body.summary, FIXED_SUMMARY);
+});
+
+test('switch off and the score throws: no score key, summary null, the route still 200', async () => {
+  setUpFixed();
+  seedUsualBefore(JSON.stringify(FIXED_CONTEXT));
+  showScore(0);
+  const plain = json(computeNight(CHILD, DATE));
+  failNextScoreForTest();
+  const r = await get(`/sleep/${DATE}`);
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body, { ...plain, summary: null });
+  assert.equal('score' in r.body, false);
 });
 
 test('#1041 through the route: a doubted wake the parent saved at the SAME time is confirmed; a put-down alone is not', async () => {
@@ -449,7 +504,7 @@ function seedLiveUsualBefore(date, over = {}) {
   for (let n = 1; n <= 7; n++) putUsualNight(addDays(date, -n), liveStart(addDays(date, -n)), LIVE_HOURS, raw, over);
 }
 const expectedLive = (night, context = null) => {
-  const input = toScoringInput(omit(night, 'score'), { context });
+  const input = toScoringInput(omit(night, 'score', 'summary'), { context });
   return json(scoreNight(input, sleepBaseline(CHILD, input), ageMonthsOn('2020-01-01', input.night_date)));
 };
 
@@ -467,10 +522,21 @@ test('/sleep/live: the saved last night is scored from its row, 93, and no other
 
   const r = await get('/sleep/live');
   assert.equal(r.body.scope, 'last');
-  assert.deepEqual(omit(r.body.night, 'score'), json(rowOf(last)), 'the stored row, every column as stored');
+  assert.deepEqual(omit(r.body.night, 'score', 'summary'), json(rowOf(last)), 'the stored row, every column as stored');
   assert.deepEqual(headline(r.body.night.score),
     [93, 'great', [['duration', 100], ['continuity', 77], ['settling', 100], ['restlessness', 100], ['consistency', 100]]]);
   assert.deepEqual(r.body.night.score, expectedLive(r.body.night));
+  // The summary of the same night: continuity 77 is "typical"; 600, 4 wake-ups and a 0.4 share are each the usual.
+  assert.deepEqual(r.body.night.summary, {
+    headline: { key: 'typical' },
+    observations: [
+      { key: 'total_sleep_vs_usual', params: { minutes: 600, usual_minutes: 600, direction: 'about_the_same' } },
+      { key: 'wake_ups_vs_usual', params: { count: 4, usual_count: 4, direction: 'about_the_same' } },
+      { key: 'longest_stretch_vs_usual', params: { minutes: 300, direction: 'about_the_same' } },
+      { key: 'settling_time', params: { minutes: 20 } },
+    ],
+    seed: `${CHILD}|${last}`,
+  });
 
   // The correction is under the score here too. The wake an hour earlier: the span is 600 minutes (30 minutes in,
   // to 90 before the end), less 150 awake = 450 asleep, 150 under the usual -> 50 - 50 * (60/150) = 30.
@@ -493,7 +559,7 @@ test('/sleep/live: last night computed fresh is scored with the context that com
   const r = await get('/sleep/live');
   const night = r.body.night;
   assert.deepEqual([r.body.scope, night.night_date, night.in_progress], ['last', last, false]);
-  assert.deepEqual(omit(night, 'score'), json(computeNight(CHILD, last)), 'the fresh night exactly as before');
+  assert.deepEqual(omit(night, 'score', 'summary'), json(computeNight(CHILD, last)), 'the fresh night exactly as before');
   // Precondition for the literals: the detector reads this night as asleep ten minutes in and up an hour before
   // the window's end, 650 minutes, unbroken. If this fails the detector moved, not the score.
   assert.deepEqual([night.status, night.onset_at, night.wake_at, night.asleep_minutes, night.awake_minutes, night.wake_count, night.in_bed_at],
@@ -508,6 +574,8 @@ test('/sleep/live: last night computed fresh is scored with the context that com
   // 94; up 60 minutes before its end against a usual 30 (30 apart) -> 83. (94 + 83) / 2 = 88.5 -> 89.
   assert.deepEqual([comp(night.score, 'consistency').score, comp(night.score, 'settling').reason], [89, 'no_in_bed']);
   assert.deepEqual(night.score, expectedLive(night, currentScoringContext(CHILD)));
+  // A night worked out fresh carries the summary too: 650 asleep with no wakes, so continuity is full and it reads settled.
+  assert.deepEqual([night.summary.headline, night.summary.seed], [{ key: 'settled' }, `${CHILD}|${last}`]);
 });
 
 test('/sleep/live: tonight, in progress, has no score and says why', async () => {
@@ -547,16 +615,20 @@ test('switch off, /sleep/:date: no score key on any read shape, every other key 
   for (const query of ['', '?context=current', '?context=auto', '?context=current&raw=1']) {
     const r = await get(`/sleep/${DATE}${query}`);
     assert.equal(r.status, 200, query);
-    assert.deepEqual(r.body, plain, `${query}: the night exactly as computed, nothing added`);
+    // The night exactly as computed, plus the night summary: the switch hides the score, not the description of the
+    // night (phase 3), and the summary is the SAME one the switch-on read gave, derived from the score the response omits.
+    assert.deepEqual(omit(r.body, 'summary'), plain, `${query}: the night exactly as computed, no score added`);
     assert.equal('score' in r.body, false, query);
+    assert.deepEqual(r.body.summary, on.body.summary, `${query}: the same summary as with the switch on`);
+    assert.equal(r.body.summary.headline.key, 'settled', query);
   }
   const detail = await get(`/sleep/${DATE}?detail=1`);
   const withTimeline = computeNight(CHILD, DATE, { includeTimeline: true });
-  assert.deepEqual(detail.body, json({ ...withTimeline, transition_frames: framesForNight(withTimeline) }));
+  assert.deepEqual(omit(detail.body, 'summary'), json({ ...withTimeline, transition_frames: framesForNight(withTimeline) }));
 
   // An admin's store answers with a night too.
   const stored = await get(`/sleep/${DATE}?store=1`);
-  assert.deepEqual([stored.status, stored.body.stored, 'score' in stored.body], [200, true, false]);
+  assert.deepEqual([stored.status, stored.body.stored, 'score' in stored.body, typeof stored.body.summary], [200, true, false, 'object']);
 
   showScore(1);
   assert.equal((await get(`/sleep/${DATE}`)).body.score.score, 96, 'read on every request: back on, the score is back');
@@ -572,11 +644,13 @@ test('switch off, /sleep?nights=N and ?stored=1: the saved rows as stored, no sc
   const list = await get('/sleep?nights=60');
   assert.equal(list.body.nights.length, 8);
   assert.deepEqual(list.body.nights.map((n) => 'score' in n), Array(8).fill(false));
-  assert.deepEqual(list.body.nights.find((n) => n.night_date === DATE), json(row), 'the stored row, every column as stored');
+  assert.deepEqual(omit(list.body.nights.find((n) => n.night_date === DATE), 'summary'), json(row), 'the stored row, every column as stored');
+  assert.deepEqual(list.body.nights.map((n) => n.summary?.headline?.key !== undefined), Array(8).fill(true),
+    'every night still has its summary with the switch off');
 
   const stored = await get(`/sleep/${DATE}?stored=1`);
   assert.deepEqual(Object.keys(stored.body).sort(), ['contexts', 'locked', 'night']);
-  assert.deepEqual(stored.body.night, json(row));
+  assert.deepEqual(omit(stored.body.night, 'summary'), json(row));
 });
 
 test('switch off, raw samples gone: the no_data night carries neither the saved score nor score_source', async () => {
@@ -591,8 +665,11 @@ test('switch off, raw samples gone: the no_data night carries neither the saved 
 
   showScore(0);
   const r = await get(`/sleep/${DATE}?context=auto`);
-  assert.deepEqual(r.body, before);
+  assert.deepEqual(omit(r.body, 'summary'), before);
   assert.deepEqual(['score' in r.body, 'score_source' in r.body], [false, false]);
+  // The summary is of the saved night, as with the switch on, and the switch does not hide it.
+  assert.deepEqual(r.body.summary, on.body.summary);
+  assert.equal(r.body.summary.headline.key, 'settled');
 });
 
 test('switch off, /sleep/live: last night and tonight carry no score key', async () => {
@@ -605,7 +682,9 @@ test('switch off, /sleep/live: last night and tonight carry no score key', async
 
   showScore(0);
   const r = await get('/sleep/live');
-  assert.deepEqual(r.body, { scope: 'last', night: json(rowOf(last)) });
+  assert.deepEqual([r.body.scope, 'score' in r.body.night], ['last', false]);
+  assert.deepEqual(omit(r.body.night, 'summary'), json(rowOf(last)));
+  assert.deepEqual(r.body.night.summary, on.body.night.summary, 'the summary does not depend on the switch');
 
   // Tonight, in progress: with the switch on it says `in_progress`; off, it says nothing at all.
   db.prepare('DELETE FROM cameras').run();
@@ -616,4 +695,8 @@ test('switch off, /sleep/live: last night and tonight carry no score key', async
   showScore(0);
   const tonight = await get('/sleep/live');
   assert.deepEqual([tonight.body.scope, tonight.body.night.in_progress, 'score' in tonight.body.night], ['tonight', true, false]);
+  // No data yet tonight (`no_data`): nothing to describe, so no summary (night-summary.test.js has the "so far" line of an
+  // in-progress night that has data).
+  assert.equal(tonight.body.night.status, 'no_data', 'precondition');
+  assert.equal(tonight.body.night.summary, null);
 });

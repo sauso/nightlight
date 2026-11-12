@@ -475,6 +475,22 @@ When a read's fresh night is `no_data` and a saved `ok` row exists, the score is
 `score_source: 'stored'` is added; no other key of the fresh night changes. A night in progress or not `ok` skips the
 baseline read. `applyCorrection` adds `wake_given: true` when the review carries a wake time (#1041), which is how a
 wake the parent saved unchanged counts as confirmed.
+**The night summary** (sleep score plan, phase 3; tests in `backend/test/night-summary.test.js`,
+`backend/test/sleep-score-routes.test.js` and `frontend/test/nightSummaryPhrases.test.jsx`). The same `attachScore` adds a
+`summary` key beside `score`: `{ headline: { key }, observations: [{ key, params }], seed }` from
+`lib/nightSummary.js` (`selectSummary(night, score, { childId, input })`, pure, no wording at all). The score is now worked
+out even when the child's switch hides it (that costs the baseline read the switch used to save), because the headline
+class (settled, typical, mixed, unsettled) is derived from the score's continuity and restlessness parts; the switch
+omits only `score` and `score_source`, never `summary`. Selecting the summary has its own try/catch and log line:
+a failure gives `summary: null` and leaves the score and the route alone. It reads the same `toScoringInput` result the
+score used (so the correction rules are the score's: wakes outside a corrected span are filtered, and a time moved by
+more than `correction_span_tolerance_minutes` drops the wake-up and longest-stretch observations) and the stored
+`summary_facts`, which older nights lack. `lib/nightSummaryKeys.js` (no imports) is the one table of headline keys and
+each observation's params; the phrase library `frontend/src/lib/nightSummaryPhrases.js` is tested against it, so a key
+added on one side only fails a test. The library picks a variant with `hash(seed + key)`, skips unknown keys and
+formats times with `lib/homeTime.js`; it is in the browser so retuned wording needs no server release.
+`components/SleepScoreCard.jsx` is the "Night summary" card (the earlier "Sleep score" card when there is no `summary`),
+and `SleepSummaryCard.jsx` shows the headline on one line.
 `lib/sleepScore.js` holds `lib/sleepScore.js` holds `SCORE_VERSION`, the one frozen `SCORE_CONFIG` (weights, curve anchors, the cap
 margin, band edges, thresholds: change any and bump the version), `toScoringInput(night, { context, nowMs })` and the
 pure `scoreNight(night, baseline, ageMonths)`. `toScoringInput` turns a stored row or a fresh `computeNight` result

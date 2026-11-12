@@ -449,6 +449,20 @@ because the day `--accent-line` is only 2.45:1 there: arc `#A7B1FF` (6.13:1 at t
 `#2C2F63`), number `#FFFFFF` (12.40:1), track white at 16%. Measured with the WCAG formula, 2026-11-12; contrast only
 rises towards the darker end of the gradient.
 
+### Night summary (`components/SleepScoreCard.jsx`, `lib/nightSummaryPhrases.js`)
+A few plain sentences about the night, above the score. On the sleep detail page it is the card under the date navigator,
+titled "Night summary" with the same moon icon as `.sleep-insight__title`: a **headline** as the card's one prominent line
+(17px, weight 600, `--text-primary`), the **observations** as a quiet list under it (13px, `--text-secondary`, 2 to 4 items),
+and, when the child's "Show sleep score" switch is on, the score ring and its "How this is scored" button under a hairline
+(`.sleep-summary__score`). With the switch off the card is the sentences alone. When the server sends no `summary` the card is
+the earlier "Sleep score" card, unchanged. On the child's card the headline is **one line** under the duration
+(`.night__headline`, 13px, `#cdd0ff` like the heading above it) and **ends in an ellipsis rather than wrapping**: the ring beside
+it narrows the column at 375px. It is also in the button's `aria-label`, so nothing the ellipsis cuts is lost to a screen reader.
+
+The words are descriptive only: what was measured and how it compares with this child's own recent nights, never a cause, advice,
+praise or blame, never a sleep stage, no emoji and no exclamation mark. The headline's class follows the score's parts, so a
+headline cannot contradict the score. See the voice rules at the top of `lib/nightSummaryPhrases.js`.
+
 ### Modal (`components/Modal.jsx`)
 On phone widths a **sheet**, not a centred dialog: overlay `rgba(10, 13, 28, 0.7)`, card
 `max-width: 440`, hugging the bottom edge (`placement="top"` for the top), rounded 20px on the inner
