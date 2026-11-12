@@ -136,19 +136,22 @@ export const OBSERVATION_PHRASES = Object.freeze({
   ),
   longest_stretch_vs_usual: COMPARE(
     [
-      'The longest unbroken stretch was {minutes}, longer than usual.',
-      'Longest stretch without waking: {minutes}, longer than usual.',
-      'The longest run of sleep lasted {minutes}, longer than usual.',
+      // The server compares the stretch's SHARE of the night with the child's usual share (the score's own measure), so
+      // the sentence says "share of the night": a shorter stretch in a shorter night can be a larger share (Codex review
+      // of PR #1052).
+      'The longest unbroken stretch was {minutes}, a larger share of the night than usual.',
+      'Longest stretch without waking: {minutes}, a larger share of the night than usual.',
+      'The longest run of sleep lasted {minutes}, a bigger part of the night than usual.',
     ],
     [
-      'The longest unbroken stretch was {minutes}, shorter than usual.',
-      'Longest stretch without waking: {minutes}, shorter than usual.',
-      'The longest run of sleep lasted {minutes}, shorter than usual.',
+      'The longest unbroken stretch was {minutes}, a smaller share of the night than usual.',
+      'Longest stretch without waking: {minutes}, a smaller share of the night than usual.',
+      'The longest run of sleep lasted {minutes}, a smaller part of the night than usual.',
     ],
     [
-      'The longest unbroken stretch was {minutes}, about as long as usual.',
-      'Longest stretch without waking: {minutes}, about as long as usual.',
-      'The longest run of sleep lasted {minutes}, about as long as usual.',
+      'The longest unbroken stretch was {minutes}, about the usual share of the night.',
+      'Longest stretch without waking: {minutes}, about the usual share of the night.',
+      'The longest run of sleep lasted {minutes}, about the usual part of the night.',
     ],
   ),
   settling_time: plain(

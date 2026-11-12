@@ -59,9 +59,11 @@ export const SUMMARY_CONFIG = deepFreeze({
     //              end of every continuity curve (efficiency 0.85 scores 85).
     //   typical    the weakest part is 65 or more AND the overall score reaches the second band.
     //   mixed      everything in between, including a night whose parts are fine but whose overall score is low.
-    // The overall score's edges ARE the score's band edges. On an EARLY ESTIMATE (no usual yet; the score carries no
-    // band word) the overall score is not consulted: it rests on an age figure of a different quantity, and a
-    // headline must not claim more than the band word does.
+    // The overall score's edges ARE the score's band edges, on an early estimate too: the ring shows that number, and
+    // a headline of "settled" beside a score of 10 would contradict it (Codex review of PR #1052; the first version
+    // skipped the overall score on an early estimate).
+    // A SETTLED headline is also held at "typical" when a comparison shown beside it is worse than usual (more wake-ups,
+    // a smaller share of the night unbroken), see selectSummary: the headline must not contradict a line on the card.
     unsettled_below: 50,
     settled: { min_part: 80, min_overall: bandEdge('great') },
     typical: { min_part: 65, min_overall: bandEdge('good') },
@@ -146,10 +148,10 @@ function headlineClass(score) {
   const weakest = restlessness && restlessness.available && finite(restlessness.score)
     ? Math.min(continuity.score, restlessness.score)
     : continuity.score;
-  const overall = score.early_estimate ? null : score.score;
+  const overall = score.score;
   if (weakest < H.unsettled_below) return 'unsettled';
-  if (weakest >= H.settled.min_part && (overall == null || overall >= H.settled.min_overall)) return 'settled';
-  if (weakest >= H.typical.min_part && (overall == null || overall >= H.typical.min_overall)) return 'typical';
+  if (weakest >= H.settled.min_part && overall >= H.settled.min_overall) return 'settled';
+  if (weakest >= H.typical.min_part && overall >= H.typical.min_overall) return 'typical';
   return 'mixed';
 }
 
@@ -278,10 +280,14 @@ export function selectSummary(night, score, ctx = {}) {
   // --- Wake-ups and the longest stretch: the detector's figures for ITS span, so not after a correction that moved
   // a time past the tolerance (and not on a night where the stretch counter was reset by an unwatched gap: the
   // score already marks that metric unusable).
+  // The counted wake-ups from `summary_facts`, with a correction's span applied (also used for the facts below). A
+  // correction inside the tolerance can still cut a counted wake-up out of the parent's night: then the detector's
+  // COUNT includes one the parent's times exclude, so the count is not quoted (Codex review of PR #1052).
+  const counted = spanMoved ? null : countedWakes(facts, input, night);
   if (!spanMoved) {
     const continuity = component(score, 'continuity');
     const wakeTerm = hasScore && !reduced ? term(continuity, 'wake_count') : null;
-    if (m.wake_count.usable) {
+    if (m.wake_count.usable && !(counted && counted.dropped > 0)) {
       if (usable(wakeTerm)) {
         const S = cfg.same_as_usual;
         addVs(observation('wake_ups_vs_usual', {
@@ -308,7 +314,6 @@ export function selectSummary(night, score, ctx = {}) {
 
   // --- From `summary_facts` (nights stored from 2026-11-11; an older night has none and gets none of these).
   if (!spanMoved) {
-    const counted = countedWakes(facts, input, night);
     if (counted) {
       const cluster = wakeCluster(counted.wakes);
       if (cluster) add(observation('wake_clustering', cluster), N.wake_clustering);
@@ -344,9 +349,14 @@ export function selectSummary(night, score, ctx = {}) {
   if (hasScore && !reduced) headline = headlineClass(score) ?? 'neutral_last_night';
 
   candidates.sort((a, b) => b.rank - a.rank || KEY_ORDER.indexOf(a.obs.key) - KEY_ORDER.indexOf(b.obs.key));
-  return {
-    headline: { key: headline },
-    observations: candidates.slice(0, cfg.max_observations).map((c) => c.obs),
-    seed,
-  };
+  const shown = candidates.slice(0, cfg.max_observations).map((c) => c.obs);
+  // A "settled" headline is held at "typical" when a comparison that is SHOWN beside it is worse than usual: more
+  // wake-ups, or a smaller share of the night unbroken. The class comes from absolute curves, so a child whose usual
+  // is two wake-ups could otherwise read "settled" over "five wake-ups, more than the usual two". Only what is shown
+  // counts: a worse comparison that did not make the card cannot contradict it.
+  const worseThanUsual = shown.some((o) =>
+    (o.key === 'wake_ups_vs_usual' && o.params.direction === 'more')
+    || (o.key === 'longest_stretch_vs_usual' && o.params.direction === 'less'));
+  if (headline === 'settled' && worseThanUsual) headline = 'typical';
+  return { headline: { key: headline }, observations: shown, seed };
 }

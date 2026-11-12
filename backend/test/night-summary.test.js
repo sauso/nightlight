@@ -127,10 +127,23 @@ describe('the headline class follows the score', () => {
     assert.equal(headlineOf(fakeScore({ continuity: 100, overall: 54 })), 'mixed');
   });
 
-  test('an early estimate: the overall score is not consulted (continuity 80 is "settled" at an overall 10), and the continuity edge still applies', () => {
-    assert.equal(headlineOf(fakeScore({ continuity: 80, overall: 10, early: true })), 'settled');
+  test('an early estimate follows the overall score too: continuity 80 beside an overall 10 is "mixed", not "settled" (the ring shows that 10)', () => {
+    assert.equal(headlineOf(fakeScore({ continuity: 80, overall: 10, early: true })), 'mixed');
+    assert.equal(headlineOf(fakeScore({ continuity: 80, overall: 85, early: true })), 'settled');
     assert.equal(headlineOf(fakeScore({ continuity: 79, overall: 99, early: true })), 'typical');
     assert.equal(headlineOf(fakeScore({ continuity: 49, overall: 99, early: true })), 'unsettled');
+  });
+
+  test('a "settled" headline is held at "typical" when a worse-than-usual comparison is shown beside it', () => {
+    // 700 asleep, 50 awake, a 650-minute stretch: continuity is high and the overall score is in the top band either way.
+    const calm = stored({ asleep_minutes: 700, awake_minutes: 50, wake_count: 5, longest_stretch_minutes: 650 });
+    const usualFive = summarise(calm, { baseline: baselineOf({ ...USUAL, wake_count: 5 }) });
+    assert.equal(obs(usualFive, 'wake_ups_vs_usual').params.direction, 'about_the_same', 'precondition: no worse comparison');
+    assert.equal(usualFive.headline.key, 'settled');
+    // The same night for a child whose usual is two wake-ups: five is more, and it is shown, so not "settled".
+    const usualTwo = summarise(calm, { baseline: baselineOf({ ...USUAL, wake_count: 2 }) });
+    assert.deepEqual(obs(usualTwo, 'wake_ups_vs_usual').params, { count: 5, usual_count: 2, direction: 'more' });
+    assert.equal(usualTwo.headline.key, 'typical');
   });
 
   test('no continuity part to judge by: the neutral line, not a class', () => {
@@ -382,6 +395,20 @@ describe('a correction by a parent', () => {
     const s = summarise(corrected('06:20'));
     assert.deepEqual(obs(s, 'wake_clustering').params, { count: 3, from_at: '2026-03-11 01:00:00', to_at: '2026-03-11 01:50:00' });
     assert.equal(obs(s, 'room_activity_near_wakes'), undefined);
+  });
+
+  test('a correction that cut a counted wake-up out of the night: the detector\'s COUNT is not quoted either', () => {
+    // The uncorrected night quotes its count against the usual (6 against 4: more).
+    const uncorrected = summarise(stored({ wake_count: 6, summary_facts: facts(WAKES, 2) }));
+    assert.deepEqual(obs(uncorrected, 'wake_ups_vs_usual').params, { count: 6, usual_count: 4, direction: 'more' });
+    // Time up moved 10 minutes earlier (inside the 15-minute tolerance, so the wake-up lines are still chosen), which
+    // takes the wake-ups that begin at 06:22, 06:25 and 06:28 out of the parent's night: three of the six are gone.
+    const s = summarise(corrected('06:20'));
+    assert.equal(obs(s, 'wake_ups'), undefined);
+    assert.equal(obs(s, 'wake_ups_vs_usual'), undefined);
+    // A correction that cut none of them leaves the count in.
+    const noneCut = summarise(corrected('06:29', { wake_count: 2, summary_facts: facts([wakeAt('01:00'), wakeAt('02:00')], 0) }));
+    assert.deepEqual(obs(noneCut, 'wake_ups_vs_usual').params, { count: 2, usual_count: 4, direction: 'less' });
   });
 
   test('a wake-up that begins at the corrected time up is outside the span (the end is exclusive)', () => {
