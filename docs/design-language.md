@@ -22,20 +22,22 @@ One periwinkle ("peri") identifies actions and navigation. By day it is `#5663D6
 own colour, `#778FFD` (the owner, 2026-11-06), lighter than the day accent. The two themes need different text on a peri fill, which sets the rules:
 
 - `--accent` is for **fills**: buttons, the active segment, switches' tracks, selected chips. Text **on** a peri fill is
-  always `--on-accent`, never a literal colour: **white by day** (5.06:1 on `#5663D6`) and the header navy `#14142A`
-  **at night** (6.71:1 on `#8995FF`). The other pairings fail WCAG's 4.5:1: navy on `#5663D6` is 3.57:1, white on
-  `#8995FF` is 2.69:1.
+  always `--on-accent`, never a literal colour: **white by day** (5.06:1 on `#5663D6`) and the warm near-black
+  `#1A1618` **at night** (6.66:1 on `#8995FF`). The other pairings fail WCAG's 4.5:1: dark text on `#5663D6` is
+  3.54:1, white on `#8995FF` is 2.69:1.
 - **Lines, rings and icons** use `--accent-line` (the same colour as `--accent` in both themes today; the separate
   token is there because they have a lower, 3:1 target and may diverge): focus rings, selected borders, row icons, chevrons.
 - **Small text** (links, "Saved ✓") uses `--accent-text`: a deeper periwinkle by day, a lighter tint at night.
-- The header uses the same navy in both themes.
+- The header uses the same warm near-black (`--bar`, `#1F1A1E`) in both themes.
 - The **complement** (`--complement`, a warm gold; peri's opposite) is for small highlights only: the current step in
   the setup progress bar, the "Recommended" badge (`status-badge--highlight`, dark text on gold) and the border of the
-  avatar's camera badge. Not buttons, tabs or links. The gold border is decoration (1.68:1 on white): the badge's
+  avatar's camera badge. Not buttons, tabs or links. The gold border is decoration (1.65:1 on a day card): the badge's
   own fill and its icon carry the meaning.
 
-The page and card surfaces (`--bg`, `--bg-elevated-2`, `--border`, `--field-bg`) keep their original lavender tint;
-re-toning them towards blue is a separate decision.
+The palette is **warmer than the brand periwinkle** (owner, 2026-11-12: both themes were "too blue"): the page, cards,
+insets, text and borders are warm greys with a faint rose-brown cast, so the periwinkle stands out against them. It
+therefore marks **actions and navigation only**, and the gold complement stays a small highlight; neither is a
+surface colour.
 
 ---
 
@@ -53,39 +55,83 @@ These are the owner's approximate day/night palette, grouped at the top of
 
 | Token | Day | Night | Use |
 |---|---|---|---|
-| `--bg` | `#F7F4FD` | `#14142A` | Page |
-| `--bg-elevated` | `#FFFFFF` | `#221F3C` | Cards |
-| `--bg-elevated-2` | `#EAE3F8` | `#100F1C` | Insets |
-| `--text-primary` | `#1D1A3A` | `#E8E2F7` | Main text |
-| `--text-secondary` | `#625C7F` | `#BCB3D5` | Supporting text |
+| `--bg` | `#F8F5F0` | `#1A1618` | Page |
+| `--bg-elevated` | `#FFFDF9` | `#262024` | Cards |
+| `--bg-elevated-2` | `#EFE8DF` | `#121011` | Insets |
+| `--text-primary` | `#241F24` | `#F0E9E3` | Main text |
+| `--text-secondary` | `#6B6158` | `#C4B9AF` | Supporting text |
 | `--accent` | `#5663D6` | `#8995FF` | Fills: buttons, active segments, selected chips |
-| `--on-accent` | `#FFFFFF` | `#14142A` | Text on an `--accent` fill |
+| `--on-accent` | `#FFFFFF` | `#1A1618` | Text on an `--accent` fill |
 | `--accent-line` | `#5663D6` | `#8995FF` | Focus rings, selected borders, icons and chevrons |
 | `--accent-text` | `#4A55C8` | `#A7B1FF` | Small linked text |
 | `--accent-soft` | `#D3D8FF` | `#C5CBFF` | Header controls and subtle accents |
 | `--complement` | `#F2C14E` | `#F6D365` | Small highlights only (see section 1) |
-| `--on-complement` | `#14142A` | `#14142A` | Text on a `--complement` fill |
-| `--bar` | `#14142A` | `#14142A` | Header |
-| `--bar-text` | `#E8E2F7` | `#E8E2F7` | Header title |
+| `--on-complement` | `#1F1A1E` | `#1F1A1E` | Text on a `--complement` fill |
+| `--bar` | `#1F1A1E` | `#1F1A1E` | Header |
+| `--bar-text` | `#EFE8E2` | `#EFE8E2` | Header title |
 | `--live` | `#23734F` | `#8BDBAD` | Live status |
 | `--offline` | `#AA3F54` | `#F4A3AD` | Offline / destructive |
-| `--border` | `#DDD5EE` | `#383450` | Borders |
-| `--field-bg` | `#EAE3F8` | `#100F1C` | Inputs |
+| `--border` | `#E5DCD1` | `#3D3439` | Borders |
+| `--field-bg` | `#EFE8DF` | `#121011` | Inputs |
 
-Measured with the WCAG formula (2026-11-06): `--on-accent` on `--accent` is 5.06:1 by day (white on `#5663D6`) and
-6.71:1 at night (navy on `#8995FF`). By day `--accent-text` (`#4A55C8`) is 6.13:1 on white cards, 5.64:1 on the page and
-4.92:1 on inset fields (plain `#5663D6` would only reach 4.06:1 on an inset, which is why the text token is deeper);
-at night `#A7B1FF` is 7.81:1 on cards, 8.92:1 on the page and 9.37:1 on insets. `--accent-line` is 5.06:1 on white and
-4.65:1 on the page by day (3:1 is the non-text target), and 5.87:1 on night cards. `--on-complement` on `--complement`
-is 10.76:1 by day and 12.40:1 at night. The logo's crescent on its `#14142A` ground is 6.13:1 (a graphic needs 3:1).
-Night live and offline text have 9.65:1 and 8.04:1 on cards; by day they have 5.77:1 and 5.92:1 on white cards. These
-clear WCAG's 4.5:1 normal-text target. A new accent use must pick its token by what it is (fill, text on a fill, line,
-small text). `test/paletteTokens.test.jsx` recomputes these ratios from the stylesheet's own token values and fails if a
-colour change makes any of them too low, if white or near-white text lands on an `--accent` fill, if a focus ring uses
-plain `--accent`, or if the logo's fill stops being `#778FFD`.
+Measured with the WCAG formula (2026-11-12). Text: `--text-primary` is 15.94:1 on a day card, 14.89:1 on the page and
+13.33:1 on an inset; at night 13.29:1 on a card, 14.91:1 on the page and 15.77:1 on an inset. `--text-secondary` is 5.95:1,
+5.56:1 and 4.97:1 by day (the inset is its tightest surface) and 8.30:1, 9.31:1 and 9.84:1 at night. Accent:
+`--on-accent` on `--accent` is 5.06:1 by day (white on `#5663D6`) and 6.66:1 at night (`#1A1618` on `#8995FF`). By day
+`--accent-text` (`#4A55C8`) is 6.04:1 on cards, 5.64:1 on the page and 5.05:1 on inset fields (plain `#5663D6` would only
+reach 4.16:1 on an inset, which is why the text token is deeper); at night `#A7B1FF` is 7.89:1 on cards, 8.85:1 on the page
+and 9.37:1 on insets. `--accent-line` is 4.98:1 on a card and 4.65:1 on the page by day (3:1 is the non-text target), and
+5.94:1 on night cards. `--on-complement` on `--complement` is 10.22:1 by day and 11.78:1 at night. The header's text
+(`#EFE8E2`) is 14.13:1 on `--bar` and its controls (`--accent-soft`) 12.28:1. The logo's crescent on `--bar` is 5.82:1 (a
+graphic needs 3:1). Live and offline text are 9.76:1 and 8.13:1 on night cards (`#8BDBAD`, `#F4A3AD`) and 5.68:1 and 5.83:1
+on day cards. These clear WCAG's 4.5:1 normal-text target. A new accent use must pick its token by what it is (fill, text on
+a fill, line, small text). `test/paletteTokens.test.jsx` recomputes these ratios from the stylesheet's own token values and
+fails if a colour change makes any of them too low, if white or near-white text lands on an `--accent` fill, if a focus
+ring uses plain `--accent`, or if the logo's fill stops being `#778FFD`. It also checks the band colours and the
+night-card text below.
 
-Sleep-timeline tokens (`--sleep-*`) are categorical data colours. Keep them
-separate from branding.
+The header colour is repeated in `index.html`'s `theme-color` meta (`#1F1A1E`), which tints the phone's browser chrome.
+The manifest's `theme_color` and `background_color` and the app icons' ground are still the older navy `#14142A`; they
+change with the next icon refresh, not with the palette.
+
+### Child hero card (`.night`)
+
+One fixed dark gradient in both themes: `linear-gradient(165deg, #352B3A 0%, #1E191F 100%)`, so its text colours are
+literals, held as three custom properties on `.night` (`--night-text` white, `--night-muted` `#D6CCD3`, `--night-link`
+`#C7CAFF`) plus `--night-divider` (white at 10%) so no rule below repeats a hex. Measured on the gradient's lightest stop
+(`#352B3A`), where contrast is lowest: `--night-text` 13.48:1, `--night-muted` 8.62:1, `--night-link` 8.55:1 (small text
+needs 4.5:1). Everything secondary on the card (age, range, "In bed", the estimate note, the headline) is `--night-muted`;
+only the "Edit" link and the chevron use `--night-link`. The score ring's colours on this card are in "Score ring" below.
+
+### Band colours (tokens defined, used from the next change)
+
+Five score bands get colours so the ring, the nights strip and the breakdown bars can show how a night went at a glance.
+The tokens exist now (`--band-*` in `index.css`); no component uses them yet. **A colour is never the only signal** (the
+band word and the number always show) and **text is never set in a band colour**: they are marks (rings, bars, dots) only.
+
+| Band | `--band-*` by day (card / inset) | `--band-*` at night (card / inset) | `--band-*-ring` on the night card (card / track) |
+|---|---|---|---|
+| great | `#1E6B3D` 6.41 / 5.36 | `#A8EDBE` 11.81 / 14.01 | `#A8EDBE` 9.96 / 11.83 |
+| good | `#126067` 7.14 / 5.97 | `#5CBFC6` 7.40 / 8.78 | `#5CBFC6` 6.24 / 7.41 |
+| fair | `#A36A10` 4.47 / 3.73 | `#D99C50` 6.71 / 7.96 | `#D99C50` 5.66 / 6.72 |
+| low | `#C4688A` 3.63 / 3.03 | `#C77790` 4.92 / 5.84 | `#C77790` 4.15 / 4.93 |
+| early estimate | `#6B6158` 5.95 / 4.97 | `#CCC3B8` 9.18 / 10.89 | `#CCC3B8` 7.74 / 9.20 |
+
+Marks need 3:1 (a graphic), and every pair above clears it; the weakest are the day rose on the inset (3.03:1) and the
+night-card rose (4.15:1 on the bare gradient, 3.51:1 with the 12% tint the design lays over the card). The ring variants
+do not switch with the theme because the `.night` card does not. Swapping the rose for a quieter hue later is a token
+change. `test/paletteTokens.test.jsx` recomputes all three columns from the stylesheet.
+
+### Sleep timeline colours
+
+The timeline tokens (`--sleep-*`) are categorical data colours; keep them separate from branding. Asleep is
+`#4B53B5` by day and `#7C85E6` at night, stirring `#A7ADE4` in both, awake an amber (`#F0A257` / `#F6C899`) and room
+activity a teal (`#2FA39A` / `#3EC4B8`). Amber by day is only 2.06:1 on a card, so where the colour is **text** (a
+duration, a badge, an icon) the rule uses `--sleep-wake-text` (`#9A5410` by day, 5.66:1); the segment keeps the lighter
+amber. A segment next to asleep has a 1px card-coloured line between them, because at night asleep against awake is
+only 2.15:1. Room-activity teal (`#2FA39A` by day) is 3.03:1 on a card, so its text (a duration, the "Movement outside the
+bed" tag, the "refined" label) uses `--sleep-visit-text`: `#17706A` by day (5.80:1 on a card, 4.97:1 on its own tag) and the
+same `#3EC4B8` at night (7.45:1); the dots and legend swatch keep the bright teal.
 
 The Settings API still accepts and returns `accent_color`, `live_color`,
 `offline_color`, and `font_choice` for older clients. This web UI ignores
@@ -226,18 +272,18 @@ Bump the `now-playing-512.png?v=` value in `useNowPlaying.js` after changing
 that image.
 
 The manifest lists the maskable pair with `purpose: 'any maskable'`.
-The HTML and manifest browser colours both use `#14142A` to match `--bar`.
+The HTML `theme-color` meta uses `#1F1A1E` to match `--bar`; the manifest's colours are still the older `#14142A` (see section 2).
 
 **The logo in the app** (header, setup guide, About, sign-in) is not one of these PNGs. It is the SVG
 `public/icons/nightlight-logo.svg` (the owner's periwinkle crescent and sleeping baby, transparent ground), drawn
-by `components/Logo.jsx`: bare in the header (the bar already is `--bar`, `#14142A`), and everywhere else on a
+by `components/Logo.jsx`: bare in the header (the bar already is `--bar`, `#1F1A1E`), and everywhere else on a
 `--bar` rounded square with a corner radius of 25% of its size, so the setup guide, About, sign-in and "Can't
 reach" screens show the same tile. The PNGs above are made from the same SVG on `#14142A`
 (`branding/logo-source.png` is that 1024px render; the standard icons are opaque full-bleed squares, and the OS
 rounds them).
 
 **The setup screens have no header** (the Welcome and Create-your-account screens, then the guide). On a phone,
-`html.setup-wizard` (set by `lib/useSetupChrome.js`) draws a navy `--bar` strip exactly as tall as the status bar and
+`html.setup-wizard` (set by `lib/useSetupChrome.js`) draws a `--bar` (near-black) strip exactly as tall as the status bar and
 nothing else, because the phone draws its status-bar icons light and the page colour hid them by day; on a computer
 the strip has no height. The counter is "Step n of 7": Create your account is Step 1, the Welcome screen is not
 numbered, and the review page is not counted. The avatar in the account and caregiver forms is centred, with Remove
@@ -319,7 +365,7 @@ Settings sub-menus (Integrations and Camera and Recording) share a pattern: a ro
 opens a sub-menu page. Its rows pass `state.from` for Back, and each destination has the sub-menu as
 its fallback Back target for direct links and refreshes.
 The Live page's theme button sits at the far right of the full-width bar, including at ≥1200px.
-The bar stays navy in both themes, so the button uses `--accent-soft`, not the changing
+The bar stays near-black in both themes, so the button uses `--accent-soft`, not the changing
 `--text-secondary`. It is compact in short landscape and keeps a 44px touch target.
 Other pages and sub-pages have no header theme button; use Account → Appearance instead.
 The back label uses up to about 35% of the bar, then ends with an ellipsis to leave room
@@ -354,7 +400,7 @@ by default** (mobile-first: buttons are full-width unless constrained).
 `:disabled` → `opacity: 0.55`. `.icon-btn` is the bare icon button: no background/border,
 `--text-secondary`, `padding: 6px 8px`; `.icon-btn--danger` recolours to `--offline`.
 
-`.btn-primary` uses `--on-accent` on the peri accent: white by day (5.06:1), navy at night (6.71:1).
+`.btn-primary` uses `--on-accent` on the peri accent: white by day (5.06:1), near-black `#1A1618` at night (6.66:1).
 
 ### Fields
 Label 12px `--text-secondary`, 6px below. Input: full width, `--field-bg`, 1px `--border`, radius
@@ -443,11 +489,13 @@ and **no animation** (section 7). Two sizes, from the type scale: 44px with a 15
 a 20px number (the sleep detail page). The ring is `aria-hidden`; the control around it carries the score in its name.
 
 `surface` picks the colours. On a `.card`: the arc is `--accent-line` on a `--border` track and the number is
-`--text-primary` (arc 5.06:1 on a white card by day, 5.87:1 on a night card; 3.57:1 and 4.40:1 against the track).
+`--text-primary` (arc 4.98:1 on a day card, 5.94:1 on a night card; 3.73:1 and 4.46:1 against the track; the number 15.94:1
+and 13.29:1).
 On the child's hero card (`.night`), which is the same dark gradient in both themes, the colours are **literals**,
-because the day `--accent-line` is only 2.45:1 there: arc `#A7B1FF` (6.13:1 at the gradient's lightest point,
-`#2C2F63`), number `#FFFFFF` (12.40:1), track white at 16%. Measured with the WCAG formula, 2026-11-12; contrast only
-rises towards the darker end of the gradient.
+because the day `--accent-line` is only about 2.4:1 there: arc `#A7B1FF` (6.66:1 at the gradient's lightest point,
+`#352B3A`, and 7.91:1 against its track), number `#FFFFFF` (13.48:1), track near-black at 35% (`rgba(10, 8, 12, 0.35)`),
+a groove darker than the card. Measured with the WCAG formula, 2026-11-12; contrast only rises towards the darker end
+of the gradient. Still one colour whatever the score until the next change recolours the arc per band (see "Band colours").
 
 ### Night summary (`components/SleepScoreCard.jsx`, `lib/nightSummaryPhrases.js`)
 A few plain sentences about the night, above the score. On the sleep detail page it is the card under the date navigator,
@@ -456,7 +504,7 @@ titled "Night summary" with the same moon icon as `.sleep-insight__title`: a **h
 and, when the child's "Show sleep score" switch is on, the score ring and its "How this is scored" button under a hairline
 (`.sleep-summary__score`). With the switch off the card is the sentences alone. When the server sends no `summary` the card is
 the earlier "Sleep score" card, unchanged. On the child's card the headline is **one line** under the duration
-(`.night__headline`, 13px, `#cdd0ff` like the heading above it) and **ends in an ellipsis rather than wrapping**: the ring beside
+(`.night__headline`, 13px, `--night-muted` like the heading above it) and **ends in an ellipsis rather than wrapping**: the ring beside
 it narrows the column at 375px. It is also in the button's `aria-label`, so nothing the ellipsis cuts is lost to a screen reader.
 
 The words are descriptive only: what was measured and how it compares with this child's own recent nights, never a cause, advice,
@@ -464,7 +512,7 @@ praise or blame, never a sleep stage, no emoji and no exclamation mark. The head
 headline cannot contradict the score. See the voice rules at the top of `lib/nightSummaryPhrases.js`.
 
 ### Modal (`components/Modal.jsx`)
-On phone widths a **sheet**, not a centred dialog: overlay `rgba(10, 13, 28, 0.7)`, card
+On phone widths a **sheet**, not a centred dialog: overlay `rgba(10, 8, 12, 0.7)`, card
 `max-width: 440`, hugging the bottom edge (`placement="top"` for the top), rounded 20px on the inner
 side only, title 18px, `✕` close button with `aria-label="Close"`.
 
