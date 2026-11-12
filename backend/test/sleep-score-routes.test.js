@@ -525,3 +525,95 @@ test('/sleep/live: sleep tracking off is unchanged, no night and so no score', a
   db.prepare('UPDATE children SET track_sleep = 0 WHERE id = ?').run(CHILD);
   assert.deepEqual((await get('/sleep/live')).body, { scope: 'off', night: null });
 });
+
+// ================================ the per-child "Show sleep score" switch (phase 2) ================================
+//
+// With `children.show_sleep_score = 0` every sleep route returns the night as it was before the score existed: no
+// `score` key and no `score_source`, every other key unchanged. Each test first proves the score IS there with the
+// switch on (the precondition: without it "absent" could mean the fixture never scored), then turns it off.
+
+const showScore = (on) => db.prepare('UPDATE children SET show_sleep_score = ? WHERE id = ?').run(on, CHILD);
+
+test('switch off, /sleep/:date: no score key on any read shape, every other key unchanged; back on, 96 again', async () => {
+  setUpFixed();
+  seedUsualBefore(JSON.stringify(FIXED_CONTEXT));
+  assert.equal(db.prepare('SELECT show_sleep_score FROM children WHERE id = ?').get(CHILD).show_sleep_score, 1,
+    'precondition: a new child has the switch on');
+  const plain = json(computeNight(CHILD, DATE));
+  const on = await get(`/sleep/${DATE}`);
+  assert.equal(on.body.score.score, 96, 'precondition: with the switch on this night has a score');
+
+  showScore(0);
+  for (const query of ['', '?context=current', '?context=auto', '?context=current&raw=1']) {
+    const r = await get(`/sleep/${DATE}${query}`);
+    assert.equal(r.status, 200, query);
+    assert.deepEqual(r.body, plain, `${query}: the night exactly as computed, nothing added`);
+    assert.equal('score' in r.body, false, query);
+  }
+  const detail = await get(`/sleep/${DATE}?detail=1`);
+  const withTimeline = computeNight(CHILD, DATE, { includeTimeline: true });
+  assert.deepEqual(detail.body, json({ ...withTimeline, transition_frames: framesForNight(withTimeline) }));
+
+  // An admin's store answers with a night too.
+  const stored = await get(`/sleep/${DATE}?store=1`);
+  assert.deepEqual([stored.status, stored.body.stored, 'score' in stored.body], [200, true, false]);
+
+  showScore(1);
+  assert.equal((await get(`/sleep/${DATE}`)).body.score.score, 96, 'read on every request: back on, the score is back');
+});
+
+test('switch off, /sleep?nights=N and ?stored=1: the saved rows as stored, no score key', async () => {
+  setUpFixed();
+  const row = storeFixedWithUsual();
+  const on = (await get('/sleep?nights=60')).body.nights;
+  assert.deepEqual(on.map((n) => typeof n.score.score), Array(8).fill('number'), 'precondition: all eight nights score with the switch on');
+
+  showScore(0);
+  const list = await get('/sleep?nights=60');
+  assert.equal(list.body.nights.length, 8);
+  assert.deepEqual(list.body.nights.map((n) => 'score' in n), Array(8).fill(false));
+  assert.deepEqual(list.body.nights.find((n) => n.night_date === DATE), json(row), 'the stored row, every column as stored');
+
+  const stored = await get(`/sleep/${DATE}?stored=1`);
+  assert.deepEqual(Object.keys(stored.body).sort(), ['contexts', 'locked', 'night']);
+  assert.deepEqual(stored.body.night, json(row));
+});
+
+test('switch off, raw samples gone: the no_data night carries neither the saved score nor score_source', async () => {
+  setUpFixed();
+  storeFixedWithUsual();
+  db.prepare('DELETE FROM activity_samples').run();
+  db.prepare('DELETE FROM bed_transitions').run();
+  const before = json(computeNightForDisplay(CHILD, DATE, { includeTimeline: false, mode: 'auto' }));
+  const on = await get(`/sleep/${DATE}?context=auto`);
+  assert.deepEqual([on.body.status, on.body.score_source, on.body.score.score], ['no_data', 'stored', 96],
+    'precondition: with the switch on the saved score is lent to this night');
+
+  showScore(0);
+  const r = await get(`/sleep/${DATE}?context=auto`);
+  assert.deepEqual(r.body, before);
+  assert.deepEqual(['score' in r.body, 'score_source' in r.body], [false, false]);
+});
+
+test('switch off, /sleep/live: last night and tonight carry no score key', async () => {
+  setUpLive();
+  const last = lastCompletedNightDate(CHILD);
+  seedLiveUsualBefore(last);
+  putUsualNight(last, liveStart(last), LIVE_HOURS, JSON.stringify(currentScoringContext(CHILD)));
+  const on = await get('/sleep/live');
+  assert.deepEqual([on.body.scope, typeof on.body.night.score.score], ['last', 'number'], 'precondition: scored with the switch on');
+
+  showScore(0);
+  const r = await get('/sleep/live');
+  assert.deepEqual(r.body, { scope: 'last', night: json(rowOf(last)) });
+
+  // Tonight, in progress: with the switch on it says `in_progress`; off, it says nothing at all.
+  db.prepare('DELETE FROM cameras').run();
+  db.prepare('DELETE FROM sleep_nights').run();
+  db.prepare('DELETE FROM children').run();
+  setUpLive(new Date().getUTCHours() - 1);
+  assert.equal((await get('/sleep/live')).body.night.score.reason, 'in_progress', 'precondition');
+  showScore(0);
+  const tonight = await get('/sleep/live');
+  assert.deepEqual([tonight.body.scope, tonight.body.night.in_progress, 'score' in tonight.body.night], ['tonight', true, false]);
+});
