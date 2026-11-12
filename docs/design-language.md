@@ -146,7 +146,7 @@ there is no token for it yet because nothing draws it.
 
 #### Known pairs below their floor
 
-These neighbours are below 3:1 and are accepted (design v3, 2026-11-13). Each is two data colours next to each other, never
+These pairs are below 3:1 and are accepted (design v3, 2026-11-13). Each is two data colours next to each other, or a segment on its surface, never
 text, and each is told apart by position, order or a label as well as by colour. `test/paletteTokens.test.jsx` names them
 and fails if one stops being true, so a fix is noticed rather than silently left in the list.
 
@@ -156,6 +156,27 @@ and fails if one stops being true, so a fix is noticed rather than silently left
 | Night: stirring `#4A4F86` against asleep `#7C85E6` | 2.31 | Same; a stirring segment sits between asleep and its neighbours. |
 | Day: stirring `#A7ADE4` against a white card | 2.16 | Timeline neighbour on a card; the segments are told apart by order and the legend. |
 | Day: room activity `#2FA39A` against the lavender track `#EAE3F8` | 2.47 | Drawn above the bar, so it never sits on the track's own colour. |
+| Night: stirring `#4A4F86` against the card `#221F3C` | 2.07 | The segment is read by its place in the bar and the legend, not by standing out from the card. |
+| Night: stirring `#4A4F86` against the inset track `#100F1C` | 2.49 | Same. |
+| Day: stirring `#A7ADE4` against the inset track `#EAE3F8` | 1.73 | Same; the weakest pair in the list after the awake segments. |
+| Day: wake-up amber `#F0A257` against the white card | 2.10 | The amber is a segment and a dot, never text (its text is `--sleep-wake-text`, 5.75:1). |
+| Day: before/after-sleep segment `#D2D0E2` against the inset track `#EAE3F8` | 1.22 | A deliberately faint "nothing counted here" segment (it was already this faint before the 2026-11-12 trial). |
+| Night: before/after-sleep segment `#3C3F60` against the inset track `#100F1C` | 1.87 | Same. |
+| Day: before/after-sleep segment `#D2D0E2` against the white card | 1.52 | The segment is drawn on the inset track, not on the card; listed because the bar's ends meet the card. |
+| Night: before/after-sleep segment `#3C3F60` against the card `#221F3C` | 1.56 | Same. |
+| Day: wake-up amber `#F0A257` against the inset track `#EAE3F8` | 1.68 | A segment on the track it is drawn on; the amber is told apart by hue, not lightness. |
+| Day: stirring `#A7ADE4` against the wake-up amber `#F0A257` | 1.03 | Same lightness, different hue; the segments are told apart by hue, order and the legend. |
+| Day: stirring `#A7ADE4` against the before/after-sleep segment `#D2D0E2` | 1.42 | Two pale neighbours; told apart by order and the legend. |
+| Day: wake-up amber `#F0A257` against the before/after-sleep segment `#D2D0E2` | 1.38 | Same. |
+| Night: stirring `#4A4F86` against the before/after-sleep segment `#3C3F60` | 1.33 | Two dim neighbours; told apart by order and the legend. |
+
+The first four were the designer's; the next six and the last seven were found when the list was reviewed (2026-11-13), and
+the test now enumerates every pair of bar segments and every segment or room-activity dot on the card and the inset track,
+so this table is complete for those: a pair under 3:1 that is not named fails it. (Room activity is a dot drawn above the
+bar, so it is measured against the surfaces only.) All are graphics, never text, and some were already this low before the
+warm trial. The follow-up timeline-shape change (design "v3.1", a separate change) fixes most of them by separating the
+segments with gaps and shape rather than by recolouring, so this table is expected to shrink then, and the test's list
+shrinks with it.
 
 The Settings API still accepts and returns `accent_color`, `live_color`,
 `offline_color`, and `font_choice` for older clients. This web UI ignores

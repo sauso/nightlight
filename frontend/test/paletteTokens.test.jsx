@@ -210,6 +210,32 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     expect(pick(day, '-ring'), 'ring marks on the navy card').toEqual(['#a8edbe', '#5cbfc6', '#d99c50', '#c77790', '#d3cde6']);
   });
 
+  test('★ the palette tokens are declared ONLY in the two theme blocks (and --night-* only on .night): a later override elsewhere would change the real colour unseen by these tests', () => {
+    // The token reader above reads exactly `:root` and `:root[data-theme='dark']`, so a declaration anywhere else
+    // (for instance `html[data-theme='dark'] { --bg: ... }`, which has higher specificity) would win in the browser and be invisible
+    // here. Every place that declares one of the pinned tokens is therefore listed; the only deliberate exceptions are named:
+    //   .night  declares the --night-* custom properties (and nothing else of the palette), by design.
+    // There are no others on this branch. Custom properties set in JSX style props are out of reach of this check.
+    const pinned = /^--(?:bg|bg-elevated|bg-elevated-2|field-bg|text-primary|text-secondary|border|bar|bar-text|on-accent|band-[a-z-]+|sleep-[a-z-]+|night-[a-z-]+)$/;
+    const allowed = (selector, token) => selector === ':root' || selector === ":root[data-theme='dark']" || (selector === '.night' && token.startsWith('--night-'));
+    const stray = [];
+    for (const rule of rules) {
+      const at = rule.lastIndexOf('{');
+      if (at < 0) continue;
+      const selector = rule.slice(0, at).trim();
+      for (const [, token] of rule.slice(at + 1).matchAll(/(?:^|[\s;])(--[a-z0-9-]+)\s*:/g)) {
+        if (pinned.test(token) && !allowed(selector, token)) stray.push(`${selector} { ${token} }`);
+      }
+    }
+    expect(stray, `palette tokens declared outside the two theme blocks: ${stray.join(' | ')}`).toEqual([]);
+    // And the night card's gradient is declared once: a second `.night` background rule would repaint it unseen by the stop reader.
+    const gradientRules = rules.filter((rule) => {
+      const at = rule.lastIndexOf('{');
+      return at >= 0 && /\.night(?![\w-])/.test(rule.slice(0, at)) && /background(?:-image)?:[^;]*gradient/.test(rule.slice(at + 1));
+    });
+    expect(gradientRules.length, `.night gradient rules: ${gradientRules.join(' | ')}`).toBe(1);
+  });
+
   test('★ text is never set in a band colour: no rule uses a --band-* token for `color`', () => {
     const offenders = rules.filter((rule) => /(^|[ ;{])color:\s*var\(--band-/.test(rule));
     expect(offenders, `band colour used as text: ${offenders.join(' | ')}`).toEqual([]);
@@ -298,22 +324,53 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
   });
 
   // Known pairs below their floor (design v3, 2026-11-13; docs/design-language.md, "Known pairs below their floor"). Each is two
-  // DATA colours that sit next to each other, never text. They are named here with the designer's measured ratio so that the list
-  // is honest in both directions: a pair that gets worse than its ratio, or better than the 3:1 floor, fails this test and the doc
-  // has to be updated, instead of the exception quietly going stale (the same pattern as the exceptions in the score-colours change).
-  test.each([
-    ['night: wake-up amber against asleep', () => contrast(sleepNight['--sleep-wake'], sleepNight['--sleep-asleep']), 2.15],
-    ['night: stirring against asleep', () => contrast(sleepNight['--sleep-stir'], sleepNight['--sleep-asleep']), 2.31],
-    ['day: stirring against the white card', () => contrast(sleepDay['--sleep-stir'], day['--bg-elevated']), 2.16],
-    ['day: room activity against the lavender track', () => contrast(sleepDay['--sleep-visit'], day['--bg-elevated-2']), 2.47],
-  ])('★ known below-floor pair, %s, is still exactly its documented ratio and still under 3:1', (_label, measure, documented) => {
-    const ratio = measure();
+  // graphics, never text: either two bar segments that can touch, or a segment on the card or the inset track it is drawn on.
+  // They are named here with their measured ratio so that the list is honest in both directions: a pair that gets worse than its
+  // ratio, or better than the 3:1 floor, fails this test and the doc has to be updated, instead of the exception quietly going
+  // stale (the same pattern as the exceptions in the score-colours change). The first four came from the designer; the review of
+  // that list (2026-11-13) found the rest, and the completeness test below is what stops a list like this being short again.
+  // The timeline-shape follow-up ("v3.1": segments separated by gaps and shape, not by colour alone) fixes most of them.
+  const TIMELINE_PAIRS = [['asleep', '--sleep-asleep'], ['stir', '--sleep-stir'], ['wake', '--sleep-wake'], ['awake', '--sleep-awake'], ['visit', '--sleep-visit']];
+  const SURFACES = { card: '--bg-elevated', track: '--bg-elevated-2' };
+  const timelineColour = (theme, name) => {
+    const t = theme === 'day' ? day : night;
+    const found = TIMELINE_PAIRS.find(([n]) => n === name);
+    return found ? t[found[1]] : t[SURFACES[name]];
+  };
+  const BELOW_FLOOR = [
+    // [theme, a, b, ratio]  (a and b are the names above; `card` is --bg-elevated and `track` is --bg-elevated-2)
+    ['night', 'wake', 'asleep', 2.15], ['night', 'stir', 'asleep', 2.31], ['day', 'stir', 'card', 2.16], ['day', 'visit', 'track', 2.47],
+    ['night', 'stir', 'card', 2.07], ['night', 'stir', 'track', 2.49], ['day', 'stir', 'track', 1.73], ['day', 'wake', 'card', 2.1],
+    ['day', 'awake', 'track', 1.22], ['night', 'awake', 'track', 1.87],
+    ['day', 'awake', 'card', 1.52], ['night', 'awake', 'card', 1.56], ['day', 'wake', 'track', 1.68],
+    ['day', 'stir', 'wake', 1.03], ['day', 'stir', 'awake', 1.42], ['day', 'wake', 'awake', 1.38], ['night', 'stir', 'awake', 1.33],
+  ];
+  const sortedPair = (a, b) => [a, b].sort().join('|');
+
+  test.each(BELOW_FLOOR)('★ known below-floor pair, %s: %s against %s, is still exactly %s:1 and still under 3:1', (theme, a, b, documented) => {
+    const ratio = contrast(timelineColour(theme, a), timelineColour(theme, b));
     expect(round2(ratio), 'the documented ratio').toBe(documented);
-    expect(ratio, 'below the 3:1 a graphic needs: if this fails the colour was fixed, so remove it from the list in the doc').toBeLessThan(3);
+    expect(ratio, 'below the 3:1 a graphic needs: if this fails the colour was fixed, so remove it from the list here and in the doc').toBeLessThan(3);
   });
 
-  test('★ every OTHER pair the design measured on the timeline clears 3:1 (so a new below-floor pair is not hidden among the named ones)', () => {
-    // The pairs that clear: room activity on the night card and track, asleep against each card, and the day wake-up amber against asleep.
+  test('★ the named list is COMPLETE: every pair of bar segments, and every segment or room-activity dot on the card and track, that is under 3:1 is named', () => {
+    // Bar segments can touch one another; every timeline colour sits on the card or its inset track. Room activity is drawn above the
+    // bar (a dot), so it is only measured against the surfaces, not against the other segments.
+    const segments = ['asleep', 'stir', 'wake', 'awake'];
+    const candidates = [];
+    for (const theme of ['day', 'night']) {
+      for (let i = 0; i < segments.length; i += 1) for (let j = i + 1; j < segments.length; j += 1) candidates.push([theme, segments[i], segments[j]]);
+      for (const name of [...segments, 'visit']) for (const surface of ['card', 'track']) candidates.push([theme, name, surface]);
+    }
+    const under = candidates
+      .filter(([theme, a, b]) => contrast(timelineColour(theme, a), timelineColour(theme, b)) < 3)
+      .map(([theme, a, b]) => `${theme}:${sortedPair(a, b)}`).sort();
+    const named = BELOW_FLOOR.map(([theme, a, b]) => `${theme}:${sortedPair(a, b)}`).sort();
+    expect(under, 'a pair under 3:1 that is not named (add it to BELOW_FLOOR and the doc), or a named pair that is no longer under').toEqual(named);
+    expect(new Set(named).size, 'no pair is named twice').toBe(named.length);
+  });
+
+  test('★ the pairs the design measured as clearing 3:1 still do (a spot check, so the completeness list is not the only thing watching them)', () => {
     expect(contrast(sleepNight['--sleep-visit'], night['--bg-elevated']), 'night room activity on the card').toBeGreaterThanOrEqual(3);
     expect(contrast(sleepNight['--sleep-visit'], night['--bg-elevated-2']), 'night room activity on the track').toBeGreaterThanOrEqual(3);
     expect(contrast(sleepDay['--sleep-visit'], day['--bg-elevated']), 'day room activity on the card').toBeGreaterThanOrEqual(3);
