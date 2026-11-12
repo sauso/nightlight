@@ -225,6 +225,32 @@ export const OBSERVATION_PHRASES = Object.freeze({
     'No one was in the bed, as noted for this night.',
     'The bed was noted as empty for this night.',
   ),
+  // A night still in progress (phase 4): "so far" in every variant, because the figure is not final, and descriptive
+  // only, because half a night is not a night to compare. No "overnight" (the night is still going) and no "usual".
+  total_sleep_so_far: plain(
+    'Asleep for {minutes} so far.',
+    'A total of {minutes} asleep so far.',
+    'Time asleep so far is {minutes}.',
+  ),
+  wake_ups_so_far: {
+    by: 'count',
+    groups: {
+      // COUNTED, in every zero variant: a wake-up in progress right now is not counted until it ends, so "no wake-ups so
+      // far" could sit beside "awake since 2:10 AM" and contradict it.
+      zero: ['No wake-ups have been counted so far.', 'So far, no wake-ups have been counted.'],
+      one: ['One wake-up has been counted so far.', 'There has been one wake-up so far.'],
+      other: [
+        '{count} wake-ups have been counted so far.',
+        'There have been {count} wake-ups so far.',
+        'So far there have been {count} wake-ups.',
+      ],
+    },
+  },
+  longest_stretch_so_far: plain(
+    'The longest unbroken stretch so far is {minutes}.',
+    'Longest stretch without waking so far: {minutes}.',
+    'The longest run of sleep so far has lasted {minutes}.',
+  ),
 });
 
 // --- formatting ------------------------------------------------------------------------------------------------------

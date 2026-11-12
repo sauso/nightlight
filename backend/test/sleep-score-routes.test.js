@@ -50,7 +50,7 @@ const { TRANSITION, framesForNight } = await import('../src/lib/bedTransitions.j
 const { saveNightReview, applyCorrection } = await import('../src/lib/sleepReviews.js');
 const { scoreNight, toScoringInput, ageMonthsOn } = await import('../src/lib/sleepScore.js');
 const { sleepBaseline } = await import('../src/lib/sleepBaseline.js');
-const { failNextScoreForTest, failNextSummaryForTest, resetScoreLogForTest, attachScore } = await import('../src/lib/sleepScoreAttach.js');
+const { failNextScoreForTest, failNextSummaryForTest, failNextLiveForTest, resetScoreLogForTest, attachScore } = await import('../src/lib/sleepScoreAttach.js');
 const { default: childrenRouter } = await import('../src/routes/children.js');
 const { logger } = await import('../src/lib/logger.js');
 
@@ -226,7 +226,7 @@ test('/sleep/:date fresh, every read shape: the score is scoreNight on the night
   for (const query of ['', '?context=current', '?context=auto', '?context=current&raw=1']) {
     const r = await get(`/sleep/${DATE}${query}`);
     assert.equal(r.status, 200, query);
-    assert.deepEqual(omit(r.body, 'score', 'summary'), plain, `${query}: every key the night had, unchanged, and only score and summary added`);
+    assert.deepEqual(omit(r.body, 'score', 'summary', 'live'), plain, `${query}: every key the night had, unchanged, and only score and summary added`);
     assert.deepEqual(headline(r.body.score), GREAT_96, query);
     assert.deepEqual(r.body.summary, FIXED_SUMMARY, `${query}: every read shape carries the summary`);
     // Found its usual: so the compute's own context reached the score (without it there is no baseline, and the
@@ -240,7 +240,7 @@ test('/sleep/:date fresh, every read shape: the score is scoreNight on the night
   // detail=1: the same night with a timeline (and the frames list), so the same score.
   const detail = await get(`/sleep/${DATE}?detail=1`);
   const withTimeline = computeNight(CHILD, DATE, { includeTimeline: true });
-  assert.deepEqual(omit(detail.body, 'score', 'summary'), json({ ...withTimeline, transition_frames: framesForNight(withTimeline) }));
+  assert.deepEqual(omit(detail.body, 'score', 'summary', 'live'), json({ ...withTimeline, transition_frames: framesForNight(withTimeline) }));
   assert.ok(detail.body.segments.length > 0, 'precondition: this is the timeline shape');
   assert.deepEqual(headline(detail.body.score), GREAT_96);
 });
@@ -252,7 +252,7 @@ test('/sleep?nights=N and ?stored=1: the saved row is scored on its own context,
   const list = await get('/sleep?nights=60');
   assert.equal(list.body.nights.length, 8, 'precondition: the night and its seven usual nights');
   const night = list.body.nights.find((n) => n.night_date === DATE);
-  assert.deepEqual(omit(night, 'score', 'summary'), json(row), 'the stored row, every column as stored');
+  assert.deepEqual(omit(night, 'score', 'summary', 'live'), json(row), 'the stored row, every column as stored');
   assert.deepEqual(headline(night.score), GREAT_96);
   assert.deepEqual(night.summary, FIXED_SUMMARY, 'the list carries the summary');
   assert.deepEqual(night.score, expected(night));
@@ -265,7 +265,7 @@ test('/sleep?nights=N and ?stored=1: the saved row is scored on its own context,
 
   const stored = await get(`/sleep/${DATE}?stored=1`);
   assert.deepEqual(Object.keys(stored.body).sort(), ['contexts', 'locked', 'night']);
-  assert.deepEqual(omit(stored.body.night, 'score', 'summary'), json(row));
+  assert.deepEqual(omit(stored.body.night, 'score', 'summary', 'live'), json(row));
   assert.deepEqual(headline(stored.body.night.score), GREAT_96);
   assert.deepEqual(stored.body.night.summary, FIXED_SUMMARY, '?stored=1 carries the summary');
 
@@ -356,7 +356,7 @@ test('raw samples gone, saved row kept: the detail read is no_data and its score
 
   const r = await get(`/sleep/${DATE}?context=auto&detail=1`);
   assert.equal(r.status, 200);
-  assert.deepEqual(omit(r.body, 'score', 'score_source', 'summary'), { ...before, transition_frames: [] }, 'the no_data night exactly as before');
+  assert.deepEqual(omit(r.body, 'score', 'score_source', 'summary', 'live'), { ...before, transition_frames: [] }, 'the no_data night exactly as before');
   assert.equal(r.body.score_source, 'stored');
   assert.deepEqual(headline(r.body.score), GREAT_96);
   assert.deepEqual(r.body.score, listed.score, 'the same score the list gives the saved row');
@@ -403,7 +403,7 @@ test('a score that throws never fails the route: 200, score null, the night unto
   const detail = await get(`/sleep/${DATE}`);
   assert.equal(detail.status, 200);
   // A score that failed takes the summary with it (the summary is derived from the score): both null, nothing else moved.
-  assert.deepEqual(detail.body, { ...plain, score: null, summary: null });
+  assert.deepEqual(detail.body, { ...plain, score: null, summary: null, live: null });
 
   // In the list only the night whose score failed loses it (the first scored: the newest). The seven usual nights
   // keep theirs: each has fewer than seven nights before it, so an early estimate. By hand: duration 87 (660
@@ -432,7 +432,7 @@ test('a summary that throws never fails the route or costs the night its score: 
   assert.equal(r.status, 200);
   assert.equal(r.body.summary, null);
   assert.deepEqual(headline(r.body.score), GREAT_96, 'the score is unaffected by the summary failing');
-  assert.deepEqual(omit(r.body, 'score', 'summary'), plain, 'and so is every other key');
+  assert.deepEqual(omit(r.body, 'score', 'summary', 'live'), plain, 'and so is every other key');
   // A fixed sentence, once, with its own line (a score fault must not hide it): a second failure inside the hour is silent.
   failNextSummaryForTest();
   assert.equal((await get(`/sleep/${DATE}`)).body.summary, null);
@@ -449,7 +449,7 @@ test('switch off and the score throws: no score key, summary null, the route sti
   failNextScoreForTest();
   const r = await get(`/sleep/${DATE}`);
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body, { ...plain, summary: null });
+  assert.deepEqual(r.body, { ...plain, summary: null, live: null });
   assert.equal('score' in r.body, false);
 });
 
@@ -522,7 +522,7 @@ test('/sleep/live: the saved last night is scored from its row, 93, and no other
 
   const r = await get('/sleep/live');
   assert.equal(r.body.scope, 'last');
-  assert.deepEqual(omit(r.body.night, 'score', 'summary'), json(rowOf(last)), 'the stored row, every column as stored');
+  assert.deepEqual(omit(r.body.night, 'score', 'summary', 'live'), json(rowOf(last)), 'the stored row, every column as stored');
   assert.deepEqual(headline(r.body.night.score),
     [93, 'great', [['duration', 100], ['continuity', 77], ['settling', 100], ['restlessness', 100], ['consistency', 100]]]);
   assert.deepEqual(r.body.night.score, expectedLive(r.body.night));
@@ -559,7 +559,7 @@ test('/sleep/live: last night computed fresh is scored with the context that com
   const r = await get('/sleep/live');
   const night = r.body.night;
   assert.deepEqual([r.body.scope, night.night_date, night.in_progress], ['last', last, false]);
-  assert.deepEqual(omit(night, 'score', 'summary'), json(computeNight(CHILD, last)), 'the fresh night exactly as before');
+  assert.deepEqual(omit(night, 'score', 'summary', 'live'), json(computeNight(CHILD, last)), 'the fresh night exactly as before');
   // Precondition for the literals: the detector reads this night as asleep ten minutes in and up an hour before
   // the window's end, 650 minutes, unbroken. If this fails the detector moved, not the score.
   assert.deepEqual([night.status, night.onset_at, night.wake_at, night.asleep_minutes, night.awake_minutes, night.wake_count, night.in_bed_at],
@@ -586,12 +586,151 @@ test('/sleep/live: tonight, in progress, has no score and says why', async () =>
   const r = await get('/sleep/live');
   assert.deepEqual([r.body.scope, r.body.night.night_date, r.body.night.in_progress], ['tonight', current, true]);
   assert.deepEqual(r.body.night.score, { score: null, reason: 'in_progress', version: 2 });
+  // No camera data yet: the live state is `unknown`, not "not asleep yet" (nobody watched the room), and no summary.
+  assert.equal(r.body.night.status, 'no_data', 'precondition');
+  assert.deepEqual(r.body.night.live, { state: 'unknown', since: null });
 });
 
 test('/sleep/live: sleep tracking off is unchanged, no night and so no score', async () => {
   setUpLive();
   db.prepare('UPDATE children SET track_sleep = 0 WHERE id = ?').run(CHILD);
   assert.deepEqual((await get('/sleep/live')).body, { scope: 'off', night: null });
+});
+
+// ================================ the live state of tonight (phase 4) ================================
+//
+// A real read of /sleep/live with samples laid RELATIVE TO NOW (the window opened a few hours ago, as above), so the
+// route's own clock is the one under test. Every wake here is placed in whole minutes before the current minute, so the
+// answer does not depend on the second the test runs in; a minute rolling over between the laying and the read moves
+// each wake one minute nearer to as_of, which none of the expectations below can tell (they are written to survive it).
+function layTonight(moving) {
+  setUpLive(new Date().getUTCHours() - 3); // the window opened between three and four hours ago
+  const current = currentNightDate(CHILD);
+  assert.ok(current, 'precondition: a night is in progress');
+  const start = Date.parse(`${computeNight(CHILD, current).window_start.replace(' ', 'T')}Z`);
+  const nowMin = Math.floor(Date.now() / MIN) * MIN;
+  // Moving for the first 20 minutes (settling), then asleep, and the wake(s) asked for in minutes before the current minute.
+  layMinutes([[start, start + 20 * MIN], ...moving.map(([a, b]) => [nowMin - a * MIN, nowMin - b * MIN])], start, nowMin);
+  return { nowMin, start, current };
+}
+const liveNight = async () => (await get('/sleep/live')).body.night;
+const countedWakes = (night) => JSON.parse(night.summary_facts).sleep.wakes;
+
+test('/sleep/live, tonight: asleep, since the onset, with the so-far facts and no score', async () => {
+  const { start } = layTonight([]);
+  const night = await liveNight();
+  assert.deepEqual([night.in_progress, night.status, night.onset_at, night.wake_at], [true, 'ok', sqlAt(start + 20 * MIN), null], 'precondition');
+  assert.deepEqual(night.live, { state: 'asleep', since: sqlAt(start + 20 * MIN) });
+  assert.deepEqual(night.score, { score: null, reason: 'in_progress', version: 2 });
+  assert.equal(night.summary.headline.key, 'neutral_so_far');
+  assert.deepEqual(night.summary.observations.map((o) => o.key).filter((k) => k.endsWith('_vs_usual')), []);
+  assert.equal(night.summary.observations[0].key, 'total_sleep_so_far');
+});
+
+test('/sleep/live, tonight: a wake running right now is awake; the wake started when it began', async () => {
+  layTonight([[8, 0]]); // moving for the last eight minutes
+  const night = await liveNight();
+  assert.equal(night.in_progress, true, 'precondition');
+  assert.equal(night.live.state, 'awake');
+  // Since the wake began: the night's own wake_at when it is set, else the counted wake's start (the minute rolled over).
+  assert.equal(night.live.since, night.wake_at ?? countedWakes(night).at(-1).start_at);
+});
+
+test('/sleep/live, tonight: a wake that ended 2 minutes ago is still awake (wake_at is null: it alone would say asleep)', async () => {
+  const { nowMin } = layTonight([[7, 2]]); // moving from 7 minutes ago until 2 minutes ago: five active minutes
+  const night = await liveNight();
+  // The precondition that makes this the missing-row case: the detector has NO wake_at (nothing touches the last minute)
+  // and counts the wake, so only the hysteresis can say awake.
+  assert.equal(night.wake_at, null, 'precondition: wake_at is null');
+  assert.deepEqual(countedWakes(night).map((w) => [w.start_at, w.minutes]), [[sqlAt(nowMin - 7 * MIN), 5]], 'precondition: the wake is counted');
+  assert.deepEqual(night.live, { state: 'awake', since: sqlAt(nowMin - 7 * MIN) });
+});
+
+test('/sleep/live, tonight: a wake that ended 6 minutes ago reads asleep, since the end of that wake', async () => {
+  const { nowMin } = layTonight([[11, 6]]); // moving from 11 until 6 minutes ago
+  const night = await liveNight();
+  assert.equal(night.wake_at, null, 'precondition');
+  assert.equal(countedWakes(night).length, 1, 'precondition: the wake is counted');
+  assert.deepEqual(night.live, { state: 'asleep', since: sqlAt(nowMin - 6 * MIN) });
+  assert.equal(night.summary.observations.find((o) => o.key === 'wake_ups_so_far').params.count, 1);
+});
+
+test('the live state is only for a night in progress: every finished night, saved or fresh, has live null', async () => {
+  setUpLive();
+  const last = lastCompletedNightDate(CHILD);
+  seedLiveUsualBefore(last);
+  putUsualNight(last, liveStart(last), LIVE_HOURS, JSON.stringify(currentScoringContext(CHILD)));
+  const saved = await get('/sleep/live');
+  assert.deepEqual([saved.body.scope, saved.body.night.in_progress ?? 'no such key'], ['last', 'no such key'], 'precondition: a saved row');
+  assert.equal(saved.body.night.live, null);
+  const list = await get('/sleep?nights=8');
+  assert.ok(list.body.nights.length >= 8, 'precondition: several saved nights');
+  assert.deepEqual(list.body.nights.map((n) => n.live), Array(list.body.nights.length).fill(null));
+  assert.equal((await get(`/sleep/${last}`)).body.live, null);
+});
+
+test('the live state is not hidden by the "Show sleep score" switch (it says where the child is, not how they slept)', async () => {
+  const { start } = layTonight([]);
+  showScore(0);
+  const night = await liveNight();
+  assert.equal('score' in night, false, 'precondition: the score is hidden');
+  assert.deepEqual(night.live, { state: 'asleep', since: sqlAt(start + 20 * MIN) });
+  assert.equal(night.summary.headline.key, 'neutral_so_far', 'and so is the summary');
+});
+
+test('a live state that throws never fails the route or costs the night anything else: 200, live null, one log line of its own', async (t) => {
+  layTonight([]);
+  const warn = t.mock.method(logger, 'warn', () => {});
+  const before = await liveNight();
+  assert.equal(before.live.state, 'asleep', 'precondition');
+
+  failNextLiveForTest();
+  const r = await get('/sleep/live');
+  assert.equal(r.status, 200);
+  assert.equal(r.body.night.live, null);
+  assert.deepEqual(r.body.night.score, before.score, 'the score is unaffected');
+  assert.deepEqual(r.body.night.summary, before.summary, 'and so is the summary');
+  assert.deepEqual(omit(r.body.night, 'live', 'as_of'), omit(before, 'live', 'as_of'), 'and every other key');
+  failNextLiveForTest();
+  assert.equal((await get('/sleep/live')).body.night.live, null);
+  assert.deepEqual(warn.mock.calls.map((c) => c.arguments), [['[sleep] live state skipped: working out the live state of a night failed']]);
+  // One-shot: the next read has it again.
+  assert.equal((await get('/sleep/live')).body.night.live.state, 'asleep');
+});
+
+test('a score that throws leaves tonight\'s live state alone (the live state does not depend on the score)', async (t) => {
+  const { start } = layTonight([]);
+  t.mock.method(logger, 'warn', () => {});
+  failNextScoreForTest();
+  const night = await liveNight();
+  assert.deepEqual([night.score, night.summary], [null, null], 'precondition: the score failed and took the summary with it');
+  assert.deepEqual(night.live, { state: 'asleep', since: sqlAt(start + 20 * MIN) });
+  // The same with the switch off: no score key, still the live state.
+  showScore(0);
+  failNextScoreForTest();
+  const hidden = await liveNight();
+  assert.deepEqual(['score' in hidden, hidden.summary, hidden.live.state], [false, null, 'asleep']);
+});
+
+test('attachScore with a chosen clock: the three states and unknown, and a stale night is not claimed', () => {
+  // No route, no database: the night object and the clock are handed in, so the clock is exactly the one named.
+  db.prepare("INSERT INTO children (id, name, birthday, track_sleep) VALUES (?, 'Score Kid', '2020-01-01', 1)").run(CHILD);
+  const child = { id: CHILD, birthday: '2020-01-01' };
+  const nowMs = Date.UTC(2026, 2, 11, 2, 30, 0);
+  const night = (over = {}) => ({
+    night_date: '2026-03-10', window_start: '2026-03-10 19:00:00', window_end: '2026-03-11 07:00:00',
+    in_progress: true, as_of: '2026-03-11 02:30:00', status: 'ok', onset_at: '2026-03-10 19:30:00', wake_at: null, in_bed_at: null,
+    asleep_minutes: 400, awake_minutes: 20, unknown_minutes: 0, wake_count: 1, longest_stretch_minutes: 300, coverage_minutes: 450, stir_minutes: 0,
+    summary_facts: JSON.stringify({ v: 1, climate: { temp_min: null, temp_max: null }, sleep: { wakes: [{ start_at: '2026-03-11 01:00:00', minutes: 6 }], room_activity_wakes: 0 } }),
+    ...over,
+  });
+  const liveOf = (n, now = nowMs) => attachScore(child, n, { nowMs: now }).live;
+  assert.deepEqual(liveOf(night()), { state: 'asleep', since: '2026-03-11 01:06:00' });
+  assert.deepEqual(liveOf(night({ wake_at: '2026-03-11 02:29:00' })), { state: 'awake', since: '2026-03-11 02:29:00' });
+  assert.deepEqual(liveOf(night({ onset_at: null, status: 'no_sleep' })), { state: 'not_asleep_yet', since: null });
+  assert.deepEqual(liveOf(night(), nowMs + 7 * MIN), { state: 'unknown', since: null });
+  assert.equal(liveOf(night({ in_progress: false })), null);
+  assert.equal(attachScore(child, null, { nowMs }), null, 'no night: returned as it is');
 });
 
 // ================================ the per-child "Show sleep score" switch (phase 2) ================================
@@ -617,14 +756,14 @@ test('switch off, /sleep/:date: no score key on any read shape, every other key 
     assert.equal(r.status, 200, query);
     // The night exactly as computed, plus the night summary: the switch hides the score, not the description of the
     // night (phase 3), and the summary is the SAME one the switch-on read gave, derived from the score the response omits.
-    assert.deepEqual(omit(r.body, 'summary'), plain, `${query}: the night exactly as computed, no score added`);
+    assert.deepEqual(omit(r.body, 'summary', 'live'), plain, `${query}: the night exactly as computed, no score added`);
     assert.equal('score' in r.body, false, query);
     assert.deepEqual(r.body.summary, on.body.summary, `${query}: the same summary as with the switch on`);
     assert.equal(r.body.summary.headline.key, 'settled', query);
   }
   const detail = await get(`/sleep/${DATE}?detail=1`);
   const withTimeline = computeNight(CHILD, DATE, { includeTimeline: true });
-  assert.deepEqual(omit(detail.body, 'summary'), json({ ...withTimeline, transition_frames: framesForNight(withTimeline) }));
+  assert.deepEqual(omit(detail.body, 'summary', 'live'), json({ ...withTimeline, transition_frames: framesForNight(withTimeline) }));
 
   // An admin's store answers with a night too.
   const stored = await get(`/sleep/${DATE}?store=1`);
@@ -644,13 +783,13 @@ test('switch off, /sleep?nights=N and ?stored=1: the saved rows as stored, no sc
   const list = await get('/sleep?nights=60');
   assert.equal(list.body.nights.length, 8);
   assert.deepEqual(list.body.nights.map((n) => 'score' in n), Array(8).fill(false));
-  assert.deepEqual(omit(list.body.nights.find((n) => n.night_date === DATE), 'summary'), json(row), 'the stored row, every column as stored');
+  assert.deepEqual(omit(list.body.nights.find((n) => n.night_date === DATE), 'summary', 'live'), json(row), 'the stored row, every column as stored');
   assert.deepEqual(list.body.nights.map((n) => n.summary?.headline?.key !== undefined), Array(8).fill(true),
     'every night still has its summary with the switch off');
 
   const stored = await get(`/sleep/${DATE}?stored=1`);
   assert.deepEqual(Object.keys(stored.body).sort(), ['contexts', 'locked', 'night']);
-  assert.deepEqual(omit(stored.body.night, 'summary'), json(row));
+  assert.deepEqual(omit(stored.body.night, 'summary', 'live'), json(row));
 });
 
 test('switch off, raw samples gone: the no_data night carries neither the saved score nor score_source', async () => {
@@ -665,7 +804,7 @@ test('switch off, raw samples gone: the no_data night carries neither the saved 
 
   showScore(0);
   const r = await get(`/sleep/${DATE}?context=auto`);
-  assert.deepEqual(omit(r.body, 'summary'), before);
+  assert.deepEqual(omit(r.body, 'summary', 'live'), before);
   assert.deepEqual(['score' in r.body, 'score_source' in r.body], [false, false]);
   // The summary is of the saved night, as with the switch on, and the switch does not hide it.
   assert.deepEqual(r.body.summary, on.body.summary);
@@ -683,7 +822,7 @@ test('switch off, /sleep/live: last night and tonight carry no score key', async
   showScore(0);
   const r = await get('/sleep/live');
   assert.deepEqual([r.body.scope, 'score' in r.body.night], ['last', false]);
-  assert.deepEqual(omit(r.body.night, 'summary'), json(rowOf(last)));
+  assert.deepEqual(omit(r.body.night, 'summary', 'live'), json(rowOf(last)));
   assert.deepEqual(r.body.night.summary, on.body.night.summary, 'the summary does not depend on the switch');
 
   // Tonight, in progress: with the switch on it says `in_progress`; off, it says nothing at all.

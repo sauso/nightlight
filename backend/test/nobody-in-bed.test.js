@@ -269,7 +269,7 @@ test('★ a flagged stored row reads exactly like a detector-empty row: every cl
 
   // `score` is the route's, not the overlay's (sleep score plan phase 1c: every night a sleep route returns gains
   // it). On a night the parent said was empty there is nothing to score, and it says so.
-  assert.deepEqual(Object.keys(shown).sort(), [...names, ...OVERLAY_KEYS, 'score', 'summary'].sort(),
+  assert.deepEqual(Object.keys(shown).sort(), [...names, ...OVERLAY_KEYS, 'score', 'summary', 'live'].sort(),
     'the row keeps its columns and gains only the overlay fields, the score and the night summary');
   assert.equal(shown.score.score, null);
   assert.deepEqual([shown.score.reason, shown.score.status], ['not_ok', 'empty']);
@@ -325,7 +325,7 @@ test('★ a flagged detail response has exactly the keys a detector-empty one ha
   assert.deepEqual([shown.score.score, shown.score.reason, shown.score.status], [null, 'not_ok', 'empty']);
   // `summary` (phase 3) is set aside the same way; on this night it is the single "no one was in the bed" line.
   assert.deepEqual(shown.summary.observations, [{ key: 'nobody_in_bed', params: {} }]);
-  const shownKeys = Object.keys(shown).filter((k) => !OVERLAY_KEYS.includes(k) && k !== 'transition_frames' && k !== 'score' && k !== 'summary').sort();
+  const shownKeys = Object.keys(shown).filter((k) => !OVERLAY_KEYS.includes(k) && k !== 'transition_frames' && k !== 'score' && k !== 'summary' && k !== 'live').sort();
   assert.deepEqual(shownKeys, Object.keys(realEmpty).sort(), 'the same keys as a real detector-empty night');
   for (const k of Object.keys(realEmpty)) {
     if (k === 'status') assert.equal(shown.status, 'empty');

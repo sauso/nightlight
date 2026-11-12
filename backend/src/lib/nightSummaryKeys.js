@@ -45,4 +45,10 @@ export const OBSERVATION_PARAMS = Object.freeze({
   sleep_span: Object.freeze(['onset_at', 'wake_at']),
   // A night a person marked "no one was in the bed" (sleepReviews.js asNobodyInBed).
   nobody_in_bed: Object.freeze([]),
+  // A night still in progress (phase 4): plain "so far" facts, never a comparison with the usual. They go last: the
+  // in-progress selection does not rank them against the others (nightSummary.js soFarObservations lists them in
+  // this order), so their place here breaks no tie. Params are raw, as everywhere else.
+  total_sleep_so_far: Object.freeze(['minutes']),
+  wake_ups_so_far: Object.freeze(['count']),
+  longest_stretch_so_far: Object.freeze(['minutes']),
 });

@@ -154,7 +154,7 @@ test('★ the field is ADDED: every other key of the payload is exactly what the
 
   // `score` (sleep score plan phase 1c) is the route's other added key: set aside the same way (its own tests are
   // in sleep-score-routes.test.js).
-  const { transition_frames, score: _score, summary: _summary, ...rest } = (await get('?detail=1')).body;
+  const { transition_frames, score: _score, summary: _summary, live: _live, ...rest } = (await get('?detail=1')).body;
   assert.ok(Array.isArray(transition_frames));
   assert.deepEqual(rest, before);
 });

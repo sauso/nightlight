@@ -229,6 +229,37 @@ describe('SleepScoreCard: the detail page card and the breakdown sheet', () => {
     expect(within(dialog).queryByText(/no longer available/)).not.toBeInTheDocument();
   });
 
+  test('tonight, in progress: the so-far facts show under the Night summary, with only the existing "No score yet" line and no ring or comparison', () => {
+    const { container } = show({
+      ...NIGHT,
+      in_progress: true,
+      score: { score: null, reason: 'in_progress', version: 2 },
+      summary: {
+        headline: { key: 'neutral_so_far' },
+        observations: [
+          { key: 'total_sleep_so_far', params: { minutes: 275 } },
+          { key: 'wake_ups_so_far', params: { count: 0 } },
+          { key: 'longest_stretch_so_far', params: { minutes: 130 } },
+        ],
+        seed: 'child-a|2026-09-01',
+      },
+      live: { state: 'awake', since: '2026-09-02 02:10:00' },
+    });
+    expect(screen.getByText('Night summary')).toBeInTheDocument();
+    const items = screen.getAllByRole('listitem').map((li) => li.textContent);
+    expect(items).toHaveLength(3);
+    expect(items[0]).toMatch(/4h 35m.*so far|so far.*4h 35m/);
+    expect(items[1]).toMatch(/counted/);
+    expect(items[2]).toMatch(/2h 10m/);
+    // The one score line there ever was: "No score yet" and the reason. No ring figure, no button, nothing about "usual".
+    expect(screen.getByText('No score yet. The night is still in progress.')).toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(container.querySelector('svg text')).toBe(null);
+    expect(container.textContent).not.toMatch(/usual/i);
+    // The live state is not drawn by this card (a later design change does that): its time appears nowhere.
+    expect(container.textContent).not.toMatch(/awake since|asleep since/i);
+  });
+
   test('a part that could not be measured is listed as not counted, with its reason in words', async () => {
     const components = SCORE.components.map((c) => (c.key === 'settling'
       ? { ...c, score: null, available: false, reason: 'no_in_bed', value: null }

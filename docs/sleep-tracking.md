@@ -853,12 +853,55 @@ the night was not watched, then the plain facts.
 
 ### Nights with no score
 
-- **A night in progress** shows only a "so far" line.
+- **A night in progress** shows a "so far" line and a few plain facts so far, never a verdict. See
+  [While the night is in progress](#while-the-night-is-in-progress).
 - **A night with no score for another reason** gets the plain headline and only measured facts, never a
   verdict.
 - **Times you entered by hand** over a night the detector saw as empty: the summary says so and gives only
   the total and the two times. The wake-ups of that night were never measured, so it never says "settled"
   or "no wake-ups".
+
+### While the night is in progress
+
+Tonight's night carries two extra things, both only until the sleep window closes. There is still **no
+score** and no judgement of the night: half a night says nothing about how it compared with the usual.
+
+**Where the child is now.** One of four states, with the time it began:
+
+- **Not asleep yet**: the camera has not seen the child settle (no time).
+- **Asleep since** a time: the end of the latest wake-up, or the time the child fell asleep when there has
+  been none.
+- **Awake since** a time: the start of the current wake-up.
+- **Unknown**: the answer is too old to call "now" (more than 6 minutes behind the clock), or the night
+  has no camera data yet, or its wake-up list cannot be read (a night saved by an older version).
+
+A wake-up counts only once it has lasted at least 5 active minutes, and the detector joins short quiet
+gaps (up to 3 minutes) into one wake-up. So the state does not flip back to asleep the moment movement
+stops: **a child stays "awake" until 4 minutes after the last wake-up ended**, then reads asleep since the
+end of it. That also covers the few seconds after each minute while the camera's reading for it is still
+being saved. The times are the detector's, not a clock on the child: "asleep since 8:05 PM" is when the
+detector decided, as it does for the night's other times.
+
+**Facts so far.** The night summary keeps its "so far" headline (for example "Sleep so far tonight, as measured.") and adds
+up to four plain facts: time asleep so far, wake-ups so far, the longest unbroken stretch so far and, when there
+is a put-down time, how long it took to fall asleep. They use the same figures as the night's other
+numbers. There is **no comparison with the usual**, no "settled" or "restless" headline and no "not enough
+nights" line. A night where the child has not fallen asleep yet has no facts.
+
+Known limits:
+
+- **A camera that has gone offline is not noticed.** The state is worked out from the last minutes the
+  server has, and a silent camera looks like a child asleep. Check the live view if it matters.
+- **Out of bed is not told apart from awake.** A child who has climbed out and is out of the camera's
+  view reads as awake.
+- **The state can be a few minutes behind.** The child's card re-reads about every 3 minutes, and a
+  minute's reading is saved a few seconds after the minute ends.
+- "No wake-ups so far" means none have been counted yet. The wake-up in progress is counted once it ends.
+- The 4-minute and 6-minute figures are starting values, set from how the detector joins wake-ups and how
+  often the page asks; nothing measured them across other homes.
+- **What the app shows today.** The facts so far appear under the **Night summary** on tonight's sleep page,
+  with the usual "No score yet" line. The child's card still shows only the headline. The where-the-child-is
+  state (`live`) is in the API response only: no screen shows it yet, a later design change will.
 
 ### After you correct a night
 
@@ -903,7 +946,20 @@ should skip any key it does not know. `headline.key` is `settled`, `typical`, `m
 `neutral_last_night` or `neutral_so_far`. Observation keys: `total_sleep`, `total_sleep_vs_usual`, `wake_ups`,
 `wake_ups_vs_usual`, `longest_stretch`, `longest_stretch_vs_usual`, `settling_time`, `wake_clustering`,
 `room_activity_near_wakes`, `temperature_range`, `reduced_coverage`, `building_baseline`, `no_sleep_detected`,
-`times_entered_by_hand`, `sleep_span` and `nobody_in_bed`.
+`times_entered_by_hand`, `sleep_span` and `nobody_in_bed`; for a night in progress also `total_sleep_so_far`
+(`minutes`), `wake_ups_so_far` (`count`) and `longest_stretch_so_far` (`minutes`).
+
+A night in progress also carries `live`, beside `score` and `summary` (every other night has `live: null`; no
+existing key changed). Like `summary` it is present whether or not Show sleep score is on, and it is `null`
+if working it out failed (one line is logged an hour):
+
+```json
+{ "state": "asleep", "since": "2026-03-11 01:06:00" }
+```
+
+`state` is `not_asleep_yet`, `asleep`, `awake` or `unknown`. `since` is a UTC time as
+`YYYY-MM-DD HH:MM:SS`, like `onset_at`, or `null` for `not_asleep_yet` and `unknown`. A client should treat a
+`state` it does not know as `unknown`.
 
 `summary` is `null` when there is nothing to describe (tracking is off, or the night has no data) and when
 building it failed; the night is then returned as usual and one line is logged.
