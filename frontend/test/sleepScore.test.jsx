@@ -317,7 +317,7 @@ describe('SleepDetail: the score follows the night on screen', () => {
     window_start: '2026-08-30 09:00:00', window_end: '2026-08-30 21:00:00',
     asleep_minutes: 600, coverage_minutes: 720, wakes: [], visits: [], alerts: [], wakeClips: [],
   };
-  const CTX = { v: 1, camera_id: 'cam-a', tz: 'Australia/Melbourne', window: { start: '19:30', end: '07:00' }, algo: '1' };
+  const CTX = { v: 1, camera_id: 'cam-a', tz: 'Europe/Berlin', window: { start: '19:30', end: '07:00' }, algo: '1' };
   const view = (applied) => ({
     applied, stored: CTX, current: { ...CTX, camera_id: 'cam-b' }, camera_names: { stored: 'Cam one', current: 'Cam two' }, algo_differs: false,
   });
