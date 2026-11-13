@@ -115,6 +115,9 @@ export default function ChildDetail() {
           Nothing is reordered with `order`, so a keyboard or screen-reader user never gets an order that disagrees with the
           screen. Each section sits in its own wrapper because TimelapseCard and RecordingsCard render NOTHING until there
           is something to show; the wrapper is then an empty box that takes no space. */}
+      {/* The timelapse, alerts and recordings cards are keyed by child (below): this component is reused when only :id changes, and
+          each card keeps local state (the picked night, "See all alerts" expanded, the Recordings row open) that must not carry from one
+          child to the next. */}
       <main className="app-main child-page">
         <div className="child-page__night">
         <div className={nightBand ? `night night--${nightBand}` : 'night'}>
@@ -170,13 +173,13 @@ export default function ChildDetail() {
           )}
         </div>
 
-        <div className="child-page__timelapse"><TimelapseCard childId={id} /></div>
+        <div className="child-page__timelapse"><TimelapseCard key={id} childId={id} /></div>
 
         <div className="child-page__alerts">
           {alertsState === 'ready' || alertsState === 'stale' ? (
             <>
               {alertsState === 'stale' && <LoadFailed what="alerts" error={alertsError} onRetry={loadAlerts} stale />}
-              <AlertList alerts={alerts} onChanged={loadAlerts} title="Recent alerts" previewCount={3} />
+              <AlertList key={id} alerts={alerts} onChanged={loadAlerts} title="Recent alerts" previewCount={3} />
             </>
           ) : (
             <div className="card alert-list">
@@ -190,7 +193,7 @@ export default function ChildDetail() {
           )}
         </div>
 
-        <div className="child-page__recordings"><RecordingsCard childId={id} /></div>
+        <div className="child-page__recordings"><RecordingsCard key={id} childId={id} /></div>
 
         <div className="child-page__sensors">
           {childCams.filter((c) => c.mqtt_topic).map((c) => (

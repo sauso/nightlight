@@ -135,6 +135,18 @@ describe('ChildCameraTile', () => {
     expect(c.container.querySelector('.child-cam__sr')).toBeNull();
   });
 
+  // The Live tab hides disabled cameras (LiveMonitor filters them out), so "Watch live" there would open a page without this camera.
+  test('★ a disabled camera is not offered "Watch live"; an online and an offline one are', () => {
+    const a = render(<ChildCameraTile cam={{ ...CAM, disabled: 1 }} onWatch={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Watch live' })).not.toBeInTheDocument();
+    a.unmount();
+    const b = render(<ChildCameraTile cam={{ ...CAM, statusLevel: 'offline' }} onWatch={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Watch live' })).toBeInTheDocument();
+    b.unmount();
+    render(<ChildCameraTile cam={CAM} onWatch={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Watch live' })).toBeInTheDocument();
+  });
+
   test('"Watch live" does what it is given, and the camera name is on the tile', async () => {
     const user = userEvent.setup();
     const onWatch = vi.fn();
@@ -296,6 +308,34 @@ describe('AlertList', () => {
     const rows = container.querySelectorAll('.alert-item');
     expect(rows[0].querySelector('.alert-item__chev')).not.toBeNull();
     expect(rows[1].querySelector('.alert-item__chev')).toBeNull();
+  });
+
+  test('★ each clip row opens ITS OWN clip, not the first or the last', async () => {
+    vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
+    const user = userEvent.setup();
+    render(
+      <AlertList
+        alerts={[
+          base({ id: 'ev-a', camera_name: 'Room A', snapshot: 1, clip_status: 'ready' }),
+          base({ id: 'ev-b', camera_name: 'Room B', snapshot: 1, clip_status: 'ready' }),
+        ]}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: 'Play clip from Room B' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.querySelector('video').getAttribute('src')).toBe('http://host/cameras/alerts/ev-b/clip');
+  });
+
+  // A null or garbage created_at used to reach toISOString(), a RangeError that blanks the whole child page. The row is drawn
+  // without a time; the rest of the row (kind, detail) still shows.
+  test.each([['null', null], ['garbage', 'not a date']])('★ a %s timestamp draws the row without a time instead of throwing', (_n, created_at) => {
+    const { container } = render(<AlertList alerts={[base({ id: 'bad', created_at, detail: 'loud' }), base({ id: 'ok' })]} />);
+    const rows = container.querySelectorAll('.alert-item');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].querySelector('time')).toBeNull();
+    expect(rows[0].textContent).toContain('Motion');
+    expect(rows[0].querySelector('.alert-item__meta').textContent).toBe('loud'); // no stray leading "·"
+    expect(rows[1].querySelector('time')).not.toBeNull();
   });
 
   describe('"See all alerts"', () => {

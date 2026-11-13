@@ -32,9 +32,13 @@ export default function ChildCameraTile({ cam, onWatch, onSettings }) {
         </button>
       )}
       <BedSingle className="child-cam__bed" size={64} strokeWidth={1.25} aria-hidden="true" />
-      <button type="button" className="child-cam__watch" onClick={onWatch}>
-        <Video size={16} aria-hidden="true" /> Watch live
-      </button>
+      {/* Not on a disabled camera: the Live tab hides disabled cameras (LiveMonitor filters them out), so the button would
+          open a page that does not show this camera. The chip already says "Disabled". */}
+      {status !== 'disabled' && (
+        <button type="button" className="child-cam__watch" onClick={onWatch}>
+          <Video size={16} aria-hidden="true" /> Watch live
+        </button>
+      )}
     </div>
   );
 }

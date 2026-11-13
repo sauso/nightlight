@@ -467,6 +467,37 @@ describe('the child page below the night card', () => {
     expect(screen.getAllByRole('button', { name: 'Watch live' })).toHaveLength(2);
   });
 
+  // ★ ChildDetail is NOT remounted when only :id changes, and the alerts, recordings and timelapse cards keep local state (the
+  // expanded "See all alerts", the open Recordings row, the picked night). Keyed by child, that state starts over for the next child.
+  test('★ switching child resets "See all alerts" and the Recordings row', async () => {
+    const five = (cam) => [1, 2, 3, 4, 5].map((i) => ({ ...alert(cam, i), created_at: `2026-09-0${i} 10:00:00` }));
+    mockApi({ alerts: [...five('cam-a1'), ...five('cam-b1')], recordings: RECORDINGS });
+    function Jump() { const go = useNavigate(); return <button type="button" onClick={() => go('/children/kid-2')}>jump</button>; }
+    const { container, user } = renderAsAdmin(
+      <Routes><Route path="/children/:id" element={<><Jump /><ChildDetail /></>} /></Routes>, atChild('kid-1'));
+    await waitFor(() => expect(container.querySelectorAll('.alert-item')).toHaveLength(3));
+    await user.click(screen.getByRole('button', { name: 'See all alerts' }));
+    await user.click(await screen.findByRole('button', { name: /^Recordings/ }));
+    expect(container.querySelectorAll('.alert-item')).toHaveLength(5);
+    expect(container.querySelector('.rec-strip')).not.toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'jump' }));
+    await waitFor(() => expect(container.querySelector('.night__name').textContent).toBe('Child A'));
+    await waitFor(() => expect(container.querySelectorAll('.alert-item')).toHaveLength(3));
+    expect(screen.getByRole('button', { name: 'See all alerts' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: /^Recordings/ })).toHaveAttribute('aria-expanded', 'false');
+    expect(container.querySelector('.rec-strip')).toBeNull();
+  });
+
+  test('★ a disabled camera has no "Watch live" (the Live tab hides it); the others still do', async () => {
+    mockApi();
+    const cams = CAMS.map((c) => (c.id === 'cam-a2' ? { ...c, disabled: 1 } : c));
+    renderAsAdmin(detailRoutes, { ...atChild('kid-1'), cameras: cams });
+    await screen.findByText('Child B Cot');
+    expect(screen.getAllByRole('button', { name: 'Watch live' })).toHaveLength(1);
+    expect(screen.getByText(/· Disabled/)).toBeTruthy();
+  });
+
   test('★ "Watch live" goes to the Live tab', async () => {
     full();
     const routes = <Routes><Route path="/children/:id" element={<ChildDetail />} /><Route path="/" element={<div>the live tab</div>} /></Routes>;

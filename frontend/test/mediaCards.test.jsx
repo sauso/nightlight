@@ -393,6 +393,8 @@ describe('RecordingsCard', () => {
     const row = await screen.findByRole('button', { name: /^Recordings/ });
     expect(row).toHaveAttribute('aria-expanded', 'false');
     expect(container.querySelector('.rec-strip')).toBeNull();
+    // aria-controls must not point at an element that is not mounted: it is set only while the strip is open.
+    expect(row).not.toHaveAttribute('aria-controls');
     // ROWS[0] (10:00 on 2 Sept) is the newest, not the older 20:15 on 1 Sept.
     expect(row.textContent).toContain('Wed, 2 Sept');
     expect(row.textContent).not.toContain('1 Sept');

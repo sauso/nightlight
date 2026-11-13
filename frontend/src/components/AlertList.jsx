@@ -54,6 +54,9 @@ export default function AlertList({ alerts, onChanged, title, previewCount = Inf
           const t = TYPE[ev.type] || { label: ev.type, Icon: Zap };
           const Icon = t.Icon;
           const when = parseUtc(ev.created_at);
+          // A null or unparsable timestamp must not throw (toISOString on an Invalid Date is a RangeError, which would blank the
+          // whole page): the row is drawn without a time instead.
+          const hasTime = !Number.isNaN(when.getTime());
           const hasClip = ev.clip_status === 'ready';
           const clipPending = ev.clip_status === 'pending';
           const Thumb = ev.snapshot ? (
@@ -79,10 +82,12 @@ export default function AlertList({ alerts, onChanged, title, previewCount = Inf
                   {hasClip && !!(protection[ev.id] ?? ev.protected) && <ProtectedBadge />}
                 </span>
                 <span className="alert-item__meta">
-                  <time className="alert-item__time" dateTime={when.toISOString()} title={home.dateTime(when)}>
-                    {clock(when)}
-                  </time>
-                  {ev.detail ? ` · ${ev.detail}` : ''}
+                  {hasTime && (
+                    <time className="alert-item__time" dateTime={when.toISOString()} title={home.dateTime(when)}>
+                      {clock(when)}
+                    </time>
+                  )}
+                  {ev.detail ? `${hasTime ? ' · ' : ''}${ev.detail}` : ''}
                 </span>
               </span>
               {hasClip && <ChevronRight size={18} className="alert-item__chev" aria-hidden="true" />}

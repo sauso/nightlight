@@ -84,7 +84,7 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
         type="button"
         className="recordings-row"
         aria-expanded={expanded}
-        aria-controls={stripId}
+        aria-controls={expanded ? stripId : undefined}
         onClick={() => setExpanded((v) => !v)}
       >
         <Video size={16} aria-hidden="true" className="recordings-row__icon" />

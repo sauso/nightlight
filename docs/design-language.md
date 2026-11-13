@@ -567,7 +567,6 @@ avatar (`:focus-visible` only); a click or tap draws nothing, since a second box
   `--offline`, `--off` `--text-secondary`. `--sm` = 2px 8px / 11px.
 - `.cam-badge` — **outlined** pill (colour + border, transparent fill), 11px/600. Filled = state,
   outlined = attribute.
-- `.cam-chip` — `--accent-text` on a 12% `--accent` tint, for the child a camera belongs to.
 
 ### Breathing dot — the live indicator
 14px box, 8px core + expanding ring. `--live` breathing at **3.6s** (calm, steady), `--accent`
@@ -765,10 +764,11 @@ reading order and the keyboard order):
    192px minimum height, a dark navy gradient from `--thumb-hi`/`--thumb-lo` in both themes (like a camera picture). Top left a
    status chip (a dot and the camera's name; offline and disabled add " · Offline" / " · Disabled" in words, so the colour is
    never the only signal; online adds visually hidden "(online)" only); a quiet bed icon in the middle; **Watch live** bottom
-   right (44px, `#8995ff` with `#14142a` text, the night card's action pair), which goes to the Live tab. An admin also gets a
+   right (44px, `#8995ff` with `#14142a` text, the night card's action pair), which goes to the Live tab. It is **not offered on a
+   disabled camera**: the Live tab hides disabled cameras, so the button would lead nowhere (the chip says "Disabled"). An admin also gets a
    44px settings gear top right ("Camera settings for <name>"); a caregiver does not (camera settings are admin-only). It is
    **not a live picture**: no stream is opened by opening the page. There is no "Cameras · n" heading and no Online/Offline pill or
-   MOTION/SOUND/PTZ/TALK badges (those are on the Cameras tab). A child with no camera gets a plain card with the existing
+   MOTION/SOUND/PTZ/TALK badges. (The Cameras tab still shows ONVIF, PTZ and Two-way Audio badges; the MOTION and SOUND detection badges are no longer shown to a caregiver anywhere, and an admin sees detection settings on the Live tile. This was accepted with the design, which has no badges.) A child with no camera gets a plain card with the existing
    "No cameras assigned yet" sentence (the admin and caregiver wordings differ, as before).
 2. **Timelapse** (`components/TimelapseCard.jsx`): the card title (15px bold, accent icon), one player (the newest night, 16:9),
    and a strip of recent nights as small thumbnails, four in view and scrolling for the rest, each labelled with its **weekday**
@@ -792,6 +792,10 @@ From **1024px** the same elements sit in two columns by grid placement (never `o
 left; the camera, timelapse, recordings and sensor history on the right. The camera column stretches to the night card's height.
 The page is 1040px wide at that size (the other pages stay at 720px). Cards take their margin on the inside of their wrapper, so
 an absent section leaves no gap.
+
+Known trade-off (accepted in review): because the DOM stays in phone order, at 1024px and wider the keyboard and reading order
+(night card, camera, timelapse, alerts, recordings) no longer matches the screen order in the left column (night card, then
+alerts), so Tab leaves the night card for the camera tile in the right column before reaching the alerts under it.
 
 Known limits: the layout has been checked in a desktop browser at 375 and 1280 wide, light and dark; it has not been seen on a
 real phone or tablet, and a screen reader has not been run over it.
