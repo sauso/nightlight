@@ -244,7 +244,9 @@ describe('RecordingsCard', () => {
     const { container, user } = mount(LA);
     await open(user);
     await waitFor(() => expect(container.querySelector('.rec-strip__item')).not.toBeNull());
-    expect(container.querySelector('.rec-strip__item').textContent).toContain('Sun, 30 Aug, 7:00 pm GMT-7');
+    const tile = container.querySelector('.rec-strip__item');
+    expect(tile.textContent).toContain('Sun 7:00 pm GMT-7');
+    expect(tile).toHaveAccessibleName(/Sun, 30 Aug, 7:00 pm GMT-7/);
   });
 
   test('★ no label when the device is at home', async () => {
@@ -252,8 +254,9 @@ describe('RecordingsCard', () => {
     await open(user);
     await waitFor(() => expect(container.querySelector('.rec-strip__item')).not.toBeNull());
     const text = container.querySelector('.rec-strip__item').textContent;
-    expect(text).toContain('Mon, 31 Aug, 2:00 pm');
+    expect(text).toContain('Mon 2:00 pm');
     expect(text).not.toMatch(/GMT|NZST|NZDT/);
+    expect(container.querySelector('.rec-strip__item')).toHaveAccessibleName(/Mon, 31 Aug, 2:00 pm/);
   });
 });
 

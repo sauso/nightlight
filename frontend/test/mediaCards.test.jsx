@@ -413,12 +413,17 @@ describe('RecordingsCard', () => {
     expect(row.textContent).toContain('Couldn’t be saved');
   });
 
-  test('lists each recording with a thumbnail and a readable time', async () => {
+  test('lists 16:9 thumbnails with short overlay times and full accessible names', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(ROWS);
     const { container, user } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
     await openStrip(user);
     await waitFor(() => expect(container.querySelectorAll('.rec-strip__item')).toHaveLength(2));
-    expect(container.querySelector('.rec-strip__item img')).toHaveAttribute('src', 'http://host/recordings/r-1/thumb');
+    const tile = container.querySelector('.rec-strip__item');
+    expect(tile.querySelector('img')).toHaveAttribute('src', 'http://host/recordings/r-1/thumb');
+    expect(tile.querySelector('.rec-strip__label')).toHaveTextContent(/^Wed \d{1,2}:\d{2} [ap]m/);
+    expect(tile).toHaveAccessibleName(/Child B Room · Wed, 2 Sept, \d{1,2}:\d{2} [ap]m/);
+    expect(tile.getAttribute('title')).toContain('Wed, 2 Sept');
+    expect(tile.querySelector('.rec-strip__play')).toBeInTheDocument();
   });
 
   // --- failed recordings (issue #276) ---

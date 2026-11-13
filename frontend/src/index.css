@@ -10,6 +10,9 @@
   --bg: #f7f4fd;
   --bg-elevated: #ffffff;
   --bg-elevated-2: #eae3f8;
+  /* Child-page button states stay close to the card surface; the inset token is a track, not a pressed fill. */
+  --child-action-hover: #f5f5fd;
+  --child-action-active: #eceefa;
   --text-primary: #1d1a3a;
   --text-secondary: #625c7f;
   --accent: #5663d6;
@@ -86,6 +89,8 @@
   --bg: #14142a;
   --bg-elevated: #221f3c;
   --bg-elevated-2: #100f1c;
+  --child-action-hover: #302d49;
+  --child-action-active: #3a3655;
   --text-primary: #e8e2f7;
   --text-secondary: #bcb3d5;
   --accent: #8995ff;
@@ -1344,7 +1349,8 @@ body.in-pip .tile-menu-backdrop {
   position: absolute; top: 4px; right: 4px; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center;
   border: none; border-radius: 50%; background: none; color: #c7caff; cursor: pointer;
 }
-.child-cam__settings:hover { background: rgba(255, 255, 255, 0.1); }
+@media (hover: hover) { .child-cam__settings:hover { background: rgba(255, 255, 255, 0.1); } }
+.child-cam__settings:active { background: rgba(255, 255, 255, 0.16); }
 .child-cam__bed { color: rgba(238, 240, 255, 0.22); }
 /* The detection line: quiet muted text at the tile's bottom left, level with Watch live. #b9bdf0 is the night card's muted tint
    (6.85:1 on its lightest stop, and this tile is as dark). It stops short of the button so the two never overlap on a phone. */
@@ -1353,7 +1359,8 @@ body.in-pip .tile-menu-backdrop {
   position: absolute; right: 12px; bottom: 12px; min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 18px;
   border: none; border-radius: 999px; background: #8995ff; color: #14142a; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
 }
-.child-cam__watch:hover { background: #9aa4ff; }
+@media (hover: hover) { .child-cam__watch:hover { background: #9aa4ff; } }
+.child-cam__watch:active { background: #aeb6ff; }
 .child-cam__settings:focus-visible, .child-cam__watch:focus-visible { outline: 2px solid #c7caff; outline-offset: 2px; }
 
 /* The child page's layout (pages/ChildDetail.jsx; UI refresh PR D). A phone is one column in DOM order: night card, camera,
@@ -1981,7 +1988,8 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .alert-item:last-child { border-bottom: none; }
 /* The whole row is the button when there is a clip: reset the button chrome and keep the row's own look. */
 .alert-item--btn { width: 100%; background: none; border-top: none; border-left: none; border-right: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
-.alert-item--btn:hover { background: var(--bg-elevated-2); }
+@media (hover: hover) { .alert-item--btn:hover { background: var(--child-action-hover); } }
+.alert-item--btn:active { background: var(--child-action-active); }
 .alert-item--btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
 .alert-item__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, var(--thumb-hi), var(--thumb-lo)); }
 .alert-item__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
@@ -2006,7 +2014,8 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 }
 /* "See all alerts": a full-width quiet row under the list, 44px or more. The divider above it is the last alert row's own. */
 .alert-list__more { display: block; width: 100%; min-height: 44px; padding: 0 16px; border: none; background: none; color: var(--accent-text); font: inherit; font-size: 14px; font-weight: 600; text-align: center; cursor: pointer; }
-.alert-list__more:hover { background: var(--bg-elevated-2); }
+@media (hover: hover) { .alert-list__more:hover { background: var(--child-action-hover); } }
+.alert-list__more:active { background: var(--child-action-active); }
 .alert-list__more:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -2809,15 +2818,17 @@ input[type='range'] {
   display: flex; align-items: center; gap: 10px; width: 100%; min-height: 56px; padding: 0 16px;
   border: none; background: none; font: inherit; color: var(--text-primary); text-align: left; cursor: pointer;
 }
-.recordings-row:hover { background: var(--bg-elevated-2); }
+@media (hover: hover) { .recordings-row:hover { background: var(--child-action-hover); } }
+.recordings-row:active { background: var(--child-action-active); }
 .recordings-row:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
 .recordings-row__icon { flex: none; color: var(--accent-line); }
 .recordings-row__title { font-size: 15px; font-weight: 700; }
-.recordings-row__latest { flex: 1; min-width: 0; text-align: right; font-size: 13px; color: var(--text-secondary); }
+/* One line at any width: at 320px the time wrapped ("4:14" over "AM") and broke the 56px row's rhythm; it now truncates instead. */
+.recordings-row__latest { flex: 1; min-width: 0; text-align: right; font-size: 13px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .recordings-row__chev { flex: none; color: var(--text-secondary); transition: transform 0.15s ease; }
 .recordings-row[aria-expanded='true'] .recordings-row__chev { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) { .recordings-row__chev { transition: none; } }
-.recordings-card .rec-strip { padding: 4px 16px 16px; }
+.recordings-card .rec-strip { padding: 4px 16px 16px; scroll-padding-inline: 16px; }
 .timelapse-hero {
   position: relative;
   display: block;
@@ -2836,6 +2847,7 @@ input[type='range'] {
   object-fit: cover;
   display: block;
 }
+.timelapse-hero:focus-visible, .timelapse-strip__item:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
 .timelapse-play {
   position: absolute;
   top: 50%;
@@ -2880,6 +2892,9 @@ input[type='range'] {
   border-radius: 8px;
   overflow: hidden;
   background: var(--bg-elevated-2);
+  /* The 2px transparent border would otherwise show this inset fill through it: a near-black outline round every unselected
+     tile on the dark theme (owner, 11-13). Clipping the fill to the padding box leaves the border the card's own colour. */
+  background-clip: padding-box;
   cursor: pointer;
   color: var(--text-secondary);
 }
@@ -3244,33 +3259,36 @@ input[type='range'] {
 }
 
 
-/* Recordings strip on a child's page. Deliberately its OWN classes rather than reusing the timelapse
-   ones: .timelapse-play is absolutely positioned and .timelapse-strip__item never established a
-   containing block, so a recordings thumbnail's play badge escaped and anchored itself to the
-   timelapse card above instead. */
-.rec-strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+/* The strip previews the next recording at phone width and snaps each picture into view. Its own positioned
+   tile keeps the play badge on the recording (the timelapse strip has different geometry). */
+.rec-strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x mandatory; }
 .rec-strip__item {
-  position: relative; /* the containing block the play badge needs */
-  flex: 0 0 auto; width: 108px; padding: 0;
+  position: relative; /* the containing block for the play glyph and time chip */
+  flex: 0 0 min(72%, 224px); aspect-ratio: 16 / 9; scroll-snap-align: start; padding: 0;
   border: 2px solid transparent; border-radius: 8px; overflow: hidden;
-  background: var(--bg-elevated-2); color: var(--text-secondary); cursor: pointer;
+  background: var(--bg-elevated); color: var(--text-primary); cursor: pointer;
 }
-.rec-strip__item:hover { border-color: var(--accent-line); color: var(--text-primary); }
-.rec-strip__item img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
-.rec-strip__item span:last-child { display: block; padding: 5px 6px; font-size: 11px; line-height: 1.25; }
+@media (hover: hover) { .rec-strip__item:hover { border-color: var(--accent-line); } }
+.rec-strip__item:active { border-color: var(--accent-line); }
+.rec-strip__item:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.rec-strip__item img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; }
+.rec-strip__label {
+  position: absolute; left: 5px; bottom: 5px; max-width: calc(100% - 10px); padding: 2px 6px;
+  border-radius: 6px; background: rgba(0, 0, 0, 0.66); color: #fff; font-size: 11px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 /* A recording that couldn't be saved (issue #276). It has no thumbnail to show, so the tile keeps the
    same footprint as its neighbours — a shorter tile would make the strip ragged — and fills the image
    area with a warning glyph instead. Muted rather than alarming: it is an explanation, not an alert. */
 .rec-strip__item--failed { border-style: dashed; border-color: var(--border); }
-.rec-strip__item--failed:hover { border-color: var(--offline); }
+@media (hover: hover) { .rec-strip__item--failed:hover { border-color: var(--offline); } }
 .rec-strip__failed {
-  display: flex; align-items: center; justify-content: center;
-  width: 100%; aspect-ratio: 16 / 9;
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   background: var(--bg-elevated); color: var(--offline);
 }
 
 .rec-strip__play {
-  position: absolute; top: 34%; left: 50%; transform: translate(-50%, -50%);
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
   width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%; background: rgba(0, 0, 0, 0.5); color: #fff; pointer-events: none;
 }

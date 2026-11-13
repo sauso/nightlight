@@ -27,6 +27,14 @@ function when(startedAt, home) {
   return home.time(d, WHEN);
 }
 
+// Keep the thumbnail readable at phone width; the full home-time date remains on the button for
+// assistive tech and the tooltip. Both forms use the same home-zone formatter, including its zone suffix.
+function shortWhen(startedAt, home) {
+  const d = parseUtc(startedAt);
+  if (Number.isNaN(d.getTime())) return startedAt;
+  return `${home.day(d, { weekday: 'short' })} ${home.time(d, { hour: 'numeric', minute: '2-digit' })}`;
+}
+
 export default function RecordingsCard({ childId, refreshNonce = 0 }) {
   const [list, setList] = useState([]);
   const [openId, setOpenId] = useState(null);
@@ -100,17 +108,15 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
           // request either: the server refuses to serve a non-ready row, and an <img> pointed at it
           // would just render a broken-image glyph.
           const failed = r.status === 'failed';
+          const fullLabel = `${r.camera_name || 'Camera'} · ${when(r.started_at, home)}${failed ? ' · couldn’t be saved' : ''}`;
           return (
             <button
               key={r.id}
               type="button"
               className={`rec-strip__item${failed ? ' rec-strip__item--failed' : ''}`}
               onClick={() => setOpenId(r.id)}
-              title={
-                failed
-                  ? `${r.camera_name || 'Camera'} · ${when(r.started_at, home)} · couldn’t be saved`
-                  : `${r.camera_name || 'Camera'} · ${when(r.started_at, home)}`
-              }
+              title={fullLabel}
+              aria-label={fullLabel}
             >
               {failed ? (
                 <span className="rec-strip__failed" aria-hidden="true"><AlertTriangle size={18} /></span>
@@ -120,7 +126,7 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
                   <span className="rec-strip__play"><Play size={16} aria-hidden="true" /></span>
                 </>
               )}
-              <span>{failed ? 'Couldn’t be saved' : when(r.started_at, home)}</span>
+              <span className="rec-strip__label" aria-hidden="true">{failed ? 'Couldn’t be saved' : shortWhen(r.started_at, home)}</span>
             </button>
           );
         })}
