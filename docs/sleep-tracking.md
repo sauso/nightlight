@@ -23,8 +23,9 @@ An admin can also switch on [Hold alerts until asleep](notifications.md#hold-ale
 
 ### At a glance, and live
 
-Each child's page summarises last night — total sleep, wake-ups,
-longest stretch, and the night's [sleep score](#sleep-score) in a small ring — and while a night is in progress it updates as **"Tonight · so far"**, so an
+Each child's page summarises last night in one card — the time asleep, a one-line headline and the
+night's [sleep score](#sleep-score) in a ring with its word ("Good"). The times, wake-ups and longest stretch are
+on the sleep page, one tap away. While a night is in progress the card updates as **"Tonight · so far"**, so an
 early-morning wake appears within a minute or two rather than only after the window closes.
 Treat those live figures as provisional: a night in progress is judged only on what has
 happened so far, so a bedtime can be revised later in the evening and the morning wake isn't
@@ -42,14 +43,14 @@ following day.
 ### In bed, then asleep
 
 On a night where your child was put down a while before they fell asleep
-(a bedtime story, a slow settle), the card and the detail page show both: **In bed** is the
+(a bedtime story, a slow settle), the sleep page shows both: **In bed** is the
 put-down the camera recorded, and **Asleep** is when the room went quiet. That's the same time the
 app has always reported as bedtime. The extra time appears only when "in bed" is at least a minute
 before "asleep", so most nights still show one time. If you corrected a night's asleep time, the
 camera's "In bed" is hidden and only your time is shown: the recorded put-down belongs to the bedtime
 you corrected, so it may not match yours. Correcting only the wake-up time keeps it. If you gave the
 **In bed** time yourself in the morning review, yours is shown, beside your asleep time too. A night
-saved before 0.35.0 has no "in bed" time on the child's card until it's recomputed, and a night
+saved before 0.35.0 has no "in bed" time on the sleep page until it's recomputed, and a night
 you corrected in the morning review is locked against that until the correction is removed (or give
 its **In bed** time yourself in the review). The detail page works the night out fresh each time, so
 it shows the time straight away.
@@ -972,11 +973,16 @@ building it failed; the night is then returned as usual and one line is logged.
 
 ### Tell it when it got a night wrong
 
-The morning after, the child's page offers **Was last night right?** — one question: when they got
-up. Tap it and the screen reads **Up at 6:37. Is that right?**
-- **That's right** records that time as your answer. Two taps from the child's page.
-- **Not quite** shows one time field, **Got up for the day**, to type the real time into, and
-  **Save**.
+The morning after, the child's page asks one question, **Up at 6:37. Is that right?**, inside the
+night card under the summary: when they got up.
+- **That's right** records that time as your answer, in one tap, right there; the question then
+  becomes a one-line receipt with a way to change it. On a night where the full screen would ask
+  something else (the two-answers case below, a night already answered, or a time that has changed
+  since the card was drawn), the button opens that screen instead of saving.
+- **Not quite** opens the review screen, which shows the same question and one time field, **Got up
+  for the day**, to type the real time into, and **Save**. (The screen's own **That's right** does the
+  same as the card's.)
+- A small **✕** on the question dismisses it for good, as before.
 - On a night where the app has two different answers, the question is instead **Up between 6:10 and
   6:50. When did they get up?**, with **Around** each time and **Another time**
   (see ["Up between"](#up-between-in-the-morning-review-when-the-app-has-two-answers)).
@@ -1068,10 +1074,9 @@ confirm is the one the child's card shows. Times are still shown, and typed, in 
 
 #### Your times become the ones shown
 
-Once you correct a night, the child's card and the sleep
-detail page both show *your* times, marked **You corrected this**, with the total
-sleep recalculated to match wherever an asleep or wake-up time you saved differs from the one that
-screen had (a time that is the same keeps that screen's own total). This is different from
+Once you correct a night, the sleep detail page shows *your* times, marked **You corrected this**, and the child's card
+shows the total sleep recalculated to match wherever an asleep or wake-up time you saved differs
+from the one that screen had (a time that is the same keeps that screen's own total). This is different from
 **Recompute this night**, which re-runs the detector: correcting records what *you* know,
 recomputing re-asks the *app*.
 - A corrected **In bed** only moves the "in bed" time. Saving the review records only the times you

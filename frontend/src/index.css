@@ -1319,7 +1319,7 @@ body.in-pip .tile-menu-backdrop {
    the big figure, as in the design. The 2026-11-12 trial collapsed the old lavender ladder (#eef0ff, #cdd0ff, #b9bdf0,
    #9fa3e0, #8f93d0) to a few tints; that structure stays, because its dimmest step (#8f93d0, 4.28:1, under the 4.5:1 text needs) was the weakest text on
    the card and one muted tint is easier to keep readable. test/paletteTokens.test.jsx recomputes these from this rule. */
-.night { --night-text: #eef0ff; --night-muted: #b9bdf0; --night-link: #c7caff; --night-number: #ffffff; --night-divider: rgba(255, 255, 255, 0.1); background: linear-gradient(165deg, #2c2f63 0%, #191b38 100%); color: var(--night-text); border-radius: 18px; padding: 16px; margin-bottom: 14px; box-shadow: 0 18px 42px -26px rgba(18, 20, 58, 0.8); }
+.night { --night-text: #eef0ff; --night-muted: #b9bdf0; --night-link: #c7caff; --night-number: #ffffff; --night-divider: rgba(255, 255, 255, 0.1); --night-action: #8995ff; --night-on-action: #14142a; background: linear-gradient(165deg, #2c2f63 0%, #191b38 100%); color: var(--night-text); border-radius: 18px; padding: 16px; margin-bottom: 14px; box-shadow: 0 18px 42px -26px rgba(18, 20, 58, 0.8); }
 /* A 12% wash of the night's band colour over the card's gradient (owner approved the colour-scaled design, 2026-11-12).
    ChildDetail.jsx puts `night--<band>` on the card while a score is shown; the band's --band-*-ring colour becomes
    --night-tint and the card paints it as a flat layer ABOVE the gradient (a background layer, not a pseudo-element, so it
@@ -1344,33 +1344,65 @@ body.in-pip .tile-menu-backdrop {
   }
 }
 .night__head { display: flex; align-items: center; gap: 13px; width: 100%; }
-.night__avatar-btn { background: none; border: none; padding: 0; cursor: pointer; flex-shrink: 0; border-radius: 50%; line-height: 0; }
+/* The avatar button is the way to set the photo; the camera badge on its corner says so (it replaced the "Tap to add birthday &
+   photo" line). The badge is a light disc with a dark glyph, so it reads on the navy card in both themes; decorative, the button
+   already has the name. The 64px avatar is the design's smaller portrait: the card's weight now goes to the night, not the face. */
+.night__avatar-btn { position: relative; background: none; border: none; padding: 0; cursor: pointer; flex-shrink: 0; border-radius: 50%; line-height: 0; }
 .night__avatar-btn:focus-visible { outline: 2px solid var(--night-link); outline-offset: 3px; }
-.night__id-btn { flex: 1; min-width: 0; display: block; background: none; border: none; padding: 0; cursor: pointer; color: inherit; font: inherit; text-align: left; }
-.night__edit { background: none; border: none; cursor: pointer; font-family: inherit; }
+.night__avatar-badge { position: absolute; right: -3px; bottom: -3px; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--night-text); color: var(--night-on-action); box-shadow: 0 0 0 2px rgba(25, 27, 56, 0.9); }
 /* Enlarged child photo in a modal (tapped from the detail hero). */
 .photo-full { display: block; width: 100%; border-radius: 12px; }
 .night__id { flex: 1; min-width: 0; }
-.night__name { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 800; line-height: 1.1; }
+/* One line, cut with an ellipsis: a long or unbroken name must not push the gear off a 375px card (.night__id is a min-width: 0 flex child). */
+.night__name { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 800; line-height: 1.1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .night__age { display: block; font-size: 12.5px; color: var(--night-muted); margin-top: 3px; }
-.night__edit { font-size: 12.5px; color: var(--night-link); opacity: 0.85; flex-shrink: 0; }
-.night__sleep { display: flex; align-items: center; gap: 11px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--night-divider); color: var(--night-muted); }
+/* The settings entry: one gear, 44px square (the touch-target floor), on the card's right. It replaced the name/age buttons and
+   the "Edit ›" link, which all went to the same place. */
+.night__settings { flex: none; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; background: none; border: none; border-radius: 50%; cursor: pointer; color: var(--night-link); }
+.night__settings:hover { background: var(--night-divider); }
+.night__settings:focus-visible { outline: 2px solid var(--night-link); outline-offset: 2px; }
+.night__sleep { display: block; margin-top: 14px; padding: 14px 0 0; border-top: 1px solid var(--night-divider); color: var(--night-muted); }
+/* The label / duration column, the ring and the chevron on one row; the headline sits under the row, full width, so the ring no
+   longer narrows it. The chevron is the card's only "this is a link" cue besides the label, so it stays. */
+.night__sleep-row { display: flex; align-items: center; gap: 11px; }
 .night__soon { font-size: 12px; color: var(--night-muted); margin-top: 2px; }
-/* "In bed 19:47 · Asleep 20:04" — same weight as the range line above it. Its own class rather than a
-   second .night__soon so nothing selecting "the range line" can pick this one up instead. */
-.night__inbed { font-size: 12px; color: var(--night-muted); margin-top: 2px; }
-.night__sleep-head { font-weight: 600; font-size: 13px; color: var(--night-muted); }
-.night__sleep-big { font-size: 22px; font-weight: 700; color: var(--night-number); margin: 1px 0 2px; line-height: 1.1; }
-.night__est { font-size: 10.5px; color: var(--night-muted); margin-top: 5px; }
-/* The night summary's headline on the child's card: one line, cut with an ellipsis rather than wrapped, because the
-   score ring beside it narrows this column at 375px. The text is also in the button's aria-label, so nothing is lost. */
-.night__headline { font-size: 13px; color: var(--night-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.night__sleep-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; color: var(--night-muted); }
+.night__sleep-big { font-size: 28px; font-weight: 700; color: var(--night-number); margin: 3px 0 0; line-height: 1.1; }
+.night__sleep-unit { font-size: 15px; font-weight: 500; color: var(--night-muted); }
+/* The night summary's headline on the child's card: ONE line, cut with an ellipsis rather than wrapped. Full width under the
+   row, so it rarely needs cutting; the text is also in the button's aria-label, so nothing the ellipsis cuts is lost. */
+.night__headline { font-size: 15px; font-weight: 700; color: var(--night-text); margin-top: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Sleep summary card as a button into the detail page */
 .night__sleep--btn { width: 100%; background: none; border: none; border-top: 1px solid var(--night-divider); text-align: left; cursor: pointer; font: inherit; }
 .night__sleep-body { flex: 1; min-width: 0; }
 .night__sleep-chev { flex: none; color: var(--night-link); opacity: 0.6; transition: transform 0.15s ease, opacity 0.15s ease; }
 .night__sleep--btn:hover .night__sleep-chev, .night__sleep--btn:focus-visible .night__sleep-chev { opacity: 1; transform: translateX(2px); }
+/* "Add a birthday in settings to see a score sooner": a quiet text button, shown only when a missing birthday is why a night
+   has no score (SleepSummaryCard.jsx). 44px tall to be a real target; no fill so it never competes with the question below. */
+.night__nudge { display: block; width: 100%; min-height: 44px; margin-top: 4px; padding: 0; background: none; border: none; cursor: pointer; text-align: left; font: inherit; font-size: 12.5px; color: var(--night-link); text-decoration: underline; }
+
+/* The morning question, INSIDE the card (components/MorningReviewCard.jsx): a divider, the question, two equal buttons. The
+   primary is the card's periwinkle with dark text (--night-action on --night-on-action, measured in paletteTokens.test.jsx);
+   the other is an outline. ⚠️ Not the app's .btn-primary colours: those follow the THEME (white text on #5663d6 by day), and this
+   card is the same navy in both themes. Both are 44px tall. */
+.night__review { position: relative; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--night-divider); }
+.night__review-q { font-size: 14px; line-height: 1.35; color: var(--night-text); padding-right: 36px; min-height: 20px; }
+.night__review-dismiss { position: absolute; top: 3px; right: -12px; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; background: none; border: none; border-radius: 50%; cursor: pointer; color: var(--night-muted); }
+.night__review-dismiss:hover { color: var(--night-text); }
+.night__review-dismiss:focus-visible { outline: 2px solid var(--night-link); outline-offset: -4px; }
+.night__review-actions { display: flex; gap: 10px; margin-top: 12px; }
+.night__review-actions .btn { flex: 1 1 0; min-height: 44px; padding: 10px 12px; }
+.night__review .night__review-yes { background: var(--night-action); color: var(--night-on-action); }
+.night__review .night__review-no { background: transparent; border: 1px solid rgba(238, 240, 255, 0.5); color: var(--night-text); }
+.night__review .btn:focus-visible, .night__review .review-card__body:focus-visible { outline: 2px solid var(--night-link); outline-offset: 2px; }
+.night__review-err { margin-top: 10px; font-size: 12.5px; font-weight: 600; color: var(--night-text); }
+/* The answered state (ReviewReceipt with `embedded`): the same words as the sleep page's receipt, in the card's own colours. */
+.night__review .review-card__body { width: 100%; min-height: 44px; padding: 0; gap: 12px; color: inherit; font: inherit; }
+.night__review .review-card__icon--done { color: var(--night-link); background: var(--night-divider); }
+.night__review .card-title { margin: 0; color: var(--night-text); font-size: 14px; font-weight: 600; text-transform: none; letter-spacing: 0; }
+.night__review .camera-tile__sub { color: var(--night-muted); }
+.night__review .review-card__go { color: var(--night-link); padding-right: 0; }
 
 /* --- Sleep detail page --- */
 /* Timeline segment colours (theme-aware; the 2026-11-12 accents on the original navy surfaces, design v3, 2026-11-13).
@@ -1661,6 +1693,10 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .score-ring--dark .score-ring__track { stroke: rgba(10, 8, 12, 0.35); }
 .score-ring--dark .score-ring__arc { stroke: #a7b1ff; }
 .score-ring--dark .score-ring__num { fill: #fff; }
+/* The band word under the number (ScoreRing `word`, the child card's 72px ring): the card's muted tint, 6.85:1 on the gradient's lightest
+   point (see .night above), set at 600 so 11px text holds up. Never in a band colour (text is never set in one). */
+.score-ring__word { fill: var(--text-secondary); font-family: inherit; font-weight: 600; }
+.score-ring--dark .score-ring__word { fill: var(--night-muted); }
 /* Band colours (owner approved the colour-scaled ring, 2026-11-12). ONLY the arc is coloured: the number stays
    --text-primary / white, because text is never set in a band colour, and the band word and number always show, so colour
    is never the only signal. On a themed card the arc is --band-<band> (switches with the theme); on the child page's fixed
@@ -3156,12 +3192,6 @@ input[type='range'] {
 
 .review-card__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .review-card__go { color: var(--accent-line); font-size: 20px; padding-right: 12px; }
-
-.review-card__dismiss {
-  order: 2; align-self: flex-start; flex-shrink: 0;
-  padding: 10px 12px; background: none; border: 0; cursor: pointer; color: var(--text-secondary);
-}
-.review-card__dismiss:hover { color: var(--text-primary); }
 
 /* The review screen (pages/NightReview.jsx): one question, one primary action, everything else quiet.
    Tokens only; the focus ring is the global :focus-visible one. */

@@ -180,24 +180,42 @@ describe('SleepSummaryCard: the ring and the spoken score', () => {
     return renderAsAdmin(<SleepSummaryCard childId="kid-1" />);
   };
   const PLAIN_LABEL = 'View sleep detail and history';
+  // The duration is two elements ("10h 37m" and a smaller "asleep"): matched on the element that holds both.
+  const asleep = (text) => screen.findByText((_c, el) => el?.classList?.contains('night__sleep-big') && el.textContent === text);
 
   test('a scored night: the ring shows the number, and the button says the score and band', async () => {
     show({ ...OK_NIGHT, score: SCORE });
-    await screen.findByText('10h 37m asleep');
+    await asleep('10h 37m asleep');
     expect(screen.getByText('82')).toBeInTheDocument();
     expect(screen.getByRole('button').getAttribute('aria-label')).toBe('View sleep detail and history. Sleep score 82, Good');
-    // "Last night" stays exactly as it was (a docs screenshot run waits for it).
-    expect(screen.getByText(/^Last night · /)).toBeInTheDocument();
+    // "Last night" is the label (a docs screenshot run waits for it), now without the date.
+    expect(screen.getByText('Last night')).toBeInTheDocument();
+  });
+
+  // ★ Colour is never the only signal: the band word is DRAWN in the ring, beside the number (the design's "82 / Good"), not only
+  // spoken by the button's name. Under the lowest band there is no word, and an early estimate says "Early".
+  test.each([
+    ['great', { score: 91, band: 'great' }, 'Great'],
+    ['good', { score: 82, band: 'good' }, 'Good'],
+    ['fair', { score: 60, band: 'fair' }, 'Fair'],
+    ['low', { score: 48, band: null }, null],
+    ['early', { score: 64, band: 'good', early_estimate: true }, 'Early'],
+  ])('★ the ring draws the %s word beside its number', async (_band, over, word) => {
+    const { container } = show({ ...OK_NIGHT, score: { ...SCORE, ...over } });
+    await asleep('10h 37m asleep');
+    const words = [...container.querySelectorAll('svg.score-ring .score-ring__word')].map((t) => t.textContent);
+    expect(words).toEqual(word ? [word] : []);
+    expect(container.querySelector('svg.score-ring .score-ring__num').textContent).toBe(String(over.score));
   });
 
   test('under the lowest band the label carries the number alone; an early estimate says so and names no band', async () => {
     const first = show({ ...OK_NIGHT, score: { ...SCORE, score: 48, band: null } });
-    await screen.findByText('10h 37m asleep');
+    await asleep('10h 37m asleep');
     expect(screen.getByRole('button').getAttribute('aria-label')).toBe('View sleep detail and history. Sleep score 48');
     first.unmount();
     vi.restoreAllMocks();
     show({ ...OK_NIGHT, score: { ...SCORE, score: 64, band: 'good', early_estimate: true } });
-    await screen.findByText('10h 37m asleep');
+    await asleep('10h 37m asleep');
     expect(screen.getByRole('button').getAttribute('aria-label')).toBe('View sleep detail and history. Sleep score 64, early estimate');
   });
 
@@ -210,7 +228,7 @@ describe('SleepSummaryCard: the ring and the spoken score', () => {
     ['early', { score: 64, band: 'good', early_estimate: true }, true],
   ])('★ the child card\'s ring carries the %s band class, and a dashed track only for an early estimate', async (band, over, dashed) => {
     const { container } = show({ ...OK_NIGHT, score: { ...SCORE, ...over } });
-    await screen.findByText('10h 37m asleep');
+    await asleep('10h 37m asleep');
     const ring = container.querySelector('svg.score-ring');
     expect(ring.getAttribute('class')).toContain('score-ring--dark');
     expect(ring.classList.contains(`score-ring--${band}`)).toBe(true);
@@ -222,7 +240,7 @@ describe('SleepSummaryCard: the ring and the spoken score', () => {
     const onBand = vi.fn();
     vi.spyOn(api, 'get').mockResolvedValue({ scope: 'last', night: { ...OK_NIGHT, score: { ...SCORE, score: 60, band: 'fair' } } });
     const { unmount } = renderAsAdmin(<SleepSummaryCard childId="kid-1" onBand={onBand} />);
-    await screen.findByText('10h 37m asleep');
+    await asleep('10h 37m asleep');
     expect(onBand).toHaveBeenLastCalledWith('fair');
     unmount();
     expect(onBand).toHaveBeenLastCalledWith(null);
@@ -232,7 +250,7 @@ describe('SleepSummaryCard: the ring and the spoken score', () => {
     const onBand = vi.fn();
     vi.spyOn(api, 'get').mockResolvedValue({ scope: 'last', night: { ...OK_NIGHT, score: NO_SCORE } });
     renderAsAdmin(<SleepSummaryCard childId="kid-1" onBand={onBand} />);
-    await screen.findByText('10h 37m asleep');
+    await asleep('10h 37m asleep');
     expect(onBand).not.toHaveBeenCalledWith(expect.any(String));
   });
 
@@ -244,11 +262,12 @@ describe('SleepSummaryCard: the ring and the spoken score', () => {
     ['the night is in progress', { ...OK_NIGHT, wake_at: null, score: NO_SCORE }, 'tonight'],
   ])('no ring and the old label when %s', async (_name, night, scope) => {
     show(night, scope);
-    await screen.findByText(/10h 37m asleep/);
+    await asleep(scope === 'tonight' ? '10h 37m asleep so far' : '10h 37m asleep');
     const button = screen.getByRole('button');
     expect(button.getAttribute('aria-label')).toBe(PLAIN_LABEL);
     expect(button.querySelector('svg text')).toBe(null); // the ring is the only svg with text in it
-    expect(screen.getByText('Estimated from movement & sound — not a medical measurement.')).toBeInTheDocument();
+    // The estimate disclaimer is the sleep page's footer now, not part of this card.
+    expect(screen.queryByText(/Estimated from movement/)).not.toBeInTheDocument();
   });
 
   test('a score object on a night that is not `ok` draws no ring', async () => {

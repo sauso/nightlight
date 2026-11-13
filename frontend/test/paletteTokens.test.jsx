@@ -309,6 +309,18 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     }
   });
 
+  // The morning question's buttons on the night card (UI refresh PR C). The card is the same navy in both themes, so the primary
+  // takes its own pair rather than the theme's --accent / --on-accent: its label must be readable on the fill (4.5:1) and the fill
+  // must stand off the card as a control (3:1) on the lightest stop and on every band's washed corner.
+  test.each(BANDS)('★ the night card\'s primary action: dark label on its fill (4.5:1), and the fill off the card (3:1), with the %s wash', (band) => {
+    expect(nightTokens['--night-action'], '--night-action is defined on .night').toMatch(/^#[0-9a-f]{6}$/);
+    expect(nightTokens['--night-on-action'], '--night-on-action is defined on .night').toMatch(/^#[0-9a-f]{6}$/);
+    expect(contrast(nightTokens['--night-on-action'], nightTokens['--night-action'])).toBeGreaterThanOrEqual(4.5);
+    const washed = tint(day[`--band-${band}-ring`], 0.12, gradientLight);
+    expect(contrast(nightTokens['--night-action'], gradientLight)).toBeGreaterThanOrEqual(3);
+    expect(contrast(nightTokens['--night-action'], washed)).toBeGreaterThanOrEqual(3);
+  });
+
   test.each(BANDS)('★ the muted text still clears 5:1 where the ring\'s 12%% %s wash lightens the card (the design\'s figure is 5.07)', (band) => {
     // Lowest contrast on the card is the lightest stop with the band colour laid over it at 12% (the design's "washed corner").
     const washed = tint(day[`--band-${band}-ring`], 0.12, gradientLight);

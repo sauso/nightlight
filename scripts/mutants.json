@@ -3857,14 +3857,6 @@
     "tests": ["lib-helpers.test.js", "childCards.test.jsx"]
   },
   {
-    "label": "#501 in bed: the card shows it whenever it exists",
-    "file": "frontend/src/components/SleepSummaryCard.jsx",
-    "find": "if (showsInBed(night)) {",
-    "replace": "if (night.in_bed_at) {",
-    "expect": "killed",
-    "tests": ["childCards.test.jsx"]
-  },
-  {
     "label": "#501 in bed: the detail page shows the stat whenever",
     "file": "frontend/src/pages/SleepDetail.jsx",
     "find": "{showsInBed(night) && <Stat label=\"In bed\"",
@@ -8533,7 +8525,7 @@
     "find": "if (onsetWasCorrected(night) && !night.in_bed_corrected) return false;",
     "replace": "if (onsetWasCorrected(night)) return false;",
     "expect": "killed",
-    "tests": ["childCards.test.jsx"],
+    "tests": ["lib-helpers.test.js"],
     "namePattern": "put-down night"
   },
   {
@@ -8542,7 +8534,7 @@
     "find": "  return utcMs(night.onset_at) - utcMs(night.in_bed_at) >= 60000;",
     "replace": "  return Boolean(night.in_bed_corrected) || utcMs(night.onset_at) - utcMs(night.in_bed_at) >= 60000;",
     "expect": "killed",
-    "tests": ["childCards.test.jsx"],
+    "tests": ["lib-helpers.test.js"],
     "namePattern": "not a minute before asleep"
   },
   {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { Camera, Settings } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -18,9 +19,9 @@ import MorningReviewCard from '../components/MorningReviewCard.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { ageLabel } from '../lib/age.js';
 
-// A child's hub: their identity + (later) last night's sleep, then their cameras and their alerts.
-// Tapping the avatar opens Child settings (name / birthday / colour / photo). Alerts are filtered
-// to this child's cameras client-side via each event's camera_id.
+// A child's hub: ONE night card (identity, last night's sleep, the morning question), then their cameras and their alerts.
+// The avatar opens the photo (or Child settings when there is none) and the gear opens Child settings (name / birthday /
+// colour / photo). Alerts are filtered to this child's cameras client-side via each event's camera_id.
 
 export default function ChildDetail() {
   const { id } = useParams();
@@ -111,24 +112,33 @@ export default function ChildDetail() {
       <main className="app-main">
         <div className={nightBand ? `night night--${nightBand}` : 'night'}>
           <div className="night__head">
+            {/* The avatar is the way to set the photo (it opens the photo, or settings when there is none), and the small
+                camera badge says so: the "Tap to add birthday & photo" line that used to say it is gone (design, 2026-11-12). */}
             <button
               type="button"
               className="night__avatar-btn"
               onClick={() => (kid.photo ? setPhotoOpen(true) : navigate(`/children/${id}/edit`))}
               aria-label={kid.photo ? `View ${kid.name}'s photo` : `Add a photo for ${kid.name}`}
             >
-              <Avatar name={kid.name} src={kid.photo} color={kid.color} size={100} />
+              <Avatar name={kid.name} src={kid.photo} color={kid.color} size={64} />
+              <span className="night__avatar-badge" aria-hidden="true"><Camera size={12} /></span>
             </button>
-            <button type="button" className="night__id-btn" onClick={() => navigate(`/children/${id}/edit`)}>
+            {/* Name and age are plain text now. The two buttons that wrapped them and the "Edit ›" link all went to child
+                settings, which is what the one gear does; settings is also where the birthday is set. No age (no birthday)
+                leaves the line out rather than inviting one: the invitation is on the card only when a score needs it. */}
+            <div className="night__id">
               <span className="night__name">{kid.name}</span>
-              <span className="night__age">{age || 'Tap to add birthday & photo'}</span>
+              {age && <span className="night__age">{age}</span>}
+            </div>
+            <button type="button" className="night__settings" onClick={() => navigate(`/children/${id}/edit`)} aria-label={`Settings for ${kid.name}`}>
+              <Settings size={20} aria-hidden="true" />
             </button>
-            <button type="button" className="night__edit" onClick={() => navigate(`/children/${id}/edit`)}>Edit ›</button>
           </div>
-          <SleepSummaryCard key={id} childId={id} onBand={onBand} />
+          <SleepSummaryCard key={id} childId={id} onBand={onBand} birthdaySet={Boolean(kid.birthday)} />
+          {/* The morning question lives IN the card (one place, asked once); it is keyed by child like the sleep card so a
+              question loaded for one child never shows under another's name while that child's request is pending. */}
+          <MorningReviewCard key={`review-${id}`} childId={id} fmtTime={fmtTime} />
         </div>
-
-        <MorningReviewCard childId={id} fmtTime={fmtTime} />
 
         <TimelapseCard childId={id} />
         <RecordingsCard childId={id} />

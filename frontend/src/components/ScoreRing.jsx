@@ -31,14 +31,22 @@
 // colour. Track and arc share one stroke so the arc is never thinner than the track. The canvas drew 7 to 11 and 8 to 12 on a
 // 112px ring; this app's rings are 44 and 64px, so those widths are scaled to the same proportion of the ring, not copied.
 // The number still fits: the inner diameter is 32px (sm) and 46px (lg) against a 15px and 20px two-digit number.
+//
+// 'xl' + `word` (night-card refresh, 2026-11-13): the child page's card draws the ring larger with the band word UNDER the
+// number inside it ("82 / Good", the approved design), so the word is read next to the number and not only by a screen
+// reader. 72px with a 9px groove leaves a 54px inner circle: the number is 22px and the word 11px, stacked about 2px either
+// side of centre. The longest word drawn is "Early" (an early estimate; its full phrase is in the button's name and on the sleep
+// page): "Estimate" does not fit a 54px circle at a legible size. Under the lowest band there is no word (bandWord), and the
+// number then sits on the centre as everywhere else. `word` is decorative like the rest of the ring.
 const SIZES = {
-  sm: { box: 44, stroke: 6, font: 15 },
-  lg: { box: 64, stroke: 9, font: 20 },
+  sm: { box: 44, stroke: 6, font: 15, wordFont: 0 },
+  lg: { box: 64, stroke: 9, font: 20, wordFont: 0 },
+  xl: { box: 72, stroke: 9, font: 22, wordFont: 11 },
 };
 
 const BANDS = ['great', 'good', 'fair', 'low', 'early'];
 
-export default function ScoreRing({ value, size = 'sm', surface = 'card', band }) {
+export default function ScoreRing({ value, size = 'sm', surface = 'card', band, word }) {
   // No number, no ring: never an empty circle or a "0" standing in for "unknown".
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   const s = SIZES[size] || SIZES.sm;
@@ -47,6 +55,7 @@ export default function ScoreRing({ value, size = 'sm', surface = 'card', band }
   const r = (s.box - s.stroke) / 2;
   const around = 2 * Math.PI * r;
   const known = BANDS.includes(band) ? band : null;
+  const hasWord = Boolean(word) && s.wordFont > 0;
   return (
     <svg className={`score-ring score-ring--${surface === 'dark' ? 'dark' : 'card'}${known ? ` score-ring--${known}` : ''}`}
       width={s.box} height={s.box} viewBox={`0 0 ${s.box} ${s.box}`} aria-hidden="true" focusable="false">
@@ -60,9 +69,16 @@ export default function ScoreRing({ value, size = 'sm', surface = 'card', band }
           strokeLinecap="round" strokeDasharray={`${(around * shown) / 100} ${around}`}
           transform={`rotate(-90 ${mid} ${mid})`} />
       )}
-      <text className="score-ring__num" x={mid} y={mid} textAnchor="middle" dominantBaseline="central" fontSize={s.font}>
+      {/* With a word the number rides above centre and the word below it, as a pair centred on the ring. Only the sizes that
+          have a word font draw one, so a caller passing `word` to a ring too small for it is simply ignored. */}
+      <text className="score-ring__num" x={mid} y={hasWord ? mid - s.wordFont / 2 - 1 : mid} textAnchor="middle" dominantBaseline="central" fontSize={s.font}>
         {shown}
       </text>
+      {hasWord && (
+        <text className="score-ring__word" x={mid} y={mid + s.font / 2 + 1} textAnchor="middle" dominantBaseline="central" fontSize={s.wordFont}>
+          {word}
+        </text>
+      )}
     </svg>
   );
 }

@@ -10,7 +10,7 @@
 //      on first paint, so every deep link hits this branch for a moment before the data lands.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import { renderAs, renderAsAdmin, renderAsCaregiver, forEachRole } from './helpers/render.jsx';
 import Children from '../src/pages/Children.jsx';
 import ChildDetail from '../src/pages/ChildDetail.jsx';
@@ -129,6 +129,8 @@ describe('a child detail screen', () => {
     return Promise.resolve(null);
   });
   const SCORE = { score: 82, band: 'good', version: 2, provisional: false, low_confidence: false, low_confidence_reasons: [], capped_by: null, early_estimate: false, components: [] };
+  // The duration is two elements (the figure and a smaller "asleep"): matched on the element that holds both.
+  const asleepText = (text) => screen.findByText((_c, el) => el?.classList?.contains('night__sleep-big') && el.textContent === text);
 
   test.each([
     ['great', { ...SCORE, score: 91, band: 'great' }],
@@ -167,7 +169,7 @@ describe('a child detail screen', () => {
   test('★ no score (or a night with none) leaves the hero card as the plain gradient: no tint class', async () => {
     withNight({ score: null, reason: 'in_progress', version: 2 });
     const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
-    await screen.findByText('10h 37m asleep');
+    await asleepText('10h 37m asleep');
     expect(container.querySelector('.night').className).toBe('night');
   });
 
@@ -208,9 +210,122 @@ describe('a child detail screen', () => {
     expect(screen.queryByText('Loading…')).toBeNull();
   });
 
-  test('a child with no birthday is invited to add one', async () => {
-    renderAsAdmin(detailRoutes, atChild('kid-2'));
-    expect(await screen.findByText(/Tap to add birthday & photo/)).toBeTruthy();
+  // ★ UI refresh PR C: the age line is the age, or nothing. "Tap to add birthday & photo" is gone; the photo is the avatar's job
+  // (a camera badge) and the birthday lives in child settings, one gear away.
+  test('★ a child with no birthday shows no age line and no invitation on the age line', async () => {
+    const { container } = renderAsAdmin(detailRoutes, atChild('kid-2'));
+    await screen.findByText('Child A Room');
+    expect(screen.queryByText(/Tap to add birthday/)).toBeNull();
+    expect(container.querySelector('.night__age')).toBeNull();
+  });
+
+  test('the settings gear has a name and opens the child\'s settings; the avatar still sets the photo', async () => {
+    const edit = <Routes><Route path="/children/:id" element={<ChildDetail />} /><Route path="/children/:id/edit" element={<div>child settings</div>} /></Routes>;
+    const { user, unmount } = renderAsAdmin(edit, atChild('kid-1'));
+    await user.click(await screen.findByRole('button', { name: 'Settings for Child B' }));
+    expect(await screen.findByText('child settings')).toBeTruthy();
+    unmount();
+
+    // No photo yet: the avatar button goes to the same settings screen (where the photo is set).
+    const second = renderAsAdmin(edit, atChild('kid-1'));
+    await second.user.click(await screen.findByRole('button', { name: 'Add a photo for Child B' }));
+    expect(await screen.findByText('child settings')).toBeTruthy();
+  });
+
+  // The quiet birthday line: ONLY when a night has no score because there is no birthday (the server's own reason key) AND the
+  // child has none. Each of the other three cases below must stay silent, so an implementation that always (or never) shows
+  // it fails here by name.
+  describe('"Add a birthday" appears only where a missing birthday is why there is no score', () => {
+    const NO_BIRTHDAY_SCORE = { score: null, reason: 'no_duration_reference', version: 2 };
+    const live = (night) => vi.spyOn(api, 'get').mockImplementation((path) => {
+      if (String(path).includes('/cameras/alerts')) return Promise.resolve([]);
+      if (String(path).includes('/sleep/live')) return Promise.resolve({ scope: 'last', night: { status: 'ok', night_date: '2026-09-01', asleep_minutes: 637, ...night } });
+      return Promise.resolve(null);
+    });
+    const NUDGE = /Add a birthday in settings/;
+
+    test('no birthday and that reason: the line is there, and goes to settings', async () => {
+      live({ score: NO_BIRTHDAY_SCORE });
+      const edit = <Routes><Route path="/children/:id" element={<ChildDetail />} /><Route path="/children/:id/edit" element={<div>child settings</div>} /></Routes>;
+      const { user } = renderAsAdmin(edit, atChild('kid-2'));
+      await user.click(await screen.findByRole('button', { name: NUDGE }));
+      expect(await screen.findByText('child settings')).toBeTruthy();
+    });
+
+    test.each([
+      ['a birthday is set (the reason is about something else)', 'kid-1', { score: NO_BIRTHDAY_SCORE }],
+      ['the night HAS a score', 'kid-2', { score: SCORE }],
+      ['a different reason', 'kid-2', { score: { score: null, reason: 'in_progress', version: 2 } }],
+      ['the child\'s score switch is off (no score key at all)', 'kid-2', {}],
+    ])('silent when %s', async (_why, kid, night) => {
+      live(night);
+      renderAsAdmin(detailRoutes, atChild(kid));
+      await asleepText('10h 37m asleep');
+      expect(screen.queryByText(NUDGE)).toBeNull();
+    });
+  });
+
+  // ★ The morning question lives IN the night card, once. Before this change it was a separate card below the hero titled
+  // "Was last night right?" (outside `.night`), so "inside the card" fails on the old code, and so does "only one".
+  describe('the morning question inside the night card', () => {
+    const PENDING = { state: 'ask', night_date: '2026-09-01', onset_at: '2026-09-01 09:10:00', wake_at: '2026-09-01 20:47:00' }; // 06:47 Melbourne
+    const withReview = (pending) => vi.spyOn(api, 'get').mockImplementation((path) => {
+      const p = String(path);
+      if (p.includes('/cameras/alerts')) return Promise.resolve([]);
+      if (p.includes('/review/pending')) return Promise.resolve(pending);
+      if (p.includes('/sleep/live')) {
+        return Promise.resolve({ scope: 'last', night: { status: 'ok', night_date: '2026-09-01', asleep_minutes: 637, score: SCORE } });
+      }
+      return Promise.resolve(null);
+    });
+
+    test('★ the question appears exactly once, inside the night card, with its two answers', async () => {
+      withReview(PENDING);
+      const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+      const question = await screen.findByText(/Is that right\?/);
+      expect(screen.getAllByText(/Is that right\?/)).toHaveLength(1);
+      expect(question.closest('.night'), 'inside the night card').not.toBeNull();
+      expect(container.querySelectorAll('.night')).toHaveLength(1);
+      for (const name of ['That’s right', 'Not quite']) {
+        const button = screen.getByRole('button', { name });
+        expect(button.closest('.night'), `${name} is inside the card`).not.toBeNull();
+      }
+      // The standalone card (its old title, its old class) is gone.
+      expect(screen.queryByText('Was last night right?')).toBeNull();
+      expect(container.querySelector('.review-card')).toBeNull();
+    });
+
+    test('★ "Not quite" opens the review screen at the same route the review has always had', async () => {
+      withReview(PENDING);
+      const routes = (
+        <Routes>
+          <Route path="/children/:id" element={<ChildDetail />} />
+          <Route path="/children/:id/review/:date" element={<ReviewRouteProbe />} />
+        </Routes>
+      );
+      function ReviewRouteProbe() { const { id, date } = useParams(); return <div>review of {id} on {date}</div>; }
+      const { user } = renderAsAdmin(routes, atChild('kid-1'));
+      await user.click(await screen.findByRole('button', { name: 'Not quite' }));
+      expect(await screen.findByText('review of kid-1 on 2026-09-01')).toBeTruthy();
+    });
+
+    test('no question while there is nothing to review', async () => {
+      withReview({ state: 'none' });
+      renderAsAdmin(detailRoutes, atChild('kid-1'));
+      await asleepText('10h 37m asleep');
+      expect(screen.queryByText(/Is that right\?/)).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Not quite' })).toBeNull();
+    });
+
+    test('the card\'s controls are real buttons with accessible names (their 44px size is a stylesheet rule, checked on the screenshots)', async () => {
+      withReview(PENDING);
+      renderAsAdmin(detailRoutes, atChild('kid-1'));
+      await screen.findByText(/Is that right\?/);
+      // The names a screen reader reads: the chevron link carries the score and band, the gear and the dismiss have names.
+      expect(screen.getByRole('button', { name: /^View sleep detail and history.*Sleep score 82, Good$/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Settings for Child B' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Dismiss' })).toBeTruthy();
+    });
   });
 
   test('a child WITH a birthday shows an age instead of the invitation', async () => {

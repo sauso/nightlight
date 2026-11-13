@@ -417,24 +417,26 @@ describe('the headline on the child\'s card', () => {
     status: 'ok', night_date: '2026-03-10', onset_at: '2026-03-10 09:10:00', wake_at: '2026-03-10 20:47:00',
     asleep_minutes: 637, wake_count: 2, longest_stretch_minutes: 300,
   };
+  // The duration is two elements (the figure and a smaller "asleep"): matched on the element that holds both.
+  const asleep = (text) => screen.findByText((_c, el) => el?.classList?.contains('night__sleep-big') && el.textContent === text);
   const show = (night, scope = 'last') => {
     vi.spyOn(api, 'get').mockResolvedValue({ scope, night });
     return renderAsAdmin(<SleepSummaryCard childId="kid-1" />);
   };
 
-  test('one headline line under the duration, "Last night" stays, the observations are not repeated, and the label says the headline then the score', async () => {
+  test('one headline line under the duration, "Last night" is the label, the observations are not repeated, and the label says the headline then the score', async () => {
     show({ ...OK_NIGHT, score: SCORE, summary: SUMMARY });
-    await screen.findByText('10h 37m asleep');
+    await asleep('10h 37m asleep');
     expect(screen.getAllByText(HEADLINE)).toHaveLength(1);
     expect(screen.queryByText(FIRST)).not.toBeInTheDocument();
-    expect(screen.getByText(/^Last night · /)).toBeInTheDocument();
+    expect(screen.getByText('Last night')).toBeInTheDocument();
     expect(screen.getByRole('button').getAttribute('aria-label'))
       .toBe('View sleep detail and history. Steady, with some waking or stirring. Sleep score 82, Good');
   });
 
   test('with the switch off the headline is still there and the label has no score', async () => {
     show({ ...OK_NIGHT, summary: SUMMARY });
-    await screen.findByText('10h 37m asleep');
+    await asleep('10h 37m asleep');
     expect(screen.getByText(HEADLINE)).toBeInTheDocument();
     expect(screen.getByRole('button').getAttribute('aria-label'))
       .toBe('View sleep detail and history. Steady, with some waking or stirring');
@@ -448,7 +450,7 @@ describe('the headline on the child\'s card', () => {
 
   test('no summary: the card is as it was, with no extra line and the old label', async () => {
     show({ ...OK_NIGHT, summary: null });
-    await screen.findByText('10h 37m asleep');
+    await asleep('10h 37m asleep');
     expect(screen.getByRole('button').getAttribute('aria-label')).toBe('View sleep detail and history');
     expect(screen.queryByText(HEADLINE)).not.toBeInTheDocument();
   });
@@ -462,7 +464,7 @@ describe('the headline on the child\'s card', () => {
 
   test('no phrase on either screen contains "night timeline" (the docs screenshot run waits for that text on its own)', async () => {
     show({ ...OK_NIGHT, score: SCORE, summary: SUMMARY });
-    await screen.findByText('10h 37m asleep');
+    await asleep('10h 37m asleep');
     expect(document.body.textContent).not.toMatch(/night\s+timeline/i);
   });
 });

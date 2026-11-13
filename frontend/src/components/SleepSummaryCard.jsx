@@ -3,8 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Moon, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
-import { showsInBed } from '../lib/inBed.js';
-import { scoreOf, scoreLabel, bandOf } from '../lib/sleepScoreText.js';
+import { scoreOf, scoreLabel, bandOf, bandWord } from '../lib/sleepScoreText.js';
 import { nightSummaryText } from '../lib/nightSummaryPhrases.js';
 import ScoreRing from './ScoreRing.jsx';
 
@@ -12,6 +11,13 @@ import ScoreRing from './ScoreRing.jsx';
 // "Tonight · so far" (recomputed on demand, capped at now — so a morning wake shows within a minute or
 // two of it happening), otherwise the last completed "Last night". A sleep-PATTERN estimate from
 // movement + sound, never a medical claim. The whole card is a button into the Sleep detail page.
+//
+// ★ WHAT THIS CARD HOLDS (UI refresh PR C, 2026-11-13, the approved design): on a scored night only the label, the
+// duration, ONE ring with its band word, and ONE headline. It used to carry the time range, wake-up count, longest
+// stretch, an "In bed ... Asleep ..." line and the estimate disclaimer as well; all of those are on the sleep page
+// (SleepDetail.jsx), which is one tap away, and a hero that says the same thing twice is the "wall of numbers" the redesign
+// removed. The estimate/"not a medical measurement" line is the sleep page's one-line footer now, and "You corrected this"
+// is the receipt under the card (MorningReviewCard.jsx). The wording of every state that is NOT a scored night is unchanged.
 
 function fmtDur(min) {
   if (min == null) return '';
@@ -22,7 +28,12 @@ function fmtDur(min) {
 
 // `onBand` (optional): told the band colour key of the night shown (bandOf), or null when no score is shown, so the
 // child page can tint its hero card (index.css, `.night--<band>`). Without it the card behaves exactly as before.
-export default function SleepSummaryCard({ childId, onBand }) {
+//
+// `birthdaySet` (default true, so no other caller changes): false when the child has no birthday. It matters only for the
+// quiet line under the card: a night with no score BECAUSE there is no birthday and no week of history yet is the one case
+// where "add a birthday" is real information (the age figure is what scores such a night), and the child page no longer
+// carries the old "Tap to add birthday & photo" invitation on the age line.
+export default function SleepSummaryCard({ childId, onBand, birthdaySet = true }) {
   const { settings } = useSettings();
   const navigate = useNavigate();
   const tz = settings.timezone || 'UTC';
@@ -40,11 +51,6 @@ export default function SleepSummaryCard({ childId, onBand }) {
     return () => { alive = false; clearInterval(t); };
   }, [childId]);
 
-  const fmtTime = (utc) => {
-    if (!utc) return '';
-    const d = new Date(String(utc).replace(' ', 'T') + 'Z');
-    return new Intl.DateTimeFormat([], { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(d);
-  };
   const fmtDate = (nightDate) => {
     if (!nightDate) return '';
     const d = new Date(String(nightDate) + 'T00:00:00');
@@ -60,6 +66,10 @@ export default function SleepSummaryCard({ childId, onBand }) {
   // a night with no score, a failed score (null), and the child's "Show sleep score" switch off (no `score` key).
   const score = night?.status === 'ok' ? scoreOf(night) : null;
   const band = bandOf(score);
+  // The word inside the ring: the band word, "Early" for an early estimate (the full "early estimate" is in the button's
+  // name; see ScoreRing), nothing under the lowest band. Colour is never the only signal, so a ring with a number always
+  // says what the number means where it can.
+  const ringWord = score ? (score.early_estimate ? 'Early' : bandWord(score)) : null;
 
   // Report the band up for the hero card's tint, and clear it when the score goes away or the card unmounts, so a tint
   // never outlives the ring it belongs to (a child switch, a night that loses its score, a failed refresh).
@@ -76,6 +86,12 @@ export default function SleepSummaryCard({ childId, onBand }) {
     ? nightSummaryText(night.summary, { zone: tz, tempUnit: settings.temp_unit })?.headline ?? null
     : null;
 
+  // The label above the duration: a small moon and the words. The moon marks "overnight sleep" the way it did when it sat
+  // at the left of the card; one place for it so every state that has a label gets the same one.
+  const head = (text) => (
+    <div className="night__sleep-head"><Moon size={14} aria-hidden="true" />{text}</div>
+  );
+
   let body;
   if (data === undefined) {
     body = <div className="night__soon">Loading sleep…</div>;
@@ -89,7 +105,7 @@ export default function SleepSummaryCard({ childId, onBand }) {
   } else if (!night || night.status === 'no_data') {
     body = tonight ? (
       <>
-        <div className="night__sleep-head">Tonight</div>
+        {head('Tonight')}
         <div className="night__soon">Tracking tonight — sleep will show here once there’s enough overnight data.</div>
       </>
     ) : (
@@ -100,7 +116,7 @@ export default function SleepSummaryCard({ childId, onBand }) {
   } else if (night.status === 'no_sleep') {
     body = (
       <>
-        <div className="night__sleep-head">{tonight ? 'Tonight' : `Last night · ${fmtDate(night.night_date)}`}</div>
+        {head(tonight ? 'Tonight' : `Last night · ${fmtDate(night.night_date)}`)}
         <div className="night__soon">{tonight ? 'Not asleep yet.' : 'No clear sleep detected overnight.'}</div>
       </>
     );
@@ -117,7 +133,7 @@ export default function SleepSummaryCard({ childId, onBand }) {
     // ONLY on the flag path.
     body = (
       <>
-        <div className="night__sleep-head">{tonight ? 'Tonight' : `Last night · ${fmtDate(night.night_date)}`}</div>
+        {head(tonight ? 'Tonight' : `Last night · ${fmtDate(night.night_date)}`)}
         <div className="night__soon">
           {night.nobody_in_bed
             ? 'You said no one was in the bed.'
@@ -126,45 +142,14 @@ export default function SleepSummaryCard({ childId, onBand }) {
       </>
     );
   } else {
-    // status ok
-    const head = tonight ? 'Tonight · so far' : `Last night · ${fmtDate(night.night_date)}`;
-    let range;
-    if (tonight) {
-      range = night.wake_at
-        ? `awake since ${fmtTime(night.wake_at)}`
-        : `asleep since ${fmtTime(night.onset_at)}`;
-    } else {
-      range = night.wake_at
-        ? `${fmtTime(night.onset_at)} – ${fmtTime(night.wake_at)}`
-        : `from ${fmtTime(night.onset_at)} · still asleep at ${fmtTime(night.window_end)}`;
-    }
-    const bits = [range];
-    if (night.wake_count != null) bits.push(`${night.wake_count} wake-up${night.wake_count === 1 ? '' : 's'}`);
-    if (night.longest_stretch_minutes) bits.push(`longest ${fmtDur(night.longest_stretch_minutes)}`);
-    // A second line, only on a night with a real gap between put-down and sleep (see showsInBed) — a
-    // bedtime story, typically. Still asleep mid-night says "since", matching the line above it.
-    let inBed = null;
-    if (showsInBed(night)) {
-      inBed = tonight && !night.wake_at
-        ? `in bed since ${fmtTime(night.in_bed_at)}`
-        : `In bed ${fmtTime(night.in_bed_at)} · Asleep ${fmtTime(night.onset_at)}`;
-    }
+    // status ok. The date is not in the label any more ("Last night", as drawn): the card is always the latest night, and
+    // the sleep page has the date navigator.
     body = (
       <>
-        <div className="night__sleep-head">{head}</div>
-        <div className="night__sleep-big">{fmtDur(night.asleep_minutes)} asleep{tonight ? ' so far' : ''}</div>
-        {/* One line that ends in an ellipsis rather than wrapping: the ring narrows this column on a 375px screen. */}
-        {headline && <div className="night__headline">{headline}</div>}
-        <div className="night__soon">{bits.join(' · ')}</div>
-        {inBed && <div className="night__inbed">{inBed}</div>}
-        {/* Say plainly when these are the times a PERSON gave us rather than the ones we worked out.
-            Without it, a corrected card is indistinguishable from a detector that suddenly got it
-            right — and the estimate disclaimer below would be a lie about where the number came from. */}
-        {night.corrected ? (
-          <div className="night__est"><span className="sleep-corrected">You corrected this</span></div>
-        ) : (
-          <div className="night__est">Estimated from movement &amp; sound{score ? ', the score included' : ''} — not a medical measurement.</div>
-        )}
+        {head(tonight ? 'Tonight · so far' : 'Last night')}
+        <div className="night__sleep-big">
+          {fmtDur(night.asleep_minutes)} <span className="night__sleep-unit">asleep{tonight ? ' so far' : ''}</span>
+        </div>
       </>
     );
   }
@@ -180,15 +165,35 @@ export default function SleepSummaryCard({ childId, onBand }) {
   const label = scope === 'off'
     ? 'Turn on sleep tracking in settings'
     : `View sleep detail and history${headline ? `. ${headline.replace(/\.$/, '')}` : ''}${score ? `. Sleep score ${scoreLabel(score)}` : ''}`;
+
+  // "Add a birthday" is shown ONLY for a night that has no score for want of one (the server's own reason key, the same one
+  // the sleep page words as "...or a birthday in this child's settings") AND the child really has none. Anything else, a
+  // score, no night, tracking off, a different reason, a birthday already set, is silent: the invitation used to sit on the
+  // age line of every child without a birthday, scored or not, which is a nag where it carries no information.
+  const needsBirthday = !birthdaySet && night?.status === 'ok' && night.score?.score == null && night.score?.reason === 'no_duration_reference';
+
   return (
-    <button type="button" className="night__sleep night__sleep--btn"
-      onClick={() => navigate(scope === 'off' ? `/children/${childId}/edit` : `/children/${childId}/sleep`)}
-      aria-label={label}>
-      <Moon size={18} aria-hidden="true" />
-      <div className="night__sleep-body">{body}</div>
-      {/* Beside the duration line. The card is a fixed dark gradient in both themes, hence `surface="dark"`. */}
-      {score && <span className="night__score"><ScoreRing value={score.score} size="sm" surface="dark" band={band} /></span>}
-      <ChevronRight size={18} aria-hidden="true" className="night__sleep-chev" />
-    </button>
+    <>
+      <button type="button" className="night__sleep night__sleep--btn"
+        onClick={() => navigate(scope === 'off' ? `/children/${childId}/edit` : `/children/${childId}/sleep`)}
+        aria-label={label}>
+        <div className="night__sleep-row">
+          <div className="night__sleep-body">{body}</div>
+          {score && (
+            <span className="night__score">
+              <ScoreRing value={score.score} size="xl" surface="dark" band={band} word={ringWord} />
+            </span>
+          )}
+          <ChevronRight size={18} aria-hidden="true" className="night__sleep-chev" />
+        </div>
+        {/* One line that ends in an ellipsis rather than wrapping. The full text is in the button's name above. */}
+        {headline && <div className="night__headline">{headline}</div>}
+      </button>
+      {needsBirthday && (
+        <button type="button" className="night__nudge" onClick={() => navigate(`/children/${childId}/edit`)}>
+          Add a birthday in settings to see a score sooner
+        </button>
+      )}
+    </>
   );
 }
