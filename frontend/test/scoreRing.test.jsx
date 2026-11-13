@@ -36,6 +36,26 @@ describe('ScoreRing bands', () => {
     expect(arc.getAttribute('stroke-dasharray')).not.toBe(ring({ band: 'early' }).querySelector('.score-ring__track').getAttribute('stroke-dasharray'));
   });
 
+  test('★ the arc is never thinner than its track, at either size (v3.1 widened both together)', () => {
+    for (const size of ['sm', 'lg']) {
+      for (const band of ['great', 'early']) {
+        const svg = ring({ size, band });
+        const track = Number(svg.querySelector('.score-ring__track').getAttribute('stroke-width'));
+        const arc = Number(svg.querySelector('.score-ring__arc').getAttribute('stroke-width'));
+        expect(arc, `${size} ${band}`).toBeGreaterThanOrEqual(track);
+        expect(track).toBeGreaterThan(4); // wider than the pre-v3.1 hairline (4px on the small ring)
+      }
+    }
+  });
+
+  test('the early estimate\'s dashes scale with the stroke (a dash shorter than the groove is wide reads as a sliver)', () => {
+    for (const size of ['sm', 'lg']) {
+      const track = ring({ size, band: 'early' }).querySelector('.score-ring__track');
+      const [dash] = track.getAttribute('stroke-dasharray').split(' ').map(Number);
+      expect(dash).toBeGreaterThanOrEqual(Number(track.getAttribute('stroke-width')) / 2);
+    }
+  });
+
   test('the number is unchanged by a band, the ring stays decorative, and it is not animated', () => {
     const svg = ring({ band: 'great', value: 91.4 });
     expect(svg.getAttribute('aria-hidden')).toBe('true');

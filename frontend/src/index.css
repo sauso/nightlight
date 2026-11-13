@@ -1375,28 +1375,34 @@ body.in-pip .tile-menu-backdrop {
 /* --- Sleep detail page --- */
 /* Timeline segment colours (theme-aware; the 2026-11-12 accents on the original navy surfaces, design v3, 2026-11-13).
    asleep   #4b53b5 day / #7c85e6 night: 6.55:1 / 4.78:1 on the card.
-   stir     #a7ade4 day / #4a4f86 night, the original pair (v3 map). Day: lavender between asleep and the card. Night: a dim
-            indigo, 2.07:1 on the card and 2.49:1 on the inset, i.e. below 3:1; it is a timeline neighbour, never text, and
-            its order (asleep brighter, stirring dimmer) is what carries it. The 2026-11-12 trial's #a7ade4 at night is gone:
-            it read as a second "asleep" next to #7c85e6 (1.53:1 apart).
+   stir     #7279c6 day / #a7ade4 night (design v3.1, 2026-11-13; v3 had #a7ade4 / #4a4f86). Day: 3.99:1 on the card, 3.20:1 on
+            the inset, both clear of 3:1. Night: 7.33:1 on the card, 8.80:1 on the inset. Against asleep it is only 1.64:1 by day
+            and 1.53:1 at night (the same pair the 2026-11-12 trial dropped for reading as a second "asleep"), and that is
+            ACCEPTED: v3.1 tells the two apart by SHAPE, not colour (stirring is a half-height block with a gap each side,
+            asleep is the full-height bar; see the timeline rules below), which is why the colour is free to be a clear
+            mark on the card instead of a dim one.
    wake     the "Awake" segment, out-of-bed dot and wake-up duration: amber #f0a257 day / #f6c899 night.
    wake-text  the same hue where it is TEXT (a duration, a badge, an icon): by day #f0a257 is only 2.10:1 on a card, far short
             of the 4.5:1 text needs, so text uses a deeper amber (#9a5410, 5.75:1 on the card, 4.61:1 on the inset, 5.21:1 on
             its 14% badge); at night the segment colour already clears it (#f6c899, 10.26:1 card, 7.33:1 badge) and is reused.
    awake    the neutral "before/after sleep" segment: the ORIGINAL lavender #d2d0e2 day / #3c3f60 night (a faint step from the
             track either way; the warm greys of the trial are gone with the other warm neutrals).
-   visit    room activity, teal #2fa39a in BOTH themes (design v3: at night the old #3ec4b8 had the same lightness as the
-            Good band's #5cbfc6, ratio 1.01, so they could not be told apart where they sit near each other; #2fa39a is
-            5.14:1 on the night card). By day it is 3.08:1 on the card and 2.47:1 on the lavender track, below 3:1 on the
-            track; it is drawn ABOVE the bar, so it never sits on the track's own colour. Bars and dots only, never text.
+   visit    room activity, teal #279189 in BOTH themes (design v3.1, 2026-11-13; v3 had #2fa39a). Darker than v3 so that by
+            day it clears 3:1 on the card (3.82:1) AND on the lavender track (3.06:1), where #2fa39a was 2.47:1 on the track.
+            Night: 4.14:1 on the card, 4.97:1 on the inset. (The old night #3ec4b8 had the same lightness as the Good band's
+            #5cbfc6, ratio 1.01, which is why night is not that.) Bars and dots only, never text.
    visit-text  the same teal where it is TEXT (a duration, a label, the "Movement outside the bed" tag): by day text uses
-            #17706a (5.90:1 on the card, 4.73:1 on the inset, 5.06:1 on the 15% tag). At night #2fa39a on the tag would be
-            only 4.14:1, so text keeps the brighter #3ec4b8 (7.37:1 card, 8.85:1 inset, 5.94:1 tag), which is why this
+            #17706a (5.90:1 on the card, 4.73:1 on the inset, 4.97:1 on the 15% tag). At night #279189 on the tag would be
+            only 3.46:1, so text keeps the brighter #3ec4b8 (7.37:1 card, 8.85:1 inset, 6.17:1 tag), which is why this
             token differs from --sleep-visit there.
+   wake-gap  the 2px gap drawn beside the awake block and on the edge of asleep that touches it: the track colour AT NIGHT, where
+            awake against asleep is only 2.15:1 and the gap is what separates them; transparent BY DAY (v3.1 removed the 1px white
+            separators there: day asleep against awake is 3.12:1). Not a hex, so test/paletteTokens.test.jsx pins its two values
+            as text.
    temp, gap unchanged. There is no token for the design's dashed "still to come" / "not counted" edge (#8c86ae at night, 4.62:1
    on the night card): nothing draws it today, so it arrives with the element that does. */
-:root { --sleep-asleep: #4b53b5; --sleep-stir: #a7ade4; --sleep-wake: #f0a257; --sleep-wake-text: #9a5410; --sleep-awake: #d2d0e2; --sleep-visit: #2fa39a; --sleep-visit-text: #17706a; --sleep-temp: #cf5b39; --sleep-gap: #c7c7c7; }
-:root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-stir: #4a4f86; --sleep-wake: #f6c899; --sleep-wake-text: #f6c899; --sleep-awake: #3c3f60; --sleep-visit: #2fa39a; --sleep-visit-text: #3ec4b8; --sleep-temp: #ef8a5e; --sleep-gap: #5a5c6e; }
+:root { --sleep-asleep: #4b53b5; --sleep-stir: #7279c6; --sleep-wake: #f0a257; --sleep-wake-text: #9a5410; --sleep-awake: #d2d0e2; --sleep-visit: #279189; --sleep-visit-text: #17706a; --sleep-temp: #cf5b39; --sleep-gap: #c7c7c7; --sleep-wake-gap: transparent; }
+:root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-stir: #a7ade4; --sleep-wake: #f6c899; --sleep-wake-text: #f6c899; --sleep-awake: #3c3f60; --sleep-visit: #279189; --sleep-visit-text: #3ec4b8; --sleep-temp: #ef8a5e; --sleep-gap: #5a5c6e; --sleep-wake-gap: var(--bg-elevated-2); }
 
 .sleep-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .sleep-nav__arrow { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
@@ -1451,17 +1457,64 @@ body.in-pip .tile-menu-backdrop {
 .sleep-detail__section-title { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-secondary); margin: 0 0 12px; }
 
 .sleep-tl { padding-top: 2px; }
-.sleep-tl__visits { position: relative; height: 12px; margin-bottom: 3px; }
+/* THE TIMELINE TELLS ITS STATES APART BY MORE THAN COLOUR (design v3.1, 2026-11-13). Several neighbouring pairs are under 3:1
+   (named, with their ratios, in test/paletteTokens.test.jsx and docs/design-language.md), so each state also has its own
+   SHAPE and the neighbours are separated by GAPS, which a colour-blind viewer or a washed-out phone screen still sees:
+     asleep    the full-height bar (30px);
+     stirring  a HALF-height block (14px, centred), with a 2px track-coloured gap on each side;
+     awake     a block that RISES 5px ABOVE the bar, so it breaks the bar's silhouette, with gaps at night.
+   Segments keep their real width in the flex row (so the onset/wake marks and the hover time stay exact); the stirring and
+   awake blocks are drawn by a ::before centred on that slot, with a 3px minimum width, so a one-minute stir is still
+   visible without pushing every later segment to the right. Because awake rises above the bar, the bar no longer clips
+   (no overflow: hidden): the end segments round their own outer corners instead. */
+.sleep-tl__visits { position: absolute; left: 0; right: 0; top: -20px; height: 12px; }
 .sleep-tl__visit { position: absolute; top: 2px; width: 9px; height: 9px; border-radius: 50%; background: var(--sleep-visit); border: 2px solid var(--bg-elevated); transform: translateX(-50%); box-shadow: 0 0 0 1px var(--sleep-visit); }
-.sleep-tl__bar { position: relative; display: flex; width: 100%; height: 30px; border-radius: 7px; overflow: hidden; background: var(--bg-elevated-2); }
+.sleep-tl__bar { position: relative; display: flex; width: 100%; height: 30px; border-radius: 7px; background: var(--bg-elevated-2); }
+.sleep-tl__bar > .sleep-seg:first-child { border-radius: 7px 0 0 7px; }
+.sleep-tl__bar > .sleep-seg:last-child { border-radius: 0 7px 7px 0; }
+.sleep-tl__bar > .sleep-seg:only-child { border-radius: 7px; }
 .sleep-seg { height: 100%; }
 .sleep-seg--asleep { background: var(--sleep-asleep); }
 .sleep-seg--stir { background: var(--sleep-stir); }
 .sleep-seg--wake { background: var(--sleep-wake); }
 .sleep-seg--awake { background: var(--sleep-awake); }
-/* A 1px card-coloured line between asleep and its neighbours (design, 2026-11-12): at night asleep against awake is only
-   2.15:1, so the colours alone do not separate them. Inset, so it costs no width; drawn on the later segment's left edge. */
-.sleep-seg--asleep + .sleep-seg, .sleep-seg + .sleep-seg--asleep { box-shadow: inset 1px 0 0 var(--bg-elevated); }
+/* Stirring and awake on the timeline: the slot itself is transparent and the ::before is the visible block. z-index 1 so the
+   block and its gaps paint over the segments after it in the row (a positioned element would otherwise be painted over by a
+   later sibling's background), and the onset/wake/now marks sit above both (2). The legend swatches use the same classes but
+   are not inside .sleep-tl__bar, so they keep the plain background and their own shapes (below). */
+.sleep-tl__bar .sleep-seg--stir, .sleep-tl__bar .sleep-seg--wake { position: relative; z-index: 1; background: none; }
+.sleep-tl__bar .sleep-seg--stir::before, .sleep-tl__bar .sleep-seg--wake::before { content: ''; position: absolute; left: 50%; width: 100%; min-width: 3px; transform: translateX(-50%); }
+.sleep-tl__bar .sleep-seg--stir::before { top: 7px; height: 14px; background: var(--sleep-stir); box-shadow: -2px 0 0 var(--bg-elevated-2), 2px 0 0 var(--bg-elevated-2); }
+/* Awake: top -5px, 33px tall (it ends 2px above the bar's floor, as drawn in the design), 1px top corners. By DAY it is 2.10:1
+   on the white card and 1.68:1 on the track, and that is DELIBERATE (owner, design v3.1): a darker amber would sit next to the
+   Fair band's amber and look the same to a colour-blind reader, and the shape (it rises above the bar) is what carries it. */
+.sleep-tl__bar .sleep-seg--wake::before { top: -5px; height: 33px; background: var(--sleep-wake); border-radius: 1px 1px 0 0; box-shadow: -2px 0 0 var(--sleep-wake-gap), 2px 0 0 var(--sleep-wake-gap); }
+/* THE ENDS OF THE BAR (Codex review of #1057). A 3px block centred on a ~0.5px slot (a one-minute segment) pokes about 1.25px past
+   either side, so a stirring or awake segment that is the FIRST or LAST in the row would paint outside the bar's rounded end, and
+   so would its outer gap. The first block is therefore anchored to the bar's left edge (growing right), the last to the right edge
+   (growing left), and each draws its gap on the inner side only. A segment that is both (the only one) has no gap. A segment
+   second from the end can still overhang by about a pixel; that is not clamped (it stays inside the card's padding).
+   NEIGHBOURS OVERLAP, ACCEPTED: two tiny adjacent blocks can overlap, and the LATER one in the row paints over the earlier (they
+   share z-index 1, so tree order decides). Consequences: a stirring block never hides asleep or the before/after segment (those
+   are full height and only its middle 14px is covered), nor an awake block (that is taller); but an awake block or a stirring
+   block can hide a one-minute stirring block that sits just before it, and a later stirring block can hide an earlier tiny
+   stirring block. At night a covered neighbour also loses 2px to the gap. The bar's totals and hover time are unaffected, since
+   they come from the real slots. */
+.sleep-tl__bar > .sleep-seg--stir:first-child::before { left: 0; transform: none; box-shadow: 2px 0 0 var(--bg-elevated-2); }
+.sleep-tl__bar > .sleep-seg--wake:first-child::before { left: 0; transform: none; box-shadow: 2px 0 0 var(--sleep-wake-gap); }
+.sleep-tl__bar > .sleep-seg--stir:last-child::before { left: auto; right: 0; transform: none; box-shadow: -2px 0 0 var(--bg-elevated-2); }
+.sleep-tl__bar > .sleep-seg--wake:last-child::before { left: auto; right: 0; transform: none; box-shadow: -2px 0 0 var(--sleep-wake-gap); }
+.sleep-tl__bar > .sleep-seg--stir:only-child::before { left: 0; right: auto; transform: none; box-shadow: none; }
+.sleep-tl__bar > .sleep-seg--wake:only-child::before { left: 0; right: auto; transform: none; box-shadow: none; }
+/* Asleep gets a 2px track-coloured edge only where it touches stirring (both themes) or awake (night only: --sleep-wake-gap is
+   transparent by day, where the 1px white separator it replaces is gone). Inset, so it costs no width. The edges are two custom
+   properties on the element, so an asleep slot between a stir and an awake keeps BOTH (a later box-shadow rule would replace an
+   earlier one, not add to it). */
+.sleep-seg--asleep { box-shadow: inset 2px 0 0 var(--tl-edge-l, transparent), inset -2px 0 0 var(--tl-edge-r, transparent); }
+.sleep-seg--stir + .sleep-seg--asleep { --tl-edge-l: var(--bg-elevated-2); }
+.sleep-seg--wake + .sleep-seg--asleep { --tl-edge-l: var(--sleep-wake-gap); }
+.sleep-seg--asleep:has(+ .sleep-seg--stir) { --tl-edge-r: var(--bg-elevated-2); }
+.sleep-seg--asleep:has(+ .sleep-seg--wake) { --tl-edge-r: var(--sleep-wake-gap); }
 /* Striped, not flat — a flat gray sat too close to --sleep-awake's own light gray to reliably tell
    apart on a thin bar segment (found by adversarial review). A hatch pattern reads as "no data" on
    sight regardless of exact hue, the same convention used for a missing-image placeholder. */
@@ -1477,7 +1530,10 @@ body.in-pip .tile-menu-backdrop {
 .sleep-visit-tag--out { color: var(--sleep-wake-text); background: color-mix(in srgb, var(--sleep-wake) 15%, transparent); }
 /* Out-of-crib room-activity dot on the timeline — the child themselves out (vs teal = someone in the room). */
 .sleep-tl__visit--out { background: var(--sleep-wake); box-shadow: 0 0 0 1px var(--sleep-wake); }
-.sleep-tl__mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-primary); opacity: 0.55; transform: translateX(-1px); }
+/* The onset/wake marks and the "now" line are the bar's height (30px) on purpose. Before v3.1 they were declared taller (top and
+   bottom -2px / -4px) but the bar had overflow: hidden, so what was ever SEEN was clipped to 30px; the bar no longer clips, so the
+   declared size is now the real one and is set to what was always visible. z-index 2 keeps them above the stirring/awake blocks. */
+.sleep-tl__mark { position: absolute; z-index: 2; top: 0; bottom: 0; width: 2px; background: var(--text-primary); opacity: 0.55; transform: translateX(-1px); }
 /* Crib-boundary transition markers (out-of-bed detection): a triangle pointing DOWN at the bar = placed
    into the crib; pointing UP = climbed/lifted out. Sit in their own strip just above the timeline bar. */
 .sleep-tl__txs { position: relative; height: 9px; margin-bottom: 2px; }
@@ -1492,11 +1548,14 @@ body.in-pip .tile-menu-backdrop {
 .sleep-refined__item b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
 .sleep-refined__old { text-decoration: line-through; opacity: 0.55; margin-right: 5px; font-variant-numeric: tabular-nums; }
 .sleep-refined__note { flex-basis: 100%; font-size: 11px; color: var(--text-secondary); opacity: 0.8; margin-top: 2px; }
-.sleep-tl__now { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 2px dashed var(--accent-line); transform: translateX(-1px); }
+.sleep-tl__now { position: absolute; z-index: 2; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--accent-line); transform: translateX(-1px); }
 /* Hover bubble over the timeline: a follow-the-cursor tooltip with the time, sleep status, and (if a
    sensor was present) the temperature at that moment. The wrap is the mouse/touch target; it must NOT
    clip (unlike the bar, which hides its segment corners). */
-.sleep-tl__barwrap { position: relative; }
+/* 6px above the bar: the awake block rises 5px, which would otherwise touch whatever is above. With room activity the markers sit
+   at top -20px (see .sleep-tl__visits), so the wrapper makes room for them, 22px, and nothing is clipped. */
+.sleep-tl__barwrap { position: relative; margin-top: 6px; }
+.sleep-tl__barwrap--room { margin-top: 22px; }
 .sleep-tl__cursor { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text-primary); opacity: 0.5; transform: translateX(-1px); pointer-events: none; }
 .sleep-tl__tip {
   position: absolute; bottom: calc(100% + 8px); transform: translateX(-50%);
@@ -1520,6 +1579,9 @@ body.in-pip .tile-menu-backdrop {
 .sleep-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; font-size: 12px; color: var(--text-secondary); }
 .sleep-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .sleep-legend__sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+/* The swatches match the shapes on the bar: stirring is a flat 14x5 block, awake a 4x14 tick. */
+.sleep-legend__sw.sleep-seg--stir { width: 14px; height: 5px; border-radius: 1px; }
+.sleep-legend__sw.sleep-seg--wake { width: 4px; height: 14px; border-radius: 1px 1px 0 0; }
 
 .sleep-wakes { list-style: none; margin: 0; padding: 0; }
 .sleep-wakes__row { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-top: 1px solid var(--border); }
