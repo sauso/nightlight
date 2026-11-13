@@ -179,13 +179,17 @@ are close in lightness (the table below), so each state also has its own silhoue
 
 | State | Shape on the bar | Gaps |
 |---|---|---|
-| Asleep | The full-height bar (30px). | A 2px track-coloured edge only where it touches stirring (both themes) or awake (night only). |
-| Stirring | A **half-height** block: 14px, centred, 3px minimum width. | 2px of the track colour on each side. |
+| Asleep | The full-height bar (30px). | A 2px track-coloured edge only where it touches a wide stirring block (both themes) or awake (night only). |
+| Stirring | A wide run is a **half-height** block: 14px, centred. A short run is a quiet 6px dash drawn on the asleep colour (no pale sliver beside it). Both have a 3px minimum width. | 2px of the track colour on each side only for a wide run. |
 | Awake (the amber segment) | **Rises 5px above the bar**: 33px tall from 5px above the top, 3px minimum width, 1px top corners. | At night, 2px of the track colour on each side (`--sleep-wake-gap`); by day none (the old 1px white separators are gone). |
 | Before/after sleep, No data | Full height, as before; "No data" stays hatched. | None. |
 | Room activity | A ring above the bar, 20px up (the bar's wrapper reserves 22px so nothing clips; 6px when there is none, for the awake rise). | n/a |
 
-The stirring and awake blocks keep their real width in the row (so the onset and wake marks and the hover time stay exact)
+Stirs separated by less than three asleep minutes join into one block for drawing only. The original segments still
+drive the hover time and status, and the reported counts do not change. A lone one-minute stir, or a drawn run under
+8px wide at the current screen size, uses the quiet dash without side gaps: there is too little space for both a
+block and readable gaps.
+The drawing segments keep their total width in the row (so the onset and wake marks stay exact)
 and are drawn centred on that slot, so a one-minute stir is still 3px wide without pushing the rest along. The bar no
 longer clips (awake rises out of it); the first and last segments round their own outer corners, and a stirring or awake block that
 is first or last in the row is anchored to that edge so it never paints outside the bar. Tiny neighbouring blocks (one-minute
@@ -194,6 +198,17 @@ one-minute stirring block next to it but never asleep, the before/after segment 
 onset, wake and "now" marks are the bar's 30px height (they were declared taller but clipped to that before). The legend swatches match: stirring a
 flat 14x5 block, awake a 4x14 tick. **Day awake against the white card stays 2.10:1 on purpose**: a darker amber would sit
 next to the Fair band's amber and look the same to a colour-blind reader, and the rise above the bar is what carries it.
+
+The card is titled **Timeline**. Its legend lists only states and markers present in that night. The next card has a
+two-segment **Wake-ups · count** / **Room activity · count** tab control. Wake-ups is selected first unless it is empty
+and room activity has rows. Each tab keeps its own rows and quiet empty line; arrow keys and Home/End move between tabs.
+The Wake-ups count follows the summary's wake-up figure: the server's standalone morning-wake row is listed last as
+**Up for the day** (with its clip and alerts, if any) and is not counted.
+
+Nothing on the timeline may poke past the card's content box (owner, on a real phone, 2026-11-13). The first hour label is
+left-aligned to the bar's left edge and the last right-aligned to its right edge (the rest are centred), and the room-activity
+rings and the into/out-of-bed triangles are positioned with `clamp()` so a marker at the very start or end sits fully inside
+the bar and still points at its minute as nearly as it can (`lib/timelineEdges.js`).
 
 #### Known pairs below their floor
 
@@ -204,8 +219,8 @@ and fails if one stops being true, so a fix is noticed rather than silently left
 | Pair | Ratio | Why it is accepted |
 |---|---|---|
 | Night: wake-up amber `#F6C899` against asleep `#7C85E6` | 2.15 | Neighbouring segments; the awake block rises above the bar and has 2px gaps at night, and the segment order carries it. |
-| Night: stirring `#A7ADE4` against asleep `#7C85E6` | 1.53 | Worse than v3 (2.31): the same colour pair the 2026-11-12 trial dropped. Told apart by shape instead: a half-height block with a gap each side against the full-height bar. |
-| Day: stirring `#7279C6` against asleep `#4B53B5` | 1.64 | New with v3.1 (stirring was a pale lavender, which cleared this pair). Same: half-height block with gaps. |
+| Night: stirring `#A7ADE4` against asleep `#7C85E6` | 1.53 | Worse than v3 (2.31): the same colour pair the 2026-11-12 trial dropped. Told apart by shape instead: a short dash or half-height block against the full-height bar, with gaps when wide enough. |
+| Day: stirring `#7279C6` against asleep `#4B53B5` | 1.64 | New with v3.1 (stirring was a pale lavender, which cleared this pair). Same: a short dash or half-height block, with gaps when wide enough. |
 | Day: stirring `#7279C6` against the wake-up amber `#F0A257` | 1.90 | Close in lightness, different hue; the stirring block is half height and the amber block rises above the bar (v3: 1.03 with the pale lavender). |
 | Night: stirring `#A7ADE4` against the wake-up amber `#F6C899` | 1.40 | New with v3.1. The two are told apart by shape: stirring is half height, awake rises above the bar, and awake has gaps at night. |
 | Day: stirring `#7279C6` against the before/after-sleep segment `#D2D0E2` | 2.63 | Two neighbours; the stirring block is half height with gaps, the other is the faint full-height segment. |

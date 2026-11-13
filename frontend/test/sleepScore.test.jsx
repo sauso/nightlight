@@ -474,9 +474,9 @@ describe('SleepDetail: the score follows the night on screen', () => {
     const today = { ...BASE, scoring_view: view('current'), score: { ...SCORE, score: 57, band: 'fair' } };
     const { user } = mount((path) => (path.includes('context=current') ? today : saved));
     expect(await screen.findByRole('button', { name: 'Sleep score 82, Good. How this is scored' })).toBeInTheDocument();
-    // The page's estimate line covers the score while one is shown, and the timeline title is untouched.
+    // The page's estimate line covers the score while one is shown, and the timeline keeps its title.
     expect(screen.getByText(/the sleep score included — a sleep-pattern guide, not a medical measurement\./)).toBeInTheDocument();
-    expect(screen.getByText('Night timeline')).toBeInTheDocument();
+    expect(screen.getByText('Timeline', { exact: true })).toBeInTheDocument();
     // The switch is in the page's "⋯" menu (UI refresh PR E).
     await user.click(await screen.findByRole('button', { name: /more options for this night/i }));
     await user.click(await screen.findByRole('menuitem', { name: 'Show with today’s settings' }));
@@ -486,7 +486,7 @@ describe('SleepDetail: the score follows the night on screen', () => {
 
   test('with the switch off (no score key) the page has no score card and the estimate line does not mention a score', async () => {
     mount(() => BASE);
-    await screen.findByText('Night timeline');
+    await screen.findByText('Timeline', { exact: true });
     await waitFor(() => expect(screen.getByText(/Estimated from movement & sound over the night\s+window — a sleep-pattern guide/)).toBeInTheDocument());
     expect(screen.queryByText('Sleep score')).not.toBeInTheDocument();
     expect(screen.queryByText(/No score yet/)).not.toBeInTheDocument();
