@@ -460,6 +460,28 @@ describe('RecordingsCard', () => {
     expect(container.querySelectorAll('.rec-strip__item')[0]).toHaveAccessibleName(/Fri, 28 Aug/);
   });
 
+  // ★ Codex review of #1064: at 320px an away-from-home viewer's zone suffix ("GMT+11") sat at the END of the row's one-line text, so the
+  // ellipsis cut exactly it. The zone is its own item now, so the layout can keep it and let the time give way. The suite's device zone
+  // is Pacific/Auckland (vite.config.js), so a Melbourne home zone is "away" and an Auckland one is "at home".
+  test('★ an away-from-home viewer\'s zone is its own item beside the time; a viewer at home has none', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(ROWS);
+    const away = renderAsAdmin(<RecordingsCard childId="kid-1" />, { settings: { timezone: 'Australia/Melbourne' } });
+    const latest = (await screen.findByRole('button', { name: /^Recordings/ })).querySelector('.recordings-row__latest');
+    const zone = latest.querySelector('.recordings-row__zone');
+    expect(zone, 'a zone item for a viewer in another zone').not.toBeNull();
+    expect(zone.textContent.trim()).toMatch(/^[A-Z+\-0-9]{3,}$/);
+    // The time part is the shrinkable one and does not contain the zone; the text as a whole is unchanged (zone still last).
+    expect(latest.querySelector('.recordings-row__when').textContent).toMatch(/^Wed \d{1,2}:\d{2} [ap]m$/);
+    expect(latest.textContent.endsWith(zone.textContent)).toBe(true);
+    away.unmount();
+
+    const home = renderAsAdmin(<RecordingsCard childId="kid-1" />, { settings: { timezone: 'Pacific/Auckland' } });
+    const homeLatest = (await screen.findByRole('button', { name: /^Recordings/ })).querySelector('.recordings-row__latest');
+    expect(homeLatest.querySelector('.recordings-row__zone'), 'no zone item at home').toBeNull();
+    expect(homeLatest.querySelector('.recordings-row__when').textContent).toMatch(/^Wed \d{1,2}:\d{2} [ap]m$/);
+    home.unmount();
+  });
+
   // --- failed recordings (issue #276) ---
   // The API now returns 'failed' rows as well as 'ready' ones. Before this, a recording that could not
   // be saved was filtered out server-side and the user saw NOTHING — no error, no entry, no way to tell

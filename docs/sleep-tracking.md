@@ -94,7 +94,12 @@ The legend lists only the states present that night. Below it, one card with two
 The **Wake-ups** count is the same number as the **Wake-ups** figure in the night's summary (mid-night wake-ups only):
 the morning wake is listed at the end as **Up for the day** with the time the child got up, and is not counted.
 The **Coverage** figure appears only when part of the night was not watched, even by a single minute, and a partial night
-is never shown as 100%. The first and last hour labels and the markers at the ends of the bar stay inside the card.
+is never shown as 100%: the figure is the covered share of the window rounded to the nearest whole percent, then held at
+99% (719 of 720 minutes reads 99%, not 100%). The line is hidden for a fully covered night, so "no Coverage line" means
+every minute was watched.
+**Up for the day** shows the wake the app kept, and also a wake you gave in the review. It is left off only when the app
+set an earlier exit aside as unusually early for this child and no one has confirmed the time (the sleep score calls such a
+wake "not certain" too). The first and last hour labels and the markers at the ends of the bar stay inside the card.
 There is a way to step back through
 roughly the last month of nights: a strip of seven nights (each with its score and a small
 colour bar; tap one to open it) that starts at the newest nights, and a calendar button. Pick an older night
@@ -1000,8 +1005,9 @@ night card under the summary: when they got up.
   since the card was drawn), the button opens that screen instead of saving.
 - **Not quite** opens the review screen on **When did they get up for the day?**: what the app had
   (**We had 6:20 am.**), the time itself between **-5m** and **+5m** buttons (each press moves it five
-  minutes; it stops at midnight rather than wrapping into another day, and you can always type the time
-  instead), any **out-of-bed** times the app logged within an hour of it as buttons you can tap
+  minutes; it stops at midnight and at noon rather than wrapping or crossing into another day, because a time before
+  12:00 is read as the morning after the night and a time from 12:00 on as the evening, and you can always type the
+  time instead), any **out-of-bed** times the app logged within an hour of it as buttons you can tap
   instead (**6:20 am · out of bed**; at most four), **Add a note**, and **Save**. Nothing is saved until
   Save, and the field is the one called **Got up for the day**. (The screen's own **That's right** does
   the same as the card's.)
@@ -1013,7 +1019,12 @@ night card under the summary: when they got up.
   **In bed**, **Fell asleep**, a note and **No one was in the bed**, for the rare night one of those is
   wrong. Each time says what the app had (**We had 7:10 pm.**) and is only recorded if you type in it;
   opening the sheet and leaving things alone records nothing, and **Save** stays off until you have
-  typed something. **Closing the sheet (Escape, a tap outside it, the ✕) throws away what you typed in
+  typed something. **One thing is saved besides what you type:** **Save** in the sheet also saves the up time the
+  page shows, exactly as the page's own **Save** and **That's right** do. On a night you have not answered yet
+  that is the app's guess (or the time you stepped to), so saving there **confirms it**, and the sheet says so
+  (**Saving also confirms the up time shown on the page.**). Where you already gave an answer, or the question is
+  "Up between" and you have not picked a time, the sheet says only that a time you change is saved.
+  **Closing the sheet (Escape, a tap outside it, the ✕) throws away what you typed in
   it**; nothing is saved by closing. If the row already holds an answer for either time it reads it out
   (**You said in bed 6:49 pm.**), so a saved answer is never hidden. If the app found no wake-up time
   for the night at all, there is nothing to confirm, so the screen opens straight onto the time field,

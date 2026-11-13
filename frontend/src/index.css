@@ -311,7 +311,12 @@ button, a, summary, label, select, input[type='checkbox'], input[type='radio'], 
 .more-menu__panel { position: absolute; right: 0; top: calc(100% + 10px); z-index: 40; min-width: 260px; max-width: min(340px, calc(100vw - 24px)); padding: 6px; background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28); }
 .more-menu__panel[hidden] { display: none; }
 .more-menu__item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 10px 12px; border: 0; border-radius: 10px; background: none; color: var(--text-primary); font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
-.more-menu__item:hover, .more-menu__item:focus-visible { background: var(--bg-elevated-2); }
+/* Light state tints, never --bg-elevated-2: that is the inset colour, near-black in the dark theme, so a hovered menu item went
+   black on the raised panel (the same root cause as the child page's rows, #1064). Hover only for a real pointer: a phone has no
+   hover, and the fill would stay on the item after a tap. The keyboard cursor (:focus-visible) and a press keep their fill. */
+.more-menu__item:focus-visible { background: var(--child-action-hover); }
+@media (hover: hover) { .more-menu__item:hover:not(:disabled) { background: var(--child-action-hover); } }
+.more-menu__item:active:not(:disabled) { background: var(--child-action-active); }
 .more-menu__item:disabled { opacity: 0.5; cursor: default; }
 .more-menu__panel .sleep-detail__recompute-note { margin: 0; padding: 0 12px 8px; }
 
@@ -536,8 +541,12 @@ body.in-pip .tile-menu-backdrop {
   width: 100%;
 }
 
-.hamburger-item:hover {
-  background: var(--bg-elevated-2);
+/* No component uses .hamburger-item any more (the hamburger left AppHeader); fixed rather than deleted so a revival does not bring back
+   the near-black hover fill (same token and pointer-only rule as .more-menu__item). */
+@media (hover: hover) {
+  .hamburger-item:hover {
+    background: var(--child-action-hover);
+  }
 }
 
 .hamburger-item--logout {
@@ -631,9 +640,14 @@ body.in-pip .tile-menu-backdrop {
     transition: background 0.15s ease, color 0.15s ease;
   }
 
-  .bottom-nav a:hover {
-    background: var(--bg-elevated-2);
-    color: var(--text-primary);
+  /* The sidebar's hover was the inset fill, which is also the SELECTED item's fill below (so a hovered item looked selected) and is
+     near-black at night. It is the light state tint now, and pointer-only (an iPad in landscape is wide enough for this rail and
+     has no hover). The selected item's own fill below is a deliberate resting surface, not a hover, and is unchanged. */
+  @media (hover: hover) {
+    .bottom-nav a:hover {
+      background: var(--child-action-hover);
+      color: var(--text-primary);
+    }
   }
 
   .bottom-nav a.active {
@@ -1961,10 +1975,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .sleep-score__note-box { margin: 10px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--bg-elevated-2); color: var(--text-primary); font-size: 12px; line-height: 1.5; }
 /* The dialog is nested under the navy card for focus restoration, but paints the normal card surface. */
 .sleep-night-card .modal-card { color: var(--text-primary); }
-/* Modal's close button is a bare 6x8px .icon-btn, too small a target on a phone. Scoped to this sheet so the other
-   dialogs keep their header spacing (review of PR #1063, 44px target). */
-.sleep-night-card .modal-card__actions .icon-btn { min-width: 44px; min-height: 44px; border-radius: 10px; font-size: 16px; }
-.sleep-night-card .modal-card__actions .icon-btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+/* (The sheet's 44px close button is now every Modal's: `.modal-card__close`, with the other modal rules.) */
 /* On a phone the ring and the time asleep share the top row and the blurb takes the card's full width underneath
    (beside the ring it wrapped to five narrow lines); from 521px up the blurb sits beside the ring as designed. */
 @media (max-width: 520px) {
@@ -2126,7 +2137,9 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   width: 30px; height: 30px; border-radius: 8px; border: none; background: none;
   color: var(--text-primary); cursor: pointer;
 }
-.clip-cal__nav:hover:not(:disabled) { background: var(--bg-elevated-2); }
+/* The calendar's hover fills use the light state token for the same reason as .more-menu__item (the inset colour is near-black at
+   night), and only under a real pointer (a phone keeps the fill after a tap). */
+@media (hover: hover) { .clip-cal__nav:hover:not(:disabled) { background: var(--child-action-hover); } }
 .clip-cal__nav:disabled { opacity: 0.3; cursor: default; }
 .clip-cal__dow, .clip-cal__grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
 .clip-cal__dow { margin-bottom: 4px; }
@@ -2142,7 +2155,9 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   content: ''; position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
   width: 4px; height: 4px; border-radius: 50%; background: var(--accent-line);
 }
-.clip-cal__day.has-clips:hover { background: var(--bg-elevated-2); }
+/* :not(.is-sel): the selected day keeps its accent fill under the pointer (it has clips, so it matched, and its white-on-accent
+   text sat on the hover fill). */
+@media (hover: hover) { .clip-cal__day.has-clips:not(.is-sel):hover { background: var(--child-action-hover); } }
 .clip-cal__day.is-sel { background: var(--accent); color: var(--on-accent); }
 .clip-cal__day.is-sel::after { background: var(--on-accent); }
 .clip-cal__foot { display: flex; gap: 8px; margin-top: 10px; }
@@ -2150,7 +2165,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   flex: 1; padding: 8px; border-radius: 9px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
 }
 .clip-cal__all { border: 1px solid var(--border); background: none; color: var(--accent-text); }
-.clip-cal__all:hover:not(:disabled) { background: var(--bg-elevated-2); }
+@media (hover: hover) { .clip-cal__all:hover:not(:disabled) { background: var(--child-action-hover); } }
 .clip-cal__all:disabled { opacity: 0.4; cursor: default; }
 .clip-cal__done { border: none; background: var(--accent); color: var(--on-accent); }
 .clip-selectall { background: none; border: none; color: var(--accent-text); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; padding: 2px 4px; margin: 0 0 8px 2px; }
@@ -2908,7 +2923,13 @@ input[type='range'] {
 .recordings-row__icon { flex: none; color: var(--accent-line); }
 .recordings-row__title { font-size: 15px; font-weight: 700; }
 /* One line at any width: at 320px the time wrapped ("4:14" over "AM") and broke the 56px row's rhythm; it now truncates instead. */
-.recordings-row__latest { flex: 1; min-width: 0; text-align: right; font-size: 13px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The zone suffix an away-from-home viewer sees ("GMT+11") is its own item and is never cut off. When time and zone do not both fit
+   beside the title (320px) the zone drops under the time, right-aligned, inside the row's 56px, rather than the time being
+   truncated to "Fri 4:1..." (the first attempt: the time shrank first, and lost its AM/PM, which is worse than a second line).
+   Only the time ends in an ellipsis, and only when it alone is wider than the room. */
+.recordings-row__latest { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 0.3em; text-align: right; font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+.recordings-row__when { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.recordings-row__zone { flex: none; }
 .recordings-row__chev { flex: none; color: var(--text-secondary); transition: transform 0.15s ease; }
 .recordings-row[aria-expanded='true'] .recordings-row__chev { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) { .recordings-row__chev { transition: none; } }
@@ -3450,6 +3471,12 @@ input[type='range'] {
 }
 .modal-card__head h2 { font-size: 18px; }
 .modal-card__actions { display: flex; align-items: center; gap: 4px; }
+/* Every Modal's close button: a bare `.icon-btn` is a 6x8px padding round a 13px glyph, far under a thumb. 44px square (the floor in
+   design-language.md section 9), still centred in the header row, whose title stays vertically centred beside it. It is the Modal's
+   own class, so the other `.icon-btn` uses (list-row actions, "Refresh now") keep their text-button look. Was scoped to the sleep
+   night card's sheet only (review of PR #1063); the review of #1062/#1064/#1065/#1066 found the rest of the dialogs the same. */
+.modal-card__close { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; border-radius: 10px; font-size: 16px; }
+.modal-card__close:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 
 /* Desktop: a `wide` modal (the video player) stops being a phone sheet and becomes a centred dialog
    sized to its content. A 440px sheet wastes most of a desktop window on a video. Only opted-in
@@ -3478,8 +3505,27 @@ input[type='range'] {
 /* A Room activity row (#907, reshaped to expand like a wake-up row). The head is time on the left and tag + duration + arrow on the
    right; "Movement outside the bed" is a long non-breaking tag, so on a narrow phone the right group drops under
    the time instead of pushing the page sideways. margin-left:auto keeps it right-aligned on either line. */
-.sleep-wakes__head--visit { flex-wrap: wrap; row-gap: 4px; }
-.sleep-wakes__head--visit .sleep-visit-right { margin-left: auto; }
+/* UI refresh follow-up (Codex review of #1065): one row, one line, at 320px. The head no longer wraps its right group under the time
+   (the old rule above, which put the "Out of bed" chip on a line of its own): the right group (chip, duration, arrow) is a fixed
+   block at the row's right edge and the TIME is what gives way, by wrapping inside its own cell, never by being cut (a phone rule:
+   text that carries meaning wraps). That only happens for a viewer away from home, whose times each carry a zone suffix; a
+   home viewer's rows measured 254px of room at 320px against 142-161px of time. On a phone under 380px the "Out of bed" chip
+   reads "Out" (the rest stays in the DOM, visually hidden, so a screen reader still hears "Out of bed"), and the amber dot beside the
+   time, which only repeats the chip's colour, goes: the worst home-time row ("5:48 am - 6:36 am", "Out", "1h 48m", an arrow) is
+   then 239px of 254. Measured in a browser at 320 and 375px, both themes (not a pixel pin in a test). */
+.sleep-wakes__head--visit { flex-wrap: nowrap; }
+.sleep-wakes__head--visit .sleep-wakes__time { min-width: 0; }
+.sleep-wakes__head--visit .sleep-visit-right { margin-left: auto; flex: none; }
+@media (max-width: 379px) {
+  .sleep-wakes__head--visit { gap: 6px; }
+  .sleep-wakes__head--visit .sleep-visit-right { gap: 6px; }
+  .sleep-wakes__head--visit .sleep-visit-dot--out { display: none; }
+  /* The caption above the list ("Movement outside the bed" beside "What is this?") wrapped to two lines at 320px: a smaller gap, no
+     side padding on the button and a 12px caption give the words the room they were short of. */
+  .sleep-events__explain { gap: 4px; font-size: 12px; }
+  .sleep-events__what { padding: 0; font-size: 12px; }
+  .sleep-visit-tag__more { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
 /* The saved frame inside an expanded row: larger than an alert's 56x40 thumbnail, because the point is to see
    what the camera saw. Same 16:9-ish shape as the camera stream. */
 .sleep-wakes__thumb--frame { width: 96px; height: 54px; }

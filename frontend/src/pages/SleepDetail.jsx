@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { Calendar, SlidersHorizontal, ChevronDown, Moon, DoorOpen, Sunrise, Thermometer, Sparkles, Zap, AudioLines, Play, Video } from 'lucide-react';
 import { api } from '../lib/api.js';
@@ -45,6 +45,18 @@ export function fmtDur(min) {
   const h = Math.floor(min / 60);
   const m = min % 60;
   return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+// Does the detector doubt this night's wake? `wake_unconfirmed` (a fresh night) or `wake_unconfirmed_at` (a stored one) names an
+// EARLIER exit the app set aside as far earlier than this child usually gets up (#700); the wake it kept is then the app's
+// best guess, so the page does not print it as "Up for the day" (the score treats it the same way, "the time up is not certain").
+// ⚠️ ...UNLESS A PARENT HAS GIVEN THE WAKE. A review that carries a wake time sets `wake_given` on the night (sleepReviews.js
+// applyCorrection, #1041) and leaves the detector's note in place, so the flags alone would hide the parent's own confirmed
+// time for good: the score already counts it as confirmed (`sleepScore.js`: wake_given || no doubt), and so does this.
+// Found by checking the Codex review's suspicion against the server's shape (sleep-early-exit-lead.test.js T13: a real later
+// wake_at beside a wake_unconfirmed for the earlier exit); the doubted-but-ungiven case is deliberate and unchanged.
+function wakeDoubted(night) {
+  return Boolean(night.wake_unconfirmed || night.wake_unconfirmed_at) && night.wake_given !== true;
 }
 
 // Colours for the timeline segments — tuned to read on both themes (defined against tokens in CSS).
@@ -565,7 +577,7 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
       <NightEventTabs key={`${childId}|${date}`} wakes={wakes} wakeCount={night.wake_count} visits={visits} alerts={alerts}
         wakeClips={wakeClips} frames={frames} fmtTime={fmtTime} onPlay={setClipFor}
         onPlayWake={setWakeClip} onShowFrame={setFrameFor}
-        morningWakeAt={!night.in_progress && !night.wake_unconfirmed && !night.wake_unconfirmed_at ? night.wake_at : null} />
+        morningWakeAt={!night.in_progress && !wakeDoubted(night) ? night.wake_at : null} />
 
       {clipFor && <ClipPlayerModal ev={clipFor} onClose={() => setClipFor(null)}
         onProtectedChange={(clipId, value) => {
@@ -604,6 +616,13 @@ function NightEventTabs({ wakes: allWakes, wakeCount, visits, alerts, wakeClips,
   // The Room activity explanation is behind a "What is this?" button (owner, staging phone 2026-11-13: a six-line paragraph above the list).
   const [explainOpen, setExplainOpen] = useState(false);
   const tabs = ['wakes', 'room'];
+  // Every id here carries a per-instance prefix: fixed strings ("sleep-events-wakes-tab") would collide as soon as two of these
+  // sit in one document (two nights open at once, a modal that embeds one), and a duplicate id points aria-controls and
+  // aria-labelledby at the FIRST copy, so the second instance's tabs would drive the wrong panel for a screen reader.
+  const ids = useId();
+  const tabId = (tab) => `${ids}-${tab}-tab`;
+  const panelId = (tab) => `${ids}-${tab}-panel`;
+  const explainId = `${ids}-explain`;
   const chooseFromKey = (event, index) => {
     let next;
     if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
@@ -619,15 +638,15 @@ function NightEventTabs({ wakes: allWakes, wakeCount, visits, alerts, wakeClips,
     <div className="card sleep-events">
       <div className="sleep-events__tabs" role="tablist" aria-label="Night events">
         {tabs.map((tab, index) => (
-          <button key={tab} type="button" role="tab" id={`sleep-events-${tab}-tab`}
-            aria-controls={`sleep-events-${tab}-panel`} aria-selected={selected === tab}
+          <button key={tab} type="button" role="tab" id={tabId(tab)}
+            aria-controls={panelId(tab)} aria-selected={selected === tab}
             tabIndex={selected === tab ? 0 : -1} onClick={() => setSelected(tab)}
             onKeyDown={(event) => chooseFromKey(event, index)}>
             {tab === 'wakes' ? `Wake-ups · ${wakes.length}` : `Room activity · ${visits.length}`}
           </button>
         ))}
       </div>
-      <div role="tabpanel" id="sleep-events-wakes-panel" aria-labelledby="sleep-events-wakes-tab" hidden={selected !== 'wakes'}>
+      <div role="tabpanel" id={panelId('wakes')} aria-labelledby={tabId('wakes')} hidden={selected !== 'wakes'}>
         {wakes.length === 0 ? (
             <div className="camera-tile__sub sleep-events__empty">No wake-ups counted (a stir under 5 minutes doesn’t count).</div>
           ) : (
@@ -660,7 +679,7 @@ function NightEventTabs({ wakes: allWakes, wakeCount, visits, alerts, wakeClips,
           </>
         )}
       </div>
-      <div role="tabpanel" id="sleep-events-room-panel" aria-labelledby="sleep-events-room-tab" hidden={selected !== 'room'}>
+      <div role="tabpanel" id={panelId('room')} aria-labelledby={tabId('room')} hidden={selected !== 'room'}>
         <>
             {visits.length > 0 && (
               <>
@@ -668,10 +687,10 @@ function NightEventTabs({ wakes: allWakes, wakeCount, visits, alerts, wakeClips,
                     opens the full explanation, unchanged. The rows themselves no longer repeat "Movement outside the bed" as a chip. */}
                 <div className="sleep-events__explain">
                   <span className="sleep-events__caption"><i className="sleep-visit-dot" aria-hidden="true" /> Movement outside the bed</span>
-                  <button type="button" className="sleep-events__what" aria-expanded={explainOpen} aria-controls="sleep-events-explain"
+                  <button type="button" className="sleep-events__what" aria-expanded={explainOpen} aria-controls={explainOpen ? explainId : undefined}
                     onClick={() => setExplainOpen((o) => !o)}>What is this?</button>
                 </div>
-                {explainOpen && <div id="sleep-events-explain" className="camera-tile__sub sleep-events__explain-text">Movement the camera saw away from the bed. Before a child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.{frames.length > 0 && ' Where the camera saved a frame when it decided the bed was entered or left, the row opens to show it. Older nights have none.'}</div>}
+                {explainOpen && <div id={explainId} className="camera-tile__sub sleep-events__explain-text">Movement the camera saw away from the bed. Before a child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.{frames.length > 0 && ' Where the camera saved a frame when it decided the bed was entered or left, the row opens to show it. Older nights have none.'}</div>}
               </>
             )}
             {visits.length === 0 ? <div className="camera-tile__sub sleep-events__empty">No room activity recorded.</div> : (
@@ -764,7 +783,7 @@ export function VisitItem({ visit, frames, fmtTime, onShowFrame }) {
         {fmtTime(visit.start_at)}{visit.minutes > 1 ? ` – ${fmtTime(visit.end_at)}` : ''}
       </span>
       <span className="sleep-visit-right">
-        {isOut && <span className="sleep-visit-tag sleep-visit-tag--out">Out of bed</span>}
+        {isOut && <span className="sleep-visit-tag sleep-visit-tag--out">Out<span className="sleep-visit-tag__more"> of bed</span></span>}
         <span className={`sleep-wakes__dur ${isOut ? 'sleep-wakes__dur--out' : 'sleep-wakes__dur--visit'}`}>{fmtDur(visit.minutes)}</span>
         {expandable && <ChevronDown size={16} className={`sleep-wakes__chev${open ? ' is-open' : ''}`} aria-hidden="true" />}
       </span>
