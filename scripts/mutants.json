@@ -21349,8 +21349,8 @@
   {
     "label": "#521 recompute on an empty night: the control is not rendered (unreachable again)",
     "file": "frontend/src/pages/SleepDetail.jsx",
-    "find": "          <RecomputeNight childId={childId}",
-    "replace": "          <RecomputeNight childId={null}",
+    "find": "<RecomputeNight key={`${id}|${date}`} childId={id}",
+    "replace": "<RecomputeNight key={`${id}|${date}`} childId={null}",
     "expect": "killed",
     "tests": [
       "sleepDetail.test.jsx"
@@ -21360,8 +21360,8 @@
   {
     "label": "#521 recompute on an empty night: a caregiver is offered it",
     "file": "frontend/src/components/RecomputeNight.jsx",
-    "find": "user?.role !== 'admin' || !childId",
-    "replace": "!childId",
+    "find": "const available = isAdmin && !!childId",
+    "replace": "const available = !!childId",
     "expect": "killed",
     "tests": [
       "sleepDetail.test.jsx"

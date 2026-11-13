@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { RefreshCw } from 'lucide-react';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
@@ -105,8 +106,20 @@ function SettingsCompare({ contexts }) {
 //     today's settings" is gone with the premise that made it true.
 //   - "Remove my correction" re-reads the page in the view it is ALREADY in (`settingsView`): removing a correction
 //     changes no settings, so it must not flip what the page is showing.
+//
+// ⚠️ UI refresh PR E: THE CONTROL LIVES IN THE SLEEP PAGE'S "⋯" MENU, NOT IN THE NIGHT CARD. This component is mounted ONCE
+// by the page (not inside each night state's card, as it was) and keeps owning everything it owned: the visibility rules,
+// the reads, the dialog. Two props tie it to the menu:
+//   - `menuSlot`: the DOM element inside the open menu where the "Recompute this night" item goes (null while the menu is
+//     closed). The item is PORTALED there, so the dialog's state survives the menu closing (a menu that unmounts its
+//     contents must not take a half-finished recompute with it).
+//   - `onAvailable(bool)`: whether this control would be offered at all. The page shows no "⋯" button for a viewer with
+//     nothing in the menu, and only this component knows (it is admin-only and, on a night today's settings cannot score,
+//     depends on its own read). It reports false again on unmount, so a night that goes away takes the item with it.
+// The read-failure message is NOT in the menu: the menu closes on selection, so a message there would be gone before it
+// could be read. It stays in the page, where this component is mounted.
 export default function RecomputeNight({ childId, date, night, fmtTime, onRecomputed, onCorrectionRemoved,
-  settingsView = 'auto', onSettingsViewChange, standaloneCard = false }) {
+  settingsView = 'auto', onSettingsViewChange, menuSlot = null, onAvailable }) {
   const { user } = useAuth();
   const [stored, setStored] = useState(undefined); // the saved row: undefined = not looked yet, null = none
   const [locked, setLocked] = useState(false);
@@ -146,8 +159,14 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
     return () => { alive = false; };
   }, [isAdmin, unscored, inProgress, childId, date]);
 
-  if (user?.role !== 'admin' || !childId || !date || night?.in_progress) return null;
-  if (unscored && !offered) return null;
+  // The one definition of "this control is offered", used for the early return below AND reported to the menu.
+  const available = isAdmin && !!childId && !!date && !night?.in_progress && !(unscored && !offered);
+  useEffect(() => {
+    onAvailable?.(available);
+    return () => onAvailable?.(false);
+  }, [available, onAvailable]);
+
+  if (!available) return null;
 
   const closeDialog = () => {
     setOpen(false);
@@ -314,11 +333,13 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
     }
   };
 
-  const body = (
+  // The menu item (and the note that explains it on a corrected night). Rendered into `menuSlot`, see the header.
+  const trigger = (
     <>
       <button
         type="button"
-        className="btn btn-secondary btn-sm sleep-detail__recompute"
+        role="menuitem"
+        className="more-menu__item"
         disabled={busy}
         onClick={async () => {
           setBusy(true);
@@ -347,7 +368,6 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
       >
         <RefreshCw size={16} aria-hidden="true" /> Recompute this night
       </button>
-      {error && !open && <div className="sleep-detail__recompute-error">{error}</div>}
       {/* A corrected night shows the person's times, not ours, so the button can look broken: the owner
           pressed it expecting a wrong time to be replaced, and nothing visible happened. Say where the
           times come from and where to change them. It used to add that recomputing "will not change what
@@ -364,7 +384,14 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
           <strong>Change what you told us about this night</strong>.
         </div>
       )}
+    </>
+  );
 
+  return (
+    <>
+      {menuSlot && createPortal(trigger, menuSlot)}
+      {/* The read-failure message, where the page can show it after the menu has closed (see the header). */}
+      {error && !open && <div className="sleep-detail__recompute-error" role="alert">{error}</div>}
       {open && (
         <Modal title="Recompute this night" onClose={() => !busy && closeDialog()}>
           {locked && confirming ? (
@@ -500,10 +527,4 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
       )}
     </>
   );
-  // On a night today's settings cannot score, the card around this has no padding of its own (SleepDetail's
-  // no-data / no-sleep cards), so the control brings its own. It only renders here once it is offered, so a
-  // night without the offer gains no empty space.
-  // #813: the deleted-camera settings line now has its own stable card. If this control is offered
-  // beneath it, give the control its own card; when it is not offered, return null above as before.
-  return unscored ? <div className={standaloneCard ? 'card' : 'sleep-detail__recompute-unscored'}>{body}</div> : body;
 }

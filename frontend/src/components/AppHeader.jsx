@@ -15,12 +15,21 @@ import Logo from './Logo.jsx';
 // It's pinned (position: sticky) rather than floating, which
 // sidesteps mobile-browser quirks with top-anchored fixed elements drifting during the
 // address-bar hide/show animation.
-export default function AppHeader({ title, back, showDemoBanner = true, showThemeToggle = false }) {
+//
+// `actions` (UI refresh PR E): a node pinned to the right of the title row, e.g. the sleep page's "⋯" menu. It sits where
+// the theme toggle sits (that is Live-only, so the two never meet).
+// `bandLine` (same PR): a thin line along the bottom edge of the bar in the band colour of the night on show, so the
+// page says how the night went before anything is read. A band key ('great' | 'good' | 'fair' | 'low' | 'early', from
+// bandOf) or 'none' for a neutral line; undefined = no line at all (every other page). It is a modifier class on the
+// <header> itself (an inset shadow in CSS), NOT a child element: that way it is painted over the bar's own navy and can
+// never end up drawn on the page background, where the band colours do not reach 3:1 (review of PR #1061). There is nothing
+// in the accessibility tree: the score and its word are on the page, and a band colour is never the only signal or any text.
+export default function AppHeader({ title, back, actions = null, bandLine, showDemoBanner = true, showThemeToggle = false }) {
   const navigate = useNavigate();
 
   return (
     <>
-      <header className="app-header">
+      <header className={`app-header${bandLine ? ` app-header--band-${bandLine}` : ''}`}>
         <div className="app-header__top-row">
           {back ? (
             <BackLink fallback={back} />
@@ -35,6 +44,7 @@ export default function AppHeader({ title, back, showDemoBanner = true, showThem
           )}
           <h1>{title}</h1>
           {showThemeToggle && <ThemeToggle />}
+          {actions && <div className="app-header__actions">{actions}</div>}
         </div>
       </header>
       {showDemoBanner && <DemoBanner />}

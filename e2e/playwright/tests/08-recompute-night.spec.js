@@ -79,7 +79,9 @@ test('a night the detector cannot score is not offered a recompute', async ({ pa
   await picker.fill(date);
 
   await expect(page.getByText(/No sleep data for this night/)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Recompute this night' })).toHaveCount(0);
+  // Recompute is a menu item in the page's "⋯" menu since UI refresh PR E, and a closed menu is hidden, so look through
+  // the hiding: the claim is that the item is not THERE, not merely that the menu is closed.
+  await expect(page.getByRole('menuitem', { name: 'Recompute this night', includeHidden: true })).toHaveCount(0);
 });
 
 test('the route REFUSES to replace a scored night with an unscored one', async ({ page }) => {

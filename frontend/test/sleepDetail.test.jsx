@@ -21,7 +21,7 @@
 // send someone to check the wrong thing.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within, fireEvent, act, render } from '@testing-library/react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Link } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver, renderAs, forEachRole } from './helpers/render.jsx';
 import SleepDetail, { addDays, framesForVisit, VisitItem } from '../src/pages/SleepDetail.jsx';
 import NightReview from '../src/pages/NightReview.jsx';
@@ -48,12 +48,26 @@ const NIGHT = {
   wakeClips: [],
 };
 
-// Route the three GETs this screen makes. A single mockResolvedValue would let a test pass while the
+// What the seven-night strip reads (GET /children/:id/sleep?nights=7: stored nights, NEWEST first, each with its `score`).
+// Seven nights ending at NIGHT's date, 2026-08-30. Scores are all different so a button cannot be mistaken for another; the
+// 08-27 row has no score (the server's { score: null, reason } shape), 08-28 is an early estimate, and 08-24 is below the
+// lowest band (band: null), so every bar class is exercised.
+const strip = (n, i) => ({ night_date: n, score: { score: 70 + i, band: 'good', early_estimate: false } });
+const STRIP_ROWS = [
+  strip('2026-08-30', 6), strip('2026-08-29', 5),
+  { night_date: '2026-08-28', score: { score: 58, band: null, early_estimate: true } },
+  { night_date: '2026-08-27', score: { score: null, reason: 'low_coverage' } },
+  strip('2026-08-26', 2), strip('2026-08-25', 1),
+  { night_date: '2026-08-24', score: { score: 41, band: null, early_estimate: false } },
+];
+
+// Route the GETs this screen makes. A single mockResolvedValue would let a test pass while the
 // component asked for the wrong night entirely — which is the bug class this file is about.
-function mockSleep({ live = { scope: 'last', night: { night_date: '2026-08-30' } }, night = NIGHT, insights = null } = {}) {
+function mockSleep({ live = { scope: 'last', night: { night_date: '2026-08-30' } }, night = NIGHT, insights = null, nights = { nights: STRIP_ROWS } } = {}) {
   const get = vi.fn((path) => {
     if (path.includes('/sleep/live')) return Promise.resolve(live);
     if (path.includes('/sleep/insights')) return Promise.resolve(insights);
+    if (path.includes('/sleep?nights=')) return typeof nights === 'function' ? nights(path) : Promise.resolve(nights);
     if (path.includes('/sleep/')) return Promise.resolve(typeof night === 'function' ? night(path) : night);
     return Promise.resolve(null);
   });
@@ -74,6 +88,17 @@ const lastNightPath = (get) =>
   get.mock.calls.map((c) => c[0]).filter((p) => p.includes('/sleep/') && !p.includes('live') && !p.includes('insights')).at(-1);
 
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+
+// UI refresh PR E: "Recompute this night" and the settings switch live in the page's "⋯" menu, not in the night card. These
+// open the menu the way a person does (press the button, then the item) and look for an item even while the menu is closed
+// (a closed menu is hidden, so a plain query would call a present-but-closed item "absent").
+const MENU_BUTTON = { name: /more options for this night/i };
+async function menuItem(user, name) {
+  const btn = await screen.findByRole('button', MENU_BUTTON);
+  if (btn.getAttribute('aria-expanded') !== 'true') await user.click(btn);
+  return screen.findByRole('menuitem', { name });
+}
+const queryRecompute = () => screen.queryByRole('menuitem', { name: /recompute this night/i, hidden: true });
 
 describe('which night it opens on', () => {
   // ⚠️ THE CLOCK IS PINNED FOR THIS WHOLE GROUP (#534, 2026-10-02: CI had been red on every PR since
@@ -249,7 +274,7 @@ describe('which night it opens on', () => {
     const { user } = mountAt('/children/kid-1/sleep?date=2026-08-24&saved=1');
 
     expect(await screen.findByText('Thanks — that’s recorded')).toBeVisible();
-    await user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+    await user.click(await menuItem(user, /recompute this night/i));
     await user.click(await screen.findByRole('button', { name: /^remove my correction$/i }));
     await user.click(await screen.findByRole('button', { name: /^remove my correction$/i }));
 
@@ -287,7 +312,7 @@ describe('which night it opens on', () => {
     const put = vi.spyOn(api, 'put').mockImplementation(() => { removed = true; return Promise.resolve({ review: {} }); });
     const { user } = mountAt('/children/kid-1/sleep?date=2026-08-24&saved=1');
 
-    await user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+    await user.click(await menuItem(user, /recompute this night/i));
     // The receipt's GET is the one still pending: no receipt yet, and it has been asked for exactly once.
     expect(reviewReads).toBe(1);
     expect(screen.queryByText('Thanks — that’s recorded')).toBeNull();
@@ -385,40 +410,46 @@ describe('moving between nights', () => {
     vi.setSystemTime(new Date('2026-08-31T02:00:00Z'));
   });
 
-  test('the arrows step one night at a time', async () => {
+  // (Strip buttons are found by name with the day in either order, "Aug 30" or "30 Aug": the date text follows the machine's locale.)
+  // UI refresh PR E: the previous / next arrows are GONE. Every night they could reach is reachable another way: the
+  // seven-night strip for the newest seven, the calendar button for the rest of the history window. These tests pin that,
+  // and that the range the arrows enforced (not past the newest night, not before the floor) is still enforced.
+  test('★ the arrows are gone, and the strip steps between nights instead', async () => {
     const get = mockSleep();
     const { user } = mount();
     await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-30'));
+    expect(screen.queryByLabelText('Previous night')).toBeNull();
+    expect(screen.queryByLabelText('Next night')).toBeNull();
 
-    await user.click(screen.getByLabelText('Previous night'));
+    await user.click(await screen.findByRole('button', { name: /(Aug 29|29 Aug), score 75/ }));
     await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-29'));
-    await user.click(screen.getByLabelText('Next night'));
+    await user.click(screen.getByRole('button', { name: /(Aug 30|30 Aug), score 76/ }));
     await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-30'));
   });
 
-  test('★ you cannot go past the latest night', async () => {
-    // The next arrow is disabled at the maximum. Without it the screen would ask for a night that
-    // does not exist yet and show "no data" for tomorrow.
+  test('★ you cannot go past the latest night (the calendar stops there)', async () => {
+    // The picker's max is the newest browsable night. Without it the screen would ask for a night that does not exist yet
+    // and show "no data" for tomorrow. (It used to be the next arrow's disabled state as well; the strip ends at that
+    // night too, so there is nothing after it to press.)
     //
-    // ⚠️ The wait is for the night's own request, NOT for `Next night` to be disabled: that arrow is
-    // ALSO disabled before anything has loaded (no maximum yet), so the old wait passed on the loading
-    // state and proved nothing about the latest night. The request is made in the same step that sets
-    // the maximum, so once it appears both arrows are in their real state.
+    // ⚠️ The wait is for the night's own request, not for the picker to appear: the picker is rendered as soon as a date
+    // is known, and the request is made in the same step that sets the maximum.
     const get = mockSleep();
     mount();
     await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-30'));
-    expect(screen.getByLabelText('Next night').disabled).toBe(true);
-    expect(screen.getByLabelText('Previous night').disabled).toBe(false);
+    expect(screen.getByLabelText('Pick a night').getAttribute('max')).toBe('2026-08-30');
+    const items = screen.getAllByRole('button', { name: /score|no score/ });
+    expect(items.at(-1).getAttribute('aria-label')).toMatch(/Aug 30|30 Aug/); // the newest night is the LAST item, not followed by another
   });
 
-  test('★ nor back beyond the history window', async () => {
-    // Nights are kept for a bounded number of days; walking past that would page through empty
-    // screens with nothing to say why.
+  test('★ nor back beyond the history window (the calendar floor)', async () => {
+    // Nights are kept for a bounded number of days; walking past that would page through empty screens with nothing to
+    // say why. The calendar is now the only way back past the strip, so its floor is the whole boundary.
     mockSleep();
-    const { user } = mount();
+    mount();
     const picker = await screen.findByLabelText('Pick a night');
     const min = picker.getAttribute('min');
-    expect(min, 'the picker publishes the same floor the arrow enforces').toBeTruthy();
+    expect(min, 'the picker publishes the floor').toBeTruthy();
 
     // ⚠️ THE EXACT FLOOR, not merely "earlier than today". `HISTORY_DAYS` is 30 and the window is
     // INCLUSIVE of both ends, so the floor is max − 29. Asserting only `min < max` let two mutants
@@ -426,18 +457,30 @@ describe('moving between nights', () => {
     // precisely the PR #229 class, an inclusive/exclusive slip that would offer a 31st night the
     // underlying activity_samples retention does not cover, which reads as data silently missing.
     expect(min).toBe(addDays(picker.getAttribute('max'), -29));
+  });
 
-    // Walk to the floor and confirm the arrow gives out there rather than one step later.
-    // ⚠️ fireEvent, not user.click, ONLY for this loop. `userEvent` simulates a full pointer sequence
-    // with a delay between events, and doing that up to 40 times — each one re-rendering the screen —
-    // pushed this test past the 5 s timeout on a loaded machine. It failed in roughly 1 run in 10,
-    // and promoting the front-end job to a blocking gate turned that into an intermittent merge
-    // blocker. Nothing here is about pointer semantics; the click that IS about that is the one in
-    // the test above, which stays a `user.click`.
-    for (let i = 0; i < 40 && !screen.getByLabelText('Previous night').disabled; i += 1) {
-      fireEvent.click(screen.getByLabelText('Previous night'));
-    }
+  // The old arrows were walked to BOTH ends by a test; the replacement only read the input's min (review of PR #1061). These open
+  // the floor night and the newest night and check the page loads each and the selected date follows.
+  test('★ the FLOOR night and the NEWEST night can both be opened, and the page loads each', async () => {
+    const get = mockSleep();
+    mount();
+    const picker = await screen.findByLabelText('Pick a night');
+    const min = picker.getAttribute('min');
+    const max = picker.getAttribute('max');
+    await waitFor(() => expect(lastNightPath(get)).toBe(`/children/kid-1/sleep/${max}?detail=1&context=auto`));
+
+    fireEvent.change(screen.getByLabelText('Pick a night'), { target: { value: min } });
+    await waitFor(() => expect(lastNightPath(get)).toBe(`/children/kid-1/sleep/${min}?detail=1&context=auto`));
     expect(screen.getByLabelText('Pick a night').value).toBe(min);
+    // The strip is at the very start of the history: nothing older than the floor is offered.
+    const labels = screen.getAllByRole('button', { name: /score|no score/ }).map((b) => b.getAttribute('aria-label'));
+    expect(labels[0]).toMatch(/(Aug 1|1 Aug),/);
+    expect(labels).toHaveLength(7);
+
+    fireEvent.change(screen.getByLabelText('Pick a night'), { target: { value: max } });
+    await waitFor(() => expect(lastNightPath(get)).toBe(`/children/kid-1/sleep/${max}?detail=1&context=auto`));
+    expect(screen.getByLabelText('Pick a night').value).toBe(max);
+    expect(screen.getByRole('heading', { level: 2, name: /^Night of .*(Aug 30|30 Aug)/ })).toBeInTheDocument();
   });
 
   test('picking a date from the calendar loads that night', async () => {
@@ -500,8 +543,9 @@ describe('★ only the live night is polled', () => {
     mount();
     await settle();
 
-    // Step back one night, off the maximum, then let plenty of poll windows pass.
-    fireEvent.click(screen.getByLabelText('Previous night'));
+    // Step back one night, off the maximum (through the calendar: this group's clock is not pinned, so the strip's window is
+    // the real last seven nights, which do not include the fixture's date), then let plenty of poll windows pass.
+    fireEvent.change(screen.getByLabelText('Pick a night'), { target: { value: '2026-08-29' } });
     await settle();
     const settled = detailCalls(get);
     expect(settled, 'the older night was fetched').toBeGreaterThan(0);
@@ -764,9 +808,8 @@ describe('#521 Recompute is reachable on an empty night', () => {
 
   test('★ a detector-empty night offers it; the first press PREVIEWS and writes nothing, the second applies', async () => {
     const get = mockEmpty();
-    mount();
-    const btn = await screen.findByRole('button', { name: /recompute this night/i });
-    fireEvent.click(btn);
+    const { user } = mount();
+    await user.click(await menuItem(user, /recompute this night/i));
     // Step 1: the dialog opens on the saved-vs-now comparison, and nothing has been stored yet.
     expect(await screen.findByRole('button', { name: /save the new numbers/i })).toBeInTheDocument();
     expect(storeCalls(get)).toHaveLength(0);
@@ -777,8 +820,8 @@ describe('#521 Recompute is reachable on an empty night', () => {
 
   test('a PARENT-flagged night opens on "locked" and offers no way to store', async () => {
     const get = mockEmpty({ night: { ...EMPTY, corrected: true, nobody_in_bed: true }, locked: true });
-    mount();
-    fireEvent.click(await screen.findByRole('button', { name: /recompute this night/i }));
+    const { user } = mount();
+    await user.click(await menuItem(user, /recompute this night/i));
     expect(await screen.findByText(/This night is locked because you corrected it/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save the new numbers/i })).not.toBeInTheDocument();
     expect(storeCalls(get)).toHaveLength(0);
@@ -794,7 +837,7 @@ describe('#521 Recompute is reachable on an empty night', () => {
       { kids: [KID], settings: { timezone: 'Australia/Melbourne' }, route: '/children/kid-1/sleep' }
     );
     expect(await screen.findByText(/No one in the bed for this night/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+    expect(queryRecompute()).not.toBeInTheDocument();
   });
 
   // Since #361 PR 3 a no_data / no_sleep night CAN show it, but only for a night whose saved settings are usable and
@@ -805,7 +848,7 @@ describe('#521 Recompute is reachable on an empty night', () => {
       mockEmpty({ night: { ...NIGHT, status } });
       const { unmount } = mount();
       await screen.findByText(/No sleep data|No clear sleep|tracking is off/);
-      expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+      expect(queryRecompute()).not.toBeInTheDocument();
       unmount();
       vi.restoreAllMocks();
     }
@@ -843,7 +886,7 @@ describe('#361 PR 3: Recompute on a night today\'s settings cannot score', () =>
     mockUnscored();
     const { user } = mount();
     expect(await screen.findByText(/No sleep data for this night/)).toBeInTheDocument();
-    await user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+    await user.click(await menuItem(user, /recompute this night/i));
     expect(await screen.findByText(/Today’s settings find no data for this night/)).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: /use the settings this night was saved with/i })).not.toBeChecked();
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
@@ -851,9 +894,9 @@ describe('#361 PR 3: Recompute on a night today\'s settings cannot score', () =>
 
   test('…and on a no_sleep night', async () => {
     mockUnscored({ status: 'no_sleep' });
-    mount();
+    const { user } = mount();
     expect(await screen.findByText(/No clear sleep detected/)).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: /recompute this night/i })).toBeInTheDocument();
+    expect(await menuItem(user, /recompute this night/i)).toBeInTheDocument();
   });
 
   test('not when the saved settings are the same as today\'s (nothing to choose)', async () => {
@@ -862,7 +905,7 @@ describe('#361 PR 3: Recompute on a night today\'s settings cannot score', () =>
     await screen.findByText(/No sleep data for this night/);
     await waitFor(() => expect(storedReads(get)).toHaveLength(1));
     await act(async () => {});
-    expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+    expect(queryRecompute()).not.toBeInTheDocument();
   });
 
   test('not for a caregiver, who also causes no read of the saved row', async () => {
@@ -873,7 +916,7 @@ describe('#361 PR 3: Recompute on a night today\'s settings cannot score', () =>
     );
     await screen.findByText(/No sleep data for this night/);
     await act(async () => {});
-    expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+    expect(queryRecompute()).not.toBeInTheDocument();
     expect(storedReads(get)).toHaveLength(0);
   });
 
@@ -882,7 +925,7 @@ describe('#361 PR 3: Recompute on a night today\'s settings cannot score', () =>
     mount();
     await screen.findByText(/Sleep tracking is off for this child/);
     await act(async () => {});
-    expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+    expect(queryRecompute()).not.toBeInTheDocument();
     expect(storedReads(get)).toHaveLength(0);
   });
 });
@@ -916,6 +959,7 @@ describe('#361 PR 4a: a finished night shown with the settings it was saved with
     const get = vi.fn((path) => {
       if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'last', night: { night_date: '2026-08-30' } });
       if (path.includes('/sleep/insights')) return Promise.resolve(null);
+      if (path.includes('/sleep?nights=')) return Promise.resolve({ nights: STRIP_ROWS });
       const claimed = extra?.(path);
       if (claimed !== undefined) return claimed;
       if (path.includes('context=current')) return Promise.resolve(current);
@@ -941,9 +985,11 @@ describe('#361 PR 4a: a finished night shown with the settings it was saved with
   for (const status of ['ok', 'no_data', 'no_sleep', 'empty']) {
     test(`★ a "${status}" night shown with its saved settings says so, with the switch to today's`, async () => {
       mockViews({ auto: { ...STORED_VIEW, status, coverage_minutes: 720 } });
-      mount();
+      const { user } = mount();
       expect(await screen.findByText(SAVED_LINE)).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: TO_TODAY })).toBeInTheDocument();
+      // The switch is in the "⋯" menu (UI refresh PR E), for every viewer, and the card says where it went.
+      expect(await menuItem(user, TO_TODAY)).toBeInTheDocument();
+      expect(screen.getByText(/Switch views in the ⋯ menu/)).toBeInTheDocument();
     });
   }
 
@@ -952,15 +998,15 @@ describe('#361 PR 4a: a finished night shown with the settings it was saved with
     mount();
     expect(await screen.findByText(/Sleep tracking is off for this child/)).toBeInTheDocument();
     expect(screen.queryByText(SAVED_LINE)).toBeNull();
-    expect(screen.queryByRole('button', { name: TO_TODAY })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: TO_TODAY, hidden: true })).toBeNull();
   });
 
   test('a night without `scoring_view` (today\'s settings, or nothing to choose) has no line and no switch', async () => {
     mockViews({ auto: NIGHT });
     mount();
     await screen.findByText('Wake-ups');
-    expect(screen.queryByRole('button', { name: TO_TODAY })).toBeNull();
-    expect(screen.queryByRole('button', { name: TO_SAVED })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: TO_TODAY, hidden: true })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: TO_SAVED, hidden: true })).toBeNull();
     expect(screen.queryByText(/Worked out with the settings|Showing today’s settings/)).toBeNull();
   });
 
@@ -972,13 +1018,16 @@ describe('#361 PR 4a: a finished night shown with the settings it was saved with
         scoring_view: view('stored', { camera_names: { stored: null, current: 'Door cam' } }),
       },
     });
-    mount();
-    expect(await screen.findAllByText('The camera this night was measured from no longer exists, so it can’t be worked out with those settings.')).toHaveLength(1);
+    const { user } = mount();
+    expect(await screen.findAllByText(/The camera this night was measured from no longer exists, so it can’t be worked out with those settings./)).toHaveLength(1);
     expect(screen.queryByText(/No sleep data for this night/)).toBeNull();
-    expect(screen.getByRole('button', { name: TO_TODAY })).toBeInTheDocument();
+    expect(await menuItem(user, TO_TODAY)).toBeInTheDocument();
   });
 
-  test('the deleted-camera settings switch keeps the same focused button after showing today', async () => {
+  // #813 asked that the switch be the same focused element across the change. The switch is a menu item now, and a menu item
+  // closes the menu and hands focus back to the "⋯" button (so a keyboard user is not dropped on the page): the thing that
+  // must stay put is THAT button, the same element before and after.
+  test('the deleted-camera settings switch returns focus to the same ⋯ button after showing today', async () => {
     mockViews({
       auto: {
         ...NIGHT, status: 'no_data', onset_at: null, wake_at: null, coverage_minutes: 0,
@@ -986,13 +1035,12 @@ describe('#361 PR 4a: a finished night shown with the settings it was saved with
       },
     });
     const { user } = mount();
-    const button = await screen.findByRole('button', { name: TO_TODAY });
-    button.focus();
-    expect(document.activeElement).toBe(button);
-    await user.click(button);
+    const menuButton = await screen.findByRole('button', MENU_BUTTON);
+    await user.click(await menuItem(user, TO_TODAY));
     expect(await screen.findByText(TODAY_LINE)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: TO_SAVED })).toBe(button);
-    expect(document.activeElement).toBe(button);
+    expect(screen.getByRole('button', MENU_BUTTON)).toBe(menuButton);
+    expect(document.activeElement).toBe(menuButton);
+    expect(await menuItem(user, TO_SAVED)).toBeInTheDocument();
   });
 
   test('a night first worked out under earlier rules says its numbers can differ from the card', async () => {
@@ -1004,12 +1052,12 @@ describe('#361 PR 4a: a finished night shown with the settings it was saved with
   test('★ the switch asks for today\'s settings, and back', async () => {
     const get = mockViews();
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: TO_TODAY }));
+    await user.click(await menuItem(user, TO_TODAY));
     expect(await screen.findByText(TODAY_LINE)).toBeInTheDocument();
     expect(nightPaths(get).at(-1)).toBe('/children/kid-1/sleep/2026-08-30?detail=1&context=current');
     // The numbers are today's too (TODAY_VIEW's 10:10Z is 8:10 pm in Melbourne).
     expect(screen.getByText(/8:10\s*pm/i)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: TO_SAVED }));
+    await user.click(await menuItem(user, TO_SAVED));
     expect(await screen.findByText(SAVED_LINE)).toBeInTheDocument();
     expect(nightPaths(get).at(-1)).toBe('/children/kid-1/sleep/2026-08-30?detail=1&context=auto');
   });
@@ -1024,10 +1072,10 @@ describe('#361 PR 4a: a finished night shown with the settings it was saved with
       },
     });
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: TO_TODAY }));
+    await user.click(await menuItem(user, TO_TODAY));
     expect(await screen.findByText(/Couldn’t refresh this night\. Showing what we had\./i)).toBeInTheDocument();
     expect(screen.getByText(SAVED_LINE)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: TO_TODAY }));
+    await user.click(await menuItem(user, TO_TODAY));
     expect(await screen.findByText(TODAY_LINE)).toBeInTheDocument();
     expect(currentReads).toBe(2);
     expect(nightPaths(get).slice(-2)).toEqual([
@@ -1043,14 +1091,14 @@ describe('#361 PR 4a: a finished night shown with the settings it was saved with
   test('★ the view is per night: no request for another night carries it, and coming back does not restore it', async () => {
     const get = mockViews();
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: TO_TODAY }));
+    await user.click(await menuItem(user, TO_TODAY));
     await screen.findByText(TODAY_LINE);
-    await user.click(screen.getByLabelText('Previous night'));
+    await user.click(await screen.findByRole('button', { name: /(Aug 29|29 Aug), score/ }));
     await waitFor(() => expect(nightPaths(get).some((p) => p.includes('/2026-08-29?'))).toBe(true));
     await act(async () => {});
     const for29 = nightPaths(get).filter((p) => p.includes('/2026-08-29?'));
     expect(for29).toEqual(['/children/kid-1/sleep/2026-08-29?detail=1&context=auto']);
-    await user.click(screen.getByLabelText('Next night'));
+    await user.click(screen.getByRole('button', { name: /(Aug 30|30 Aug), score/ }));
     await waitFor(() => expect(nightPaths(get).at(-1)).toBe('/children/kid-1/sleep/2026-08-30?detail=1&context=auto'));
     expect(await screen.findByText(SAVED_LINE)).toBeInTheDocument();
   });
@@ -1059,7 +1107,7 @@ describe('#361 PR 4a: a finished night shown with the settings it was saved with
     const refresh = captureRefresh();
     const get = mockViews();
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: TO_TODAY }));
+    await user.click(await menuItem(user, TO_TODAY));
     await screen.findByText(TODAY_LINE);
     const before = nightPaths(get).length;
     await act(async () => { refresh.fire(); });
@@ -1079,9 +1127,9 @@ describe('#361 PR 4a: a finished night shown with the settings it was saved with
       },
     });
     const { user } = mount();
-    await user.click(await screen.findByRole('button', { name: TO_TODAY }));
+    await user.click(await menuItem(user, TO_TODAY));
     await screen.findByText(TODAY_LINE);
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(await menuItem(user, /recompute this night/i));
     await user.click(await screen.findByRole('button', { name: /save the new numbers/i }));
     expect(await screen.findByText(SAVED_LINE)).toBeInTheDocument();
     const stores = get.mock.calls.map((c) => c[0]).filter((p) => /[?&]store=1/.test(p));
@@ -1140,7 +1188,8 @@ describe('what a night lists', () => {
     expect(badge).toBeTruthy();
     expect(screen.queryByText(/\+9 dB/), 'the detail waits until the row is opened').toBeNull();
 
-    await user.click(screen.getByRole('button', { expanded: false }));
+    // The wake row's own button (the page's "⋯" menu button is also collapsed, so "the one collapsed button" no longer works).
+    await user.click(badge.closest('button'));
     const row = (await screen.findByText(/\+9 dB/)).closest('.sleep-wakes__alert');
     expect(row, 'the alert sits inside the wake it belongs to').toBeTruthy();
     expect(within(row).getByText(/Nursery/)).toBeTruthy();
@@ -1166,7 +1215,8 @@ describe('what a night lists', () => {
     const badge = await screen.findByText(/1 alert$/);
     expect(badge).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { expanded: false }));
+    // The wake row's own button (the page's "⋯" menu button is also collapsed, so "the one collapsed button" no longer works).
+    await user.click(badge.closest('button'));
     const row = (await screen.findByText(/4\.2%/)).closest('.sleep-wakes__alert');
     expect(row, 'the wake-up alert sits inside the morning wake it belongs to').toBeTruthy();
   });
@@ -1625,5 +1675,409 @@ describe('#907 the saved frame on a Room activity row (expands like a wake-up ro
     mount();
     await screen.findByText(/Room activity/);
     expect(within(rowOf('Out of bed')).queryByRole('button')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// UI refresh PR E: the frame at the top of the page. Header "⋯" menu (Recompute and the settings switch moved into it), a
+// band-coloured line under the header, "Night of <date>" with a calendar button, and the seven-night strip that replaced
+// the previous / next arrows. The clock is pinned for the whole group (as in "moving between nights"): the strip's window
+// and the picker's range come from the real date, and the fixtures are fixed dates.
+// ---------------------------------------------------------------------------------------------------------------------
+describe('UI refresh PR E: the frame', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-08-31T02:00:00Z'));
+  });
+
+  const mountCaregiver = () => renderAsCaregiver(
+    <Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes>,
+    { kids: [KID], settings: { timezone: 'Australia/Melbourne' }, route: '/children/kid-1/sleep' }
+  );
+  const CTX_SAVED = { v: 1, camera_id: 'cam-a', tz: 'Australia/Melbourne', window: { start: '19:30', end: '07:00' }, algo: '1' };
+  const CTX_NOW = { ...CTX_SAVED, camera_id: 'cam-b' };
+  const VIEWED = {
+    ...NIGHT,
+    scoring_view: { applied: 'stored', stored: CTX_SAVED, current: CTX_NOW, camera_names: { stored: 'Bed cam', current: 'Door cam' }, algo_differs: false },
+  };
+  const stripGroup = () => screen.queryByRole('group', { name: 'Recent nights' });
+  const stripItems = () => within(stripGroup()).getAllByRole('button');
+  const stripBar = (btn) => btn.querySelector('.sleep-strip__bar').className;
+  const bandLineClass = () => document.querySelector('.app-header')?.className;
+  const scored = (score, extra = {}) => ({ score, band: 'fair', early_estimate: false, version: 2, provisional: false, low_confidence: false,
+    low_confidence_reasons: [], capped_by: null, unwatched_minutes: 0, components: [], ...extra });
+
+  describe('switching to another child', () => {
+    // The page stays mounted when the route moves to another child, and /sleep/live has to answer before the newest night is known
+    // again. Held in plain state, the new child spent that time with the PREVIOUS child's newest night, so its strip rows were drawn
+    // against the wrong night (review of PR #1061).
+    test('★ the strip never draws the new child’s rows against the previous child’s newest night', async () => {
+      const KID2 = { id: 'kid-2', name: 'Child C' };
+      let releaseLive;
+      vi.spyOn(api, 'get').mockImplementation((path) => {
+        if (path.includes('/children/kid-2/sleep/live')) return new Promise((resolve) => { releaseLive = () => resolve({ scope: 'last', night: { night_date: '2026-09-02' } }); });
+        if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'last', night: { night_date: '2026-08-30' } });
+        if (path.includes('/sleep/insights')) return Promise.resolve(null);
+        if (path.includes('/children/kid-2/sleep?nights=')) return Promise.resolve({ nights: [{ night_date: '2026-08-28', score: scored(61) }, { night_date: '2026-08-27', score: scored(62) }] });
+        if (path.includes('/sleep?nights=')) return Promise.resolve({ nights: STRIP_ROWS });
+        if (path.includes('/sleep/')) return Promise.resolve(NIGHT);
+        return Promise.resolve(null);
+      });
+      const { user } = renderAsAdmin(
+        <><Link to="/children/kid-2/sleep">other child</Link><Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes></>,
+        { kids: [KID, KID2], settings: { timezone: 'Australia/Melbourne' }, route: '/children/kid-1/sleep' }
+      );
+      await screen.findByRole('group', { name: 'Recent nights' });
+      expect(stripItems()).toHaveLength(7);
+
+      await user.click(screen.getByRole('link', { name: 'other child' }));
+      // The new child's live night has not answered: no newest night is known, so no strip (not child 1's, and not child 2's rows
+      // drawn against child 1's 2026-08-30: its rows are older than that, so the old code DID draw them), and no calendar either.
+      await act(async () => {});
+      expect(stripGroup()).toBeNull();
+      expect(screen.queryByLabelText('Pick a night')).toBeNull();
+
+      await act(async () => { releaseLive(); });
+      await screen.findByRole('group', { name: 'Recent nights' });
+      expect(stripItems().map((b) => b.getAttribute('aria-label')).at(-1)).toMatch(/(Sep\w* 2|2 Sep\w*), no score/);
+      expect(stripItems().map((b) => b.getAttribute('aria-label')).some((l) => /(Aug 28|28 Aug), score 61/.test(l))).toBe(true);
+      expect(screen.getByLabelText('Pick a night').getAttribute('max')).toBe('2026-09-02');
+    });
+  });
+
+  describe('the "⋯" menu', () => {
+    test('★ an admin on an ordinary night has a menu with Recompute in it, and nothing else', async () => {
+      mockSleep();
+      const { user } = mount();
+      await user.click(await screen.findByRole('button', MENU_BUTTON));
+      expect(screen.getAllByRole('menuitem').map((i) => i.textContent.trim())).toEqual(['Recompute this night']);
+    });
+
+    test('★ with a settings view on offer the menu also holds the switch, in the wording the card had', async () => {
+      mockSleep({ night: VIEWED });
+      const { user } = mount();
+      await user.click(await screen.findByRole('button', MENU_BUTTON));
+      expect(screen.getAllByRole('menuitem').map((i) => i.textContent.trim()))
+        .toEqual(['Show with today’s settings', 'Recompute this night']);
+    });
+
+    test('★ a caregiver with nothing to choose from gets NO "⋯" button at all', async () => {
+      mockSleep();
+      mountCaregiver();
+      await screen.findByText('Wake-ups');
+      await act(async () => {});
+      expect(screen.queryByRole('button', MENU_BUTTON)).toBeNull();
+    });
+
+    test('★ a caregiver can still switch settings view (it was never admin-only): the menu holds that and not Recompute', async () => {
+      mockSleep({ night: VIEWED });
+      const { user } = mountCaregiver();
+      await user.click(await screen.findByRole('button', MENU_BUTTON));
+      expect(screen.getAllByRole('menuitem').map((i) => i.textContent.trim())).toEqual(['Show with today’s settings']);
+    });
+
+    test('no menu on a night with tracking off, nor on the night in progress (nothing to recompute, nothing to switch)', async () => {
+      for (const [night, text] of [[{ ...NIGHT, status: 'off' }, /tracking is off/], [{ ...NIGHT, in_progress: true }, 'Wake-ups']]) {
+        mockSleep({ night });
+        const { unmount } = mount();
+        await screen.findByText(text);
+        await act(async () => {});
+        expect(screen.queryByRole('button', MENU_BUTTON)).toBeNull();
+        unmount();
+        vi.restoreAllMocks();
+      }
+    });
+
+    test('★ no menu while Recompute is not offered on a night today\'s settings cannot score (it asks first)', async () => {
+      // An admin on a no_data night: the item appears only once its own read finds usable, differing saved settings.
+      // Here that read says "same settings", so the menu must never appear.
+      mockSleep({
+        night: (path) => (path.includes('?stored=1')
+          ? { night: NIGHT, locked: false, contexts: { stored_state: 'ok', stored: CTX_SAVED, current: CTX_SAVED, differs: false } }
+          : { ...NIGHT, status: 'no_data', onset_at: null, wake_at: null, coverage_minutes: 0 }),
+      });
+      mount();
+      await screen.findByText(/No sleep data for this night/);
+      await act(async () => {});
+      expect(screen.queryByRole('button', MENU_BUTTON)).toBeNull();
+    });
+
+    test('choosing Recompute closes the menu and opens its dialog', async () => {
+      mockSleep({ night: (path) => (path.includes('?stored=1') ? { night: { ...NIGHT, asleep_minutes: 1 }, locked: false } : NIGHT) });
+      const { user } = mount();
+      await user.click(await menuItem(user, /recompute this night/i));
+      expect(await screen.findByRole('dialog')).toBeInTheDocument();
+      expect(screen.getByRole('button', MENU_BUTTON).getAttribute('aria-expanded')).toBe('false');
+    });
+
+    test('★ a failed read is told on the PAGE, since the menu has closed by then', async () => {
+      // The menu closes on choosing, so an error shown inside it would be gone before it could be read.
+      mockSleep({ night: (path) => (path.includes('?stored=1') ? Promise.reject(new Error('Could not reach the server')) : NIGHT) });
+      const { user } = mount();
+      await user.click(await menuItem(user, /recompute this night/i));
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toContain('Could not reach the server');
+      expect(alert.closest('[role="menu"]')).toBeNull();
+    });
+
+    test('keyboard: Enter on the button opens it, Escape closes it and focus returns to the button', async () => {
+      mockSleep();
+      const { user } = mount();
+      const btn = await screen.findByRole('button', MENU_BUTTON);
+      btn.focus();
+      await user.keyboard('{Enter}');
+      expect(btn.getAttribute('aria-expanded')).toBe('true');
+      expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: /recompute this night/i }));
+      await user.keyboard('{Escape}');
+      expect(btn.getAttribute('aria-expanded')).toBe('false');
+      expect(document.activeElement).toBe(btn);
+    });
+
+    test('★ choosing the Recompute item (which another component owns) closes the menu', async () => {
+      // Its item is portaled into the menu by RecomputeNight, which is not a React child of the menu: a click handler on the
+      // menu's React tree would never hear it. This pins the whole path, page and all.
+      mockSleep({ night: (path) => (path.includes('?stored=1') ? Promise.reject(new Error('nope')) : NIGHT) });
+      const { user } = mount();
+      const btn = await screen.findByRole('button', MENU_BUTTON);
+      await user.click(btn);
+      expect(btn.getAttribute('aria-expanded')).toBe('true');
+      await user.click(await screen.findByRole('menuitem', { name: /recompute this night/i }));
+      expect(btn.getAttribute('aria-expanded')).toBe('false');
+      expect(document.activeElement).toBe(btn);
+    });
+  });
+
+  describe('the band line under the header', () => {
+    test('★ follows the band of the night on screen: the band with a score, neutral ("early") for an early estimate', async () => {
+      mockSleep({
+        night: (path) => {
+          if (path.includes('2026-08-29')) return { ...NIGHT, night_date: '2026-08-29', score: scored(58, { band: null, early_estimate: true }) };
+          return { ...NIGHT, score: scored(64) };
+        },
+      });
+      const { user } = mount();
+      await waitFor(() => expect(bandLineClass()).toContain('app-header--band-fair'));
+      await user.click(await screen.findByRole('button', { name: /(Aug 29|29 Aug), score/ }));
+      await waitFor(() => expect(bandLineClass()).toContain('app-header--band-early'));
+    });
+
+    test('a night with no score (and the moments before the night has loaded) is neutral', async () => {
+      mockSleep();
+      mount();
+      expect(bandLineClass()).toContain('app-header--band-none'); // before the night has loaded
+      await screen.findByText('Wake-ups');
+      expect(bandLineClass()).toContain('app-header--band-none'); // NIGHT carries no score
+    });
+
+    test('a below-the-lowest-band score is "low", which has its own colour (not neutral)', async () => {
+      mockSleep({ night: { ...NIGHT, score: scored(41, { band: null }) } });
+      mount();
+      await waitFor(() => expect(bandLineClass()).toContain('app-header--band-low'));
+    });
+  });
+
+  describe('"Night of <date>" and the calendar', () => {
+    test('says which night, and the calendar still jumps to any night in range', async () => {
+      const get = mockSleep();
+      mount();
+      expect(await screen.findByRole('heading', { level: 2, name: /^Night of .*(Aug 30|30 Aug)/ })).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText('Pick a night'), { target: { value: '2026-08-12' } });
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-12'));
+      expect(await screen.findByRole('heading', { level: 2, name: /^Night of .*(Aug 12|12 Aug)/ })).toBeInTheDocument();
+    });
+
+    test('★ every night the old arrows could reach is reachable: the strip the newest seven (and a window round any older night), the calendar the whole window', async () => {
+      mockSleep();
+      mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      const picker = screen.getByLabelText('Pick a night');
+      expect(stripItems()).toHaveLength(7);
+      // The calendar spans the full 30-night window, so anything older than the strip is one pick away.
+      expect(picker.getAttribute('min')).toBe(addDays(picker.getAttribute('max'), -29));
+      expect(picker.getAttribute('max')).toBe('2026-08-30');
+    });
+  });
+
+  describe('the seven-night strip', () => {
+    test('★ seven buttons, oldest to newest, each with its weekday, date and score', async () => {
+      mockSleep();
+      mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      const items = stripItems();
+      expect(items).toHaveLength(7);
+      expect(items.at(-1).getAttribute('aria-label')).toMatch(/(Aug 30|30 Aug), score 76/);
+      expect(items[0].getAttribute('aria-label')).toMatch(/(Aug 24|24 Aug), score 41/);
+      expect(items.at(-1).textContent).toContain('30');
+      expect(items.at(-1).textContent).toContain('76');
+    });
+
+    test('★ the band bar follows the score: a band, "low" under the lowest edge, neutral for an early estimate and for no score', async () => {
+      mockSleep();
+      mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      const byDay = Object.fromEntries(stripItems().map((b) => [b.querySelector('.sleep-strip__date').textContent, b]));
+      expect(stripBar(byDay['30'])).toContain('sleep-strip__bar--good');
+      expect(stripBar(byDay['24'])).toContain('sleep-strip__bar--low'); // 41, band: null
+      expect(stripBar(byDay['28'])).toContain('sleep-strip__bar--early'); // 58, early estimate: its number, the neutral bar
+      expect(byDay['28'].textContent).toContain('58');
+      expect(byDay['28'].getAttribute('aria-label')).toMatch(/early estimate/);
+      expect(stripBar(byDay['27'])).toContain('sleep-strip__bar--none'); // no score
+    });
+
+    test('★ a night with no score shows a dash, and says "no score" to a screen reader', async () => {
+      mockSleep();
+      mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      const noScore = stripItems().find((b) => /no score/.test(b.getAttribute('aria-label')));
+      expect(noScore.getAttribute('aria-label')).toMatch(/(Aug 27|27 Aug), no score/);
+      expect(noScore.textContent).toContain('–');
+    });
+
+    test('★ the selected night is marked aria-current="date", only that one, and tapping another moves the mark and loads it', async () => {
+      const get = mockSleep();
+      const { user } = mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      let current = stripItems().filter((b) => b.getAttribute('aria-current') === 'date');
+      expect(current).toHaveLength(1);
+      expect(current[0].getAttribute('aria-label')).toMatch(/Aug 30|30 Aug/);
+
+      await user.click(stripItems().find((b) => /(Aug 26|26 Aug)/.test(b.getAttribute('aria-label'))));
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-26'));
+      current = stripItems().filter((b) => b.getAttribute('aria-current') === 'date');
+      expect(current).toHaveLength(1);
+      expect(current[0].getAttribute('aria-label')).toMatch(/Aug 26|26 Aug/);
+    });
+
+    // The strip is a seven-night WINDOW that always holds the selected night (review of PR #1061: with a fixed newest-seven window,
+    // an older night picked from the calendar left the strip with nothing to tap, and its neighbour needed the calendar again,
+    // where the arrows it replaced were one tap each).
+    const dayLabel = (b) => b.querySelector('.sleep-strip__date').textContent;
+    const stripDays = () => stripItems().map(dayLabel);
+    const current = () => stripItems().filter((b) => b.getAttribute('aria-current') === 'date');
+    const pick = (date) => fireEvent.change(screen.getByLabelText('Pick a night'), { target: { value: date } });
+
+    test('★★ an older night picked from the calendar is IN the strip, marked, in the centre, with its neighbours one tap away', async () => {
+      const get = mockSleep();
+      const { user } = mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      pick('2026-08-12');
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-12'));
+      expect(stripDays()).toEqual(['9', '10', '11', '12', '13', '14', '15']);
+      expect(current()).toHaveLength(1);
+      expect(dayLabel(current()[0])).toBe('12');
+      // The older neighbour is one tap, and the strip keeps it marked afterwards...
+      await user.click(stripItems().find((b) => dayLabel(b) === '11'));
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-11'));
+      expect(dayLabel(current()[0])).toBe('11');
+      // ...and so is the newer one.
+      await user.click(stripItems().find((b) => dayLabel(b) === '12'));
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-12'));
+      expect(dayLabel(current()[0])).toBe('12');
+      await user.click(stripItems().find((b) => dayLabel(b) === '13'));
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-13'));
+      expect(dayLabel(current()[0])).toBe('13');
+    });
+
+    test('★ walking back night by night from the strip stays possible all the way to the floor (what the arrows did)', async () => {
+      const get = mockSleep();
+      const { user } = mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      pick('2026-08-05');
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-05'));
+      for (const day of ['4', '3', '2', '1']) {
+        await user.click(stripItems().find((b) => dayLabel(b) === day));
+        await waitFor(() => expect(lastNightPath(get)).toContain(`2026-08-0${day}`));
+        expect(dayLabel(current()[0])).toBe(day);
+      }
+      expect(stripDays()).toEqual(['1', '2', '3', '4', '5', '6', '7']); // clamped at the first night: still seven wide
+    });
+
+    test('a night with no stored row in the strip shows a dash and says "no score"', async () => {
+      mockSleep();
+      mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      pick('2026-08-12');
+      await screen.findByRole('heading', { level: 2, name: /(Aug 12|12 Aug)/ });
+      const twelve = current()[0];
+      expect(twelve.textContent).toContain('–');
+      expect(twelve.getAttribute('aria-label')).toMatch(/no score/);
+    });
+
+    test('★ the newest-seven window comes back when the newest nights are chosen again', async () => {
+      mockSleep();
+      mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      pick('2026-08-12');
+      await waitFor(() => expect(stripDays()).toEqual(['9', '10', '11', '12', '13', '14', '15']));
+      pick('2026-08-30');
+      await waitFor(() => expect(stripDays()).toEqual(['24', '25', '26', '27', '28', '29', '30']));
+      expect(dayLabel(current()[0])).toBe('30');
+    });
+
+    test('★ the strip is read ONCE for the whole history (30 nights) and moving between nights makes no further request', async () => {
+      const get = mockSleep();
+      const { user } = mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      const stripReads = () => get.mock.calls.map((c) => c[0]).filter((p) => p.includes('/sleep?nights='));
+      expect(stripReads()).toEqual(['/children/kid-1/sleep?nights=30']);
+      pick('2026-08-12');
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-12'));
+      await user.click(stripItems().find((b) => dayLabel(b) === '11'));
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-11'));
+      expect(stripReads()).toHaveLength(1);
+    });
+
+    test('★ fewer than seven nights: shows the ones that exist', async () => {
+      mockSleep({ nights: { nights: STRIP_ROWS.slice(0, 2) } });
+      mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      expect(stripItems()).toHaveLength(2);
+    });
+
+    test('★ a FAILED strip request shows nothing in its place and the page still works', async () => {
+      mockSleep({ nights: () => Promise.reject(new Error('boom')) });
+      mount();
+      expect(await screen.findByText('Wake-ups')).toBeInTheDocument(); // the night itself loaded
+      await act(async () => {});
+      expect(stripGroup()).toBeNull();
+      expect(screen.queryByText(/boom/)).toBeNull(); // no error line for a decoration
+      expect(screen.getByLabelText('Pick a night')).toBeInTheDocument();
+    });
+
+    test('★ a SLOW strip request (never answers) shows nothing and does not hold the page up', async () => {
+      mockSleep({ nights: () => new Promise(() => {}) });
+      mount();
+      expect(await screen.findByText('Wake-ups')).toBeInTheDocument();
+      expect(stripGroup()).toBeNull();
+    });
+
+    test('an answer that is not a list of nights shows nothing', async () => {
+      for (const nights of [null, {}, { nights: 'soon' }, { nights: [] }]) {
+        mockSleep({ nights });
+        const { unmount } = mount();
+        await screen.findByText('Wake-ups');
+        await act(async () => {});
+        expect(stripGroup()).toBeNull();
+        unmount();
+        vi.restoreAllMocks();
+      }
+    });
+
+    test('★ a Recompute save re-reads the strip, so the re-scored night\'s bar is not stale', async () => {
+      const get = mockSleep({
+        night: (path) => {
+          if (path.includes('?stored=1')) return { night: { ...NIGHT, asleep_minutes: 1 }, locked: false };
+          if (path.includes('store=1')) return { ...NIGHT, stored: true };
+          return NIGHT;
+        },
+      });
+      const stripReads = () => get.mock.calls.filter(([p]) => p.includes('/sleep?nights=')).length;
+      const { user } = mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      expect(stripReads()).toBe(1);
+      await user.click(await menuItem(user, /recompute this night/i));
+      await user.click(await screen.findByRole('button', { name: /save the new numbers/i }));
+      await waitFor(() => expect(stripReads()).toBe(2));
+    });
   });
 });
