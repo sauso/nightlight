@@ -23,7 +23,7 @@ const CHILDREN = [{ id: 'c1', name: 'First child' }, { id: 'c2', name: 'Second c
 const SECRET = 'QWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXowMTIzNDU=';
 
 let getSpy, postSpy, putSpy, delSpy, getTextSpy;
-function mockApi({ devices = [device()], onDevices = null, children = CHILDREN, childrenFail = false, settings = { retention_days: 30 },
+function mockApi({ devices = [device()], onDevices = null, children = CHILDREN, childrenFail = false, settings = { retention_days: 30 }, discovery = null,
   entities = [], post = null, put = null, del = null, getText = null } = {}) {
   getSpy = vi.spyOn(api, 'get').mockImplementation(async (path) => {
     const p = String(path);
@@ -31,6 +31,7 @@ function mockApi({ devices = [device()], onDevices = null, children = CHILDREN, 
     if (/^\/esphome\/devices\/\d+\/entities$/.test(p)) return entities;
     if (p === '/children') { if (childrenFail) throw new Error('no'); return children; }
     if (p === '/esphome/settings') return settings;
+    if (p.startsWith('/esphome/discover/')) return { done: true, candidates: discovery || [], sourceErrors: [] };
     throw new Error(`unexpected GET ${p}`);
   });
   postSpy = vi.spyOn(api, 'post').mockImplementation(post || (async () => ({})));
@@ -48,6 +49,30 @@ beforeEach(() => { mockApi(); vi.mocked(saveTextDownload).mockClear(); });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('the device list', () => {
+  test('a discovered device pre-fills name, IP and non-default port, leaving child and key empty (#1071)', async () => {
+    mockApi({ devices: [], discovery: [{ id: 'one', name: 'living-room-sensor', ip: '10.0.0.9', port: 6054, encrypted: true }] });
+    postSpy.mockImplementation(async (path) => path === '/esphome/discover'
+      ? { scanId: '12345678-1234-1234-1234-123456789abc', endsAt: Date.now() + 30000 } : {});
+    const { user } = renderAsAdmin(<SettingsEsphome />);
+    await user.click(await screen.findByRole('button', { name: 'Find devices on my network' }));
+    await user.click(await screen.findByRole('button', { name: /living-room-sensor/ }));
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByLabelText('Name')).toHaveValue('living-room-sensor');
+    expect(dialog.getByLabelText('IP address')).toHaveValue('10.0.0.9');
+    expect(dialog.getByLabelText('Port')).toHaveValue(6054);
+    expect(dialog.getByLabelText('Encryption key (optional)')).toHaveValue('');
+    expect(dialog.getByLabelText('Child')).toHaveValue('');
+    expect(dialog.getByText(/This device says it uses encryption/)).toBeInTheDocument();
+  });
+  test('a discovered default port leaves the add form port blank (#1071)', async () => {
+    mockApi({ devices: [], discovery: [{ id: 'one', name: 'ESPHome device', ip: '10.0.0.9', port: 6053 }] });
+    postSpy.mockImplementation(async (path) => path === '/esphome/discover'
+      ? { scanId: '12345678-1234-1234-1234-123456789abc', endsAt: Date.now() + 30000 } : {});
+    const { user } = renderAsAdmin(<SettingsEsphome />);
+    await user.click(await screen.findByRole('button', { name: 'Find devices on my network' }));
+    await user.click(await screen.findByRole('button', { name: /ESPHome device/ }));
+    expect(within(screen.getByRole('dialog')).getByLabelText('Port')).toHaveValue(null);
+  });
   test.each([
     ['connected', 'Connected', 'status-badge--ok'],
     ['connecting', 'Connecting', 'status-badge--off'],

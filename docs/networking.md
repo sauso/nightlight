@@ -56,6 +56,8 @@ These were measured on one Unraid server with a PC and a phone. Wi-Fi with clien
 
 Finding [cameras](cameras.md#finding-cameras) follows the same multicast rules in the other direction. Nightlight can browse mDNS and send ONVIF WS-Discovery probes only where that traffic reaches the cameras. Docker's default bridge does not expose LAN multicast; another VLAN needs a router that relays mDNS, while WS-Discovery usually stays on one network segment. Camera searches run only when an admin starts one (the setup guide starts one when its camera step opens).
 
+Finding [ESPHome devices](esphome.md#finding-devices) also browses mDNS. It needs the same LAN multicast reachability or an mDNS relay across VLANs; Docker's default bridge will not expose those announcements. An admin starts the search on the ESPHome settings screen.
+
 **`MDNS_ANNOUNCE`** turns it on or off. Default: on (unset or blank). `false`, `0`, `no` or `off`, in any case, turn it off, and then nothing listens on UDP port 5353 at all. Any other value leaves it on and logs a warning. It is read at start, so restart the container after changing it.
 
 **What is announced.** Anyone on your network can see:

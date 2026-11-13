@@ -150,6 +150,8 @@ const ROUTE_GATES = {
   'POST /api/cameras/onvif-probe': ADMIN,
   'POST /api/cameras/discover': ADMIN, // #945: multicast scan is an admin-only network action
   'GET /api/cameras/discover/:scanId': ADMIN, // #945: results expose private LAN addresses
+  'POST /api/esphome/discover': ADMIN, // #1071: multicast scan is an admin-only network action
+  'GET /api/esphome/discover/:scanId': ADMIN, // #1071: results expose private LAN addresses
   'POST /api/cameras/probe-report': ADMIN,
   'POST /api/cameras/:id/record/start': SIGNED_IN, //           capturing a moment is acting in it (owner)
   'POST /api/cameras/:id/record/stop': SIGNED_IN,

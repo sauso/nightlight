@@ -114,6 +114,10 @@ a blank password means "keep the existing one." Keep that invariant.
 - **`lib/rtspProbe.js`** — `validateRtspStream()` (ffprobe over TCP) runs on add/edit so a
   camera that can't be reached (bad creds/path/IP) isn't silently saved; the UI can override
   with `force` for a camera that's just momentarily offline.
+- **ESPHome device discovery** (`lib/esphomeDiscovery.js`, #1071) — browses `_esphomelib._tcp` over mDNS for up to
+  30 seconds and only suggests private IPv4 addresses to admins; it never connects to or adds a device. It reuses
+  `createScanManager` from `cameraDiscovery.js` through its own instance, so a camera search and a device search can
+  run side by side (`POST /api/esphome/discover`, `GET /api/esphome/discover/:scanId`).
 
 ## Self-healing / reconciliation (`backend/src/index.js`)
 

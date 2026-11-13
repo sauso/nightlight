@@ -1,13 +1,38 @@
 import { Router } from 'express';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import db from '../db.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { validateHost } from '../lib/mqttClient.js';
 import { validEsphomeKey } from '../lib/esphomeTransport.js';
 import { refreshEsphome, esphomeStatus, getEsphomeEntities, testEsphomeDevice, deleteEsphomeDevice } from '../lib/esphomeManager.js';
+import { createScanManager } from '../lib/cameraDiscovery.js';
+import { discoverEsphomeDevices } from '../lib/esphomeDiscovery.js';
 
 const router = Router();
 router.use(requireAuth, requireAdmin);
+// #1071: one scan is shared server-wide; the per-admin limit bounds repeated multicast searches.
+const discoveryLimiter = rateLimit({ windowMs: 60_000, limit: 5, standardHeaders: true,
+  legacyHeaders: false, keyGenerator: (req) => `${ipKeyGenerator(req.ip)}|${req.user.id}`,
+  message: { error: 'Too many device searches. Try again in a minute.' } });
+export function existingEsphomeHostsForDiscovery() {
+  return new Set(db.prepare('SELECT host, port FROM esphome_devices').all()
+    .map(({ host, port }) => `${host}:${port}`));
+}
+let discoveryScans = createScanManager({ discover: discoverEsphomeDevices, existingHosts: existingEsphomeHostsForDiscovery });
+export function setEsphomeDiscoveryScansForTest(scans) { discoveryScans = scans; }
+router.post('/discover', discoveryLimiter, (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  res.json(discoveryScans.start());
+});
+router.get('/discover/:scanId', (req, res) => {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.params.scanId))
+    return res.status(404).json({ error: 'Device search not found.' });
+  const scan = discoveryScans.get(req.params.scanId);
+  if (!scan) return res.status(404).json({ error: 'Device search not found.' });
+  res.set('Cache-Control', 'private, no-store');
+  res.json({ done: scan.done, candidates: scan.candidates, sourceErrors: scan.sourceErrors, endsAt: scan.endsAt });
+});
 const bad = (res, error) => res.status(400).json({ error });
 const configErrors = new Set([
   'A device configuration is required.', 'Name must be 1 to 100 characters.',

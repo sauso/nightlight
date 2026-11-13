@@ -5,6 +5,7 @@ import AppHeader from '../components/AppHeader.jsx';
 import Modal from '../components/Modal.jsx';
 import Switch from '../components/Switch.jsx';
 import { saveTextDownload } from '../lib/saveTextDownload.js';
+import EsphomeDiscovery from '../components/EsphomeDiscovery.jsx';
 import {
   MAX_DEVICES, RETENTION_DEFAULT_DAYS, RETENTION_MAX_DAYS, RETENTION_MIN_DAYS, validRetention,
   stateBadge, encryptionNote, relativeAge, exportRange, dayString, EXPORT_MAX_DAYS,
@@ -147,6 +148,10 @@ export default function SettingsEsphome() {
             onExport={() => setDialog({ kind: 'export', device })} />
         ))}
 
+        {list && <EsphomeDiscovery full={full} onPick={(candidate) => {
+          if (!full) setDialog({ kind: 'form', prefill: { name: candidate.name, host: candidate.ip,
+            port: candidate.port, encrypted: candidate.encrypted === true } });
+        }} />}
         {list && (
           <div style={{ marginBottom: 14 }}>
             <button type="button" className="btn btn-primary" disabled={full} onClick={() => setDialog({ kind: 'form' })}>
@@ -159,7 +164,7 @@ export default function SettingsEsphome() {
         <RetentionCard flash={flash} />
 
         {dialog?.kind === 'form' && (
-          <DeviceFormModal device={dialog.device} childOptions={children} childrenFailed={childrenFailed}
+          <DeviceFormModal device={dialog.device} prefill={dialog.prefill} childOptions={children} childrenFailed={childrenFailed}
             onClose={() => setDialog(null)} onSaved={afterSave} />
         )}
         {dialog?.kind === 'delete' && (
@@ -272,11 +277,11 @@ function Entities({ device }) {
 // Add or edit one device. The encryption key is the one secret here, so it lives ONLY in this component's state while
 // the dialog is open: never in a stored draft (the MQTT page keeps its password out of browser storage the same way),
 // never in a URL, never read back (the server returns `key_set`, not the key), and gone when the dialog closes.
-function DeviceFormModal({ device, childOptions, childrenFailed, onClose, onSaved }) {
+function DeviceFormModal({ device, prefill, childOptions, childrenFailed, onClose, onSaved }) {
   const editing = !!device;
-  const [name, setName] = useState(device?.name || '');
-  const [host, setHost] = useState(device ? hostLabel(device.host) : '');
-  const [port, setPort] = useState(device ? String(device.port) : '');
+  const [name, setName] = useState(device?.name || prefill?.name || '');
+  const [host, setHost] = useState(device ? hostLabel(device.host) : prefill?.host || '');
+  const [port, setPort] = useState(device ? String(device.port) : prefill?.port !== 6053 && prefill?.port ? String(prefill.port) : '');
   const [key, setKey] = useState('');
   const [clearKey, setClearKey] = useState(false);
   const [childId, setChildId] = useState(device?.child_id || '');
@@ -356,6 +361,7 @@ function DeviceFormModal({ device, childOptions, childrenFailed, onClose, onSave
         </div>
         <div className="field">
           <label htmlFor="esphome-key">Encryption key (optional)</label>
+          {prefill?.encrypted && <div className="camera-tile__sub">This device says it uses encryption. Paste its key below; you'll find it in the device's configuration.</div>}
           <input id="esphome-key" type="password" autoComplete="off" spellCheck={false}
             placeholder={editing && device.key_set ? 'Leave blank to keep the stored key' : 'Paste the key from the device’s configuration'}
             value={key} onChange={(e) => setKey(e.target.value)} />
