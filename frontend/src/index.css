@@ -165,13 +165,27 @@ button {
 
 /* No tap-highlight flash on a control. The Android WebView (and iOS Safari) paint a translucent box over whatever is tapped
    (a grey-blue default on Android), and on our rounded buttons, cards and rows it showed as a square flash that is not part of
-   the design. Every control we restyled has its own :active and/or :focus-visible state (the global button:focus-visible ring
-   below; the :active tints on the rows, tiles and the review controls), so removing the default does not leave a control
-   without feedback. A control that still has no :active tint of its own is listed in docs/design-language.md section 9, not
-   papered over here. It is ONE rule for every kind of interactive element, so a new control inherits it: do not set it
-   per component. Hover rules are unaffected (they stay inside @media (hover: hover)). */
-button, a, summary, label[for], select, [role='button'], [role='tab'], [role='menuitem'], [role='link'] {
+   the design. It is ONE rule for every kind of interactive element, so a new control inherits it: do not set it per
+   component. It covers buttons, links, summaries, selects, labels (which wrap the inputs and the Switch), the checkbox/radio
+   inputs including the role=switch one, the button/tab/menuitem/link roles, and the two plain elements that are click targets
+   without being buttons (the camera tile's video area and a clip row's body).
+   Removing the flash removes the ONLY press feedback some controls had, and a touch tap does not show :focus-visible, so the
+   fallback below gives every button-like control a press state, and a control's own :active rule replaces it. A control with a
+   specific press state of its own is better; the ones that rely on the fallback are listed in docs/design-language.md
+   section 9. Hover rules are unaffected (they stay inside @media (hover: hover)). */
+button, a, summary, label, select, input[type='checkbox'], input[type='radio'], .switch,
+[role='button'], [role='tab'], [role='menuitem'], [role='link'],
+.camera-tile__video-wrap, .clip-row__body {
   -webkit-tap-highlight-color: transparent;
+}
+
+/* The generic press state: any enabled button-like control dims a little while it is pressed. brightness only, on purpose:
+   no transform (a shrinking button loses taps near its edge: a full-width .btn at scale(.98) dropped clicks within about 2px of
+   its left and right edge, reproduced in Chromium), no colour fill (a fill token chosen without looking at the control is how
+   the inset colour got used as a pressed fill, see #1064) and no background. :where() makes the selector's own specificity just
+   the :active, so ANY `.control:active` rule written elsewhere wins on the properties it sets (it may set filter itself). */
+:where(button, [role='button'], summary, [role='tab'], [role='menuitem']):where(:not(:disabled)):active {
+  filter: brightness(0.9);
 }
 
 .app-shell {
@@ -2502,13 +2516,12 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   cursor: default;
 }
 
-/* Press feedback for every .btn variant at once. With the Android tap highlight removed (see the rule near the top) a button
-   would otherwise show nothing when pressed. A background tint cannot be the one rule: primary is filled, secondary and danger
-   are transparent outlines, and --bg-elevated-2 (the inset) is off limits as a pressed fill (#1064). A slight shrink reads on
-   all three in both themes, and brightness(0.92) deepens a filled button; on an outline it only dims the ink a little. Not on
-   a disabled button, and no transition, so there is nothing to opt out of for prefers-reduced-motion. */
+/* Press feedback for every .btn variant at once, a touch lighter than the generic fallback near the top (it would give 0.9).
+   A background tint cannot be the one rule: primary is filled, secondary and danger are transparent outlines, and
+   --bg-elevated-2 (the inset) is off limits as a pressed fill (#1064). brightness deepens a filled button and only dims the
+   ink on an outline. NO transform: scale(0.98) lost clicks within about 2px of the edge of a full-width button (it shrinks
+   under the finger). Not on a disabled button, and no transition, so there is nothing for prefers-reduced-motion to opt out of. */
 .btn:not(:disabled):active {
-  transform: scale(0.98);
   filter: brightness(0.92);
 }
 

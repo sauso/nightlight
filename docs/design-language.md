@@ -970,24 +970,34 @@ Other rules:
 
 - Global `:focus-visible` ring — never `outline: none` without a replacement.
 - Icon-only control → `aria-label`. Decorative icon → `aria-hidden="true"`.
-- **An accessible name contains the text the control prints, and starts with it** (WCAG 2.5.3, label in name). When a button
-  shows "Sun 7:00 pm" its `aria-label` begins "Sun 7:00 pm", then the camera and the full date; never "Sun, 30 Aug, 7:00 pm
-  from the camera", or "Play ..." in front of a printed date. A voice-control user says what they see, and a name that
-  opens with something else does not match it. Put the verb or the extra detail after the printed text. A symbol that is not a
-  word anyone says (the sleep strip's dash for "no score") need not be in the name. Test it with
-  `nameStartsWithPrinted` (`frontend/test/helpers/accessibleName.js`). Icon-only controls have no printed text and are
-  exempt (they only need a name).
-- **No tap-highlight flash.** One rule in `index.css` sets `-webkit-tap-highlight-color: transparent` on every interactive element
-  (button, a, summary, label[for], select, and the button, tab, menuitem and link roles), because the Android WebView paints a
-  square grey flash over a tapped control that is not part of the design. Do not set it per component. It means a control
-  needs its own press state: a `:active` tint with `--child-action-active` (hover: `--child-action-hover`, inside
-  `@media (hover: hover)`) beside its `:focus-visible` ring. **Never `--bg-elevated-2` or `--field-bg` as a pressed or open fill:**
-  they are the inset colours, near-black in the dark theme, and drew the black bars #1064 removed (`paletteTokens.test.jsx`
-  fails any `:active` rule that uses them). Every `.btn` variant shares one press: a 2% shrink and `brightness(0.92)`
-  (a tint cannot do it, because secondary and danger are transparent outlines). Controls that still have no `:active`
-  state (a known limit, not a decision): `.more-menu__btn`, the Room activity and Wake-ups tabs, `.sleep-score__open`,
-  `.sleep-events__what`, `.review-add`, `.night__sleep--btn` and the bottom-nav links. They keep their focus ring and, on a
-  pointer, hover.
+- **An accessible name contains the text the control prints, and starts with it where practical** (WCAG 2.5.3, label in name).
+  When a button shows "Sun 7:00 pm" its `aria-label` begins "Sun 7:00 pm", then the camera and the full date; never "Sun, 30
+  Aug, 7:00 pm from the camera", or "Play ..." in front of a printed date. A voice-control user says what they see, and a name
+  that does not contain it does not match. Put the verb or the extra detail after the printed text. Where the printed text is a
+  long sentence the name may carry only its opening. A symbol that is not a word anyone says (the sleep strip's dash for "no
+  score") need not be in the name. Test it with `nameStartsWithPrinted` (`frontend/test/helpers/accessibleName.js`).
+  Two controls only CONTAIN the printed text, a known and accepted limit: the Room activity rows (the dot's "Movement outside
+  the bed" comes before the time range) and "Why this score?" (the spoken score comes first). Icon-only controls have no
+  printed text and are exempt (they only need a name).
+- **No tap-highlight flash, and a press state in its place.** One rule in `index.css` sets
+  `-webkit-tap-highlight-color: transparent` on buttons, links, summaries, selects, labels, checkbox and radio inputs (the
+  Switch included), the button, tab, menuitem and link roles, and two plain click targets (`.camera-tile__video-wrap`,
+  `.clip-row__body`), because the Android WebView paints a square grey flash over a tapped control that is not part of the
+  design. Do not set it per component. A touch tap does not show `:focus-visible`, so removing the flash would leave a control
+  with no feedback; a generic fallback therefore dims any enabled button, `[role=button]`, summary, tab or menuitem with
+  `filter: brightness(0.9)` while pressed. It is written with `:where()` so its specificity is only the `:active`, and a
+  control's own `:active` rule replaces it. The fallback is brightness only: no `transform` (a shrinking full-width button
+  lost taps within about 2px of its edge) and no colour. A control with a specific press state is better than the
+  fallback:
+  `--child-action-active` as the tint (hover: `--child-action-hover`, inside `@media (hover: hover)`), beside its
+  `:focus-visible` ring. **Never `--bg-elevated-2` or `--field-bg` in any `:active` rule**: they are the inset colours,
+  near-black in the dark theme, and drew the black bars #1064 removed (`paletteTokens.test.jsx` fails any `:active` rule that
+  names them). `.btn` has its own, `brightness(0.92)` (a tint cannot work: secondary and danger are transparent outlines).
+  Specific tints: the review stepper buttons, the logged-time chips, the "Something else was off" row, the sleep strip, and
+  the child page's rows and tiles. **Everything else relies on the generic dim** (`.more-menu__btn`, the tabs,
+  `.sleep-score__open`, `.sleep-events__what`, `.review-add`, `.night__sleep--btn`, the bottom-nav links, `.child-card` whose
+  own `:active` only undoes its hover lift). The Switch toggles visibly, and the two plain click targets (a `div`, not a
+  button) have no press state at all: both are a known limit.
 - `aria-pressed` on toggles, `aria-expanded` (+ `aria-haspopup`) on disclosures.
 - Real `<input>`s behind custom controls, not `div`s with click handlers.
 - `prefers-reduced-motion` honoured for every loop.

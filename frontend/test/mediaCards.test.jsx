@@ -20,7 +20,7 @@ import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
 import { screen, waitFor, within, render } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
-import { nameStartsWithPrinted } from './helpers/accessibleName.js';
+import { nameStartsWithPrinted, accessibleName } from './helpers/accessibleName.js';
 import Modal from '../src/components/Modal.jsx';
 import MediaPlayerModal from '../src/components/MediaPlayerModal.jsx';
 import ClipPlayerModal from '../src/components/ClipPlayerModal.jsx';
@@ -477,6 +477,11 @@ describe('RecordingsCard', () => {
     await waitFor(() => expect(container.querySelectorAll('.rec-strip__item')).toHaveLength(2));
     expect(container.querySelectorAll('.rec-strip__item--failed')).toHaveLength(1);
     expect(screen.getByText('Couldn’t be saved')).toBeInTheDocument();
+    // ★ Label in name (WCAG 2.5.3): the failed tile's name opens with its printed "Couldn’t be saved" and still carries the camera
+    // and the full date. Fails on the old name, which was "<camera> · <date> · couldn’t be saved".
+    const failed = container.querySelector('.rec-strip__item--failed');
+    expect(nameStartsWithPrinted(failed)).toBe(true);
+    expect(accessibleName(failed)).toMatch(/^Couldn’t be saved, Child A Room, Wed, 2 Sept,/);
   });
 
   test('it never requests media it cannot have — no thumbnail, no play affordance', async () => {

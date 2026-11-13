@@ -15,7 +15,7 @@ import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
 import { screen, waitFor, act } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver, renderAs, ADMIN, CAREGIVER } from './helpers/render.jsx';
-import { nameStartsWithPrinted } from './helpers/accessibleName.js';
+import { nameStartsWithPrinted, accessibleName } from './helpers/accessibleName.js';
 import SleepSummaryCard from '../src/components/SleepSummaryCard.jsx';
 import TimelapseCard from '../src/components/TimelapseCard.jsx';
 import { api } from '../src/lib/api.js';
@@ -217,7 +217,7 @@ describe('SleepSummaryCard', () => {
       // Clickable even with nothing to show, so the date picker there is still reachable.
       live({ scope: 'last_night', night: { status: 'no_data' } });
       const { user } = renderAsAdmin(routes, { settings: { timezone: TZ } });
-      await user.click(await screen.findByRole('button', { name: /^Once a camera .* View sleep detail and history$/ }));
+      await user.click(await screen.findByRole('button', { name: /^Once a camera with motion or sound detection runs overnight\. View sleep detail and history$/ }));
       expect(await screen.findByText('sleep detail')).toBeInTheDocument();
     });
 
@@ -226,6 +226,52 @@ describe('SleepSummaryCard', () => {
       const { user } = renderAsCaregiver(routes, { settings: { timezone: TZ } });
       await user.click(await screen.findByRole('button', { name: /^Last night .* asleep\. View sleep detail and history$/ }));
       expect(await screen.findByText('sleep detail')).toBeInTheDocument();
+    });
+  });
+
+  // ★ Label in name (WCAG 2.5.3) for the states without a score: the name opens with what the card prints, and is short before the
+  // destination. Each fails on the old names, which began "View sleep detail and history" (or "Turn on sleep tracking in settings").
+  describe('★ the button’s name starts with the text it prints, in every state', () => {
+    const button = () => screen.getByRole('button');
+
+    test('loading', async () => {
+      vi.spyOn(api, 'get').mockReturnValue(new Promise(() => {}));
+      show();
+      await screen.findByText('Loading sleep…');
+      expect(accessibleName(button())).toBe('Loading sleep. View sleep detail and history');
+    });
+
+    test('tracking off', async () => {
+      live({ scope: 'off' });
+      show();
+      await screen.findByText('Sleep tracking is off');
+      expect(accessibleName(button())).toBe('Sleep tracking is off. Turn on sleep tracking in settings');
+    });
+
+    test('no data, last night: the name is the opening of the printed sentence and short', async () => {
+      live({ scope: 'last_night', night: { status: 'no_data' } });
+      show();
+      await screen.findByText(/^Once a camera with motion or sound detection runs overnight/);
+      const name = accessibleName(button());
+      const before = name.split('. View sleep detail')[0];
+      expect(before.length).toBeLessThan(60);
+      expect(document.querySelector('.night__soon').textContent.startsWith(before)).toBe(true);
+    });
+
+    test('no data, tonight', async () => {
+      live({ scope: 'tonight', night: { status: 'no_data' } });
+      show();
+      await screen.findByText('Tonight');
+      expect(accessibleName(button())).toBe('Tonight. View sleep detail and history');
+    });
+
+    test('tonight with a duration says "so far" once', async () => {
+      live({ scope: 'tonight', night: { ...OK_NIGHT, wake_at: null } });
+      show();
+      await asleep('10h 37m asleep so far');
+      const name = accessibleName(button());
+      expect(name.startsWith('Tonight 10h 37m asleep so far. View sleep detail')).toBe(true);
+      expect(name.match(/so far/g)).toHaveLength(1);
     });
   });
 
@@ -342,6 +388,13 @@ describe('TimelapseCard', () => {
     list([{ id: 't-9', night_date: 'garbage' }]);
     renderAsAdmin(<TimelapseCard childId="kid-1" />);
     expect(await screen.findByRole('button', { name: 'garbage, play timelapse' })).toBeInTheDocument();
+  });
+
+  test('an unparseable date in a strip tile leaves the date part out rather than saying "garbage, garbage timelapse"', async () => {
+    list([{ id: 't-9', night_date: 'garbage' }, { id: 't-8', night_date: 'rubbish' }]);
+    renderAsAdmin(<TimelapseCard childId="kid-1" />);
+    expect(await screen.findByRole('button', { name: 'garbage timelapse' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'rubbish timelapse' })).toBeInTheDocument();
   });
 
   test('the hero opens the player', async () => {

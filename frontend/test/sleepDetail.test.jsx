@@ -23,7 +23,7 @@ import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within, fireEvent, act, render } from '@testing-library/react';
 import { Routes, Route, Link } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver, renderAs, forEachRole } from './helpers/render.jsx';
-import { nameStartsWithPrinted } from './helpers/accessibleName.js';
+import { nameStartsWithPrinted, accessibleName } from './helpers/accessibleName.js';
 import SleepDetail, { addDays, framesForVisit, VisitItem } from '../src/pages/SleepDetail.jsx';
 import NightReview from '../src/pages/NightReview.jsx';
 import { api } from '../src/lib/api.js';
@@ -2133,6 +2133,11 @@ describe('UI refresh PR E: the frame', () => {
         const score = b.querySelector('.sleep-strip__score').textContent;
         const printed = `${b.querySelector('.sleep-strip__day').textContent} ${b.querySelector('.sleep-strip__date').textContent}${score === '–' ? '' : ` ${score}`}`;
         expect(nameStartsWithPrinted(b, printed)).toBe(true);
+        // The name still carries the month and the spoken score words after the printed text (a name that was ONLY the printed
+        // text would pass the check above and lose both).
+        const name = accessibleName(b);
+        expect(name).toMatch(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep\w*|Oct|Nov|Dec)\b/);
+        expect(name).toMatch(score === '–' ? /, no score$/ : new RegExp(`, score ${score}(?: \\(early estimate\\))?$`));
       }
     });
 

@@ -129,7 +129,9 @@ export default function SleepSummaryCard({ childId, onBand, onNightShown, birthd
       </>
     );
   } else if (!night || night.status === 'no_data') {
-    lead = tonight ? 'Tonight' : 'Once a camera with motion or sound detection runs overnight, last night’s sleep shows here';
+    // Not tonight: the printed sentence is long, so the name carries only its opening (still the start of what is printed, and
+    // under 60 characters) and leaves the rest to the card text. Tonight: the head alone, the line is short.
+    lead = tonight ? 'Tonight' : 'Once a camera with motion or sound detection runs overnight';
     body = tonight ? (
       <>
         {head('Tonight')}
@@ -173,7 +175,9 @@ export default function SleepSummaryCard({ childId, onBand, onNightShown, birthd
   } else {
     // status ok. The date is not in the label any more ("Last night", as drawn): the card is always the latest night, and
     // the sleep page has the date navigator.
-    lead = `${tonight ? 'Tonight · so far' : 'Last night'} ${fmtDur(night.asleep_minutes)} asleep${tonight ? ' so far' : ''}`;
+    // "so far" once only: tonight's printed head is "Tonight · so far" and the line "10h 37m asleep so far", so the name is
+    // "Tonight 10h 37m asleep so far" (it starts with the head's first word and carries the whole line).
+    lead = `${tonight ? 'Tonight' : 'Last night'} ${fmtDur(night.asleep_minutes)} asleep${tonight ? ' so far' : ''}`;
     body = (
       <>
         {head(tonight ? 'Tonight · so far' : 'Last night')}

@@ -286,7 +286,7 @@ describe('SleepSummaryCard: the ring and the spoken score', () => {
     show(night, scope);
     await asleep(scope === 'tonight' ? '10h 37m asleep so far' : '10h 37m asleep');
     const button = screen.getByRole('button');
-    expect(button.getAttribute('aria-label')).toBe(scope === 'tonight' ? 'Tonight · so far 10h 37m asleep so far. View sleep detail and history' : PLAIN_LABEL);
+    expect(button.getAttribute('aria-label')).toBe(scope === 'tonight' ? 'Tonight 10h 37m asleep so far. View sleep detail and history' : PLAIN_LABEL);
     expect(button.querySelector('svg text')).toBe(null); // the ring is the only svg with text in it
     // The estimate disclaimer is the sleep page's footer now, not part of this card.
     expect(screen.queryByText(/Estimated from movement/)).not.toBeInTheDocument();

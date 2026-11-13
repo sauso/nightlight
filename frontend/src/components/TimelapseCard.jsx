@@ -24,6 +24,14 @@ function weekdayLabel(nightDate) {
   return formatDayKey(nightDate, { weekday: 'short' });
 }
 
+// A strip tile's accessible name: the printed weekday first, then the day and month, then "timelapse". An unparseable date comes
+// back from formatDayKey as the raw text for BOTH parts, so the date part is left out rather than saying it twice ("garbage timelapse").
+function tileName(nightDate) {
+  const weekday = weekdayLabel(nightDate);
+  const dayMonth = formatDayKey(nightDate, { day: 'numeric', month: 'short' });
+  return `${weekday}${dayMonth === weekday ? '' : `, ${dayMonth}`} timelapse`;
+}
+
 export default function TimelapseCard({ childId }) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -103,7 +111,7 @@ export default function TimelapseCard({ childId }) {
               className={`timelapse-strip__item${t.id === sel.id ? ' timelapse-strip__item--active' : ''}`}
               onClick={() => setSelId(t.id)}
               title={nightLabel(t.night_date)}
-              aria-label={`${weekdayLabel(t.night_date)}, ${formatDayKey(t.night_date, { day: 'numeric', month: 'short' })} timelapse`}
+              aria-label={tileName(t.night_date)}
               aria-pressed={t.id === sel.id}
             >
               <img src={api.url(`/timelapses/${t.id}/thumb`)} alt="" loading="lazy" />
