@@ -110,6 +110,46 @@ describe('child-page interactive surfaces', () => {
     }
   });
 
+  // ★ The inset tokens are tracks, not pressed fills: --bg-elevated-2 and --field-bg are near-black in the dark theme, which is what
+  // drew the black open/press bars #1064 removed. Checked across the WHOLE stylesheet, not a list of controls, so a control added
+  // later cannot bring it back. Only :active is banned here: a hover fill on a row is already pinned above for the child page,
+  // and older hover rules elsewhere (menu items, the clip calendar) are untouched by this guard.
+  test('★ no :active rule anywhere uses an inset token, in any property or fallback form', () => {
+    const pressed = rules.filter((rule) => /:active\b/.test(rule.slice(0, rule.lastIndexOf('{'))));
+    expect(pressed.length).toBeGreaterThan(9); // it really read the stylesheet (the generic, .btn, review, strip and child-page rules)
+    // The token NAME anywhere in the body: background, background-image (a gradient), a shorthand, or a fallback form such as
+    // var(--field-bg, #000). Over-broad on purpose; nothing pressed has a reason to read an inset colour.
+    for (const rule of pressed) expect(rule, rule).not.toMatch(/--(?:bg-elevated-2|field-bg)\b/);
+  });
+
+  // The generic press state: zero extra specificity (so any `.control:active` rule wins), brightness only (no transform: a shrinking
+  // full-width button lost taps within ~2px of its edge) and no colour or background.
+  test('★ every button-like control has a generic press state that is brightness only', () => {
+    const generic = rules.find((rule) => rule.startsWith(':where(button,') && /:active\s*\{/.test(rule));
+    expect(generic, 'the :where() fallback').toBeDefined();
+    expect(generic).toContain(':where(:not(:disabled))');
+    expect(generic).toMatch(/filter:\s*brightness\(/);
+    expect(generic).not.toMatch(/transform|background|color:|box-shadow|border/);
+    const btn = rules.find((rule) => /^\.btn:not\(:disabled\):active\s*\{/.test(rule));
+    expect(btn).toMatch(/filter:\s*brightness\(/);
+    expect(btn).not.toMatch(/transform/);
+  });
+
+  test('★ the tap-highlight rule covers the controls, the Switch and the plain click targets', () => {
+    const rule = rules.find((r) => r.includes('-webkit-tap-highlight-color: transparent'));
+    for (const selector of ['button', 'a', 'summary', 'label', "input[type='checkbox']", '.switch', "[role='tab']", '.camera-tile__video-wrap', '.clip-row__body']) {
+      expect(rule.slice(0, rule.lastIndexOf('{')).split(',').map((s) => s.trim()), selector).toContain(selector);
+    }
+  });
+
+  test('★ the review controls have a specific pressed tint, and the review row hovers with the child-page tint', () => {
+    const state = (selector, pseudo) => rules.filter((rule) => rule.slice(0, rule.lastIndexOf('{')).includes(`${selector}`) && rule.slice(0, rule.lastIndexOf('{')).includes(pseudo));
+    for (const selector of ['.review-link', '.review-stepper__btn', '.review-suggest__btn', '.sleep-strip__item']) {
+      expect(state(selector, ':active').some((rule) => rule.includes('var(--child-action-active)')), selector).toBe(true);
+    }
+    expect(state('.review-link', ':hover').some((rule) => rule.includes('var(--child-action-hover)'))).toBe(true);
+  });
+
   test('★ disclosure text remains readable on the card and its two state tints in both themes', () => {
     for (const [name, palette] of [['day', day], ['night', night]]) {
       for (const surface of ['--bg-elevated', '--child-action-hover', '--child-action-active']) {

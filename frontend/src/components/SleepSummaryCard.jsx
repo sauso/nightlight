@@ -113,10 +113,15 @@ export default function SleepSummaryCard({ childId, onBand, onNightShown, birthd
     <div className="night__sleep-head"><Moon size={14} aria-hidden="true" />{text}</div>
   );
 
+  // `lead` is the card's printed label and main line as one string, set beside each `body` below. The button's accessible
+  // name STARTS with it (WCAG 2.5.3, label in name), so a voice-control user saying what they see ("Last night") matches.
   let body;
+  let lead;
   if (data === undefined) {
+    lead = 'Loading sleep'; // the printed ellipsis is dropped so the name does not read "Loading sleep…. View…"
     body = <div className="night__soon">Loading sleep…</div>;
   } else if (scope === 'off') {
+    lead = 'Sleep tracking is off';
     body = (
       <>
         <div className="night__sleep-head">Sleep tracking is off</div>
@@ -124,6 +129,9 @@ export default function SleepSummaryCard({ childId, onBand, onNightShown, birthd
       </>
     );
   } else if (!night || night.status === 'no_data') {
+    // Not tonight: the printed sentence is long, so the name carries only its opening (still the start of what is printed, and
+    // under 60 characters) and leaves the rest to the card text. Tonight: the head alone, the line is short.
+    lead = tonight ? 'Tonight' : 'Once a camera with motion or sound detection runs overnight';
     body = tonight ? (
       <>
         {head('Tonight')}
@@ -135,6 +143,7 @@ export default function SleepSummaryCard({ childId, onBand, onNightShown, birthd
       </div>
     );
   } else if (night.status === 'no_sleep') {
+    lead = tonight ? 'Tonight' : `Last night · ${fmtDate(night.night_date)}`;
     body = (
       <>
         {head(tonight ? 'Tonight' : `Last night · ${fmtDate(night.night_date)}`)}
@@ -152,6 +161,7 @@ export default function SleepSummaryCard({ childId, onBand, onNightShown, birthd
     // `corrected: true` (sleepReviews.js's other `applyCorrection` branch), so it would tell a parent
     // who had only fixed a time that they had said no one was there — false. `nobody_in_bed` is true
     // ONLY on the flag path.
+    lead = tonight ? 'Tonight' : `Last night · ${fmtDate(night.night_date)}`;
     body = (
       <>
         {head(tonight ? 'Tonight' : `Last night · ${fmtDate(night.night_date)}`)}
@@ -165,6 +175,9 @@ export default function SleepSummaryCard({ childId, onBand, onNightShown, birthd
   } else {
     // status ok. The date is not in the label any more ("Last night", as drawn): the card is always the latest night, and
     // the sleep page has the date navigator.
+    // "so far" once only: tonight's printed head is "Tonight · so far" and the line "10h 37m asleep so far", so the name is
+    // "Tonight 10h 37m asleep so far" (it starts with the head's first word and carries the whole line).
+    lead = `${tonight ? 'Tonight' : 'Last night'} ${fmtDur(night.asleep_minutes)} asleep${tonight ? ' so far' : ''}`;
     body = (
       <>
         {head(tonight ? 'Tonight · so far' : 'Last night')}
@@ -183,9 +196,13 @@ export default function SleepSummaryCard({ childId, onBand, onNightShown, birthd
   // under the lowest band; "early estimate" in place of a band word). With no score the label is what it always was.
   // The headline is said too (phase 3), after the destination and before the score: "…history. A fairly steady night
   // overall. Sleep score 82, Good". Its own full stop is dropped so the label does not carry two.
+  //
+  // It opens with `lead`, the label and main line the card prints (WCAG 2.5.3, label in name): the card's name used to start
+  // at "View sleep detail and history" and never said "Last night" or the hours, so what a voice-control user could see was
+  // not what they could say. The destination, headline and score follow as before.
   const label = scope === 'off'
-    ? 'Turn on sleep tracking in settings'
-    : `View sleep detail and history${headline ? `. ${headline.replace(/\.$/, '')}` : ''}${pendingLine ? `. ${pendingLine}` : ''}${score ? `. Sleep score ${scoreLabel(score)}` : ''}`;
+    ? `${lead}. Turn on sleep tracking in settings`
+    : `${lead}. View sleep detail and history${headline ? `. ${headline.replace(/\.$/, '')}` : ''}${pendingLine ? `. ${pendingLine}` : ''}${score ? `. Sleep score ${scoreLabel(score)}` : ''}`;
 
   // "Add a birthday" is shown ONLY for a night that has no score for want of one (the server's own reason key, the same one
   // the sleep page words as "...or a birthday in this child's settings") AND the child really has none. Anything else, a

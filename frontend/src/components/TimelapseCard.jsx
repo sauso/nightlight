@@ -24,6 +24,14 @@ function weekdayLabel(nightDate) {
   return formatDayKey(nightDate, { weekday: 'short' });
 }
 
+// A strip tile's accessible name: the printed weekday first, then the day and month, then "timelapse". An unparseable date comes
+// back from formatDayKey as the raw text for BOTH parts, so the date part is left out rather than saying it twice ("garbage timelapse").
+function tileName(nightDate) {
+  const weekday = weekdayLabel(nightDate);
+  const dayMonth = formatDayKey(nightDate, { day: 'numeric', month: 'short' });
+  return `${weekday}${dayMonth === weekday ? '' : `, ${dayMonth}`} timelapse`;
+}
+
 export default function TimelapseCard({ childId }) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -54,6 +62,7 @@ export default function TimelapseCard({ childId }) {
   if (!list.length) return null;
   const sel = list.find((t) => t.id === selId) || list[0];
   const confirming = del === 'confirm' || del === 'deleting' || del === 'error';
+  const heroMeta = `${nightLabel(sel.night_date)}${sel.duration_s ? ` · ${sel.duration_s}s` : ''}`;
 
   function closePlayer() {
     setDel('');
@@ -80,12 +89,13 @@ export default function TimelapseCard({ childId }) {
         <Film size={16} aria-hidden="true" /> Timelapse
       </div>
 
-      <button type="button" className="timelapse-hero" onClick={() => setPlaying(true)} aria-label={`Play ${nightLabel(sel.night_date)} timelapse`}>
+      {/* The name STARTS with the text printed on the button, duration included (WCAG 2.5.3, label in name): it used to be
+          "Play Tue, 1 Sept timelapse", which does not contain the visible "Tue, 1 Sept · 42s", so a voice-control user saying
+          what they see got no match. The verb moves to the end. */}
+      <button type="button" className="timelapse-hero" onClick={() => setPlaying(true)} aria-label={`${heroMeta}, play timelapse`}>
         <img className="timelapse-hero__thumb" src={api.url(`/timelapses/${sel.id}/thumb`)} alt="" loading="lazy" />
         <span className="timelapse-play"><Play size={26} aria-hidden="true" /></span>
-        <span className="timelapse-hero__meta">
-          {nightLabel(sel.night_date)}{sel.duration_s ? ` · ${sel.duration_s}s` : ''}
-        </span>
+        <span className="timelapse-hero__meta">{heroMeta}</span>
       </button>
 
       {list.length > 1 && (
@@ -93,14 +103,15 @@ export default function TimelapseCard({ childId }) {
           {list.map((t) => (
             // The tile prints only the weekday (the design: "Tue", "Mon"), over the thumbnail. A weekday alone repeats once a
             // week, so the FULL date is the accessible name and the tooltip, and the picture is decoration (alt="") so a
-            // screen reader hears "Show Tue, 1 Sept timelapse" once, not the date twice.
+            // screen reader hears "Tue, 1 Sept timelapse" once, not the date twice. The name opens with the printed weekday
+            // (WCAG 2.5.3, label in name; it was "Show Tue, 1 Sept timelapse"), and aria-pressed says it picks the night.
             <button
               key={t.id}
               type="button"
               className={`timelapse-strip__item${t.id === sel.id ? ' timelapse-strip__item--active' : ''}`}
               onClick={() => setSelId(t.id)}
               title={nightLabel(t.night_date)}
-              aria-label={`Show ${nightLabel(t.night_date)} timelapse`}
+              aria-label={tileName(t.night_date)}
               aria-pressed={t.id === sel.id}
             >
               <img src={api.url(`/timelapses/${t.id}/thumb`)} alt="" loading="lazy" />

@@ -103,7 +103,7 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
         className="recordings-row"
         aria-expanded={expanded}
         aria-controls={expanded ? stripId : undefined}
-        {...(list[0].status === 'failed' ? null : { title: `Latest: ${when(list[0].started_at, home)}`, 'aria-label': `Recordings, latest ${when(list[0].started_at, home)}` })}
+        {...(list[0].status === 'failed' ? null : { title: `Latest: ${when(list[0].started_at, home)}`, 'aria-label': `Recordings ${shortWhen(list[0].started_at, home)}, latest ${when(list[0].started_at, home)}` })}
         onClick={() => setExpanded((v) => !v)}
       >
         <Video size={16} aria-hidden="true" className="recordings-row__icon" />
@@ -120,7 +120,11 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
           // request either: the server refuses to serve a non-ready row, and an <img> pointed at it
           // would just render a broken-image glyph.
           const failed = r.status === 'failed';
-          const fullLabel = `${r.camera_name || 'Camera'} · ${when(r.started_at, home)}${failed ? ' · couldn’t be saved' : ''}`;
+          // The name STARTS with the chip's own text (WCAG 2.5.3, label in name): a voice-control user says what they see
+          // ("Sun 7:00 pm") and a name that opens with the camera does not match it. The camera and the full date follow,
+          // so a screen-reader user still gets which camera and which day (the chip alone is a weekday for a week).
+          const chip = failed ? 'Couldn’t be saved' : shortWhen(r.started_at, home);
+          const fullLabel = `${chip}, ${r.camera_name || 'Camera'}, ${when(r.started_at, home)}`;
           return (
             <button
               key={r.id}
@@ -138,7 +142,7 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
                   <span className="rec-strip__play"><Play size={16} aria-hidden="true" /></span>
                 </>
               )}
-              <span className="rec-strip__label" aria-hidden="true">{failed ? 'Couldn’t be saved' : shortWhen(r.started_at, home)}</span>
+              <span className="rec-strip__label" aria-hidden="true">{chip}</span>
             </button>
           );
         })}

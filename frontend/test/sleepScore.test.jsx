@@ -16,6 +16,7 @@ import { describe, test, expect, vi, afterEach } from 'vitest';
 import { screen, within, waitFor } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin } from './helpers/render.jsx';
+import { accessibleName } from './helpers/accessibleName.js';
 import SleepSummaryCard from '../src/components/SleepSummaryCard.jsx';
 import SleepScoreCard from '../src/components/SleepScoreCard.jsx';
 import SleepDetail from '../src/pages/SleepDetail.jsx';
@@ -193,15 +194,22 @@ describe('SleepSummaryCard: the ring and the spoken score', () => {
     vi.spyOn(api, 'get').mockResolvedValue({ scope, night });
     return renderAsAdmin(<SleepSummaryCard childId="kid-1" />);
   };
-  const PLAIN_LABEL = 'View sleep detail and history';
+  // The name opens with what the card prints ("Last night" and the duration: WCAG 2.5.3, label in name), then the destination.
+  const LEAD = 'Last night 10h 37m asleep. ';
+  const PLAIN_LABEL = `${LEAD}View sleep detail and history`;
   // The duration is two elements ("10h 37m" and a smaller "asleep"): matched on the element that holds both.
   const asleep = (text) => screen.findByText((_c, el) => el?.classList?.contains('night__sleep-big') && el.textContent === text);
 
   test('a scored night: the ring shows the number, and the button says the score and band', async () => {
-    show({ ...OK_NIGHT, score: SCORE });
+    const { container } = show({ ...OK_NIGHT, score: SCORE });
     await asleep('10h 37m asleep');
     expect(screen.getByText('82')).toBeInTheDocument();
-    expect(screen.getByRole('button').getAttribute('aria-label')).toBe('View sleep detail and history. Sleep score 82, Good');
+    // ★ Label in name (WCAG 2.5.3): the button's name opens with the label and the duration the card prints, so what a
+    // voice-control user can see is what they can say. Fails on the old name, which began "View sleep detail and history".
+    const name = accessibleName(screen.getByRole('button'));
+    const printed = `${container.querySelector('.night__sleep-head').textContent} ${container.querySelector('.night__sleep-big').textContent}`;
+    expect(name.startsWith(printed.replace(/\s+/g, ' ').trim())).toBe(true);
+    expect(screen.getByRole('button').getAttribute('aria-label')).toBe(`${LEAD}View sleep detail and history. Sleep score 82, Good`);
     // "Last night" is the label (a docs screenshot run waits for it), now without the date.
     expect(screen.getByText('Last night')).toBeInTheDocument();
   });
@@ -225,12 +233,12 @@ describe('SleepSummaryCard: the ring and the spoken score', () => {
   test('under the lowest band the label carries the number alone; an early estimate says so and names no band', async () => {
     const first = show({ ...OK_NIGHT, score: { ...SCORE, score: 48, band: null } });
     await asleep('10h 37m asleep');
-    expect(screen.getByRole('button').getAttribute('aria-label')).toBe('View sleep detail and history. Sleep score 48');
+    expect(screen.getByRole('button').getAttribute('aria-label')).toBe(`${LEAD}View sleep detail and history. Sleep score 48`);
     first.unmount();
     vi.restoreAllMocks();
     show({ ...OK_NIGHT, score: { ...SCORE, score: 64, band: 'good', early_estimate: true } });
     await asleep('10h 37m asleep');
-    expect(screen.getByRole('button').getAttribute('aria-label')).toBe('View sleep detail and history. Sleep score 64, early estimate');
+    expect(screen.getByRole('button').getAttribute('aria-label')).toBe(`${LEAD}View sleep detail and history. Sleep score 64, early estimate`);
   });
 
   // The ring's classes, for every band: the child card sits on the fixed dark card, so it asks for the dark surface.
@@ -278,7 +286,7 @@ describe('SleepSummaryCard: the ring and the spoken score', () => {
     show(night, scope);
     await asleep(scope === 'tonight' ? '10h 37m asleep so far' : '10h 37m asleep');
     const button = screen.getByRole('button');
-    expect(button.getAttribute('aria-label')).toBe(PLAIN_LABEL);
+    expect(button.getAttribute('aria-label')).toBe(scope === 'tonight' ? 'Tonight 10h 37m asleep so far. View sleep detail and history' : PLAIN_LABEL);
     expect(button.querySelector('svg text')).toBe(null); // the ring is the only svg with text in it
     // The estimate disclaimer is the sleep page's footer now, not part of this card.
     expect(screen.queryByText(/Estimated from movement/)).not.toBeInTheDocument();
@@ -289,7 +297,7 @@ describe('SleepSummaryCard: the ring and the spoken score', () => {
     show({ ...OK_NIGHT, status: 'no_sleep', score: SCORE });
     await screen.findByText('No clear sleep detected overnight.');
     expect(screen.queryByText('82')).not.toBeInTheDocument();
-    expect(screen.getByRole('button').getAttribute('aria-label')).toBe(PLAIN_LABEL);
+    expect(screen.getByRole('button').getAttribute('aria-label')).toBe('Last night · Tue, 1 Sept. View sleep detail and history');
   });
 });
 

@@ -50,7 +50,7 @@ export function stripDates(maxDate, minDate, rows, selected) {
 // UTC so the day can never slip to a neighbour in any zone (the dates are already the app timezone's calendar dates).
 const weekdayOf = (d) => new Intl.DateTimeFormat([], { timeZone: 'UTC', weekday: 'short' }).format(new Date(`${d}T12:00:00Z`));
 const dayOf = (d) => Number(d.slice(8, 10));
-const longOf = (d) => new Intl.DateTimeFormat([], { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${d}T12:00:00Z`));
+const monthDayOf = (d) => new Intl.DateTimeFormat([], { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(new Date(`${d}T12:00:00Z`));
 
 // The last seven nights as seven buttons: weekday, date, score and a 4px band bar (UI refresh PR E). Tapping one opens
 // that night (`onSelect(date)`), the selected one carries aria-current="date". It replaces the previous / next arrows.
@@ -90,7 +90,12 @@ export default function SleepNightStrip({ childId, maxDate, minDate, selected, o
         const score = scoreOf(byDate.get(d));
         const band = bandOf(score) || 'none';
         const shown = score ? String(Math.round(score.score)) : '–';
-        const name = `${longOf(d)}, ${score ? `score ${shown}${score.early_estimate ? ' (early estimate)' : ''}` : 'no score'}`;
+        // The name STARTS with what the button prints (WCAG 2.5.3, label in name): weekday, day number and the score, so a
+        // voice-control user saying "Sat 14" or "Sat 14 82" matches. It was "Sat, Nov 14, score 82", which has the pieces but
+        // never the printed text in order. A dash is a symbol, not a word anyone says, so a night with no score leads with
+        // the weekday and day only. The month and the words follow for a screen-reader user.
+        const lead = `${weekdayOf(d)} ${dayOf(d)}${score ? ` ${shown}` : ''}`;
+        const name = `${lead}, ${monthDayOf(d)}, ${score ? `score ${shown}${score.early_estimate ? ' (early estimate)' : ''}` : 'no score'}`;
         return (
           <button key={d} type="button" className="sleep-strip__item" aria-label={name}
             aria-current={d === selected ? 'date' : undefined} onClick={() => onSelect(d)}>

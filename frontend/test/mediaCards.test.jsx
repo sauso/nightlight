@@ -20,6 +20,7 @@ import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
 import { screen, waitFor, within, render } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
+import { nameStartsWithPrinted, accessibleName } from './helpers/accessibleName.js';
 import Modal from '../src/components/Modal.jsx';
 import MediaPlayerModal from '../src/components/MediaPlayerModal.jsx';
 import ClipPlayerModal from '../src/components/ClipPlayerModal.jsx';
@@ -404,7 +405,10 @@ describe('RecordingsCard', () => {
     // The row shows the SHORT form (the long one lost its AM/PM at 320px) and keeps the long one as its name and tooltip.
     expect(row.textContent).toMatch(/Wed \d{1,2}:\d{2} [ap]m/);
     expect(row.textContent).not.toContain('Wed, 2 Sept');
-    expect(row).toHaveAccessibleName(/^Recordings, latest Wed, 2 Sept, \d{1,2}:\d{2} [ap]m/);
+    expect(row).toHaveAccessibleName(/^Recordings Wed \d{1,2}:\d{2} [ap]m( [A-Z]+)?, latest Wed, 2 Sept, \d{1,2}:\d{2} [ap]m/);
+    // ★ Label in name (WCAG 2.5.3): it opens with what the row prints, "Recordings Wed 10:00 am" (the title and the time are two
+    // spans, so they are joined here). Fails on the old name, which had "Recordings" and the long date but never the printed time.
+    expect(nameStartsWithPrinted(row, `${row.querySelector('.recordings-row__title').textContent} ${row.querySelector('.recordings-row__latest').textContent}`)).toBe(true);
     expect(row.getAttribute('title')).toContain('Wed, 2 Sept');
     expect(row.textContent).not.toContain('Tue');
     await user.click(row);
@@ -430,7 +434,9 @@ describe('RecordingsCard', () => {
     const tile = container.querySelector('.rec-strip__item');
     expect(tile.querySelector('img')).toHaveAttribute('src', 'http://host/recordings/r-1/thumb');
     expect(tile.querySelector('.rec-strip__label')).toHaveTextContent(/^Wed \d{1,2}:\d{2} [ap]m/);
-    expect(tile).toHaveAccessibleName(/Child B Room · Wed, 2 Sept, \d{1,2}:\d{2} [ap]m/);
+    expect(tile).toHaveAccessibleName(/^Wed \d{1,2}:\d{2} [ap]m( [A-Z]+)?, Child B Room, Wed, 2 Sept, \d{1,2}:\d{2} [ap]m/);
+    // ★ Label in name (WCAG 2.5.3): the name opens with the chip. Fails on the old "Child B Room · Wed, 2 Sept…".
+    expect(nameStartsWithPrinted(tile)).toBe(true);
     expect(tile.getAttribute('title')).toContain('Wed, 2 Sept');
     expect(tile.querySelector('.rec-strip__play')).toBeInTheDocument();
   });
@@ -471,6 +477,11 @@ describe('RecordingsCard', () => {
     await waitFor(() => expect(container.querySelectorAll('.rec-strip__item')).toHaveLength(2));
     expect(container.querySelectorAll('.rec-strip__item--failed')).toHaveLength(1);
     expect(screen.getByText('Couldn’t be saved')).toBeInTheDocument();
+    // ★ Label in name (WCAG 2.5.3): the failed tile's name opens with its printed "Couldn’t be saved" and still carries the camera
+    // and the full date. Fails on the old name, which was "<camera> · <date> · couldn’t be saved".
+    const failed = container.querySelector('.rec-strip__item--failed');
+    expect(nameStartsWithPrinted(failed)).toBe(true);
+    expect(accessibleName(failed)).toMatch(/^Couldn’t be saved, Child A Room, Wed, 2 Sept,/);
   });
 
   test('it never requests media it cannot have — no thumbnail, no play affordance', async () => {

@@ -163,6 +163,31 @@ button {
   font-family: inherit;
 }
 
+/* No tap-highlight flash on a control. The Android WebView (and iOS Safari) paint a translucent box over whatever is tapped
+   (a grey-blue default on Android), and on our rounded buttons, cards and rows it showed as a square flash that is not part of
+   the design. It is ONE rule for every kind of interactive element, so a new control inherits it: do not set it per
+   component. It covers buttons, links, summaries, selects, labels (which wrap the inputs and the Switch), the checkbox/radio
+   inputs including the role=switch one, the button/tab/menuitem/link roles, and the two plain elements that are click targets
+   without being buttons (the camera tile's video area and a clip row's body).
+   Removing the flash removes the ONLY press feedback some controls had, and a touch tap does not show :focus-visible, so the
+   fallback below gives every button-like control a press state, and a control's own :active rule replaces it. A control with a
+   specific press state of its own is better; the ones that rely on the fallback are listed in docs/design-language.md
+   section 9. Hover rules are unaffected (they stay inside @media (hover: hover)). */
+button, a, summary, label, select, input[type='checkbox'], input[type='radio'], .switch,
+[role='button'], [role='tab'], [role='menuitem'], [role='link'],
+.camera-tile__video-wrap, .clip-row__body {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The generic press state: any enabled button-like control dims a little while it is pressed. brightness only, on purpose:
+   no transform (a shrinking button loses taps near its edge: a full-width .btn at scale(.98) dropped clicks within about 2px of
+   its left and right edge, reproduced in Chromium), no colour fill (a fill token chosen without looking at the control is how
+   the inset colour got used as a pressed fill, see #1064) and no background. :where() makes the selector's own specificity just
+   the :active, so ANY `.control:active` rule written elsewhere wins on the properties it sets (it may set filter itself). */
+:where(button, [role='button'], summary, [role='tab'], [role='menuitem']):where(:not(:disabled)):active {
+  filter: brightness(0.9);
+}
+
 .app-shell {
   min-height: 100%;
   display: flex;
@@ -2491,6 +2516,15 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   cursor: default;
 }
 
+/* Press feedback for every .btn variant at once, a touch lighter than the generic fallback near the top (it would give 0.9).
+   A background tint cannot be the one rule: primary is filled, secondary and danger are transparent outlines, and
+   --bg-elevated-2 (the inset) is off limits as a pressed fill (#1064). brightness deepens a filled button and only dims the
+   ink on an outline. NO transform: scale(0.98) lost clicks within about 2px of the edge of a full-width button (it shrinks
+   under the finger). Not on a disabled button, and no transition, so there is nothing for prefers-reduced-motion to opt out of. */
+.btn:not(:disabled):active {
+  filter: brightness(0.92);
+}
+
 /* Red "box outline" — transparent fill, red border + text. Used for destructive/stop actions. */
 .btn-danger {
   background: transparent;
@@ -3481,7 +3515,7 @@ input[type='range'] {
   background: none; border: 0; cursor: pointer; font: inherit; font-size: 14.5px; color: var(--text-primary);
 }
 /* Pointer devices only: on a phone :hover sticks to the row after a tap and left the opened row tinted dark (phone pass). */
-@media (hover: hover) { .review-link:hover { background: var(--bg-elevated-2); } }
+@media (hover: hover) { .review-link:hover { background: var(--child-action-hover); } }
 .review-row__icon { flex: none; color: var(--accent-line); }
 .review-row__text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .review-row__sub { display: block; margin-top: 2px; font-size: 12.5px; color: var(--text-secondary); }
@@ -3519,6 +3553,12 @@ input[type='range'] {
   border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary);
 }
 .review-suggest__btn:disabled { opacity: 0.5; cursor: default; }
+/* Press feedback for the controls that had none once the default tap highlight went (see the -webkit-tap-highlight-color rule
+   near the top). It is --child-action-active, the pressed tint of the child page's rows (#1064), NOT --bg-elevated-2: that is the
+   INSET colour, near-black in the dark theme, and using it as a pressed or open fill is what drew the black bars #1064 removed
+   (test/paletteTokens.test.jsx fails any :active rule that does). */
+.review-link:not(:disabled):active, .review-stepper__btn:not(:disabled):active, .review-suggest__btn:not(:disabled):active,
+.sleep-strip__item:active { background: var(--child-action-active); }
 
 /* "+ Add a note": a plain text action, 44px tall. */
 .review-add {
