@@ -25,9 +25,15 @@
 //
 // Sizes come from the type scale (design-language.md, section 3): 'sm' has a 15px number, 'lg' the 20px "large
 // numeric readout". The viewBox is in real pixels, so the number is exactly that size.
+//
+// STROKE WIDTH (design v3.1, 2026-11-13): the groove is thick enough (6px on 44, 9px on 64; it was 4 and 6) that the track
+// and the arc read as a shape rather than a hairline, which is what lets the ring be told apart without relying on the arc's
+// colour. Track and arc share one stroke so the arc is never thinner than the track. The canvas drew 7 to 11 and 8 to 12 on a
+// 112px ring; this app's rings are 44 and 64px, so those widths are scaled to the same proportion of the ring, not copied.
+// The number still fits: the inner diameter is 32px (sm) and 46px (lg) against a 15px and 20px two-digit number.
 const SIZES = {
-  sm: { box: 44, stroke: 4, font: 15 },
-  lg: { box: 64, stroke: 6, font: 20 },
+  sm: { box: 44, stroke: 6, font: 15 },
+  lg: { box: 64, stroke: 9, font: 20 },
 };
 
 const BANDS = ['great', 'good', 'fair', 'low', 'early'];
@@ -44,9 +50,10 @@ export default function ScoreRing({ value, size = 'sm', surface = 'card', band }
   return (
     <svg className={`score-ring score-ring--${surface === 'dark' ? 'dark' : 'card'}${known ? ` score-ring--${known}` : ''}`}
       width={s.box} height={s.box} viewBox={`0 0 ${s.box} ${s.box}`} aria-hidden="true" focusable="false">
-      {/* A dashed track marks an early estimate by shape, so it does not rely on the neutral colour alone. */}
+      {/* A dashed track marks an early estimate by shape, so it does not rely on the neutral colour alone. The dashes scale with
+          the stroke (a fixed 2px dash on a 9px groove would be a row of slivers). */}
       <circle className="score-ring__track" cx={mid} cy={mid} r={r} fill="none" strokeWidth={s.stroke}
-        strokeDasharray={known === 'early' ? '2 3' : undefined} />
+        strokeDasharray={known === 'early' ? `${s.stroke / 2} ${s.stroke / 2 + 1}` : undefined} />
       {/* Not drawn at 0: a round line cap would leave a dot that reads as "a little". Starts at 12 o'clock. */}
       {shown > 0 && (
         <circle className="score-ring__arc" cx={mid} cy={mid} r={r} fill="none" strokeWidth={s.stroke}

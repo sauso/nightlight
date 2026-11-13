@@ -852,23 +852,24 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
           ))}
         </div>
       )}
-      {/* Room-activity (outside-bed) markers sit above the bar so they read as events, not sleep state. */}
-      {visits.length > 0 && (
-        <div className="sleep-tl__visits">
-          {visits.map((v, i) => (
-            <span key={i} className={`sleep-tl__visit${v.type === 'child_out' ? ' sleep-tl__visit--out' : ''}`}
-              style={{ left: `${pctOf(v.start_at, startMs, totalMs)}%` }}
-              title={`${v.type === 'child_out' ? 'Out of bed' : 'Movement outside the bed'} · ${fmtTime(v.start_at)}`} />
-          ))}
-        </div>
-      )}
-      <div className="sleep-tl__barwrap" ref={barRef}
+      <div className={`sleep-tl__barwrap${visits.length > 0 ? ' sleep-tl__barwrap--room' : ''}`} ref={barRef}
         onMouseMove={(e) => updateHover(e.clientX)}
         onMouseLeave={() => setHover(null)}
         onTouchStart={(e) => updateHover(e.touches[0].clientX)}
         onTouchMove={(e) => updateHover(e.touches[0].clientX)}
         onTouchEnd={() => setHover(null)}
       >
+        {/* Room-activity (outside-bed) markers sit above the bar (top -20px of the wrapper, which makes room for them) so they
+            read as events, not sleep state. They are inside the wrapper so the bar's own coordinates position them. */}
+        {visits.length > 0 && (
+          <div className="sleep-tl__visits">
+            {visits.map((v, i) => (
+              <span key={i} className={`sleep-tl__visit${v.type === 'child_out' ? ' sleep-tl__visit--out' : ''}`}
+                style={{ left: `${pctOf(v.start_at, startMs, totalMs)}%` }}
+                title={`${v.type === 'child_out' ? 'Out of bed' : 'Movement outside the bed'} · ${fmtTime(v.start_at)}`} />
+            ))}
+          </div>
+        )}
         <div className="sleep-tl__bar">
           {segs.map((s, i) => (
             <div key={i} className={`sleep-seg ${SEG_CLASS[s.state] || 'sleep-seg--awake'}`}

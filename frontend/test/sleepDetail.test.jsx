@@ -1224,6 +1224,47 @@ describe('what a night lists', () => {
     expect(screen.queryByText('No data')).toBeNull();
   });
 
+  // Timeline legibility (design v3.1): each state is a different SHAPE as well as a colour. The sizes are CSS (not pinned here, a
+  // pixel pin rejects equivalent CSS and misses real rendering); what is observable in the DOM is that the stirring and awake
+  // segments are drawn as their own elements, the legend has a swatch for each carrying the same class (so the swatch can take
+  // the same shape), and room-activity markers live inside the bar wrapper whose class makes room for them.
+  test('the timeline draws stirring and awake as their own segments, and the legend has a swatch for each', async () => {
+    const seg = (state, from, to) => ({ state, from_at: from, to_at: to, minutes: 5 });
+    mockSleep({
+      night: {
+        ...NIGHT,
+        segments: [
+          seg('asleep', '2026-08-30 09:30:00', '2026-08-30 10:00:00'), seg('stir', '2026-08-30 10:00:00', '2026-08-30 10:02:00'),
+          seg('asleep', '2026-08-30 10:02:00', '2026-08-30 11:00:00'), seg('wake', '2026-08-30 11:00:00', '2026-08-30 11:10:00'),
+        ],
+      },
+    });
+    const { container } = mount();
+    await screen.findByText('Wake-ups');
+    const bar = container.querySelector('.sleep-tl__bar');
+    expect(bar.querySelectorAll('.sleep-seg--stir').length, 'one stirring segment').toBe(1);
+    expect(bar.querySelectorAll('.sleep-seg--wake').length, 'one awake segment').toBe(1);
+    const legend = container.querySelector('.sleep-legend');
+    expect(legend.querySelector('.sleep-legend__sw.sleep-seg--stir'), 'a stirring swatch').toBeTruthy();
+    expect(legend.querySelector('.sleep-legend__sw.sleep-seg--wake'), 'an awake swatch').toBeTruthy();
+  });
+
+  test('room-activity markers are inside the bar wrapper, which makes room for them; with none the wrapper does not', async () => {
+    mockSleep({ night: { ...NIGHT, visits: [{ type: 'visitor', start_at: '2026-08-30 12:00:00', end_at: '2026-08-30 12:05:00' }] } });
+    const withVisit = mount();
+    await screen.findByText('Wake-ups');
+    const wrap = withVisit.container.querySelector('.sleep-tl__barwrap');
+    expect(wrap.classList.contains('sleep-tl__barwrap--room')).toBe(true);
+    expect(wrap.querySelectorAll('.sleep-tl__visits .sleep-tl__visit').length).toBe(1);
+    withVisit.unmount();
+    mockSleep();
+    const none = mount();
+    await screen.findByText('Wake-ups');
+    const plain = none.container.querySelector('.sleep-tl__barwrap');
+    expect(plain.classList.contains('sleep-tl__barwrap--room')).toBe(false);
+    expect(plain.querySelector('.sleep-tl__visits')).toBeNull();
+  });
+
   test('★ a live night measures coverage against elapsed time, not the whole window', async () => {
     // Against the full window, a live night would report ~50% coverage at midnight and look broken.
     // `as_of` is what makes the number honest while the night is still running.

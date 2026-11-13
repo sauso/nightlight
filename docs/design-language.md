@@ -138,52 +138,66 @@ change drop a pair under 3:1 again, name it with its real ratio next to this par
 ### Sleep timeline colours
 
 The timeline tokens (`--sleep-*`) are categorical data colours; keep them separate from branding. Asleep is
-`#4B53B5` by day and `#7C85E6` at night, stirring `#A7ADE4` by day and the original dim indigo `#4A4F86` at night,
-awake (the "before or after sleep" segment) the original lavender `#D2D0E2` / `#3C3F60`, the wake-up amber `#F0A257` /
-`#F6C899`, and room activity the teal `#2FA39A` in both themes (it was `#3EC4B8` at night, which had the same lightness as
-the Good band's `#5CBFC6` and could not be told from it; the design draws it as a ring there). Amber by day is only 2.10:1
-on a card, so where the colour is **text** (a duration, a badge, an icon) the rule uses `--sleep-wake-text` (`#9A5410` by
-day, 5.75:1 on a card, 4.61:1 on an inset); the segment keeps the lighter amber. A segment next to asleep has a 1px
-card-coloured line between them, because at night asleep against the wake-up amber is only 2.15:1. Room-activity teal
-(`#2FA39A`) is 3.08:1 on a day card, so its text (a duration, the "Movement outside the bed" tag, the "refined" label) uses
-`--sleep-visit-text`: `#17706A` by day (5.90:1 on a card, 5.06:1 on its own tag) and the brighter `#3EC4B8` at night
-(7.37:1 on a card, 5.94:1 on its tag; `#2FA39A` itself would be 4.14:1 on the tag); the dots and legend swatch keep
-`#2FA39A`. The design also has a dashed "still to come" / "not counted" edge (`#8C86AE` at night, 4.62:1 on the card);
+`#4B53B5` by day and `#7C85E6` at night, stirring `#7279C6` by day and `#A7ADE4` at night (design v3.1; v3 had `#A7ADE4`
+and the dim indigo `#4A4F86`), awake (the "before or after sleep" segment) the original lavender `#D2D0E2` / `#3C3F60`, the
+wake-up amber `#F0A257` / `#F6C899`, and room activity the teal `#279189` in both themes (v3: `#2FA39A`; before that
+`#3EC4B8` at night, which had the same lightness as the Good band's `#5CBFC6` and could not be told from it). The
+v3.1 teal is darker so that by day it clears 3:1 on the card (3.82:1) and on the lavender track (3.06:1). Amber by day is
+only 2.10:1 on a card, so where the colour is **text** (a duration, a badge, an icon) the rule uses `--sleep-wake-text`
+(`#9A5410` by day, 5.75:1 on a card, 4.61:1 on an inset); the segment keeps the lighter amber. Room-activity teal is
+3.82:1 on a day card, so its text (a duration, the "Movement outside the bed" tag, the "refined" label) uses
+`--sleep-visit-text`: `#17706A` by day (5.90:1 on a card, 4.97:1 on its own tag) and the brighter `#3EC4B8` at night
+(7.37:1 on a card, 6.17:1 on its tag; `#279189` itself would be 3.46:1 on the tag); the dots and legend swatch keep
+`#279189`. The design also has a dashed "still to come" / "not counted" edge (`#8C86AE` at night, 4.62:1 on the card);
 there is no token for it yet because nothing draws it.
+
+**The states are told apart by shape and gaps, not by colour alone (design v3.1, 2026-11-13).** Several neighbouring colours
+are close in lightness (the table below), so each state also has its own silhouette:
+
+| State | Shape on the bar | Gaps |
+|---|---|---|
+| Asleep | The full-height bar (30px). | A 2px track-coloured edge only where it touches stirring (both themes) or awake (night only). |
+| Stirring | A **half-height** block: 14px, centred, 3px minimum width. | 2px of the track colour on each side. |
+| Awake (the amber segment) | **Rises 5px above the bar**: 33px tall from 5px above the top, 3px minimum width, 1px top corners. | At night, 2px of the track colour on each side (`--sleep-wake-gap`); by day none (the old 1px white separators are gone). |
+| Before/after sleep, No data | Full height, as before; "No data" stays hatched. | None. |
+| Room activity | A ring above the bar, 20px up (the bar's wrapper reserves 22px so nothing clips; 6px when there is none, for the awake rise). | n/a |
+
+The stirring and awake blocks keep their real width in the row (so the onset and wake marks and the hover time stay exact)
+and are drawn centred on that slot, so a one-minute stir is still 3px wide without pushing the rest along. The bar no
+longer clips (awake rises out of it); the first and last segments round their own outer corners. The legend swatches match: stirring a
+flat 14x5 block, awake a 4x14 tick. **Day awake against the white card stays 2.10:1 on purpose**: a darker amber would sit
+next to the Fair band's amber and look the same to a colour-blind reader, and the rise above the bar is what carries it.
 
 #### Known pairs below their floor
 
-These pairs are below 3:1 and are accepted (design v3, 2026-11-13). Each is two data colours next to each other, or a segment on its surface, never
-text, and each is told apart by position, order or a label as well as by colour. `test/paletteTokens.test.jsx` names them
+These pairs are below 3:1 and are accepted (design v3.1, 2026-11-13). Each is two data colours next to each other, or a segment on its surface, never
+text, and each is told apart by shape (see above), position, order or a label as well as by colour. `test/paletteTokens.test.jsx` names them
 and fails if one stops being true, so a fix is noticed rather than silently left in the list.
 
 | Pair | Ratio | Why it is accepted |
 |---|---|---|
-| Night: wake-up amber `#F6C899` against asleep `#7C85E6` | 2.15 | Neighbouring segments; the 1px separator and the segment order carry it. |
-| Night: stirring `#4A4F86` against asleep `#7C85E6` | 2.31 | Same; a stirring segment sits between asleep and its neighbours. |
-| Day: stirring `#A7ADE4` against a white card | 2.16 | Timeline neighbour on a card; the segments are told apart by order and the legend. |
-| Day: room activity `#2FA39A` against the lavender track `#EAE3F8` | 2.47 | Drawn above the bar, so it never sits on the track's own colour. |
-| Night: stirring `#4A4F86` against the card `#221F3C` | 2.07 | The segment is read by its place in the bar and the legend, not by standing out from the card. |
-| Night: stirring `#4A4F86` against the inset track `#100F1C` | 2.49 | Same. |
-| Day: stirring `#A7ADE4` against the inset track `#EAE3F8` | 1.73 | Same; the weakest pair in the list after the awake segments. |
-| Day: wake-up amber `#F0A257` against the white card | 2.10 | The amber is a segment and a dot, never text (its text is `--sleep-wake-text`, 5.75:1). |
+| Night: wake-up amber `#F6C899` against asleep `#7C85E6` | 2.15 | Neighbouring segments; the awake block rises above the bar and has 2px gaps at night, and the segment order carries it. |
+| Night: stirring `#A7ADE4` against asleep `#7C85E6` | 1.53 | Worse than v3 (2.31): the same colour pair the 2026-11-12 trial dropped. Told apart by shape instead: a half-height block with a gap each side against the full-height bar. |
+| Day: stirring `#7279C6` against asleep `#4B53B5` | 1.64 | New with v3.1 (stirring was a pale lavender, which cleared this pair). Same: half-height block with gaps. |
+| Day: stirring `#7279C6` against the wake-up amber `#F0A257` | 1.90 | Close in lightness, different hue; the stirring block is half height and the amber block rises above the bar (v3: 1.03 with the pale lavender). |
+| Night: stirring `#A7ADE4` against the wake-up amber `#F6C899` | 1.40 | New with v3.1. The two are told apart by shape: stirring is half height, awake rises above the bar, and awake has gaps at night. |
+| Day: stirring `#7279C6` against the before/after-sleep segment `#D2D0E2` | 2.63 | Two neighbours; the stirring block is half height with gaps, the other is the faint full-height segment. |
+| Day: wake-up amber `#F0A257` against the white card | 2.10 | Deliberate and kept (see above). The amber is a segment and a dot, never text (its text is `--sleep-wake-text`, 5.75:1). |
+| Day: wake-up amber `#F0A257` against the inset track `#EAE3F8` | 1.68 | A segment on the track it is drawn on; told apart by hue and by rising above the bar. |
 | Day: before/after-sleep segment `#D2D0E2` against the inset track `#EAE3F8` | 1.22 | A deliberately faint "nothing counted here" segment (it was already this faint before the 2026-11-12 trial). |
 | Night: before/after-sleep segment `#3C3F60` against the inset track `#100F1C` | 1.87 | Same. |
 | Day: before/after-sleep segment `#D2D0E2` against the white card | 1.52 | The segment is drawn on the inset track, not on the card; listed because the bar's ends meet the card. |
 | Night: before/after-sleep segment `#3C3F60` against the card `#221F3C` | 1.56 | Same. |
-| Day: wake-up amber `#F0A257` against the inset track `#EAE3F8` | 1.68 | A segment on the track it is drawn on; the amber is told apart by hue, not lightness. |
-| Day: stirring `#A7ADE4` against the wake-up amber `#F0A257` | 1.03 | Same lightness, different hue; the segments are told apart by hue, order and the legend. |
-| Day: stirring `#A7ADE4` against the before/after-sleep segment `#D2D0E2` | 1.42 | Two pale neighbours; told apart by order and the legend. |
-| Day: wake-up amber `#F0A257` against the before/after-sleep segment `#D2D0E2` | 1.38 | Same. |
-| Night: stirring `#4A4F86` against the before/after-sleep segment `#3C3F60` | 1.33 | Two dim neighbours; told apart by order and the legend. |
+| Day: wake-up amber `#F0A257` against the before/after-sleep segment `#D2D0E2` | 1.38 | Same as the amber above: told apart by hue and by the rise above the bar. |
 
-The first four were the designer's; the next six and the last seven were found when the list was reviewed (2026-11-13), and
-the test now enumerates every pair of bar segments and every segment or room-activity dot on the card and the inset track,
-so this table is complete for those: a pair under 3:1 that is not named fails it. (Room activity is a dot drawn above the
-bar, so it is measured against the surfaces only.) All are graphics, never text, and some were already this low before the
-warm trial. The follow-up timeline-shape change (design "v3.1", a separate change) fixes most of them by separating the
-segments with gaps and shape rather than by recolouring, so this table is expected to shrink then, and the test's list
-shrinks with it.
+What v3.1 cleared and removed from this table: stirring against the card and the inset track in both themes (day 3.99 and
+3.20, night 7.33 and 8.80), room activity against the day track (2.47 to 3.06), and night stirring against the
+before/after-sleep segment (1.33 to 4.70). What it made worse or added is in the rows above and is named, not hidden.
+
+The test enumerates every pair of bar segments and every segment or room-activity dot on the card and the inset track, so this
+table is complete for those: a pair under 3:1 that is not named fails it. (Room activity is a dot drawn above the bar, so it is
+measured against the surfaces only.) All are graphics, never text. The shapes and gaps themselves are CSS and are checked by
+eye on a real render (the screenshots in the change that introduced them), not pinned as pixel values in a test.
 
 The Settings API still accepts and returns `accent_color`, `live_color`,
 `offline_color`, and `font_choice` for older clients. This web UI ignores
@@ -547,6 +561,11 @@ track**: provisional by shape, with no colour needed. Three rules hold: **colour
 band word, or "Early estimate", are always beside the ring), **text is never set in a band colour** (the number stays
 `--text-primary` or white; only the arc takes the colour), and the low band is soft, not red. Two sizes, from the type scale: 44px with a 15px number (the child's card) and 64px with
 a 20px number (the sleep detail page). The ring is `aria-hidden`; the control around it carries the score in its name.
+**The groove is wide on purpose (v3.1, 2026-11-13)**: the track and the arc share one stroke, 6px on the 44px ring and 9px on the
+64px ring (they were 4px and 6px), so the ring reads as a shape and the arc is never thinner than its track. The early
+estimate keeps its dashed track, with dashes scaled to the stroke. No contrast figure changes: the colours are untouched, and a
+stroke's width is not part of the WCAG ratio. (The design canvas drew 7 to 11 and 8 to 12 on a 112px ring; this app's rings are
+44px and 64px, so the widths were scaled to the same proportion, not copied.)
 
 `surface` picks the colours. On a `.card`: the arc is `--band-<band>` (which switches with the theme, contrast in "Band colours")
 on a `--border` track and the number is `--text-primary` (the number 16.65:1 and 12.53:1; with no band the arc is

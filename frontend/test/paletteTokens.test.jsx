@@ -432,11 +432,35 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
 
   test('★ the timeline colours are the approved v3 ones: asleep, stirring, wake-up amber, before/after-sleep neutral, room activity', () => {
     const keys = ['--sleep-asleep', '--sleep-stir', '--sleep-wake', '--sleep-awake', '--sleep-visit', '--sleep-visit-text', '--sleep-gap'];
-    expect(keys.map((k) => sleepDay[k])).toEqual(['#4b53b5', '#a7ade4', '#f0a257', '#d2d0e2', '#2fa39a', '#17706a', '#c7c7c7']);
-    // Night room activity is #2fa39a (it was #3ec4b8, the same lightness as the Good band, ratio 1.01), but its TEXT stays #3ec4b8:
-    // #2fa39a on its own 15% tag is only 4.14:1.
-    expect(keys.map((k) => sleepNight[k])).toEqual(['#7c85e6', '#4a4f86', '#f6c899', '#3c3f60', '#2fa39a', '#3ec4b8', '#5a5c6e']);
-    expect(contrast('#2fa39a', tint('#2fa39a', 0.15, night['--bg-elevated'])), 'why night text is not the segment teal').toBeLessThan(4.5);
+    // v3.1 (2026-11-13) moved two of them: stirring is #7279c6 by day and #a7ade4 at night (v3: #a7ade4 / #4a4f86), and room
+    // activity is #279189 in both themes (v3: #2fa39a).
+    expect(keys.map((k) => sleepDay[k])).toEqual(['#4b53b5', '#7279c6', '#f0a257', '#d2d0e2', '#279189', '#17706a', '#c7c7c7']);
+    // Night room activity is #279189 (it was #3ec4b8, the same lightness as the Good band, ratio 1.01), but its TEXT stays #3ec4b8:
+    // #279189 on its own 15% tag is only 3.46:1.
+    expect(keys.map((k) => sleepNight[k])).toEqual(['#7c85e6', '#a7ade4', '#f6c899', '#3c3f60', '#279189', '#3ec4b8', '#5a5c6e']);
+    expect(contrast('#279189', tint('#279189', 0.15, night['--bg-elevated'])), 'why night text is not the segment teal').toBeLessThan(4.5);
+  });
+
+  // The gap beside the awake block is the track colour AT NIGHT and nothing by day (v3.1). It is not a hex, so the token reader
+  // above cannot see it: read the two :root rules for the literal values.
+  test('★ the awake gap token is transparent by day and the track colour at night, and no 1px white separator is left on the bar', () => {
+    const dayRule = rules.find((r) => r.startsWith(':root {') && r.includes('--sleep-wake-gap:')) || '';
+    const nightBlock = rules.find((r) => r.startsWith(":root[data-theme='dark'] {") && r.includes('--sleep-wake-gap:')) || '';
+    expect(dayRule, 'by day').toMatch(/--sleep-wake-gap:\s*transparent\s*;/);
+    expect(nightBlock, 'at night').toMatch(/--sleep-wake-gap:\s*var\(--bg-elevated-2\)\s*;/);
+    // The old separator (a 1px card-coloured inset line between asleep and its neighbours) must not come back: at night it was the
+    // only thing separating asleep from awake, now the gaps do it.
+    expect(rules.filter((r) => /inset 1px 0 0 var\(--bg-elevated\)/.test(r)), 'a 1px card-coloured separator').toEqual([]);
+  });
+
+  test('★ asleep gets its edge colour only beside stirring (the track) and awake (the awake gap token), and awake draws its own gap with that token', () => {
+    const edge = (selector) => rules.find((r) => r.startsWith(`${selector} {`)) || '';
+    expect(edge('.sleep-seg--stir + .sleep-seg--asleep')).toContain('var(--bg-elevated-2)');
+    expect(edge('.sleep-seg--asleep:has(+ .sleep-seg--stir)')).toContain('var(--bg-elevated-2)');
+    expect(edge('.sleep-seg--wake + .sleep-seg--asleep')).toContain('var(--sleep-wake-gap)');
+    expect(edge('.sleep-seg--asleep:has(+ .sleep-seg--wake)')).toContain('var(--sleep-wake-gap)');
+    expect(edge('.sleep-tl__bar .sleep-seg--wake::before'), 'awake gap').toContain('var(--sleep-wake-gap)');
+    expect(edge('.sleep-tl__bar .sleep-seg--stir::before'), 'stirring gap').toContain('var(--bg-elevated-2)');
   });
 
   // Known pairs below their floor (design v3, 2026-11-13; docs/design-language.md, "Known pairs below their floor"). Each is two
@@ -445,7 +469,8 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
   // ratio, or better than the 3:1 floor, fails this test and the doc has to be updated, instead of the exception quietly going
   // stale (the same pattern as the exceptions in the score-colours change). The first four came from the designer; the review of
   // that list (2026-11-13) found the rest, and the completeness test below is what stops a list like this being short again.
-  // The timeline-shape follow-up ("v3.1": segments separated by gaps and shape, not by colour alone) fixes most of them.
+  // The timeline-shape follow-up ("v3.1": segments separated by gaps and shape, not by colour alone) has landed: it cleared most of
+  // them and the table below is what is left, plus the few pairs it made worse (see the comment inside the table).
   const TIMELINE_PAIRS = [['asleep', '--sleep-asleep'], ['stir', '--sleep-stir'], ['wake', '--sleep-wake'], ['awake', '--sleep-awake'], ['visit', '--sleep-visit']];
   const SURFACES = { card: '--bg-elevated', track: '--bg-elevated-2' };
   const timelineColour = (theme, name) => {
@@ -455,11 +480,16 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
   };
   const BELOW_FLOOR = [
     // [theme, a, b, ratio]  (a and b are the names above; `card` is --bg-elevated and `track` is --bg-elevated-2)
-    ['night', 'wake', 'asleep', 2.15], ['night', 'stir', 'asleep', 2.31], ['day', 'stir', 'card', 2.16], ['day', 'visit', 'track', 2.47],
-    ['night', 'stir', 'card', 2.07], ['night', 'stir', 'track', 2.49], ['day', 'stir', 'track', 1.73], ['day', 'wake', 'card', 2.1],
+    // v3.1 (2026-11-13) moved the stirring and room-activity colours and separated the segments by shape and gaps. What cleared 3:1
+    // and left this list: stirring on the card and on the track in both themes, room activity on the track by day, night stirring
+    // against the before/after-sleep segment. What is NEW on it, honestly: day stirring against asleep (1.64) and against the
+    // amber (1.90), night stirring against the amber (1.40); and night stirring against asleep went DOWN, 2.31 to 1.53, because it
+    // is #a7ade4 again. Those pairs are told apart by shape (half-height block, gaps) rather than colour.
+    ['night', 'wake', 'asleep', 2.15], ['night', 'stir', 'asleep', 1.53], ['day', 'stir', 'asleep', 1.64],
+    ['day', 'wake', 'card', 2.1], ['day', 'wake', 'track', 1.68],
     ['day', 'awake', 'track', 1.22], ['night', 'awake', 'track', 1.87],
-    ['day', 'awake', 'card', 1.52], ['night', 'awake', 'card', 1.56], ['day', 'wake', 'track', 1.68],
-    ['day', 'stir', 'wake', 1.03], ['day', 'stir', 'awake', 1.42], ['day', 'wake', 'awake', 1.38], ['night', 'stir', 'awake', 1.33],
+    ['day', 'awake', 'card', 1.52], ['night', 'awake', 'card', 1.56],
+    ['day', 'stir', 'wake', 1.9], ['night', 'stir', 'wake', 1.4], ['day', 'stir', 'awake', 2.63], ['day', 'wake', 'awake', 1.38],
   ];
   const sortedPair = (a, b) => [a, b].sort().join('|');
 
@@ -490,6 +520,11 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     expect(contrast(sleepNight['--sleep-visit'], night['--bg-elevated']), 'night room activity on the card').toBeGreaterThanOrEqual(3);
     expect(contrast(sleepNight['--sleep-visit'], night['--bg-elevated-2']), 'night room activity on the track').toBeGreaterThanOrEqual(3);
     expect(contrast(sleepDay['--sleep-visit'], day['--bg-elevated']), 'day room activity on the card').toBeGreaterThanOrEqual(3);
+    expect(contrast(sleepDay['--sleep-visit'], day['--bg-elevated-2']), 'day room activity on the track (v3.1: #279189 is 3.06, the v3 teal was 2.47)').toBeGreaterThanOrEqual(3);
+    expect(contrast(sleepDay['--sleep-stir'], day['--bg-elevated']), 'day stirring on the card').toBeGreaterThanOrEqual(3);
+    expect(contrast(sleepDay['--sleep-stir'], day['--bg-elevated-2']), 'day stirring on the track').toBeGreaterThanOrEqual(3);
+    expect(contrast(sleepNight['--sleep-stir'], night['--bg-elevated']), 'night stirring on the card').toBeGreaterThanOrEqual(3);
+    expect(contrast(sleepNight['--sleep-stir'], night['--bg-elevated-2']), 'night stirring on the track').toBeGreaterThanOrEqual(3);
     expect(contrast(sleepDay['--sleep-asleep'], day['--bg-elevated']), 'day asleep on the card').toBeGreaterThanOrEqual(3);
     expect(contrast(sleepNight['--sleep-asleep'], night['--bg-elevated']), 'night asleep on the card').toBeGreaterThanOrEqual(3);
     expect(contrast(sleepDay['--sleep-wake'], sleepDay['--sleep-asleep']), 'day wake-up amber against asleep').toBeGreaterThanOrEqual(3);
@@ -501,12 +536,6 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
       expect(rule, `${selector} has a rule`).toBeTruthy();
       expect(rule, selector).toMatch(/(^|[ ;{])color: var\(--sleep-wake-text\)/);
     }
-  });
-
-  test('asleep has a 1px card-coloured separator against its neighbours', () => {
-    const rule = rules.find((r) => r.includes('.sleep-seg--asleep + .sleep-seg') && r.includes('.sleep-seg + .sleep-seg--asleep'));
-    expect(rule, 'the separator rule').toBeTruthy();
-    expect(rule).toContain('inset 1px 0 0 var(--bg-elevated)');
   });
 
   test('★ every var(--token) the stylesheet reads is defined somewhere (var(--danger, #c0392b) and var(--surface-2, ...) were not, so their fallbacks silently ruled)', () => {
