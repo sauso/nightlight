@@ -998,20 +998,39 @@ night card under the summary: when they got up.
   becomes a one-line receipt with a way to change it. On a night where the full screen would ask
   something else (the two-answers case below, a night already answered, or a time that has changed
   since the card was drawn), the button opens that screen instead of saving.
-- **Not quite** opens the review screen, which shows the same question and one time field, **Got up
-  for the day**, to type the real time into, and **Save**. (The screen's own **That's right** does the
-  same as the card's.)
+- **Not quite** opens the review screen on **When did they get up for the day?**: what the app had
+  (**We had 6:20 am.**), the time itself between **-5m** and **+5m** buttons (each press moves it five
+  minutes; it stops at midnight rather than wrapping into another day, and you can always type the time
+  instead), any **out-of-bed** times the app logged within an hour of it as buttons you can tap
+  instead (**6:20 am · out of bed**; at most four), **Add a note**, and **Save**. Nothing is saved until
+  Save, and the field is the one called **Got up for the day**. (The screen's own **That's right** does
+  the same as the card's.)
 - A small **✕** on the question dismisses it for good, as before.
 - On a night where the app has two different answers, the question is instead **Up between 6:10 and
   6:50. When did they get up?**, with **Around** each time and **Another time**
   (see ["Up between"](#up-between-in-the-morning-review-when-the-app-has-two-answers)).
-- **No one was in the bed** (a small link under the buttons) says the whole night was wrong. See
+- **Something else was off** (a row under the question) opens **Edit sleep times**, a sheet that holds
+  **In bed**, **Fell asleep**, a note and **No one was in the bed**, for the rare night one of those is
+  wrong. Each time says what the app had (**We had 7:10 pm.**) and is only recorded if you type in it;
+  opening the sheet and leaving things alone records nothing, and **Save** stays off until you have
+  typed something. **Closing the sheet (Escape, a tap outside it, the ✕) throws away what you typed in
+  it**; nothing is saved by closing. If the row already holds an answer for either time it reads it out
+  (**You said in bed 6:49 pm.**), so a saved answer is never hidden. If the app found no wake-up time
+  for the night at all, there is nothing to confirm, so the screen opens straight onto the time field,
+  and the row says to add when they went to bed and fell asleep (both are needed to make it a slept
+  night).
+- **The sheet's Save sends what the page's buttons always sent.** Saving a bedtime, fell-asleep time or
+  note from the sheet also records the wake-up time the page shows (the app's guess, if you have not
+  changed it), exactly as the bedtime fields did when they sat beside **That's right**. Nothing the
+  server stores changed with the sheet.
+- **Stepping or typing a wake-up time across or after noon follows the server's noon rule.** A bare
+  time before 12:00 is the morning after the night, and from 12:00 it is the night's own day. A time
+  that therefore lands on the wrong day (for example a wake that comes out before the asleep time) is
+  refused with an ordering message, never stored as a wrong time. The -5m / +5m buttons never wrap
+  past midnight.
+- **No one was in the bed** is inside the sheet. It sends only that answer (and a note, if you typed
+  one); any time typed on the page or in the sheet is dropped, never sent beside it. See
   ["No one was in the bed" says the whole night was wrong](#no-one-was-in-the-bed-says-the-whole-night-was-wrong-not-just-a-time).
-- **Change bedtime or fell-asleep time** (a collapsed section) holds **In bed**, **Fell asleep** and a
-  note, for the rare night one of those is wrong. They start closed and are only recorded if you
-  type in them; opening the section and leaving them alone records nothing. If the app found no
-  wake-up time for the night at all, there is nothing to confirm, so the screen opens straight onto
-  the time field with this section already open.
 
 The prompt appears once per night and goes for good once answered **or dismissed** (the **x** on the
 card); nothing is asked about nights with no times to confirm. Either an admin or a caregiver can
@@ -1038,7 +1057,7 @@ records who last answered a night.
 
 #### In bed and asleep are two different answers
 
-Under **Change bedtime or fell-asleep time** you can give **In bed** (when they were put down) and
+In the **Edit sleep times** sheet (the **Something else was off** row) you can give **In bed** (when they were put down) and
 **Fell asleep**. On a night with a bedtime story they can be half an hour apart, and you can give
 both. Both are optional, and each is recorded only if you type in it: the times the app guessed are
 shown for you to edit, but they are never saved as yours unless you change them. "In bed" can't be
@@ -1162,7 +1181,7 @@ Either:
     about this night**) and presses **Someone was in the bed**.
 
   The review can still empty a time, for an admin or a caregiver: clear **Got up for the day** (and
-  **Fell asleep** and **In bed** under **Change bedtime or fell-asleep time**), then **Save**. A
+  **Fell asleep** and **In bed** in the **Edit sleep times** sheet), then **Save**. A
   cleared time is removed; one you leave alone is kept. Emptying all three removes the correction.
   **Remove my correction** is the admin's other route, and a save sent straight to the API that
   empties all three times does the same.
@@ -1310,8 +1329,8 @@ That is deliberate — it is what a future improvement gets scored against. Noth
 
 ### "No one was in the bed" says the whole night was wrong, not just a time
 
-Under the usual buttons
-is a small link for the case those don't fit at all — a night the detector scored as sleep, or as a wake
+In the **Edit sleep times** sheet (opened from the **Something else was off** row under the question)
+is a button, **No one was in the bed**, for the case those don't fit at all — a night the detector scored as sleep, or as a wake
 or two, when nobody was actually there. It changes the child's card and the sleep detail page to say
 "You said no one was in the bed", the same way a time correction already shows your own times
 instead of the detector's, and it is per night and per child — there's no house- or timezone-specific
@@ -1348,7 +1367,7 @@ such button. Saving from there keeps you on that
 night and shows the receipt in place, so working back through a run of nights doesn't send you to
 re-pick the date each time. It asks the same single question as the morning card. A night the app
 called "no one in the bed" has no wake-up time to confirm, so its review opens on the time field
-with **Change bedtime or fell-asleep time** already open: give both times to make it a slept night
+with **Something else was off** under it: give both times there to make it a slept night
 (a wake-up on its own leaves it "no one in the bed", see the table under the #355 point in
 [Known limits, all documented rather than fixed](#known-limits-all-documented-rather-than-fixed)).
 

@@ -919,10 +919,10 @@ describe('★ the empty states each say a different thing', () => {
       { kids: [KID], settings: { timezone: 'Australia/Melbourne' }, route: '/children/kid-1/sleep' }
     );
     await user.click(await screen.findByRole('button', { name: /was this night right/i }));
-    // A night with no times opens straight into the time field (NightReview's no-opinion branch) and opens the
-    // bedtime disclosure by itself, so both times are offered: a lone wake would leave the night "no one in the
-    // bed", and both are what make it a scored night.
+    // A night with no times opens straight into the time field (NightReview's no-opinion branch), and the row under it says
+    // where the other two go: a lone wake would leave the night "no one in the bed", and both are what make it a scored night.
     expect(await screen.findByLabelText('Got up for the day')).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: /Something else was off/ }));
     expect(screen.getByLabelText('Fell asleep')).toBeEnabled();
   });
 

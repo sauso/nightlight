@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronDown, ChevronRight, Clock, Bed } from 'lucide-react';
+import { ChevronRight, Clock, Bed, Plus } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { useHomeTime } from '../lib/useHomeTime.js';
 import AppHeader from '../components/AppHeader.jsx';
+import Modal from '../components/Modal.jsx';
 import { toLocalHhmm } from '../lib/reviewConfirm.js';
 
 // Recording what actually happened last night, from the person who was there.
@@ -31,8 +32,8 @@ import { toLocalHhmm } from '../lib/reviewConfirm.js';
 // skipped most mornings: the person wants to say "yes, they got up at 6:37" and go. So the page asks only
 // when the child got up, which is the one time a parent can answer from memory and the one the detector
 // gets wrong by the most (family-C measurement, 2026-10-27: the true wake is often not among the logged
-// exits at all). Bedtime and fell-asleep are still stored and still editable, behind a disclosure, for
-// the rare night they are wrong. Per-event answers are no longer asked here; the ones already stored are
+// exits at all). Bedtime and fell-asleep are still stored and still editable, in the "Edit sleep times" sheet
+// (opened from "Something else was off"), for the rare night they are wrong. Per-event answers are no longer asked here; the ones already stored are
 // untouched (this page never sends `verdicts`), and the backend routes and columns are unchanged.
 //
 // ⚠️ Times are typed as local wall-clock and sent AS TYPED. The server resolves them against the app's
@@ -44,6 +45,50 @@ import { toLocalHhmm } from '../lib/reviewConfirm.js';
 // direction is deliberately NOT done in the browser: see the note on toLocalHhmm.
 
 const toDate = (utc) => new Date(`${utc.replace(' ', 'T')}Z`);
+
+// ★ THE -5m / +5m STEPPER (UI refresh PR I). It moves the typed 'HH:MM' by whole minutes and NEVER past midnight:
+// it stops at 00:00 and 23:59. Wrapping would be a silent day change, and the page does not know the day: the
+// server resolves a bare 'HH:MM' by the noon rule (before 12:00 is the morning after the night's date, lib/sleepReviews.js
+// localHmToUtcSql), so 23:57 + 5 -> 00:02 would quietly become a different calendar day than the one on screen. A wake
+// that really is either side of midnight is typed by hand, where the person sees the digits they send. Whether a stepped
+// time is VALID stays the server's call (its ordering 400s surface in the error slot exactly as for a typed time).
+// An empty or malformed value is left alone (null): there is nothing to step from, and inventing a starting time would
+// put a time the person never chose into the answer.
+const STEP_MINUTES = 5;
+function stepHhmm(hhmm, deltaMinutes) {
+  const m = /^(\d{2}):(\d{2})/.exec(hhmm || '');
+  if (!m) return null;
+  const total = Math.min(1439, Math.max(0, Number(m[1]) * 60 + Number(m[2]) + deltaMinutes));
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+// ★ LOGGED OUT-OF-BED EVENTS AS SUGGESTIONS under the stepper. The review response already carries the night's recorded
+// events (`transitions`, the same list the server checks a frame id against), so no new field or call is needed. Only
+// the ones that can plausibly BE the wake are offered: an out-of-bed event within an hour of a time the page already
+// shows (the app's wake, either end of a range, or the person's own stored answer), at most four, nearest first.
+// ⚠️ Why these filters and numbers (not measured on a real night; a reasoned default, stated so it can be changed):
+//   - 60 minutes: a night has 20-35 events and the wake is rarely further than that from the app's estimate; wider only
+//     lists the night's other exits. A wake the app was wrong about by more than an hour is typed (the stepper or the field).
+//   - verdict 'wrong' is skipped (the owner already said that event is not real) and so is an exit that is the quick
+//     reversal of a put-down (quick_reversal_of is set; a goodnight kiss reading as an exit, bedTransitionRules.js).
+//   - Nothing at all on a night with no wake and no stored answer: there is nothing to be "near".
+// The listed minute is shown in home time like every other time on this page, and a tap sends the event's id as
+// `true_wake_transition_id`, which the server resolves to the event's exact instant and which WINS over the typed text
+// (routes/children.js). Typing or stepping after a tap drops the id (see `setField`).
+const SUGGEST_WINDOW_MS = 60 * 60 * 1000;
+const SUGGEST_MAX = 4;
+function wakeSuggestions(transitions, anchorsUtc) {
+  const anchors = anchorsUtc.filter(Boolean).map((u) => toDate(u).getTime());
+  if (!Array.isArray(transitions) || anchors.length === 0) return [];
+  return transitions
+    .filter((t) => t && t.type === 'out_of_bed' && t.created_at && t.verdict !== 'wrong' && t.quick_reversal_of == null)
+    .map((t) => ({ t, gap: Math.min(...anchors.map((a) => Math.abs(toDate(t.created_at).getTime() - a))) }))
+    .filter(({ gap }) => gap <= SUGGEST_WINDOW_MS)
+    .sort((a, b) => a.gap - b.gap)
+    .slice(0, SUGGEST_MAX)
+    .map(({ t }) => t)
+    .sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+}
 
 export default function NightReview() {
   const { id, date } = useParams();
@@ -85,7 +130,18 @@ export default function NightReview() {
   // string that defaults to ''.
   const [typed, setTyped] = useState({});
   const [editToggled, setEditToggled] = useState(null); // null = not chosen yet, follow `seededEditing`
-  const [moreToggled, setMoreToggled] = useState(null); // same, for the disclosure
+  // The "Edit sleep times" sheet. `draft` holds what has been typed INSIDE it (keys inBed / onset / note, absent until
+  // typed, like `typed`). It is deliberately separate from `typed`: closing the sheet (Escape, the backdrop, the close
+  // button) throws the draft away, as the sheet's own wording promises, while the wake typed on the page behind it stays.
+  // Save in the sheet merges the draft over `typed` for that one save (see `save`).
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [draft, setDraft] = useState({});
+  // The step's note field is hidden behind "Add a note" until asked for (or until a note exists); same for the sheet's.
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [sheetNoteOpen, setSheetNoteOpen] = useState(false);
+  // The logged exit the person tapped as their wake, by event id (see `wakeSuggestions`). Valid only while the wake
+  // field still holds exactly what that tap put there: `setField('wake', ...)` clears it.
+  const [frame, setFrame] = useState(null);
   const [nobodyLocal, setNobodyLocal] = useState(null); // set only after the server confirms (see saveNobody)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -165,24 +221,47 @@ export default function NightReview() {
   // there is nothing to say "That's right" to.
   const seededEditing = !hasComputedWake || Boolean(review?.true_wake_at);
   const editing = editToggled ?? seededEditing;
-  // The disclosure opens by itself in two cases. (1) The owner has already answered one of its two times,
-  // so a stored answer is never hidden from them. (2) The app found no wake for the night: a night the
-  // detector scored empty only becomes a scored night when a parent gives BOTH times (#355; a lone wake
-  // leaves it "no one in the bed", docs/sleep-tracking.md), and the review of such a night is the only way
-  // in, so hiding the asleep field there would make that path unreachable from the screen.
-  const seededMore = Boolean(review?.true_onset_at || review?.true_in_bed_at) || !hasComputedWake;
-  const moreOpen = moreToggled ?? seededMore;
   const nobody = nobodyLocal ?? Boolean(review?.nobody_in_bed);
 
-  const setField = (key, value) => setTyped((t) => ({ ...t, [key]: value }));
+  // The bedtime and fell-asleep times live in the "Edit sleep times" sheet (UI refresh PR I), which used to be a disclosure
+  // that OPENED BY ITSELF in two cases. A sheet must not open by itself, so each case is carried by the row that opens it
+  // instead: (1) an answer already on record for either time is read out on the row, so a stored answer is never hidden;
+  // (2) a night the app found no wake for says what the sheet is for, because such a night only becomes a scored night
+  // when a parent gives BOTH times (#355; a lone wake leaves it "no one in the bed", docs/sleep-tracking.md) and the
+  // review is the only way in.
+  const setField = (key, value) => {
+    setTyped((t) => ({ ...t, [key]: value }));
+    // A hand-typed (or stepped) wake is no longer the logged event the person tapped: drop that id, so the body never
+    // names a frame beside a different time (the server lets the frame win over the text).
+    if (key === 'wake') setFrame(null);
+  };
+  const setDraftField = (key, value) => setDraft((d) => ({ ...d, [key]: value }));
+  // The error slot is shared (the page shows it under the card, the sheet inside itself), so both open and close clear it: a
+  // failure from the page must not greet the sheet, nor a sheet failure the page behind it.
+  const openSheet = () => { setDraft({}); setSheetNoteOpen(false); setError(null); setSheetOpen(true); };
+  // Closing DISCARDS what was typed in the sheet (the draft), whichever way it was closed. Nothing is sent.
+  const closeSheet = () => { setSheetOpen(false); setDraft({}); setError(null); };
+  const pickSuggestion = (t) => {
+    setTyped((prev) => ({ ...prev, wake: toLocalHhmm(t.created_at, tz) }));
+    setFrame(t.id);
+  };
+  const stepWake = (delta) => {
+    const next = stepHhmm(wakeShown, delta);
+    if (next !== null) setField('wake', next);
+  };
 
   // The time as a person reads it (home time, via the shared formatter). Never called before `timesReady`.
   const readable = (utc) => (utc ? home.time(toDate(utc)) : '');
-  // The detector's put-down and fell-asleep times, read out for the disclosure ("in bed 6:10 pm, asleep ...").
-  const saidParts = [
-    computed?.in_bed_at && `in bed ${readable(computed.in_bed_at)}`,
-    computed?.onset_at && `asleep ${readable(computed.onset_at)}`,
+  // What the person already answered for the two sheet times, read out on the sheet's row ("in bed 6:10 pm, asleep ...").
+  const storedSleepParts = [
+    review?.true_in_bed_at && `in bed ${readable(review.true_in_bed_at)}`,
+    review?.true_onset_at && `asleep ${readable(review.true_onset_at)}`,
   ].filter(Boolean);
+  // Logged exits near the wake the page shows, offered as one-tap answers under the stepper (see `wakeSuggestions`).
+  // Anchored on every time the page already shows: the person's stored answer, the app's wake, or both ends of a range.
+  const suggestions = timesReady
+    ? wakeSuggestions(data.transitions, [review?.true_wake_at, ...(range ? [range.from, range.to] : [computed?.wake_at])])
+    : [];
 
   // Something to save: a wake to send, or something the person typed (an emptied wake clears it, a lone
   // asleep time on a night with no wake is a valid answer). Save is NOT tied to the wake alone: the old screen
@@ -193,9 +272,17 @@ export default function NightReview() {
   // `wakeOverride`: the 'HH:MM' of an "Around ..." button in range mode, sent as the wake answer through the
   // SAME payload as every other wake save (so the server's checks, the store-first step and the lock are the
   // ones "That's right" already goes through). Absent for every other caller.
-  const save = async (wakeOverride) => {
+  //
+  // `sheetDraft`: set ONLY by the "Edit sleep times" sheet's Save, and it is what was typed in the sheet. It is laid over
+  // `typed` for this one save (`t` below). ⚠️ THE BODY IS EXACTLY WHAT THE OLD PAGE'S SAVE SENT FOR THE SAME STATE (owner's
+  // decision on review of this change): the bedtime / fell-asleep / note fields used to sit on the page beside "That's right"
+  // and Save, which always sent the shown wake (the app's guess, on a night not yet answered) with them. The sheet's Save
+  // does the same, so this change alters no saved data. Omitting the wake instead would have let a note-only save leave a
+  // night neither locked nor asked again.
+  const save = async (wakeOverride, sheetDraft) => {
+    const t = sheetDraft ? { ...typed, ...sheetDraft } : typed;
     // Never a time read in the placeholder zone, whichever button asked (see `timesReady`).
-    if (!timesReady || !(canSave || wakeOverride)) return;
+    if (!timesReady || !((sheetDraft ? Object.keys(t).length > 0 : canSave) || wakeOverride)) return;
     setBusy(true);
     setError(null);
     // ⚠️ THE PAYLOAD IS THE WAKE ANSWER PLUS WHAT WAS ON SCREEN, AND NOTHING ELSE (plan amendment 3,
@@ -222,17 +309,21 @@ export default function NightReview() {
     // it (exactly as the old screen did). An untouched empty wake (a night with none) omits the key.
     if (wakeOverride) body.true_wake_local = wakeOverride;
     else if (wakeShown) body.true_wake_local = wakeShown;
-    else if ('wake' in typed) body.true_wake_local = null;
-    if ('onset' in typed) body.true_onset_local = typed.onset || null;
-    if ('inBed' in typed) body.true_in_bed_local = typed.inBed || null;
-    if ('note' in typed) body.note = typed.note.trim() || null;
+    else if ('wake' in t) body.true_wake_local = null;
+    if ('onset' in t) body.true_onset_local = t.onset || null;
+    if ('inBed' in t) body.true_in_bed_local = t.inBed || null;
+    if ('note' in t) body.note = t.note.trim() || null;
     // A time typed by hand replaces a FRAME the answer was once taken from (a review saved by the old
     // screen's "Up for the day here" etc.). The server keeps a stored frame id when none is sent, and a
     // frame beside a different time would label the wrong picture as "they got up"; the old screen cleared
     // the id the moment a time was edited, and this keeps that. Only when a frame is actually on record and
     // the time really changed: a first-time answer carries no frame key at all.
-    const changed = (key, stored, frameId) => key in typed && frameId != null && typed[key] !== toLocalHhmm(stored, tz);
-    if (changed('wake', review?.true_wake_at, review?.true_wake_transition_id)) body.true_wake_transition_id = null;
+    const changed = (key, stored, frameId) => key in t && frameId != null && t[key] !== toLocalHhmm(stored, tz);
+    // A logged exit the person tapped under the stepper (`frame`) is a frame-backed answer: its id goes with the time, and
+    // the server takes the event's exact instant. Never with an "Around" button's time (that is a different answer), and
+    // only while the wake still holds what the tap put there (`setField` clears `frame` the moment it is edited).
+    if (frame != null && !wakeOverride && 'wake' in t) body.true_wake_transition_id = frame;
+    else if (changed('wake', review?.true_wake_at, review?.true_wake_transition_id)) body.true_wake_transition_id = null;
     if (changed('onset', review?.true_onset_at, review?.true_onset_transition_id)) body.true_onset_transition_id = null;
     if (changed('inBed', review?.true_in_bed_at, review?.true_in_bed_transition_id)) body.true_in_bed_transition_id = null;
     try {
@@ -257,15 +348,18 @@ export default function NightReview() {
   // No confirm modal, unlike a destructive action elsewhere in the app — the flag is reversible
   // (`saveNobody(false)`), and the receipt this lands on is what confirms it, same as "That's right".
   //
-  // The note, if one was typed in the disclosure, rides along: it describes the NIGHT, not a time, and
-  // the original bug here was that a note typed but not yet saved vanished the moment this was tapped,
-  // silently, because the call sent nothing but the flag. Untyped, it is omitted (keep what is stored).
-  const saveNobody = async (flag) => {
+  // The note, if one was typed (on the page, or in the "Edit sleep times" sheet this is tapped from: `sheetDraft`),
+  // rides along: it describes the NIGHT, not a time, and the original bug here was that a note typed but not yet saved
+  // vanished the moment this was tapped, silently, because the call sent nothing but the flag. Untyped, it is omitted
+  // (keep what is stored). ⚠️ Still NEVER sent with a time, now that the action lives in the same sheet as the time
+  // fields: the body is built here from the note alone, and a time typed in the sheet is abandoned, as before.
+  const saveNobody = async (flag, sheetDraft) => {
+    const t = sheetDraft ? { ...typed, ...sheetDraft } : typed;
     setBusy(true);
     setError(null);
     try {
       const body = { nobody_in_bed: flag };
-      if ('note' in typed) body.note = typed.note.trim() || null;
+      if ('note' in t) body.note = t.note.trim() || null;
       await api.put(`/children/${id}/review/${date}`, body);
       // Only now — confirmed by the server — do we say so. Setting the flag BEFORE this await (as this
       // used to) meant a failed save left the screen claiming the flag was set (or cleared) when the
@@ -361,22 +455,59 @@ export default function NightReview() {
                 </>
               ) : (
                 <>
+                  {/* The correcting step (UI refresh PR I, as drawn): a question, what the app had, then a -5m / time / +5m
+                      stepper, the logged exits near it as one-tap answers, an optional note and Save. The time is always
+                      a real <input type="time">: typing and the stepper edit the SAME value, which is sent as HH:MM exactly
+                      as it stands (the server resolves the day, see stepHhmm). The question names the child, so it is not
+                      a time and is drawn at once; the hint below it carries times and waits for the real zone. */}
+                  <div className="review-question">When did {kid?.name || 'they'} get up for the day?</div>
                   {timesReady && (
                     <div className="camera-tile__sub review-hint">
                       {review?.true_wake_at
-                        ? `You said up at ${readable(review.true_wake_at)}. `
+                        ? `You said up at ${readable(review.true_wake_at)}.`
                         : range
-                          ? `We said up between ${readable(range.from)} and ${readable(range.to)}. `
+                          ? `We said up between ${readable(range.from)} and ${readable(range.to)}.`
                           : hasComputedWake
-                            ? `We said up at ${readable(computed.wake_at)}. `
-                            : 'We didn’t work out when they got up. '}
-                      Put in what actually happened — your time is what {kid?.name || 'their'}’s card will show.
+                            ? `We had ${readable(computed.wake_at)}.`
+                            : 'We didn’t work out when they got up. To count the night, add when they went to bed and fell asleep too, under “Something else was off”.'}
+                      {' '}Your time is what {kid?.name || 'their'}’s card will show.
                     </div>
                   )}
-                  <label className="field">
-                    <span className="field__label">Got up for the day</span>
-                    <input type="time" value={wakeShown} disabled={!timesReady} onChange={onType('wake')} />
-                  </label>
+                  <div className="review-stepper">
+                    <button type="button" className="review-stepper__btn" aria-label={`−${STEP_MINUTES}m, ${STEP_MINUTES} minutes earlier`}
+                      disabled={!timesReady || !wakeShown} onClick={() => stepWake(-STEP_MINUTES)}>
+                      −{STEP_MINUTES}m
+                    </button>
+                    <label className="review-stepper__time">
+                      <span className="review-sr">Got up for the day</span>
+                      <input type="time" value={wakeShown} disabled={!timesReady} onChange={onType('wake')} />
+                    </label>
+                    <button type="button" className="review-stepper__btn" aria-label={`+${STEP_MINUTES}m, ${STEP_MINUTES} minutes later`}
+                      disabled={!timesReady || !wakeShown} onClick={() => stepWake(STEP_MINUTES)}>
+                      +{STEP_MINUTES}m
+                    </button>
+                  </div>
+                  {suggestions.length > 0 && (
+                    <div className="review-suggest" role="group" aria-label="Logged out-of-bed times">
+                      {suggestions.map((s) => (
+                        <button key={s.id} type="button" className="review-suggest__btn"
+                          disabled={busy} onClick={() => pickSuggestion(s)}>
+                          {readable(s.created_at)} · out of bed
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {(noteOpen || noteShown) ? (
+                    <label className="field">
+                      <span className="field__label">Anything else worth noting</span>
+                      <input type="text" value={noteShown} disabled={!timesReady} onChange={onType('note')}
+                        placeholder="e.g. put back on the bed to get dressed at 5:45" />
+                    </label>
+                  ) : (
+                    <button type="button" className="review-add" onClick={() => setNoteOpen(true)}>
+                      <Plus size={16} aria-hidden="true" /> Add a note
+                    </button>
+                  )}
                   <div className="review-actions">
                     <button type="button" className="btn btn-primary" disabled={busy || !timesReady || !canSave} onClick={() => save()}>
                       {busy ? 'Saving…' : 'Save'}
@@ -388,64 +519,84 @@ export default function NightReview() {
           )}
         </div>
 
-        {/* The two quieter ways out of the question, as two rows in a card of their own (UI refresh PR H, as drawn): a 44px target
-            each, an icon at the left and a chevron at the right. They were a text button and an underlined link inside the
-            question's card, about 37px tall. Same two controls, same behaviour; only the card and the rows are new. */}
+        {/* The quieter way out of the question (UI refresh PR I): ONE row, "Something else was off", which opens the "Edit sleep
+            times" sheet below. It used to be two rows (PR H): a disclosure of the bedtime and fell-asleep fields, and "No one was
+            in the bed". Both now live in the sheet, as drawn. A 44px target, an icon at the left and a chevron at the right.
+            The second line carries what the old disclosure showed by opening itself (see `storedSleepParts`). */}
         {!nobody && (
           <div className="card review-rows">
-              {/* The rare night the other two times are wrong. Collapsed by default: three time fields and a
-                  note were the old screen's first impression, and only the wake is asked of everyone. */}
-              <div className="review-more">
-                <button
-                  type="button"
-                  className="review-more__toggle"
-                  aria-expanded={moreOpen}
-                  onClick={() => setMoreToggled(!moreOpen)}
-                >
-                  <Clock size={18} className="review-row__icon" aria-hidden="true" />
-                  <span className="review-row__text">Change bedtime or fell-asleep time</span>
-                  <ChevronDown size={16} className={`review-more__chev${moreOpen ? ' is-open' : ''}`} aria-hidden="true" />
-                </button>
-                {moreOpen && (
-                  <div className="review-more__body">
-                    {timesReady && saidParts.length > 0 && (
-                      <div className="camera-tile__sub review-hint">
-                        We said {saidParts.join(', ')}. Only a time you type here is saved.
-                      </div>
-                    )}
-                    {/* Above "Fell asleep", in the order the two happen. Optional: leave it alone and
-                        nothing about the put-down is recorded or sent. */}
-                    <label className="field">
-                      <span className="field__label">In bed</span>
-                      <input type="time" value={inBedShown} disabled={!timesReady} onChange={onType('inBed')} />
-                    </label>
-                    <label className="field">
-                      <span className="field__label">Fell asleep</span>
-                      <input type="time" value={onsetShown} disabled={!timesReady} onChange={onType('onset')} />
-                    </label>
-                    <label className="field">
-                      <span className="field__label">Anything else worth noting</span>
-                      <input
-                        type="text"
-                        value={noteShown}
-                        disabled={!timesReady}
-                        placeholder="e.g. put back on the bed to get dressed at 5:45"
-                        onChange={onType('note')}
-                      />
-                    </label>
-                  </div>
-                )}
-              </div>
-
-              <button type="button" className="review-link" disabled={busy} onClick={() => saveNobody(true)}>
-                <Bed size={18} className="review-row__icon" aria-hidden="true" />
-                <span className="review-row__text">No one was in the bed</span>
-                <ChevronRight size={16} className="review-row__go" aria-hidden="true" />
-              </button>
+            <button type="button" className="review-link" aria-haspopup="dialog" onClick={openSheet}>
+              <Clock size={18} className="review-row__icon" aria-hidden="true" />
+              <span className="review-row__text">
+                Something else was off
+                <span className="review-row__sub">
+                  {timesReady && storedSleepParts.length > 0
+                    ? `You said ${storedSleepParts.join(', ')}. Tap to change it.`
+                    : !hasComputedWake
+                      ? 'Add when they went to bed and fell asleep.'
+                      : 'Change bedtime or fell-asleep time, or say no one was in the bed.'}
+                </span>
+              </span>
+              <ChevronRight size={16} className="review-row__go" aria-hidden="true" />
+            </button>
           </div>
         )}
 
-        {error && <div className="error-banner">{error}</div>}
+        {/* "Edit sleep times": a bottom sheet (the shared Modal, so focus moves in, Tab stays in, Escape and a tap outside close
+            it, and focus goes back to the row that opened it). ⚠️ CLOSING DISCARDS: what is typed here lives in `draft`, which
+            `closeSheet` empties, and nothing is sent until Save or "No one was in the bed". The In bed field shows only what the
+            parent said, never the detector's put-down (plan review R3, 2026-09-30), and "We had" under each field says what the app
+            had; Fell asleep SHOWS the app's time so there is something to edit, but is sent only once changed. */}
+        {sheetOpen && !nobody && (
+          <Modal title="Edit sleep times" onClose={closeSheet} error={error || ''}>
+            <div className="review-sheet">
+              {timesReady && (
+                <div className="camera-tile__sub review-hint">
+                  Only a time you change here is saved. Closing this without saving throws away what you typed.
+                </div>
+              )}
+              {/* In the order the two happen. Optional: leave it alone and nothing about the put-down is recorded or sent. */}
+              <label className="field">
+                <span className="field__label">In bed</span>
+                <input type="time" value={draft.inBed ?? inBedShown} disabled={!timesReady} aria-describedby="review-had-inbed"
+                  onChange={(e) => setDraftField('inBed', e.target.value)} />
+              </label>
+              {timesReady && computed?.in_bed_at && <div id="review-had-inbed" className="review-sheet__had">We had {readable(computed.in_bed_at)}.</div>}
+              <label className="field">
+                <span className="field__label">Fell asleep</span>
+                <input type="time" value={draft.onset ?? onsetShown} disabled={!timesReady} aria-describedby="review-had-onset"
+                  onChange={(e) => setDraftField('onset', e.target.value)} />
+              </label>
+              {timesReady && computed?.onset_at && <div id="review-had-onset" className="review-sheet__had">We had {readable(computed.onset_at)}.</div>}
+              {(sheetNoteOpen || draft.note || noteShown) ? (
+                <label className="field">
+                  <span className="field__label">Anything else worth noting</span>
+                  <input type="text" value={draft.note ?? noteShown} disabled={!timesReady}
+                    placeholder="e.g. put back on the bed to get dressed at 5:45"
+                    onChange={(e) => setDraftField('note', e.target.value)} />
+                </label>
+              ) : (
+                <button type="button" className="review-add" onClick={() => setSheetNoteOpen(true)}>
+                  <Plus size={16} aria-hidden="true" /> Add a note
+                </button>
+              )}
+              <div className="review-actions">
+                <button type="button" className="btn btn-primary"
+                  disabled={busy || !timesReady || Object.keys(draft).length === 0} onClick={() => save(undefined, draft)}>
+                  {busy ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+              {/* A flag and a time are mutually exclusive on the server: this sends the flag (and a typed note) and abandons any
+                  time typed above (see `saveNobody`). Carries no time, so it works before the timezone has arrived. */}
+              <button type="button" className="review-link review-link--sheet" disabled={busy} onClick={() => saveNobody(true, draft)}>
+                <Bed size={18} className="review-row__icon" aria-hidden="true" />
+                <span className="review-row__text">No one was in the bed</span>
+              </button>
+            </div>
+          </Modal>
+        )}
+
+        {error && !sheetOpen && <div className="error-banner">{error}</div>}
       </main>
     </>
   );
