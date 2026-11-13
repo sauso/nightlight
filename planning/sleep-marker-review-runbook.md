@@ -43,10 +43,12 @@ staging query returns empty, first suspect a prod ID pasted by mistake.
   A stored night computed before #508 still carries the old, row-based figure until recomputed.
 - **`bed_transitions`**: `camera_id`, `type` (`out_of_bed` | `into_bed`), `peak`
   (0–1 fraction, i.e. 0.2 = 20%), `created_at`.
-- **All timestamps are UTC text** `"YYYY-MM-DD HH:MM:SS"`. **Melbourne = UTC+10** — add
-  10h for AEST. (Container *logs* are already AEST; the *DB* is UTC. Don't mix them up.)
+- **All timestamps are UTC text** `"YYYY-MM-DD HH:MM:SS"`. **Convert to the install's local
+  time** by adding its UTC offset, which changes with daylight saving, so take it from the install's
+  configured timezone rather than a fixed number. (Container *logs* are in the container's `TZ`; the
+  *DB* is UTC. Don't mix them up.)
 - A night's window is `window_start`→`window_end` in UTC. For an overnight, `night_date`
-  is the evening's date and `window_end` is ~07:00 AEST the next morning.
+  is the evening's date and `window_end` is the next morning in local time.
 
 ## 3. The reliable DB-query recipe
 
@@ -102,7 +104,7 @@ ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100 \
 # add \[coactive\] for the ROADMAP §1.2 item 3 diagnostic below
 ```
 
-Log lines are **AEST**. A confirmed line looks like:
+Log lines are in the container's local time (`TZ`). A confirmed line looks like:
 `[oob] "Child A Cam" OUT OF BED — motion left the bed, quiet 6000ms since, outside peak 6.3%`
 
 **`[coactive]` (added 2026-09-18) is a separate, purely diagnostic line** — it fires when the bed-zone

@@ -229,12 +229,17 @@ claim. Every weight and curve is a starting value tuned on two cameras in one ho
 | 1b | Scoring maths: baseline, score, age table with citation, evidence script | T2 | `DONE` on `dev` (#1040) |
 | 1c | API: attach `score` on read; `docs/sleep-tracking.md`. Also the wake half of #1041 and the 15-minute correction rule (owner decision 2026-11-12) | T1 | `DONE` on `dev` (#1042) |
 | 2 | Score UI: ring on the card and detail page, breakdown sheet, per-child "Show sleep score" switch (default on). The docs screenshots are refreshed at release, not here | T2 | `DONE` on `dev` (#1051) |
-| 3 | Night summary: selection on the server, phrase library in the browser | T1 | `IN PROGRESS` (this pull request) |
-| 4 | Live night: "so far" summary, current state | T2 | `HELD` until the score has been used on staging |
+| 3 | Night summary: selection on the server, phrase library in the browser | T1 | `DONE` on `dev` (#1052) |
+| 4 | Live night: "so far" summary, current state | T2 | Server half `DONE` on `dev` (#1054); the screens that show it landed with the UI refresh (#1055 to #1066). Not released yet |
 | 5 | Trends over 7/14/30 days (replaces idea A1) | T1 or T2 | `HELD` |
 | 6 | Tappable timeline (independent of the score) | T1 | `HELD` |
 | 7 | Optional LLM rewording through a user-supplied endpoint | separate plan | `IDEA` |
 | later | "Disruptions" and self-settling rate; needs cry classification (§2.2) and a reliable caregiver signal | separate plans | `IDEA` |
+
+Phases 0 to 4 are merged to `dev` and not yet in a release. This section stays here, with phases 5 to 7
+as its open remainder, until they ship; at the release that carries phases 0 to 4 their text moves to
+[`ROADMAP-archive.md`](ROADMAP-archive.md) under this number and a stub stays behind, as the ground rule
+at the top of this file says.
 
 ## 2. Specced, not built
 
@@ -335,9 +340,16 @@ synthetic source a second path and assert the toggle swaps the stream.
 
 ---
 
+### 2.4 Record a wake without alerting — `SHIPPED` (0.27.0)
+
+Stub: a code comment that cites "roadmap 2.4" means this. When the sleep tracker sees a wake-up it saves
+a short clip and sends no alert. The original text is in git history (`fb364370`, PR #193) and the
+behaviour is in `docs/recording.md` and `docs/sleep-tracking.md`.
+
 ### 2.6 Mark the main camera in the camera list — `IDEA` · *small*
 
-All that is left of the old 2.6. **Single-camera sleep analysis shipped in 0.28.0**: sleep is scored
+All that is left of the old 2.6 (a comment that cites "ROADMAP 2.6" for the "adding a camera is a no-op
+for sleep" acceptance condition means the old, shipped text). **Single-camera sleep analysis shipped in 0.28.0**: sleep is scored
 from the child's main camera (enabled, lowest `sort_order`), climate and the alert list stay
 multi-camera because they average or list rather than combine, and the sleep detail view names the
 camera it measured from.
@@ -429,6 +441,12 @@ and unblocked, and are the right thing to reach for in a gap.
 ### E. Maintenance and housekeeping
 Not features — small, agreed, unblocked work with no dependency on the holdout. **This is the list to
 pick from when there is a gap**, which is why it is one list rather than four notes in four places.
+
+Stubs for finished items that code comments still cite (the full text is in git history, `45cbd039`):
+- **E2. `routes/auth.js` branch coverage** — `DONE` 2026-09-25 (#497). Detail: ROADMAP-archive.md §2.3.
+- **E3. The third state in `02-add-camera`'s e2e wait** — `DONE` 2026-09-25 (#498). The spec now waits for
+  whichever of "Save changes" or "Save anyway" appears instead of inferring success from a timeout.
+- **E4. The soak stack moved into the repo as `e2e/soak/`** — `DONE` 2026-09-25 (#499); see `e2e/soak/README.md`.
 
 ### F. Interface
 - **F1. Wider UI refresh** — `IDEA`. A refresh of the settings, cameras, live and caregivers screens,

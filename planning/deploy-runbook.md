@@ -130,7 +130,7 @@ While on 0.x: **minor** if `[Unreleased]` contains any `### Added`, else **patch
 
 ### 2.2 Release-prep, on a branch off `dev`
 1. `CHANGELOG.md`: leave an **empty** `## [Unreleased]` on top, then `## [x.y.z] - YYYY-MM-DD`
-   (today's date, Melbourne local) above what was under Unreleased.
+   (today's date in the maintainer's local time) above what was under Unreleased.
    ⚠️ **Do not delete the previous top version header** — that slip orphaned `[0.24.0]` in #147.
    ⚠️ **Merge duplicate type headings** while you are in there. A release batch is assembled from many
    PRs and each adds its own `### Added` without seeing the others. `check-changelog.mjs` gates it.

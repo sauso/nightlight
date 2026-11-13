@@ -3,7 +3,7 @@
 Test infrastructure — **not** part of the production deployment. Runs the real
 app image against a synthetic RTSP camera so the whole pipeline (transcoder →
 MediaMTX → WHEP/HLS) is exercised with no camera hardware. See
-`planning/ROADMAP.md` §2.4 for the remaining phases.
+`planning/ROADMAP.md` §2.3 for the remaining phases.
 
 ## Pieces
 
