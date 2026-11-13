@@ -147,6 +147,36 @@ describe('ChildCameraTile', () => {
     expect(screen.getByRole('button', { name: 'Watch live' })).toBeInTheDocument();
   });
 
+  // The detection line (owner, 2026-11-13: the badges came back as words). Same two fields the old MOTION/SOUND badges read.
+  describe('the detection line', () => {
+    const line = (container) => container.querySelector('.child-cam__detect')?.textContent;
+
+    test.each([
+      [1, 1, 'Motion on · Sound on'],
+      [1, 0, 'Motion on · Sound off'],
+      [0, 1, 'Motion off · Sound on'],
+      [0, 0, 'Motion off · Sound off'],
+    ])('★ motion %s, sound %s reads "%s" (words, never colour alone)', (m, s, text) => {
+      const { container } = render(<ChildCameraTile cam={{ ...CAM, detect_motion_enabled: m, detect_sound_enabled: s }} />);
+      expect(line(container)).toBe(text);
+    });
+
+    test('a disabled camera says nothing about detection (nothing runs on it; the chip says Disabled)', () => {
+      const { container } = render(<ChildCameraTile cam={{ ...CAM, disabled: 1, detect_motion_enabled: 1, detect_sound_enabled: 1 }} />);
+      expect(line(container)).toBeUndefined();
+    });
+
+    test('a camera carrying neither field (an unknown state, not "off") shows no line', () => {
+      const { container } = render(<ChildCameraTile cam={CAM} />);
+      expect(line(container)).toBeUndefined();
+    });
+
+    test('an offline camera still shows what it is set to', () => {
+      const { container } = render(<ChildCameraTile cam={{ ...CAM, statusLevel: 'offline', detect_motion_enabled: 1, detect_sound_enabled: 0 }} />);
+      expect(line(container)).toBe('Motion on · Sound off');
+    });
+  });
+
   test('"Watch live" does what it is given, and the camera name is on the tile', async () => {
     const user = userEvent.setup();
     const onWatch = vi.fn();
