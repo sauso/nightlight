@@ -3733,7 +3733,12 @@ input[type='range'] {
 .camera-device__chips span { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--accent-line); border-radius: 999px; color: var(--accent-text); font-size: 11px; font-weight: 600; }
 .camera-device__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 56px; padding: 8px 14px; border-top: 1px solid var(--border); font-size: 13px; }
 .camera-device__foot label, .camera-device__foot > span { color: var(--text-secondary); }
-.camera-device__foot select { width: min(60%, 260px); min-height: 44px; }
+/* The page's field look (.field input, .field select) only applies inside a `.field` wrapper, and this row has none, so the select
+   fell back to the browser's default white box with a square black border (found on the owner's phone, 2026-11-14, PR #1078).
+   The same values as `.field select`, copied here rather than wrapping the row in `.field` (its 14px margin and label style are
+   not wanted in a card's foot row). */
+.camera-device__foot select { width: min(60%, 260px); min-height: 44px; box-sizing: border-box; background: var(--field-bg); border: 1px solid var(--border); color: var(--text-primary); border-radius: 10px; padding: 11px 12px; font-size: 15px; }
+.camera-device__foot select:focus { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .cameras-add { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .cameras-empty { padding: 18px; margin-bottom: 14px; }
 .cameras-empty h2 { margin: 0; color: var(--night-text); font: 800 18px var(--font-display); }
