@@ -48,24 +48,41 @@ test('rejects non-literal LAN IPv4, caps results and keeps saved devices (#1071)
   assert.equal(result.candidates[0].port, 6054);
 });
 
-test('encryption requires a nonempty api_encryption value and saved address plus port (#1071)', async () => {
+test('encryption is advertised only by a nonempty api_encryption value (#1071)', async () => {
   const net = network();
-  const pending = scan(net, { existingHosts: new Set(['10.0.0.1:6053']) });
-  net.emit({ addresses: ['10.0.0.1'], port: 6054, txt: { api_encryption: '', api_encryption_supported: '1' } });
+  const pending = scan(net);
+  // One address per case: a later announcement for the same address must not be able to hide an earlier verdict.
+  net.emit({ addresses: ['10.0.0.1'], port: 6053, txt: { api_encryption: '' } });
   net.emit({ addresses: ['10.0.0.2'], port: 6053, txt: { api_encryption_supported: '1' } });
   net.emit({ addresses: ['10.0.0.3'], port: 6053, txt: { api_encryption: '1' } });
-  net.emit({ addresses: ['10.0.0.4'], host: 'living-room-sensor.local', port: 0,
+  net.emit({ addresses: ['10.0.0.4'], port: 6053, txt: { api_encryption: 1 } });
+  net.emit({ addresses: ['10.0.0.5'], host: 'living-room-sensor.local', port: 0,
     txt: { board: 'a'.repeat(10000), version: {}, friendly_name: {} } });
-  net.emit({ addresses: ['10.0.0.1'], port: 6053, txt: {} });
   const { candidates } = await pending;
-  assert.equal(candidates[0].alreadyAdded, true);
-  assert.equal(candidates[0].encrypted, undefined);
-  assert.equal(candidates[1].encrypted, undefined);
-  assert.equal(candidates[2].encrypted, true);
-  assert.equal(candidates[3].port, 6053);
-  assert.equal(candidates[3].board, undefined);
-  assert.equal(candidates[3].version, undefined);
-  assert.equal(candidates[3].name, 'living-room-sensor.local');
+  const at = (ip) => candidates.find((c) => c.ip === ip);
+  assert.equal(at('10.0.0.1').encrypted, undefined);
+  assert.equal(at('10.0.0.2').encrypted, undefined);
+  assert.equal(at('10.0.0.3').encrypted, true);
+  assert.equal(at('10.0.0.4').encrypted, undefined);
+  assert.equal(at('10.0.0.5').port, 6053);
+  assert.equal(at('10.0.0.5').board, undefined);
+  assert.equal(at('10.0.0.5').version, undefined);
+  assert.equal(at('10.0.0.5').name, 'living-room-sensor.local');
+});
+
+test('a saved address and port mark only that service; another port on the same host stays pickable (#1072)', async () => {
+  const net = network();
+  const pending = scan(net, { existingHosts: new Set(['10.0.0.1:6053']) });
+  net.emit({ addresses: ['10.0.0.1'], port: 6054, txt: {} });
+  net.emit({ addresses: ['10.0.0.1'], port: 6053, txt: {} });
+  net.emit({ addresses: ['10.0.0.1'], port: 6054, txt: {} }); // a repeat announcement is not a third card
+  const { candidates } = await pending;
+  assert.equal(candidates.length, 2);
+  const saved = candidates.find((c) => c.port === 6053);
+  const other = candidates.find((c) => c.port === 6054);
+  assert.equal(saved.alreadyAdded, true);
+  assert.equal(other.alreadyAdded, undefined);
+  assert.notEqual(saved.id, other.id);
 });
 
 test('abort and failure close an owned browser but preserve a shared Bonjour (#1071)', async () => {

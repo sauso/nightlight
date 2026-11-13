@@ -59,10 +59,17 @@ test('saved address and port mark only an exact match (#1071)', async () => {
   assert.equal(candidates[0].alreadyAdded, undefined);
 });
 
-test('rate limit and demo mode cover both discovery paths (#1071)', async () => {
+test('the search limit is 5 a minute per admin, not shared between admins (#1071)', async () => {
+  // A fresh admin so the count does not depend on how many requests the earlier tests made.
+  const other = makeUser(db, { id: 'admin-discovery-b', username: 'admin-discovery-b', role: 'admin' });
+  const otherToken = signToken({ id: other.id, username: other.username, role: other.role, sid: makeSession(db, other.id) });
   const statuses = [];
-  for (let i = 0; i < 5; i++) statuses.push((await post(adminToken)).status);
-  assert.ok(statuses.includes(429));
+  for (let i = 0; i < 6; i++) statuses.push((await post(otherToken)).status);
+  assert.deepEqual(statuses, [200, 200, 200, 200, 200, 429]);
+  assert.equal((await post(adminToken)).status, 200); // the first admin is not locked out by the second
+});
+
+test('demo mode refuses both discovery paths (#1071)', async () => {
   process.env.DEMO_MODE = 'true';
   assert.equal((await post(adminToken)).status, 403);
   assert.equal((await get(scanId, adminToken)).status, 403);

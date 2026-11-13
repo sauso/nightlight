@@ -45,9 +45,12 @@ export async function discoverEsphomeDevices({ createBonjour = defaultCreateBonj
         const txt = record?.txt && typeof record.txt === 'object' ? record.txt : {};
         for (const ip of Array.isArray(record?.addresses) ? record.addresses : []) {
           if (!isPrivateLanIPv4(ip)) { dropped++; continue; }
-          let candidate = candidates.get(ip);
+          // Keyed by address AND port: one host advertising two ESPHome services (a saved :6053 and a new :6054) must
+          // stay two cards, or the later announcement would silently replace the saved one and hide it (#1072 review).
+          const key = `${ip}:${port}`;
+          let candidate = candidates.get(key);
           if (!candidate && candidates.size >= 20) continue;
-          candidate = { id: createHash('sha256').update(ip).digest('hex').slice(0, 12), ip,
+          candidate = { id: createHash('sha256').update(key).digest('hex').slice(0, 12), ip,
             name: cleanName(txt.friendly_name, record?.host || record?.name, ip), port };
           const board = cleanTxt(txt.board);
           const version = cleanTxt(txt.version);
@@ -56,7 +59,7 @@ export async function discoverEsphomeDevices({ createBonjour = defaultCreateBonj
           // #1071: supported encryption alone is not a configured PSK. TXT remains unverified.
           if (typeof txt.api_encryption === 'string' && txt.api_encryption.length > 0) candidate.encrypted = true;
           if (existingHosts.has(`${ip}:${port}`)) candidate.alreadyAdded = true;
-          candidates.set(ip, candidate);
+          candidates.set(key, candidate);
           onCandidate({ ...candidate });
         }
       });
