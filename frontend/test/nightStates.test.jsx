@@ -174,7 +174,8 @@ describe('the review screen: the two quieter rows', () => {
     await user.click(await screen.findByRole('button', { name: /Something else was off/ }));
     expect(screen.getByRole('dialog', { name: 'Edit sleep times' })).toBeInTheDocument();
     expect(screen.getByLabelText('Fell asleep')).toBeInTheDocument();
-    expect(screen.getByText(/Only a time you change here is saved/).closest('.review-hint')).not.toBeNull();
+    // An unanswered night shows the app's wake, which the sheet's Save also sends (and so confirms): the hint says so.
+    expect(screen.getByText(/Saving also confirms the up time shown/).closest('.review-hint')).not.toBeNull();
   });
 
   test('a night already answered "no one was in the bed" shows only the question card', async () => {

@@ -236,6 +236,11 @@ and fails if one stops being true, so a fix is noticed rather than silently left
 | Night: "No data" hatch `#5A5C6E` against the card `#221F3C` / the inset track `#100F1C` | 2.40 / 2.88 | Same. |
 | Night: "No data" hatch `#5A5C6E` against asleep `#7C85E6` / before-after `#3C3F60` | 1.99 / 1.54 | Same. |
 
+One more pair sits under 3:1 and is named in the same test file, in its own block (it is not a timeline colour): the **Wake-ups | Room
+activity tab control**'s selected pill fill against its track, 1.22 by day and 1.31 at night. It is not what marks the selected tab: the
+3px `--accent-line` indicator is (3.54 and 3.69 against the pill, 4.31 and 4.83 against the track, both clearing 3:1), with the bolder,
+darker label as a second cue. The test fails if the indicator drops under 3:1 or the fill pair stops being what is documented.
+
 What v3.1 cleared and removed from this table: stirring against the card and the inset track in both themes (day 3.99 and
 3.20, night 7.33 and 8.80), room activity against the day track (2.47 to 3.06), and night stirring against the
 before/after-sleep segment (1.33 to 4.70). What it made worse or added is in the rows above and is named, not hidden.
@@ -677,15 +682,21 @@ UI refresh PR H. Every state keeps the same words it had; what is new is the sha
   the correcting step as drawn (UI refresh PR I): "When did <child> get up for the day?", a "We had 6:20 am." line, a **-5m / time / +5m
   stepper**, the logged out-of-bed times near it as tappable chips ("6:20 am · out of bed"), "Add a note" and Save. The middle of the
   stepper is a real time field (typing still works and is sent as typed), the side buttons are labelled "-5m, 5 minutes earlier" and "+5m, 5 minutes
-  later", and every control is at least 44px. The stepper **stops at 00:00 and 23:59 instead of wrapping**: a wrap would silently
-  change the calendar day the server picks for a bare time. It does nothing on an empty field (it never invents a starting time). The
+  later", and every control is at least 44px. The stepper **stops at 00:00 and 23:59 instead of wrapping, and at 11:59 and 12:00
+  instead of crossing noon**: the server reads a bare time before 12:00 as the morning after the night's date and from 12:00 on
+  as the night's own date, so a wrap or a step across noon would silently change the calendar day. A time that really is on the
+  other side is typed by hand. It does nothing on an empty field (it never invents a starting time). The
   chips are out-of-bed events within an hour of a time the page already shows, at most four; a tap sets the time and records which
   logged event it was, and typing or stepping afterwards drops that link. "Up between A and B" keeps its three buttons (Around A,
   Around B, Another time), restyled at 44px; "Another time" leads into the same step, empty as before.
   The one quieter answer is a **row in a card of its own**, "Something else was off" (icon, words, chevron, 44px), which opens an
   **Edit sleep times** bottom sheet: In bed, Fell asleep (each with a "We had ..." line), "Add a note", Save, and "No one was in the bed".
   The sheet is the shared `Modal` (focus moves in, Tab stays in, Escape or a tap outside closes it and focus returns to the row).
-  **Closing it discards what was typed in it**, and the sheet says so. **Not built**, because the app has no field to store a reason:
+  **Closing it discards what was typed in it**, and the sheet says so. Its **Save also sends the wake the page shows** (the same
+  answer the page's own buttons send, so nothing stored changes), so while that wake is still the app's guess (or a time just
+  stepped to) the sheet says "Saving also confirms the up time shown on the page. In bed and fell asleep are saved only if you
+  change them."; with a stored answer, or in "Up between" mode with nothing typed (no wake is sent), it says only "Only a time you
+  change here is saved." **Not built**, because the app has no field to store a reason:
   the design's "What was off?" chips.
 - **Card headings are one treatment**: an icon (16px, `--accent-line`) and a 15px bold title in `--text-primary`, as on Timelapse, Recent
   alerts and Recordings. "Room climate · last 24h", the sleep page's "Timeline" and "Sleep & room temperature" were 12 to 13px grey or
@@ -693,10 +704,24 @@ UI refresh PR H. Every state keeps the same words it had; what is new is the sha
 - **Room activity** (the second tab): every row is **one line** ("7:14 PM – 7:31 PM", the duration, a chevron when it opens). The common
   kind, "Movement outside the bed", is a small teal dot (the timeline's ring colour) that carries the words as its name and title, so a
   screen reader still hears them on every row; a chip appears only for the less common "Out of bed". One caption line above the list
-  says what the dot is, with a **What is this?** button (44px, `aria-expanded`) that opens the full explanation, worded as before.
+  says what the dot is, with a **What is this?** button (44px, `aria-expanded`, and `aria-controls` only while the explanation is open
+  and so exists) that opens the full explanation, worded as before. **At 320px every row is still one line** (measured at 320 and
+  375px, both themes): the right-hand group (chip, duration, arrow) never drops under the time. Under 380px the chip reads "Out" on
+  screen (" of bed" stays in the page, visually hidden, so a screen reader still hears "Out of bed"), the amber dot beside the time
+  (which only repeats the chip's colour) is hidden, and the caption above is 12px. A viewer away from home sees a zone suffix on both
+  times, which cannot fit on one line at 320px: there the **time wraps inside its own cell** and the chip stays on the row, rather
+  than the time being cut (text that carries meaning wraps).
 - **The tab control** (Wake-ups | Room activity) has a light accent tint for its track and a stronger tint with a 3px `--accent-line`
   indicator for the selected tab, in both themes. It was the near-black inset `--bg-elevated-2` at night, which read as a black hole
-  beside the raised selected tab.
+  beside the raised selected tab. **Contrast, recomputed from the stylesheet** (`paletteTokens.test.jsx`): the selected pill's fill
+  against the track is only 1.22:1 by day and 1.31:1 at night (named in "Known pairs below their floor"), so the fill is not what
+  carries the state; the 3px `--accent-line` indicator is, and it is 3.54:1 (day) and 3.69:1 (night) against the pill fill and 4.31:1
+  and 4.83:1 against the track, over the 3:1 a non-text mark needs. The bolder, darker label is a second cue. The control's ids are
+  per instance (React `useId`), so two on one page never share an `aria-controls` target.
+- **"Up for the day"** is one row with **only the time** the child got up (the old row showed a start-to-end range and a duration;
+  the owner approved the single time). The counted wake-ups above it keep their ranges. It is shown for a wake the detector did not
+  doubt, and for one a **parent gave** in the review, even though the detector's own "set aside an earlier exit" note stays on the
+  night (that note alone hides the row only when no parent has confirmed the time: the score treats the wake the same way).
 - **The review question belongs to the night the card shows.** The child page's question and its receipt come from a request about
   the last completed night, so they are drawn only when the night card above shows that finished night: while "Tonight · so far" is
   on the card there is no review row and no receipt from the night before. The review route and the notification's link
@@ -740,7 +765,9 @@ The top of the sleep detail page, as drawn in the UI refresh.
 ### Modal (`components/Modal.jsx`)
 On phone widths a **sheet**, not a centred dialog: overlay `rgba(10, 13, 28, 0.7)`, card
 `max-width: 440`, hugging the bottom edge (`placement="top"` for the top), rounded 20px on the inner
-side only, title 18px, `✕` close button with `aria-label="Close"`.
+side only, title 18px, `✕` close button with `aria-label="Close"`. The close button is **44 x 44px** in every modal (its own class,
+`modal-card__close`; a bare `.icon-btn` is a 6 x 8px padding), so the other `.icon-btn` uses (list-row actions, "Refresh now") keep
+their text-button look.
 
 A bottom sheet has **28px plus the device's bottom inset** (`env(safe-area-inset-bottom)`) under its last control, not the
 card's usual 16px: on a phone the sheet sits on the screen edge, by the gesture bar and rounded corners, and 16px looked
@@ -891,7 +918,10 @@ reading order and the keyboard order):
    the next one; each picture carries a short chip and a play mark: weekday and home time ("Wed 12:09 am") for a recording
    under seven days old, the date and time ("30 Aug, 7:00 pm") from seven days on, so an old recording is not mistaken for
    this week's. The full date and time are the accessible name and the tooltip. The row's own time uses the same short form
-   (the long form lost its AM/PM at 320px) and keeps the full one as its name and tooltip. Tap a picture to play it. A failed recording has a warning mark and opens
+   (the long form lost its AM/PM at 320px) and keeps the full one as its name and tooltip. For a viewer away from home the zone
+   suffix ("GMT+11") is its own item beside the time: at 320px, when both do not fit, **the zone drops under the time** (right-aligned,
+   inside the 56px row) rather than being cut off, and only a time that alone is wider than the row ends in an ellipsis (checked in a
+   browser at 320 and 375px, both themes). Tap a picture to play it. A failed recording has a warning mark and opens
    its explanation instead. Older recordings stay reachable (recordings have no retention). A newest recording that failed says
    "Couldn't be saved" on the row. Renders nothing when there are none.
 5. **Sensor history** (a camera with an MQTT topic), unchanged.
@@ -992,7 +1022,15 @@ Other rules:
   `--child-action-active` as the tint (hover: `--child-action-hover`, inside `@media (hover: hover)`), beside its
   `:focus-visible` ring. **Never `--bg-elevated-2` or `--field-bg` in any `:active` rule**: they are the inset colours,
   near-black in the dark theme, and drew the black bars #1064 removed (`paletteTokens.test.jsx` fails any `:active` rule that
-  names them). `.btn` has its own, `brightness(0.92)` (a tint cannot work: secondary and danger are transparent outlines).
+  names them). **The same goes for `:hover`**: no `:hover` rule anywhere uses an inset token (`paletteTokens.test.jsx` fails one),
+  because a hover fill was the same near-black bar at night. Hover tints use `--child-action-hover`, and only inside
+  `@media (hover: hover)`. That is how the sleep page's `⋯` menu items, the clip calendar's buttons and days (the selected day keeps its
+  accent fill under the pointer), the desktop sidebar's hovered link and the unused `.hamburger-item` were fixed. **Any `:hover`
+  rule that sets a background fill is inside `@media (hover: hover)`** (a phone keeps a tapped control in `:hover`, so an unwrapped
+  fill stays painted; `.tile-menu__item` and `.night__settings` were the last two), and the test enforces it for the whole
+  stylesheet. The deliberate exceptions set no fill: `.clip-datepicker__trigger`, `.detect-toggle` and `.log-chip` change only a border
+  or text colour (the last two exclude their lit state with `:not(...)`), and are named in the test. The sidebar's
+  *selected* link keeps `--bg-elevated-2` on purpose: it is a resting surface, not a hover. `.btn` has its own, `brightness(0.92)` (a tint cannot work: secondary and danger are transparent outlines).
   Specific tints: the review stepper buttons, the logged-time chips, the "Something else was off" row, the sleep strip, and
   the child page's rows and tiles. **Everything else relies on the generic dim** (`.more-menu__btn`, the tabs,
   `.sleep-score__open`, `.sleep-events__what`, `.review-add`, `.night__sleep--btn`, the bottom-nav links, `.child-card` whose

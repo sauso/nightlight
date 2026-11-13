@@ -45,6 +45,21 @@ function shortWhen(startedAt, home) {
   return `${home.day(d, { weekday: 'short' })} ${time}`;
 }
 
+// The short form split into the part that may shrink and the zone suffix that may not: [time, zone]. At 320px an away-from-home
+// viewer's "Fri 4:12 am GMT+11" did not fit beside the title, and the row's ellipsis cut it from the END, which removed exactly
+// the cue that says the time is not in the viewer's own zone (found in the Codex review of #1064). The zone is taken from Intl's
+// own `timeZoneName` part (the same one `home.time` appended) and only split off when the text ENDS with it; a locale that puts
+// the zone first keeps the whole text in one piece, as before. No zone (the viewer is at home) -> [whole, ''].
+function shortWhenParts(startedAt, home) {
+  const text = shortWhen(startedAt, home);
+  const d = parseUtc(startedAt);
+  if (!home.differs || Number.isNaN(d.getTime())) return [text, ''];
+  const zone = new Intl.DateTimeFormat([], { timeZone: home.zone, timeZoneName: 'short' })
+    .formatToParts(d).find((p) => p.type === 'timeZoneName')?.value;
+  if (!zone || !text.endsWith(zone) || text.length === zone.length) return [text, ''];
+  return [text.slice(0, -zone.length).trimEnd(), zone];
+}
+
 export default function RecordingsCard({ childId, refreshNonce = 0 }) {
   const [list, setList] = useState([]);
   const [openId, setOpenId] = useState(null);
@@ -109,7 +124,13 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
         <Video size={16} aria-hidden="true" className="recordings-row__icon" />
         <span className="recordings-row__title">Recordings</span>
         {/* The SHORT form: the long one ("Fri, 13 Nov, 4:12 am GMT+11") lost its AM/PM to an ellipsis at 320px. */}
-        <span className="recordings-row__latest">{list[0].status === 'failed' ? 'Couldn’t be saved' : shortWhen(list[0].started_at, home)}</span>
+        {/* The time shrinks first (it ends in an ellipsis); the zone suffix of an away-from-home viewer never does. */}
+        <span className="recordings-row__latest">
+          {list[0].status === 'failed' ? <span className="recordings-row__when">Couldn’t be saved</span> : (() => {
+            const [time, zone] = shortWhenParts(list[0].started_at, home);
+            return <><span className="recordings-row__when">{time}</span>{zone && <span className="recordings-row__zone">{' '}{zone}</span>}</>;
+          })()}
+        </span>
         <ChevronRight size={18} aria-hidden="true" className="recordings-row__chev" />
       </button>
 

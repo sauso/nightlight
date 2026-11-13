@@ -46,19 +46,26 @@ import { toLocalHhmm } from '../lib/reviewConfirm.js';
 
 const toDate = (utc) => new Date(`${utc.replace(' ', 'T')}Z`);
 
-// ★ THE -5m / +5m STEPPER (UI refresh PR I). It moves the typed 'HH:MM' by whole minutes and NEVER past midnight:
-// it stops at 00:00 and 23:59. Wrapping would be a silent day change, and the page does not know the day: the
-// server resolves a bare 'HH:MM' by the noon rule (before 12:00 is the morning after the night's date, lib/sleepReviews.js
-// localHmToUtcSql), so 23:57 + 5 -> 00:02 would quietly become a different calendar day than the one on screen. A wake
-// that really is either side of midnight is typed by hand, where the person sees the digits they send. Whether a stepped
-// time is VALID stays the server's call (its ordering 400s surface in the error slot exactly as for a typed time).
-// An empty or malformed value is left alone (null): there is nothing to step from, and inventing a starting time would
-// put a time the person never chose into the answer.
+// ★ THE -5m / +5m STEPPER (UI refresh PR I). It moves the typed 'HH:MM' by whole minutes and NEVER past midnight or
+// noon: it stops at 00:00 and 23:59, and at 11:59 / 12:00. Wrapping would be a silent day change, and the page does not know
+// the day: the server resolves a bare 'HH:MM' by the noon rule (before 12:00 is the morning after the night's date, from
+// 12:00 on is the night's own date; lib/sleepReviews.js localHmToUtcSql), so 23:57 + 5 -> 00:02 would quietly become a
+// different calendar day than the one on screen, and so would 11:58 + 5 -> 12:03 (found in the Codex review of #1062/#1066,
+// which only knew about midnight: the day flips at NOON too, in the other direction, a whole 24h away from where the
+// person was looking). So the step never crosses either edge: the result stays on the SAME side of noon as the time it
+// started from. A wake that really is either side of midnight or noon is typed by hand, where the person sees the digits
+// they send. Whether a stepped time is VALID stays the server's call (its ordering 400s surface in the error slot exactly
+// as for a typed time). An empty or malformed value is left alone (null): there is nothing to step from, and inventing a
+// starting time would put a time the person never chose into the answer.
 const STEP_MINUTES = 5;
+const NOON = 12 * 60;
 function stepHhmm(hhmm, deltaMinutes) {
   const m = /^(\d{2}):(\d{2})/.exec(hhmm || '');
   if (!m) return null;
-  const total = Math.min(1439, Math.max(0, Number(m[1]) * 60 + Number(m[2]) + deltaMinutes));
+  const from = Number(m[1]) * 60 + Number(m[2]);
+  // The band the time started in: [00:00, 11:59] or [12:00, 23:59]. Clamping to it is what keeps the server's day the same.
+  const [lo, hi] = from < NOON ? [0, NOON - 1] : [NOON, 1439];
+  const total = Math.min(hi, Math.max(lo, from + deltaMinutes));
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
@@ -268,6 +275,14 @@ export default function NightReview() {
   // let a caregiver empty a time to remove a correction, and a night the app found no wake for can still be
   // given just an asleep time (restored in the PR #897 fix round, the owner's decision).
   const canSave = Boolean(wakeShown) || Object.keys(typed).length > 0;
+
+  // ⚠️ THE SHEET'S SAVE ALSO SENDS THE WAKE THE PAGE SHOWS (see `save`: the body is what the old page sent), so for a night whose
+  // wake is still the app's guess (the person has not answered yet) saving there CONFIRMS that guess, or the time they stepped to
+  // on the page behind. The sheet used to say only "Only a time you change here is saved", which was not true of that wake
+  // (found in the Codex review of #1066). It says so only while it is the case: with a stored answer and nothing typed on the page,
+  // the wake sent is the person's own, unchanged; in "Up between" mode with nothing typed there is no wake to send (`wakeShown`
+  // is empty). A wake typed or stepped on the page is sent whatever is stored, so it counts.
+  const savesShownWake = Boolean(wakeShown) && (!review?.true_wake_at || 'wake' in typed);
 
   // `wakeOverride`: the 'HH:MM' of an "Around ..." button in range mode, sent as the wake answer through the
   // SAME payload as every other wake save (so the server's checks, the store-first step and the lock are the
@@ -552,7 +567,10 @@ export default function NightReview() {
             <div className="review-sheet">
               {timesReady && (
                 <div className="camera-tile__sub review-hint">
-                  Only a time you change here is saved. Closing this without saving throws away what you typed.
+                  {savesShownWake
+                    ? 'Saving also confirms the up time shown on the page. In bed and fell asleep are saved only if you change them.'
+                    : 'Only a time you change here is saved.'}
+                  {' '}Closing this without saving throws away what you typed.
                 </div>
               )}
               {/* In the order the two happen. Optional: leave it alone and nothing about the put-down is recorded or sent. */}

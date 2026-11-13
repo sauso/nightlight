@@ -447,6 +447,53 @@ describe('the review screen', () => {
       expect(keysOf(lastBody())).toEqual([...WAKE_ONLY_KEYS, 'true_onset_local'].sort());
     });
 
+    // ★ The sheet's hint must be TRUE about what Save sends (Codex review of #1066): the old text said only a changed time is saved,
+    // while Save also sends the wake the page shows. It names the wake only while that is what is sent.
+    const CONFIRMS = /Saving also confirms the up time shown/;
+    const PLAIN = /Only a time you change here is saved/;
+
+    test('★ an unanswered night: the hint says saving also confirms the shown wake, and the save really sends it', async () => {
+      const { user } = at();
+      await thatsRight();
+      const sheet = within(await openSheet(user));
+      expect(sheet.getByText(CONFIRMS)).toBeInTheDocument();
+      expect(sheet.queryByText(PLAIN)).not.toBeInTheDocument();
+      await user.type(sheet.getByLabelText(/In bed/), '19:05');
+      await user.click(sheet.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      // The claim and the body agree: this is the wake the hint named.
+      expect(lastBody().true_wake_local).toBe('05:48');
+    });
+
+    test('★ a night with a stored answer, nothing typed on the page: the wake sent is their own, so the plain wording stays', async () => {
+      api.get.mockResolvedValue({ ...NIGHT, review: { true_wake_at: '2026-08-29 19:40:00', true_onset_at: null, note: null } });
+      const { user } = at();
+      await screen.findByLabelText(/Got up for the day/);
+      const sheet = within(await openSheet(user));
+      expect(sheet.getByText(PLAIN)).toBeInTheDocument();
+      expect(sheet.queryByText(CONFIRMS)).not.toBeInTheDocument();
+    });
+
+    test('a stored answer that was then stepped on the page is a changed wake that Save sends, so the hint says so', async () => {
+      api.get.mockResolvedValue({ ...NIGHT, review: { true_wake_at: '2026-08-29 19:40:00', true_onset_at: null, note: null } });
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: '+5m, 5 minutes later' }));
+      const sheet = within(await openSheet(user));
+      expect(sheet.getByText(CONFIRMS)).toBeInTheDocument();
+    });
+
+    test('"Up between" with nothing typed: there is no wake to send, so the plain wording stays and the body has no wake', async () => {
+      api.get.mockResolvedValue({ ...NIGHT, wake_range: { from: '2026-08-29 19:30:00', to: '2026-08-29 19:48:00' } });
+      const { user } = at();
+      const sheet = within(await openSheet(user));
+      expect(sheet.getByText(PLAIN)).toBeInTheDocument();
+      expect(sheet.queryByText(CONFIRMS)).not.toBeInTheDocument();
+      await user.type(sheet.getByLabelText(/In bed/), '19:05');
+      await user.click(sheet.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      expect(lastBody()).not.toHaveProperty('true_wake_local');
+    });
+
     test('★ a note-only save from the sheet sends the shown wake too, exactly as the old page did', async () => {
       const { user } = at();
       await thatsRight();
@@ -612,6 +659,40 @@ describe('the review screen', () => {
       expect(wakeField()).toHaveValue('23:59');
       await second.user.click(later());
       expect(wakeField()).toHaveValue('23:59');
+    });
+
+    test('★ it stops at NOON too, both ways: 11:58 + 5 never becomes 12:03, because the server reads the two as different days', async () => {
+      // The server's noon rule (backend lib/sleepReviews.js localHmToUtcSql): a bare time before 12:00 is the MORNING AFTER the night's
+      // date, from 12:00 on it is the night's own date. So stepping across noon would flip the day by 24h with no sign on screen.
+      // 11:58 Melbourne is 01:58Z, 12:03 is 02:03Z (UTC+10 in August). Both edges, each from each side.
+      api.get.mockResolvedValue(answeredAt('2026-08-29 01:58:00'));
+      const first = at();
+      await waitFor(() => expect(wakeField()).toHaveValue('11:58'));
+      await first.user.click(later());
+      expect(wakeField()).toHaveValue('11:59');
+      await first.user.click(later());
+      expect(wakeField()).toHaveValue('11:59');
+      first.unmount();
+
+      api.get.mockResolvedValue(answeredAt('2026-08-29 02:03:00'));
+      const second = at();
+      await waitFor(() => expect(wakeField()).toHaveValue('12:03'));
+      await second.user.click(earlier());
+      expect(wakeField()).toHaveValue('12:00');
+      await second.user.click(earlier());
+      expect(wakeField()).toHaveValue('12:00');
+      // ...and inside a side the step is still exactly five minutes.
+      await second.user.click(later());
+      expect(wakeField()).toHaveValue('12:05');
+    });
+
+    test('typing across noon is still possible (the person sees the digits they send)', async () => {
+      api.get.mockResolvedValue(answeredAt('2026-08-29 01:58:00'));
+      const { user } = at();
+      await waitFor(() => expect(wakeField()).toHaveValue('11:58'));
+      await user.clear(wakeField());
+      await user.type(wakeField(), '12:03');
+      expect(wakeField()).toHaveValue('12:03');
     });
 
     test('typing still works after stepping, and what is sent is the time as typed', async () => {

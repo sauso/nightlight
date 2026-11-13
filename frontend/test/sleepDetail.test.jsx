@@ -471,8 +471,9 @@ describe('timeline legend and night-event tabs', () => {
     expect(wakeTab).toHaveAttribute('aria-selected', 'true');
     expect(wakeTab).toHaveAttribute('tabindex', '0');
     expect(roomTab).toHaveAttribute('tabindex', '-1');
-    expect(wakeTab.getAttribute('aria-controls')).toBe('sleep-events-wakes-panel');
-    expect(roomTab.getAttribute('aria-controls')).toBe('sleep-events-room-panel');
+    // The ids are per instance (React useId), so what is pinned is the relationship: each tab names a real panel that names it back.
+    expect(document.getElementById(wakeTab.getAttribute('aria-controls'))).toHaveAttribute('aria-labelledby', wakeTab.id);
+    expect(document.getElementById(roomTab.getAttribute('aria-controls'))).toHaveAttribute('aria-labelledby', roomTab.id);
     expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', wakeTab.id);
     expect(screen.getByRole('tabpanel')).toHaveTextContent('10m');
     expect(within(screen.getByRole('tabpanel')).getByText('Up for the day')).toBeVisible();
@@ -1682,7 +1683,8 @@ describe('#907 the saved frame on a Room activity row (expands like a wake-up ro
   // is found by that title; the less common "Out of bed" row still has its chip.
   const rowOf = (text) => (text === 'Movement outside the bed'
     ? screen.getAllByTitle(text)[0].closest('li')
-    : screen.getAllByText(text).find((el) => el.classList.contains('sleep-visit-tag')).closest('li'));
+    // The chip's text is "Out" plus a visually-hidden-on-a-narrow-phone " of bed" span (so the row fits 320px), so find it by its own text.
+    : screen.getAllByText('Out', { selector: '.sleep-visit-tag' })[0].closest('li'));
   // A row with a frame is a button (aria-expanded) and the frame lies underneath it once open.
   const expand = async (user, text) => user.click(within(rowOf(text)).getByRole('button', { expanded: false }));
 
@@ -2357,5 +2359,83 @@ describe('Room activity rows are one line, with the explanation behind "What is 
     fireEvent.click(await screen.findByRole('tab', { name: /Room activity/ }));
     expect(screen.queryByRole('button', { name: 'What is this?' })).not.toBeInTheDocument();
     expect(screen.getByText('No room activity recorded.')).toBeInTheDocument();
+  });
+
+  // --- follow-ups from the Codex reviews of #1062 / #1065 ---------------------------------------------------------------------
+
+  test('★ "What is this?" names what it controls only while that exists (no aria-controls pointing at nothing)', async () => {
+    const { user } = await openRoom();
+    const what = screen.getByRole('button', { name: 'What is this?' });
+    // Closed: the explanation is not in the page, so there is nothing to control.
+    expect(what).not.toHaveAttribute('aria-controls');
+    await user.click(what);
+    // Open: the id it names is a real element and it is the explanation.
+    const target = document.getElementById(what.getAttribute('aria-controls'));
+    expect(target).not.toBeNull();
+    expect(target).toHaveTextContent(/the camera can.t tell who/);
+    await user.click(what);
+    expect(what).not.toHaveAttribute('aria-controls');
+  });
+
+  test('★ two of these tab controls on one page do not share ids: each tab drives its OWN panel', async () => {
+    // Fixed ids ("sleep-events-wakes-tab") would repeat, and a duplicate id makes aria-controls / aria-labelledby resolve to the FIRST
+    // copy, so the second instance's tabs would point a screen reader at the first one's panels.
+    mockSleep({ night: night() });
+    mount();
+    mount();
+    await waitFor(() => expect(screen.getAllByRole('tab', { name: /Room activity/ })).toHaveLength(2));
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs).toHaveLength(4);
+    expect(new Set(tabs.map((t) => t.id)).size, 'tab ids are unique across both instances').toBe(4);
+    for (const tab of tabs) {
+      const panel = document.getElementById(tab.getAttribute('aria-controls'));
+      expect(panel, 'the panel a tab controls exists').not.toBeNull();
+      expect(panel.closest('.sleep-events'), 'and is in the same instance').toBe(tab.closest('.sleep-events'));
+      expect(document.getElementById(panel.getAttribute('aria-labelledby')), 'and is labelled by that same tab').toBe(tab);
+    }
+  });
+
+  test('the "Out of bed" chip keeps its whole name in the page (the narrow phone only hides the tail visually)', async () => {
+    const { container } = await openRoom();
+    const tag = container.querySelector('.sleep-visit-tag');
+    expect(tag.textContent).toBe('Out of bed');
+    expect(tag.querySelector('.sleep-visit-tag__more').textContent).toBe(' of bed');
+  });
+});
+
+// --- Codex review of #1062 (finding 9): the "Up for the day" row against a doubted wake ------------------------------------------
+// The detector can set aside an EARLIER exit as far earlier than this child usually gets up (`wake_unconfirmed`, stored as
+// `wake_unconfirmed_at`; backend sleep-early-exit-lead.test.js T13 has a real later `wake_at` beside it). The page then does not print
+// the wake as "Up for the day": the score treats it as "not certain" too. But a parent who GIVES the wake confirms it, and the server marks
+// that with `wake_given` while leaving the detector's note in place, so the flag alone must not hide the parent's own time.
+describe('the "Up for the day" row and a wake the detector doubted', () => {
+  const doubted = { wake_unconfirmed: { at: '2026-08-30 17:00:10', lead_min: 240, threshold_min: 80 } };
+  const upRow = () => within(screen.getByRole('tabpanel')).queryByText('Up for the day');
+  const show = async (over) => {
+    mockSleep({ night: { ...NIGHT, ...over } });
+    mount();
+    await screen.findByRole('tab', { name: /Wake-ups/ });
+  };
+
+  test.each([
+    ['a fresh night', doubted],
+    ['a stored night (the same doubt in its stored form)', { wake_unconfirmed_at: '2026-08-30 17:00:10' }],
+  ])('%s: a doubted wake nobody confirmed is not printed as "Up for the day" (unchanged)', async (_name, over) => {
+    await show(over);
+    expect(upRow()).toBeNull();
+  });
+
+  test.each([
+    ['a fresh night', { ...doubted, wake_given: true }],
+    ['a stored night', { wake_unconfirmed_at: '2026-08-30 17:00:10', wake_given: true }],
+  ])('★ %s whose wake a parent gave still shows "Up for the day" with that time', async (_name, over) => {
+    await show(over);
+    expect(upRow()).not.toBeNull();
+    expect(within(screen.getByRole('tabpanel')).getByText('6:15 am')).toBeVisible();
+  });
+
+  test('no doubt at all shows the row (unchanged)', async () => {
+    await show({});
+    expect(upRow()).not.toBeNull();
   });
 });

@@ -517,12 +517,117 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
 
   // The close button and the long-text wrapping are layout, so they are read from the stylesheet rather than measured
   // (jsdom has no layout); the screenshots at 320 and 375px are the check of record (PR #1063).
-  test('the sheet\'s close button has a 44px target and a focus ring; long words in the sheet wrap', () => {
-    const close = rules.find((r) => r.startsWith('.sleep-night-card .modal-card__actions .icon-btn {'));
+  test('every modal\'s close button has a 44px target and a focus ring; long words in the sheet wrap', () => {
+    // Was scoped to the night card's sheet (#1063); it is the Modal's own class now, so every dialog's close is 44px (follow-up to the
+    // Codex review of #1062/#1064/#1065/#1066). Measured at 44 x 44 in a browser at 320 and 375px.
+    const close = rules.find((r) => r.startsWith('.modal-card__close {'));
     expect(close).toContain('min-width: 44px');
     expect(close).toContain('min-height: 44px');
-    expect(rules.find((r) => r.startsWith('.sleep-night-card .modal-card__actions .icon-btn:focus-visible {'))).toContain('outline: 2px solid');
+    expect(rules.find((r) => r.startsWith('.modal-card__close:focus-visible {'))).toContain('outline: 2px solid');
     expect(rules.find((r) => r.startsWith('.score-part, .sleep-score__numbers li {'))).toContain('overflow-wrap: anywhere');
+  });
+
+  // ★ The Wake-ups | Room activity tab control (Codex review of #1062: the selected pill against its track measured 1.25:1 light and
+  // 1.20:1 dark on the OLD tabs; #1065 then added the indicator and the stronger tint). Recomputed here from the CURRENT rules, with
+  // the tints read out of the stylesheet's own color-mix percentages, so a re-tint cannot quietly change the answer. The honest result:
+  // the selected pill's FILL against the track is still under 3:1 (named below, with its number), and is not what carries the state;
+  // the 3px --accent-line indicator along the selected pill's foot is, and it clears 3:1 against BOTH the pill fill and the track it
+  // sits beside (3.54 and 4.31 by day, 3.69 and 4.83 at night). The bold/dark text is a second cue. So the selected state is
+  // distinguishable by a non-text mark that meets WCAG 1.4.11.
+  describe('the tab control: selected state vs track', () => {
+    const mixOf = (selector) => {
+      const rule = rules.find((r) => r.startsWith(`${selector} {`)) || '';
+      const m = /color-mix\(in srgb, var\(--accent-line\) (\d+)%, var\(--bg-elevated\)\)/.exec(rule);
+      return { rule, alpha: m ? Number(m[1]) / 100 : null };
+    };
+    const track = mixOf('.sleep-events__tabs');
+    const selected = mixOf('.sleep-events__tabs [role="tab"][aria-selected="true"]');
+    const colours = (t) => ({
+      trackFill: tint(t['--accent-line'], track.alpha, t['--bg-elevated']),
+      selectedFill: tint(t['--accent-line'], selected.alpha, t['--bg-elevated']),
+    });
+
+    test('the tints and the 3px indicator are read from the stylesheet', () => {
+      expect(track.alpha, 'track tint').toBeGreaterThan(0);
+      expect(selected.alpha, 'selected tint is stronger than the track').toBeGreaterThan(track.alpha);
+      expect(selected.rule, 'the indicator is an inset 3px --accent-line bar').toMatch(/box-shadow:\s*inset 0 -3px 0 var\(--accent-line\)/);
+    });
+
+    test.each([['day', day, 3.54, 4.31, 1.22], ['night', night, 3.69, 4.83, 1.31]])(
+      '★ %s: the indicator clears 3:1 on the selected fill and on the track; the fill-vs-track pair is NAMED as under 3:1',
+      (_name, t, onFill, onTrack, fillVsTrack) => {
+        const { trackFill, selectedFill } = colours(t);
+        expect(round2(contrast(t['--accent-line'], selectedFill)), 'indicator on the selected fill').toBe(onFill);
+        expect(round2(contrast(t['--accent-line'], trackFill)), 'indicator on the track').toBe(onTrack);
+        expect(contrast(t['--accent-line'], selectedFill)).toBeGreaterThanOrEqual(3);
+        expect(contrast(t['--accent-line'], trackFill)).toBeGreaterThanOrEqual(3);
+        // The known pair below its floor (listed in docs/design-language.md, "Known pairs below their floor"): if this ever clears 3:1
+        // the entry is stale and goes; if it gets worse, the indicator is carrying more and the doc must say so.
+        expect(round2(contrast(selectedFill, trackFill)), 'selected fill against the track (documented)').toBe(fillVsTrack);
+        expect(contrast(selectedFill, trackFill)).toBeLessThan(3);
+      },
+    );
+  });
+
+  // ★ Hover fills (#1064 fixed the child page's rows; this is the same root cause elsewhere: the sleep page's ⋯ menu and the clip
+  // calendar used --bg-elevated-2, near-black in the dark theme, as a hover fill). Checked across the WHOLE stylesheet: no :hover rule
+  // may name an inset token, and the controls that had one now tint with the light state token under a real pointer only. A hover
+  // fill outside (hover: hover) stays on a tapped control on a phone.
+  test('★ no :hover rule anywhere uses an inset token, and the menu and calendar hovers are pointer-only', () => {
+    const hovered = rules.filter((rule) => /:hover\b/.test(rule.slice(0, rule.lastIndexOf('{'))));
+    expect(hovered.length, 'it really read the hover rules').toBeGreaterThan(15);
+    for (const rule of hovered) expect(rule, rule).not.toMatch(/--(?:bg-elevated-2|field-bg)\b/);
+    const stack = [];
+    const seen = new Set();
+    for (const [, rawSelector, brace] of css.matchAll(/([^{}]+)([{}])/g)) {
+      if (brace === '}') { stack.pop(); continue; }
+      const selector = rawSelector.trim();
+      const m = /\.(more-menu__item|clip-cal__(?:nav|day|all))\b[^,{]*:hover\b/.exec(selector);
+      if (m) {
+        seen.add(m[1]);
+        expect(stack.some((parent) => /^@media\s*\(hover:\s*hover\)/.test(parent)), selector).toBe(true);
+      }
+      stack.push(selector);
+    }
+    expect([...seen].sort(), 'every one of the four controls was found').toEqual(['clip-cal__all', 'clip-cal__day', 'clip-cal__nav', 'more-menu__item']);
+    expect(rules.find((r) => r.startsWith('.more-menu__item:active'))).toContain('var(--child-action-active)');
+  });
+
+  // ★ The general form of the rule (review of #1069): ANY :hover rule that sets a background or background-color FILL must sit inside
+  // @media (hover: hover), not only the controls named above. A phone keeps the :hover state on a tapped control, so an unwrapped fill
+  // stays painted until the next tap elsewhere (found on .night__settings and .tile-menu__item). A :hover rule that only changes a
+  // border, a text colour, opacity, a transform or a shadow may stay unwrapped: those are listed as the deliberate exceptions below, so
+  // a new one has to be looked at, not waved through. (`background: none` / `transparent` is not a fill and is not flagged.)
+  test('★ every :hover rule that sets a background fill is inside @media (hover: hover)', () => {
+    const parts = css.split(/([{}])/);
+    const stack = [];
+    const unwrapped = [];
+    let hoverFills = 0;
+    for (let i = 0; i < parts.length; i += 1) {
+      if (parts[i] === '{') {
+        const selector = parts[i - 1].trim();
+        const body = parts[i + 1] ?? '';
+        const leaf = !body.includes('{') && parts[i + 2] === '}';
+        if (leaf && /:hover\b/.test(selector)) {
+          const fill = /(^|[;\s])background(-color)?\s*:\s*(?!none\b|transparent\b)[^;}]+/.test(body);
+          if (fill) {
+            hoverFills += 1;
+            if (!stack.some((p) => /^@media\s*\(hover:\s*hover\)/.test(p))) unwrapped.push(selector);
+          }
+        }
+        stack.push(selector);
+      } else if (parts[i] === '}') stack.pop();
+    }
+    expect(hoverFills, 'it really found the hover fills').toBeGreaterThan(8);
+    expect(unwrapped, `a :hover background fill outside (hover: hover): ${unwrapped.join(' | ')}`).toEqual([]);
+    // The deliberate exceptions: hover rules that set NO background fill, so a sticky hover on a phone repaints only a border or text
+    // colour (and these two are guarded against sticking on a lit control with :not(...)). They are named so the list is checked.
+    const noFill = ['.clip-datepicker__trigger:hover', '.detect-toggle:hover:not(:disabled):not(.detect-toggle--on)', '.log-chip:hover:not(.log-chip--active)'];
+    for (const selector of noFill) {
+      const rule = rules.find((r) => r.startsWith(`${selector} {`));
+      expect(rule, selector).toBeTruthy();
+      expect(rule, `${selector} sets no background`).not.toMatch(/background/);
+    }
   });
 
   test('★ the .night rules take their text colours from the card\'s properties, not from literals', () => {
