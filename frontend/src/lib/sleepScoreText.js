@@ -14,7 +14,7 @@
 // Nothing here assumes a locale, a clock format or a timezone: durations are plain minutes, and the one clock time
 // (consistency) goes through lib/homeTime.js like every other time on these screens.
 
-import { formatInZone, TIME } from './homeTime.js';
+import { formatInZone, resolveZone, zonesDiffer, TIME } from './homeTime.js';
 
 // The night's score object when it carries a NUMBER, else null. The one test for "is there a ring to draw":
 // `score` absent (the child's "Show sleep score" switch is off), `null` (scoring failed on the server) and
@@ -183,7 +183,10 @@ export function pendingNightText(night, zone) {
   if (typeof s !== 'string' || !s) return null;
   const d = new Date(`${s.replace(' ', 'T')}Z`);
   if (Number.isNaN(d.getTime())) return null;
-  const at = formatInZone(d, zone, TIME);
+  // The short zone name rides along when this device sits in another zone than the home one, like every other time of day
+  // (useHomeTime): "after 7:00 AM GMT+10" says WHICH 7:00 to someone looking at the card from abroad.
+  const home = resolveZone(zone);
+  const at = formatInZone(d, home, TIME, zonesDiffer(home));
   return at ? `Score and night summary after ${at}` : null;
 }
 

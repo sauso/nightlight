@@ -58,7 +58,10 @@ export default function MorningReviewCard({ childId, fmtTime, forNight }) {
       .then((r) => { if (live) setCard(r || null); })
       .catch(() => { /* the card is an invitation, not a feature — stay silent if it can't load */ });
     return () => { live = false; };
-  }, [loadPending]);
+    // `forNight` is a dependency on purpose: the server's answer is about the last COMPLETED night, so when the card above flips from
+    // tonight (no row) to last night on a page that stayed open, the answer fetched while tonight was showing is the previous night's
+    // and the question for the night that just ended has never been asked for. Without this it did not appear until a reload.
+  }, [loadPending, forNight]);
 
   if (!card || hidden || card.state === 'none') return null;
   if (forNight !== undefined && card.night_date !== forNight) return null;

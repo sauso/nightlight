@@ -17,6 +17,7 @@ import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin } from './helpers/render.jsx';
+import MorningReviewCard from '../src/components/MorningReviewCard.jsx';
 import SleepSummaryCard from '../src/components/SleepSummaryCard.jsx';
 import SleepScoreCard from '../src/components/SleepScoreCard.jsx';
 import SleepDetail from '../src/pages/SleepDetail.jsx';
@@ -46,6 +47,12 @@ const SO_FAR = {
 const TONIGHT = { status: 'ok', night_date: '2026-09-01', in_progress: true, asleep_minutes: 275, window_end: WINDOW_END, score: IN_PROGRESS, summary: SO_FAR };
 
 describe('pendingNightText', () => {
+  // vite.config.js pins the device zone to Pacific/Auckland, so Melbourne is "another zone" and Auckland is home.
+  test('★ carries the short zone name only when the device is in another zone than home', () => {
+    expect(pendingNightText(TONIGHT, 'Pacific/Auckland')).toMatch(/^Score and night summary after 7:00\s*PM$/i);
+    expect(pendingNightText(TONIGHT, TZ)).toMatch(/after 5:00\s*PM\s+\S*(GMT|AEST|AEDT|UTC)\S*$/i);
+  });
+
   test('says when the score arrives, in the configured zone', () => {
     expect(pendingNightText(TONIGHT, TZ)).toMatch(AFTER_5PM);
     expect(pendingNightText(TONIGHT, 'UTC')).toMatch(/after 7:00\s*AM/i);
@@ -234,6 +241,27 @@ describe('the child page: the review row follows the night on screen', () => {
     await waitFor(() => expect(api.get).toHaveBeenCalledWith(expect.stringContaining('/review/pending')));
     await new Promise((r) => setTimeout(r, 30));
     expect(screen.queryByText(/that.s recorded/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('the review question when the card flips from tonight to last night on an open page', () => {
+  const FLIP_ASK = { state: 'ask', night_date: '2026-09-02', wake_at: '2026-09-02 19:56:00', onset_at: '2026-09-02 09:00:00' };
+  const PREVIOUS = { state: 'done', night_date: '2026-09-01', true_wake_at: '2026-09-01 19:56:00', true_onset_at: null, true_in_bed_at: null, nobody_in_bed: false };
+
+  test('★ the question for the night that just ended appears without a reload', async () => {
+    // While tonight shows, the server answers about the PREVIOUS night; once the window closes it answers about the new last night.
+    let answer = PREVIOUS;
+    vi.spyOn(api, 'get').mockImplementation(() => Promise.resolve(answer));
+    const fmt = (v) => String(v);
+    const { rerenderWith } = renderAsAdmin(<MorningReviewCard childId="kid-1" fmtTime={fmt} forNight={null} />, { settings: { timezone: TZ } });
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByText(/that.s recorded/i)).not.toBeInTheDocument();
+    // The window closes: the card above now shows the finished night, and the server's answer has moved on.
+    answer = FLIP_ASK;
+    rerenderWith({ ui: <MorningReviewCard childId="kid-1" fmtTime={fmt} forNight="2026-09-02" /> });
+    expect(await screen.findByText(/Is that right\?/)).toBeInTheDocument();
+    expect(api.get).toHaveBeenCalledTimes(2);
   });
 });
 

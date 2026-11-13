@@ -1591,9 +1591,12 @@ body.in-pip .tile-menu-backdrop {
 .recompute-choice__option:has(input:disabled) { cursor: default; opacity: 0.55; }
 .recompute-choice__help { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); margin-left: 28px; }
 .recompute-choice__help strong { font-weight: 600; color: var(--text-primary); }
-/* 15px bold in the primary text colour, like every other card heading (Timelapse, Recent alerts, Recordings, Room climate): it was a 13px
-   uppercase grey label, the smallest thing in its card (owner, staging phone 2026-11-13: "same heading treatment"). */
-.sleep-detail__section-title { font-size: 15px; font-weight: 700; color: var(--text-primary); margin: 0 0 12px; }
+/* The small grey uppercase label. Still used by Settings ("Keeping readings"), which keeps it. */
+.sleep-detail__section-title { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-secondary); margin: 0 0 12px; }
+/* The sleep page's card heading (the Timeline card): 15px bold in the primary text colour, like every other card heading (Timelapse,
+   Recent alerts, Recordings, Room climate). A class of its own so the Settings page's label above is untouched (owner, staging
+   phone 2026-11-13: the smallest thing in its card was the heading). */
+.sleep-card-title { font-size: 15px; font-weight: 700; color: var(--text-primary); margin: 0 0 12px; }
 
 .sleep-tl { padding-top: 2px; }
 /* THE TIMELINE TELLS ITS STATES APART BY MORE THAN COLOUR (design v3.1, 2026-11-13). Several neighbouring pairs are under 3:1
@@ -1894,7 +1897,8 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 /* "Score and night summary after 7:00 AM" under the so-far facts: the muted tint, as on the child's card (.night__pending-line). */
 .sleep-night-card .sleep-night-card__pending { color: var(--night-muted); }
 /* The no-data night (SleepDetail NightContent): a dashed moon ring over the explanation, centred, as drawn. */
-.sleep-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px 14px; text-align: center; }.sleep-score__open { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 44px; padding: 4px 0; background: none; border: none; color: var(--night-link); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; border-radius: 10px; }
+.sleep-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px 14px; text-align: center; }
+.sleep-score__open { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 44px; padding: 4px 0; background: none; border: none; color: var(--night-link); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; border-radius: 10px; }
 .sleep-score__open:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .sleep-night-card__review { padding-top: 10px; border-top: 1px solid var(--night-divider); }
 .sleep-night-card__review a, .sleep-night-card__review button { min-height: 44px; }

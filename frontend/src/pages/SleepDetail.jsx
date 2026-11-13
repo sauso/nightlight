@@ -546,7 +546,7 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
       </div>
 
       <div className="card">
-        <div className="sleep-detail__section-title">Timeline</div>
+        <div className="sleep-card-title">Timeline</div>
         <Timeline night={night} fmtTime={fmtTime} tz={tz} tempUnit={tempUnit} />
         <div className="sleep-legend">
           {states.has('asleep') && <span><i className="sleep-legend__sw sleep-seg--asleep" aria-hidden="true" /> Asleep</span>}
