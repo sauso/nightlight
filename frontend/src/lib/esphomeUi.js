@@ -32,6 +32,16 @@ export function stateBadge(device) {
   return STATE_BADGES[state] || { text: String(state), cls: 'status-badge--off' };
 }
 
+// Off and an unrecognised state have no connection activity to animate.
+export function stateDot(device) {
+  if (device?.enabled === false) return 'off';
+  const state = device?.status?.state;
+  if (state === 'connected') return 'live';
+  if (state === 'connecting') return 'connecting';
+  if (state === 'disconnected' || state === 'failed') return 'offline';
+  return 'off';
+}
+
 // What the card says about encryption. `status.encrypted` is only true for a CONNECTED encrypted session: it is false
 // while connecting, disconnected, failed and disabled EVEN WITH a key configured (a plan-review finding, verified in
 // esphomeManager.js). So "not encrypted: readings can be read on your network" is claimed only for a connected plaintext

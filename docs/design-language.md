@@ -95,6 +95,10 @@ the timeline colours and the night-card text below, and **names the pairs that a
 The header colour is repeated in `index.html`'s `theme-color` meta (`#14142A`), which tints the phone's browser chrome; the
 manifest's `theme_color` and `background_color` and the app icons' ground are the same navy.
 
+### ESPHome search and saved devices (#1074)
+
+The ESPHome settings screen uses the existing `.night` navy card for **Find devices**, above **Your devices**. The search button is its main action; the card's error line uses `--night-error` (`#F4A3AD`) on the lightest gradient stop (`#2C2F63`) to stay above 4.5:1 contrast. Results are 56px rows with wrapping names and muted but full-opacity unavailable states. Each saved device has a 44px **⋯** menu for Edit, Test connection, Download CSV and Delete device; **Sensors** is a separate disclosure row. The manual action reads **Add by IP address**.
+
 ### Child hero card (`.night`)
 
 One fixed navy gradient in both themes: `linear-gradient(165deg, #2C2F63 0%, #191B38 100%)`, so its text colours are
