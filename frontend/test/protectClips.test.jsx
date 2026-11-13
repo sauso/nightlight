@@ -178,7 +178,7 @@ test('Sleep Detail shows the wake lock and lets an admin unprotect it without a 
   vi.spyOn(api, 'put').mockResolvedValue({ protected: false });
   const { user } = renderAsAdmin(<Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes>,
     { kids: [{ id: 'child-1', name: 'a child' }], route: '/children/child-1/sleep' });
-  await user.click(await screen.findByRole('button', { name: /10m awake/ }));
+  await user.click(await screen.findByRole('button', { name: /10m/ }));
   expect(screen.getAllByLabelText('Protected').length).toBeGreaterThan(0);
   await user.click(screen.getByRole('button', { name: 'Play the clip recorded at the start of this wake' }));
   expect(screen.queryByRole('button', { name: 'Delete clip' })).toBeNull();
@@ -196,8 +196,8 @@ test('Sleep Detail does not print zero after an unprotected wake clip', async ()
     ? { night: { night_date: '2026-08-30' } } : path.includes('/sleep/insights') ? null : night));
   renderAsAdmin(<Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes>,
     { kids: [{ id: 'child-1', name: 'a child' }], route: '/children/child-1/sleep' });
-  const head = await screen.findByRole('button', { name: /20m awake/ });
-  expect(head).toHaveTextContent(/20m awakeclip$/);
+  const head = await screen.findByRole('button', { name: /20m/ });
+  expect(head).toHaveTextContent(/20mclip$/);
   expect(head).not.toHaveTextContent(/clip0/);
 });
 
@@ -211,7 +211,7 @@ test('Sleep Detail updates a correlated alert badge after protection changes', a
   vi.spyOn(api, 'put').mockResolvedValue({ protected: true });
   const { user } = renderAsAdmin(<Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes>,
     { kids: [{ id: 'child-1', name: 'a child' }], route: '/children/child-1/sleep' });
-  await user.click(await screen.findByRole('button', { name: /20m awake/ }));
+  await user.click(await screen.findByRole('button', { name: /20m/ }));
   await user.click(screen.getByRole('button', { name: 'Play clip from Camera A' }));
   await user.click(screen.getByRole('button', { name: 'Protect this clip' }));
   await waitFor(() => expect(api.put).toHaveBeenCalledWith('/cameras/alerts/a1/protected', { protected: true }));

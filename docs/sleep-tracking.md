@@ -86,9 +86,12 @@ another room less well.
 
 ### The detail view
 
-Tap the sleep summary for the full **night timeline**: a to-scale bar of
-asleep / stirring / awake stretches on a real time axis, every wake-up listed with its time
-and length, a **movement outside the bed** list, and a way to step back through
+Tap the sleep summary for the **Timeline** card: a to-scale bar of
+asleep / stirring / awake stretches on a real time axis. Nearby short stirs join visually on the bar;
+the underlying times and counts stay separate, and the hover status follows the original segments.
+The legend lists only the states present that night. Below it, one card with two tabs, **Wake-ups** and
+**Room activity**, shows each count and its own rows (with clips or saved frames where available),
+and there is a way to step back through
 roughly the last month of nights: a strip of seven nights (each with its score and a small
 colour bar; tap one to open it) that starts at the newest nights, and a calendar button. Pick an older night
 and the strip slides to centre on it, so the nights either side are one tap away. The strip is a heat map of the

@@ -101,7 +101,7 @@ for (const [suffix, form] of [['mobile', PHONE], ['desktop', DESKTOP]]) {
 
   // The night detail page: the numbers behind the overview card.
   await go(`/children/${AVERY}/sleep`);
-  await page.getByText('NIGHT TIMELINE').waitFor();
+  await page.getByText('Timeline', { exact: true }).waitFor();
   await shot('sleep-mobile');
 
   // The morning review: opened the way a person gets there, from the prompt on the child page.

@@ -392,6 +392,137 @@ describe('which night it opens on', () => {
   });
 });
 
+describe('timeline legend and night-event tabs', () => {
+  const wake = { start_at: '2026-08-30 10:00:00', end_at: '2026-08-30 10:10:00', minutes: 10 };
+  const visit = { type: 'visitor', start_at: '2026-08-30 12:00:00', end_at: '2026-08-30 12:05:00', minutes: 5 };
+  const seg = (state, from_at, to_at, minutes) => ({ state, from_at, to_at, minutes });
+
+  test('the title and legend describe only states and markers actually on the bar', async () => {
+    mockSleep({ night: { ...NIGHT, segments: [seg('asleep', '2026-08-30 09:00:00', '2026-08-30 09:01:00', 1)],
+      transitions: [{ type: 'into_bed', at: '2026-08-30 09:00:00' }] } });
+    const { container } = mount();
+    expect(await screen.findByText('Timeline', { exact: true })).toBeInTheDocument();
+    const legend = container.querySelector('.sleep-legend');
+    expect(legend.textContent).toContain('Asleep');
+    for (const absent of ['Stirring', 'Awake', 'Before/after sleep', 'No data', 'Movement outside the bed']) {
+      expect(legend.textContent).not.toContain(absent);
+    }
+    expect(legend.textContent).toContain('Got into bed');
+    expect(legend.textContent).not.toContain('Got out of bed');
+  });
+
+  test('a busy fixture draws grouped stirs without removing awake blocks or markers', async () => {
+    const at = (minute) => new Date(Date.UTC(2026, 7, 30, 9, minute)).toISOString().slice(0, 19).replace('T', ' ');
+    const segments = [];
+    let minute = 0;
+    for (let i = 0; i < 40; i += 1) {
+      segments.push(seg('stir', at(minute), at(minute + 1), 1));
+      minute += 1;
+      if ([9, 19, 29].includes(i)) {
+        segments.push(seg('wake', at(minute), at(minute + 5), 5));
+        minute += 5;
+      } else if (i < 39) {
+        segments.push(seg('asleep', at(minute), at(minute + 1), 1));
+        minute += 1;
+      }
+    }
+    mockSleep({ night: { ...NIGHT, segments, wake_count: 3, visits: [visit, { ...visit, start_at: at(30) }] } });
+    const { container } = mount();
+    await screen.findByRole('tab', { name: 'Room activity · 2' });
+    expect(container.querySelectorAll('.sleep-tl__bar .sleep-seg--stir')).toHaveLength(4);
+    expect(container.querySelectorAll('.sleep-tl__bar .sleep-seg--wake')).toHaveLength(3);
+    expect(container.querySelectorAll('.sleep-tl__visit')).toHaveLength(2);
+    expect((await screen.findByText('Wake-ups')).closest('.sleep-stat')).toHaveTextContent('3');
+    expect(segments.filter((s) => s.state === 'stir')).toHaveLength(40);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, right: 720, bottom: 30, width: 720, height: 30, x: 0, y: 0, toJSON() {} });
+    fireEvent.mouseMove(container.querySelector('.sleep-tl__bar'), { clientX: 1.5 });
+    expect(container.querySelector('.sleep-tl__tip-status')).toHaveTextContent('asleep');
+  });
+
+  test('a lone stir is a quiet dash while a wide run keeps its side-gap treatment', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(720);
+    mockSleep({ night: { ...NIGHT, segments: [
+      seg('stir', '2026-08-30 09:00:00', '2026-08-30 09:01:00', 1),
+      seg('asleep', '2026-08-30 09:01:00', '2026-08-30 10:00:00', 59),
+      seg('stir', '2026-08-30 10:00:00', '2026-08-30 10:30:00', 30),
+    ] } });
+    const { container } = mount();
+    await screen.findByRole('tab', { name: 'Wake-ups · 0' });
+    await waitFor(() => expect(container.querySelectorAll('.sleep-tl__bar .sleep-seg--stir')).toHaveLength(2));
+    const [short, wide] = container.querySelectorAll('.sleep-tl__bar .sleep-seg--stir');
+    expect(short).toHaveClass('sleep-seg--stir-quiet');
+    expect(wide).not.toHaveClass('sleep-seg--stir-quiet');
+  });
+
+  test('tabs expose counts, keyboard navigation, separate rows and the original clip player', async () => {
+    mockSleep({ night: { ...NIGHT, wakes: [wake], wake_count: 1, visits: [visit],
+      wakeClips: [{ id: 'clip-1', started_at: wake.start_at, camera_name: 'Camera A', duration_s: 30 }] } });
+    mount();
+    const wakeTab = await screen.findByRole('tab', { name: 'Wake-ups · 1' });
+    const roomTab = screen.getByRole('tab', { name: 'Room activity · 1' });
+    expect(wakeTab).toHaveAttribute('aria-selected', 'true');
+    expect(wakeTab).toHaveAttribute('tabindex', '0');
+    expect(roomTab).toHaveAttribute('tabindex', '-1');
+    expect(wakeTab.getAttribute('aria-controls')).toBe('sleep-events-wakes-panel');
+    expect(roomTab.getAttribute('aria-controls')).toBe('sleep-events-room-panel');
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', wakeTab.id);
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('10m');
+    expect(within(screen.getByRole('tabpanel')).getByText('Up for the day')).toBeVisible();
+    expect(within(screen.getByRole('tabpanel')).getByText('6:15 am')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /10mclip/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Play the clip recorded at the start of this wake' }));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    wakeTab.focus();
+    fireEvent.keyDown(wakeTab, { key: 'ArrowRight' });
+    expect(roomTab).toHaveAttribute('aria-selected', 'true');
+    expect(roomTab).toHaveFocus();
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('5m');
+    expect(screen.queryByRole('tabpanel', { name: 'Wake-ups · 1' })).toBeNull();
+    fireEvent.keyDown(roomTab, { key: 'Home' });
+    expect(wakeTab).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(wakeTab, { key: 'End' });
+    expect(roomTab).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(roomTab, { key: 'ArrowLeft' });
+    expect(wakeTab).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('room activity is the default only when wake-ups is empty; each empty tab has its own line', async () => {
+    mockSleep({ night: { ...NIGHT, visits: [visit] } });
+    const first = mount();
+    const roomTab = await screen.findByRole('tab', { name: 'Room activity · 1' });
+    expect(roomTab).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByRole('tab', { name: 'Wake-ups · 0' }));
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('No wake-ups counted');
+    first.unmount();
+    mockSleep();
+    mount();
+    expect(await screen.findByRole('tab', { name: 'Wake-ups · 0' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByRole('tab', { name: 'Room activity · 0' }));
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('No room activity recorded');
+  });
+
+  test('coverage is shown when part of the night was not watched', async () => {
+    mockSleep({ night: { ...NIGHT, coverage_minutes: 600 } });
+    mount();
+    expect(await screen.findByText('Coverage')).toBeInTheDocument();
+    expect(screen.getByText('83%')).toBeInTheDocument();
+  });
+
+  test('a new night chooses its own default instead of retaining the previous tab', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-08-31T02:00:00Z'));
+    mockSleep({ night: (path) => path.includes('/2026-08-29')
+      ? { ...NIGHT, night_date: '2026-08-29', wakes: [wake] }
+      : { ...NIGHT, visits: [visit] } });
+    mount();
+    expect(await screen.findByRole('tab', { name: 'Room activity · 1' })).toHaveAttribute('aria-selected', 'true');
+    // Another night is reached through the seven-night strip (the arrows went with the sleep page frame, PR E).
+    fireEvent.click(await screen.findByRole('button', { name: /(Aug 29|29 Aug)/ }));
+    expect(await screen.findByRole('tab', { name: 'Wake-ups · 1' })).toHaveAttribute('aria-selected', 'true');
+  });
+});
+
 describe('moving between nights', () => {
   // ⚠️ THE CLOCK IS PINNED FOR THIS WHOLE GROUP (2026-09-29, CI went red on a PR that touched no
   // frontend). The fixture night is a fixed 2026-08-30, but the screen's maximum comes from the REAL
@@ -1247,12 +1378,12 @@ describe('what a night lists', () => {
     expect(within(stat).getByText('0')).toBeTruthy();
   });
 
-  test('coverage is reported as a percentage of the window', async () => {
-    // 720 minutes covered out of a 12-hour window is 100%. Coverage is how someone tells a quiet
-    // night from a night the cameras missed, so a wrong denominator here is actively misleading.
+  test('complete coverage stays out of the summary', async () => {
+    // The full percentage adds no useful information beside the measured nightly figures.
     mockSleep();
     mount();
-    expect(await screen.findByText(/100%/)).toBeTruthy();
+    await screen.findByRole('tab', { name: 'Wake-ups · 0' });
+    expect(screen.queryByText('Coverage')).toBeNull();
   });
 
   test('a night with a data gap shows the "No data" legend entry (issue #442)', async () => {
@@ -1330,7 +1461,7 @@ describe('what a night lists', () => {
     expect(plain.querySelector('.sleep-tl__visits')).toBeNull();
   });
 
-  test('★ a live night measures coverage against elapsed time, not the whole window', async () => {
+  test('★ a live night measures coverage against elapsed time and hides the complete-coverage line', async () => {
     // Against the full window, a live night would report ~50% coverage at midnight and look broken.
     // `as_of` is what makes the number honest while the night is still running.
     mockSleep({
@@ -1340,7 +1471,8 @@ describe('what a night lists', () => {
       },
     });
     mount();
-    expect(await screen.findByText(/100%/)).toBeTruthy();
+    await screen.findByRole('tab', { name: 'Wake-ups · 0' });
+    expect(screen.queryByText('Coverage')).toBeNull();
   });
 });
 
@@ -1480,7 +1612,7 @@ describe('#907 the saved frame on a Room activity row (expands like a wake-up ro
   test('★ only a row with a frame expands; its frame shows once opened and opens that frame', async () => {
     mockSleep({ night: withFrames([{ id: 42, type: 'out_of_bed', at: '2026-08-30 15:00:20' }]) });
     const { user } = mount();
-    await screen.findByText(/Room activity/);
+    fireEvent.click(await screen.findByRole('tab', { name: /Room activity/ }));
 
     // Closed: nothing to click but the head, and the frame is not even rendered (so no image is fetched).
     expect(screen.queryByRole('button', { name: /Show the frame/ })).toBeNull();
@@ -1518,7 +1650,7 @@ describe('#907 the saved frame on a Room activity row (expands like a wake-up ro
     vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}?token=media-token`);
     mockSleep({ night: withFrames([{ id: 42, type: 'out_of_bed', at: '2026-08-30 15:00:20' }]) });
     const { user } = mount();
-    await screen.findByText(/Room activity/);
+    fireEvent.click(await screen.findByRole('tab', { name: /Room activity/ }));
     await expand(user, 'Out of bed');
     // The thumbnail under the row goes through api.url() as well, for the same reason.
     expect(rowOf('Out of bed').querySelector('img').getAttribute('src'))
@@ -1535,7 +1667,7 @@ describe('#907 the saved frame on a Room activity row (expands like a wake-up ro
     // (17:00 to 17:02; the frame is 30 s after its end) and nowhere near the child_out row.
     mockSleep({ night: withFrames([{ id: 77, type: 'into_bed', at: '2026-08-30 17:02:30' }]) });
     const { user } = mount();
-    await screen.findByText(/Room activity/);
+    fireEvent.click(await screen.findByRole('tab', { name: /Room activity/ }));
     expect(within(rowOf('Out of bed')).queryByRole('button'), 'the other row is a plain line').toBeNull();
     await expand(user, 'Movement outside the bed');
     const button = within(rowOf('Movement outside the bed')).getByRole('button', { name: /Show the frame from 3:02 am \(got into bed\)/ });
@@ -1580,7 +1712,7 @@ describe('#907 the saved frame on a Room activity row (expands like a wake-up ro
   test('★ Escape closes the viewer and focus goes back to the button that opened it', async () => {
     mockSleep({ night: withFrames([{ id: 42, type: 'out_of_bed', at: '2026-08-30 15:00:20' }]) });
     const { user } = mount();
-    await screen.findByText(/Room activity/);
+    fireEvent.click(await screen.findByRole('tab', { name: /Room activity/ }));
     await expand(user, 'Out of bed');
     const button = await screen.findByRole('button', { name: /Show the frame/ });
     await user.click(button);
@@ -1599,7 +1731,7 @@ describe('#907 the saved frame on a Room activity row (expands like a wake-up ro
       ]),
     });
     const { user } = mount();
-    await screen.findByText(/Room activity/);
+    fireEvent.click(await screen.findByRole('tab', { name: /Room activity/ }));
     await expand(user, 'Out of bed');
     const buttons = within(rowOf('Out of bed')).getAllByRole('button', { name: /Show the frame/ });
     expect(buttons).toHaveLength(2);
@@ -1612,7 +1744,7 @@ describe('#907 the saved frame on a Room activity row (expands like a wake-up ro
   test('★ a payload without transition_frames (an older server) renders plain rows and no error', async () => {
     mockSleep({ night: withFrames(undefined) });
     mount();
-    await screen.findByText(/Room activity/);
+    fireEvent.click(await screen.findByRole('tab', { name: /Room activity/ }));
     expect(rowOf('Out of bed')).toBeTruthy();
     expect(within(rowOf('Out of bed')).queryByRole('button')).toBeNull();
     expect(screen.queryByText(/the row opens to show it/i), 'and no explanation of an arrow that is not there').toBeNull();
@@ -1673,7 +1805,7 @@ describe('#907 the saved frame on a Room activity row (expands like a wake-up ro
   test('an empty list is the same as none', async () => {
     mockSleep({ night: withFrames([]) });
     mount();
-    await screen.findByText(/Room activity/);
+    fireEvent.click(await screen.findByRole('tab', { name: /Room activity/ }));
     expect(within(rowOf('Out of bed')).queryByRole('button')).toBeNull();
   });
 });

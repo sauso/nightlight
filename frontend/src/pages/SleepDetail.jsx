@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { Calendar, SlidersHorizontal, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play, Video } from 'lucide-react';
+import { Calendar, SlidersHorizontal, ChevronDown, Moon, DoorOpen, Sunrise, Thermometer, Sparkles, Zap, AudioLines, Play, Video } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
@@ -19,6 +19,7 @@ import SleepScoreCard from '../components/SleepScoreCard.jsx';
 import { scoreOf, bandOf } from '../lib/sleepScoreText.js';
 import { showsInBed } from '../lib/inBed.js';
 import { addDays, nightDetailPath, describeSettings } from '../lib/nightView.js';
+import { timelineDrawingSegments } from '../lib/timelineDrawing.js';
 
 // Sleep detail: a to-scale timeline of one night for a child, with the wake-ups marked, plus a date
 // picker to browse back through the retained nights (~30 days of activity_samples). Reached by tapping
@@ -485,6 +486,8 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
   const hasChildOut = visits.some((v) => v.type === 'child_out');
   const hasRoom = visits.some((v) => v.type !== 'child_out');
   const hasGap = (night.segments || []).some((s) => s.state === 'gap');
+  const states = new Set((night.segments || []).map((s) => s.state));
+  const transitionTypes = new Set((night.transitions || []).map((t) => t.type));
   const alerts = night.alerts || [];
   const wakeClips = night.wakeClips || [];
   // #907. Absent on a server from before the field existed (and on a night with no camera): no buttons, no error.
@@ -504,7 +507,7 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
           <Stat label={night.in_progress ? 'Asleep' : 'Asleep from → to'} value={range} />
           <Stat label="Wake-ups" value={String(night.wake_count ?? 0)} />
           <Stat label="Longest stretch" value={fmtDurAbbr(night.longest_stretch_minutes)} />
-          <Stat label="Coverage" value={`${covPct}%`} />
+          {covPct < 100 && <Stat label="Coverage" value={`${covPct}%`} />}
         </div>
         <RefinedTimes night={night} fmtTime={fmtTime} />
         {night.analysis_camera_name && (
@@ -522,52 +525,26 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
       </div>
 
       <div className="card">
-        <div className="sleep-detail__section-title">Night timeline</div>
+        <div className="sleep-detail__section-title">Timeline</div>
         <Timeline night={night} fmtTime={fmtTime} tz={tz} tempUnit={tempUnit} />
         <div className="sleep-legend">
-          <span><i className="sleep-legend__sw sleep-seg--asleep" /> Asleep</span>
-          <span><i className="sleep-legend__sw sleep-seg--stir" /> Stirring</span>
-          <span><i className="sleep-legend__sw sleep-seg--wake" /> Awake</span>
-          <span><i className="sleep-legend__sw sleep-seg--awake" /> Before/after sleep</span>
-          {hasGap && <span><i className="sleep-legend__sw sleep-seg--gap" /> No data</span>}
-          {hasRoom && <span><i className="sleep-legend__sw sleep-legend__sw--visit" /> Movement outside the bed</span>}
-          {hasChildOut && <span><i className="sleep-legend__sw sleep-legend__sw--out" /> Out of bed</span>}
-          {(night.transitions || []).length > 0 && (
-            <span><i className="sleep-tl__tx sleep-tl__tx--in" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 1px 0', verticalAlign: 'middle' }} /> Got into bed
-              <i className="sleep-tl__tx sleep-tl__tx--out" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 0 10px', verticalAlign: 'middle' }} /> Got out of bed</span>
-          )}
+          {states.has('asleep') && <span><i className="sleep-legend__sw sleep-seg--asleep" aria-hidden="true" /> Asleep</span>}
+          {states.has('stir') && <span><i className="sleep-legend__sw sleep-seg--stir" aria-hidden="true" /> Stirring</span>}
+          {states.has('wake') && <span><i className="sleep-legend__sw sleep-seg--wake" aria-hidden="true" /> Awake</span>}
+          {(states.has('awake') || states.has('settling')) && <span><i className="sleep-legend__sw sleep-seg--awake" aria-hidden="true" /> Before/after sleep</span>}
+          {hasGap && <span><i className="sleep-legend__sw sleep-seg--gap" aria-hidden="true" /> No data</span>}
+          {hasRoom && <span><i className="sleep-legend__sw sleep-legend__sw--visit" aria-hidden="true" /> Movement outside the bed</span>}
+          {hasChildOut && <span><i className="sleep-legend__sw sleep-legend__sw--out" aria-hidden="true" /> Out of bed</span>}
+          {transitionTypes.has('into_bed') && <span><i className="sleep-tl__tx sleep-tl__tx--in" aria-hidden="true" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 1px 0', verticalAlign: 'middle' }} /> Got into bed</span>}
+          {transitionTypes.has('out_of_bed') && <span><i className="sleep-tl__tx sleep-tl__tx--out" aria-hidden="true" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 0 0', verticalAlign: 'middle' }} /> Got out of bed</span>}
         </div>
         <ClimateTrack night={night} startMs={utcMs(night.display_start || night.window_start)} endMs={utcMs(night.display_end || night.window_end)} tempUnit={tempUnit} />
       </div>
 
-      <div className="card">
-        <div className="sleep-detail__section-title">Wake-ups · {wakes.length}</div>
-        {wakes.length === 0 ? (
-          <div className="camera-tile__sub" style={{ padding: '2px 2px 4px' }}>No awakenings counted (a stir under 5 minutes doesn’t count).</div>
-        ) : (
-          <ul className="sleep-wakes">
-            {wakes.map((w, i) => (
-              <WakeItem key={i} wake={w} hits={alertsInRange(alerts, w.start_at, w.end_at)}
-                clip={clipForWake(wakeClips, w.start_at, w.end_at)}
-                fmtTime={fmtTime} onPlay={setClipFor} onPlayWake={setWakeClip} />
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {visits.length > 0 && (
-        <div className="card">
-          <div className="sleep-detail__section-title"><DoorOpen size={15} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: 6 }} />Room activity · {visits.length}</div>
-          <div className="camera-tile__sub" style={{ margin: '-6px 0 10px' }}>Movement the camera saw away from the bed. Before your child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.{frames.length > 0 && ' Where the camera saved a frame when it decided the bed was entered or left, the row opens to show it. Older nights have none.'}</div>
-          <ul className="sleep-wakes">
-            {/* Keyed by when the row starts, not its position: each row keeps its own open/closed state, and the live
-                night is re-read every two minutes, so a row inserted before an open one must not hand it over. */}
-            {visits.map((v) => (
-              <VisitItem key={`${v.start_at}|${v.type}`} visit={v} frames={framesForVisit(frames, v)} fmtTime={fmtTime} onShowFrame={setFrameFor} />
-            ))}
-          </ul>
-        </div>
-      )}
+      <NightEventTabs key={`${childId}|${date}`} wakes={wakes} visits={visits} alerts={alerts}
+        wakeClips={wakeClips} frames={frames} fmtTime={fmtTime} onPlay={setClipFor}
+        onPlayWake={setWakeClip} onShowFrame={setFrameFor}
+        morningWakeAt={!night.in_progress && !night.wake_unconfirmed && !night.wake_unconfirmed_at ? night.wake_at : null} />
 
       {clipFor && <ClipPlayerModal ev={clipFor} onClose={() => setClipFor(null)}
         onProtectedChange={(clipId, value) => {
@@ -597,6 +574,64 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
   );
 }
 
+function NightEventTabs({ wakes, visits, alerts, wakeClips, frames, fmtTime, onPlay, onPlayWake, onShowFrame, morningWakeAt }) {
+  // The parent keys this component by child and night, so a newly opened night chooses its own useful default.
+  const [selected, setSelected] = useState(() => wakes.length === 0 && visits.length > 0 ? 'room' : 'wakes');
+  const tabs = ['wakes', 'room'];
+  const chooseFromKey = (event, index) => {
+    let next;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    setSelected(tabs[next]);
+    event.currentTarget.parentElement.querySelectorAll('[role="tab"]')[next].focus();
+  };
+  return (
+    <div className="card sleep-events">
+      <div className="sleep-events__tabs" role="tablist" aria-label="Night events">
+        {tabs.map((tab, index) => (
+          <button key={tab} type="button" role="tab" id={`sleep-events-${tab}-tab`}
+            aria-controls={`sleep-events-${tab}-panel`} aria-selected={selected === tab}
+            tabIndex={selected === tab ? 0 : -1} onClick={() => setSelected(tab)}
+            onKeyDown={(event) => chooseFromKey(event, index)}>
+            {tab === 'wakes' ? `Wake-ups · ${wakes.length}` : `Room activity · ${visits.length}`}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" id="sleep-events-wakes-panel" aria-labelledby="sleep-events-wakes-tab" hidden={selected !== 'wakes'}>
+        {wakes.length === 0 ? (
+            <div className="camera-tile__sub sleep-events__empty">No wake-ups counted (a stir under 5 minutes doesn’t count).</div>
+          ) : (
+            <ul className="sleep-wakes">
+              {wakes.map((w, i) => (
+                <WakeItem key={`${w.start_at}|${i}`} wake={w} hits={alertsInRange(alerts, w.start_at, w.end_at)}
+                  clip={clipForWake(wakeClips, w.start_at, w.end_at)}
+                  fmtTime={fmtTime} onPlay={onPlay} onPlayWake={onPlayWake} />
+              ))}
+            </ul>
+          )}
+        {morningWakeAt && <div className="sleep-events__morning"><span><Sunrise size={16} aria-hidden="true" /> Up for the day</span><time>{fmtTime(morningWakeAt)}</time></div>}
+      </div>
+      <div role="tabpanel" id="sleep-events-room-panel" aria-labelledby="sleep-events-room-tab" hidden={selected !== 'room'}>
+        <>
+            {visits.length > 0 && <div className="camera-tile__sub sleep-events__explain">Movement the camera saw away from the bed. Before a child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.{frames.length > 0 && ' Where the camera saved a frame when it decided the bed was entered or left, the row opens to show it. Older nights have none.'}</div>}
+            {visits.length === 0 ? <div className="camera-tile__sub sleep-events__empty">No room activity recorded.</div> : (
+              <ul className="sleep-wakes">
+                {/* A live update may insert a row before an open one; time and type keep its state with that row. */}
+                {visits.map((v) => (
+                  <VisitItem key={`${v.start_at}|${v.type}`} visit={v} frames={framesForVisit(frames, v)} fmtTime={fmtTime} onShowFrame={onShowFrame} />
+                ))}
+              </ul>
+            )}
+        </>
+      </div>
+    </div>
+  );
+}
+
 // One wake-up row. Collapsed by default (time + duration + chips); expand it to see the correlated
 // alerts and play whatever was recorded.
 //
@@ -611,7 +646,7 @@ function WakeItem({ wake, hits, clip, fmtTime, onPlay, onPlayWake }) {
     <>
       <span className="sleep-wakes__time">{fmtTime(wake.start_at)} – {fmtTime(wake.end_at)}</span>
       <span className="sleep-wakes__headright">
-        <span className="sleep-wakes__dur">{fmtDur(wake.minutes)} awake</span>
+        <span className="sleep-wakes__dur">{fmtDur(wake.minutes)}</span>
         {hits.length > 0 && (
           <span className="sleep-wakes__badge">
             <Zap size={11} aria-hidden="true" />{hits.length} alert{hits.length === 1 ? '' : 's'}
@@ -794,11 +829,26 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
   const endMs = utcMs(night.display_end || night.window_end);
   const totalMs = Math.max(1, endMs - startMs);
   const segs = night.segments || [];
+  const drawingSegs = timelineDrawingSegments(segs);
 
   // Hover bubble: as the cursor (or a finger) moves across the bar, show the time under it, the sleep
   // status at that moment, and — if the room had a sensor — the temperature then. `null` = not hovering.
   const barRef = useRef(null);
   const [hover, setHover] = useState(null);
+  const [barWidth, setBarWidth] = useState(0);
+  // The side gaps need actual screen space. Eight pixels leaves a visible block after both 2px gaps;
+  // it is a drawing threshold, unrelated to the minutes used for sleep analysis.
+  const STIR_GAP_WIDTH_PX = 8;
+  useEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return undefined;
+    const measure = () => setBarWidth(bar.clientWidth);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, []);
 
   const tempSeries = useMemo(
     () => (night.climate?.series || []).filter((p) => p.temperature != null).map((p) => ({ ms: utcMs(p.t), c: p.temperature })),
@@ -893,8 +943,8 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
           </div>
         )}
         <div className="sleep-tl__bar">
-          {segs.map((s, i) => (
-            <div key={i} className={`sleep-seg ${SEG_CLASS[s.state] || 'sleep-seg--awake'}`}
+          {drawingSegs.map((s, i) => (
+            <div key={i} className={`sleep-seg ${SEG_CLASS[s.state] || 'sleep-seg--awake'}${s.state === 'stir' && (s.minutes === 1 || s.minutes / (totalMs / 60000) * barWidth < STIR_GAP_WIDTH_PX) ? ' sleep-seg--stir-quiet' : ''}`}
               style={{ width: `${(s.minutes / (totalMs / 60000)) * 100}%` }} />
           ))}
           {onsetPct != null && <span className="sleep-tl__mark" style={{ left: `${onsetPct}%` }} />}
