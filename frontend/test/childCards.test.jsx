@@ -15,6 +15,7 @@ import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
 import { screen, waitFor, act } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver, renderAs, ADMIN, CAREGIVER } from './helpers/render.jsx';
+import { nameStartsWithPrinted } from './helpers/accessibleName.js';
 import SleepSummaryCard from '../src/components/SleepSummaryCard.jsx';
 import TimelapseCard from '../src/components/TimelapseCard.jsx';
 import { api } from '../src/lib/api.js';
@@ -207,7 +208,7 @@ describe('SleepSummaryCard', () => {
       live({ scope: 'off' });
       const { user } = renderAsAdmin(routes, { settings: { timezone: TZ } });
       expect(await screen.findByText('Sleep tracking is off')).toBeInTheDocument();
-      const btn = screen.getByRole('button', { name: 'Turn on sleep tracking in settings' });
+      const btn = screen.getByRole('button', { name: 'Sleep tracking is off. Turn on sleep tracking in settings' });
       await user.click(btn);
       expect(await screen.findByText('child settings')).toBeInTheDocument();
     });
@@ -216,14 +217,14 @@ describe('SleepSummaryCard', () => {
       // Clickable even with nothing to show, so the date picker there is still reachable.
       live({ scope: 'last_night', night: { status: 'no_data' } });
       const { user } = renderAsAdmin(routes, { settings: { timezone: TZ } });
-      await user.click(await screen.findByRole('button', { name: 'View sleep detail and history' }));
+      await user.click(await screen.findByRole('button', { name: /^Once a camera .* View sleep detail and history$/ }));
       expect(await screen.findByText('sleep detail')).toBeInTheDocument();
     });
 
     test('a caregiver gets the same card and the same destination', async () => {
       live({ scope: 'last_night', night: OK_NIGHT });
       const { user } = renderAsCaregiver(routes, { settings: { timezone: TZ } });
-      await user.click(await screen.findByRole('button', { name: 'View sleep detail and history' }));
+      await user.click(await screen.findByRole('button', { name: /^Last night .* asleep\. View sleep detail and history$/ }));
       expect(await screen.findByText('sleep detail')).toBeInTheDocument();
     });
   });
@@ -267,8 +268,9 @@ describe('TimelapseCard', () => {
   // because `/Play .*1.*Sep.*/` quietly assumes day-BEFORE-month and en-US renders "Tue, Sep 1".
   // That is why the locale is pinned rather than worked around: a half-tolerant matcher reads as
   // careful while being exactly as machine-specific as the exact string it replaced.
-  const SEP1 = 'Play Tue, 1 Sept timelapse';
-  const AUG31 = 'Play Mon, 31 Aug timelapse';
+  // The hero's name opens with the text printed on it, duration included (WCAG 2.5.3): "Tue, 1 Sept · 42s".
+  const SEP1 = 'Tue, 1 Sept · 42s, play timelapse';
+  const AUG31 = 'Mon, 31 Aug, play timelapse';
 
   beforeEach(() => {
     vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
@@ -295,6 +297,8 @@ describe('TimelapseCard', () => {
     renderAsAdmin(<TimelapseCard childId="kid-1" />);
     const hero = await screen.findByRole('button', { name: SEP1 });
     expect(hero.textContent).toBe('Tue, 1 Sept · 42s');
+    // ★ Label in name (WCAG 2.5.3): the name opens with the printed text, duration included. Fails on "Play Tue, 1 Sept timelapse".
+    expect(nameStartsWithPrinted(hero)).toBe(true);
   });
 
   test('a single timelapse shows no picker strip', async () => {
@@ -324,8 +328,10 @@ describe('TimelapseCard', () => {
     await screen.findByRole('button', { name: SEP1 });
     const tiles = [...container.querySelectorAll('.timelapse-strip__item')];
     expect(tiles.map((t) => t.textContent)).toEqual(['Tue', 'Mon']);
-    expect(screen.getByRole('button', { name: 'Show Tue, 1 Sept timelapse' })).toBe(tiles[0]);
-    expect(screen.getByRole('button', { name: 'Show Mon, 31 Aug timelapse' })).toBe(tiles[1]);
+    expect(screen.getByRole('button', { name: 'Tue, 1 Sept timelapse' })).toBe(tiles[0]);
+    expect(screen.getByRole('button', { name: 'Mon, 31 Aug timelapse' })).toBe(tiles[1]);
+    // ★ Label in name (WCAG 2.5.3): what a tile PRINTS is how its name begins. Fails on the old "Show Tue, 1 Sept timelapse".
+    for (const tile of tiles) expect(nameStartsWithPrinted(tile)).toBe(true);
     // The thumbnail is decoration: the date is not announced twice.
     expect(tiles[0].querySelector('img')).toHaveAttribute('alt', '');
     expect(tiles[0]).toHaveAttribute('aria-pressed', 'true');
@@ -335,7 +341,7 @@ describe('TimelapseCard', () => {
   test('an unparseable night date is shown raw rather than as Invalid Date', async () => {
     list([{ id: 't-9', night_date: 'garbage' }]);
     renderAsAdmin(<TimelapseCard childId="kid-1" />);
-    expect(await screen.findByRole('button', { name: 'Play garbage timelapse' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'garbage, play timelapse' })).toBeInTheDocument();
   });
 
   test('the hero opens the player', async () => {

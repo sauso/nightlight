@@ -163,6 +163,17 @@ button {
   font-family: inherit;
 }
 
+/* No tap-highlight flash on a control. The Android WebView (and iOS Safari) paint a translucent box over whatever is tapped
+   (a grey-blue default on Android), and on our rounded buttons, cards and rows it showed as a square flash that is not part of
+   the design. Every control we restyled has its own :active and/or :focus-visible state (the global button:focus-visible ring
+   below; the :active tints on the rows, tiles and the review controls), so removing the default does not leave a control
+   without feedback. A control that still has no :active tint of its own is listed in docs/design-language.md section 9, not
+   papered over here. It is ONE rule for every kind of interactive element, so a new control inherits it: do not set it
+   per component. Hover rules are unaffected (they stay inside @media (hover: hover)). */
+button, a, summary, label[for], select, [role='button'], [role='tab'], [role='menuitem'], [role='link'] {
+  -webkit-tap-highlight-color: transparent;
+}
+
 .app-shell {
   min-height: 100%;
   display: flex;
@@ -3519,6 +3530,10 @@ input[type='range'] {
   border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary);
 }
 .review-suggest__btn:disabled { opacity: 0.5; cursor: default; }
+/* Press feedback for the controls that had none once the default tap highlight went (see the -webkit-tap-highlight-color rule
+   near the top): the same --bg-elevated-2 tint the rows use on hover, on touch as well as mouse. */
+.review-link:not(:disabled):active, .review-stepper__btn:not(:disabled):active, .review-suggest__btn:not(:disabled):active,
+.sleep-strip__item:active { background: var(--bg-elevated-2); }
 
 /* "+ Add a note": a plain text action, 44px tall. */
 .review-add {

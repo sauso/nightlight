@@ -498,7 +498,7 @@ describe('the headline on the child\'s card', () => {
     expect(screen.queryByText(FIRST)).not.toBeInTheDocument();
     expect(screen.getByText('Last night')).toBeInTheDocument();
     expect(screen.getByRole('button').getAttribute('aria-label'))
-      .toBe('View sleep detail and history. Steady, with some waking or stirring. Sleep score 82, Good');
+      .toBe('Last night 10h 37m asleep. View sleep detail and history. Steady, with some waking or stirring. Sleep score 82, Good');
   });
 
   test('with the switch off the headline is still there and the label has no score', async () => {
@@ -506,7 +506,7 @@ describe('the headline on the child\'s card', () => {
     await asleep('10h 37m asleep');
     expect(screen.getByText(HEADLINE)).toBeInTheDocument();
     expect(screen.getByRole('button').getAttribute('aria-label'))
-      .toBe('View sleep detail and history. Steady, with some waking or stirring');
+      .toBe('Last night 10h 37m asleep. View sleep detail and history. Steady, with some waking or stirring');
   });
 
   test('a night in progress shows its "so far" line', async () => {
@@ -518,7 +518,7 @@ describe('the headline on the child\'s card', () => {
   test('no summary: the card is as it was, with no extra line and the old label', async () => {
     show({ ...OK_NIGHT, summary: null });
     await asleep('10h 37m asleep');
-    expect(screen.getByRole('button').getAttribute('aria-label')).toBe('View sleep detail and history');
+    expect(screen.getByRole('button').getAttribute('aria-label')).toBe('Last night 10h 37m asleep. View sleep detail and history');
     expect(screen.queryByText(HEADLINE)).not.toBeInTheDocument();
   });
 
@@ -526,7 +526,7 @@ describe('the headline on the child\'s card', () => {
     show({ ...OK_NIGHT, status: 'no_sleep', summary: SUMMARY });
     await screen.findByText('No clear sleep detected overnight.');
     expect(screen.queryByText(HEADLINE)).not.toBeInTheDocument();
-    expect(screen.getByRole('button').getAttribute('aria-label')).toBe('View sleep detail and history');
+    expect(screen.getByRole('button').getAttribute('aria-label')).toBe('Last night · Tue, 10 Mar. View sleep detail and history');
   });
 
   test('no phrase on either screen contains "night timeline" (the old card title; the docs screenshot run now waits for the exact title "Timeline")', async () => {

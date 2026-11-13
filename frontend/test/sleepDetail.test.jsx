@@ -23,6 +23,7 @@ import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within, fireEvent, act, render } from '@testing-library/react';
 import { Routes, Route, Link } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver, renderAs, forEachRole } from './helpers/render.jsx';
+import { nameStartsWithPrinted } from './helpers/accessibleName.js';
 import SleepDetail, { addDays, framesForVisit, VisitItem } from '../src/pages/SleepDetail.jsx';
 import NightReview from '../src/pages/NightReview.jsx';
 import { api } from '../src/lib/api.js';
@@ -2117,6 +2118,22 @@ describe('UI refresh PR E: the frame', () => {
       expect(items[0].getAttribute('aria-label')).toMatch(/(Aug 24|24 Aug), score 41/);
       expect(items.at(-1).textContent).toContain('30');
       expect(items.at(-1).textContent).toContain('76');
+    });
+
+    // ★ Label in name (WCAG 2.5.3): each button's name OPENS with what it prints, weekday, day number and (for a scored night) the
+    // score, so a voice-control user saying "Sat 29 75" matches. Fails on the old name, "Sat, Aug 29, score 75", which had the
+    // pieces but never the printed text in order. A dash is a symbol, not said, so a night with no score leads with the day only.
+    test('★ every strip button’s accessible name starts with the text it prints', async () => {
+      mockSleep();
+      mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      const items = stripItems();
+      expect(items.length).toBeGreaterThan(0);
+      for (const b of items) {
+        const score = b.querySelector('.sleep-strip__score').textContent;
+        const printed = `${b.querySelector('.sleep-strip__day').textContent} ${b.querySelector('.sleep-strip__date').textContent}${score === '–' ? '' : ` ${score}`}`;
+        expect(nameStartsWithPrinted(b, printed)).toBe(true);
+      }
     });
 
     test('★ the band bar follows the score: a band, "low" under the lowest edge, neutral for an early estimate and for no score', async () => {

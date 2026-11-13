@@ -327,7 +327,7 @@ describe('a child detail screen', () => {
       renderAsAdmin(detailRoutes, atChild('kid-1'));
       await screen.findByText(/Is that right\?/);
       // The names a screen reader reads: the chevron link carries the score and band, the gear and the dismiss have names.
-      expect(screen.getByRole('button', { name: /^View sleep detail and history.*Sleep score 82, Good$/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /^Last night .*asleep\. View sleep detail and history.*Sleep score 82, Good$/ })).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Settings for Child B' })).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Dismiss' })).toBeTruthy();
     });

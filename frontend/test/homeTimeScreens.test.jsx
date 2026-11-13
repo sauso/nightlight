@@ -15,6 +15,7 @@
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderAsAdmin } from './helpers/render.jsx';
+import { nameStartsWithPrinted } from './helpers/accessibleName.js';
 import AlertList from '../src/components/AlertList.jsx';
 import RecentAlerts from '../src/components/RecentAlerts.jsx';
 import EventLog from '../src/components/EventLog.jsx';
@@ -252,6 +253,8 @@ describe('RecordingsCard', () => {
     const tile = container.querySelector('.rec-strip__item');
     expect(tile.textContent).toContain('Sun 7:00 pm GMT-7');
     expect(tile).toHaveAccessibleName(/Sun, 30 Aug, 7:00 pm GMT-7/);
+    // ★ Label in name (WCAG 2.5.3): the name opens with the chip, zone label included. Fails on the old "<camera> · Sun, 30 Aug…".
+    expect(nameStartsWithPrinted(tile)).toBe(true);
   });
 
   test('★ no label when the device is at home', async () => {
@@ -275,7 +278,7 @@ describe('TimelapseCard — a night is a calendar date, not an instant', () => {
     // reads '2026-03-08' as 00:00 UTC and prints the evening before in Los Angeles. The next case is the
     // one that fails on the old formatter.
     renderAsAdmin(<TimelapseCard childId="kid-1" />, { settings: { timezone: LA } });
-    expect(await screen.findByRole('button', { name: 'Play Sun, 8 Mar timelapse' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Sun, 8 Mar · 42s, play timelapse' })).toBeInTheDocument();
   });
 
   test('★★ a night whose local midnight does not exist on this device still prints its own date', async () => {
@@ -293,7 +296,7 @@ describe('TimelapseCard — a night is a calendar date, not an instant', () => {
       vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
       vi.spyOn(api, 'get').mockResolvedValue([{ id: 't-1', night_date: '2011-12-30', duration_s: 42 }]);
       renderAsAdmin(<TimelapseCard childId="kid-1" />, { settings: { timezone: LA } });
-      expect(await screen.findByRole('button', { name: 'Play Fri, 30 Dec timelapse' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Fri, 30 Dec · 42s, play timelapse' })).toBeInTheDocument();
     } finally {
       process.env.TZ = pinned;
     }

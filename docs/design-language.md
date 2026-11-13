@@ -970,6 +970,21 @@ Other rules:
 
 - Global `:focus-visible` ring — never `outline: none` without a replacement.
 - Icon-only control → `aria-label`. Decorative icon → `aria-hidden="true"`.
+- **An accessible name contains the text the control prints, and starts with it** (WCAG 2.5.3, label in name). When a button
+  shows "Sun 7:00 pm" its `aria-label` begins "Sun 7:00 pm", then the camera and the full date; never "Sun, 30 Aug, 7:00 pm
+  from the camera", or "Play ..." in front of a printed date. A voice-control user says what they see, and a name that
+  opens with something else does not match it. Put the verb or the extra detail after the printed text. A symbol that is not a
+  word anyone says (the sleep strip's dash for "no score") need not be in the name. Test it with
+  `nameStartsWithPrinted` (`frontend/test/helpers/accessibleName.js`). Icon-only controls have no printed text and are
+  exempt (they only need a name).
+- **No tap-highlight flash.** One rule in `index.css` sets `-webkit-tap-highlight-color: transparent` on every interactive element
+  (button, a, summary, label[for], select, and the button, tab, menuitem and link roles), because the Android WebView paints a
+  square grey flash over a tapped control that is not part of the design. Do not set it per component. It means a control
+  needs its own press state: a `:active` tint with a token (`--bg-elevated-2` or `--child-action-active`) beside its
+  `:focus-visible` ring, with any `:hover` inside `@media (hover: hover)`. Controls that still have no `:active` tint
+  (a known limit, not a decision): `.btn` (all variants), `.more-menu__btn`, the Room activity and Wake-ups tabs,
+  `.sleep-score__open`, `.sleep-events__what`, `.review-add`, `.night__sleep--btn` and the bottom-nav links. They keep their
+  focus ring and, on a pointer, hover.
 - `aria-pressed` on toggles, `aria-expanded` (+ `aria-haspopup`) on disclosures.
 - Real `<input>`s behind custom controls, not `div`s with click handlers.
 - `prefers-reduced-motion` honoured for every loop.
