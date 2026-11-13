@@ -164,7 +164,11 @@ are close in lightness (the table below), so each state also has its own silhoue
 
 The stirring and awake blocks keep their real width in the row (so the onset and wake marks and the hover time stay exact)
 and are drawn centred on that slot, so a one-minute stir is still 3px wide without pushing the rest along. The bar no
-longer clips (awake rises out of it); the first and last segments round their own outer corners. The legend swatches match: stirring a
+longer clips (awake rises out of it); the first and last segments round their own outer corners, and a stirring or awake block that
+is first or last in the row is anchored to that edge so it never paints outside the bar. Tiny neighbouring blocks (one-minute
+segments are about half a pixel wide on a phone) can overlap; the later one in the row is drawn on top, which can hide a
+one-minute stirring block next to it but never asleep, the before/after segment or an awake block, which are taller. The
+onset, wake and "now" marks are the bar's 30px height (they were declared taller but clipped to that before). The legend swatches match: stirring a
 flat 14x5 block, awake a 4x14 tick. **Day awake against the white card stays 2.10:1 on purpose**: a darker amber would sit
 next to the Fair band's amber and look the same to a colour-blind reader, and the rise above the bar is what carries it.
 
@@ -189,13 +193,18 @@ and fails if one stops being true, so a fix is noticed rather than silently left
 | Day: before/after-sleep segment `#D2D0E2` against the white card | 1.52 | The segment is drawn on the inset track, not on the card; listed because the bar's ends meet the card. |
 | Night: before/after-sleep segment `#3C3F60` against the card `#221F3C` | 1.56 | Same. |
 | Day: wake-up amber `#F0A257` against the before/after-sleep segment `#D2D0E2` | 1.38 | Same as the amber above: told apart by hue and by the rise above the bar. |
+| Day: "No data" hatch `#C7C7C7` against the white card / the inset track `#EAE3F8` | 1.69 / 1.36 | The hatch is its own pattern (stripes of `#C7C7C7` on the track colour), so it reads by its diagonal stripes, not its lightness; against the track it is the pattern's own two stripes. Unchanged by v3.1; found missing from this table in review. |
+| Day: "No data" hatch `#C7C7C7` against stirring `#7279C6` / amber `#F0A257` / before-after `#D2D0E2` | 2.36 / 1.24 / 1.12 | Same: the stripes, not the colour, mark missing data. |
+| Night: "No data" hatch `#5A5C6E` against the card `#221F3C` / the inset track `#100F1C` | 2.40 / 2.88 | Same. |
+| Night: "No data" hatch `#5A5C6E` against asleep `#7C85E6` / before-after `#3C3F60` | 1.99 / 1.54 | Same. |
 
 What v3.1 cleared and removed from this table: stirring against the card and the inset track in both themes (day 3.99 and
 3.20, night 7.33 and 8.80), room activity against the day track (2.47 to 3.06), and night stirring against the
 before/after-sleep segment (1.33 to 4.70). What it made worse or added is in the rows above and is named, not hidden.
 
-The test enumerates every pair of bar segments and every segment or room-activity dot on the card and the inset track, so this
-table is complete for those: a pair under 3:1 that is not named fails it. (Room activity is a dot drawn above the bar, so it is
+The test enumerates every pair of bar segments (asleep, stirring, awake, before/after sleep and the "No data" hatch) and every
+segment or room-activity dot on the card and the inset track, so this table is complete for those (the "No data" hatch was
+missing until the review of the v3.1 change; the grouped rows above name nine pairs): a pair under 3:1 that is not named fails it. (Room activity is a dot drawn above the bar, so it is
 measured against the surfaces only.) All are graphics, never text. The shapes and gaps themselves are CSS and are checked by
 eye on a real render (the screenshots in the change that introduced them), not pinned as pixel values in a test.
 

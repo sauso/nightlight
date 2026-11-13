@@ -1249,6 +1249,21 @@ describe('what a night lists', () => {
     expect(legend.querySelector('.sleep-legend__sw.sleep-seg--wake'), 'an awake swatch').toBeTruthy();
   });
 
+  test('★ moving over a room-activity marker does not show the bar\'s sleep-status tooltip (the markers sit inside the hover wrapper)', async () => {
+    // jsdom has no layout, and the hover handler bails out on a zero-width bar, so give the wrapper a real width.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, right: 300, bottom: 30, width: 300, height: 30, x: 0, y: 0, toJSON() {} });
+    mockSleep({ night: { ...NIGHT, visits: [{ type: 'visitor', start_at: '2026-08-30 12:00:00', end_at: '2026-08-30 12:05:00' }] } });
+    const { container } = mount();
+    await screen.findByText('Wake-ups');
+    const wrap = container.querySelector('.sleep-tl__barwrap');
+    fireEvent.mouseMove(wrap.querySelector('.sleep-tl__bar'), { clientX: 100 });
+    expect(container.querySelector('.sleep-tl__tip'), 'over the bar the tooltip shows (so the test can tell)').toBeTruthy();
+    fireEvent.mouseMove(wrap.querySelector('.sleep-tl__visit'), { clientX: 150 });
+    expect(container.querySelector('.sleep-tl__tip'), 'over a marker it is cleared, not moved').toBeNull();
+    fireEvent.mouseMove(wrap.querySelector('.sleep-tl__bar'), { clientX: 120 });
+    expect(container.querySelector('.sleep-tl__tip'), 'and back on the bar it returns').toBeTruthy();
+  });
+
   test('room-activity markers are inside the bar wrapper, which makes room for them; with none the wrapper does not', async () => {
     mockSleep({ night: { ...NIGHT, visits: [{ type: 'visitor', start_at: '2026-08-30 12:00:00', end_at: '2026-08-30 12:05:00' }] } });
     const withVisit = mount();

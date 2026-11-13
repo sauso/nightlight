@@ -860,9 +860,15 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
         onTouchEnd={() => setHover(null)}
       >
         {/* Room-activity (outside-bed) markers sit above the bar (top -20px of the wrapper, which makes room for them) so they
-            read as events, not sleep state. They are inside the wrapper so the bar's own coordinates position them. */}
+            read as events, not sleep state. They are inside the wrapper so the bar's own coordinates position them. The strip is
+            therefore inside the hover wrapper too, and React events bubble through the DOM tree whatever the geometry, so without
+            the handlers below moving over a marker would show the bar's sleep-status tooltip for a minute the pointer is not over.
+            Over the strip the tooltip is cleared instead (Codex review of #1057); the markers keep their own `title`. */}
         {visits.length > 0 && (
-          <div className="sleep-tl__visits">
+          <div className="sleep-tl__visits"
+            onMouseMove={(e) => { e.stopPropagation(); setHover(null); }}
+            onTouchStart={(e) => { e.stopPropagation(); setHover(null); }}
+            onTouchMove={(e) => { e.stopPropagation(); setHover(null); }}>
             {visits.map((v, i) => (
               <span key={i} className={`sleep-tl__visit${v.type === 'child_out' ? ' sleep-tl__visit--out' : ''}`}
                 style={{ left: `${pctOf(v.start_at, startMs, totalMs)}%` }}

@@ -455,12 +455,38 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
 
   test('★ asleep gets its edge colour only beside stirring (the track) and awake (the awake gap token), and awake draws its own gap with that token', () => {
     const edge = (selector) => rules.find((r) => r.startsWith(`${selector} {`)) || '';
-    expect(edge('.sleep-seg--stir + .sleep-seg--asleep')).toContain('var(--bg-elevated-2)');
-    expect(edge('.sleep-seg--asleep:has(+ .sleep-seg--stir)')).toContain('var(--bg-elevated-2)');
-    expect(edge('.sleep-seg--wake + .sleep-seg--asleep')).toContain('var(--sleep-wake-gap)');
-    expect(edge('.sleep-seg--asleep:has(+ .sleep-seg--wake)')).toContain('var(--sleep-wake-gap)');
-    expect(edge('.sleep-tl__bar .sleep-seg--wake::before'), 'awake gap').toContain('var(--sleep-wake-gap)');
-    expect(edge('.sleep-tl__bar .sleep-seg--stir::before'), 'stirring gap').toContain('var(--bg-elevated-2)');
+    // A neighbour BEFORE asleep sets the LEFT edge (--tl-edge-l); one AFTER it (the :has rules) sets the RIGHT edge (--tl-edge-r).
+    // Checking the property, not only the colour, is what catches the two being swapped.
+    expect(edge('.sleep-seg--stir + .sleep-seg--asleep')).toMatch(/--tl-edge-l:\s*var\(--bg-elevated-2\)/);
+    expect(edge('.sleep-seg--asleep:has(+ .sleep-seg--stir)')).toMatch(/--tl-edge-r:\s*var\(--bg-elevated-2\)/);
+    expect(edge('.sleep-seg--wake + .sleep-seg--asleep')).toMatch(/--tl-edge-l:\s*var\(--sleep-wake-gap\)/);
+    expect(edge('.sleep-seg--asleep:has(+ .sleep-seg--wake)')).toMatch(/--tl-edge-r:\s*var\(--sleep-wake-gap\)/);
+    // ...and asleep paints the left property on its left side (a positive inset offset) and the right one on its right (negative).
+    const base = rules.find((r) => r.startsWith('.sleep-seg--asleep {') && r.includes('box-shadow')) || '';
+    expect(base, 'left edge').toMatch(/inset\s+[1-9]\d*px\s+0\s+0\s+var\(--tl-edge-l/);
+    expect(base, 'right edge').toMatch(/inset\s+-[1-9]\d*px\s+0\s+0\s+var\(--tl-edge-r/);
+    // The blocks' own gaps: EVERY rule that sets a box-shadow on the stirring / awake ::before (the base rule and the first/last/only
+    // variants) must use the gap colour, so a later rule that wins for some position cannot swap it unseen. Not a pixel pin.
+    const shadowOf = (pseudo) => rules.filter((r) => { const at = r.lastIndexOf('{'); return r.slice(0, at).includes(pseudo) && /box-shadow:/.test(r.slice(at)); });
+    for (const [pseudo, token] of [['.sleep-seg--wake::before', 'var(--sleep-wake-gap)'], ['.sleep-seg--stir::before', 'var(--bg-elevated-2)']]) {
+      const all = shadowOf(pseudo);
+      expect(all.length, `${pseudo} has a box-shadow rule`).toBeGreaterThan(0);
+      for (const r of all) {
+        const value = r.slice(r.lastIndexOf('{')).match(/box-shadow:\s*([^;}]*)/)[1];
+        // `none` is the only-child rule (no neighbour to separate from); every other declaration must use the token.
+        expect(value === 'none' || value.includes(token), `${r.slice(0, r.lastIndexOf('{')).trim()}: ${value}`).toBe(true);
+      }
+    }
+  });
+
+  test('★ a stirring or awake block that is first or last in the bar is anchored to that edge, so it cannot paint outside the bar', () => {
+    for (const kind of ['stir', 'wake']) {
+      const rule = (pos) => rules.find((r) => r.startsWith(`.sleep-tl__bar > .sleep-seg--${kind}:${pos}::before {`)) || '';
+      expect(rule('first-child'), `${kind} first`).toMatch(/(^|[ ;{])left:\s*0\b/);
+      expect(rule('last-child'), `${kind} last`).toMatch(/(^|[ ;{])right:\s*0\b/);
+      expect(rule('last-child'), `${kind} last no longer centred by left`).toMatch(/left:\s*auto/);
+      for (const pos of ['first-child', 'last-child', 'only-child']) expect(rule(pos), `${kind} ${pos} is not shifted back by the centring`).toMatch(/transform:\s*none/);
+    }
   });
 
   // Known pairs below their floor (design v3, 2026-11-13; docs/design-language.md, "Known pairs below their floor"). Each is two
@@ -471,7 +497,7 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
   // that list (2026-11-13) found the rest, and the completeness test below is what stops a list like this being short again.
   // The timeline-shape follow-up ("v3.1": segments separated by gaps and shape, not by colour alone) has landed: it cleared most of
   // them and the table below is what is left, plus the few pairs it made worse (see the comment inside the table).
-  const TIMELINE_PAIRS = [['asleep', '--sleep-asleep'], ['stir', '--sleep-stir'], ['wake', '--sleep-wake'], ['awake', '--sleep-awake'], ['visit', '--sleep-visit']];
+  const TIMELINE_PAIRS = [['asleep', '--sleep-asleep'], ['stir', '--sleep-stir'], ['wake', '--sleep-wake'], ['awake', '--sleep-awake'], ['gap', '--sleep-gap'], ['visit', '--sleep-visit']];
   const SURFACES = { card: '--bg-elevated', track: '--bg-elevated-2' };
   const timelineColour = (theme, name) => {
     const t = theme === 'day' ? day : night;
@@ -490,6 +516,10 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     ['day', 'awake', 'track', 1.22], ['night', 'awake', 'track', 1.87],
     ['day', 'awake', 'card', 1.52], ['night', 'awake', 'card', 1.56],
     ['day', 'stir', 'wake', 1.9], ['night', 'stir', 'wake', 1.4], ['day', 'stir', 'awake', 2.63], ['day', 'wake', 'awake', 1.38],
+    // The "No data" hatch (--sleep-gap stripes on the track colour) was left out of the enumeration until Codex's review of #1057
+    // found it; these existed before v3.1 (the gap colour did not change). `gap` against `track` is the hatch's own two stripes.
+    ['day', 'gap', 'card', 1.69], ['day', 'gap', 'track', 1.36], ['day', 'gap', 'stir', 2.36], ['day', 'gap', 'wake', 1.24], ['day', 'gap', 'awake', 1.12],
+    ['night', 'gap', 'card', 2.4], ['night', 'gap', 'track', 2.88], ['night', 'gap', 'asleep', 1.99], ['night', 'gap', 'awake', 1.54],
   ];
   const sortedPair = (a, b) => [a, b].sort().join('|');
 
@@ -502,7 +532,7 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
   test('★ the named list is COMPLETE: every pair of bar segments, and every segment or room-activity dot on the card and track, that is under 3:1 is named', () => {
     // Bar segments can touch one another; every timeline colour sits on the card or its inset track. Room activity is drawn above the
     // bar (a dot), so it is only measured against the surfaces, not against the other segments.
-    const segments = ['asleep', 'stir', 'wake', 'awake'];
+    const segments = ['asleep', 'stir', 'wake', 'awake', 'gap'];
     const candidates = [];
     for (const theme of ['day', 'night']) {
       for (let i = 0; i < segments.length; i += 1) for (let j = i + 1; j < segments.length; j += 1) candidates.push([theme, segments[i], segments[j]]);

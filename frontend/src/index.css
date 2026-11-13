@@ -1489,6 +1489,23 @@ body.in-pip .tile-menu-backdrop {
    on the white card and 1.68:1 on the track, and that is DELIBERATE (owner, design v3.1): a darker amber would sit next to the
    Fair band's amber and look the same to a colour-blind reader, and the shape (it rises above the bar) is what carries it. */
 .sleep-tl__bar .sleep-seg--wake::before { top: -5px; height: 33px; background: var(--sleep-wake); border-radius: 1px 1px 0 0; box-shadow: -2px 0 0 var(--sleep-wake-gap), 2px 0 0 var(--sleep-wake-gap); }
+/* THE ENDS OF THE BAR (Codex review of #1057). A 3px block centred on a ~0.5px slot (a one-minute segment) pokes about 1.25px past
+   either side, so a stirring or awake segment that is the FIRST or LAST in the row would paint outside the bar's rounded end, and
+   so would its outer gap. The first block is therefore anchored to the bar's left edge (growing right), the last to the right edge
+   (growing left), and each draws its gap on the inner side only. A segment that is both (the only one) has no gap. A segment
+   second from the end can still overhang by about a pixel; that is not clamped (it stays inside the card's padding).
+   NEIGHBOURS OVERLAP, ACCEPTED: two tiny adjacent blocks can overlap, and the LATER one in the row paints over the earlier (they
+   share z-index 1, so tree order decides). Consequences: a stirring block never hides asleep or the before/after segment (those
+   are full height and only its middle 14px is covered), nor an awake block (that is taller); but an awake block or a stirring
+   block can hide a one-minute stirring block that sits just before it, and a later stirring block can hide an earlier tiny
+   stirring block. At night a covered neighbour also loses 2px to the gap. The bar's totals and hover time are unaffected, since
+   they come from the real slots. */
+.sleep-tl__bar > .sleep-seg--stir:first-child::before { left: 0; transform: none; box-shadow: 2px 0 0 var(--bg-elevated-2); }
+.sleep-tl__bar > .sleep-seg--wake:first-child::before { left: 0; transform: none; box-shadow: 2px 0 0 var(--sleep-wake-gap); }
+.sleep-tl__bar > .sleep-seg--stir:last-child::before { left: auto; right: 0; transform: none; box-shadow: -2px 0 0 var(--bg-elevated-2); }
+.sleep-tl__bar > .sleep-seg--wake:last-child::before { left: auto; right: 0; transform: none; box-shadow: -2px 0 0 var(--sleep-wake-gap); }
+.sleep-tl__bar > .sleep-seg--stir:only-child::before { left: 0; right: auto; transform: none; box-shadow: none; }
+.sleep-tl__bar > .sleep-seg--wake:only-child::before { left: 0; right: auto; transform: none; box-shadow: none; }
 /* Asleep gets a 2px track-coloured edge only where it touches stirring (both themes) or awake (night only: --sleep-wake-gap is
    transparent by day, where the 1px white separator it replaces is gone). Inset, so it costs no width. The edges are two custom
    properties on the element, so an asleep slot between a stir and an awake keeps BOTH (a later box-shadow rule would replace an
@@ -1513,6 +1530,9 @@ body.in-pip .tile-menu-backdrop {
 .sleep-visit-tag--out { color: var(--sleep-wake-text); background: color-mix(in srgb, var(--sleep-wake) 15%, transparent); }
 /* Out-of-crib room-activity dot on the timeline — the child themselves out (vs teal = someone in the room). */
 .sleep-tl__visit--out { background: var(--sleep-wake); box-shadow: 0 0 0 1px var(--sleep-wake); }
+/* The onset/wake marks and the "now" line are the bar's height (30px) on purpose. Before v3.1 they were declared taller (top and
+   bottom -2px / -4px) but the bar had overflow: hidden, so what was ever SEEN was clipped to 30px; the bar no longer clips, so the
+   declared size is now the real one and is set to what was always visible. z-index 2 keeps them above the stirring/awake blocks. */
 .sleep-tl__mark { position: absolute; z-index: 2; top: 0; bottom: 0; width: 2px; background: var(--text-primary); opacity: 0.55; transform: translateX(-1px); }
 /* Crib-boundary transition markers (out-of-bed detection): a triangle pointing DOWN at the bar = placed
    into the crib; pointing UP = climbed/lifted out. Sit in their own strip just above the timeline bar. */
