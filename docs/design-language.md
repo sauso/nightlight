@@ -980,11 +980,14 @@ Other rules:
 - **No tap-highlight flash.** One rule in `index.css` sets `-webkit-tap-highlight-color: transparent` on every interactive element
   (button, a, summary, label[for], select, and the button, tab, menuitem and link roles), because the Android WebView paints a
   square grey flash over a tapped control that is not part of the design. Do not set it per component. It means a control
-  needs its own press state: a `:active` tint with a token (`--bg-elevated-2` or `--child-action-active`) beside its
-  `:focus-visible` ring, with any `:hover` inside `@media (hover: hover)`. Controls that still have no `:active` tint
-  (a known limit, not a decision): `.btn` (all variants), `.more-menu__btn`, the Room activity and Wake-ups tabs,
-  `.sleep-score__open`, `.sleep-events__what`, `.review-add`, `.night__sleep--btn` and the bottom-nav links. They keep their
-  focus ring and, on a pointer, hover.
+  needs its own press state: a `:active` tint with `--child-action-active` (hover: `--child-action-hover`, inside
+  `@media (hover: hover)`) beside its `:focus-visible` ring. **Never `--bg-elevated-2` or `--field-bg` as a pressed or open fill:**
+  they are the inset colours, near-black in the dark theme, and drew the black bars #1064 removed (`paletteTokens.test.jsx`
+  fails any `:active` rule that uses them). Every `.btn` variant shares one press: a 2% shrink and `brightness(0.92)`
+  (a tint cannot do it, because secondary and danger are transparent outlines). Controls that still have no `:active`
+  state (a known limit, not a decision): `.more-menu__btn`, the Room activity and Wake-ups tabs, `.sleep-score__open`,
+  `.sleep-events__what`, `.review-add`, `.night__sleep--btn` and the bottom-nav links. They keep their focus ring and, on a
+  pointer, hover.
 - `aria-pressed` on toggles, `aria-expanded` (+ `aria-haspopup`) on disclosures.
 - Real `<input>`s behind custom controls, not `div`s with click handlers.
 - `prefers-reduced-motion` honoured for every loop.

@@ -2502,6 +2502,16 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   cursor: default;
 }
 
+/* Press feedback for every .btn variant at once. With the Android tap highlight removed (see the rule near the top) a button
+   would otherwise show nothing when pressed. A background tint cannot be the one rule: primary is filled, secondary and danger
+   are transparent outlines, and --bg-elevated-2 (the inset) is off limits as a pressed fill (#1064). A slight shrink reads on
+   all three in both themes, and brightness(0.92) deepens a filled button; on an outline it only dims the ink a little. Not on
+   a disabled button, and no transition, so there is nothing to opt out of for prefers-reduced-motion. */
+.btn:not(:disabled):active {
+  transform: scale(0.98);
+  filter: brightness(0.92);
+}
+
 /* Red "box outline" — transparent fill, red border + text. Used for destructive/stop actions. */
 .btn-danger {
   background: transparent;
@@ -3492,7 +3502,7 @@ input[type='range'] {
   background: none; border: 0; cursor: pointer; font: inherit; font-size: 14.5px; color: var(--text-primary);
 }
 /* Pointer devices only: on a phone :hover sticks to the row after a tap and left the opened row tinted dark (phone pass). */
-@media (hover: hover) { .review-link:hover { background: var(--bg-elevated-2); } }
+@media (hover: hover) { .review-link:hover { background: var(--child-action-hover); } }
 .review-row__icon { flex: none; color: var(--accent-line); }
 .review-row__text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .review-row__sub { display: block; margin-top: 2px; font-size: 12.5px; color: var(--text-secondary); }
@@ -3531,9 +3541,11 @@ input[type='range'] {
 }
 .review-suggest__btn:disabled { opacity: 0.5; cursor: default; }
 /* Press feedback for the controls that had none once the default tap highlight went (see the -webkit-tap-highlight-color rule
-   near the top): the same --bg-elevated-2 tint the rows use on hover, on touch as well as mouse. */
+   near the top). It is --child-action-active, the pressed tint of the child page's rows (#1064), NOT --bg-elevated-2: that is the
+   INSET colour, near-black in the dark theme, and using it as a pressed or open fill is what drew the black bars #1064 removed
+   (test/paletteTokens.test.jsx fails any :active rule that does). */
 .review-link:not(:disabled):active, .review-stepper__btn:not(:disabled):active, .review-suggest__btn:not(:disabled):active,
-.sleep-strip__item:active { background: var(--bg-elevated-2); }
+.sleep-strip__item:active { background: var(--child-action-active); }
 
 /* "+ Add a note": a plain text action, 44px tall. */
 .review-add {

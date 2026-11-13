@@ -110,6 +110,29 @@ describe('child-page interactive surfaces', () => {
     }
   });
 
+  // ★ The inset tokens are tracks, not pressed fills: --bg-elevated-2 and --field-bg are near-black in the dark theme, which is what
+  // drew the black open/press bars #1064 removed. Checked across the WHOLE stylesheet, not a list of controls, so a control added
+  // later cannot bring it back. Only :active is banned here: a hover fill on a row is already pinned above for the child page,
+  // and older hover rules elsewhere (menu items, the clip calendar) are untouched by this guard.
+  test('★ no :active rule anywhere fills with an inset token', () => {
+    const pressed = rules.filter((rule) => /:active\b/.test(rule.slice(0, rule.lastIndexOf('{'))));
+    expect(pressed.length).toBeGreaterThan(8); // it really read the stylesheet (the .btn, review, strip and child-page rules)
+    for (const rule of pressed) expect(rule, rule).not.toMatch(/(?:background|background-color):[^;]*var\(--(?:bg-elevated-2|field-bg)\)/);
+  });
+
+  test('★ the review controls and every .btn variant have press feedback, and the review row hovers with the child-page tint', () => {
+    const state = (selector, pseudo) => rules.filter((rule) => rule.slice(0, rule.lastIndexOf('{')).includes(`${selector}`) && rule.slice(0, rule.lastIndexOf('{')).includes(pseudo));
+    for (const selector of ['.review-link', '.review-stepper__btn', '.review-suggest__btn', '.sleep-strip__item']) {
+      expect(state(selector, ':active').some((rule) => rule.includes('var(--child-action-active)')), selector).toBe(true);
+    }
+    expect(state('.review-link', ':hover').some((rule) => rule.includes('var(--child-action-hover)'))).toBe(true);
+    // .btn has no background of its own to tint (primary is filled, secondary and danger are outlines), so its press is a
+    // shrink and a brightness step that work on all three.
+    const btn = state('.btn', ':active').find((rule) => /\.btn:not\(:disabled\):active/.test(rule));
+    expect(btn).toMatch(/transform:\s*scale\(/);
+    expect(btn).toMatch(/filter:\s*brightness\(/);
+  });
+
   test('★ disclosure text remains readable on the card and its two state tints in both themes', () => {
     for (const [name, palette] of [['day', day], ['night', night]]) {
       for (const surface of ['--bg-elevated', '--child-action-hover', '--child-action-active']) {
