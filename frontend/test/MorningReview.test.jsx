@@ -18,7 +18,7 @@
 //      version of that is in nightReviewTimezoneGate.test.jsx; the cases here use the injected flag.
 
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver, forEachRole, renderAs } from './helpers/render.jsx';
 import MorningReviewCard from '../src/components/MorningReviewCard.jsx';
@@ -42,6 +42,9 @@ const PENDING = {
   wake_at: '2026-08-29 19:48:00', // 05:48 Melbourne, the morning after
   transition_count: 4,
 };
+
+// The app formats a time with its zone suffix ("5:40 am AEST"), so the suggestion buttons are found by pattern.
+const SUGGEST_540 = /^5:40 am.* · out of bed$/;
 
 const fmtTime = (utc) => (utc ? String(utc).slice(11, 16) : '');
 
@@ -190,6 +193,12 @@ describe('the review screen', () => {
   const at = (renderer = renderAsAdmin, extra = {}) => renderer(routed, { route: ROUTE, kids: KIDS, ...extra });
 
   const thatsRight = () => screen.findByRole('button', { name: /That.s right/ });
+  // The "Edit sleep times" sheet, opened from the "Something else was off" row. Returns the dialog so a test can look
+  // INSIDE it (the page behind stays in the DOM, inert, and has a note field of its own with the same label).
+  const openSheet = async (user) => {
+    await user.click(await screen.findByRole('button', { name: /Something else was off/ }));
+    return screen.getByRole('dialog', { name: 'Edit sleep times' });
+  };
   const lastBody = () => api.put.mock.calls[api.put.mock.calls.length - 1][1];
   // The key SET of a body, sorted: a stray key (onset, note, verdicts, a null) fails by name.
   const keysOf = (body) => Object.keys(body).sort();
@@ -202,7 +211,9 @@ describe('the review screen', () => {
     expect(await screen.findByText(/^Up at 5:48 am.*Is that right\?/)).toBeInTheDocument();
     expect(await thatsRight()).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Not quite' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /No one was in the bed/ })).toBeInTheDocument();
+    // The quieter answers are ONE row now; "No one was in the bed" is inside the sheet that row opens (PR I).
+    expect(screen.getByRole('button', { name: /Something else was off/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /No one was in the bed/ })).not.toBeInTheDocument();
   });
 
   test('★ none of the old per-event UI is on the page, although the server still sends the events', async () => {
@@ -313,9 +324,10 @@ describe('the review screen', () => {
     api.get.mockResolvedValue({ ...NIGHT, computed: { status: 'empty', onset_at: null, in_bed_at: null, wake_at: null } });
     const { user } = at();
     await screen.findByLabelText(/Got up for the day/);
-    await user.type(screen.getByLabelText(/Fell asleep/), '19:40');
-    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const sheet = within(await openSheet(user));
+    await user.type(sheet.getByLabelText(/Fell asleep/), '19:40');
+    expect(sheet.getByRole('button', { name: 'Save' })).toBeEnabled();
+    await user.click(sheet.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
     expect(lastBody()).toMatchObject({ true_onset_local: '19:40' });
     expect(lastBody()).not.toHaveProperty('true_wake_local');
@@ -355,60 +367,97 @@ describe('the review screen', () => {
     await waitFor(() => expect(screen.getByLabelText(/Got up for the day/)).toHaveValue('05:52'));
   });
 
-  describe('"Change bedtime or fell-asleep time" (the disclosure)', () => {
-    const toggle = () => screen.getByRole('button', { name: /Change bedtime or fell-asleep time/ });
+  describe('"Something else was off" and the "Edit sleep times" sheet', () => {
+    const row = () => screen.getByRole('button', { name: /Something else was off/ });
 
-    test('collapsed by default, with its state on the button', async () => {
+    test('★ a sheet, not a disclosure: closed until the row is tapped, then a dialog holding both times, the "We had" hints and the note', async () => {
       const { user } = at();
       await thatsRight();
-      expect(toggle()).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       expect(screen.queryByLabelText(/Fell asleep/)).not.toBeInTheDocument();
-      await user.click(toggle());
-      expect(toggle()).toHaveAttribute('aria-expanded', 'true');
-      expect(screen.getByLabelText(/In bed/)).toBeInTheDocument();
-      expect(screen.getByLabelText(/Fell asleep/)).toBeInTheDocument();
-      expect(screen.getByLabelText(/worth noting/)).toBeInTheDocument();
-      await user.click(toggle());
-      expect(toggle()).toHaveAttribute('aria-expanded', 'false');
-      expect(screen.queryByLabelText(/Fell asleep/)).not.toBeInTheDocument();
+      const sheet = within(await openSheet(user));
+      expect(sheet.getByLabelText(/In bed/)).toBeInTheDocument();
+      expect(sheet.getByLabelText(/Fell asleep/)).toBeInTheDocument();
+      // "We had" says what the app had for each, beside the field (19:10 / 19:33 Melbourne).
+      expect(sheet.getByText(/^We had 7:10 pm/)).toBeInTheDocument();
+      expect(sheet.getByText(/^We had 7:33 pm/)).toBeInTheDocument();
+      // The note is behind "Add a note", like on the correcting step.
+      expect(sheet.queryByLabelText(/worth noting/)).not.toBeInTheDocument();
+      await user.click(sheet.getByRole('button', { name: /Add a note/ }));
+      expect(sheet.getByLabelText(/worth noting/)).toBeInTheDocument();
+      expect(sheet.getByRole('button', { name: /No one was in the bed/ })).toBeInTheDocument();
     });
 
-    test('★ opening it and touching nothing sends nothing extra: the detector\'s guess is never the owner\'s answer', async () => {
+    test('★ Escape closes it WITHOUT saving, hands focus back to the row, and what was typed is thrown away', async () => {
+      const { user } = at();
+      await thatsRight();
+      let sheet = within(await openSheet(user));
+      // Focus moved INTO the sheet when it opened (the shared Modal does this; this proves the page uses it).
+      expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+      await user.type(sheet.getByLabelText(/In bed/), '19:05');
+      await user.keyboard('{Escape}');
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(api.put).not.toHaveBeenCalled();
+      expect(row()).toHaveFocus();
+      // Reopened: the typed time is gone, not remembered (the sheet says closing discards).
+      sheet = within(await openSheet(user));
+      expect(sheet.getByLabelText(/In bed/)).toHaveValue('');
+      expect(sheet.getByRole('button', { name: 'Save' })).toBeDisabled();
+    });
+
+    test('a tap on the backdrop and the close button both close it without saving', async () => {
+      const { user } = at();
+      await thatsRight();
+      await openSheet(user);
+      await user.click(screen.getByRole('button', { name: 'Close' }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      await openSheet(user);
+      await user.click(document.querySelector('.modal-overlay'));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(api.put).not.toHaveBeenCalled();
+    });
+
+    test('★ opening it and touching nothing sends nothing, and Save waits for a typed time: the detector\'s guess is never the owner\'s answer', async () => {
       // "Fell asleep" SHOWS the detector's 19:33 so there is something to edit, but it is only sent once typed.
       // In bed shows nothing at all (the detector's put-down is never seeded into it).
       const { user } = at();
-      await user.click(await thatsRight().then(() => toggle()));
-      expect(screen.getByLabelText(/Fell asleep/)).toHaveValue('19:33');
-      expect(screen.getByLabelText(/In bed/)).toHaveValue('');
-      await user.click(screen.getByRole('button', { name: /That.s right/ }));
-      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
-      expect(keysOf(lastBody())).toEqual(WAKE_ONLY_KEYS);
+      const sheet = within(await thatsRight().then(() => openSheet(user)));
+      expect(sheet.getByLabelText(/Fell asleep/)).toHaveValue('19:33');
+      expect(sheet.getByLabelText(/In bed/)).toHaveValue('');
+      expect(sheet.getByRole('button', { name: 'Save' })).toBeDisabled();
+      await user.click(sheet.getByRole('button', { name: 'Save' }));
+      expect(api.put).not.toHaveBeenCalled();
     });
 
-    test('★ correcting only the asleep time sends that time, and NOTHING about in bed', async () => {
+    test('★ correcting only the asleep time sends that time and NOT the app\'s wake: the sheet is not the "That\'s right" question', async () => {
+      // The old disclosure rode along with "That's right", which sent the shown wake. This Save is its own button: sending the
+      // detector's 05:48 here would store the app's guess as the parent's answer from a tap on a different question.
       const { user } = at();
       await thatsRight();
-      await user.click(toggle());
-      const asleep = screen.getByLabelText(/Fell asleep/);
+      const sheet = within(await openSheet(user));
+      const asleep = sheet.getByLabelText(/Fell asleep/);
       await user.clear(asleep);
       await user.type(asleep, '19:20');
-      await user.click(screen.getByRole('button', { name: /That.s right/ }));
+      await user.click(sheet.getByRole('button', { name: 'Save' }));
 
       await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
-      expect(lastBody()).toMatchObject({ true_wake_local: '05:48', true_onset_local: '19:20' });
-      expect(keysOf(lastBody())).toEqual([...WAKE_ONLY_KEYS, 'true_onset_local'].sort());
+      expect(lastBody()).toMatchObject({ true_onset_local: '19:20' });
+      expect(lastBody()).not.toHaveProperty('true_wake_local');
+      expect(keysOf(lastBody())).toEqual(['computed_onset_at', 'computed_wake_at', 'settings_key', 'true_onset_local']);
     });
 
-    test('★ in bed, asleep and a note typed here are all sent, alongside the wake', async () => {
+    test('★ from the correcting step, in bed, asleep and a note typed in the sheet are sent alongside the wake that step shows', async () => {
       const { user } = at();
       await user.click(await screen.findByRole('button', { name: 'Not quite' }));
-      await user.click(toggle());
-      await user.type(screen.getByLabelText(/In bed/), '19:05');
-      const asleep = screen.getByLabelText(/Fell asleep/);
+      const sheet = within(await openSheet(user));
+      await user.type(sheet.getByLabelText(/In bed/), '19:05');
+      const asleep = sheet.getByLabelText(/Fell asleep/);
       await user.clear(asleep);
       await user.type(asleep, '19:20');
-      await user.type(screen.getByLabelText(/worth noting/), 'a cold');
-      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await user.click(sheet.getByRole('button', { name: /Add a note/ }));
+      await user.type(sheet.getByLabelText(/worth noting/), 'a cold');
+      await user.click(sheet.getByRole('button', { name: 'Save' }));
 
       await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
       expect(lastBody()).toMatchObject({
@@ -416,22 +465,276 @@ describe('the review screen', () => {
       });
     });
 
-    test('a stored in-bed or asleep answer opens it by itself and seeds the fields, so an answer is never hidden', async () => {
+    test('a wake typed on the page behind is kept when the sheet is closed, and sent by the sheet\'s Save', async () => {
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: 'Not quite' }));
+      const wake = await screen.findByLabelText(/Got up for the day/);
+      await user.clear(wake);
+      await user.type(wake, '06:10');
+      await openSheet(user);
+      await user.keyboard('{Escape}');
+      expect(screen.getByLabelText(/Got up for the day/)).toHaveValue('06:10');
+
+      const sheet = within(await openSheet(user));
+      await user.type(sheet.getByLabelText(/In bed/), '19:05');
+      await user.click(sheet.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      expect(lastBody()).toMatchObject({ true_wake_local: '06:10', true_in_bed_local: '19:05' });
+    });
+
+    test('a stored in-bed or asleep answer is read out on the row and seeds the sheet, so an answer is never hidden', async () => {
       api.get.mockResolvedValue({
         ...NIGHT,
         review: { true_in_bed_at: '2026-08-29 08:49:20', true_onset_at: null, true_wake_at: null, note: 'dressed on the bed' },
       });
-      at();
-      await waitFor(() => expect(screen.getByLabelText(/In bed/)).toHaveValue('18:49'));
-      expect(toggle()).toHaveAttribute('aria-expanded', 'true');
-      expect(screen.getByLabelText(/worth noting/)).toHaveValue('dressed on the bed');
+      const { user } = at();
+      expect(await screen.findByText(/You said in bed 6:49 pm.*Tap to change it./)).toBeInTheDocument();
+      const sheet = within(await openSheet(user));
+      expect(sheet.getByLabelText(/In bed/)).toHaveValue('18:49');
+      // A stored note shows its field at once, without a tap on "Add a note".
+      expect(sheet.getByLabelText(/worth noting/)).toHaveValue('dressed on the bed');
     });
 
-    test('its fields stay disabled until the real timezone has arrived', async () => {
+    test('its fields stay disabled until the real timezone has arrived, but it can be opened', async () => {
       const { user } = at(renderAsAdmin, { settings: { timezone: 'UTC' }, loading: false, settingsLoaded: false });
       await thatsRight();
-      await user.click(toggle());
-      for (const label of [/In bed/, /Fell asleep/, /worth noting/]) expect(screen.getByLabelText(label)).toBeDisabled();
+      const sheet = within(await openSheet(user));
+      for (const label of [/In bed/, /Fell asleep/]) expect(sheet.getByLabelText(label)).toBeDisabled();
+      expect(sheet.getByRole('button', { name: 'Save' })).toBeDisabled();
+    });
+
+    test('★ a failed save keeps the sheet open, shows the reason INSIDE it, and keeps what was typed', async () => {
+      // The page's own error banner sits behind the scrim, where nobody would see it (Modal's `error` prop exists for this).
+      api.put.mockRejectedValueOnce(new Error('"In bed" can\'t be after "Fell asleep"'));
+      const { user } = at();
+      await thatsRight();
+      const sheet = within(await openSheet(user));
+      await user.type(sheet.getByLabelText(/In bed/), '21:00');
+      await user.click(sheet.getByRole('button', { name: 'Save' }));
+      expect(await sheet.findByText(/can.t be after/)).toBeInTheDocument();
+      expect(sheet.getByLabelText(/In bed/)).toHaveValue('21:00');
+      expect(sheet.getByRole('button', { name: 'Save' })).toBeEnabled();
+      await user.clear(sheet.getByLabelText(/In bed/));
+      await user.type(sheet.getByLabelText(/In bed/), '19:00');
+      await user.click(sheet.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+      expect(lastBody().true_in_bed_local).toBe('19:00');
+    });
+  });
+
+  describe('the -5m / +5m stepper on the "Not quite" step (UI refresh PR I)', () => {
+    const wakeField = () => screen.getByLabelText(/Got up for the day/);
+    const earlier = () => screen.getByRole('button', { name: '5 minutes earlier' });
+    const later = () => screen.getByRole('button', { name: '5 minutes later' });
+    // A stored answer opens straight into the step; 14:02Z is 00:02 Melbourne and 13:57Z is 23:57 (UTC+10 in August).
+    const answeredAt = (utc, extra = {}) => ({ ...NIGHT, review: { true_wake_at: utc, true_onset_at: null, note: null, ...extra } });
+
+    test('★ "We had" says what the app had, the question names the child, and the time is clear before Save', async () => {
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: 'Not quite' }));
+      expect(screen.getByText('When did Child B get up for the day?')).toBeInTheDocument();
+      expect(screen.getByText(/We had 5:48 am/)).toBeInTheDocument();
+      expect(wakeField()).toHaveValue('05:48');
+      // Not a typed answer until touched: Save waits only on a value being there, and a time is.
+      expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    });
+
+    test('★ each press moves the time by exactly five minutes, and Save sends the stepped time with the SAME body as a typed one', async () => {
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: 'Not quite' }));
+      await user.click(later());
+      expect(wakeField()).toHaveValue('05:53');
+      await user.click(earlier());
+      await user.click(earlier());
+      expect(wakeField()).toHaveValue('05:43');
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      // Identical to the typed-time test above: the stepper edits the same value and adds no key.
+      expect(lastBody()).toEqual({
+        true_wake_local: '05:43',
+        computed_onset_at: '2026-08-29 09:33:00',
+        computed_wake_at: '2026-08-29 19:48:00',
+        settings_key: '',
+      });
+    });
+
+    test('★ it stops at midnight instead of wrapping: a stepped time never silently changes day', async () => {
+      // 00:02 - 5 would wrap to 23:57 (the evening BEFORE, a different calendar day to the server's noon rule); 23:57 + 5 would
+      // wrap to 00:02. Both stop at the edge of the day instead. Typing across midnight stays possible and is judged by the server.
+      api.get.mockResolvedValue(answeredAt('2026-08-28 14:02:00'));
+      const { user, unmount } = at();
+      await waitFor(() => expect(wakeField()).toHaveValue('00:02'));
+      await user.click(earlier());
+      expect(wakeField()).toHaveValue('00:00');
+      await user.click(earlier());
+      expect(wakeField()).toHaveValue('00:00');
+      unmount();
+
+      api.get.mockResolvedValue(answeredAt('2026-08-29 13:57:00'));
+      const second = at();
+      await waitFor(() => expect(wakeField()).toHaveValue('23:57'));
+      await second.user.click(later());
+      expect(wakeField()).toHaveValue('23:59');
+      await second.user.click(later());
+      expect(wakeField()).toHaveValue('23:59');
+    });
+
+    test('typing still works after stepping, and what is sent is the time as typed', async () => {
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: 'Not quite' }));
+      await user.click(later());
+      await user.clear(wakeField());
+      await user.type(wakeField(), '06:10');
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      expect(lastBody().true_wake_local).toBe('06:10');
+    });
+
+    test('with no time in the field there is nothing to step from, and the buttons do not invent one', async () => {
+      api.get.mockResolvedValue({ ...NIGHT, computed: { status: 'empty', onset_at: null, in_bed_at: null, wake_at: null } });
+      const { user } = at();
+      await screen.findByLabelText(/Got up for the day/);
+      expect(earlier()).toBeDisabled();
+      expect(later()).toBeDisabled();
+      await user.click(later());
+      expect(wakeField()).toHaveValue('');
+    });
+
+    test('before the real timezone arrives the stepper is disabled too (it is a control that can send a time)', async () => {
+      api.get.mockResolvedValue(answeredAt('2026-08-29 19:40:00'));
+      at(renderAsAdmin, { settings: { timezone: 'UTC' }, loading: false, settingsLoaded: false });
+      await screen.findByLabelText(/Got up for the day/);
+      expect(earlier()).toBeDisabled();
+      expect(later()).toBeDisabled();
+    });
+
+    test('★ stepping a time that was saved with a frame drops the frame, exactly as typing does', async () => {
+      api.get.mockResolvedValue(answeredAt('2026-08-29 19:40:00', { true_wake_transition_id: 11 }));
+      const { user } = at();
+      await waitFor(() => expect(wakeField()).toHaveValue('05:40'));
+      await user.click(later());
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      expect(lastBody().true_wake_local).toBe('05:45');
+      expect(lastBody().true_wake_transition_id).toBeNull();
+    });
+  });
+
+  describe('logged out-of-bed times offered under the stepper', () => {
+    // 19:40:10Z is 05:40 Melbourne, eight minutes from the app's 05:48. The others are each a reason NOT to offer one.
+    const withEvents = (transitions, over = {}) => ({ ...NIGHT, transitions, ...over });
+    const OOB = { id: 21, type: 'out_of_bed', created_at: '2026-08-29 19:40:10', verdict: null, quick_reversal_of: null };
+    const wakeField = () => screen.getByLabelText(/Got up for the day/);
+    const suggestion = (name) => screen.queryByRole('button', { name });
+
+    test('★ a nearby exit is offered, tapping it sets the time and sends its id with the same body keys plus the id', async () => {
+      api.get.mockResolvedValue(withEvents([OOB]));
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: 'Not quite' }));
+      await user.click(screen.getByRole('button', { name: SUGGEST_540 }));
+      expect(wakeField()).toHaveValue('05:40');
+      expect(screen.getByRole('button', { name: SUGGEST_540 })).toHaveAttribute('aria-pressed', 'true');
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      expect(lastBody()).toMatchObject({ true_wake_local: '05:40', true_wake_transition_id: 21 });
+      expect(keysOf(lastBody())).toEqual([...WAKE_ONLY_KEYS, 'true_wake_transition_id'].sort());
+    });
+
+    test('★ stepping or typing after a tap drops the id: a frame is never sent beside a different time', async () => {
+      api.get.mockResolvedValue(withEvents([OOB]));
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: 'Not quite' }));
+      await user.click(screen.getByRole('button', { name: SUGGEST_540 }));
+      await user.click(screen.getByRole('button', { name: '5 minutes later' }));
+      expect(wakeField()).toHaveValue('05:45');
+      expect(screen.getByRole('button', { name: SUGGEST_540 })).toHaveAttribute('aria-pressed', 'false');
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      expect(lastBody().true_wake_local).toBe('05:45');
+      expect(lastBody()).not.toHaveProperty('true_wake_transition_id');
+    });
+
+    test('★ a tap replaces the frame of an answer already on record with the new id (not a clear)', async () => {
+      api.get.mockResolvedValue(withEvents([OOB], {
+        review: { true_wake_at: '2026-08-29 19:50:00', true_onset_at: null, note: null, true_wake_transition_id: 11 },
+      }));
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: SUGGEST_540 }));
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      expect(lastBody().true_wake_transition_id).toBe(21);
+    });
+
+    test('only an exit that could be the wake is offered: not a far one, a put-down, a "wrong" one or a quick reversal; at most four, in time order', async () => {
+      api.get.mockResolvedValue(withEvents([
+        { ...OOB, id: 31, created_at: '2026-08-29 17:00:00' }, // 3h48m before the wake: too far
+        { ...OOB, id: 32, type: 'into_bed' },
+        { ...OOB, id: 33, verdict: 'wrong' },
+        { ...OOB, id: 34, quick_reversal_of: 30 },
+        { ...OOB, id: 41, created_at: '2026-08-29 19:30:00' }, // 05:30
+        { ...OOB, id: 42, created_at: '2026-08-29 19:35:00' }, // 05:35
+        { ...OOB, id: 43, created_at: '2026-08-29 19:44:00' }, // 05:44
+        { ...OOB, id: 44, created_at: '2026-08-29 19:46:00' }, // 05:46
+        { ...OOB, id: 45, created_at: '2026-08-29 20:40:00' }, // 06:40, the farthest of the near ones: dropped by the cap
+      ]));
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: 'Not quite' }));
+      const offered = within(screen.getByRole('group', { name: /out-of-bed/ })).getAllByRole('button').map((b) => b.textContent);
+      expect(offered.map((t) => t.replace(/ [^ ]+ · /, ' · '))).toEqual(['5:30 am · out of bed', '5:35 am · out of bed', '5:44 am · out of bed', '5:46 am · out of bed']);
+    });
+
+    test('★ an exit more than an hour from every time on the page is not offered, even when there is room for it', async () => {
+      // The cap of four hides a missing window in the test above (the far exit ranks after the near ones), so it is alone here.
+      api.get.mockResolvedValue(withEvents([{ ...OOB, id: 31, created_at: '2026-08-29 17:00:00' }])); // 3h48m before 05:48
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: 'Not quite' }));
+      expect(screen.queryByRole('group', { name: /out-of-bed/ })).not.toBeInTheDocument();
+    });
+
+    test('nothing is offered on a night with no wake and no answer to be near', async () => {
+      api.get.mockResolvedValue(withEvents([OOB], { computed: { status: 'empty', onset_at: null, in_bed_at: null, wake_at: null } }));
+      at();
+      await screen.findByLabelText(/Got up for the day/);
+      expect(screen.queryByRole('group', { name: /out-of-bed/ })).not.toBeInTheDocument();
+    });
+
+    test('a night whose response carries no events at all behaves as before', async () => {
+      const { transitions, ...old } = NIGHT; // eslint-disable-line no-unused-vars
+      api.get.mockResolvedValue(old);
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: 'Not quite' }));
+      expect(screen.queryByRole('group', { name: /out-of-bed/ })).not.toBeInTheDocument();
+      expect(wakeField()).toHaveValue('05:48');
+    });
+
+    test('"That\'s right" never sends a frame, even when exits are on offer', async () => {
+      api.get.mockResolvedValue(withEvents([OOB]));
+      const { user } = at();
+      await user.click(await thatsRight());
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      expect(keysOf(lastBody())).toEqual(WAKE_ONLY_KEYS);
+    });
+  });
+
+  describe('the note on the "Not quite" step', () => {
+    test('it is behind "Add a note", and a note typed there is sent', async () => {
+      const { user } = at();
+      await user.click(await screen.findByRole('button', { name: 'Not quite' }));
+      expect(screen.queryByLabelText(/worth noting/)).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /Add a note/ }));
+      await user.type(screen.getByLabelText(/worth noting/), 'woke early');
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      expect(lastBody()).toMatchObject({ true_wake_local: '05:48', note: 'woke early' });
+    });
+
+    test('a stored note shows its field at once, and an untouched one is not re-sent', async () => {
+      api.get.mockResolvedValue({ ...NIGHT, review: { true_wake_at: '2026-08-29 19:40:00', true_onset_at: null, note: 'checked twice' } });
+      const { user } = at();
+      await waitFor(() => expect(screen.getByLabelText(/worth noting/)).toHaveValue('checked twice'));
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      expect(lastBody()).not.toHaveProperty('note');
     });
   });
 
@@ -492,20 +795,26 @@ describe('the review screen', () => {
     });
   });
 
-  test('★ a night the app found no wake for opens into the time field WITH the asleep field, and nothing to say "That\'s right" to', async () => {
+  test('★ a night the app found no wake for opens into the time field, says what the sheet is for, and nothing to say "That\'s right" to', async () => {
     // #355: a detector-empty night becomes a scored night only when a parent gives BOTH times, and the review is
-    // the one way in, so the disclosure is open by itself here (a night with a wake keeps it shut).
+    // the one way in. The sheet cannot open by itself (the old disclosure did), so the step and the row both say where
+    // the other times go.
     api.get.mockResolvedValue({ ...NIGHT, computed: { status: 'empty', onset_at: null, in_bed_at: null, wake_at: null } });
     const { user } = at();
     const wake = await screen.findByLabelText(/Got up for the day/);
     expect(screen.queryByRole('button', { name: /That.s right/ })).not.toBeInTheDocument();
     expect(screen.getByText(/didn.t work out when they got up/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Change bedtime or fell-asleep time/ })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: /Something else was off/ })).toHaveTextContent('Add when they went to bed and fell asleep.');
     // Nothing to save until a time is typed, so an empty field can never be sent as an answer.
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    // ...and the stepper has nothing to step from, so it does not invent a starting time.
+    expect(screen.getByRole('button', { name: '5 minutes later' })).toBeDisabled();
     await user.type(wake, '06:05');
-    await user.type(screen.getByLabelText(/Fell asleep/), '19:40');
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    // The wake is typed on the page and the asleep time in the sheet, whose Save sends both: the page was already on the
+    // wake question, so its value is an answer.
+    const sheet = within(await openSheet(user));
+    await user.type(sheet.getByLabelText(/Fell asleep/), '19:40');
+    await user.click(sheet.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
     expect(lastBody()).toMatchObject({ true_wake_local: '06:05', true_onset_local: '19:40', computed_wake_at: null });
   });
@@ -571,8 +880,8 @@ describe('the review screen', () => {
       expect(screen.queryByText(/Is that right\?/)).not.toBeInTheDocument();
       expect(screen.getByText(/timezone setting could not be loaded/)).toBeInTheDocument();
       expect(screen.queryByText(/Waiting for the app.s timezone setting/)).toBeNull();
-      // Nothing about "no one was in the bed" carries a time, so it still works.
-      expect(screen.getByRole('button', { name: /No one was in the bed/ })).toBeEnabled();
+      // Nothing about "no one was in the bed" carries a time, so it still works: its row opens the sheet before the zone is known.
+      expect(screen.getByRole('button', { name: /Something else was off/ })).toBeEnabled();
 
       zoneArrives(rerenderWith);
       await waitFor(() => expect(screen.getByRole('button', { name: /That.s right/ })).toBeEnabled());
@@ -602,7 +911,8 @@ describe('the review screen', () => {
 
     test('tapping the link saves the flag alone — no times, nothing else', async () => {
       const { user } = at();
-      await user.click(await screen.findByRole('button', { name: /No one was in the bed/ }));
+      const sheet = within(await openSheet(user));
+      await user.click(sheet.getByRole('button', { name: /No one was in the bed/ }));
       await waitFor(() => expect(api.put).toHaveBeenCalled());
       expect(api.put.mock.calls[0][0]).toBe('/children/c-1/review/2026-08-29');
       // Exactly this body — not merely "contains" it — because sending a time alongside the flag is
@@ -617,21 +927,36 @@ describe('the review screen', () => {
       await user.clear(wake);
       await user.type(wake, '06:10');
 
-      await user.click(screen.getByRole('button', { name: /No one was in the bed/ }));
+      const sheet = within(await openSheet(user));
+      await user.click(sheet.getByRole('button', { name: /No one was in the bed/ }));
       await waitFor(() => expect(api.put).toHaveBeenCalled());
+      expect(api.put.mock.calls[0][1]).toEqual({ nobody_in_bed: true });
+    });
+
+    test('★ it stays exclusive with the times typed IN THE SAME SHEET: they are abandoned, never sent beside the flag', async () => {
+      // The action now sits under the time fields it must never travel with. Both a time typed in the sheet and the page
+      // behind it are dropped; only the flag (and a note, below) is sent, or the server answers "pick one" with a 400.
+      const { user } = at();
+      const sheet = within(await thatsRight().then(() => openSheet(user)));
+      await user.type(sheet.getByLabelText(/In bed/), '19:05');
+      const asleep = sheet.getByLabelText(/Fell asleep/);
+      await user.clear(asleep);
+      await user.type(asleep, '19:20');
+      await user.click(sheet.getByRole('button', { name: /No one was in the bed/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
       expect(api.put.mock.calls[0][1]).toEqual({ nobody_in_bed: true });
     });
 
     // Regression: saveNobody used to send ONLY `{nobody_in_bed: true}`, so a note typed in the form was silently
     // discarded the instant this was tapped instead of saving. The note describes the NIGHT, not a time, and the
     // server's note handling is independent of the flag/time exclusion.
-    test('a note typed in the disclosure is NOT discarded when the flag is saved', async () => {
+    test('a note typed in the sheet is NOT discarded when the flag is saved', async () => {
       const { user } = at();
-      await thatsRight();
-      await user.click(screen.getByRole('button', { name: /Change bedtime or fell-asleep time/ }));
-      await user.type(screen.getByLabelText(/worth noting/), 'he was sick, checked on him twice');
+      const sheet = within(await thatsRight().then(() => openSheet(user)));
+      await user.click(sheet.getByRole('button', { name: /Add a note/ }));
+      await user.type(sheet.getByLabelText(/worth noting/), 'he was sick, checked on him twice');
 
-      await user.click(screen.getByRole('button', { name: /No one was in the bed/ }));
+      await user.click(sheet.getByRole('button', { name: /No one was in the bed/ }));
       await waitFor(() => expect(api.put).toHaveBeenCalled());
       expect(api.put.mock.calls[0][1]).toEqual({ nobody_in_bed: true, note: 'he was sick, checked on him twice' });
     });
@@ -642,15 +967,17 @@ describe('the review screen', () => {
     test('★ a failed save does NOT claim the flag was set, and a retry sends the ORIGINAL action', async () => {
       api.put.mockRejectedValueOnce(new Error('offline'));
       const { user } = at();
-      await user.click(await screen.findByRole('button', { name: /No one was in the bed/ }));
+      const sheet = within(await openSheet(user));
+      await user.click(sheet.getByRole('button', { name: /No one was in the bed/ }));
       await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
 
       expect(screen.queryByText('You said no one was in the bed.')).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /Someone was in the bed/ })).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: /That.s right/ })).toBeInTheDocument();
-      expect(screen.getByText(/Could not save|offline/)).toBeInTheDocument();
+      // The reason shows inside the sheet, which stays open, where it can be seen.
+      expect(sheet.getByText(/Could not save|offline/)).toBeInTheDocument();
 
-      await user.click(screen.getByRole('button', { name: /No one was in the bed/ }));
+      await user.click(sheet.getByRole('button', { name: /No one was in the bed/ }));
       await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
       expect(api.put.mock.calls[1][1]).toEqual({ nobody_in_bed: true });
     });
@@ -698,7 +1025,7 @@ describe('the review screen', () => {
     test('★★ the confirmed flag survives a later rerender that still carries the OLD stored value', async () => {
       api.get.mockResolvedValue({ ...NIGHT, review: { nobody_in_bed: 0 } });
       const { user, rerenderWith } = at(renderAsAdmin, { settings: { timezone: 'UTC' } });
-      await user.click(await screen.findByRole('button', { name: /No one was in the bed/ }));
+      await user.click(within(await openSheet(user)).getByRole('button', { name: /No one was in the bed/ }));
       await waitFor(() => expect(screen.getByText('You said no one was in the bed.')).toBeInTheDocument());
 
       rerenderWith({ settings: { timezone: 'Australia/Melbourne' } });
@@ -718,9 +1045,11 @@ describe('the review screen', () => {
       expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
       expect(document.querySelector('main .btn-primary')).not.toBeNull(); // the selector below really finds it
 
-      await user.click(screen.getByRole('button', { name: /No one was in the bed/ }));
+      const sheet = within(await openSheet(user));
+      await user.click(sheet.getByRole('button', { name: /No one was in the bed/ }));
       await screen.findByText('You said no one was in the bed.');
       expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); // the sheet is gone with the form
       // ...and not in its busy spelling either: the mocked save succeeds and the real screen would navigate
       // away, so `busy` is still true here and a Save button would read "Saving…". The flag view's own undo
       // button is secondary (and also reads "Saving…"), so the primary button is what must be absent.

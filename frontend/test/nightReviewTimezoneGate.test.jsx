@@ -17,7 +17,7 @@
 // HOME time, `settings.timezone`, never the browser's and never the 'UTC' placeholder.
 
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { AuthContext } from '../src/lib/AuthContext.jsx';
@@ -86,7 +86,12 @@ function mount({ settings = 'late', night = NIGHT, zone = HOME_TZ } = {}) {
 
 const lastBody = () => api.put.mock.calls[api.put.mock.calls.length - 1][1];
 const thatsRight = () => screen.findByRole('button', { name: /That.s right/ });
-const bedtimeToggle = () => screen.getByRole('button', { name: /Change bedtime or fell-asleep time/ });
+// The sheet that holds the bedtime and fell-asleep fields (UI refresh PR I; it was a disclosure). Opened from the row, and looked
+// into with `within` because the page behind it stays in the DOM.
+const openSheet = async () => {
+  await user.click(screen.getByRole('button', { name: /Something else was off/ }));
+  return within(screen.getByRole('dialog', { name: 'Edit sleep times' }));
+};
 
 // The full journey, parameterised by when /settings resolves, so the happy path and the race are compared on
 // the SAME steps. `clickEarly` is the race: tap before the zone is known.
@@ -136,15 +141,17 @@ describe('#512 — the repro, replayed against the real SettingsProvider', () =>
     // typed is sent.
     const m = mount({ settings: 'late' });
     await thatsRight();
-    await user.click(bedtimeToggle());
-    expect(screen.getByLabelText(/Fell asleep/)).toBeDisabled(); // before the zone is known
+    const sheet = await openSheet();
+    expect(sheet.getByLabelText(/Fell asleep/)).toBeDisabled(); // before the zone is known
     await m.resolveSettings();
-    await waitFor(() => expect(screen.getByLabelText(/Fell asleep/)).toBeEnabled());
-    expect(screen.getByLabelText(/Fell asleep/)).toHaveValue(hhmmIn(NIGHT.computed.onset_at, HOME_TZ)); // 19:33, not 09:33
-    await user.type(screen.getByLabelText(/In bed/), '19:05');
-    await user.click(screen.getByRole('button', { name: /That.s right/ }));
+    await waitFor(() => expect(sheet.getByLabelText(/Fell asleep/)).toBeEnabled());
+    expect(sheet.getByLabelText(/Fell asleep/)).toHaveValue(hhmmIn(NIGHT.computed.onset_at, HOME_TZ)); // 19:33, not 09:33
+    await user.type(sheet.getByLabelText(/In bed/), '19:05');
+    await user.click(sheet.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(api.put).toHaveBeenCalled());
-    expect(lastBody()).toMatchObject({ true_wake_local: '05:48', true_in_bed_local: '19:05' });
+    // The sheet's Save is its own question: it sends the typed bedtime and NOT the app's wake (see NightReview's save).
+    expect(lastBody()).toMatchObject({ true_in_bed_local: '19:05' });
+    expect(lastBody().true_wake_local).toBeUndefined();
     expect(lastBody().true_onset_local).toBeUndefined();
   });
 
@@ -219,15 +226,20 @@ describe('#512 — /settings FAILS for the whole visit', () => {
     await screen.findByText(/timezone setting could not be loaded/);
     expect(save).toBeDisabled();
     expect(screen.getByLabelText(/Got up for the day/)).toBeDisabled();
-    // This review holds an asleep time, so the disclosure opened by itself: its fields are shut too.
-    for (const label of [/In bed/, /Fell asleep/]) expect(screen.getByLabelText(label)).toBeDisabled();
+    // This review holds an asleep time: the sheet's fields are shut too.
+    const sheet = await openSheet();
+    for (const label of [/In bed/, /Fell asleep/]) expect(sheet.getByLabelText(label)).toBeDisabled();
+    await user.keyboard('{Escape}');
     await user.click(save);
     expect(api.put).not.toHaveBeenCalled();
   });
 
   test('what carries no time still works: "No one was in the bed" saves, with no time in the body', async () => {
     mount({ settings: 'fail' });
-    await user.click(await screen.findByRole('button', { name: /No one was in the bed/ }));
+    await screen.findByText(/timezone setting could not be loaded/);
+    // The row that holds it opens the sheet while the zone is unknown (the sheet's time fields are shut, this one is not).
+    const sheet = await openSheet();
+    await user.click(sheet.getByRole('button', { name: /No one was in the bed/ }));
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
     expect(lastBody()).toEqual({ nobody_in_bed: true });
   });

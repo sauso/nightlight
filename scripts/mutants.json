@@ -6999,8 +6999,8 @@
   {
     "label": "nobody-in-bed fix round #1: saveNobody claims the flag before the server confirms it",
     "file": "frontend/src/pages/NightReview.jsx",
-    "find": "  const saveNobody = async (flag) => {\r\n    setBusy(true);",
-    "replace": "  const saveNobody = async (flag) => {\r\n    setNobodyTouched(true);\r\n    setNobody(flag);\r\n    setBusy(true);",
+    "find": "    const t = sheetDraft ? { ...typed, ...sheetDraft } : typed;\r\n    setBusy(true);\r\n    setError(null);\r\n    try {\r\n      const body = { nobody_in_bed: flag };",
+    "replace": "    const t = sheetDraft ? { ...typed, ...sheetDraft } : typed;\r\n    setNobodyLocal(flag);\r\n    setBusy(true);\r\n    setError(null);\r\n    try {\r\n      const body = { nobody_in_bed: flag };",
     "expect": "killed",
     "tests": ["MorningReview.test.jsx"],
     "namePattern": "does NOT claim the flag was set"

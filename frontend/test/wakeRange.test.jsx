@@ -31,6 +31,10 @@ vi.mock('react-router-dom', async (importOriginal) => {
 
 afterEach(() => vi.restoreAllMocks());
 
+// The app formats a time with its zone suffix ("5:40 am AEST"), so the suggestion buttons are found by pattern.
+const SUGGEST_540 = /^5:40 am.* · out of bed$/;
+
+
 // 5:31 and 6:25 in Melbourne on the morning of 2026-08-29 (UTC+10): the exit-earlier-than-movement shape.
 const EARLY = '2026-08-28 19:31:00';
 const LATE = '2026-08-28 20:25:00';
@@ -128,6 +132,47 @@ describe('the review screen in range mode', () => {
       computed_wake_at: RANGE_NIGHT.computed.wake_at,
       settings_key: 'settings-key',
     });
+  });
+
+  test('★ "Another time" leads into the stepper, which has nothing to step from until a time is typed (UI refresh PR I)', async () => {
+    const { put } = mountReview(RANGE_NIGHT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Another time' }));
+    // Empty, as before: stepping from one of the rejected estimates would put a time the person just turned down in the box.
+    expect(screen.getByRole('button', { name: '5 minutes later' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '5 minutes earlier' })).toBeDisabled();
+    await user.type(screen.getByLabelText('Got up for the day'), '0610');
+    await user.click(screen.getByRole('button', { name: '5 minutes later' }));
+    expect(screen.getByLabelText('Got up for the day')).toHaveValue('06:15');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    expect(put.mock.calls[0][1]).toEqual({
+      true_wake_local: '06:15',
+      computed_onset_at: RANGE_NIGHT.computed.onset_at,
+      computed_wake_at: RANGE_NIGHT.computed.wake_at,
+      settings_key: 'settings-key',
+    });
+  });
+
+  test('★ logged exits near either end are offered under "Another time", and the "Around" buttons never send a frame', async () => {
+    // 19:40Z the evening before is 05:40 Melbourne, nine minutes from the earlier end.
+    const night = { ...RANGE_NIGHT, transitions: [{ id: 7, type: 'out_of_bed', created_at: '2026-08-28 19:40:00', verdict: null, quick_reversal_of: null }] };
+    const { put } = mountReview(night);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /^Around .*5:31/ }));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    expect(put.mock.calls[0][1]).not.toHaveProperty('true_wake_transition_id');
+  });
+
+  test('★ tapping an offered exit under "Another time" sends its id with the time', async () => {
+    const night = { ...RANGE_NIGHT, transitions: [{ id: 7, type: 'out_of_bed', created_at: '2026-08-28 19:40:00', verdict: null, quick_reversal_of: null }] };
+    const { put } = mountReview(night);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Another time' }));
+    await user.click(screen.getByRole('button', { name: SUGGEST_540 }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    expect(put.mock.calls[0][1]).toMatchObject({ true_wake_local: '05:40', true_wake_transition_id: 7 });
   });
 
   test('★ the timezone gate holds the new buttons: before /settings arrives they are disabled and send nothing', async () => {

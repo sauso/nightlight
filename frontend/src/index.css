@@ -3472,30 +3472,66 @@ input[type='range'] {
    Tokens only; the focus ring is the global :focus-visible one. */
 .review-question { font-size: 17px; font-weight: 600; line-height: 1.35; margin: 2px 0 14px; }
 
-/* The disclosure for the two rarely-wrong times. A plain text button with a chevron, like the sleep
-   page's wake rows; aria-expanded carries the state for assistive tech, the chevron for the eye. */
-/* The two quieter answers are rows in a card of their own (UI refresh PR H, as drawn): icon, words, chevron, each a full-width
-   44px target (they were about 37px). The card has no padding of its own so a row's hit area runs edge to edge; the disclosure's
-   fields get their padding from .review-more__body. */
+/* The one quieter answer is a row in a card of its own (UI refresh PR H, as drawn; PR I made it ONE row, "Something else was
+   off", which opens the "Edit sleep times" sheet): icon, words, chevron, a full-width 44px target. The card has no padding of its
+   own so the row's hit area runs edge to edge. */
 .review-rows { padding: 0; overflow: hidden; }
-.review-more__toggle, .review-link {
+.review-link {
   display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 10px 16px; text-align: left;
   background: none; border: 0; cursor: pointer; font: inherit; font-size: 14.5px; color: var(--text-primary);
 }
 /* Pointer devices only: on a phone :hover sticks to the row after a tap and left the opened row tinted dark (phone pass). */
-@media (hover: hover) { .review-more__toggle:hover, .review-link:hover { background: var(--bg-elevated-2); } }
-.review-more + .review-link { border-top: 1px solid var(--border); }
+@media (hover: hover) { .review-link:hover { background: var(--bg-elevated-2); } }
 .review-row__icon { flex: none; color: var(--accent-line); }
 .review-row__text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.review-row__go, .review-more__chev { flex: none; color: var(--text-secondary); }
-.review-more__chev { transition: transform 0.18s ease; }
-.review-more__chev.is-open { transform: rotate(180deg); }
-.review-more__body { padding: 4px 16px 16px; }
-/* The sentence above a field ("We said asleep 7:33 PM...") had no space under it and ran into the next label (phone pass). */
+.review-row__sub { display: block; margin-top: 2px; font-size: 12.5px; color: var(--text-secondary); }
+.review-row__go { flex: none; color: var(--text-secondary); }
+/* The sentence above a field ("We had 6:20 AM...") had no space under it and ran into the next label (phone pass). */
 .review-hint { margin: 0 0 12px; }
 .review-link:disabled { opacity: 0.55; cursor: default; }
 
-@media (prefers-reduced-motion: reduce) { .review-more__chev { transition: none; } }
+/* The correcting step's -5m / time / +5m stepper (UI refresh PR I). The side buttons and the time are all at least 44px tall;
+   the time is a real <input type="time"> drawn large, so typing still works and a screen reader reads a time field. */
+.review-stepper { display: flex; align-items: stretch; gap: 8px; margin-bottom: 8px; }
+.review-stepper__btn {
+  flex: none; min-width: 56px; min-height: 52px; padding: 0 10px; border-radius: 12px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg-elevated); color: var(--accent-text); font: inherit; font-size: 15px; font-weight: 700;
+}
+.review-stepper__btn:disabled { opacity: 0.5; cursor: default; }
+.review-stepper__time { flex: 1; min-width: 0; display: block; }
+.review-stepper__time input {
+  width: 100%; min-height: 52px; box-sizing: border-box; border-radius: 12px; padding: 0 12px; text-align: center;
+  border: 1px solid var(--border); background: var(--field-bg); color: var(--text-primary); font: inherit; font-size: 22px; font-weight: 700;
+}
+/* At 320px the 22px time (with its clock icon) was clipped to "06:3"; a smaller time and narrower side buttons make it fit (checked in screenshots). */
+@media (max-width: 360px) {
+  .review-stepper { gap: 6px; }
+  .review-stepper__btn { min-width: 46px; padding: 0 6px; }
+  .review-stepper__time input { font-size: 18px; padding: 0 6px; }
+}
+/* Visually hidden, still the accessible name of the time field (the question above already says what it is). */
+.review-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* The logged out-of-bed times offered under the stepper, one tap each. Wraps on a narrow phone; 44px targets. */
+.review-suggest { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.review-suggest__btn {
+  min-height: 44px; padding: 0 14px; border-radius: 22px; cursor: pointer; font: inherit; font-size: 14px;
+  border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary);
+}
+.review-suggest__btn[aria-pressed="true"] { border-color: var(--accent-line); background: color-mix(in srgb, var(--accent) 16%, transparent); font-weight: 600; }
+.review-suggest__btn:disabled { opacity: 0.5; cursor: default; }
+
+/* "+ Add a note": a plain text action, 44px tall. */
+.review-add {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0; margin-bottom: 8px;
+  background: none; border: 0; cursor: pointer; font: inherit; font-size: 14.5px; font-weight: 600; color: var(--accent-text);
+}
+
+/* The "Edit sleep times" sheet's body. The "We had ..." line sits under its field; the sheet's "No one was in the bed" is a
+   full-width row with no side padding of its own (the sheet card already has it). */
+.review-sheet__had { margin: -8px 0 12px; font-size: 12.5px; color: var(--text-secondary); }
+.review-sheet .review-actions { margin-top: 4px; }
+.review-link--sheet { padding-left: 0; padding-right: 0; margin-top: 8px; border-top: 1px solid var(--border); }
 
 /* The review card's answered state, and the confirm-or-correct block on the review screen. */
 .review-card--done .review-card__body { padding-right: 4px; }
@@ -3503,7 +3539,7 @@ input[type='range'] {
 .review-card__icon--done { color: var(--live); background: rgba(127, 191, 163, 0.14); }
 
 .review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.review-actions .btn { flex: 1 1 auto; }
+.review-actions .btn { flex: 1 1 auto; min-height: 44px; } /* every answer on the review screen is a 44px target (PR I) */
 
 /* "You corrected this" — shown wherever a night's times came from a person rather than the detector.
    Owner 2026-11-05: hard to read. It is only used on the sleep card (`.night`), which is a dark indigo gradient in BOTH themes,

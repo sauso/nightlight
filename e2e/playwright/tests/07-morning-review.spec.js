@@ -49,18 +49,23 @@ test('correcting a night records MY times and shows them back', async ({ page })
 
   // ⚠️ The CARD shows the STORED night, while this screen RECOMPUTES from camera activity. The seeded night
   // has no activity behind it (see seed-review-night.mjs for why one cannot), so the recompute returns
-  // status 'no_data' and the screen has nothing to confirm: it opens straight into its time field, with the
-  // bedtime disclosure already open so both times can be given. On a real night the detector has a wake,
+  // status 'no_data' and the screen has nothing to confirm: it opens straight into its time field, and the
+  // "Something else was off" row under it opens the "Edit sleep times" sheet so both times can be given (UI refresh PR I; it
+  // used to be a disclosure that opened by itself). On a real night the detector has a wake,
   // the screen asks "Up at … Is that right?" with "That's right" / "Not quite", and that path is covered by
   // the unit tests (frontend/test/MorningReview.test.jsx) and, over the wire, by the wake-only test below.
   // Pinning one of the two screens here would make this a statement about the fixture, not the flow.
   await expect(page.getByText(/didn.t work out when they got up/)).toBeVisible();
 
-  // By LABEL, not position: "In bed" sits above "Fell asleep" in the disclosure, so positional locators
-  // would type the asleep time into "In bed".
-  await page.getByLabel('Fell asleep', { exact: true }).fill('20:15');
+  // By LABEL, not position: "In bed" sits above "Fell asleep" in the sheet, so positional locators
+  // would type the asleep time into "In bed". The wake is typed on the page behind the sheet and the asleep time in the sheet,
+  // whose Save sends both (the page is already on the wake question, so the wake it holds is an answer). The sheet's Save is
+  // found INSIDE the dialog: the page behind it has a Save of its own.
   await page.getByLabel('Got up for the day', { exact: true }).fill('06:05');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /Something else was off/ }).click();
+  const sheet = page.getByRole('dialog', { name: 'Edit sleep times' });
+  await sheet.getByLabel('Fell asleep', { exact: true }).fill('20:15');
+  await sheet.getByRole('button', { name: 'Save', exact: true }).click();
 
   // ★ The prompt must become a RECEIPT, not simply vanish. A save that shows nothing is
   // indistinguishable from one that failed — exactly what was reported before the receipt existed.
@@ -128,16 +133,18 @@ test('a recorded night can be corrected again — a mistake is not final', async
   // Reopening a night you have already answered goes straight into the form with YOUR times already
   // in it — there is nothing left to "confirm", you are changing an answer you gave. This is also a
   // second round trip worth asserting: the correction has to come back out of the server and into the
-  // form fields, not merely be displayed on the card. The asleep time sits in the disclosure, which opens
-  // by itself because an answer to it is on record.
-  const onset = page.getByLabel('Fell asleep', { exact: true });
+  // form fields, not merely be displayed on the card. The asleep time sits in the sheet, and the row that opens it reads the
+  // stored answer out (so it is never hidden).
   const wake = page.getByLabel('Got up for the day', { exact: true });
-  await expect(onset).toHaveValue('20:15');
   await expect(wake).toHaveValue('06:05');
-
-  await onset.fill('19:45');
+  await expect(page.getByRole('button', { name: /Something else was off/ })).toContainText(/asleep/);
   await wake.fill('05:30');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /Something else was off/ }).click();
+  const sheet = page.getByRole('dialog', { name: 'Edit sleep times' });
+  const onset = sheet.getByLabel('Fell asleep', { exact: true });
+  await expect(onset).toHaveValue('20:15');
+  await onset.fill('19:45');
+  await sheet.getByRole('button', { name: 'Save', exact: true }).click();
 
   await expect(page.getByText(/You said asleep 19:45, up at 5:30/)).toBeVisible();
   await expect(page.getByText(/You said asleep 20:15, up at 6:05/)).toHaveCount(0);
@@ -158,20 +165,23 @@ test('"no one was in the bed" replaces the correction, and undoing it restores t
   await page.getByText(/You said asleep 19:45, up at 5:30/).click();
   await expect(page.getByLabel('Got up for the day', { exact: true })).toBeVisible();
 
-  // Already-answered, so this opens straight into the time field with the previous times filled in, and
-  // the disclosure (which holds the note) is open — the flag link sits under it.
-  const flag = page.getByRole('button', { name: 'No one was in the bed' });
+  // Already-answered, so this opens straight into the time field with the previous times filled in. "No one was in the bed" is
+  // inside the "Edit sleep times" sheet, opened from the row under the question (UI refresh PR I).
+  await page.getByRole('button', { name: /Something else was off/ }).click();
+  const sheet = page.getByRole('dialog', { name: 'Edit sleep times' });
+  const flag = sheet.getByRole('button', { name: 'No one was in the bed' });
 
   // Layout, measured rather than read from the stylesheet (#754; replaces frontend/test/reviewFieldSpacing.test.js):
-  // each field's caption sits ABOVE its input, and the flag button is not flush against the note input.
+  // each field's caption sits ABOVE its input, and Save is not flush against the note input.
   // Written but not run where it was added (needs the e2e stack); confirm it before relying on it.
-  const note = page.getByLabel('Anything else worth noting');
-  const caption = page.locator('label.field', { hasText: 'Anything else worth noting' }).locator('.field__label');
+  await sheet.getByRole('button', { name: /Add a note/ }).click();
+  const note = sheet.getByLabel('Anything else worth noting');
+  const caption = sheet.locator('label.field', { hasText: 'Anything else worth noting' }).locator('.field__label');
   const noteBox = await note.boundingBox();
   const captionBox = await caption.boundingBox();
-  const flagBox = await flag.boundingBox();
+  const saveBox = await sheet.getByRole('button', { name: 'Save', exact: true }).boundingBox();
   expect(captionBox.y + captionBox.height, 'the caption is above its input, not inline beside it').toBeLessThanOrEqual(noteBox.y + 1);
-  expect(flagBox.y - (noteBox.y + noteBox.height), 'the flag button has room under the note input').toBeGreaterThanOrEqual(8);
+  expect(saveBox.y - (noteBox.y + noteBox.height), 'Save has room under the note input').toBeGreaterThanOrEqual(8);
 
   await flag.click();
 
@@ -198,8 +208,8 @@ test('"no one was in the bed" replaces the correction, and undoing it restores t
 // down at 18:49 for a bedtime story fell asleep at 19:13, and the review had no way to say both — its
 // only put-down button overwrote the asleep time. This proves the two answers travel separately through
 // the real client and server, and both come back on the receipt. Since the one-question review (2026-10-27)
-// the frame buttons are gone from the screen and the two times live behind the "Change bedtime or fell-asleep
-// time" disclosure; this is the typed path.
+// the frame buttons are gone from the screen and the two times live in the "Edit sleep times" sheet (opened from
+// "Something else was off"); this is the typed path.
 //
 // NOT RUN when it was written, for the same reason as the test above: no `:dev` stack in that
 // environment. Checked by hand against NightReview.jsx / ReviewReceipt.jsx / SleepDetail.jsx copy and
@@ -213,11 +223,13 @@ test('"in bed" and "asleep" are separate answers, and both come back on the rece
   const nights = await (await page.request.get(`/api/children/${CHILD.id}/sleep?nights=1`, { headers })).json();
   const date = nights.nights[0].night_date;
   await page.goto(`/#/children/${CHILD.id}/review/${date}`);
-  // No activity behind the seeded night, so the screen opens on its time field with the disclosure open.
-  await page.getByLabel('In bed', { exact: true }).fill('19:40');
-  await page.getByLabel('Fell asleep', { exact: true }).fill('20:15');
+  // No activity behind the seeded night, so the screen opens on its time field; the two other times go in the sheet.
   await page.getByLabel('Got up for the day', { exact: true }).fill('06:05');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: /Something else was off/ }).click();
+  const sheet = page.getByRole('dialog', { name: 'Edit sleep times' });
+  await sheet.getByLabel('In bed', { exact: true }).fill('19:40');
+  await sheet.getByLabel('Fell asleep', { exact: true }).fill('20:15');
+  await sheet.getByRole('button', { name: 'Save', exact: true }).click();
 
   await expect(page).toHaveURL(/\/sleep\?date=.*saved=1/);
   await expect(page.getByText(/You said in bed 19:40, asleep 20:15, up at 6:05/)).toBeVisible();

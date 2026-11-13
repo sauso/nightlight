@@ -7,8 +7,9 @@
 //   switch off stays quiet  a child whose "Show sleep score" is off has no `score` key; promising a score that will never be
 //                           shown would be false, so neither card says it (they behave as before);
 //   no data ............... the sleep page's empty night draws the dashed ring and keeps its words;
-//   review rows ........... "Change bedtime or fell-asleep time" and "No one was in the bed" are one card of rows, each a button;
-//                           the disclosure still opens and closes (aria-expanded).
+//   review row ............ "Something else was off" is one row in a card of its own that opens the "Edit sleep times" sheet
+//                           (PR I; it was two rows, a disclosure and "No one was in the bed", in PR H). The sheet's own behaviour
+//                           is pinned in MorningReview.test.jsx.
 //
 // NOT tested here, and said plainly: the headline WRAPPING at 320px instead of ending in an ellipsis. jsdom does no layout and
 // the repo's rule is not to pin CSS text (CLAUDE.md, proportionate testing 7); it was checked in screenshots at 320px
@@ -157,36 +158,30 @@ describe('the review screen: the two quieter rows', () => {
   const routed = <Routes><Route path="/children/:id/review/:date" element={<NightReview />} /></Routes>;
   const at = () => renderAsAdmin(routed, { route: '/children/c-1/review/2026-08-29', kids: [{ id: 'c-1', name: 'Child B' }] });
 
-  test('★ both are buttons in one card of their own, apart from the question', async () => {
+  test('★ the quieter answer is one row in a card of its own, apart from the question (PR I: "No one was in the bed" moved into its sheet)', async () => {
     at();
     const confirm = await screen.findByRole('button', { name: /That.s right/ });
-    const more = screen.getByRole('button', { name: /Change bedtime or fell-asleep time/ });
-    const nobody = screen.getByRole('button', { name: /No one was in the bed/ });
+    const more = screen.getByRole('button', { name: /Something else was off/ });
     const rows = more.closest('.review-rows');
     expect(rows).not.toBeNull();
-    expect(rows.contains(nobody)).toBe(true);
-    // The question's own card is a different element, so the rows are not inside the confirm buttons' card.
+    // The question's own card is a different element, so the row is not inside the confirm buttons' card.
     expect(rows.contains(confirm)).toBe(false);
+    expect(screen.queryByRole('button', { name: /No one was in the bed/ })).not.toBeInTheDocument();
   });
 
-  test('the disclosure still opens and closes, and its hint sits above the fields', async () => {
+  test('the sheet opens from the row and its hint sits above the fields', async () => {
     const { user } = at();
-    const more = await screen.findByRole('button', { name: /Change bedtime or fell-asleep time/ });
-    expect(more).toHaveAttribute('aria-expanded', 'false');
-    await user.click(more);
-    expect(more).toHaveAttribute('aria-expanded', 'true');
+    await user.click(await screen.findByRole('button', { name: /Something else was off/ }));
+    expect(screen.getByRole('dialog', { name: 'Edit sleep times' })).toBeInTheDocument();
     expect(screen.getByLabelText('Fell asleep')).toBeInTheDocument();
-    expect(screen.getByText(/We said .*Only a time you type here is saved/).closest('.review-hint')).not.toBeNull();
-    await user.click(more);
-    expect(more).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByLabelText('Fell asleep')).not.toBeInTheDocument();
+    expect(screen.getByText(/Only a time you change here is saved/).closest('.review-hint')).not.toBeNull();
   });
 
   test('a night already answered "no one was in the bed" shows only the question card', async () => {
     api.get.mockResolvedValue({ ...NIGHT, review: { nobody_in_bed: 1 } });
     at();
     expect(await screen.findByText('You said no one was in the bed.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Change bedtime or fell-asleep time/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Something else was off/ })).not.toBeInTheDocument();
     expect(document.querySelector('.review-rows')).toBeNull();
   });
 });

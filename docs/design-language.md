@@ -673,11 +673,20 @@ UI refresh PR H. Every state keeps the same words it had; what is new is the sha
   night" button is **not built** (the strip and the calendar already reach other nights).
 - **Early estimate**, **no score** and **score switch off** are unchanged: a number with a neutral dashed-track ring and "Early"; no
   ring and "No score yet" with its reason; no ring at all.
-- **The review screen** keeps one question card ("Up at 6:20 AM. Is that right?" with That's right and Not quite). The two quieter
-  answers, "Change bedtime or fell-asleep time" (a disclosure) and "No one was in the bed", are **rows in a card of their own**: icon,
-  words, chevron, each a full-width 44px target (they were about 37px). The sentence above a time field has 12px under it. Behaviour,
-  focus order and what is saved are unchanged. **Not built**, because the app has no such control: the design's -5m / +5m time
-  stepper, the "Edit sleep times" sheet and its "What was off?" chips.
+- **The review screen** keeps one question card ("Up at 6:20 AM. Is that right?" with That's right and Not quite). **Not quite** opens
+  the correcting step as drawn (UI refresh PR I): "When did <child> get up for the day?", a "We had 6:20 am." line, a **-5m / time / +5m
+  stepper**, the logged out-of-bed times near it as tappable chips ("6:20 am · out of bed"), "Add a note" and Save. The middle of the
+  stepper is a real time field (typing still works and is sent as typed), the side buttons are labelled "5 minutes earlier" and "5 minutes
+  later", and every control is at least 44px. The stepper **stops at 00:00 and 23:59 instead of wrapping**: a wrap would silently
+  change the calendar day the server picks for a bare time. It does nothing on an empty field (it never invents a starting time). The
+  chips are out-of-bed events within an hour of a time the page already shows, at most four; a tap sets the time and records which
+  logged event it was, and typing or stepping afterwards drops that link. "Up between A and B" keeps its three buttons (Around A,
+  Around B, Another time), restyled at 44px; "Another time" leads into the same step, empty as before.
+  The one quieter answer is a **row in a card of its own**, "Something else was off" (icon, words, chevron, 44px), which opens an
+  **Edit sleep times** bottom sheet: In bed, Fell asleep (each with a "We had ..." line), "Add a note", Save, and "No one was in the bed".
+  The sheet is the shared `Modal` (focus moves in, Tab stays in, Escape or a tap outside closes it and focus returns to the row).
+  **Closing it discards what was typed in it**, and the sheet says so. **Not built**, because the app has no field to store a reason:
+  the design's "What was off?" chips.
 - **Card headings are one treatment**: an icon (16px, `--accent-line`) and a 15px bold title in `--text-primary`, as on Timelapse, Recent
   alerts and Recordings. "Room climate · last 24h", the sleep page's "Timeline" and "Sleep & room temperature" were 12 to 13px grey or
   uppercase labels and now match.
