@@ -768,7 +768,7 @@ reading order and the keyboard order):
    disabled camera**: the Live tab hides disabled cameras, so the button would lead nowhere (the chip says "Disabled"). An admin also gets a
    44px settings gear top right ("Camera settings for <name>"); a caregiver does not (camera settings are admin-only). It is
    **not a live picture**: no stream is opened by opening the page. There is no "Cameras · n" heading and no Online/Offline pill or
-   MOTION/SOUND/PTZ/TALK badges. (The Cameras tab still shows ONVIF, PTZ and Two-way Audio badges; the MOTION and SOUND detection badges are no longer shown to a caregiver anywhere, and an admin sees detection settings on the Live tile. This was accepted with the design, which has no badges.) A child with no camera gets a plain card with the existing
+   PTZ/TALK badges (the Cameras tab shows ONVIF, PTZ and Two-way Audio badges). Instead, one quiet muted line at the tile's bottom left, **for every role**, says whether detection is on in words: "Motion on · Sound on", or "Motion off" / "Sound off" for what is off (from the camera's `detect_motion_enabled` and `detect_sound_enabled`; owner decision, 2026-11-13: the first version had no such line, so a caregiver could not tell). It is left out on a disabled camera and on a camera object that carries neither field. A child with no camera gets a plain card with the existing
    "No cameras assigned yet" sentence (the admin and caregiver wordings differ, as before).
 2. **Timelapse** (`components/TimelapseCard.jsx`): the card title (15px bold, accent icon), one player (the newest night, 16:9),
    and a strip of recent nights as small thumbnails, four in view and scrolling for the rest, each labelled with its **weekday**

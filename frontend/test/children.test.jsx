@@ -498,6 +498,22 @@ describe('the child page below the night card', () => {
     expect(screen.getByText(/· Disabled/)).toBeTruthy();
   });
 
+  // ★ The detection line is for EVERY role: the old MOTION/SOUND badges were on the page for a caregiver too, and the owner asked for
+  // them back (as words) after PR D dropped them.
+  test('★ the detection line shows for an admin AND a caregiver, per camera, from the cameras own fields', async () => {
+    const cams = CAMS.map((c) => (c.id === 'cam-a1' ? { ...c, detect_motion_enabled: 1, detect_sound_enabled: 1 }
+      : c.id === 'cam-a2' ? { ...c, detect_motion_enabled: 0, detect_sound_enabled: 1 } : c));
+    for (const render of [renderAsAdmin, renderAsCaregiver]) {
+      mockApi();
+      const { container, unmount } = render(detailRoutes, { ...atChild('kid-1'), cameras: cams });
+      await screen.findByText('Child B Cot');
+      expect([...container.querySelectorAll('.child-cam__detect')].map((el) => el.textContent))
+        .toEqual(['Motion on · Sound on', 'Motion off · Sound on']);
+      unmount();
+      vi.restoreAllMocks();
+    }
+  });
+
   test('★ "Watch live" goes to the Live tab', async () => {
     full();
     const routes = <Routes><Route path="/children/:id" element={<ChildDetail />} /><Route path="/" element={<div>the live tab</div>} /></Routes>;

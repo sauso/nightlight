@@ -1315,6 +1315,9 @@ body.in-pip .tile-menu-backdrop {
 }
 .child-cam__settings:hover { background: rgba(255, 255, 255, 0.1); }
 .child-cam__bed { color: rgba(238, 240, 255, 0.22); }
+/* The detection line: quiet muted text at the tile's bottom left, level with Watch live. #b9bdf0 is the night card's muted tint
+   (6.85:1 on its lightest stop, and this tile is as dark). It stops short of the button so the two never overlap on a phone. */
+.child-cam__detect { position: absolute; left: 14px; bottom: 26px; max-width: calc(100% - 176px); font-size: 12.5px; line-height: 1.3; color: #b9bdf0; }
 .child-cam__watch {
   position: absolute; right: 12px; bottom: 12px; min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 18px;
   border: none; border-radius: 999px; background: #8995ff; color: #14142a; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
