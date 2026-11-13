@@ -90,8 +90,12 @@ Tap the sleep summary for the **Timeline** card: a to-scale bar of
 asleep / stirring / awake stretches on a real time axis. Nearby short stirs join visually on the bar;
 the underlying times and counts stay separate, and the hover status follows the original segments.
 The legend lists only the states present that night. Below it, one card with two tabs, **Wake-ups** and
-**Room activity**, shows each count and its own rows (with clips or saved frames where available),
-and there is a way to step back through
+**Room activity**, shows each count and its own rows (with clips or saved frames where available).
+The **Wake-ups** count is the same number as the **Wake-ups** figure in the night's summary (mid-night wake-ups only):
+the morning wake is listed at the end as **Up for the day** with the time the child got up, and is not counted.
+The **Coverage** figure appears only when part of the night was not watched, even by a single minute, and a partial night
+is never shown as 100%. The first and last hour labels and the markers at the ends of the bar stay inside the card.
+There is a way to step back through
 roughly the last month of nights: a strip of seven nights (each with its score and a small
 colour bar; tap one to open it) that starts at the newest nights, and a calendar button. Pick an older night
 and the strip slides to centre on it, so the nights either side are one tap away. The strip is a heat map of the

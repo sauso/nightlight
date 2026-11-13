@@ -26,6 +26,13 @@ import { renderAsAdmin, renderAsCaregiver, renderAs, forEachRole } from './helpe
 import SleepDetail, { addDays, framesForVisit, VisitItem } from '../src/pages/SleepDetail.jsx';
 import NightReview from '../src/pages/NightReview.jsx';
 import { api } from '../src/lib/api.js';
+import { timelineDrawingSegments } from '../src/lib/timelineDrawing.js';
+
+// A passthrough spy, so one test can see whether a hover redoes the drawing merge. The real function still runs everywhere.
+vi.mock('../src/lib/timelineDrawing.js', async (importOriginal) => {
+  const real = await importOriginal();
+  return { ...real, timelineDrawingSegments: vi.fn(real.timelineDrawingSegments) };
+});
 
 const KID = { id: 'kid-1', name: 'Child B' };
 
@@ -507,6 +514,68 @@ describe('timeline legend and night-event tabs', () => {
     mount();
     expect(await screen.findByText('Coverage')).toBeInTheDocument();
     expect(screen.getByText('83%')).toBeInTheDocument();
+  });
+
+  test('coverage shows for a single missing minute (719 of 720), and never reads 100% for a partial night', async () => {
+    // 719/720 rounds to 100%; a gate on the rounded figure hid the line for exactly the night it exists for.
+    mockSleep({ night: { ...NIGHT, coverage_minutes: 719 } });
+    mount();
+    expect(await screen.findByText('Coverage')).toBeInTheDocument();
+    expect(screen.getByText('99%')).toBeInTheDocument();
+    expect(screen.queryByText('100%')).toBeNull();
+  });
+
+  test('the Wake-ups count matches wake_count: the standalone morning row is "Up for the day", not a wake-up', async () => {
+    const midnight = { start_at: '2026-08-30 12:00:00', end_at: '2026-08-30 12:10:00', minutes: 10 };
+    const morning = { start_at: '2026-08-30 20:15:00', end_at: '2026-08-30 21:00:00', minutes: 45 };
+    mockSleep({ night: { ...NIGHT, wake_count: 1, wakes: [midnight, morning] } });
+    mount();
+    expect(await screen.findByRole('tab', { name: 'Wake-ups · 1' })).toBeInTheDocument();
+    const panel = screen.getByRole('tabpanel');
+    expect(within(panel).getByText('Up for the day')).toBeVisible();
+    expect(panel.querySelectorAll('.sleep-wakes__item')).toHaveLength(2);
+    expect(panel).not.toHaveTextContent('45m');
+    // The row is the morning one only when the list is exactly one longer than wake_count: an older server without the field
+    // counts every row, and a list that already matches keeps all of its rows.
+  });
+
+  test('without wake_count (an older server) every row counts and "Up for the day" is the plain line', async () => {
+    const midnight = { start_at: '2026-08-30 12:00:00', end_at: '2026-08-30 12:10:00', minutes: 10 };
+    mockSleep({ night: { ...NIGHT, wake_count: undefined, wakes: [midnight] } });
+    mount();
+    expect(await screen.findByRole('tab', { name: 'Wake-ups · 1' })).toBeInTheDocument();
+    expect(within(screen.getByRole('tabpanel')).getByText('Up for the day')).toBeVisible();
+  });
+
+  test('the first and last hour labels align to the bar ends; markers are clamped inside it', async () => {
+    mockSleep({ night: { ...NIGHT, visits: [{ type: 'visitor', start_at: '2026-08-30 09:00:00', end_at: '2026-08-30 09:02:00', minutes: 2 },
+      { type: 'visitor', start_at: '2026-08-30 21:00:00', end_at: '2026-08-30 21:00:00', minutes: 1 }],
+    transitions: [{ type: 'into_bed', at: '2026-08-30 09:00:00' }, { type: 'out_of_bed', at: '2026-08-30 21:00:00' }] } });
+    const { container } = mount();
+    await screen.findByRole('tab', { name: 'Room activity · 2' });
+    const labels = [...container.querySelectorAll('.sleep-tl__tick-label')];
+    expect(labels.length).toBeGreaterThan(2);
+    expect(labels[0]).toHaveClass('sleep-tl__tick-label--start');
+    expect(labels[labels.length - 1]).toHaveClass('sleep-tl__tick-label--end');
+    for (const middle of labels.slice(1, -1)) expect(middle).toHaveClass('sleep-tl__tick-label--center');
+    // The clamp is an inline CSS function that jsdom may not keep; the attribute is what React wrote.
+    const markers = container.querySelectorAll('.sleep-tl__visits .sleep-tl__visit, .sleep-tl__txs .sleep-tl__tx');
+    expect(markers).toHaveLength(4);
+    for (const marker of markers) expect(marker.getAttribute('style') || '').toMatch(/clamp\(/);
+  });
+
+  test('hovering the bar does not redo the drawing merge', async () => {
+    mockSleep({ night: { ...NIGHT, segments: [seg('stir', '2026-08-30 09:00:00', '2026-08-30 09:01:00', 1),
+      seg('asleep', '2026-08-30 09:01:00', '2026-08-30 10:00:00', 59)] } });
+    const { container } = mount();
+    await waitFor(() => expect(container.querySelector('.sleep-tl__bar')).not.toBeNull());
+    await screen.findByRole('tab', { name: 'Wake-ups · 0' });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, right: 720, bottom: 30, width: 720, height: 30, x: 0, y: 0, toJSON() {} });
+    timelineDrawingSegments.mockClear();
+    fireEvent.mouseMove(container.querySelector('.sleep-tl__barwrap'), { clientX: 100 });
+    fireEvent.mouseMove(container.querySelector('.sleep-tl__barwrap'), { clientX: 200 });
+    expect(container.querySelector('.sleep-tl__tip')).not.toBeNull();
+    expect(timelineDrawingSegments).not.toHaveBeenCalled();
   });
 
   test('a new night chooses its own default instead of retaining the previous tab', async () => {
@@ -1336,8 +1405,9 @@ describe('what a night lists', () => {
       night: {
         ...NIGHT,
         wake_count: 0, // the STORED metric counts only mid-night arousals — deliberately untouched by
-        // this fix, and deliberately allowed to differ from the section title below by exactly one on a
-        // night with a real wake_at (see the comment above the morning-wake row in sleepAnalysis.js).
+        // this fix. The list is one row longer on a night with a real wake_at (see the comment above the
+        // morning-wake row in sleepAnalysis.js); the tab count follows wake_count and the extra row is the
+        // "Up for the day" row (PR G), so the tab reads "Wake-ups · 0" while the row, and its alert, stay reachable.
         wakes: [{ start_at: '2026-08-30 20:15:00', end_at: '2026-08-30 21:00:00', minutes: 45 }],
         alerts: [{ id: 'a1', type: 'motion', camera_name: 'Nursery', detail: '4.2%', created_at: '2026-08-30 20:15:00' }],
       },
@@ -1345,6 +1415,8 @@ describe('what a night lists', () => {
     const { user } = mount('Australia/Melbourne');
     const badge = await screen.findByText(/1 alert$/);
     expect(badge).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Wake-ups · 0' }), 'the morning row is not counted as a wake-up').toBeTruthy();
+    expect(within(badge.closest('li')).getByText('Up for the day')).toBeTruthy();
 
     // The wake row's own button (the page's "⋯" menu button is also collapsed, so "the one collapsed button" no longer works).
     await user.click(badge.closest('button'));

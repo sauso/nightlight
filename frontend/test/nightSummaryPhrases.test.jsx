@@ -3,8 +3,9 @@
 // child's card. The selection of WHICH facts to say is the server's (backend/test/night-summary.test.js).
 //
 // THE GUARDRAIL SUITE runs over EVERY variant of EVERY key, so a phrase added later is checked without anyone
-// remembering to: no banned term, no exclamation mark, no "night timeline" (the docs screenshot run waits for that
-// text on the page), no emoji, every {placeholder} one of the params the server declares for that key, and short.
+// remembering to: no banned term, no exclamation mark, no "night timeline" (the card was once titled that and the
+// docs screenshot run waited for it; it now waits for the exact title "Timeline", e2e/walkthrough/capture.mjs, and the ban stays so
+// no summary phrase can ever be mistaken for the title), no emoji, every {placeholder} one of the params the server declares for that key, and short.
 // The server's key table (backend/src/lib/nightSummaryKeys.js, which has no imports so this test can load it) is the
 // single list both sides are held to: a key added on one side only fails a test here.
 //
@@ -462,7 +463,7 @@ describe('the headline on the child\'s card', () => {
     expect(screen.getByRole('button').getAttribute('aria-label')).toBe('View sleep detail and history');
   });
 
-  test('no phrase on either screen contains "night timeline" (the docs screenshot run waits for that text on its own)', async () => {
+  test('no phrase on either screen contains "night timeline" (the old card title; the docs screenshot run now waits for the exact title "Timeline")', async () => {
     show({ ...OK_NIGHT, score: SCORE, summary: SUMMARY });
     await asleep('10h 37m asleep');
     expect(document.body.textContent).not.toMatch(/night\s+timeline/i);

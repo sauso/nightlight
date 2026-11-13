@@ -1713,6 +1713,10 @@ body.in-pip .tile-menu-backdrop {
 .sleep-tl__axis { position: relative; height: 16px; margin-top: 4px; }
 .sleep-tl__tick { position: absolute; top: 0; width: 1px; height: 4px; background: var(--border); transform: translateX(-0.5px); }
 .sleep-tl__tick-label { position: absolute; top: 5px; left: 0; transform: translateX(-50%); font-size: 10px; color: var(--text-secondary); white-space: nowrap; }
+/* The first and last labels sit on the bar's ends: centred they poke half a label past the card's content edge (owner, real phone,
+   2026-11-13), so the first is left-aligned to the tick and the last right-aligned to it (see tickLabelAlign in lib/timelineEdges.js). */
+.sleep-tl__tick-label--start { left: 0.5px; transform: none; }
+.sleep-tl__tick-label--end { left: auto; right: 0.5px; transform: none; }
 .sleep-tl__ends { display: flex; justify-content: space-between; margin-top: 2px; font-size: 11px; color: var(--text-secondary); }
 
 .sleep-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; font-size: 12px; color: var(--text-secondary); }
@@ -1731,6 +1735,10 @@ body.in-pip .tile-menu-backdrop {
 .sleep-events__explain { margin: 0 0 10px; }
 .sleep-events__morning { display: flex; justify-content: space-between; gap: 12px; align-items: center; border-top: 1px solid var(--border); padding: 12px 2px 2px; font-size: 13px; }
 .sleep-events__morning span { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text-primary); }
+.sleep-events__morning-list { border-top: 1px solid var(--border); }
+.sleep-events__morning-list .sleep-wakes__item { border-top: none; }
+.sleep-events__morning-label { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.sleep-events__morning-list .sleep-wakes__dur { color: var(--text-secondary); }
 .sleep-events__morning time { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .sleep-wakes__row { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-top: 1px solid var(--border); }
 .sleep-wakes__row:first-child { border-top: none; }

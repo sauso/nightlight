@@ -20,6 +20,8 @@ import { scoreOf, bandOf } from '../lib/sleepScoreText.js';
 import { showsInBed } from '../lib/inBed.js';
 import { addDays, nightDetailPath, describeSettings } from '../lib/nightView.js';
 import { timelineDrawingSegments } from '../lib/timelineDrawing.js';
+import { splitMorningWake } from '../lib/nightWakes.js';
+import { markerLeft, tickLabelAlign } from '../lib/timelineEdges.js';
 
 // Sleep detail: a to-scale timeline of one night for a child, with the wake-ups marked, plus a date
 // picker to browse back through the retained nights (~30 days of activity_samples). Reached by tapping
@@ -494,7 +496,11 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
   const frames = night.transition_frames || [];
   // Coverage is measured against elapsed time so far for a live night, not the full window.
   const covEnd = night.in_progress && night.as_of ? night.as_of : night.window_end;
-  const covPct = Math.round((night.coverage_minutes / Math.max(1, Math.round((utcMs(covEnd) - utcMs(night.window_start)) / 60000))) * 100);
+  const covWindowMin = Math.max(1, Math.round((utcMs(covEnd) - utcMs(night.window_start)) / 60000));
+  // Shown whenever ANY minute was not covered, judged on the raw minutes: 719 of 720 rounds to 100%, and a line that vanishes for
+  // a night with a gap would hide exactly what it is for. A partial night is never printed as 100% (capped at 99).
+  const partialCoverage = night.coverage_minutes < covWindowMin;
+  const covPct = Math.min(99, Math.round((night.coverage_minutes / covWindowMin) * 100));
 
   return (
     <>
@@ -507,7 +513,7 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
           <Stat label={night.in_progress ? 'Asleep' : 'Asleep from → to'} value={range} />
           <Stat label="Wake-ups" value={String(night.wake_count ?? 0)} />
           <Stat label="Longest stretch" value={fmtDurAbbr(night.longest_stretch_minutes)} />
-          {covPct < 100 && <Stat label="Coverage" value={`${covPct}%`} />}
+          {partialCoverage && <Stat label="Coverage" value={`${covPct}%`} />}
         </div>
         <RefinedTimes night={night} fmtTime={fmtTime} />
         {night.analysis_camera_name && (
@@ -541,7 +547,7 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
         <ClimateTrack night={night} startMs={utcMs(night.display_start || night.window_start)} endMs={utcMs(night.display_end || night.window_end)} tempUnit={tempUnit} />
       </div>
 
-      <NightEventTabs key={`${childId}|${date}`} wakes={wakes} visits={visits} alerts={alerts}
+      <NightEventTabs key={`${childId}|${date}`} wakes={wakes} wakeCount={night.wake_count} visits={visits} alerts={alerts}
         wakeClips={wakeClips} frames={frames} fmtTime={fmtTime} onPlay={setClipFor}
         onPlayWake={setWakeClip} onShowFrame={setFrameFor}
         morningWakeAt={!night.in_progress && !night.wake_unconfirmed && !night.wake_unconfirmed_at ? night.wake_at : null} />
@@ -574,7 +580,10 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
   );
 }
 
-function NightEventTabs({ wakes, visits, alerts, wakeClips, frames, fmtTime, onPlay, onPlayWake, onShowFrame, morningWakeAt }) {
+function NightEventTabs({ wakes: allWakes, wakeCount, visits, alerts, wakeClips, frames, fmtTime, onPlay, onPlayWake, onShowFrame, morningWakeAt }) {
+  // The tab says N wake-ups and the summary says `wake_count`, so both must come from the same rows: the server's standalone
+  // morning-wake row is listed with "Up for the day", not counted (see splitMorningWake). The old card counted every row.
+  const { counted: wakes, morning } = splitMorningWake(allWakes, wakeCount);
   // The parent keys this component by child and night, so a newly opened night chooses its own useful default.
   const [selected, setSelected] = useState(() => wakes.length === 0 && visits.length > 0 ? 'room' : 'wakes');
   const tabs = ['wakes', 'room'];
@@ -613,7 +622,26 @@ function NightEventTabs({ wakes, visits, alerts, wakeClips, frames, fmtTime, onP
               ))}
             </ul>
           )}
-        {morningWakeAt && <div className="sleep-events__morning"><span><Sunrise size={16} aria-hidden="true" /> Up for the day</span><time>{fmtTime(morningWakeAt)}</time></div>}
+        {/* The morning row keeps what the server attached to it (a clip, alerts), so it is a real row when it has any. */}
+        {morning && morningWakeAt ? (
+          <ul className="sleep-wakes sleep-events__morning-list">
+            <WakeItem wake={morning} morningAt={morningWakeAt} hits={alertsInRange(alerts, morning.start_at, morning.end_at)}
+              clip={clipForWake(wakeClips, morning.start_at, morning.end_at)}
+              fmtTime={fmtTime} onPlay={onPlay} onPlayWake={onPlayWake} />
+          </ul>
+        ) : (
+          <>
+            {/* An unconfirmed morning wake has no "Up for the day" time to show: its row stays a plain, uncounted wake row. */}
+            {morning && (
+              <ul className="sleep-wakes sleep-events__morning-list">
+                <WakeItem wake={morning} hits={alertsInRange(alerts, morning.start_at, morning.end_at)}
+                  clip={clipForWake(wakeClips, morning.start_at, morning.end_at)}
+                  fmtTime={fmtTime} onPlay={onPlay} onPlayWake={onPlayWake} />
+              </ul>
+            )}
+            {!morning && morningWakeAt && <div className="sleep-events__morning"><span><Sunrise size={16} aria-hidden="true" /> Up for the day</span><time>{fmtTime(morningWakeAt)}</time></div>}
+          </>
+        )}
       </div>
       <div role="tabpanel" id="sleep-events-room-panel" aria-labelledby="sleep-events-room-tab" hidden={selected !== 'room'}>
         <>
@@ -639,14 +667,17 @@ function NightEventTabs({ wakes, visits, alerts, wakeClips, frames, fmtTime, onP
 // counts a minute active on a ~200 ms blip while an alert waits for 2-3 seconds sustained. That used to
 // leave a row you couldn't investigate. The automatic wake clip (roadmap 2.4) fills exactly that gap,
 // so a wake is expandable when it has EITHER an alert or a clip.
-function WakeItem({ wake, hits, clip, fmtTime, onPlay, onPlayWake }) {
+// `morningAt` marks the morning-wake row: it reads "Up for the day" with the time the child got up, instead of a range and a length.
+function WakeItem({ wake, hits, clip, fmtTime, onPlay, onPlayWake, morningAt }) {
   const [open, setOpen] = useState(false);
   const expandable = hits.length > 0 || !!clip;
   const head = (
     <>
-      <span className="sleep-wakes__time">{fmtTime(wake.start_at)} – {fmtTime(wake.end_at)}</span>
+      {morningAt
+        ? <span className="sleep-wakes__time sleep-events__morning-label"><Sunrise size={16} aria-hidden="true" /> Up for the day</span>
+        : <span className="sleep-wakes__time">{fmtTime(wake.start_at)} – {fmtTime(wake.end_at)}</span>}
       <span className="sleep-wakes__headright">
-        <span className="sleep-wakes__dur">{fmtDur(wake.minutes)}</span>
+        <span className="sleep-wakes__dur">{morningAt ? fmtTime(morningAt) : fmtDur(wake.minutes)}</span>
         {hits.length > 0 && (
           <span className="sleep-wakes__badge">
             <Zap size={11} aria-hidden="true" />{hits.length} alert{hits.length === 1 ? '' : 's'}
@@ -820,6 +851,11 @@ function RefinedTimes({ night, fmtTime }) {
   );
 }
 
+// Half the painted width of the markers above the bar, for markerLeft: the room-activity ring is 9px wide (border-box, border
+// included) plus its 1px outer ring, so 5.5px to the edge; the into/out-of-bed triangle is 8px wide (4px). See .sleep-tl__visit / __tx.
+const VISIT_HALF_PX = 5.5;
+const TX_HALF_PX = 4;
+
 // The to-scale bar: each segment positioned by its share of the window, plus hour tick labels and
 // onset/wake markers so the wake-ups read against a real time axis.
 function Timeline({ night, fmtTime, tz, tempUnit }) {
@@ -828,8 +864,10 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
   const startMs = utcMs(night.display_start || night.window_start);
   const endMs = utcMs(night.display_end || night.window_end);
   const totalMs = Math.max(1, endMs - startMs);
-  const segs = night.segments || [];
-  const drawingSegs = timelineDrawingSegments(segs);
+  const segs = useMemo(() => night.segments || [], [night.segments]);
+  // Keyed by the segments, not by every render: a hover (setHover) re-renders this component on each pointer move and the merge
+  // must not run again for it.
+  const drawingSegs = useMemo(() => timelineDrawingSegments(segs), [segs]);
 
   // Hover bubble: as the cursor (or a finger) moves across the bar, show the time under it, the sleep
   // status at that moment, and — if the room had a sensor — the temperature then. `null` = not hovering.
@@ -913,7 +951,7 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
         <div className="sleep-tl__txs">
           {transitions.map((t, i) => (
             <span key={i} className={`sleep-tl__tx ${t.type === 'into_bed' ? 'sleep-tl__tx--in' : 'sleep-tl__tx--out'}`}
-              style={{ left: `${t.pct}%` }}
+              style={{ left: markerLeft(t.pct, TX_HALF_PX) }}
               title={`${t.type === 'into_bed' ? 'Got into bed' : 'Got out of bed'} · ${fmtTime(t.at)}`} />
           ))}
         </div>
@@ -937,7 +975,7 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
             onTouchMove={(e) => { e.stopPropagation(); setHover(null); }}>
             {visits.map((v, i) => (
               <span key={i} className={`sleep-tl__visit${v.type === 'child_out' ? ' sleep-tl__visit--out' : ''}`}
-                style={{ left: `${pctOf(v.start_at, startMs, totalMs)}%` }}
+                style={{ left: markerLeft(pctOf(v.start_at, startMs, totalMs), VISIT_HALF_PX) }}
                 title={`${v.type === 'child_out' ? 'Out of bed' : 'Movement outside the bed'} · ${fmtTime(v.start_at)}`} />
             ))}
           </div>
@@ -963,7 +1001,7 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
       <div className="sleep-tl__axis">
         {ticks.map((t, i) => (
           <span key={i} className="sleep-tl__tick" style={{ left: `${t.pct}%` }}>
-            {t.label && <span className="sleep-tl__tick-label">{t.label}</span>}
+            {t.label && <span className={`sleep-tl__tick-label sleep-tl__tick-label--${tickLabelAlign(t.pct)}`}>{t.label}</span>}
           </span>
         ))}
       </div>

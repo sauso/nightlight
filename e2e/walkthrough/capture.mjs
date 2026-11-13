@@ -101,6 +101,8 @@ for (const [suffix, form] of [['mobile', PHONE], ['desktop', DESKTOP]]) {
 
   // The night detail page: the numbers behind the overview card.
   await go(`/children/${AVERY}/sleep`);
+  // The timeline card's title is exactly "Timeline" (it was "NIGHT TIMELINE" before UI refresh PR G); an exact match, so no
+  // longer text containing the word (a night summary phrase, say) can satisfy it early.
   await page.getByText('Timeline', { exact: true }).waitFor();
   await shot('sleep-mobile');
 

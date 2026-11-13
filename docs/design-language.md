@@ -202,6 +202,13 @@ next to the Fair band's amber and look the same to a colour-blind reader, and th
 The card is titled **Timeline**. Its legend lists only states and markers present in that night. The next card has a
 two-segment **Wake-ups · count** / **Room activity · count** tab control. Wake-ups is selected first unless it is empty
 and room activity has rows. Each tab keeps its own rows and quiet empty line; arrow keys and Home/End move between tabs.
+The Wake-ups count follows the summary's wake-up figure: the server's standalone morning-wake row is listed last as
+**Up for the day** (with its clip and alerts, if any) and is not counted.
+
+Nothing on the timeline may poke past the card's content box (owner, on a real phone, 2026-11-13). The first hour label is
+left-aligned to the bar's left edge and the last right-aligned to its right edge (the rest are centred), and the room-activity
+rings and the into/out-of-bed triangles are positioned with `clamp()` so a marker at the very start or end sits fully inside
+the bar and still points at its minute as nearly as it can (`lib/timelineEdges.js`).
 
 #### Known pairs below their floor
 
