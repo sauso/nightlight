@@ -40,7 +40,7 @@ const { totp } = require('./totp');
 // loopback. README.md's documented remote-access setup has SWAG reaching Nightlight **by LAN IP, not
 // by container name**, which is not loopback — so on that topology every remote user in the household
 // shares the same 20 attempts, exactly as they do here. Verified against express's `'loopback'` trust
-// function: a proxy at 172.18.0.5 or 192.168.1.100 yields `req.ip` = the proxy; only 127.0.0.1 yields
+// function: a proxy at 172.18.0.5 or 192.168.1.20 yields `req.ip` = the proxy; only 127.0.0.1 yields
 // the real client. Tracked as its own issue rather than worked around here.
 //
 // ⚠️ Which is also why there is NO test that the limiter itself engages: proving it would mean

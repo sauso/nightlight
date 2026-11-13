@@ -69,7 +69,7 @@ EOF
 
 # 2. ship + run (fresh filename inside the container)
 B64=$(base64 -w0 /tmp/x.js)
-ssh -i ~/.ssh/unraid_nightlight -o StrictHostKeyChecking=no root@192.168.1.100 \
+ssh -i ~/.ssh/<key-file> -o StrictHostKeyChecking=no root@<server-ip> \
   "docker exec nightlight-dev sh -c 'rm -f /tmp/q.js; echo $B64 | base64 -d > /tmp/q.js' && \
    docker exec -e NODE_PATH=/app/node_modules -w /app nightlight-dev node /tmp/q.js"
 ```
@@ -98,7 +98,7 @@ for (const r of db.prepare(
 transition did or didn't fire) is log-only:
 
 ```bash
-ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100 \
+ssh -i ~/.ssh/<key-file> root@<server-ip> \
   "docker logs --since 20h nightlight-dev 2>&1 | grep -E 'OUT OF BED|INTO BED' | grep -i child.a"
 # add \[oob\]|\[intobed\] to the grep for the candidate/cancelled detail
 # add \[coactive\] for the ROADMAP §1.2 item 3 diagnostic below
