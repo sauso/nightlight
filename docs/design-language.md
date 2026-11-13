@@ -102,8 +102,29 @@ literals, held as four custom properties on `.night` (`--night-text` `#EEF0FF`, 
 `#C7CAFF`, `--night-number` white) plus `--night-divider` (white at 10%) so no rule below repeats a hex. Measured on the
 gradient's lightest stop (`#2C2F63`), where contrast is lowest: `--night-text` 10.95:1, `--night-muted` 6.85:1 (5.07:1 or
 more at the corner the ring's 12% band wash lightens, per the design), `--night-link` 7.86:1 (small text needs 4.5:1).
-Everything secondary on the card (age, range, "In bed", the estimate note, the headline) is `--night-muted`; only the
-"Edit" link and the chevron use `--night-link`. The score ring's colours on this card are in "Score ring" below.
+Everything secondary on the card (the age, the label, the "asleep" unit) is `--night-muted`; the settings gear, the chevron and
+the quiet birthday line use `--night-link`. The score ring's colours on this card are in "Score ring" below.
+
+**What the card holds (UI refresh PR C, 2026-11-13).** Top to bottom, one card, nothing else:
+1. **Identity row**: the avatar (64px, with a small camera badge: it is the way to set the photo, and goes to child settings when
+   there is none), the name, the age (the line is left out when there is no birthday: there is no "Tap to add birthday & photo"
+   any more), and one **settings gear** (44px, named "Settings for <name>") that opens child settings.
+2. A hairline, then the **sleep row**, one button into the sleep page: a "Last night" label with a small moon (or "Tonight · so
+   far"), the duration in 28px ("9h 40m" with a smaller "asleep"), **one ring** (72px, band word under the number: "82 / Good",
+   "Early" for an early estimate, no word under the lowest band) and a chevron. Under the row, **one headline line**
+   (`.night__headline`, 15px bold, ends in an ellipsis). No time range, no wake-up count, no longest stretch, no "In bed" line, no
+   bullet list and no estimate note: they are all on the sleep page, one tap away. The button's name still carries the headline and
+   the score ("View sleep detail and history. A fairly steady night overall. Sleep score 82, Good").
+3. A hairline, then the **morning question** (`components/MorningReviewCard.jsx`) while a night is waiting to be reviewed: "Up at
+   6:20 AM. Is that right?" with two 44px buttons, **That's right** (the card's own periwinkle, `--night-action` with
+   `--night-on-action` text, which are NOT the theme's `--accent` pair because this card is the same navy in both themes) and
+   **Not quite** (an outline). It is asked once, here; there is no separate review card below the hero. Answered, it becomes a
+   one-line receipt ("Thanks — that's recorded / You said up at 6:20 AM. Tap to change it.") in the same place. A small dismiss
+   (44px hit area) is kept at the question's right edge, as on the old card.
+4. A quiet "Add a birthday in settings to see a score sooner" line only when a night has no score for want of a birthday.
+
+States without a score (tracking off, loading, no data, no clear sleep, an empty bed) keep their wording and show no ring.
+Colour is never the only signal: the band word and the number are drawn, and the button's name says both.
 
 ### Band colours
 
@@ -568,8 +589,9 @@ soft rose rather than an alarm red), `early` for an early estimate whatever the 
 not know (a newer server), so a possibly good night is never painted rose. **An early estimate is a neutral arc on a dashed
 track**: provisional by shape, with no colour needed. Three rules hold: **colour is never the only signal** (the number and the
 band word, or "Early estimate", are always beside the ring), **text is never set in a band colour** (the number stays
-`--text-primary` or white; only the arc takes the colour), and the low band is soft, not red. Two sizes, from the type scale: 44px with a 15px number (the child's card) and 64px with
-a 20px number (the sleep detail page). The ring is `aria-hidden`; the control around it carries the score in its name.
+`--text-primary` or white; only the arc takes the colour), and the low band is soft, not red. Three sizes, from the type scale: 44px with a 15px number, 64px with
+a 20px number (the sleep detail page) and 72px with a 22px number and the **band word** drawn under it in 11px (the child's card,
+"82 / Good"; the word is decorative like the rest of the ring). The ring is `aria-hidden`; the control around it carries the score in its name.
 **The groove is wide on purpose (v3.1, 2026-11-13)**: the track and the arc share one stroke, 6px on the 44px ring and 9px on the
 64px ring (they were 4px and 6px), so the ring reads as a shape and the arc is never thinner than its track. The early
 estimate keeps its dashed track, with dashes scaled to the stroke. No contrast figure changes: the colours are untouched, and a
@@ -605,8 +627,9 @@ titled "Night summary" with the same moon icon as `.sleep-insight__title`: a **h
 and, when the child's "Show sleep score" switch is on, the score ring and its "How this is scored" button under a hairline
 (`.sleep-summary__score`). With the switch off the card is the sentences alone. When the server sends no `summary` the card is
 the earlier "Sleep score" card, unchanged. On the child's card the headline is **one line** under the duration
-(`.night__headline`, 13px, `--night-muted` like the heading above it) and **ends in an ellipsis rather than wrapping**: the ring beside
-it narrows the column at 375px. It is also in the button's `aria-label`, so nothing the ellipsis cuts is lost to a screen reader.
+(`.night__headline`, 15px bold, under the sleep row at the card's full width) and **ends in an ellipsis rather than wrapping**. It is
+also in the button's `aria-label`, so nothing the ellipsis cuts is lost to a screen reader. The observations list is not on the
+child's card at all.
 
 The words are descriptive only: what was measured and how it compares with this child's own recent nights, never a cause, advice,
 praise or blame, never a sleep stage, no emoji and no exclamation mark. The headline's class follows the score's parts, so a

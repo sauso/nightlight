@@ -26,14 +26,18 @@ import { Check } from 'lucide-react';
 // the person never gave: the receipt is a statement about what THEY said, and reading the detector's guess
 // back as if it were theirs is the confusion the one-question screen exists to remove. The cost is
 // accepted: an old review that holds all three still reads all three, in order.
-export default function ReviewReceipt({ onsetAt, wakeAt, inBedAt, nobodyInBed, fmtTime, onOpen }) {
+//
+// `embedded`: the receipt sits INSIDE the child page's night card (MorningReviewCard.jsx) rather than being a card of its
+// own, so it takes that card's flat dark styling (`.night__review`) and not `.card review-card`. Same words either way;
+// that is the whole point of keeping one component.
+export default function ReviewReceipt({ onsetAt, wakeAt, inBedAt, nobodyInBed, fmtTime, onOpen, embedded = false }) {
   const said = [
     inBedAt && `in bed ${fmtTime(inBedAt)}`,
     onsetAt && `asleep ${fmtTime(onsetAt)}`,
     wakeAt && `up at ${fmtTime(wakeAt)}`,
   ].filter(Boolean);
   return (
-    <div className="card review-card review-card--done">
+    <div className={embedded ? 'night__review night__review--done' : 'card review-card review-card--done'}>
       <button type="button" className="review-card__body" onClick={onOpen}>
         <span className="review-card__icon review-card__icon--done"><Check size={20} /></span>
         <span className="review-card__text">

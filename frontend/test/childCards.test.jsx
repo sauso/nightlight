@@ -7,11 +7,10 @@
 //   * `no_data` and `empty` look similar and mean opposite things — "we saw nothing" vs "we watched
 //     all night and the bed was empty". Conflating them is how this card used to invent a full
 //     night's sleep out of an empty bed;
-//   * `tonight` vs a completed night changes every string on the card, because "asleep since 19:10"
-//     and "19:10 – 06:47" are different claims;
-//   * a CORRECTED night must say so, or a card showing a person's own times is indistinguishable
-//      from a detector that suddenly got it right — and the "estimated from movement & sound"
-//      disclaimer would then be a lie about where the number came from.
+//   * `tonight` vs a completed night changes the label and the duration ("Tonight · so far", "asleep so far");
+//   * since the UI refresh (PR C) a scored night shows ONLY the label, the duration, the ring and one headline: the time
+//     range, counts, put-down line, "You corrected this" and the estimate disclaimer moved to the sleep page, and the tests
+//     below pin their absence (the tests that pinned them on this card were replaced).
 import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
 import { screen, waitFor, act } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
@@ -46,6 +45,8 @@ describe('SleepSummaryCard', () => {
     return new RegExp(`\\b${h12}:${mm}\\b|\\b${String(h24).padStart(2, '0')}:${mm}\\b`);
   };
   const soon = () => document.querySelector('.night__soon').textContent;
+  // The duration is two elements ("10h 37m" and a smaller "asleep"), so it is matched on the element that holds both.
+  const asleep = (text) => screen.findByText((_c, el) => el?.classList?.contains('night__sleep-big') && el.textContent === text);
   const head = () => document.querySelector('.night__sleep-head').textContent;
 
   const OK_NIGHT = {
@@ -64,74 +65,43 @@ describe('SleepSummaryCard', () => {
     expect(screen.getByText('Loading sleep…')).toBeInTheDocument();
   });
 
-  test('a completed night shows the range, wake count and longest stretch in the APP timezone', async () => {
-    live({ scope: 'last_night', night: OK_NIGHT });
+  // ★ UI refresh PR C (2026-11-13, the approved design): a scored night's card holds the label, the duration, the ring and ONE
+  // headline, and nothing else. The time range, wake-up count, longest stretch, "In bed ... Asleep ..." line and the estimate
+  // disclaimer are on the sleep page now (sleepDetail.test.jsx covers them there), so the tests that pinned them on this card
+  // are replaced by the one below, which pins their ABSENCE with every one of those fields present in the fixture.
+  test('★ a completed night shows the label and the duration, and none of the detail the sleep page owns', async () => {
+    live({ scope: 'last_night', night: { ...OK_NIGHT, in_bed_at: '2026-09-01 08:47:12', corrected: 1 } });
     show();
-    expect(await screen.findByText('10h 37m asleep')).toBeInTheDocument();
-    expect(head()).toBe('Last night · Tue, 1 Sept');
-    // ⚠️ 09:10Z is 19:10 in Melbourne and 09:10 in UTC. The card must format in `settings.timezone`,
-    // not the browser's — a review window anchored on a literal UTC hour has shipped here before.
-    expect(soon()).toMatch(hhmm(19, 10));
-    expect(soon()).toMatch(hhmm(6, 47));
-    expect(soon()).toMatch(/2 wake-ups · longest 5h 0m/);
-  });
-
-  test('the SAME night formats differently under a different configured timezone', async () => {
-    live({ scope: 'last_night', night: OK_NIGHT });
-    renderAsAdmin(<SleepSummaryCard childId="kid-1" />, { settings: { timezone: 'UTC' } });
-    // The default install is UTC. If the card ignored the setting, this and the test above could not
-    // both pass — which is exactly what makes the pair discriminating rather than decorative.
-    await screen.findByText('10h 37m asleep');
-    expect(soon()).toMatch(hhmm(9, 10));
-    expect(soon()).toMatch(hhmm(20, 47));
-    expect(soon()).not.toMatch(hhmm(19, 10));
-  });
-
-  test('pluralises one wake-up correctly and omits absent detail', async () => {
-    live({ scope: 'last_night', night: { ...OK_NIGHT, wake_count: 1, longest_stretch_minutes: null } });
-    show();
-    expect(await screen.findByText(/1 wake-up(?!s)/)).toBeInTheDocument();
-    expect(screen.queryByText(/longest/)).not.toBeInTheDocument();
-  });
-
-  test('a zero wake count is shown, not hidden', async () => {
-    // `wake_count != null`, not a truthiness check: "0 wake-ups" is a real and good result, and
-    // dropping it silently would make a perfect night look like a night with missing data.
-    live({ scope: 'last_night', night: { ...OK_NIGHT, wake_count: 0 } });
-    show();
-    expect(await screen.findByText(/0 wake-ups/)).toBeInTheDocument();
+    expect(await asleep('10h 37m asleep')).toBeInTheDocument();
+    // The label no longer carries the date ("Last night · Tue, 1 Sept"): the card is always the latest night.
+    expect(head()).toBe('Last night');
+    const card = document.querySelector('.night__sleep').textContent;
+    // The fixture has an onset (19:10 Melbourne), a wake (6:47), 2 wake-ups, a 5h longest stretch, a put-down and a correction;
+    // none of them may reach the card, in either clock form.
+    expect(card).not.toMatch(hhmm(19, 10));
+    expect(card).not.toMatch(hhmm(6, 47));
+    expect(card).not.toMatch(hhmm(18, 47));
+    expect(card).not.toMatch(/wake-up|longest|In bed|Asleep |still asleep/);
+    expect(document.querySelector('.night__soon')).toBeNull();
+    expect(document.querySelector('.night__est')).toBeNull();
+    expect(screen.queryByText('You corrected this')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Estimated from movement/)).not.toBeInTheDocument();
+    // No bullet list of observations either.
+    expect(document.querySelector('.night__sleep li, .night__sleep ul')).toBeNull();
   });
 
   test('durations under an hour drop the hours part', async () => {
     live({ scope: 'last_night', night: { ...OK_NIGHT, asleep_minutes: 47 } });
     show();
-    expect(await screen.findByText('47m asleep')).toBeInTheDocument();
+    expect(await asleep('47m asleep')).toBeInTheDocument();
   });
 
-  test('a night still in progress reads "so far", not as a finished range', async () => {
+  test('a night still in progress reads "so far", with no range', async () => {
     live({ scope: 'tonight', night: { ...OK_NIGHT, wake_at: null } });
     show();
     expect(await screen.findByText('Tonight · so far')).toBeInTheDocument();
-    expect(screen.getByText('10h 37m asleep so far')).toBeInTheDocument();
-    expect(soon()).toMatch(/^asleep since /);
-    expect(soon()).toMatch(hhmm(19, 10));
-  });
-
-  test('an in-progress night after a morning wake says "awake since"', async () => {
-    live({ scope: 'tonight', night: OK_NIGHT });
-    show();
-    await screen.findByText('Tonight · so far');
-    expect(soon()).toMatch(/^awake since /);
-    expect(soon()).toMatch(hhmm(6, 47));
-  });
-
-  test('a completed night with no wake says how far the window ran, not that it is still going', async () => {
-    live({ scope: 'last_night', night: { ...OK_NIGHT, wake_at: null, window_end: '2026-09-01 21:00:00' } });
-    show();
-    await screen.findByText('10h 37m asleep');
-    expect(soon()).toMatch(/^from .* · still asleep at /);
-    expect(soon()).toMatch(hhmm(19, 10));
-    expect(soon()).toMatch(hhmm(7, 0));
+    expect(await asleep('10h 37m asleep so far')).toBeInTheDocument();
+    expect(document.querySelector('.night__sleep').textContent).not.toMatch(/asleep since|awake since/);
   });
 
   test('"no one in the bed" is NOT the same as "no data"', async () => {
@@ -202,117 +172,26 @@ describe('SleepSummaryCard', () => {
     expect(await screen.findByText(/Once a camera with motion or sound detection runs overnight/)).toBeInTheDocument();
   });
 
-  // --- "In bed" beside "Asleep" (issue #501) ---
-  // Only a night with a real gap between put-down and sleep gets the second line. Both branches are
-  // tested, because a fixture that always carried a gap would pass with the condition deleted.
-  const inBedLine = () => document.querySelector('.night__inbed')?.textContent ?? null;
-
-  test('a story night shows "In bed" and "Asleep" as two labelled times, in the APP timezone', async () => {
-    live({ scope: 'last_night', night: { ...OK_NIGHT, in_bed_at: '2026-09-01 08:47:12' } }); // 18:47 Melbourne
+  // The headline, one line, with the observations list that the server also sends kept OFF the card (it is on the sleep page).
+  test('★ the night summary is ONE headline line on the card, never the observations list', async () => {
+    const summary = {
+      headline: { key: 'typical' },
+      observations: [
+        { key: 'total_sleep_vs_usual', params: { minutes: 600, usual_minutes: 640, direction: 'less' } },
+        { key: 'wake_ups', params: { count: 3 } },
+      ],
+      seed: 'child-a|2026-03-10',
+    };
+    live({ scope: 'last_night', night: { ...OK_NIGHT, summary } });
     show();
-    await screen.findByText('10h 37m asleep');
-    expect(inBedLine()).toMatch(/^In bed .* · Asleep .*$/);
-    expect(inBedLine()).toMatch(hhmm(18, 47));
-    expect(inBedLine()).toMatch(hhmm(19, 10));
-    expect(soon(), 'the range line is untouched').not.toMatch(/In bed/);
-  });
-
-  test('mid-night and still asleep, it reads "in bed since", matching "asleep since"', async () => {
-    live({ scope: 'tonight', night: { ...OK_NIGHT, wake_at: null, in_bed_at: '2026-09-01 08:47:12' } });
-    show();
-    await screen.findByText('Tonight · so far');
-    expect(inBedLine()).toMatch(/^in bed since /);
-    expect(inBedLine()).toMatch(hhmm(18, 47));
-  });
-
-  test('mid-night but already up, it gives both times rather than "since"', async () => {
-    live({ scope: 'tonight', night: { ...OK_NIGHT, in_bed_at: '2026-09-01 08:47:12' } });
-    show();
-    await screen.findByText('Tonight · so far');
-    expect(inBedLine()).toMatch(/^In bed .* · Asleep /);
-  });
-
-  test.each([
-    ['no put-down was found', null],
-    ['the put-down is the minute sleep began', '2026-09-01 09:10:00'],
-    ['the put-down is seconds AFTER the floored onset (a one-way check, never an absolute one)', '2026-09-01 09:10:45'],
-    // Well after "asleep", not just seconds: the one-way check alone must refuse it. (A CORRECTED
-    // night is also hidden by its own guard — see the corrected-onset tests below.)
-    ['the put-down is well AFTER "asleep"', '2026-09-01 09:30:00'],
-  ])('no second line when %s', async (_why, inBed) => {
-    live({ scope: 'last_night', night: { ...OK_NIGHT, in_bed_at: inBed } });
-    show();
-    await screen.findByText('10h 37m asleep');
-    expect(inBedLine()).toBeNull();
-  });
-
-  test('no second line on a night whose onset was corrected LATER than the computed put-down', async () => {
-    // The shape adversarial code review found (2026-09-25): computed put-down 18:47, the person said
-    // asleep at 19:30 — a full gap, so the one-way check alone passes, and the card paired the
-    // person's time with the put-down estimate they had just overridden.
-    live({
-      scope: 'last_night',
-      night: {
-        ...OK_NIGHT, in_bed_at: '2026-09-01 08:47:12', algo_onset_at: OK_NIGHT.onset_at,
-        onset_at: '2026-09-01 09:30:00', corrected: true,
-      },
-    });
-    show();
-    expect(await screen.findByText('You corrected this')).toBeInTheDocument();
-    expect(inBedLine()).toBeNull();
-  });
-
-  test('★ a put-down the PARENT gave shows beside their own corrected asleep time — the put-down night', async () => {
-    // 2026-09-30. The corrected-onset rule above hides the DETECTOR's put-down, because it belongs to the
-    // bedtime the person overrode. A put-down the person gave themselves (`in_bed_corrected`) is not that,
-    // so it shows: put down 18:49 for a story, asleep 19:13.
-    live({
-      scope: 'last_night',
-      night: {
-        ...OK_NIGHT, algo_onset_at: OK_NIGHT.onset_at, onset_at: '2026-09-01 09:13:00', corrected: true,
-        in_bed_at: '2026-09-01 08:49:20', in_bed_corrected: true, algo_in_bed_at: '2026-09-01 08:47:12',
-      },
-    });
-    show();
-    expect(await screen.findByText('You corrected this')).toBeInTheDocument();
-    expect(inBedLine()).toMatch(/^In bed .* · Asleep .*$/);
-    expect(inBedLine()).toMatch(hhmm(18, 49));
-    expect(inBedLine()).toMatch(hhmm(19, 13));
-  });
-
-  test('...but a put-down the parent gave that is not a minute before asleep still reads as one time', async () => {
-    live({
-      scope: 'last_night',
-      night: { ...OK_NIGHT, corrected: true, algo_onset_at: OK_NIGHT.onset_at, in_bed_at: '2026-09-01 09:09:30', in_bed_corrected: true },
-    });
-    show();
-    expect(await screen.findByText('You corrected this')).toBeInTheDocument();
-    expect(inBedLine()).toBeNull();
-  });
-
-  test('a WAKE-only correction still shows "In bed" — the onset and put-down are still one story', async () => {
-    live({
-      scope: 'last_night',
-      night: { ...OK_NIGHT, in_bed_at: '2026-09-01 08:47:12', algo_onset_at: OK_NIGHT.onset_at, corrected: true },
-    });
-    show();
-    expect(await screen.findByText('You corrected this')).toBeInTheDocument();
-    expect(inBedLine()).toMatch(/^In bed .* · Asleep .*$/);
-  });
-
-  test('a CORRECTED night says so, and drops the estimate disclaimer', async () => {
-    live({ scope: 'last_night', night: { ...OK_NIGHT, corrected: 1 } });
-    const { unmount } = show();
-    expect(await screen.findByText('You corrected this')).toBeInTheDocument();
-    // ⚠️ Leaving the disclaimer on a corrected night would be a lie about where the number came from:
-    // these are the times a PERSON gave, not an estimate from movement and sound.
-    expect(screen.queryByText(/Estimated from movement/)).not.toBeInTheDocument();
-    unmount();
-
-    live({ scope: 'last_night', night: OK_NIGHT });
-    show();
-    expect(await screen.findByText(/Estimated from movement & sound — not a medical measurement\./)).toBeInTheDocument();
-    expect(screen.queryByText('You corrected this')).not.toBeInTheDocument();
+    await asleep('10h 37m asleep');
+    const line = document.querySelector('.night__headline');
+    expect(line, 'a headline line').not.toBeNull();
+    expect(line.textContent).toBe('Steady, with some waking or stirring.');
+    expect(document.querySelectorAll('.night__headline')).toHaveLength(1);
+    // Observations read "Asleep for 10h 0m, less than the usual 10h 40m." and "3 wake-ups were counted overnight.": neither may appear on the card.
+    expect(document.querySelector('.night__sleep').textContent).not.toMatch(/wake-ups were counted|less than the usual/);
+    expect(document.querySelector('.night__sleep li')).toBeNull();
   });
 
   describe('where the card goes when tapped', () => {
@@ -353,14 +232,14 @@ describe('SleepSummaryCard', () => {
     beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
     afterEach(() => vi.useRealTimers());
 
-    test('re-reads every three minutes so a morning wake appears without a reload', async () => {
-      live({ scope: 'tonight', night: { ...OK_NIGHT, wake_at: null } });
+    test('re-reads every three minutes so a night in progress stays current without a reload', async () => {
+      live({ scope: 'tonight', night: { ...OK_NIGHT, wake_at: null, asleep_minutes: 300 } });
       show();
-      await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
-      api.get.mockResolvedValue({ scope: 'tonight', night: OK_NIGHT });
+      expect(await asleep('5h 0m asleep so far')).toBeInTheDocument();
+      expect(api.get).toHaveBeenCalledTimes(1);
+      api.get.mockResolvedValue({ scope: 'tonight', night: { ...OK_NIGHT, wake_at: null, asleep_minutes: 480 } });
       await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60 * 1000); });
-      await waitFor(() => expect(soon()).toMatch(/^awake since /));
-      expect(soon()).toMatch(hhmm(6, 47));
+      expect(await asleep('8h 0m asleep so far')).toBeInTheDocument();
     });
 
     test('unmounting stops the polling', async () => {

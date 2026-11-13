@@ -31,17 +31,21 @@ test.describe.configure({ mode: 'serial' });
 // and that is far easier to see in 24-hour form.
 test.use({ locale: 'en-GB' });
 
-test('the card offers last night for review', async ({ page }) => {
+test('the night card offers last night for review', async ({ page }) => {
   await page.goto(childPage);
-  await expect(page.getByText('Was last night right?')).toBeVisible();
-  // The card carries the one thing it is asking about (when they got up), so a person can answer without
-  // opening anything. It no longer quotes the fell-asleep time or an event count.
-  await expect(page.getByText(/We think they got up at /)).toBeVisible();
+  // The question is INSIDE the child's night card (UI refresh PR C), once, with its two answers; it used to be a separate card
+  // titled "Was last night right?". It carries the one thing it asks about (when they got up), so a person can answer without
+  // opening anything, and it does not quote the fell-asleep time or an event count.
+  await expect(page.getByText(/^Up at .*\. Is that right\?$/)).toBeVisible();
+  await expect(page.getByText(/Is that right\?/)).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'That’s right' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Not quite' })).toBeVisible();
 });
 
 test('correcting a night records MY times and shows them back', async ({ page }) => {
   await page.goto(childPage);
-  await page.getByText('Was last night right?').click();
+  // "Not quite" is the card's way into the review screen for a correction.
+  await page.getByRole('button', { name: 'Not quite' }).click();
 
   // ⚠️ The CARD shows the STORED night, while this screen RECOMPUTES from camera activity. The seeded night
   // has no activity behind it (see seed-review-night.mjs for why one cannot), so the recompute returns
@@ -81,7 +85,7 @@ test('correcting a night records MY times and shows them back', async ({ page })
   // would happily pass while the morning card still asked a question already answered.
   await page.goto(childPage);
   await expect(page.getByText('Thanks — that’s recorded')).toBeVisible();
-  await expect(page.getByText('Was last night right?')).toHaveCount(0);
+  await expect(page.getByText(/Is that right\?/)).toHaveCount(0);
 });
 
 test('the correction survives a reload, so it really reached the server', async ({ page }) => {

@@ -60,14 +60,14 @@ describe('the card that asks', () => {
     // passed against a card that rendered nothing at all.
     await forEachRole(async (name, who) => {
       const { unmount } = renderAs(who, <MorningReviewCard childId="c-1" fmtTime={fmtTime} />);
-      expect(await screen.findByText(/Was last night right\?/)).toBeInTheDocument();
+      expect(await screen.findByText(/Is that right\?/)).toBeInTheDocument();
       unmount();
     });
   });
 
   test('it asks the one question the screen asks — when they got up — and no longer quotes bedtime or an event count', async () => {
     renderAsAdmin(<MorningReviewCard childId="c-1" fmtTime={fmtTime} />);
-    expect(await screen.findByText(/We think they got up at 19:48/)).toBeInTheDocument();
+    expect(await screen.findByText('Up at 19:48. Is that right?')).toBeInTheDocument();
     expect(screen.queryByText(/fell asleep/)).not.toBeInTheDocument();
     expect(screen.queryByText(/recorded event/)).not.toBeInTheDocument();
   });
@@ -76,11 +76,11 @@ describe('the card that asks', () => {
     // Both halves matter. Hiding without recording means it returns tomorrow; recording without hiding
     // means it sits there until a reload, which reads as broken.
     const { user } = renderAsAdmin(<MorningReviewCard childId="c-1" fmtTime={fmtTime} />);
-    await screen.findByText(/Was last night right\?/);
+    await screen.findByText(/Is that right\?/);
 
     await user.click(screen.getByRole('button', { name: /dismiss/i }));
 
-    expect(screen.queryByText(/Was last night right\?/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Is that right\?/)).not.toBeInTheDocument();
     await waitFor(() => expect(api.put).toHaveBeenCalledWith(
       '/children/c-1/review/2026-08-29',
       { dismissed: true }
@@ -92,16 +92,16 @@ describe('the card that asks', () => {
     // cannot be got rid of.
     api.put.mockRejectedValue(new Error('offline'));
     const { user } = renderAsAdmin(<MorningReviewCard childId="c-1" fmtTime={fmtTime} />);
-    await screen.findByText(/Was last night right\?/);
+    await screen.findByText(/Is that right\?/);
     await user.click(screen.getByRole('button', { name: /dismiss/i }));
-    expect(screen.queryByText(/Was last night right\?/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Is that right\?/)).not.toBeInTheDocument();
   });
 
   test('nothing renders when there is nothing to review', async () => {
     api.get.mockResolvedValue({ state: 'none' });
     const { container } = renderAsAdmin(<MorningReviewCard childId="c-1" fmtTime={fmtTime} />);
     await waitFor(() => expect(api.get).toHaveBeenCalled());
-    expect(container.querySelector('.review-card')).toBeNull();
+    expect(container.querySelector('.night__review')).toBeNull();
   });
 
   test('a wake-only answer shows a receipt that says only "up at …", with a way back in, not nothing', async () => {
@@ -158,7 +158,7 @@ describe('the card that asks', () => {
     api.get.mockRejectedValue(new Error('offline'));
     const { container } = renderAsAdmin(<MorningReviewCard childId="c-1" fmtTime={fmtTime} />);
     await waitFor(() => expect(api.get).toHaveBeenCalled());
-    expect(container.querySelector('.review-card')).toBeNull();
+    expect(container.querySelector('.night__review')).toBeNull();
   });
 });
 

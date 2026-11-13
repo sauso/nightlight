@@ -6,6 +6,7 @@ import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { useHomeTime } from '../lib/useHomeTime.js';
 import AppHeader from '../components/AppHeader.jsx';
+import { toLocalHhmm } from '../lib/reviewConfirm.js';
 
 // Recording what actually happened last night, from the person who was there.
 //
@@ -37,20 +38,10 @@ import AppHeader from '../components/AppHeader.jsx';
 // ⚠️ Times are typed as local wall-clock and sent AS TYPED. The server resolves them against the app's
 // configured timezone — see toLocalHhmm below for why that direction is deliberate.
 
-// UTC 'YYYY-MM-DD HH:MM:SS' -> the 'HH:MM' shown in the app's configured timezone — the same zone the
-// sleep card renders in, so the review and the thing it is correcting always agree. This is the value of
-// a `<input type="time">`, which needs the 24-hour 'HH:MM' form whatever the device's own clock format;
-// the times READ on this page (the question, the hints) go through useHomeTime like every other screen.
-//
-// The reverse direction is deliberately NOT done here. The server resolves what was typed against the
-// app timezone and the night's date, because that is where the timezone setting lives and where the
-// DST-safe conversion already exists and is tested. Doing it in the browser would use the phone's zone
-// instead, so a review typed while travelling would disagree with the card it was correcting.
-function toLocalHhmm(utc, tz) {
-  if (!utc) return '';
-  const d = new Date(`${utc.replace(' ', 'T')}Z`);
-  return new Intl.DateTimeFormat('en-GB', { timeZone: tz || undefined, hourCycle: 'h23', hour: '2-digit', minute: '2-digit' }).format(d);
-}
+// `toLocalHhmm` (UTC 'YYYY-MM-DD HH:MM:SS' -> the 'HH:MM' in the app's configured timezone, the value of a
+// `<input type="time">`) lives in lib/reviewConfirm.js, where the child page's one-tap "That's right" shares it. The
+// times READ on this page (the question, the hints) go through useHomeTime like every other screen. The reverse
+// direction is deliberately NOT done in the browser: see the note on toLocalHhmm.
 
 const toDate = (utc) => new Date(`${utc.replace(' ', 'T')}Z`);
 

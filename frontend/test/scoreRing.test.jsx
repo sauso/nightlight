@@ -69,3 +69,49 @@ describe('ScoreRing bands', () => {
     expect(render(<ScoreRing value={null} band="great" />).container.querySelector('svg')).toBeNull();
   });
 });
+
+// The band word inside the ring (the child card's "82 / Good", UI refresh PR C). Colour is never the only signal, so the word is
+// drawn where a person looks, not only in the button's accessible name.
+describe('ScoreRing word', () => {
+  const words = (svg) => [...svg.querySelectorAll('.score-ring__word')].map((t) => t.textContent);
+  const y = (el) => Number(el.getAttribute('y'));
+
+  test('★ the xl ring draws the word under the number, and the pair is centred on the ring', () => {
+    const svg = ring({ size: 'xl', surface: 'dark', band: 'good', value: 82, word: 'Good' });
+    expect(words(svg)).toEqual(['Good']);
+    const num = svg.querySelector('.score-ring__num');
+    const word = svg.querySelector('.score-ring__word');
+    expect(num.textContent).toBe('82');
+    // The number is ABOVE the centre line and the word BELOW it (SVG y grows downwards), so neither sits on the other.
+    const mid = Number(svg.getAttribute('width')) / 2;
+    expect(y(num)).toBeLessThan(mid);
+    expect(y(word)).toBeGreaterThan(mid);
+    // ...and with enough room between their centres for the two font sizes (22px over 11px): no overlap.
+    expect(y(word) - y(num)).toBeGreaterThan((Number(num.getAttribute('font-size')) + Number(word.getAttribute('font-size'))) / 2);
+  });
+
+  test('no word given: the number stays on the centre, as on every other ring', () => {
+    const svg = ring({ size: 'xl', value: 82 });
+    expect(words(svg)).toEqual([]);
+    expect(y(svg.querySelector('.score-ring__num'))).toBe(Number(svg.getAttribute('width')) / 2);
+  });
+
+  test('a word on a ring too small to hold it is ignored, not squeezed in', () => {
+    for (const size of ['sm', 'lg']) {
+      const svg = ring({ size, value: 82, word: 'Good' });
+      expect(words(svg), size).toEqual([]);
+      expect(y(svg.querySelector('.score-ring__num')), size).toBe(Number(svg.getAttribute('width')) / 2);
+    }
+  });
+
+  test('the xl ring keeps the v3.1 stroke rule (the arc is never thinner than the track) and a wider groove than the old rings', () => {
+    const svg = ring({ size: 'xl', band: 'early', value: 64 });
+    const track = Number(svg.querySelector('.score-ring__track').getAttribute('stroke-width'));
+    expect(Number(svg.querySelector('.score-ring__arc').getAttribute('stroke-width'))).toBeGreaterThanOrEqual(track);
+    expect(track).toBeGreaterThan(4);
+  });
+
+  test('the word is as decorative as the rest of the ring (the svg stays hidden from a screen reader)', () => {
+    expect(ring({ size: 'xl', value: 82, word: 'Good' }).getAttribute('aria-hidden')).toBe('true');
+  });
+});

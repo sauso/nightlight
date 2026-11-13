@@ -106,7 +106,8 @@ for (const [suffix, form] of [['mobile', PHONE], ['desktop', DESKTOP]]) {
 
   // The morning review: opened the way a person gets there, from the prompt on the child page.
   await go(`/children/${AVERY}`);
-  await page.getByText('Was last night right?').click();
+  // The question now sits inside the night card; "Not quite" opens the review screen, which is what this shot shows.
+  await page.getByRole('button', { name: 'Not quite' }).click();
   await page.getByRole('button', { name: 'That’s right' }).waitFor();
   await shot('review-mobile');
 
