@@ -35,13 +35,24 @@ const CHILDREN = [
   { id: 'e2e-wakeonly-kid', name: 'Wake Only Kid' },
 ];
 
+// ★ THE SLEEP WINDOW NEVER CONTAINS "NOW" (UI refresh PR H). It used to be the fixed 19:00-07:00, and the child page's night card
+// (and the morning question under it) follow /sleep/live, which reports tonight IN PROGRESS whenever a window is open: a run
+// that started at 21:00 got "Tonight · so far" and no question, so 07-morning-review failed by time of day. The window is now a
+// single hour that starts two hours from now, in the app's own timezone (the zone the window is read in), so no window is open
+// for the rest of the run and /sleep/live answers with the last completed night at any hour. The seeded night's own times are
+// unchanged and independent of the window.
+const tz = db.prepare('SELECT timezone FROM settings WHERE id = ?').get('app')?.timezone || 'UTC';
+const hhmmAt = (ms) => new Intl.DateTimeFormat('en-GB', { timeZone: tz, hourCycle: 'h23', hour: '2-digit', minute: '2-digit' }).format(new Date(ms));
+const WINDOW_START = hhmmAt(Date.now() + 2 * 3600 * 1000);
+const WINDOW_END = hhmmAt(Date.now() + 3 * 3600 * 1000);
+
 for (const { id, name } of CHILDREN) {
-  // A child who tracks sleep, with a wide window so the night has certainly ended whenever this runs.
+  // A child who tracks sleep, with a window that is not open now (see above).
   db.prepare(
     `INSERT INTO children (id, name, track_sleep, sleep_window_start, sleep_window_end)
-     VALUES (@id, @name, 1, '19:00', '07:00')
-     ON CONFLICT(id) DO UPDATE SET track_sleep = 1, sleep_window_start = '19:00', sleep_window_end = '07:00'`
-  ).run({ id, name });
+     VALUES (@id, @name, 1, @ws, @we)
+     ON CONFLICT(id) DO UPDATE SET track_sleep = 1, sleep_window_start = @ws, sleep_window_end = @we`
+  ).run({ id, name, ws: WINDOW_START, we: WINDOW_END });
 
   const nightDate = lastCompletedNightDate(id);
   if (!nightDate) {

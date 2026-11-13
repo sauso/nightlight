@@ -8,8 +8,9 @@ import { formatInZone, TIME } from '../lib/homeTime.js';
 import { showsInBed } from '../lib/inBed.js';
 import {
   sheetScoreOf, scoreQualifier, scoreLabel, componentName, componentDetail, droppedTerms, unavailableText, noScoreText,
-  lowConfidenceText, cappedText, bandOf, bandOfValue, clampFactorScore, minutesText, clockText,
+  lowConfidenceText, cappedText, bandOf, bandOfValue, clampFactorScore, minutesText, clockText, pendingNightText,
 } from '../lib/sleepScoreText.js';
+import NightPendingRing from './NightPendingRing.jsx';
 
 const ORDER = ['duration', 'continuity', 'settling', 'restlessness', 'consistency'];
 // The nightly job rechecks the end of a window for three hours (sleepAnalysis.runNightlySleepJob).
@@ -134,15 +135,21 @@ export default function SleepScoreCard({ night, reviewAction = null }) {
   if (!hasScore && !blurb && night.status !== 'ok') return null;
   const fromSaved = night.score_source === 'stored';
   const why = hasScore && !score ? noScoreText(night.in_progress ? 'in_progress' : raw.reason) : '';
+  // Tonight in progress (UI refresh PR H): a dashed ring and "Score and night summary after 7:00 AM" instead of "No score yet. The
+  // night is still in progress." The so-far observations (the blurb) are unchanged. Null when there is no window end to name, or
+  // the child's score switch is off (no score object): the card then says what it said before.
+  const pendingLine = !score ? pendingNightText(night, settings?.timezone) : null;
   return (
     <div className="card night sleep-score sleep-night-card">
       <div className="sleep-night-card__main">
         {score && <ScoreRing value={score.score} size="xl" surface="dark" band={bandOf(score)} word={score.early_estimate ? 'Early' : scoreQualifier(score)} />}
+        {pendingLine && <NightPendingRing surface="dark" />}
         <div className="sleep-night-card__story">
           {measured(night.asleep_minutes) && <div className="sleep-night-card__duration">{minutesText(night.asleep_minutes)} asleep{night.in_progress ? ' so far' : ''}</div>}
           {score?.early_estimate && <div className="sleep-night-card__qualifier">Early estimate</div>}
           {blurb?.length > 0 && <p className="sleep-night-card__blurb">{blurb.join(' ')}</p>}
-          {hasScore && !score && <p className="sleep-night-card__blurb">No score yet.{why ? ` ${why}` : ''}</p>}
+          {pendingLine && <p className="sleep-night-card__blurb sleep-night-card__pending">{pendingLine}.</p>}
+          {hasScore && !score && !pendingLine && <p className="sleep-night-card__blurb">No score yet.{why ? ` ${why}` : ''}</p>}
           {score?.provisional && <p className="sleep-score__note">This score may still change.</p>}
           {fromSaved && <p className="sleep-score__note">The timeline for this night is no longer available. The score comes from the saved night.</p>}
         </div>

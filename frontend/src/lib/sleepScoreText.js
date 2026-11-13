@@ -14,7 +14,7 @@
 // Nothing here assumes a locale, a clock format or a timezone: durations are plain minutes, and the one clock time
 // (consistency) goes through lib/homeTime.js like every other time on these screens.
 
-import { formatInZone, TIME } from './homeTime.js';
+import { formatInZone, resolveZone, zonesDiffer, TIME } from './homeTime.js';
 
 // The night's score object when it carries a NUMBER, else null. The one test for "is there a ring to draw":
 // `score` absent (the child's "Show sleep score" switch is off), `null` (scoring failed on the server) and
@@ -166,6 +166,29 @@ const NO_SCORE = {
   under_12_months_no_baseline: 'Under 12 months, it needs about a week of tracked nights first.',
 };
 export const noScoreText = (reason) => NO_SCORE[reason] ?? '';
+
+// A night that is still going has no score and no whole-night summary YET, and the cards say WHEN they arrive instead of
+// "No score yet" (UI refresh PR H, the approved design): "Score and night summary after 7:00 AM". The time is the END OF THE
+// NIGHT WINDOW in the app's configured zone (home time, never the browser's: docs/design-language.md), because that is when
+// the night stops changing; the server may still recheck it for a few hours after (SleepScoreCard's "may still change" note).
+//
+// `night` is the night object of either card. Null unless the night is in progress, carries a score OBJECT (so the child's
+// "Show sleep score" switch being off stays silent: promising a score that will never be shown would be a lie) and has a
+// readable window end. The callers fall back to what they said before when this is null, so an older server or a night
+// without a window end changes nothing.
+export function pendingNightText(night, zone) {
+  if (!night?.in_progress) return null;
+  if (!night.score || typeof night.score !== 'object') return null;
+  const s = night.window_end;
+  if (typeof s !== 'string' || !s) return null;
+  const d = new Date(`${s.replace(' ', 'T')}Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  // The short zone name rides along when this device sits in another zone than the home one, like every other time of day
+  // (useHomeTime): "after 7:00 AM GMT+10" says WHICH 7:00 to someone looking at the card from abroad.
+  const home = resolveZone(zone);
+  const at = formatInZone(d, home, TIME, zonesDiffer(home));
+  return at ? `Score and night summary after ${at}` : null;
+}
 
 // One part's own figures in human units: what was measured and, where there is one, the child's usual.
 // '' when there is nothing sensible to say (an unknown part, a missing value): the bar and its score still show.

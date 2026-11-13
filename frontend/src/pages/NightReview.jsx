@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, ChevronRight, Clock, Bed } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
@@ -362,7 +362,7 @@ export default function NightReview() {
               ) : (
                 <>
                   {timesReady && (
-                    <div className="camera-tile__sub">
+                    <div className="camera-tile__sub review-hint">
                       {review?.true_wake_at
                         ? `You said up at ${readable(review.true_wake_at)}. `
                         : range
@@ -384,7 +384,15 @@ export default function NightReview() {
                   </div>
                 </>
               )}
+            </>
+          )}
+        </div>
 
+        {/* The two quieter ways out of the question, as two rows in a card of their own (UI refresh PR H, as drawn): a 44px target
+            each, an icon at the left and a chevron at the right. They were a text button and an underlined link inside the
+            question's card, about 37px tall. Same two controls, same behaviour; only the card and the rows are new. */}
+        {!nobody && (
+          <div className="card review-rows">
               {/* The rare night the other two times are wrong. Collapsed by default: three time fields and a
                   note were the old screen's first impression, and only the wake is asked of everyone. */}
               <div className="review-more">
@@ -394,13 +402,14 @@ export default function NightReview() {
                   aria-expanded={moreOpen}
                   onClick={() => setMoreToggled(!moreOpen)}
                 >
+                  <Clock size={18} className="review-row__icon" aria-hidden="true" />
+                  <span className="review-row__text">Change bedtime or fell-asleep time</span>
                   <ChevronDown size={16} className={`review-more__chev${moreOpen ? ' is-open' : ''}`} aria-hidden="true" />
-                  Change bedtime or fell-asleep time
                 </button>
                 {moreOpen && (
                   <div className="review-more__body">
                     {timesReady && saidParts.length > 0 && (
-                      <div className="camera-tile__sub">
+                      <div className="camera-tile__sub review-hint">
                         We said {saidParts.join(', ')}. Only a time you type here is saved.
                       </div>
                     )}
@@ -429,11 +438,12 @@ export default function NightReview() {
               </div>
 
               <button type="button" className="review-link" disabled={busy} onClick={() => saveNobody(true)}>
-                No one was in the bed
+                <Bed size={18} className="review-row__icon" aria-hidden="true" />
+                <span className="review-row__text">No one was in the bed</span>
+                <ChevronRight size={16} className="review-row__go" aria-hidden="true" />
               </button>
-            </>
-          )}
-        </div>
+          </div>
+        )}
 
         {error && <div className="error-banner">{error}</div>}
       </main>

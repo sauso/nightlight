@@ -112,7 +112,7 @@ the quiet birthday line use `--night-link`. The score ring's colours on this car
 2. A hairline, then the **sleep row**, one button into the sleep page: a "Last night" label with a small moon (or "Tonight · so
    far"), the duration in 28px ("9h 40m" with a smaller "asleep"), **one ring** (72px, band word under the number: "82 / Good",
    "Early" for an early estimate, no word under the lowest band) and a chevron. Under the row, **one headline line**
-   (`.night__headline`, 15px bold, ends in an ellipsis). No time range, no wake-up count, no longest stretch, no "In bed" line, no
+   (`.night__headline`, 15px bold, **wraps** to a second line on a narrow phone rather than ending in an ellipsis). No time range, no wake-up count, no longest stretch, no "In bed" line, no
    bullet list and no estimate note: they are all on the sleep page, one tap away. The button's name still carries the headline and
    the score ("View sleep detail and history. A fairly steady night overall. Sleep score 82, Good").
 3. Under the sleep row, a quiet "Add a birthday in settings to see a score sooner" line, only when a night has no score for want of a birthday.
@@ -461,7 +461,7 @@ Also: `@media (prefers-reduced-motion: reduce)` — see §7.
   also keep clear of the safe-area insets on every edge.
 - `overscroll-behavior-y: contain` keeps the browser's own pull-to-refresh from firing under the
   app's custom one (`usePullToRefresh.js`).
-- `.app-shell` reserves `padding-bottom: 64px` for the bottom nav.
+- `.app-shell` reserves `padding-bottom: 64px` **plus `env(safe-area-inset-bottom)`** for the bottom nav (the nav pads by the inset, so the page must too; without it the last line of a page, the sleep page's estimate line, was clipped on a phone with a gesture bar).
 
 ---
 
@@ -640,9 +640,9 @@ needed), `--night-link` 5.82 to 6.74:1, and the arc against the tinted card 6.79
 A few plain sentences about the night sit beside the score ring and duration in one navy card under the date.
 The detail page joins related observations into a two or three sentence blurb. The child's card keeps the
 headline as **one line** under the duration
-(`.night__headline`, 15px bold, under the sleep row at the card's full width) and **ends in an ellipsis rather than wrapping**. It is
-also in the button's `aria-label`, so nothing the ellipsis cuts is lost to a screen reader. The observations list is not on the
-child's card at all.
+(`.night__headline`, 15px bold, under the sleep row at the card's full width) and **wraps rather than ending in an ellipsis**: at
+320px "Steady, with some waking or stirring." was cut to "Steady, with some waking or stirri...", which hides what the line is for.
+It is also in the button's `aria-label`. The observations list is not on the child's card at all.
 
 The detail card's **Why this score?** button opens a bottom sheet on a phone and a centred dialog from
 1024px. Each of the five factors has the name and measured value on one row, and under it a 72px bar and a
@@ -657,6 +657,44 @@ figures and notes that apply to this score. The page's estimate line remains at 
 The words are descriptive only: what was measured and how it compares with this child's own recent nights, never a cause, advice,
 praise or blame, never a sleep stage, no emoji and no exclamation mark. The headline's class follows the score's parts, so a
 headline cannot contradict the score. See the voice rules at the top of `lib/nightSummaryPhrases.js`.
+
+### States without a score ring (`NightPendingRing.jsx`) and the review rows
+UI refresh PR H. Every state keeps the same words it had; what is new is the shape beside them.
+
+- **Tonight in progress**, on both the child card and the sleep page's night card: a **dashed ring with a moon** (the same 72px as the
+  score ring, so the card does not change shape when the score arrives), and "Score and night summary after 7:00 AM". The time is the
+  end of the night window **in the configured timezone** (`pendingNightText` in `lib/sleepScoreText.js`). The child card shows this
+  line **instead of** its headline (a night that has not finished has no whole-night sentence); the sleep page keeps the facts so far
+  above it. The ring has no number and no band, and is never a band colour: it uses the neutral early-estimate strokes
+  (`--band-early`, `--band-early-ring`), and as a stroke, not text colour (`paletteTokens.test.jsx` forbids a band token on text).
+  A child whose **Show sleep score** switch is off has no `score` key, so neither card shows the ring or the line (they would promise a
+  score that never appears); a night with no window end or an older server falls back to the earlier wording.
+- **No data**: the sleep page's empty night shows the dashed ring above "No sleep data for this night — ...". The design's "Go to last
+  night" button is **not built** (the strip and the calendar already reach other nights).
+- **Early estimate**, **no score** and **score switch off** are unchanged: a number with a neutral dashed-track ring and "Early"; no
+  ring and "No score yet" with its reason; no ring at all.
+- **The review screen** keeps one question card ("Up at 6:20 AM. Is that right?" with That's right and Not quite). The two quieter
+  answers, "Change bedtime or fell-asleep time" (a disclosure) and "No one was in the bed", are **rows in a card of their own**: icon,
+  words, chevron, each a full-width 44px target (they were about 37px). The sentence above a time field has 12px under it. Behaviour,
+  focus order and what is saved are unchanged. **Not built**, because the app has no such control: the design's -5m / +5m time
+  stepper, the "Edit sleep times" sheet and its "What was off?" chips.
+- **Card headings are one treatment**: an icon (16px, `--accent-line`) and a 15px bold title in `--text-primary`, as on Timelapse, Recent
+  alerts and Recordings. "Room climate · last 24h", the sleep page's "Timeline" and "Sleep & room temperature" were 12 to 13px grey or
+  uppercase labels and now match.
+- **Room activity** (the second tab): every row is **one line** ("7:14 PM – 7:31 PM", the duration, a chevron when it opens). The common
+  kind, "Movement outside the bed", is a small teal dot (the timeline's ring colour) that carries the words as its name and title, so a
+  screen reader still hears them on every row; a chip appears only for the less common "Out of bed". One caption line above the list
+  says what the dot is, with a **What is this?** button (44px, `aria-expanded`) that opens the full explanation, worded as before.
+- **The tab control** (Wake-ups | Room activity) has a light accent tint for its track and a stronger tint with a 3px `--accent-line`
+  indicator for the selected tab, in both themes. It was the near-black inset `--bg-elevated-2` at night, which read as a black hole
+  beside the raised selected tab.
+- **The review question belongs to the night the card shows.** The child page's question and its receipt come from a request about
+  the last completed night, so they are drawn only when the night card above shows that finished night: while "Tonight · so far" is
+  on the card there is no review row and no receipt from the night before. The review route and the notification's link
+  (`/children/:id/review/:date`) name their own date and are unchanged.
+- **Phone rules found by this pass** (320 and 375px, both themes): text that carries meaning wraps, it is not cut with an ellipsis; a
+  heading that wraps is balanced (`text-wrap: balance`) so one word is not left alone; a hover tint is only for pointer devices
+  (`@media (hover: hover)`), because on a phone it stays on a row after a tap.
 
 ### Sleep page frame (`MoreMenu.jsx`, `SleepNightStrip.jsx`, `AppHeader`'s `actions` and `bandLine`)
 The top of the sleep detail page, as drawn in the UI refresh.
@@ -814,15 +852,18 @@ events and Recent alerts (they show their error and hide the empty copy, but hav
 The `.night` card is described under "Child hero card" above. Below it, in this order (which is also the DOM order, the
 reading order and the keyboard order):
 
-1. **Camera tile** (`components/ChildCameraTile.jsx`, `.child-cam`): one large dark tile per camera of the child, 18px radius,
-   192px minimum height, a dark navy gradient from `--thumb-hi`/`--thumb-lo` in both themes (like a camera picture). Top left a
-   status chip (a dot and the camera's name; offline and disabled add " · Offline" / " · Disabled" in words, so the colour is
-   never the only signal; online adds visually hidden "(online)" only); a quiet bed icon in the middle; **Watch live** bottom
-   right (44px, `#8995ff` with `#14142a` text, the night card's action pair), which goes to the Live tab. It is **not offered on a
+1. **Camera tile** (`components/ChildCameraTile.jsx`, `.child-cam`): one **slim row** per camera of the child (about 64px
+   tall, 18px radius, the dark navy gradient from `--thumb-hi`/`--thumb-lo` in both themes). It used to be a 192px tile with a large
+   empty bed icon where a picture would be; this tile never has a picture, so that space was always empty and pushed the page
+   down (owner, staging phone 2026-11-13). The row holds, left to right, a status chip (a dot and the camera's name; offline and
+   disabled add " · Offline" / " · Disabled" in words, so the colour is never the only signal; online adds visually hidden
+   "(online)" only) with the detection line under it, **Watch live** (44px, `#8995ff` with `#14142a` text, the night card's action
+   pair), which goes to the Live tab, and the gear. If a preview image is ever added it goes above the row at 16:9 and only when
+   an image exists. It is **not offered on a
    disabled camera**: the Live tab hides disabled cameras, so the button would lead nowhere (the chip says "Disabled"). An admin also gets a
-   44px settings gear top right ("Camera settings for <name>"); a caregiver does not (camera settings are admin-only). It is
+   44px settings gear at the row's end ("Camera settings for <name>"); a caregiver does not (camera settings are admin-only). It is
    **not a live picture**: no stream is opened by opening the page. There is no "Cameras · n" heading and no Online/Offline pill or
-   PTZ/TALK badges (the Cameras tab shows ONVIF, PTZ and Two-way Audio badges). Instead, one quiet muted line at the tile's bottom left, **for every role**, says whether detection is on in words: "Motion on · Sound on", or "Motion off" / "Sound off" for what is off (from the camera's `detect_motion_enabled` and `detect_sound_enabled`; owner decision, 2026-11-13: the first version had no such line, so a caregiver could not tell). It is left out on a disabled camera and on a camera object that carries neither field. A child with no camera gets a plain card with the existing
+   PTZ/TALK badges (the Cameras tab shows ONVIF, PTZ and Two-way Audio badges). Instead, one quiet muted line under the camera's name, **for every role**, says whether detection is on in words: "Motion on · Sound on", or "Motion off" / "Sound off" for what is off (from the camera's `detect_motion_enabled` and `detect_sound_enabled`; owner decision, 2026-11-13: the first version had no such line, so a caregiver could not tell). It is left out on a disabled camera and on a camera object that carries neither field. A child with no camera gets a plain card with the existing
    "No cameras assigned yet" sentence (the admin and caregiver wordings differ, as before).
 2. **Timelapse** (`components/TimelapseCard.jsx`): the card title (15px bold, accent icon), one player (the newest night, 16:9),
    and a strip of recent nights as small thumbnails, four in view and scrolling for the rest, each labelled with its **weekday**

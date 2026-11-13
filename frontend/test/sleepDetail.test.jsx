@@ -1677,7 +1677,11 @@ describe('#907 the saved frame on a Room activity row (expands like a wake-up ro
     ...(transition_frames === undefined ? {} : { transition_frames }),
   });
   // The same words are also in the timeline legend, so pick the row's own tag.
-  const rowOf = (text) => screen.getAllByText(text).find((el) => el.classList.contains('sleep-visit-tag')).closest('li');
+  // The common kind ("Movement outside the bed") is a dot whose name and title carry the words, not a chip (UI refresh PR H), so its row
+  // is found by that title; the less common "Out of bed" row still has its chip.
+  const rowOf = (text) => (text === 'Movement outside the bed'
+    ? screen.getAllByTitle(text)[0].closest('li')
+    : screen.getAllByText(text).find((el) => el.classList.contains('sleep-visit-tag')).closest('li'));
   // A row with a frame is a button (aria-expanded) and the frame lies underneath it once open.
   const expand = async (user, text) => user.click(within(rowOf(text)).getByRole('button', { expanded: false }));
 
@@ -2283,5 +2287,53 @@ describe('UI refresh PR E: the frame', () => {
       await user.click(await screen.findByRole('button', { name: /save the new numbers/i }));
       await waitFor(() => expect(stripReads()).toBe(2));
     });
+  });
+});
+
+// --- UI refresh PR H, owner feedback 5 (staging phone 2026-11-13): the Room activity tab is one line per row ----------------------
+describe('Room activity rows are one line, with the explanation behind "What is this?"', () => {
+  const night = () => ({
+    ...NIGHT,
+    visits: [
+      { start_at: '2026-08-30 15:00:00', end_at: '2026-08-30 15:05:00', minutes: 5, type: 'child_out' },
+      { start_at: '2026-08-30 17:00:00', end_at: '2026-08-30 17:02:00', minutes: 2, type: 'room' },
+    ],
+  });
+  const openRoom = async () => {
+    mockSleep({ night: night() });
+    const view = mount();
+    fireEvent.click(await screen.findByRole('tab', { name: /Room activity/ }));
+    return view;
+  };
+
+  test('★ the common kind is not a chip on every row: a named dot, and a chip only for "Out of bed"', async () => {
+    const { container } = await openRoom();
+    const tags = [...container.querySelectorAll('.sleep-visit-tag')].map((el) => el.textContent);
+    expect(tags).toEqual(['Out of bed']);
+    // Nothing is lost: the plain row still NAMES its kind, to a screen reader and to a pointer.
+    const dot = screen.getByRole('img', { name: 'Movement outside the bed' });
+    expect(dot).toHaveAttribute('title', 'Movement outside the bed');
+    expect(dot.closest('li').querySelector('.sleep-visit-tag')).toBeNull();
+  });
+
+  test('★ the six-line paragraph is behind a "What is this?" button that holds the full text', async () => {
+    const { user } = await openRoom();
+    const what = screen.getByRole('button', { name: 'What is this?' });
+    expect(what).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText(/the camera can.t tell who/)).not.toBeInTheDocument();
+    await user.click(what);
+    expect(what).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText(/Movement the camera saw away from the bed\. Before a child settles and after they get up it.s them/)).toBeInTheDocument();
+    expect(screen.getByText(/the camera can.t tell who/)).toBeInTheDocument();
+    await user.click(what);
+    expect(screen.queryByText(/the camera can.t tell who/)).not.toBeInTheDocument();
+  });
+
+  test('a night with no room activity has no caption and no button', async () => {
+    mockSleep({ night: { ...NIGHT, visits: [] } });
+    mount();
+    fireEvent.click(await screen.findByRole('tab', { name: /Room activity/ }));
+    expect(screen.queryByRole('button', { name: 'What is this?' })).not.toBeInTheDocument();
+    expect(screen.getByText('No room activity recorded.')).toBeInTheDocument();
   });
 });
