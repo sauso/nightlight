@@ -1,5 +1,5 @@
 // demoGuard is the only thing standing between "read-only public demo" and "public admin access
-// to a real running app" once the demo account is admin (see planning/ROADMAP.md and
+// to a real running app" once the demo account is admin (see docs/demo-mode.md and
 // middleware/demoMode.js's own comments for the full context). Two invariants matter more than
 // the rest, both found only by adversarial design review, not by the original design:
 //

@@ -245,7 +245,8 @@ Rules:
 - Guardrail tests over the whole phrase library: no banned term (ideal, safe, healthy, badly, poor,
   because, parent, mum, dad, deep sleep, REM, light sleep, should); every placeholder is a declared
   param; an observation with a null param is never selected; new copy never contains the phrase
-  "night timeline" (the docs screenshot run matches that text).
+  "night timeline" (the card was once titled that; the docs screenshot run now waits for the exact
+  title "Timeline", so the card must keep that title).
 - The in-progress night gets the "so far" variants and no score.
 - **Deferred decision:** the LLM phase needs wording on the server. When that phase is planned, the
   phrase library moves to a JSON file both sides read. Not done now.
