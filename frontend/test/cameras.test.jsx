@@ -23,24 +23,26 @@ import SettingsCamera from '../src/pages/SettingsCamera.jsx';
 import { api } from '../src/lib/api.js';
 
 const KIDS = [
-  { id: 'kid-1', name: 'Child B' },
-  { id: 'kid-2', name: 'Child A' },
+  { id: 'kid-1', name: 'First child' },
+  { id: 'kid-2', name: 'Another child' },
 ];
 
 const CAMS = [
   {
     id: 'cam-a',
-    name: 'Child B Room',
+    name: 'Nursery camera',
     child_id: 'kid-1',
     statusLevel: 'live',
     rtsp_display: 'rtsp://192.0.2.10:554/ch0',
     discovery_source: 'onvif',
     ptz_supported: 1,
     backchannel_supported: 'yes',
+    detect_motion_enabled: 1,
+    detect_sound_enabled: 0,
   },
   {
     id: 'cam-b',
-    name: 'Hallway',
+    name: 'Camera B',
     child_id: null,
     disabled: 1,
     discovery_source: 'manual',
@@ -50,7 +52,11 @@ const CAMS = [
 ];
 
 const withCams = (over = {}) => ({ kids: KIDS, cameras: CAMS, ...over });
-const card = (name) => screen.getByText(name).closest('.cam-card');
+const card = (name) => screen.getByText(name).closest('.dev-card');
+async function action(user, name, item) {
+  await user.click(within(card(name)).getByRole('button', { name: `More for ${name}` }));
+  await user.click(within(card(name)).getByRole('menuitem', { name: item }));
+}
 
 function mockApi() {
   vi.spyOn(api, 'put').mockResolvedValue({});
@@ -67,38 +73,69 @@ describe('the Cameras tab', () => {
     await forEachRole(async (_name, who) => {
       mockApi();
       const { unmount } = renderAs(who, <Cameras />, withCams());
-      expect(screen.getByText('Child B Room')).toBeInTheDocument();
-      expect(screen.getByText('Hallway')).toBeInTheDocument();
+      expect(screen.getByText('Nursery camera')).toBeInTheDocument();
+      expect(screen.getByText('Camera B')).toBeInTheDocument();
       expect(screen.getByText('rtsp://192.0.2.10:554/ch0')).toBeInTheDocument();
 
-      // The badges are the same three words on every card, so they only mean anything scoped to a
-      // card AND read together with the class that carries the yes/no.
-      const live = card('Child B Room');
-      expect(within(live).getByText('ONVIF')).toHaveClass('cam-badge--ok');
-      expect(within(live).getByText('PTZ')).toHaveClass('cam-badge--ok');
-      expect(within(live).getByText('Two-way Audio')).toHaveClass('cam-badge--ok');
+      const live = card('Nursery camera');
+      expect(within(live).getByText('ONVIF')).toBeInTheDocument();
+      expect(within(live).getByText('PTZ')).toBeInTheDocument();
+      expect(within(live).getByText('Two-way audio')).toBeInTheDocument();
+      expect(within(live).getByText('Motion on · Sound off')).toBeInTheDocument();
+      expect(within(live).getByText('Online')).toBeInTheDocument();
 
-      const off = card('Hallway');
-      expect(within(off).getByText('ONVIF')).toHaveClass('cam-badge--bad');
-      expect(within(off).getByText('PTZ')).toHaveClass('cam-badge--bad');
-      expect(within(off).getByText('Two-way Audio')).toHaveClass('cam-badge--bad');
+      const off = card('Camera B');
+      expect(within(off).queryByText('ONVIF')).not.toBeInTheDocument();
+      expect(within(off).queryByText('PTZ')).not.toBeInTheDocument();
+      expect(within(off).queryByText('Two-way audio')).not.toBeInTheDocument();
+      expect(within(off).queryByText(/Motion/)).not.toBeInTheDocument();
       // ⚠️ Required: forEachRole renders both roles into the SAME document, so without this the
       // second pass has two copies of every camera on the page and every query is ambiguous.
       unmount();
     });
   });
 
-  test('a disabled camera is styled as off and reads as offline', () => {
+  test('the detection line shows for an enabled camera and is left out of a disabled one, even with detection fields (#1078 review)', () => {
+    mockApi();
+    renderAsAdmin(<Cameras />, withCams({ cameras: [CAMS[0], { ...CAMS[1], detect_motion_enabled: 1, detect_sound_enabled: 1 }] }));
+    expect(within(card('Nursery camera')).getByText('Motion on · Sound off')).toBeInTheDocument();
+    expect(within(card('Camera B')).queryByText(/Motion (on|off)/)).toBeNull();
+  });
+
+  test('a disabled camera has a neutral dot and reads as disabled', () => {
     mockApi();
     renderAsAdmin(<Cameras />, withCams());
-    expect(card('Hallway')).toHaveClass('cam-card--off');
-    expect(card('Child B Room')).not.toHaveClass('cam-card--off');
+    expect(within(card('Camera B')).getByText('Disabled').querySelector('.dot--neutral')).toBeInTheDocument();
   });
 
   test('says so when there are no cameras at all', () => {
     mockApi();
     renderAsAdmin(<Cameras />, withCams({ cameras: [] }));
+    expect(screen.getByRole('heading', { name: 'Add your first camera' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Add camera' })).toHaveLength(1);
+  });
+
+  test('caregiver empty state has no setup action', () => {
+    mockApi();
+    renderAsCaregiver(<Cameras />, withCams({ cameras: [] }));
     expect(screen.getByText('No cameras added yet.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add camera' })).not.toBeInTheDocument();
+  });
+
+  test('each menu has its own name; keyboard open and Escape return focus', async () => {
+    mockApi();
+    const { user } = renderAsAdmin(<Cameras />, withCams());
+    const first = screen.getByRole('button', { name: 'More for Nursery camera' });
+    const second = screen.getByRole('button', { name: 'More for Camera B' });
+    expect(first).not.toBe(second);
+    first.focus();
+    await user.keyboard('{ArrowDown}');
+    expect(within(card('Nursery camera')).getByRole('menu', { name: 'Actions for Nursery camera' })).toBeInTheDocument();
+    expect(within(card('Nursery camera')).getByRole('menuitem', { name: 'Edit camera' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(first).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(within(card('Nursery camera')).getByRole('menuitem', { name: 'Edit camera' })).toHaveFocus();
   });
 
   test('an error from the cameras context is shown without any action being taken', () => {
@@ -107,21 +144,17 @@ describe('the Cameras tab', () => {
     expect(screen.getByText('Could not load cameras')).toBeInTheDocument();
   });
 
-  test('ONLY an admin gets Disable, Edit, Remove and Add camera', () => {
+  test('ONLY an admin gets camera action menus, assignment selects and Add camera', () => {
     mockApi();
     const { unmount } = renderAsAdmin(<Cameras />, withCams());
-    expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(2);
-    expect(screen.getByRole('button', { name: 'Disable' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Enable' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '+ Add camera' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More for Nursery camera' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More for Camera B' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add camera' })).toBeInTheDocument();
     unmount();
 
     renderAsCaregiver(<Cameras />, withCams());
-    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Disable' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '+ Add camera' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /More for/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add camera' })).not.toBeInTheDocument();
   });
 
   test('★ a caregiver SEES each camera\'s child as text, with no control to change it (#552)', () => {
@@ -130,8 +163,8 @@ describe('the Cameras tab', () => {
     mockApi();
     renderAsCaregiver(<Cameras />, withCams());
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-    expect(within(card('Child B Room')).getByText('Child B')).toBeInTheDocument();
-    expect(within(card('Hallway')).getByText('Unassigned')).toBeInTheDocument();
+    expect(within(card('Nursery camera')).getByText('First child')).toBeInTheDocument();
+    expect(within(card('Camera B')).getByText('Unassigned')).toBeInTheDocument();
     expect(api.put).not.toHaveBeenCalled();
   });
 
@@ -139,7 +172,7 @@ describe('the Cameras tab', () => {
     mockApi();
     const { user, camerasValue } = renderAsAdmin(<Cameras />, withCams());
     expect(screen.getAllByRole('combobox')).toHaveLength(2);
-    const select = within(card('Hallway')).getByRole('combobox');
+    const select = within(card('Camera B')).getByRole('combobox');
     await user.selectOptions(select, 'kid-2');
     await waitFor(() => expect(api.put).toHaveBeenCalledWith('/cameras/cam-b/assign', { child_id: 'kid-2' }));
     // waitFor: refresh runs when the PUT resolves, which is after it was called (#570).
@@ -149,7 +182,7 @@ describe('the Cameras tab', () => {
   test('unassigning sends null, not an empty string', async () => {
     mockApi();
     const { user } = renderAsAdmin(<Cameras />, withCams());
-    const select = within(card('Child B Room')).getByRole('combobox');
+    const select = within(card('Nursery camera')).getByRole('combobox');
     expect(select).toHaveValue('kid-1');
     await user.selectOptions(select, '');
     // ⚠️ The <option> value is '' and the route stores whatever it is given. `child_id: ''` would
@@ -161,7 +194,7 @@ describe('the Cameras tab', () => {
     mockApi();
     api.put.mockRejectedValue(new Error('That child was deleted'));
     const { user } = renderAsAdmin(<Cameras />, withCams());
-    await user.selectOptions(within(card('Hallway')).getByRole('combobox'), 'kid-1');
+    await user.selectOptions(within(card('Camera B')).getByRole('combobox'), 'kid-1');
     expect(await screen.findByText('That child was deleted')).toBeInTheDocument();
   });
 
@@ -169,13 +202,13 @@ describe('the Cameras tab', () => {
     mockApi();
     const { user } = renderAsAdmin(<Cameras />, withCams());
 
-    // Child B Room is on, so its button says Disable and must send enabled:false.
-    await user.click(within(card('Child B Room')).getByRole('button', { name: 'Disable' }));
+    // Nursery camera is on, so its button says Disable and must send enabled:false.
+    await action(user, 'Nursery camera', 'Disable camera');
     await waitFor(() => expect(api.put).toHaveBeenCalledWith('/cameras/cam-a/enabled', { enabled: false }));
 
-    // Hallway is off (`disabled: 1`), so its button says Enable and must send enabled:true. Both
+    // Camera B is off (`disabled: 1`), so its button says Enable and must send enabled:true. Both
     // directions are asserted because a single inverted flag passes either one on its own.
-    await user.click(within(card('Hallway')).getByRole('button', { name: 'Enable' }));
+    await action(user, 'Camera B', 'Enable camera');
     await waitFor(() => expect(api.put).toHaveBeenCalledWith('/cameras/cam-b/enabled', { enabled: true }));
   });
 
@@ -185,24 +218,27 @@ describe('the Cameras tab', () => {
     api.put.mockImplementation(() => new Promise((r) => { release = r; }));
     const { user } = renderAsAdmin(<Cameras />, withCams());
 
-    await user.click(within(card('Child B Room')).getByRole('button', { name: 'Disable' }));
-    const busy = within(card('Child B Room')).getByRole('button', { name: '…' });
+    await action(user, 'Nursery camera', 'Disable camera');
+    await user.click(within(card('Nursery camera')).getByRole('button', { name: 'More for Nursery camera' }));
+    const busy = within(card('Nursery camera')).getByRole('menuitem', { name: 'Disable camera' });
     expect(busy).toBeDisabled();
     // The OTHER camera's toggle must stay live — `togglingId` is an id, not a boolean, precisely so
     // one slow camera does not freeze the page.
-    expect(within(card('Hallway')).getByRole('button', { name: 'Enable' })).toBeEnabled();
+    await user.click(within(card('Camera B')).getByRole('button', { name: 'More for Camera B' }));
+    expect(within(card('Camera B')).getByRole('menuitem', { name: 'Enable camera' })).toBeEnabled();
 
     release({});
-    await waitFor(() => expect(within(card('Child B Room')).getByRole('button', { name: 'Disable' })).toBeEnabled());
+    await waitFor(() => expect(busy).toBeEnabled());
   });
 
   test('a failed toggle clears the busy state so it can be retried', async () => {
     mockApi();
     api.put.mockRejectedValue(new Error('Camera is gone'));
     const { user } = renderAsAdmin(<Cameras />, withCams());
-    await user.click(within(card('Child B Room')).getByRole('button', { name: 'Disable' }));
+    await action(user, 'Nursery camera', 'Disable camera');
     expect(await screen.findByText('Camera is gone')).toBeInTheDocument();
-    expect(within(card('Child B Room')).getByRole('button', { name: 'Disable' })).toBeEnabled();
+    await user.click(within(card('Nursery camera')).getByRole('button', { name: 'More for Nursery camera' }));
+    expect(within(card('Nursery camera')).getByRole('menuitem', { name: 'Disable camera' })).toBeEnabled();
   });
 
   test('Edit and Add navigate to the camera screen carrying a Cameras back-link', async () => {
@@ -216,7 +252,7 @@ describe('the Cameras tab', () => {
       </Routes>,
       withCams()
     );
-    await user.click(within(card('Child B Room')).getByRole('button', { name: 'Edit' }));
+    await action(user, 'Nursery camera', 'Edit camera');
     expect(await screen.findByText('camera screen')).toBeInTheDocument();
     expect(seen).toHaveLength(1);
   });
@@ -225,10 +261,12 @@ describe('the Cameras tab', () => {
     test('asks first, names the camera, and sends nothing until confirmed', async () => {
       mockApi();
       const { user } = renderAsAdmin(<Cameras />, withCams());
-      await user.click(within(card('Child B Room')).getByRole('button', { name: 'Remove' }));
+      await action(user, 'Nursery camera', 'Remove camera');
 
       const dialog = screen.getByRole('dialog');
-      expect(within(dialog).getByText('Child B Room')).toBeInTheDocument();
+      expect(within(dialog).getByText('Nursery camera')).toBeInTheDocument();
+      expect(within(dialog).getByText('bed transitions and their snapshot photos')).toBeInTheDocument();
+      expect(within(dialog).getByText('recordings and wake clips, including the video files')).toBeInTheDocument();
       expect(api.del).not.toHaveBeenCalled();
 
       await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
@@ -239,7 +277,7 @@ describe('the Cameras tab', () => {
     test('confirming deletes that camera and refreshes the list', async () => {
       mockApi();
       const { user, camerasValue } = renderAsAdmin(<Cameras />, withCams());
-      await user.click(within(card('Hallway')).getByRole('button', { name: 'Remove' }));
+      await action(user, 'Camera B', 'Remove camera');
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
 
       await waitFor(() => expect(api.del).toHaveBeenCalledWith('/cameras/cam-b'));
@@ -253,7 +291,7 @@ describe('the Cameras tab', () => {
       let release;
       api.del.mockImplementation(() => new Promise((r) => { release = r; }));
       const { user } = renderAsAdmin(<Cameras />, withCams());
-      await user.click(within(card('Hallway')).getByRole('button', { name: 'Remove' }));
+      await action(user, 'Camera B', 'Remove camera');
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
 
       const dialog = await screen.findByRole('dialog');
@@ -271,7 +309,7 @@ describe('the Cameras tab', () => {
       mockApi();
       api.del.mockRejectedValue(new Error('Camera is in use'));
       const { user } = renderAsAdmin(<Cameras />, withCams());
-      await user.click(within(card('Hallway')).getByRole('button', { name: 'Remove' }));
+      await action(user, 'Camera B', 'Remove camera');
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
 
       expect(await screen.findByText('Camera is in use')).toBeInTheDocument();
@@ -292,7 +330,7 @@ describe('the Cameras tab', () => {
       mockApi();
       api.del.mockRejectedValue(new Error('Cannot remove: still recording #378'));
       const { user, camerasValue } = renderAsAdmin(<Cameras />, withCams());
-      await user.click(within(card('Hallway')).getByRole('button', { name: 'Remove' }));
+      await action(user, 'Camera B', 'Remove camera');
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
 
       const alert = await within(screen.getByRole('dialog')).findByRole('alert');
@@ -307,7 +345,7 @@ describe('the Cameras tab', () => {
       mockApi();
       api.del.mockRejectedValueOnce(new Error('first failure #378'));
       const { user } = renderAsAdmin(<Cameras />, withCams());
-      await user.click(within(card('Hallway')).getByRole('button', { name: 'Remove' }));
+      await action(user, 'Camera B', 'Remove camera');
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
       await within(screen.getByRole('dialog')).findByText('first failure #378');
 
@@ -321,11 +359,11 @@ describe('the Cameras tab', () => {
 
       // A different failure, cancelled, then the dialog opened again for another camera: no leftover.
       api.del.mockRejectedValueOnce(new Error('second failure #378'));
-      await user.click(within(card('Child B Room')).getByRole('button', { name: 'Remove' }));
+      await action(user, 'Nursery camera', 'Remove camera');
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
       await within(screen.getByRole('dialog')).findByText('second failure #378');
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
-      await user.click(within(card('Hallway')).getByRole('button', { name: 'Remove' }));
+      await action(user, 'Camera B', 'Remove camera');
       expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
     });
 
@@ -335,7 +373,7 @@ describe('the Cameras tab', () => {
       mockApi();
       api.put.mockRejectedValue(new Error('assign failed #378'));
       const { user } = renderAsAdmin(<Cameras />, withCams());
-      await user.selectOptions(within(card('Hallway')).getByRole('combobox'), 'kid-1');
+      await user.selectOptions(within(card('Camera B')).getByRole('combobox'), 'kid-1');
       expect(await screen.findByText('assign failed #378')).toBeInTheDocument();
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
@@ -351,8 +389,8 @@ describe('the Cameras tab', () => {
       expect(labelled).toHaveLength(2);
       // Distinct ids, and each is inside the card it belongs to (a shared id would label the first only).
       expect(new Set(labelled.map((el) => el.id)).size).toBe(2);
-      expect(within(card('Child B Room')).getByLabelText('Assigned to')).toBe(labelled[0]);
-      expect(within(card('Hallway')).getByLabelText('Assigned to')).toBe(labelled[1]);
+      expect(within(card('Nursery camera')).getByLabelText('Assigned to')).toBe(labelled[0]);
+      expect(within(card('Camera B')).getByLabelText('Assigned to')).toBe(labelled[1]);
       expect(labelled[0]).toHaveValue('kid-1');
       expect(labelled[1]).toHaveValue('');
     });

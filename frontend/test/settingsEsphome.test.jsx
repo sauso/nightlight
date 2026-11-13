@@ -40,7 +40,7 @@ function mockApi({ devices = [device()], onDevices = null, children = CHILDREN, 
   getTextSpy = vi.spyOn(api, 'getText').mockImplementation(getText || (async () => 'minute_utc\r\n'));
 }
 const deferred = () => { let resolve; let reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
-const cardOf = (name) => screen.getByText(name).closest('.esp-dev');
+const cardOf = (name) => screen.getByText(name).closest('.dev-card');
 const menuItem = async (name, cardName = 'Device A') => {
   if (!screen.queryByText(cardName)) await screen.findByText(cardName);
   fireEvent.click(within(cardOf(cardName)).getByRole('button', { name: `More for ${cardName}` }));
@@ -180,7 +180,7 @@ describe('the device list', () => {
     ['connecting', 'Connecting', 'breathing--connecting'],
     ['disconnected', 'Disconnected', 'breathing--offline'],
     ['failed', 'Failed', 'breathing--offline'],
-    ['disabled', 'Off', 'esp-dot--off'],
+    ['disabled', 'Off', 'dot--neutral'],
   ])('a %s device shows %s', async (state, text, cls) => {
     mockApi({ devices: [device({ enabled: state !== 'disabled', status: status({ state }) })] });
     renderAsAdmin(<SettingsEsphome />);
@@ -192,7 +192,7 @@ describe('the device list', () => {
   test('shows the address, the child, the last reading and the sensor count', async () => {
     mockApi({ devices: [device({ child_id: 'c2' })] });
     renderAsAdmin(<SettingsEsphome />);
-    const card = within(await screen.findByText('Device A').then((el) => el.closest('.esp-dev')));
+    const card = within(await screen.findByText('Device A').then((el) => el.closest('.dev-card')));
     expect(card.getByText(/10\.0\.0\.5:6053 · Second child/)).toBeInTheDocument();
     expect(card.getByText(/Last reading: 2 min ago · 410 in the last hour/)).toBeInTheDocument();
     expect(card.getByRole('button', { name: /Sensors 7/ })).toBeInTheDocument();

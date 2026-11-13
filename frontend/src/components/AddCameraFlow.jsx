@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { AlertTriangle, ChevronRight } from 'lucide-react';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { probeCamera, buildCameraPayload } from '../lib/cameraConnect.js';
@@ -45,17 +45,18 @@ export default function AddCameraFlow({ initialChildId = '', onCreated, autoStar
   }, [prefill]);
 
   return (
-    <CameraDiscovery autoStart={autoStart} selectedId={selected?.id ?? null} onPick={setSelected}>
+    <CameraDiscovery autoStart={autoStart} selectedId={selected?.id ?? null} onPick={setSelected}
+      onAddManually={() => setManualOpen(true)}>
       {selected && <ConnectCard key={selected.id} candidate={selected} initialChildId={initialChildId}
         onCreated={onCreated} onAdvanced={openAdvanced} />}
       <section className="camera-manual" ref={manualRef}>
-        <button type="button" className="camera-card" aria-expanded={manualOpen} onClick={() => setManualOpen((open) => !open)}>
-          <span className="camera-card__text">
-            <strong className="camera-card__name">Add a camera manually</strong>
-            <span className="camera-card__line">Enter an RTSP or ONVIF address</span>
+        <button type="button" className="camera-manual__trigger" aria-expanded={manualOpen} onClick={() => setManualOpen((open) => !open)}>
+          <span className="camera-manual__text">
+            <strong>Add a camera manually</strong>
+            <span>Enter an RTSP or ONVIF address</span>
           </span>
-          <span className="camera-card__side">
-            <ChevronRight size={18} className={`camera-card__chevron${manualOpen ? ' is-open' : ''}`} aria-hidden="true" />
+          <span className="camera-manual__side">
+            <ChevronRight size={18} className={manualOpen ? 'is-open' : ''} aria-hidden="true" />
           </span>
         </button>
         {manualOpen && <div className="camera-manual__form">
@@ -146,15 +147,17 @@ function ConnectCard({ candidate, initialChildId, onCreated, onAdvanced }) {
         <label htmlFor="connect-name">Name</label>
         <input id="connect-name" value={name} onChange={(event) => setName(event.target.value)} required disabled={busy} />
       </div>
-      <div className="field">
-        <label htmlFor="connect-user">Username</label>
-        <input id="connect-user" value={username} onChange={loginChanged(setUsername)} disabled={busy}
-          autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
-      </div>
-      <div className="field">
-        <label htmlFor="connect-pass">Password</label>
-        <input id="connect-pass" type="password" value={password} onChange={loginChanged(setPassword)} disabled={busy}
-          autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+      <div className="camera-connect__credentials">
+        <div className="field">
+          <label htmlFor="connect-user">Username</label>
+          <input id="connect-user" value={username} onChange={loginChanged(setUsername)} disabled={busy}
+            autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+        </div>
+        <div className="field">
+          <label htmlFor="connect-pass">Password</label>
+          <input id="connect-pass" type="password" value={password} onChange={loginChanged(setPassword)} disabled={busy}
+            autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+        </div>
       </div>
       {askChild && <div className="field">
         <label htmlFor="connect-child">Child</label>
@@ -163,13 +166,17 @@ function ConnectCard({ candidate, initialChildId, onCreated, onAdvanced }) {
           {kids.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}
         </select>
       </div>}
-      {error && <div className="error-banner" role="alert">
-        {error}
-        {canEnterDetails && <div><button type="button" className="linkbtn" onClick={advanced}>Enter the stream details yourself</button></div>}
+      {error && <div className="camera-connect__error" role="alert">
+        <AlertTriangle size={17} aria-hidden="true" />
+        <div>{error}
+          {canEnterDetails && <div><button type="button" className="linkbtn" onClick={advanced}>Enter the stream details yourself</button></div>}
+        </div>
       </div>}
-      {confirmMsg && <div className="form-warning" role="alert">
-        <div>{confirmMsg}</div>
-        <div className="camera-tile__sub">Check the login, or if the camera is just switched off right now, save it anyway.</div>
+      {confirmMsg && <div className="camera-connect__confirm" role="alert">
+        <AlertTriangle size={17} aria-hidden="true" />
+        <div><div>{confirmMsg}</div>
+          <div className="camera-tile__sub">Check the login, or if the camera is just switched off right now, save it anyway.</div>
+        </div>
       </div>}
       <div className="camera-connect__actions">
         <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Adding...' : 'Add camera'}</button>

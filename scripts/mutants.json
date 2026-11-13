@@ -16852,8 +16852,8 @@
   {
     "label": "#381 Cameras: the label is not tied to the select",
     "file": "frontend/src/pages/Cameras.jsx",
-    "find": "htmlFor={isAdmin ? `assign-${cam.id}` : undefined}",
-    "replace": "data-x=\"1\"",
+    "find": "<label htmlFor={`assign-${cam.id}`}>Assigned to</label>",
+    "replace": "<label data-x=\"1\">Assigned to</label>",
     "expect": "killed",
     "tests": ["cameras.test.jsx"],
     "namePattern": "label is tied to ITS OWN select"

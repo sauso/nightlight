@@ -132,7 +132,7 @@ for (const [suffix, form] of [['mobile', PHONE], ['desktop', DESKTOP]]) {
 
   // The add-camera form, filled with example values and not saved.
   await go('/cameras');
-  await page.getByRole('button', { name: '+ Add camera' }).click();
+  await page.getByRole('button', { name: 'Add camera', exact: true }).click();
   // Since #945 the Add camera screen starts with a search for cameras on the network and keeps the full form behind the
   // "Add a camera manually" card. A fresh seeded container finds no camera, so open the manual card, which is what a
   // person with a camera the search cannot see does.

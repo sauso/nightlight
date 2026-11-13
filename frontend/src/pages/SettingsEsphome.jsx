@@ -139,7 +139,7 @@ export default function SettingsEsphome() {
               port: candidate.port, encrypted: candidate.encrypted === true } });
           }} />
 
-        <h2 className="section-title esp-devices-title">Your devices <span>{list ? list.length : 0} of {MAX_DEVICES}</span></h2>
+        <h2 className="section-title dev-card-list-title">Your devices <span>{list ? list.length : 0} of {MAX_DEVICES}</span></h2>
 
         {list === null && !devices.error && <div className="camera-tile__sub" role="status">Loading…</div>}
         {list === null && devices.error && (
@@ -213,31 +213,31 @@ function DeviceCard({ device, version, childName, onEdit, onDelete, onExport }) 
   }
 
   return (
-    <div className="esp-dev esphome-device">
-      <div className="esp-dev__main">
-        <div className="esp-dev__body">
-          <div className="esp-dev__state">
-            {dot === 'off' ? <span className="esp-dot--off" aria-hidden="true" /> : <BreathingDot status={dot} />}
+    <div className="dev-card esphome-device">
+      <div className="dev-card__main">
+        <div className="dev-card__body">
+          <div className="dev-card__state">
+            {dot === 'off' ? <span className="dot--neutral" aria-hidden="true" /> : <BreathingDot status={dot} />}
             {badge.text}
           </div>
-          <div className="esp-dev__name">{device.name}</div>
-          <div className="esp-dev__line">{hostLabel(device.host)}:{device.port} · {childName}</div>
-          <div className={`esp-dev__encryption${enc.warn ? ' esphome-warn' : ''}`}>
+          <div className="dev-card__name">{device.name}</div>
+          <div className="dev-card__line">{hostLabel(device.host)}:{device.port} · {childName}</div>
+          <div className={`dev-card__encryption${enc.warn ? ' esphome-warn' : ''}`}>
             {enc.warn ? <LockOpen size={14} aria-hidden="true" /> : <Lock size={14} aria-hidden="true" />}{enc.text}
           </div>
-          {showError && <div className="esp-dev__error" role="status">{status.error}</div>}
-          <div className="esp-dev__line">Last reading: {age || 'none yet'} · {status.rows_last_hour ?? 0} in the last hour</div>
+          {showError && <div className="dev-card__error" role="status">{status.error}</div>}
+          <div className="dev-card__line">Last reading: {age || 'none yet'} · {status.rows_last_hour ?? 0} in the last hour</div>
           {test && <TestResult result={test} />}
         </div>
         <MoreMenu className="more-menu--card" label={`More for ${device.name}`} menuLabel={`Actions for ${device.name}`}>
           <button type="button" role="menuitem" className="more-menu__item" onClick={onEdit}><Pencil size={16} aria-hidden="true" />Edit</button>
           <button type="button" role="menuitem" className="more-menu__item" onClick={runTest} disabled={test === 'running'}><Wifi size={16} aria-hidden="true" />Test connection</button>
           <button type="button" role="menuitem" className="more-menu__item" onClick={onExport}><Download size={16} aria-hidden="true" />Download CSV</button>
-          <div className="esp-dev__menu-divider" />
-          <button type="button" role="menuitem" className="more-menu__item esp-dev__delete" onClick={onDelete}><Trash2 size={16} aria-hidden="true" />Delete device</button>
+          <div className="dev-card__menu-divider" />
+          <button type="button" role="menuitem" className="more-menu__item dev-card__delete" onClick={onDelete}><Trash2 size={16} aria-hidden="true" />Delete device</button>
         </MoreMenu>
       </div>
-      <button type="button" className="esp-dev__sensors" aria-expanded={entitiesOpen}
+      <button type="button" className="dev-card__sensors" aria-expanded={entitiesOpen}
         onClick={() => setEntitiesOpen((o) => !o)}>Sensors <span>{status.entity_count ?? 0}</span><ChevronRight size={18} aria-hidden="true" /></button>
       {entitiesOpen && <Entities device={device} />}
     </div>

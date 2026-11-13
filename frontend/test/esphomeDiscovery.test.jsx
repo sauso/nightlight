@@ -26,6 +26,7 @@ test('results render as text; encrypted and added states are visible and pickabl
   expect(rows[0]).toHaveTextContent('Encryption advertised');
   expect(rows[1]).toHaveAttribute('aria-disabled', 'true');
   expect(rows[1]).toHaveTextContent('Added');
+  expect(rows[1]).toHaveTextContent('Encryption advertised'); // a saved device keeps its chip (#1078 review)
   await view.user.click(rows[1]);
   expect(onPick).not.toHaveBeenCalled();
   await view.user.click(rows[0]);
@@ -64,6 +65,18 @@ test('idle and nothing found offer the manual add action inside the card', async
   await screen.findByText(/No devices found/);
   await view.user.click(screen.getByRole('button', { name: 'Add by IP address' }));
   expect(onAddManually).toHaveBeenCalledOnce();
+});
+
+test('the manual action waits for the device count too: the shared card ignores it while loading (#1078 review)', async () => {
+  api.get.mockResolvedValueOnce({ done: true, candidates: [] });
+  const onAddManually = vi.fn();
+  const view = renderAsAdmin(<EsphomeDiscovery onPick={vi.fn()} onAddManually={onAddManually} loading />);
+  await view.user.click(screen.getByRole('button', { name: 'Find devices on my network' }));
+  await screen.findByText(/No devices found/);
+  const manual = screen.getByRole('button', { name: 'Add by IP address' });
+  expect(manual).toHaveAttribute('aria-disabled', 'true');
+  await view.user.click(manual);
+  expect(onAddManually).not.toHaveBeenCalled();
 });
 
 test('a loading device list blocks picks without a misleading chip', async () => {

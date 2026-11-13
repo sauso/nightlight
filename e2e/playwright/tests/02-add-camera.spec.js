@@ -7,7 +7,7 @@ const { CAMERA } = require('./helpers');
 test('add a camera through the UI and see it go live on the grid', async ({ page }) => {
   await page.goto('/#/cameras');
 
-  await page.getByRole('button', { name: '+ Add camera' }).click();
+  await page.getByRole('button', { name: 'Add camera', exact: true }).click();
   // #957: discovery cannot find the synthetic RTSP source. The separate manual
   // card starts collapsed and can open without waiting for a scan (#950).
   await page.getByRole('button', { name: /Add a camera manually/ }).click();

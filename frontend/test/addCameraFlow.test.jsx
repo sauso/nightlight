@@ -52,11 +52,22 @@ test('each result is a text card; saved cameras stay visible but cannot be selec
   expect(buttons[0]).toHaveTextContent('192.168.1.2');
   expect(buttons[0]).toHaveTextContent('Thingino');
   expect(buttons[0]).toHaveTextContent('ONVIF');
-  expect(within(buttons[0]).getByTitle(cams[0].product)).toHaveClass('camera-card__product');
+  expect(within(buttons[0]).getByTitle(cams[0].product)).toBeInTheDocument();
   expect(buttons[1]).toHaveAttribute('aria-disabled', 'true');
-  expect(buttons[1]).toHaveTextContent('Already added');
+  expect(buttons[1]).toHaveTextContent('Added');
   await user.click(buttons[1]);
   expect(screen.queryByRole('form', { name: /Connect/ })).toBeNull();
+});
+
+test('an empty search opens the unchanged embedded manual form from inside the search card', async () => {
+  api.get.mockResolvedValue({ done: true, candidates: [], endsAt: Date.now() });
+  const view = renderAsAdmin(<AddCameraFlow initialChildId="kid-1" />,
+    { kids, route: '/setup' });
+  await view.user.click(screen.getByRole('button', { name: 'Find cameras on my network' }));
+  const search = await screen.findByRole('region', { name: 'Find cameras' });
+  await view.user.click(within(search).getByRole('button', { name: 'Add a camera manually' }));
+  expect(screen.getByRole('button', { name: /Add a camera manually.*Enter an RTSP/ })).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByLabelText('Camera IP address')).toBeInTheDocument();
 });
 
 test('the picked camera asks for name and login, with child choice only when needed', async () => {

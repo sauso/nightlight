@@ -95,9 +95,11 @@ the timeline colours and the night-card text below, and **names the pairs that a
 The header colour is repeated in `index.html`'s `theme-color` meta (`#14142A`), which tints the phone's browser chrome; the
 manifest's `theme_color` and `background_color` and the app icons' ground are the same navy.
 
-### ESPHome search and saved devices (#1074)
+### Search card and item cards (#1074, #1076)
 
-The ESPHome settings screen uses the existing `.night` navy card for **Find devices**, above **Your devices**. The search button is its main action; the card's error line uses `--night-error` (`#F4A3AD`) on the lightest gradient stop (`#2C2F63`) to stay above 4.5:1 contrast. Results are 56px rows with wrapping names and muted but full-opacity unavailable states. Each saved device has a 44px **⋯** menu for Edit, Test connection, Download CSV and Delete device; **Sensors** is a separate disclosure row. The manual action reads **Add by IP address**.
+ESPHome and Cameras use one `.night.find-card` search surface: **Find devices** or **Find cameras**. The search button is its main action; the card's error line uses `--night-error` (`#F4A3AD`) on the lightest gradient stop (`#2C2F63`) to stay above 4.5:1 contrast. Results are 56px rows with wrapping names and full-opacity unavailable states labelled **Added** or **Not added**. The manual action appears inside the card after an empty search. It reads **Add by IP address** for ESPHome and **Add a camera manually** for cameras. The camera's manual disclosure row remains below the card.
+
+Saved ESPHome devices and cameras share `.dev-card`: a status dot and word, wrapping name, muted address, optional detail lines, and a 44px **⋯** action menu. ESPHome keeps Edit, Test connection, Download CSV and Delete device, plus a separate **Sensors** disclosure. Camera cards show only supported capability chips, a Motion/Sound line when available, and a visible **Assigned to** foot row. The camera menu holds Edit camera, Enable/Disable camera and Remove camera. A disabled camera has a neutral dot; an unknown status keeps the amber connecting dot. The camera list's Remove dialog gives the full permanent-deletion warning.
 
 ### Child hero card (`.night`)
 

@@ -20,7 +20,7 @@ On a new installation, the setup guide opens after the first admin signs in. Cho
 
 ### Finding cameras
 
-The setup guide starts a search when you reach its camera step. From **Cameras → Add camera**, press **Find cameras on my network**. Nightlight shows a card for each Thingino camera advertising `_thingino._tcp` over mDNS or ONVIF camera responding to WS-Discovery. Results can appear throughout the 30-second search. Each card shows the camera name and address; a camera already saved has a greyed **Already added** card that cannot be selected. Only an admin can start a search.
+The setup guide starts a search when you reach its camera step. From **Cameras → Add camera**, press **Find cameras on my network** in the navy search card. Nightlight shows a row for each Thingino camera advertising `_thingino._tcp` over mDNS or ONVIF camera responding to WS-Discovery. Results can appear throughout the 30-second search. Each row shows the camera name, address and any advertised features; a camera already saved reads **Added** and cannot be selected. If nothing is found, the card offers **Add a camera manually**, which opens the manual row below. Only an admin can start a search.
 
 Pick a camera card to edit its name and enter its username and password. Nightlight asks you to choose a child only when several are available and the setup guide has not already selected one. Press **Add camera** to let Nightlight find the stream settings over ONVIF and test the stream before saving. A wrong login shows the camera's message; repeated wrong attempts can temporarily lock some cameras out. If the camera does not answer the ONVIF request, open **Advanced settings** or **Enter the stream details yourself** to enter its address and stream path. The separate **Add a camera manually** card is always below the found cameras. A camera that does not advertise either service may still be added there.
 
@@ -43,14 +43,14 @@ In **Test your monitor**, choose **Run picture check**. Nightlight waits for suc
 
 ### What you see on a camera
 
-- **Capability badges.** Cameras added via ONVIF show **PTZ** and **Two-way Audio** badges in the list: green when supported, red when not. Manually added cameras show neither, because their capabilities aren't probed.
+- **Camera cards.** Each card shows a status dot and word (Online, Connecting, Offline, Status unknown, or Disabled), its address, and a Motion/Sound line when those settings are available and the camera is enabled. The capability chips show only supported ONVIF, PTZ and two-way audio features. A timed-out status check reads **Status unknown** with an amber dot.
 - **Pan/tilt (PTZ).** On cameras that report PTZ, a move button appears on the camera tile (next to the stream-quality gear). Tap it for an on-screen D-pad: each press nudges the camera a fixed amount, and holding an arrow keeps it moving. It stops on release and can't run past the limit.
 - **Two-way audio (talk-back).** On cameras that support it, a talk button appears on the tile: hold it to speak through the camera's speaker. It works with **Hikvision** (over ISAPI; enter the camera's *web* login when adding) and with **any ONVIF camera that has an audio backchannel** (for example Thingino or Sonoff). The backchannel is set up automatically from the ONVIF probe, using the camera's own stream login.
 
 ### Editing, removing and assigning
 
-- **Editing.** Edit shows the same fields. Leave the **password blank to keep the existing one**; it's never sent back to your browser. Changing the address re-tests the stream, the same as adding.
-- **Removing.** Remove asks for confirmation, then stops the stream and **permanently deletes everything for the camera**: its bed transitions and snapshot photos, activity history, alerts with their clips and snapshots, recordings, event log and sensor history. You can add the camera again, but none of that comes back. See [Removing a child or a camera](recording.md#removing-a-child-or-a-camera).
+- **Editing and enabling.** On the Cameras tab, an admin opens a camera's **⋯** menu for **Edit camera** and **Disable camera** or **Enable camera**. Edit shows the same fields. Leave the **password blank to keep the existing one**; it's never sent back to your browser. Changing the address re-tests the stream, the same as adding.
+- **Removing.** The same **⋯** menu holds **Remove camera**. Its confirmation lists what is permanently deleted: bed transitions and snapshot photos, activity history, alerts with clips and snapshots, recordings and wake clips including video files, the event log, and temperature and humidity history. Saved night summaries and timelapses stay, but their detail and morning-review photos go. You can add the camera again, but none of the deleted data comes back. See [Removing a child or a camera](recording.md#removing-a-child-or-a-camera).
 - **Assigning to a child.** Use the "Assigned to" dropdown on each camera (admin only; a caregiver sees the assignment as text). It is more than grouping: a camera's nights are tracked only while it is assigned to a child who has sleep tracking on, so unassigning a camera stops its tracking just as turning tracking off does.
 
 ## Where to put the camera
