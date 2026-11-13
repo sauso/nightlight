@@ -12,7 +12,9 @@ export default function CameraDiscovery({ onPick, autoStart = false, selectedId 
       name: candidate.name,
       line: candidate.ip,
       extra: candidate.product,
-      chips: [
+      // A saved camera shows only "Added", as before; the card itself draws whatever chips it is given (a saved ESPHome
+      // device keeps its "Encryption advertised" chip: found in the #1078 review).
+      chips: candidate.alreadyAdded === true ? [] : [
         ...(candidate.sources?.includes('mdns') ? [{ text: 'Thingino' }] : []),
         ...(candidate.sources?.includes('onvif') ? [{ text: 'ONVIF' }] : []),
       ],

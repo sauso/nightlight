@@ -95,6 +95,13 @@ describe('the Cameras tab', () => {
     });
   });
 
+  test('the detection line shows for an enabled camera and is left out of a disabled one, even with detection fields (#1078 review)', () => {
+    mockApi();
+    renderAsAdmin(<Cameras />, withCams({ cameras: [CAMS[0], { ...CAMS[1], detect_motion_enabled: 1, detect_sound_enabled: 1 }] }));
+    expect(within(card('Nursery camera')).getByText('Motion on · Sound off')).toBeInTheDocument();
+    expect(within(card('Camera B')).queryByText(/Motion (on|off)/)).toBeNull();
+  });
+
   test('a disabled camera has a neutral dot and reads as disabled', () => {
     mockApi();
     renderAsAdmin(<Cameras />, withCams());

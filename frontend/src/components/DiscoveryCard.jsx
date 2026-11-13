@@ -46,7 +46,7 @@ export default function DiscoveryCard({ scanPath, autoStart = false, title, subt
                 {extra && <span title={extra}>{extra}</span>}
               </span>
               <span className="find-card__side">
-                {!added && chips.map((chip) => <span className="find-card__chip" key={chip.text}>{chip.icon && <chip.icon size={12} aria-hidden="true" />}{chip.text}</span>)}
+                {chips.map((chip) => <span className="find-card__chip" key={chip.text}>{chip.icon && <chip.icon size={12} aria-hidden="true" />}{chip.text}</span>)}
                 {added ? <span className="find-card__availability"><Check size={16} aria-hidden="true" />Added</span>
                   : full ? <span className="find-card__availability">Not added</span>
                     : !loading && <ChevronRight size={18} aria-hidden="true" />}
