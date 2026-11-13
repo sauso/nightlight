@@ -360,6 +360,10 @@ describe('RecordingsCard', () => {
     { id: 'r-2', camera_name: null, started_at: '2026-09-01 20:15:00', duration_s: null },
   ];
 
+  // The card is ONE row (UI refresh PR D, the approved design); the thumbnails open from it. Every test that looks at the strip
+  // or at an entry goes through this, which is also what proves the row is the way in.
+  const openStrip = async (user) => { await user.click(await screen.findByRole('button', { name: /^Recordings/ })); };
+
   beforeEach(() => {
     vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
     vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
@@ -382,10 +386,37 @@ describe('RecordingsCard', () => {
     expect(container.querySelector('.card')).toBeNull();
   });
 
+  // ★ UI refresh PR D: the card is one row (title, the newest recording's time, a chevron) and the thumbnails wait behind it.
+  test('★ it is one collapsed row showing the time of the NEWEST recording; the strip opens and closes from it', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(ROWS);
+    const { container, user } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    const row = await screen.findByRole('button', { name: /^Recordings/ });
+    expect(row).toHaveAttribute('aria-expanded', 'false');
+    expect(container.querySelector('.rec-strip')).toBeNull();
+    // aria-controls must not point at an element that is not mounted: it is set only while the strip is open.
+    expect(row).not.toHaveAttribute('aria-controls');
+    // ROWS[0] (10:00 on 2 Sept) is the newest, not the older 20:15 on 1 Sept.
+    expect(row.textContent).toContain('Wed, 2 Sept');
+    expect(row.textContent).not.toContain('1 Sept');
+    await user.click(row);
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    expect(row).toHaveAttribute('aria-controls', container.querySelector('.rec-strip').id);
+    expect(container.querySelectorAll('.rec-strip__item')).toHaveLength(2);
+    await user.click(row);
+    expect(container.querySelector('.rec-strip')).toBeNull();
+  });
+
+  test('a newest entry that failed says so on the row rather than printing a time for a clip that does not exist', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue([{ id: 'r-bad', status: 'failed', camera_name: 'Child A Room', started_at: '2026-09-02 09:00:00' }]);
+    renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    const row = await screen.findByRole('button', { name: /^Recordings/ });
+    expect(row.textContent).toContain('Couldn’t be saved');
+  });
+
   test('lists each recording with a thumbnail and a readable time', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(ROWS);
-    const { container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
-    expect(await screen.findByText('Recordings')).toBeInTheDocument();
+    const { container, user } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await openStrip(user);
     await waitFor(() => expect(container.querySelectorAll('.rec-strip__item')).toHaveLength(2));
     expect(container.querySelector('.rec-strip__item img')).toHaveAttribute('src', 'http://host/recordings/r-1/thumb');
   });
@@ -402,8 +433,8 @@ describe('RecordingsCard', () => {
 
   test('a FAILED recording appears in the strip instead of vanishing', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
-    const { container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
-    await screen.findByText('Recordings');
+    const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await openStrip(user);
     await waitFor(() => expect(container.querySelectorAll('.rec-strip__item')).toHaveLength(2));
     expect(container.querySelectorAll('.rec-strip__item--failed')).toHaveLength(1);
     expect(screen.getByText('Couldn’t be saved')).toBeInTheDocument();
@@ -413,8 +444,8 @@ describe('RecordingsCard', () => {
     // Not cosmetic. The server refuses to serve a non-ready row, so an <img> pointed at its thumb
     // renders a broken-image glyph, and a play badge invites a click that can only fail.
     vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
-    const { container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
-    await screen.findByText('Recordings');
+    const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
+    await openStrip(user);
     const failedTile = await waitFor(() => {
       const el = container.querySelector('.rec-strip__item--failed');
       expect(el).not.toBeNull();
@@ -431,7 +462,7 @@ describe('RecordingsCard', () => {
   test('opening it explains what happened rather than launching a player', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
     const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
-    await screen.findByText('Recordings');
+    await openStrip(user);
     await user.click(await waitFor(() => {
       const el = container.querySelector('.rec-strip__item--failed');
       expect(el).not.toBeNull();
@@ -450,7 +481,7 @@ describe('RecordingsCard', () => {
     // removable from it or it stays there for the life of the install.
     vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
     const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
-    await screen.findByText('Recordings');
+    await openStrip(user);
     await user.click(await waitFor(() => {
       const el = container.querySelector('.rec-strip__item--failed');
       expect(el).not.toBeNull();
@@ -472,7 +503,8 @@ describe('RecordingsCard', () => {
       listRequests += 1;
       return Promise.resolve(listRequests === 1 ? ROWS : [...ROWS, { ...ROWS[0], id: 'r-3' }]);
     });
-    const { rerenderWith, container } = renderAsAdmin(<RecordingsCard childId="kid-1" refreshNonce={0} />);
+    const { rerenderWith, container, user } = renderAsAdmin(<RecordingsCard childId="kid-1" refreshNonce={0} />);
+    await openStrip(user); // stays open across the rerender: the same instance keeps its state
     await waitFor(() => expect(container.querySelectorAll('.rec-strip__item')).toHaveLength(2));
     rerenderWith({ ui: <RecordingsCard childId="kid-1" refreshNonce={1} /> });
     // The tile's Record button finishes on a different screen, so the only way this card learns a
@@ -484,7 +516,7 @@ describe('RecordingsCard', () => {
   test('opening a recording plays it, and a nameless camera does not render "null"', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(ROWS);
     const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
-    await screen.findByText('Recordings');
+    await openStrip(user);
     await user.click(container.querySelectorAll('.rec-strip__item')[1]);
     const dialog = await screen.findByRole('dialog');
     expect(dialog.getAttribute('aria-labelledby')).toBeTruthy();
@@ -495,7 +527,7 @@ describe('RecordingsCard', () => {
   test('deleting a recording says it is PERMANENT — recordings have no retention', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(ROWS);
     const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
-    await screen.findByText('Recordings');
+    await openStrip(user);
     await user.click(container.querySelectorAll('.rec-strip__item')[0]);
     await user.click(await screen.findByRole('button', { name: 'Delete recording' }));
 
@@ -514,7 +546,7 @@ describe('RecordingsCard', () => {
     vi.spyOn(api, 'get').mockResolvedValue(ROWS);
     api.del.mockRejectedValue(new Error('busy'));
     const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
-    await screen.findByText('Recordings');
+    await openStrip(user);
     await user.click(container.querySelectorAll('.rec-strip__item')[0]);
     await user.click(await screen.findByRole('button', { name: 'Delete recording' }));
     await user.click(screen.getByRole('button', { name: 'Delete' }));
@@ -535,7 +567,7 @@ describe('RecordingsCard', () => {
   test('★ a caregiver can play and download a recording but gets no delete action', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(ROWS);
     const { user, container } = renderAsCaregiver(<RecordingsCard childId="kid-1" />);
-    await screen.findByText('Recordings');
+    await openStrip(user);
     await user.click(container.querySelectorAll('.rec-strip__item')[0]);
     const dialog = await screen.findByRole('dialog');
     expect(dialog.querySelector('video')).not.toBeNull();
@@ -547,7 +579,7 @@ describe('RecordingsCard', () => {
   test('★ a caregiver opening a failed entry is told an admin can remove it, with no Remove button', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
     const { user, container } = renderAsCaregiver(<RecordingsCard childId="kid-1" />);
-    await screen.findByText('Recordings');
+    await openStrip(user);
     await user.click(await waitFor(() => {
       const el = container.querySelector('.rec-strip__item--failed');
       expect(el).not.toBeNull();
@@ -563,7 +595,7 @@ describe('RecordingsCard', () => {
   test('an admin opening a failed entry gets Remove and no "an admin can" line', async () => {
     vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
     const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
-    await screen.findByText('Recordings');
+    await openStrip(user);
     await user.click(await waitFor(() => {
       const el = container.querySelector('.rec-strip__item--failed');
       expect(el).not.toBeNull();
@@ -578,7 +610,7 @@ describe('RecordingsCard', () => {
     vi.spyOn(api, 'get').mockResolvedValue(ROWS);
     api.del.mockRejectedValue(Object.assign(new Error('Admin access required'), { status: 403 }));
     const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
-    await screen.findByText('Recordings');
+    await openStrip(user);
     await user.click(container.querySelectorAll('.rec-strip__item')[0]);
     await user.click(await screen.findByRole('button', { name: 'Delete recording' }));
     await user.click(screen.getByRole('button', { name: 'Delete' }));
@@ -590,7 +622,7 @@ describe('RecordingsCard', () => {
     vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
     api.del.mockRejectedValue(Object.assign(new Error('Admin access required'), { status: 403 }));
     const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
-    await screen.findByText('Recordings');
+    await openStrip(user);
     await user.click(await waitFor(() => {
       const el = container.querySelector('.rec-strip__item--failed');
       expect(el).not.toBeNull();
@@ -605,7 +637,7 @@ describe('RecordingsCard', () => {
     vi.spyOn(api, 'get').mockResolvedValue(FAILED_ROWS);
     api.del.mockRejectedValue(Object.assign(new Error('Request failed (502)'), { status: 502 }));
     const { user, container } = renderAsAdmin(<RecordingsCard childId="kid-1" />);
-    await screen.findByText('Recordings');
+    await openStrip(user);
     await user.click(await waitFor(() => {
       const el = container.querySelector('.rec-strip__item--failed');
       expect(el).not.toBeNull();

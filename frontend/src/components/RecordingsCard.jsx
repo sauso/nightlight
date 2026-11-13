@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Play, Video, Trash2, AlertTriangle } from 'lucide-react';
+import { useCallback, useEffect, useId, useState } from 'react';
+import { Play, Video, Trash2, AlertTriangle, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { useHomeTime } from '../lib/useHomeTime.js';
@@ -32,6 +32,10 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
   const [openId, setOpenId] = useState(null);
   const [del, setDel] = useState(''); // '' | 'confirm' | 'deleting' | 'error'
   const [delError, setDelError] = useState('');
+  // Closed by default: the row alone is the card (see the markup). Recordings are rare, kept moments, so the thumbnails
+  // wait one tap rather than taking a screen of the child's page.
+  const [expanded, setExpanded] = useState(false);
+  const stripId = useId();
   const { user } = useAuth() || {};
   const isAdmin = user?.role === 'admin';
   const home = useHomeTime();
@@ -72,11 +76,24 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
 
   return (
     <div className="card recordings-card">
-      <div className="card-title">
-        <Video size={16} aria-hidden="true" /> Recordings
-      </div>
+      {/* ONE row (UI refresh PR D, the approved design): "Recordings", the newest one's time, a chevron. The row is a
+          disclosure that opens the strip of every recording below it. It is not a link to the newest: recordings have no
+          page of their own and no retention, so the older ones must stay reachable, and a row that played only the newest
+          would strand them. The list is newest first (the server orders it), so list[0] is the latest. */}
+      <button
+        type="button"
+        className="recordings-row"
+        aria-expanded={expanded}
+        aria-controls={expanded ? stripId : undefined}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <Video size={16} aria-hidden="true" className="recordings-row__icon" />
+        <span className="recordings-row__title">Recordings</span>
+        <span className="recordings-row__latest">{list[0].status === 'failed' ? 'Couldn’t be saved' : when(list[0].started_at, home)}</span>
+        <ChevronRight size={18} aria-hidden="true" className="recordings-row__chev" />
+      </button>
 
-      <div className="rec-strip">
+      {expanded && <div className="rec-strip" id={stripId}>
         {list.map((r) => {
           // A failed recording is shown, not hidden (issue #276) — the user pressed Record and is owed
           // an explanation rather than an empty card. It has no video and no thumbnail, so it must not
@@ -107,7 +124,7 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
             </button>
           );
         })}
-      </div>
+      </div>}
 
       {/* A failed recording gets an explanation and a way to clear it — NOT the player, which would
           load a video that does not exist. Keeping it deletable is what stops failures accumulating

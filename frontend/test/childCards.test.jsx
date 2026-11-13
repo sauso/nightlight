@@ -317,6 +317,21 @@ describe('TimelapseCard', () => {
     expect(container.querySelectorAll('.timelapse-strip__item')[1]).toHaveClass('timelapse-strip__item--active');
   });
 
+  // UI refresh PR D: the strip's tiles are small thumbnails labelled by WEEKDAY only; the full date is the accessible name.
+  test('★ the strip tiles are labelled by weekday, and the full date is their accessible name', async () => {
+    list(ROWS);
+    const { container } = renderAsAdmin(<TimelapseCard childId="kid-1" />);
+    await screen.findByRole('button', { name: SEP1 });
+    const tiles = [...container.querySelectorAll('.timelapse-strip__item')];
+    expect(tiles.map((t) => t.textContent)).toEqual(['Tue', 'Mon']);
+    expect(screen.getByRole('button', { name: 'Show Tue, 1 Sept timelapse' })).toBe(tiles[0]);
+    expect(screen.getByRole('button', { name: 'Show Mon, 31 Aug timelapse' })).toBe(tiles[1]);
+    // The thumbnail is decoration: the date is not announced twice.
+    expect(tiles[0].querySelector('img')).toHaveAttribute('alt', '');
+    expect(tiles[0]).toHaveAttribute('aria-pressed', 'true');
+    expect(tiles[1]).toHaveAttribute('aria-pressed', 'false');
+  });
+
   test('an unparseable night date is shown raw rather than as Invalid Date', async () => {
     list([{ id: 't-9', night_date: 'garbage' }]);
     renderAsAdmin(<TimelapseCard childId="kid-1" />);

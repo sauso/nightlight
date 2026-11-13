@@ -1,4 +1,4 @@
-// The small shared components — AppHeader, BackLink, CameraRow, DetectionRow, AlertList (whose clip
+// The small shared components — AppHeader, BackLink, ChildCameraTile, DetectionRow, AlertList (whose clip
 // delete is admin-only since #538) — and the
 // route table in App.jsx.
 //
@@ -11,7 +11,7 @@
 //   2. DetectionRow IS KEYBOARD-OPERABLE ONLY IF onClick EXISTS. It is a <div role="button">, so
 //      `tabIndex` and the Enter/Space handler are the only things making it reachable at all; and a
 //      NON-clickable row must not advertise itself as a button.
-//   3. AlertList's relative times are the ROUNDING that decides "just now" vs "1m ago".
+//   3. AlertList's row time is the CLOCK TIME in HOME time, with the day only when it is not today (the HOME zone's today).
 //   4. App.jsx's route table is the ONLY place role gating is applied to whole screens — and it is
 //      where the shipped 403-for-everyone bug would have been visible.
 import { describe, test, expect, vi, afterEach } from 'vitest';
@@ -21,7 +21,7 @@ import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { renderAs, renderAsAdmin, renderAsCaregiver, ADMIN, CAREGIVER } from './helpers/render.jsx';
 import AppHeader from '../src/components/AppHeader.jsx';
 import BackLink from '../src/components/BackLink.jsx';
-import CameraRow from '../src/components/CameraRow.jsx';
+import ChildCameraTile from '../src/components/ChildCameraTile.jsx';
 import DetectionRow from '../src/components/DetectionRow.jsx';
 import AlertList from '../src/components/AlertList.jsx';
 import { Protected, AdminProtected } from '../src/App.jsx';
@@ -109,80 +109,65 @@ describe('BackLink', () => {
   });
 });
 
-// --- CameraRow ----------------------------------------------------------------------------------
+// --- ChildCameraTile ----------------------------------------------------------------------------
 
-describe('CameraRow', () => {
+describe('ChildCameraTile', () => {
   const CAM = { id: 'cam-a', name: 'Child B Room', statusLevel: 'live' };
 
-  test('online, offline and disabled are three distinct states', () => {
-    const a = render(<CameraRow cam={CAM} />);
-    expect(screen.getByText('Online')).toHaveClass('status-badge--ok');
+  // ★ Status is never only a colour: the dot is a mark, the words are the signal.
+  test('online, offline and disabled are three distinct states, each said in words except the normal one', () => {
+    const a = render(<ChildCameraTile cam={CAM} />);
+    expect(a.container.querySelector('.child-cam')).toHaveClass('child-cam--online');
+    expect(screen.queryByText(/Offline|Disabled/)).not.toBeInTheDocument();
+    // The normal case adds no visible word, but a screen reader still hears it.
+    expect(a.container.querySelector('.child-cam__sr').textContent).toMatch(/online/);
     a.unmount();
 
-    const b = render(<CameraRow cam={{ ...CAM, statusLevel: 'offline' }} />);
-    expect(screen.getByText('Offline')).toHaveClass('status-badge--bad');
+    const b = render(<ChildCameraTile cam={{ ...CAM, statusLevel: 'offline' }} />);
+    expect(b.container.querySelector('.child-cam')).toHaveClass('child-cam--offline');
+    expect(screen.getByText(/· Offline/)).toBeInTheDocument();
     b.unmount();
 
-    // ⚠️ Disabled beats live: a camera someone switched off is not "Online" just because its last
-    // known status was. The order of the ternary is what makes that true.
-    render(<CameraRow cam={{ ...CAM, statusLevel: 'live', disabled: 1 }} />);
-    expect(screen.getByText('Disabled')).toHaveClass('status-badge--off');
-    expect(screen.queryByText('Online')).not.toBeInTheDocument();
+    // ⚠️ Disabled beats live: a camera someone switched off is not "online" just because its last known status was.
+    const c = render(<ChildCameraTile cam={{ ...CAM, statusLevel: 'live', disabled: 1 }} />);
+    expect(c.container.querySelector('.child-cam')).toHaveClass('child-cam--disabled');
+    expect(screen.getByText(/· Disabled/)).toBeInTheDocument();
+    expect(c.container.querySelector('.child-cam__sr')).toBeNull();
   });
 
-  test('only the live dot appears when the camera is actually live', () => {
-    const a = render(<CameraRow cam={CAM} />);
-    expect(a.container.querySelector('.cam-thumb__dot')).not.toBeNull();
-    expect(a.container.querySelector('.cam-thumb')).not.toHaveClass('off');
+  // The Live tab hides disabled cameras (LiveMonitor filters them out), so "Watch live" there would open a page without this camera.
+  test('★ a disabled camera is not offered "Watch live"; an online and an offline one are', () => {
+    const a = render(<ChildCameraTile cam={{ ...CAM, disabled: 1 }} onWatch={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Watch live' })).not.toBeInTheDocument();
     a.unmount();
-    const b = render(<CameraRow cam={{ ...CAM, disabled: 1 }} />);
-    expect(b.container.querySelector('.cam-thumb__dot')).toBeNull();
-    expect(b.container.querySelector('.cam-thumb')).toHaveClass('off');
+    const b = render(<ChildCameraTile cam={{ ...CAM, statusLevel: 'offline' }} onWatch={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Watch live' })).toBeInTheDocument();
+    b.unmount();
+    render(<ChildCameraTile cam={CAM} onWatch={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Watch live' })).toBeInTheDocument();
   });
 
-  test('shows only the capabilities the camera actually has', () => {
-    const { unmount } = render(<CameraRow cam={{ ...CAM, detect_motion_enabled: 1, ptz_supported: 1 }} />);
-    expect(screen.getByText('MOTION')).toBeInTheDocument();
-    expect(screen.getByText('PTZ')).toBeInTheDocument();
-    expect(screen.queryByText('SOUND')).not.toBeInTheDocument();
-    expect(screen.queryByText('TALK')).not.toBeInTheDocument();
-    unmount();
-
-    render(<CameraRow cam={{ ...CAM, detect_sound_enabled: 1, talk_configured: 1 }} />);
-    expect(screen.getByText('SOUND')).toBeInTheDocument();
-    expect(screen.getByText('TALK')).toBeInTheDocument();
-    expect(screen.queryByText('MOTION')).not.toBeInTheDocument();
-  });
-
-  test('an assigned child appears as a chip, with a photo or an initial', () => {
-    const { unmount, container } = render(<CameraRow cam={CAM} child={{ name: 'rosa', color: '#f4c56a' }} />);
-    // The initial is upper-cased regardless of how the name was typed.
-    expect(container.querySelector('.cam-chip__mini').textContent).toBe('R');
-    unmount();
-
-    const withPhoto = render(<CameraRow cam={CAM} child={{ name: 'Child B', photo: 'data:image/png;base64,x' }} />);
-    expect(withPhoto.container.querySelector('.cam-chip__mini img')).not.toBeNull();
-  });
-
-  test('a child with no name at all falls back to ? rather than throwing', () => {
-    const { container } = render(<CameraRow cam={CAM} child={{ name: '' }} />);
-    expect(container.querySelector('.cam-chip__mini').textContent).toBe('?');
-  });
-
-  test('it is a BUTTON only when it does something', async () => {
+  test('"Watch live" does what it is given, and the camera name is on the tile', async () => {
     const user = userEvent.setup();
-    const onClick = vi.fn();
-    const { unmount, container } = render(<CameraRow cam={CAM} onClick={onClick} />);
-    await user.click(screen.getByRole('button'));
-    expect(onClick).toHaveBeenCalled();
-    expect(container.querySelector('svg')).not.toBeNull(); // the chevron hints it goes somewhere
-    unmount();
+    const onWatch = vi.fn();
+    render(<ChildCameraTile cam={CAM} onWatch={onWatch} />);
+    expect(screen.getByText('Child B Room')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Watch live' }));
+    expect(onWatch).toHaveBeenCalledTimes(1);
+  });
 
-    // ⚠️ A caregiver gets the read-only form. Rendering a <button> that does nothing is worse than a
-    // <div>: it is focusable, it looks tappable, and it lies about what the screen can do.
-    const plain = render(<CameraRow cam={CAM} />);
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
-    expect(plain.container.querySelector('svg')).toBeNull();
+  // ⚠️ The camera-settings gear exists only when the caller passes onSettings (ChildDetail does so for an admin). A control a
+  // caregiver can see but that can only end in a redirect is worse than none.
+  test('the settings gear is there only when a handler is given', async () => {
+    const user = userEvent.setup();
+    const a = render(<ChildCameraTile cam={CAM} onWatch={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /settings/i })).not.toBeInTheDocument();
+    a.unmount();
+
+    const onSettings = vi.fn();
+    render(<ChildCameraTile cam={CAM} onWatch={vi.fn()} onSettings={onSettings} />);
+    await user.click(screen.getByRole('button', { name: 'Camera settings for Child B Room' }));
+    expect(onSettings).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -265,67 +250,121 @@ describe('AlertList', () => {
 
   test('appends the detail when the alert has one', () => {
     render(<AlertList alerts={[base({ detail: '+12 dB over ambient' })]} />);
-    expect(screen.getByText(/Motion · \+12 dB over ambient/)).toBeInTheDocument();
+    expect(screen.getByText(/\+12 dB over ambient/)).toBeInTheDocument();
   });
 
-  test('relative times round the way the code says they do', () => {
-    // ⚠️ THE CLOCK MUST BE FROZEN. `created_at` is stored to whole seconds, so building a fixture
-    // from a live `Date.now()` loses the sub-second remainder and a "59 seconds ago" row lands on
-    // either 59 or 60 depending on when in the second the test ran — i.e. it straddles the exact
-    // boundary it exists to pin, and fails roughly half the time.
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-09-02T10:00:00.000Z'));
-    try {
-    const ago = (s) => new Date(Date.now() - s * 1000).toISOString().slice(0, 19).replace('T', ' ');
+  // Clock times (UI refresh PR D): the row says WHEN in the home timezone, not "3h ago". One instant is used throughout,
+  // 2026-08-31 02:00 UTC = 2:00 pm on 31 Aug in Auckland (the suite's device zone) = 7:00 pm on 30 Aug in Los Angeles.
+  describe('the clock time on a row', () => {
+    const AT = base({ id: 'x', created_at: '2026-08-31 02:00:00' });
+    const NOW_SAME_DAY = '2026-08-31T03:00:00Z'; // 3:00 pm on 31 Aug in Auckland
+    const NOW_NEXT_DAY = '2026-09-01T03:00:00Z'; // 3:00 pm on 1 Sept in Auckland
+    const at = (now, tz) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(now));
+      return renderAsAdmin(<AlertList alerts={[AT]} />, { settings: { timezone: tz } });
+    };
+    afterEach(() => vi.useRealTimers());
+
+    test('★ an alert from today shows the clock time alone, in HOME time', () => {
+      at(NOW_SAME_DAY, 'Pacific/Auckland');
+      expect(document.querySelector('time').textContent).toBe('2:00 pm');
+    });
+
+    test('★ an alert from an earlier day carries the day, so three alerts across quiet days are not ambiguous', () => {
+      at(NOW_NEXT_DAY, 'Pacific/Auckland');
+      expect(document.querySelector('time').textContent).toBe('Mon, 31 Aug, 2:00 pm');
+    });
+
+    test('★ "today" is the HOME zone\'s today, not the device\'s', () => {
+      // The clock is 10:00 UTC on 31 Aug: 10 pm on 31 Aug in Auckland (the device), so the alert (2 pm that day) is from today
+      // there; but 3 am on 31 Aug in Los Angeles, where the alert (7 pm on 30 Aug) is from YESTERDAY. With home = Los Angeles
+      // the row must carry the day; a "today" worked out in the device's zone would drop it.
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-08-31T10:00:00Z'));
+      const la = renderAsAdmin(<AlertList alerts={[AT]} />, { settings: { timezone: 'America/Los_Angeles' } });
+      expect(document.querySelector('time').textContent).toBe('Sun, 30 Aug, 7:00 pm GMT-7');
+      la.unmount();
+      renderAsAdmin(<AlertList alerts={[AT]} />, { settings: { timezone: 'Pacific/Auckland' } });
+      expect(document.querySelector('time').textContent).toBe('2:00 pm');
+    });
+
+    test('no relative wording is left on the row', () => {
+      at(NOW_SAME_DAY, 'Pacific/Auckland');
+      expect(screen.queryByText(/ago|just now/)).not.toBeInTheDocument();
+    });
+  });
+
+  test('★ a row WITH a clip is one button that carries the kind and the time; a row without one is not a button and has no chevron', () => {
+    vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
+    const { container } = render(
+      <AlertList alerts={[base({ id: 'c', snapshot: 1, clip_status: 'ready' }), base({ id: 'n', type: 'sound' })]} />
+    );
+    const buttons = screen.getAllByRole('button');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toHaveClass('alert-item--btn');
+    expect(buttons[0].textContent).toContain('Motion'); // the whole row, not just the thumbnail
+    expect(buttons[0].querySelector('time')).not.toBeNull();
+    const rows = container.querySelectorAll('.alert-item');
+    expect(rows[0].querySelector('.alert-item__chev')).not.toBeNull();
+    expect(rows[1].querySelector('.alert-item__chev')).toBeNull();
+  });
+
+  test('★ each clip row opens ITS OWN clip, not the first or the last', async () => {
+    vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
+    const user = userEvent.setup();
     render(
       <AlertList
         alerts={[
-          base({ id: 'a', created_at: ago(20) }),
-          base({ id: 'b', created_at: ago(59) }),
-          base({ id: 'c', created_at: ago(75) }),
-          base({ id: 'd', created_at: ago(90) }),
-          base({ id: 'e', created_at: ago(3 * 3600) }),
-          base({ id: 'f', created_at: ago(50 * 3600) }),
+          base({ id: 'ev-a', camera_name: 'Room A', snapshot: 1, clip_status: 'ready' }),
+          base({ id: 'ev-b', camera_name: 'Room B', snapshot: 1, clip_status: 'ready' }),
         ]}
       />
     );
-    // ⚠️ BOTH SIDES of the "just now" cut, and both sides of the minute rounding.
-    // 20 s and 59 s are "just now" (`s < 60`); 75 s must NOT be — it is the only case that pins the
-    // cut from ABOVE, and without it widening the bound to `s < 90` survives the whole suite (found
-    // by an adversarial review, 2026-09-02, against an earlier version of this comment that claimed
-    // both boundaries were covered when only one was).
-    // 75 s rounds to 1m and 90 s rounds to 2m — that pair is what separates `Math.round` from
-    // `Math.floor` on the minutes, since floor would call both of them 1m.
-    expect(screen.getAllByText('just now')).toHaveLength(2);
-    expect(screen.getByText('1m ago')).toBeInTheDocument();
-    expect(screen.getByText('2m ago')).toBeInTheDocument();
-    expect(screen.getByText('3h ago')).toBeInTheDocument();
-    expect(screen.getByText('2d ago')).toBeInTheDocument();
-    } finally {
-      // ⚠️ try/finally, not a trailing call: a failed assertion above would otherwise leave fake
-      // timers installed for the REST OF THE FILE, and every later test that awaits a userEvent
-      // click then hangs to its 5 s timeout. One bad assertion turned into five red tests.
-      vi.useRealTimers();
-    }
+    await user.click(screen.getByRole('button', { name: 'Play clip from Room B' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.querySelector('video').getAttribute('src')).toBe('http://host/cameras/alerts/ev-b/clip');
   });
 
-  test('the seconds are ROUNDED, not floored — a fraction over the minute is not "just now"', () => {
-    // ⚠️ The clock is deliberately offset by 600 ms. `created_at` is stored to whole seconds, so
-    // freezing the clock on an exact second (as the test above must, to pin the 59/60 cut) makes the
-    // elapsed time an exact multiple of 1000 — and `Math.round` and `Math.floor` can then never
-    // disagree. That is a fixture that cannot discriminate: the fix for one flake removed the
-    // ability to test this line at all, and the mutant survived until a review found it.
-    // Here elapsed is 59.6 s: rounded it is 60 (so "1m ago"), floored it is 59 (so "just now").
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-09-02T10:00:00.600Z'));
-    try {
-      const created = new Date(Date.now() - 59 * 1000).toISOString().slice(0, 19).replace('T', ' ');
-      render(<AlertList alerts={[base({ id: 'x', created_at: created })]} />);
-      expect(screen.getByText('1m ago')).toBeInTheDocument();
-      expect(screen.queryByText('just now')).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
+  // A null or garbage created_at used to reach toISOString(), a RangeError that blanks the whole child page. The row is drawn
+  // without a time; the rest of the row (kind, detail) still shows.
+  test.each([['null', null], ['garbage', 'not a date']])('★ a %s timestamp draws the row without a time instead of throwing', (_n, created_at) => {
+    const { container } = render(<AlertList alerts={[base({ id: 'bad', created_at, detail: 'loud' }), base({ id: 'ok' })]} />);
+    const rows = container.querySelectorAll('.alert-item');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].querySelector('time')).toBeNull();
+    expect(rows[0].textContent).toContain('Motion');
+    expect(rows[0].querySelector('.alert-item__meta').textContent).toBe('loud'); // no stray leading "·"
+    expect(rows[1].querySelector('time')).not.toBeNull();
+  });
+
+  describe('"See all alerts"', () => {
+    const FIVE = [1, 2, 3, 4, 5].map((i) => base({ id: `e${i}`, created_at: `2026-09-0${i} 10:00:00` }));
+    const rows = (container) => container.querySelectorAll('.alert-item').length;
+
+    test('★ with a preview count, only that many rows show and "See all alerts" reveals the rest in place', async () => {
+      const user = userEvent.setup();
+      const { container } = render(<AlertList alerts={FIVE} previewCount={3} />);
+      expect(rows(container)).toBe(3);
+      const more = screen.getByRole('button', { name: 'See all alerts' });
+      expect(more).toHaveAttribute('aria-expanded', 'false');
+      await user.click(more);
+      expect(rows(container)).toBe(5);
+      expect(screen.getByRole('button', { name: 'Show fewer' })).toHaveAttribute('aria-expanded', 'true');
+      await user.click(screen.getByRole('button', { name: 'Show fewer' }));
+      expect(rows(container)).toBe(3);
+    });
+
+    test('★ it is offered only when there is more to see: three alerts or fewer have no such row', () => {
+      render(<AlertList alerts={FIVE.slice(0, 3)} previewCount={3} />);
+      expect(screen.queryByRole('button', { name: /See all alerts|Show fewer/ })).not.toBeInTheDocument();
+    });
+
+    test('without a preview count every alert shows and there is no such row', () => {
+      const { container } = render(<AlertList alerts={FIVE} />);
+      expect(rows(container)).toBe(5);
+      expect(screen.queryByRole('button', { name: 'See all alerts' })).not.toBeInTheDocument();
+    });
   });
 
   test('a snapshot becomes a play button only when the clip is READY', async () => {

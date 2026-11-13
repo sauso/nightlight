@@ -1286,29 +1286,70 @@ body.in-pip .tile-menu-backdrop {
 .status-badge--off { background: var(--text-secondary); }
 .status-badge--sm { padding: 2px 8px; font-size: 11px; }
 
-/* Rich camera row — small live thumbnail + name + Online/Offline pill + child chip + badges.
-   Shared by the Child detail screen (and reusable). */
-.cam-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 11px 14px; border-bottom: 1px solid var(--border);
-  width: 100%; text-align: left; background: none; border-top: none; border-left: none; border-right: none;
-  font: inherit; color: var(--text-primary);
+/* A child's camera tile on the child page (components/ChildCameraTile.jsx; UI refresh PR D, the approved design). A dark tile in
+   BOTH themes, like a camera picture and like the night card above it, so its text colours are literals that do not follow the
+   theme: chip text #eef0ff on the tile's gradient is 14:1 or more, and the action's dark label on #8995ff is 6.71:1 (the same pair
+   as the night card's primary action). The status dot colours are marks, not text, and each is also said in words in the chip
+   (never colour alone): online #5fd08f, offline #e0556b (the REC badge's red), disabled #b9bdf0. They are brighter than --live and
+   --offline because those two are tuned for a light card and read dim on this ground. */
+.child-cam {
+  position: relative; display: flex; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 192px;
+  margin-bottom: 14px; border-radius: 18px; overflow: hidden; color: #eef0ff;
+  background: linear-gradient(165deg, var(--thumb-hi) 0%, var(--thumb-lo) 100%);
 }
-.cam-row:last-child { border-bottom: none; }
-.cam-row:hover { background: var(--bg-elevated-2); }
-.cam-thumb {
-  width: 54px; height: 40px; border-radius: 9px; flex-shrink: 0; position: relative;
-  background: radial-gradient(120% 100% at 30% 12%, var(--thumb-hi) 0%, var(--thumb-lo) 78%);
+.child-cam--online { --cam-dot: #5fd08f; }
+.child-cam--offline { --cam-dot: #e0556b; }
+.child-cam--disabled { --cam-dot: #b9bdf0; }
+.child-cam__chip {
+  position: absolute; top: 12px; left: 12px; max-width: calc(100% - 72px); display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 999px; background: rgba(0, 0, 0, 0.45); font-size: 13px; font-weight: 600; line-height: 1.2;
 }
-.cam-thumb.sm { width: 40px; height: 30px; border-radius: 7px; }
-.cam-thumb.off { filter: grayscale(1) brightness(0.62); }
-.cam-thumb__dot { position: absolute; top: 5px; left: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 32%, transparent); }
-.cam-row__main { flex: 1; min-width: 0; }
-.cam-row__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.cam-row__name { font-weight: 600; font-size: 15px; }
-.cam-row__meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
-.cam-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--accent-text); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 2px 9px 2px 3px; border-radius: 999px; }
-.cam-chip__mini { width: 18px; height: 18px; border-radius: 50%; color: #fff; font-size: 9px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
+.child-cam__dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--cam-dot); }
+.child-cam__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.child-cam__state { flex: none; white-space: nowrap; font-weight: 500; }
+/* Visually hidden, still read by a screen reader (the "online" the dot stands for). */
+.child-cam__sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.child-cam__settings {
+  position: absolute; top: 4px; right: 4px; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%; background: none; color: #c7caff; cursor: pointer;
+}
+.child-cam__settings:hover { background: rgba(255, 255, 255, 0.1); }
+.child-cam__bed { color: rgba(238, 240, 255, 0.22); }
+.child-cam__watch {
+  position: absolute; right: 12px; bottom: 12px; min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 18px;
+  border: none; border-radius: 999px; background: #8995ff; color: #14142a; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+}
+.child-cam__watch:hover { background: #9aa4ff; }
+.child-cam__settings:focus-visible, .child-cam__watch:focus-visible { outline: 2px solid #c7caff; outline-offset: 2px; }
+
+/* The child page's layout (pages/ChildDetail.jsx; UI refresh PR D). A phone is one column in DOM order: night card, camera,
+   timelapse, alerts, recordings, sensor history. From 1024px the same elements go into two columns as drawn (night card then
+   alerts on the left; camera, timelapse, recordings and sensor history on the right) by grid placement ONLY, never `order`, so the
+   keyboard and reading order stay the DOM order. The rows are
+     1  night card | camera(s)        (the camera column stretches to the card's height)
+     2  alerts ...  | timelapse
+     3  alerts ...  | recordings
+     4  alerts ...  | sensor history
+     5  alerts ...  | (spare)
+   with the alerts card spanning rows 2 to the end and the last row `1fr`: a spanning item that touches a flexible track is
+   sized by that track, so an alerts list expanded to 20 rows grows into the spare row instead of pushing a gap under the
+   timelapse. Sections that render nothing (no timelapse, no recordings) leave an empty zero-height box, and the margins live
+   on the cards INSIDE the boxes, so an empty one adds no gap. */
+.child-page__cameras { display: flex; flex-direction: column; }
+.child-page__nocam { color: var(--text-secondary); font-size: 13px; }
+@media (min-width: 1024px) {
+  .app-main.child-page { max-width: 1040px; }
+  .child-page {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto auto auto 1fr;
+    column-gap: 20px; align-items: start;
+  }
+  .child-page__night { grid-column: 1; grid-row: 1; }
+  .child-page__cameras { grid-column: 2; grid-row: 1; align-self: stretch; }
+  .child-page__timelapse { grid-column: 2; grid-row: 2; }
+  .child-page__alerts { grid-column: 1; grid-row: 2 / -1; }
+  .child-page__recordings { grid-column: 2; grid-row: 3; }
+  .child-page__sensors { grid-column: 2; grid-row: 4; }
+}
 
 /* Child hero ("night") card — identity now, last night's sleep later. */
 /* ONE fixed navy gradient in both themes (the original #2c2f63 to #191b38), so its text colours are literals that do not
@@ -1794,35 +1835,44 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 :root[data-theme='dark'] .child-card { box-shadow: 0 14px 34px -24px rgba(0, 0, 0, 0.8); }
 :root[data-theme='dark'] .child-card:hover { box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.9); }
 
-/* Alert list — one card, one row per alert: thumbnail, camera name, motion/sound icon + label, time.
-   Shared by the Live "Recent activity" list and each child's detail screen. */
-.alert-item { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-bottom: 1px solid var(--border); }
+/* Recent alerts on a child's page (components/AlertList.jsx; UI refresh PR D): one card, one row per alert: thumbnail, kind
+   (icon + word) with the clock time under it, and a chevron on a row that opens a clip. The card has NO padding of its own so
+   the dividers run edge to edge; the title and the rows pad themselves. A row is 56px or more (a 40px thumbnail plus padding),
+   past the 44px a touch target needs, and a row with a clip is ONE button, not a thumbnail button inside a row. */
+.alert-list { padding: 0; overflow: hidden; }
+.alert-list__title { display: flex; align-items: center; gap: 8px; margin: 0; padding: 14px 16px 6px; }
+.alert-list__body { padding: 0 16px 16px; }
+.alert-item { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
 .alert-item:last-child { border-bottom: none; }
-.alert-item__thumb { width: 64px; height: 46px; border-radius: 9px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, var(--thumb-hi), var(--thumb-lo)); }
+/* The whole row is the button when there is a clip: reset the button chrome and keep the row's own look. */
+.alert-item--btn { width: 100%; background: none; border-top: none; border-left: none; border-right: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.alert-item--btn:hover { background: var(--bg-elevated-2); }
+.alert-item--btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.alert-item__thumb { width: 56px; height: 40px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: linear-gradient(135deg, var(--thumb-hi), var(--thumb-lo)); }
 .alert-item__thumb--empty { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-soft); }
-.alert-item__body { flex: 1; min-width: 0; }
-.alert-item__name { font-weight: 600; font-size: 14.5px; display: flex; align-items: center; gap: 7px; }
+.alert-item__body { flex: 1; min-width: 0; display: block; }
+.alert-item__name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 6px; }
 .alert-item__nametext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* "REC" badge shown to the right of the camera name while a clip is being captured. */
+/* "REC" badge shown to the right of the kind while a clip is being captured. */
 .rec-badge { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; color: #e0556b; background: rgba(224, 85, 107, 0.13); padding: 1px 6px 1px 5px; border-radius: 20px; }
 .rec-dot { width: 7px; height: 7px; border-radius: 50%; background: #e0556b; animation: recpulse 1.2s ease-in-out infinite; }
 @keyframes recpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
 @media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
-.alert-item__meta { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; }
+.alert-item__meta { display: block; font-size: 13px; color: var(--text-secondary); margin-top: 1px; }
 .alert-item__ico { color: var(--accent-line); flex-shrink: 0; }
-.alert-item__time { font-size: 12px; color: var(--text-secondary); flex-shrink: 0; white-space: nowrap; }
-/* Thumbnail wrapper carries the play/recording overlay. As a <button> (clip ready) it's a bare,
-   tappable frame. */
-.alert-item__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; padding: 0; border: none; background: none; cursor: default; line-height: 0; }
-button.alert-item__thumbwrap { cursor: pointer; border-radius: 9px; }
-button.alert-item__thumbwrap:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.alert-item__time { font-variant-numeric: tabular-nums; }
+.alert-item__chev { flex: none; color: var(--text-secondary); }
+/* The thumbnail's frame carries the play overlay (shown when a clip is ready). */
+.alert-item__thumbwrap { position: relative; flex-shrink: 0; display: inline-flex; line-height: 0; }
 .alert-item__play {
   position: absolute; inset: 0; margin: auto; width: 26px; height: 26px;
   display: inline-flex; align-items: center; justify-content: center;
   border-radius: 50%; background: rgba(10, 13, 28, 0.62); color: #fff;
 }
-.alert-item__play--pending { background: rgba(10, 13, 28, 0.5); color: var(--accent-soft); }
-.alert-item__clipflag { color: var(--accent-line); }
+/* "See all alerts": a full-width quiet row under the list, 44px or more. The divider above it is the last alert row's own. */
+.alert-list__more { display: block; width: 100%; min-height: 44px; padding: 0 16px; border: none; background: none; color: var(--accent-text); font: inherit; font-size: 14px; font-weight: 600; text-align: center; cursor: pointer; }
+.alert-list__more:hover { background: var(--bg-elevated-2); }
+.alert-list__more:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 /* Modal clip player */
@@ -2602,23 +2652,37 @@ input[type='range'] {
   flex: 1;
 }
 
-/* "Memories" timelapse card on child detail (see components/TimelapseCard.jsx). */
-/* These media sections start directly below their titles; Cameras and Recent alerts have padded rows,
-   so only these in-card titles need extra space. */
+/* Timelapse card on child detail (see components/TimelapseCard.jsx). The title is 15px bold with an accent icon, like the
+   Recent alerts title (UI refresh PR D): the canonical 12px grey .card-title is too quiet for the one heading of a card
+   whose body is a picture. Flex centring keeps the icon level with the word (owner screenshot, 2026-11-01). */
 .timelapse-card .card-title {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 10px;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
 }
-/* Same centring as the Timelapse title above: without it the Video icon sat on the text baseline,
-   higher than the word (owner screenshot, 2026-11-01). */
-.recordings-card .card-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 10px;
+.timelapse-card .card-title svg, .alert-list__title svg { color: var(--accent-line); }
+.alert-list__title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+/* The Recordings card is ONE row (components/RecordingsCard.jsx): icon, title, the newest recording's time, a chevron that
+   turns down while the thumbnails below it are open. The row is the whole card's top, so the card carries no padding of
+   its own and the row is 56px high (past the 44px touch target). */
+.recordings-card { padding: 0; overflow: hidden; }
+.recordings-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 56px; padding: 0 16px;
+  border: none; background: none; font: inherit; color: var(--text-primary); text-align: left; cursor: pointer;
 }
+.recordings-row:hover { background: var(--bg-elevated-2); }
+.recordings-row:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.recordings-row__icon { flex: none; color: var(--accent-line); }
+.recordings-row__title { font-size: 15px; font-weight: 700; }
+.recordings-row__latest { flex: 1; min-width: 0; text-align: right; font-size: 13px; color: var(--text-secondary); }
+.recordings-row__chev { flex: none; color: var(--text-secondary); transition: transform 0.15s ease; }
+.recordings-row[aria-expanded='true'] .recordings-row__chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .recordings-row__chev { transition: none; } }
+.recordings-card .rec-strip { padding: 4px 16px 16px; }
 .timelapse-hero {
   position: relative;
   display: block;
@@ -2670,9 +2734,12 @@ input[type='range'] {
   overflow-x: auto;
   padding-bottom: 2px;
 }
+/* The strip: small thumbnails, four in view (scrolling for the rest), each labelled with its WEEKDAY over the picture. The label
+   sits on a dark chip because a thumbnail can be any brightness, and the tile is positioned so that chip stays inside it. */
 .timelapse-strip__item {
-  flex: 0 0 auto;
-  width: 84px;
+  position: relative;
+  flex: 0 0 calc((100% - 24px) / 4);
+  aspect-ratio: 3 / 2;
   padding: 0;
   border: 2px solid transparent;
   border-radius: 8px;
@@ -2687,15 +2754,20 @@ input[type='range'] {
 }
 .timelapse-strip__item img {
   width: 100%;
-  height: 48px;
+  height: 100%;
   object-fit: cover;
   display: block;
 }
 .timelapse-strip__item span {
-  display: block;
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 1px 6px;
+  border-radius: 6px;
   font-size: 11px;
-  padding: 3px 2px;
-  text-align: center;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
 }
 /* Pill toggle switch (see components/Switch.jsx) — for immediate-apply settings only.
    The real checkbox is stretched over the track and made invisible so it stays the hit

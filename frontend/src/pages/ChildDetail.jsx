@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Camera, Settings } from 'lucide-react';
+import { Bell, Camera, Settings } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
 import Modal from '../components/Modal.jsx';
-import CameraRow from '../components/CameraRow.jsx';
+import ChildCameraTile from '../components/ChildCameraTile.jsx';
 import AlertList from '../components/AlertList.jsx';
 import LoadFailed from '../components/LoadFailed.jsx';
 import { loadState } from '../lib/loadState.js';
@@ -19,7 +19,7 @@ import MorningReviewCard from '../components/MorningReviewCard.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { ageLabel } from '../lib/age.js';
 
-// A child's hub: ONE night card (identity, last night's sleep, the morning question), then their cameras and their alerts.
+// A child's hub: ONE night card (identity, last night's sleep, the morning question), then their camera, timelapse, alerts and recordings.
 // The avatar opens the photo (or Child settings when there is none) and the gear opens Child settings (name / birthday /
 // colour / photo). Alerts are filtered to this child's cameras client-side via each event's camera_id.
 
@@ -109,7 +109,17 @@ export default function ChildDetail() {
   return (
     <>
       <AppHeader title={kid.name} back={{ to: '/children', label: 'Children' }} />
-      <main className="app-main">
+      {/* ★ LAYOUT (UI refresh PR D). The DOM is the PHONE order, which is also the reading and tab order: night card, camera,
+          timelapse, recent alerts, recordings, sensor history. From 1024px the same elements are placed in two columns by
+          CSS grid (index.css, `.child-page`), alerts under the night card and everything else in the other column, as drawn.
+          Nothing is reordered with `order`, so a keyboard or screen-reader user never gets an order that disagrees with the
+          screen. Each section sits in its own wrapper because TimelapseCard and RecordingsCard render NOTHING until there
+          is something to show; the wrapper is then an empty box that takes no space. */}
+      {/* The timelapse, alerts and recordings cards are keyed by child (below): this component is reused when only :id changes, and
+          each card keeps local state (the picked night, "See all alerts" expanded, the Recordings row open) that must not carry from one
+          child to the next. */}
+      <main className="app-main child-page">
+        <div className="child-page__night">
         <div className={nightBand ? `night night--${nightBand}` : 'night'}>
           <div className="night__head">
             {/* The avatar is the way to set the photo (it opens the photo, or settings when there is none), and the small
@@ -139,27 +149,23 @@ export default function ChildDetail() {
               question loaded for one child never shows under another's name while that child's request is pending. */}
           <MorningReviewCard key={`review-${id}`} childId={id} fmtTime={fmtTime} />
         </div>
+        </div>
 
-        <TimelapseCard childId={id} />
-        <RecordingsCard childId={id} />
-
-        {childCams.filter((c) => c.mqtt_topic).map((c) => (
-          <SensorHistoryCard key={c.id} camera={c} />
-        ))}
-
-        <div className="card tight">
-          <div className="card-title">Cameras · {childCams.length}</div>
+        {/* The camera(s): one large tile each, no "Cameras · n" heading (a child's page is about the child; the count and the
+            capability badges are on the Cameras tab). "Watch live" goes to the Live tab, where every camera is. */}
+        <div className="child-page__cameras">
           {childCams.map((c) => (
-            <CameraRow
+            <ChildCameraTile
               key={c.id}
               cam={c}
-              onClick={isAdmin ? () => navigate(`/cameras/${c.id}`, { state: { from: { to: `/children/${id}`, label: kid.name } } }) : undefined}
+              onWatch={() => navigate('/')}
+              onSettings={isAdmin ? () => navigate(`/cameras/${c.id}`, { state: { from: { to: `/children/${id}`, label: kid.name } } }) : undefined}
             />
           ))}
           {/* Assigning a camera is admin-only (#552), so a caregiver is told who can, not sent to a
               screen where the control is not there for them. */}
           {childCams.length === 0 && (
-            <div className="camera-tile__sub">
+            <div className="card child-page__nocam">
               {isAdmin
                 ? 'No cameras assigned yet — assign one from the Cameras tab.'
                 : 'No cameras assigned yet — an admin can assign one from the Cameras tab.'}
@@ -167,19 +173,33 @@ export default function ChildDetail() {
           )}
         </div>
 
-        {alertsState === 'ready' || alertsState === 'stale' ? (
-          <>
-            {alertsState === 'stale' && <LoadFailed what="alerts" error={alertsError} onRetry={loadAlerts} stale />}
-            <AlertList alerts={alerts} onChanged={loadAlerts} title="Recent alerts" />
-          </>
-        ) : (
-          <div className="card">
-            <div className="card-title">Recent alerts</div>
-            {alertsState === 'loading' && <div className="camera-tile__sub">Loading…</div>}
-            {alertsState === 'error' && <LoadFailed what="alerts" error={alertsError} onRetry={loadAlerts} />}
-            {alertsState === 'empty' && <div className="camera-tile__sub">No alerts for {kid.name} yet.</div>}
-          </div>
-        )}
+        <div className="child-page__timelapse"><TimelapseCard key={id} childId={id} /></div>
+
+        <div className="child-page__alerts">
+          {alertsState === 'ready' || alertsState === 'stale' ? (
+            <>
+              {alertsState === 'stale' && <LoadFailed what="alerts" error={alertsError} onRetry={loadAlerts} stale />}
+              <AlertList key={id} alerts={alerts} onChanged={loadAlerts} title="Recent alerts" previewCount={3} />
+            </>
+          ) : (
+            <div className="card alert-list">
+              <div className="card-title alert-list__title"><Bell size={16} aria-hidden="true" /><span>Recent alerts</span></div>
+              <div className="alert-list__body">
+                {alertsState === 'loading' && <div className="camera-tile__sub">Loading…</div>}
+                {alertsState === 'error' && <LoadFailed what="alerts" error={alertsError} onRetry={loadAlerts} />}
+                {alertsState === 'empty' && <div className="camera-tile__sub">No alerts for {kid.name} yet.</div>}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="child-page__recordings"><RecordingsCard key={id} childId={id} /></div>
+
+        <div className="child-page__sensors">
+          {childCams.filter((c) => c.mqtt_topic).map((c) => (
+            <SensorHistoryCard key={c.id} camera={c} />
+          ))}
+        </div>
       </main>
 
       {photoOpen && kid.photo && (
