@@ -15,7 +15,14 @@ import Logo from './Logo.jsx';
 // It's pinned (position: sticky) rather than floating, which
 // sidesteps mobile-browser quirks with top-anchored fixed elements drifting during the
 // address-bar hide/show animation.
-export default function AppHeader({ title, back, showDemoBanner = true, showThemeToggle = false }) {
+//
+// `actions` (UI refresh PR E): a node pinned to the right of the title row, e.g. the sleep page's "⋯" menu. It sits where
+// the theme toggle sits (that is Live-only, so the two never meet).
+// `bandLine` (same PR): a thin line along the bottom edge of the bar in the band colour of the night on show, so the
+// page says how the night went before anything is read. A band key ('great' | 'good' | 'fair' | 'low' | 'early', from
+// bandOf) or 'none' for a neutral line; undefined = no line at all (every other page). Decorative and aria-hidden: the
+// score and its word are on the page, and a band colour is never the only signal or any text (docs/design-language.md).
+export default function AppHeader({ title, back, actions = null, bandLine, showDemoBanner = true, showThemeToggle = false }) {
   const navigate = useNavigate();
 
   return (
@@ -35,7 +42,9 @@ export default function AppHeader({ title, back, showDemoBanner = true, showThem
           )}
           <h1>{title}</h1>
           {showThemeToggle && <ThemeToggle />}
+          {actions && <div className="app-header__actions">{actions}</div>}
         </div>
+        {bandLine && <span className={`app-header__band app-header__band--${bandLine}`} aria-hidden="true" />}
       </header>
       {showDemoBanner && <DemoBanner />}
     </>

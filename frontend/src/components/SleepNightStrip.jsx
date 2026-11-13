@@ -1,0 +1,85 @@
+import { useEffect, useState } from 'react';
+import { api } from '../lib/api.js';
+import { addDays } from '../lib/nightView.js';
+import { scoreOf, bandOf } from '../lib/sleepScoreText.js';
+
+// How many nights the strip shows. The design draws seven (a week); it is a layout width, not a score rule.
+export const STRIP_NIGHTS = 7;
+
+// The nights the strip shows, oldest first: the STRIP_NIGHTS calendar dates ending at `maxDate` (the newest night the
+// page can show), cut off at the child's first stored night so a new child sees the nights that exist and not a row of
+// empty ones. `rows` is the /sleep?nights= answer. No rows at all (a new child, a bad answer) gives no strip.
+//
+// The window is FIXED to the newest nights, not centred on the selected one: tapping a night must not shuffle the row
+// under the finger. A night older than the window is chosen with the calendar button, and then nothing in the strip is
+// marked (the title above it names the night).
+export function stripDates(maxDate, rows) {
+  if (!maxDate || !Array.isArray(rows)) return [];
+  const stored = rows.map((r) => r?.night_date).filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d));
+  if (!stored.length) return [];
+  const first = stored.reduce((a, b) => (b < a ? b : a));
+  const out = [];
+  for (let i = STRIP_NIGHTS - 1; i >= 0; i -= 1) {
+    const d = addDays(maxDate, -i);
+    if (d >= first) out.push(d);
+  }
+  return out;
+}
+
+// Weekday and day number in the viewer's own language, from the date string alone. Built at noon UTC and formatted in
+// UTC so the day can never slip to a neighbour in any zone (the dates are already the app timezone's calendar dates).
+const weekdayOf = (d) => new Intl.DateTimeFormat([], { timeZone: 'UTC', weekday: 'short' }).format(new Date(`${d}T12:00:00Z`));
+const dayOf = (d) => Number(d.slice(8, 10));
+const longOf = (d) => new Intl.DateTimeFormat([], { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${d}T12:00:00Z`));
+
+// The last seven nights as seven buttons: weekday, date, score and a 4px band bar (UI refresh PR E). Tapping one opens
+// that night (`onSelect(date)`), the selected one carries aria-current="date". It replaces the previous / next arrows.
+//
+// ⚠️ IT IS A HEAT MAP BY DESIGN (the owner accepted this in the design review): seven coloured bars side by side invite comparing
+// one night with another. No comparison wording is added, and the bar is never the only signal: the number (or a dash)
+// is printed in the button and in its accessible name. The bar uses the same band keys as the ring (bandOf), so an early
+// estimate shows its number with the neutral bar, and a night with no score a dash with the neutral bar.
+//
+// ⚠️ IT IS OPTIONAL. The page works without it, so while the request is in flight and when it fails the strip renders
+// nothing at all (no spinner, no error line): a failed decoration must not read as a failed page. `version` is bumped by the
+// page after a Recompute save so a re-scored night's bar does not go stale.
+export default function SleepNightStrip({ childId, maxDate, selected, onSelect, version = 0 }) {
+  // The answer is kept WITH the child it was for, so a different child never wears the previous child's bars while its
+  // own request is in flight; a `version` bump (same child) keeps the old bars on screen until the new answer lands.
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    if (!childId) return undefined;
+    let alive = true;
+    // Additive use of the existing list route (stored nights, newest first, each with `score`): no server change.
+    api.get(`/children/${childId}/sleep?nights=${STRIP_NIGHTS}`)
+      .then((r) => { if (alive) setData(Array.isArray(r?.nights) ? { childId, nights: r.nights } : null); })
+      .catch(() => { if (alive) setData(null); });
+    return () => { alive = false; };
+  }, [childId, version]);
+
+  const rows = data?.childId === childId ? data.nights : null;
+  const dates = stripDates(maxDate, rows);
+  if (!dates.length) return null;
+  const byDate = new Map(rows.map((r) => [r?.night_date, r]));
+
+  return (
+    <div className="sleep-strip" role="group" aria-label="Recent nights">
+      {dates.map((d) => {
+        const score = scoreOf(byDate.get(d));
+        const band = bandOf(score) || 'none';
+        const shown = score ? String(Math.round(score.score)) : '–';
+        const name = `${longOf(d)}, ${score ? `score ${shown}${score.early_estimate ? ' (early estimate)' : ''}` : 'no score'}`;
+        return (
+          <button key={d} type="button" className="sleep-strip__item" aria-label={name}
+            aria-current={d === selected ? 'date' : undefined} onClick={() => onSelect(d)}>
+            <span className="sleep-strip__day" aria-hidden="true">{weekdayOf(d)}</span>
+            <span className="sleep-strip__date" aria-hidden="true">{dayOf(d)}</span>
+            <span className="sleep-strip__score" aria-hidden="true">{shown}</span>
+            <span className={`sleep-strip__bar sleep-strip__bar--${band}`} aria-hidden="true" />
+          </button>
+        );
+      })}
+    </div>
+  );
+}

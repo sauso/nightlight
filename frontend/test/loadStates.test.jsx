@@ -285,6 +285,8 @@ describe('Sleep detail', () => {
         // mount, to decide whether to offer anything. Answered apart (nothing saved, so no offer), so it neither
         // takes the night's `first` answer nor counts as one of the night's reads below.
         if (p.includes('?stored=1')) return Promise.resolve({ night: null, locked: false });
+        // UI refresh PR E: the seven-night strip's own read, likewise not one of the night's reads.
+        if (p.includes('/sleep?nights=')) return Promise.resolve({ nights: [] });
         calls += 1;
         return calls === 1 ? Promise.resolve(first) : later();
       });

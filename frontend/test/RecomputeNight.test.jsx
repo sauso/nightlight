@@ -15,6 +15,7 @@
 //      undoing whatever correction was showing. The fix re-fetches the normal route after storing.
 
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
+import { useState } from 'react';
 import { screen, waitFor, act } from '@testing-library/react';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import RecomputeNight from '../src/components/RecomputeNight.jsx';
@@ -58,11 +59,25 @@ function mockApi({ stored = STORED, onStore = FRESH, overlaid = FRESH, locked } 
   });
 }
 
+// UI refresh PR E: the control is a menu item the PAGE gives a slot for (the sleep page's open "⋯" menu). This stands in for
+// that slot, always open, so every test below still presses the item exactly as a person would, and the dialog and the
+// reads are the real component's. The availability callback is passed through when a test gives one.
+function SlotHarness({ onAvailable, ...props }) {
+  const [slot, setSlot] = useState(null);
+  return (
+    <>
+      <div role="menu" aria-label="slot" ref={setSlot} />
+      <RecomputeNight {...props} menuSlot={slot} onAvailable={onAvailable} />
+    </>
+  );
+}
+
 const setup = (renderer, props = {}) =>
   renderer(
-    <RecomputeNight childId="c-1" date="2026-08-28" night={props.night || FRESH} fmtTime={fmtTime}
+    <SlotHarness childId="c-1" date="2026-08-28" night={props.night || FRESH} fmtTime={fmtTime}
       onRecomputed={props.onRecomputed || vi.fn()} onCorrectionRemoved={props.onCorrectionRemoved}
-      settingsView={props.settingsView} onSettingsViewChange={props.onSettingsViewChange} />
+      settingsView={props.settingsView} onSettingsViewChange={props.onSettingsViewChange}
+      onAvailable={props.onAvailable} />
   );
 
 beforeEach(() => mockApi());
@@ -92,7 +107,7 @@ describe('a LOCKED night (the server says so in ?stored=1)', () => {
     // numbers" (the tests below prove it does). Locked, it must not: the server would refuse the write.
     mockApi({ locked: true });
     const { user } = setup(renderAsAdmin, { night: { ...FRESH, corrected: true } });
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
 
     expect(await screen.findByText(/This night is locked because you corrected it/)).toBeInTheDocument();
     // Said as an instruction now that there is a control for it (see "Remove my correction" below).
@@ -110,7 +125,7 @@ describe('a LOCKED night (the server says so in ?stored=1)', () => {
     // way to get it saved (plan review R8). Keying on `corrected` would hide that fix.
     mockApi({ stored: null, locked: false });
     const { user } = setup(renderAsAdmin, { night: { ...FRESH, corrected: true } });
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
     await waitFor(() => expect(screen.getByText(/nothing is saved for this night yet/i)).toBeInTheDocument());
     expect(screen.queryByText(/locked/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /save this night/i })).toBeInTheDocument();
@@ -119,7 +134,7 @@ describe('a LOCKED night (the server says so in ?stored=1)', () => {
   test('a server that does not send `locked` at all reads as unlocked (an older backend)', async () => {
     mockApi(); // `{ night }` only
     const { user } = setup(renderAsAdmin);
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
     await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
     expect(screen.queryByText(/locked/)).not.toBeInTheDocument();
   });
@@ -167,7 +182,7 @@ describe('"Remove my correction" on a LOCKED night', () => {
 
   async function openLocked(props = {}) {
     const rendered = setup(renderAsAdmin, { night: { ...FRESH, corrected: true }, ...props });
-    await rendered.user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await rendered.user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
     await screen.findByText(/This night is locked because you corrected it/);
     return rendered;
   }
@@ -182,7 +197,7 @@ describe('"Remove my correction" on a LOCKED night', () => {
     // Not locked (a corrected night whose saved row is stale): the ordinary preview, no removal.
     mockApi({ locked: false });
     const { user } = setup(renderAsAdmin, { night: { ...FRESH, corrected: true } });
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
     await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: /remove my correction/i })).not.toBeInTheDocument();
   });
@@ -379,7 +394,7 @@ describe('"Remove my correction" on a LOCKED night', () => {
 describe('the baseline is what is SAVED, not what the page is showing', () => {
   test('it reads the stored row rather than recomputing a second time', async () => {
     const { user } = setup(renderAsAdmin);
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
 
     await waitFor(() => expect(api.get).toHaveBeenCalled());
     expect(api.get.mock.calls[0][0]).toMatch(/stored=1/);
@@ -391,7 +406,7 @@ describe('the baseline is what is SAVED, not what the page is showing', () => {
     // THE regression test for the shipped bug. The page shows 10:15 and the saved row says 06:56, so
     // there is plainly something to fix — comparing the page against itself said otherwise.
     const { user } = setup(renderAsAdmin);
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
 
     await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
     expect(screen.queryByText(/already matches/i)).not.toBeInTheDocument();
@@ -400,7 +415,7 @@ describe('the baseline is what is SAVED, not what the page is showing', () => {
 
   test('the dialog shows the saved figures on the left and the new ones on the right', async () => {
     const { user } = setup(renderAsAdmin);
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
 
     await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
     expect(screen.getByText('06:56')).toBeInTheDocument(); // saved, wrong
@@ -412,7 +427,7 @@ describe('the baseline is what is SAVED, not what the page is showing', () => {
   test('a saved summary that already agrees offers nothing to save', async () => {
     mockApi({ stored: { ...FRESH } });
     const { user } = setup(renderAsAdmin);
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
 
     await waitFor(() => expect(screen.getByText(/already matches/i)).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
@@ -421,7 +436,7 @@ describe('the baseline is what is SAVED, not what the page is showing', () => {
   test('a night with nothing saved yet offers to record it', async () => {
     mockApi({ stored: null });
     const { user } = setup(renderAsAdmin);
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
 
     await waitFor(() => expect(screen.getByText(/nothing is saved for this night yet/i)).toBeInTheDocument());
     expect(screen.getByRole('button', { name: /save this night/i })).toBeInTheDocument();
@@ -431,12 +446,12 @@ describe('the baseline is what is SAVED, not what the page is showing', () => {
 describe('role gating', () => {
   test('an admin sees the control', () => {
     setup(renderAsAdmin);
-    expect(screen.getByRole('button', { name: /recompute this night/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /recompute this night/i })).toBeInTheDocument();
   });
 
   test('a caregiver does not see it at all', () => {
     setup(renderAsCaregiver);
-    expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /recompute this night/i })).not.toBeInTheDocument();
   });
 
   test('a caregiver cannot reach the endpoint through this component', () => {
@@ -449,7 +464,7 @@ describe('writing', () => {
   test('saving is what stores, and it reports the result upwards', async () => {
     const onRecomputed = vi.fn();
     const { user } = setup(renderAsAdmin, { onRecomputed });
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
     await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
 
     await user.click(screen.getByRole('button', { name: /save the new numbers/i }));
@@ -472,7 +487,7 @@ describe('writing', () => {
     const overlaid = { ...FRESH, corrected: true, night__marker: 'overlay' };
     mockApi({ overlaid });
     const { user } = setup(renderAsAdmin, { onRecomputed });
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
     await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
 
     await user.click(screen.getByRole('button', { name: /save the new numbers/i }));
@@ -483,7 +498,7 @@ describe('writing', () => {
 
   test('cancelling closes the dialog and stores nothing', async () => {
     const { user } = setup(renderAsAdmin);
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
     await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
 
     await user.click(screen.getByRole('button', { name: /^cancel$/i }));
@@ -495,7 +510,7 @@ describe('writing', () => {
     // The backend answers 409 when a night's samples have aged out. The user has to be told why, or the
     // button just looks broken.
     const { user } = setup(renderAsAdmin);
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
     await waitFor(() => expect(screen.getByText(/no longer matches/i)).toBeInTheDocument());
 
     api.get.mockRejectedValueOnce(new Error("This night can't be re-scored: its minute-by-minute data has aged out"));
@@ -507,7 +522,7 @@ describe('writing', () => {
 describe('when there is nothing to act on', () => {
   test('a night still in progress has no control — there is nothing settled to store', () => {
     setup(renderAsAdmin, { night: { ...FRESH, in_progress: true } });
-    expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /recompute this night/i })).not.toBeInTheDocument();
   });
 });
 
@@ -560,7 +575,7 @@ describe('#361 PR 3: "Use the settings this night was saved with"', () => {
   const box = () => screen.getByRole('checkbox', { name: /use the settings this night was saved with/i });
   async function openDialog(props = {}) {
     const rendered = setup(renderAsAdmin, props);
-    await rendered.user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await rendered.user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
     await screen.findByRole('dialog');
     return rendered;
   }
@@ -618,7 +633,7 @@ describe('#361 PR 3: "Use the settings this night was saved with"', () => {
     const onRecomputed = vi.fn();
     const onSettingsViewChange = vi.fn();
     const { user } = setup(renderAsAdmin, { onRecomputed, onSettingsViewChange, settingsView: 'current' });
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
     await screen.findByRole('dialog');
     await user.click(box());
     await screen.findByText('09:40');
@@ -644,7 +659,7 @@ describe('#361 PR 3: "Use the settings this night was saved with"', () => {
     await screen.findByText('09:40');
     await user.click(screen.getByRole('button', { name: /^cancel$/i }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
     await screen.findByRole('dialog');
     expect(box()).not.toBeChecked();
     expect(screen.getByText('10:15')).toBeInTheDocument();
@@ -734,7 +749,7 @@ describe('#361 PR 3: "Use the settings this night was saved with"', () => {
     test('★ the control appears only after its own read finds usable, DIFFERING saved settings; the dialog offers only that path', async () => {
       const calls = mockChoiceApi();
       const { user } = setup(renderAsAdmin, { night: NO_DATA });
-      await user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+      await user.click(await screen.findByRole('menuitem', { name: /recompute this night/i }));
       await screen.findByRole('dialog');
       expect(calls[0]).toBe(`${BASE}?stored=1`); // the mount-time read
       expect(screen.getByText(/Today’s settings find no data for this night\. The settings it was saved with may still work\./)).toBeInTheDocument();
@@ -761,7 +776,7 @@ describe('#361 PR 3: "Use the settings this night was saved with"', () => {
         return Promise.reject(new Error(`unexpected call: ${url}`));
       });
       const { user } = setup(renderAsAdmin, { night: NO_DATA });
-      await user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+      await user.click(await screen.findByRole('menuitem', { name: /recompute this night/i }));
       expect(await screen.findByText(/Nothing is saved for this night any more/)).toBeInTheDocument();
       expect(screen.queryByText(/Saving now records the night/)).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
@@ -770,7 +785,7 @@ describe('#361 PR 3: "Use the settings this night was saved with"', () => {
     test('a no_sleep night says "no clear sleep", not "no data"', async () => {
       mockChoiceApi();
       const { user } = setup(renderAsAdmin, { night: { ...NO_DATA, status: 'no_sleep', coverage_minutes: 700 } });
-      await user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+      await user.click(await screen.findByRole('menuitem', { name: /recompute this night/i }));
       expect(await screen.findByText(/Today’s settings find no clear sleep in this night\./)).toBeInTheDocument();
     });
 
@@ -787,7 +802,7 @@ describe('#361 PR 3: "Use the settings this night was saved with"', () => {
         await waitFor(() => expect(calls).toEqual([`${BASE}?stored=1`]));
         // Let the answer land; the control must still not appear.
         await act(async () => {});
-        expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+        expect(screen.queryByRole('menuitem', { name: /recompute this night/i })).not.toBeInTheDocument();
       });
     }
 
@@ -795,7 +810,7 @@ describe('#361 PR 3: "Use the settings this night was saved with"', () => {
       const calls = mockChoiceApi();
       setup(renderAsCaregiver, { night: NO_DATA });
       await act(async () => {});
-      expect(screen.queryByRole('button', { name: /recompute this night/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('menuitem', { name: /recompute this night/i })).not.toBeInTheDocument();
       expect(calls).toEqual([]);
     });
   });
@@ -837,7 +852,7 @@ describe('#361 PR 4a: on a page showing the saved settings, the dialog compares 
   }
   async function open(props) {
     const rendered = setup(renderAsAdmin, props);
-    await rendered.user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+    await rendered.user.click(await screen.findByRole('menuitem', { name: /recompute this night/i }));
     await screen.findByRole('dialog');
     return rendered;
   }
@@ -891,7 +906,7 @@ describe('#361 PR 4a: on a page showing the saved settings, the dialog compares 
     // its own `?stored=1` (PR 3, plan R1); once open, today's settings are the ones that score.
     const calls = mockToday();
     const { user } = setup(renderAsAdmin, { night: { ...PAGE, status: 'no_data', onset_at: null, wake_at: null } });
-    await user.click(await screen.findByRole('button', { name: /recompute this night/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /recompute this night/i }));
     expect(await screen.findByText(/no longer matches/i)).toBeInTheDocument();
     expect(calls).toContain(TODAY_URL);
     expect(screen.queryByText(/Today’s settings find no/)).not.toBeInTheDocument();
@@ -917,7 +932,7 @@ describe('#361 PR 4a: on a page showing the saved settings, the dialog compares 
       night: { ...PAGE, corrected: true, scoring_view: { ...VIEW, applied: 'current' } },
       settingsView: 'current', onRecomputed, onSettingsViewChange,
     });
-    await user.click(screen.getByRole('button', { name: /recompute this night/i }));
+    await user.click(screen.getByRole('menuitem', { name: /recompute this night/i }));
     await user.click(await screen.findByRole('button', { name: /^remove my correction$/i }));
     await user.click(screen.getByRole('button', { name: /^remove my correction$/i }));
     await waitFor(() => expect(onRecomputed).toHaveBeenCalledTimes(1));
@@ -925,5 +940,40 @@ describe('#361 PR 4a: on a page showing the saved settings, the dialog compares 
     expect(calls.slice(-3)).toEqual([`${BASE}?stored=1`, TODAY_URL, `${BASE}?detail=1&context=current`]);
     expect(onSettingsViewChange).not.toHaveBeenCalled();
     expect(await screen.findByText('11:05')).toBeInTheDocument();
+  });
+});
+
+// UI refresh PR E: the page shows a "⋯" button only when something is in the menu, and only this component knows whether
+// Recompute is on offer (admin-only, not on the night in progress, and on a night today's settings cannot score only after
+// its own read). It says so through `onAvailable`, and says false again when it goes away.
+describe('telling the menu whether the item is on offer', () => {
+  test('★ an admin on an ordinary night: true, and false again when the control goes away', async () => {
+    const onAvailable = vi.fn();
+    const rendered = setup(renderAsAdmin, { onAvailable });
+    await waitFor(() => expect(onAvailable).toHaveBeenLastCalledWith(true));
+    expect(screen.getByRole('menuitem', { name: /recompute this night/i })).toBeInTheDocument();
+    rendered.unmount();
+    expect(onAvailable).toHaveBeenLastCalledWith(false);
+  });
+
+  test('★ a caregiver: never true (no "⋯" for someone with nothing in it)', async () => {
+    const onAvailable = vi.fn();
+    setup(renderAsCaregiver, { onAvailable });
+    await waitFor(() => expect(onAvailable).toHaveBeenCalled());
+    expect(onAvailable).not.toHaveBeenCalledWith(true);
+  });
+
+  test('the night in progress: never true', async () => {
+    const onAvailable = vi.fn();
+    setup(renderAsAdmin, { onAvailable, night: { ...FRESH, in_progress: true } });
+    await waitFor(() => expect(onAvailable).toHaveBeenCalled());
+    expect(onAvailable).not.toHaveBeenCalledWith(true);
+  });
+
+  test('with no menu slot it draws nothing but still reports (the menu is not mounted yet)', async () => {
+    const onAvailable = vi.fn();
+    renderAsAdmin(<RecomputeNight childId="c-1" date="2026-08-28" night={FRESH} fmtTime={fmtTime} onRecomputed={vi.fn()} onAvailable={onAvailable} />);
+    await waitFor(() => expect(onAvailable).toHaveBeenLastCalledWith(true));
+    expect(screen.queryByRole('menuitem', { hidden: true })).toBeNull();
   });
 });

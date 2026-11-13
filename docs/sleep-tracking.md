@@ -88,8 +88,14 @@ another room less well.
 
 Tap the sleep summary for the full **night timeline**: a to-scale bar of
 asleep / stirring / awake stretches on a real time axis, every wake-up listed with its time
-and length, a **movement outside the bed** list, and a date picker to step back through
-roughly the last month of nights. Two moment markers sit on the bar — **got into bed** and
+and length, a **movement outside the bed** list, and a way to step back through
+roughly the last month of nights: a strip of the last seven nights (each with its score and a small
+colour bar; tap one to open it) and a calendar button for anything older. The strip is a heat map of the
+week, so seven bars sit side by side; the number is always printed too, and a night with no score
+shows a dash. A new child sees only the nights that exist. If the strip cannot be loaded it is left out
+and the page works without it. A thin line under the page's header takes the colour of the night on
+screen (grey when there is no score, or for an early estimate), and the **⋯** button at the right of the
+header holds the actions described below. Two moment markers sit on the bar — **got into bed** and
 **got out of bed** — and they are deliberately the only two shown: they're the put-down and
 the morning departure the night's times were actually derived from. A single camera can see
 that something crossed the edge of the bed, but not *who*, so movement in between is reported
@@ -119,13 +125,13 @@ those has changed since (the camera was turned off, moved to another child or is
 tiles were rearranged, or the window or timezone was changed), the detail page works a **finished** night out with
 the settings it was saved with, so it uses the same settings as the child's card. A line above the night says so,
 for example "Worked out with the settings this night was saved with (Bed cam, 19:30–07:00, Europe/London), using
-today's detection rules". **Show with today's settings** switches the page to today's, and a second button switches
-back. The choice is for that night only and is not remembered: another night, a reload, or a Recompute save goes
+today's detection rules". **Show with today's settings** (in the **⋯** menu at the top of the page; the line above the night says so) switches the
+page to today's, and the same menu item switches back. The choice is for that night only and is not remembered: another night, a reload, or a Recompute save goes
 back to the saved settings. Before, the page always used today's settings, so after such a change a finished night
 could show different numbers from its card, or "no data". The morning review uses the same settings as this page
 (see [A night whose settings have changed](#a-night-whose-settings-have-changed)).
-If switching views fails, the page keeps showing the previous night and shows an error. Press the same settings
-button again to retry.
+If switching views fails, the page keeps showing the previous night and shows an error. Choose the same item in the
+**⋯** menu again to retry.
 
 | The night | Settings the detail page uses |
 |---|---|
@@ -1110,7 +1116,7 @@ the same for every child and every install.
 | Sleep detail page | worked out fresh each time (once finished, with the settings it was saved with) | still worked out fresh each time, with the settings it was saved with and your times laid over it |
 | Editing or removing your correction | — | always allowed |
 
-**Recompute this night** (admins only) is on every night that was scored, including one that shows
+**Recompute this night** (admins only; in the **⋯** menu at the top of the sleep page) is on every night that was scored, including one that shows
 **No one in the bed**, whether the detector scored it empty or you flagged it. It works the same way
 there: the first press compares the saved summary with the current one and saves nothing, the second
 saves. A flagged night is a corrected night, so it normally opens on "locked" until you remove the correction (once its saved summary is final, as described in [A night you have corrected is locked](#a-night-you-have-corrected-is-locked)). It is

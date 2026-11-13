@@ -131,8 +131,8 @@ Colour is never the only signal: the band word and the number are drawn, and the
 ### Band colours
 
 Five score bands get colours so the ring, the nights strip and the breakdown bars can show how a night went at a glance.
-The tokens are `--band-*` in `index.css`. Today only the score ring uses them (see "Score ring"); the strip and the
-breakdown bars follow in later changes. **A colour is never the only signal** (the
+The tokens are `--band-*` in `index.css`. Today the score ring (see "Score ring"), the seven-night strip's bars and the
+line under the sleep page's header use them; the breakdown bars follow in a later change. **A colour is never the only signal** (the
 band word and the number always show) and **text is never set in a band colour**: they are marks (rings, bars, dots) only.
 
 | Band | `--band-*` by day (card / inset) | `--band-*` at night (card / inset) | `--band-*-ring` on the night card (card / track) |
@@ -622,7 +622,7 @@ needed), `--night-link` 5.82 to 6.74:1, and the arc against the tinted card 6.79
 (a graphic needs 3:1; rose is the weakest). `test/paletteTokens.test.jsx` recomputes them from the stylesheet, including the 12%.
 
 ### Night summary (`components/SleepScoreCard.jsx`, `lib/nightSummaryPhrases.js`)
-A few plain sentences about the night, above the score. On the sleep detail page it is the card under the date navigator,
+A few plain sentences about the night, above the score. On the sleep detail page it is the card under the night strip,
 titled "Night summary" with the same moon icon as `.sleep-insight__title`: a **headline** as the card's one prominent line
 (17px, weight 600, `--text-primary`), the **observations** as a quiet list under it (13px, `--text-secondary`, 2 to 4 items),
 and, when the child's "Show sleep score" switch is on, the score ring and its "How this is scored" button under a hairline
@@ -635,6 +635,29 @@ child's card at all.
 The words are descriptive only: what was measured and how it compares with this child's own recent nights, never a cause, advice,
 praise or blame, never a sleep stage, no emoji and no exclamation mark. The headline's class follows the score's parts, so a
 headline cannot contradict the score. See the voice rules at the top of `lib/nightSummaryPhrases.js`.
+
+### Sleep page frame (`MoreMenu.jsx`, `SleepNightStrip.jsx`, `AppHeader`'s `actions` and `bandLine`)
+The top of the sleep detail page, as drawn in the UI refresh.
+- **Header.** Back link, "Sleep", and a **⋯** button on the right (`MoreMenu`, passed to `AppHeader` as `actions`). Along the
+  bar's bottom edge runs a 3px **band line** (`bandLine`): the night on screen's band colour, or neutral for no score and for an
+  early estimate. It uses the fixed `--band-*-ring` colours (the bar is navy in both themes), is `aria-hidden`, and is a mark, not text.
+  Those ring colours were measured on the lighter card gradient, so on the darker bar they clear 3:1 by a wider margin.
+- **`⋯` menu.** A menu button (`aria-haspopup="menu"`, `aria-expanded`) over a popover of `role="menuitem"` buttons, each at least
+  44px tall. Enter, Space or ArrowDown opens it and focuses the first item; Up, Down, Home and End move; Escape closes it and
+  returns focus to the button; so does choosing an item; a press outside, or tabbing out, closes it without taking focus back.
+  It holds "Show with today's settings" (shown to every viewer when the night has a saved-settings view) and "Recompute this
+  night" (admin only, and only where it is offered). **A viewer with neither gets no `⋯` button at all.** The panel is always
+  in the page, only `hidden` while closed: Recompute's item belongs to `RecomputeNight` (portaled into the panel), whose dialog
+  must outlive the menu closing, so the menu listens to clicks and keys natively (a React handler would never hear the portaled item).
+  A failed Recompute read is shown on the page, not in the menu, because the menu has closed by then.
+- **Title.** "Night of <weekday, date>" (with a "so far" badge for the night in progress) and a 44px calendar button. The native
+  date input lies invisibly over the button, so a tap opens the platform picker; its min and max keep the 30-night history window.
+- **Night strip.** Seven buttons, oldest to newest, right-aligned: weekday, date number, score (a dash with no score), and a 4px
+  band bar. The selected night has `aria-current="date"` and an accent border. Each button's accessible name carries the date and
+  the score ("Sat, Aug 29, score 75", "…, no score", "…, score 58 (early estimate)"). It is a **heat map by design** (the owner
+  accepted that): no comparison wording is added, and the bar is never the only signal. The window is fixed to the newest nights, so
+  tapping never shuffles it; a night picked from the calendar that is older than the window leaves nothing marked. It uses the
+  stored scores from `GET /children/:id/sleep?nights=7` and renders nothing while loading or if the request fails.
 
 ### Modal (`components/Modal.jsx`)
 On phone widths a **sheet**, not a centred dialog: overlay `rgba(10, 13, 28, 0.7)`, card

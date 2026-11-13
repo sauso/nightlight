@@ -251,6 +251,37 @@ button {
   inset: -7px;
 }
 
+/* UI refresh PR E. `actions` (the sleep page's "⋯" menu) is pinned to the right of the title row. */
+.app-header__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
+/* The band-coloured line along the bar's bottom edge on the sleep page: a mark, never text. The bar is navy in both themes,
+   so the line takes the FIXED ring colours (--band-*-ring, the ones made for the navy card), not the themed --band-* ones.
+   'early' (an early estimate) and 'none' (no score) are neutral: the bar's own text colour at low strength, so it reads as
+   an ordinary rule on the bar rather than a missing band. aria-hidden in the markup. */
+.app-header__band { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; }
+.app-header__band--great { background: var(--band-great-ring); }
+.app-header__band--good { background: var(--band-good-ring); }
+.app-header__band--fair { background: var(--band-fair-ring); }
+.app-header__band--low { background: var(--band-low-ring); }
+.app-header__band--early, .app-header__band--none { background: var(--bar-text); opacity: 0.22; }
+
+/* The "⋯" menu (components/MoreMenu.jsx). The button lives on the navy bar, so it takes the bar's soft accent like the back
+   link; it stays compact (32px) while its hit area reaches 44px, the same device as the theme toggle (#381). The panel is a
+   themed popover (it is NOT on the bar), so it sets its own text colour: the header's would otherwise cascade into it. */
+.more-menu { position: relative; }
+.more-menu__btn { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; background: none; color: var(--accent-soft); cursor: pointer; }
+.more-menu__btn::after { content: ''; position: absolute; inset: -6px; }
+.more-menu__panel { position: absolute; right: 0; top: calc(100% + 10px); z-index: 40; min-width: 260px; max-width: min(340px, calc(100vw - 24px)); padding: 6px; background: var(--bg-elevated); color: var(--text-primary); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28); }
+.more-menu__panel[hidden] { display: none; }
+.more-menu__item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 10px 12px; border: 0; border-radius: 10px; background: none; color: var(--text-primary); font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
+.more-menu__item:hover, .more-menu__item:focus-visible { background: var(--bg-elevated-2); }
+.more-menu__item:disabled { opacity: 0.5; cursor: default; }
+.more-menu__panel .sleep-detail__recompute-note { margin: 0; padding: 0 12px 8px; }
+
 .app-header h1 {
   font-size: 22px;
   color: var(--bar-text);
@@ -1480,13 +1511,32 @@ body.in-pip .tile-menu-backdrop {
 :root { --sleep-asleep: #4b53b5; --sleep-stir: #7279c6; --sleep-wake: #f0a257; --sleep-wake-text: #9a5410; --sleep-awake: #d2d0e2; --sleep-visit: #279189; --sleep-visit-text: #17706a; --sleep-temp: #cf5b39; --sleep-gap: #c7c7c7; --sleep-wake-gap: transparent; }
 :root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-stir: #a7ade4; --sleep-wake: #f6c899; --sleep-wake-text: #f6c899; --sleep-awake: #3c3f60; --sleep-visit: #279189; --sleep-visit-text: #3ec4b8; --sleep-temp: #ef8a5e; --sleep-gap: #5a5c6e; --sleep-wake-gap: var(--bg-elevated-2); }
 
-.sleep-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-.sleep-nav__arrow { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; }
-.sleep-nav__arrow:disabled { opacity: 0.35; cursor: default; }
-.sleep-nav__date { position: relative; flex: 1; text-align: center; display: flex; flex-direction: column; align-items: center; padding: 4px 0; }
-.sleep-nav__date-sub { order: -1; font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
-.sleep-nav__date-label { font-size: 16px; font-weight: 600; color: var(--text-primary); }
-.sleep-nav__date-input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+/* The sleep page's frame (UI refresh PR E): "Night of <date>" with a calendar button, then the seven-night strip. The
+   previous / next arrows that used to sit here are gone: the strip reaches the newest seven nights and the calendar the rest. */
+.sleep-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 12px; }
+.sleep-title__text { margin: 0; font-size: 20px; font-weight: 700; color: var(--text-primary); }
+/* A 44px button; the native date input is laid invisibly over it so a tap opens the platform's own picker. */
+.sleep-title__cal { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--accent-text); cursor: pointer; }
+.sleep-title__cal:focus-within { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.sleep-title__cal-input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+
+/* The seven-night strip. Right-aligned flex (newest at the right edge, as drawn) so a child with fewer than seven nights
+   gets items of the SAME width, not stretched ones: max-width is one seventh of the row less the gaps. min-height 64px
+   keeps every button over 44px tall. The bar is a mark, never text, and uses the day --band-* tokens (the strip sits on a
+   themed --bg-elevated surface, which is what their contrast was measured on, see the --band-* comment in :root); the number
+   above it carries the meaning. 'none' (no score) is the neutral border colour; 'early' is the early-estimate neutral. */
+.sleep-strip { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: 14px; }
+.sleep-strip__item { flex: 1 1 0; min-width: 0; max-width: calc((100% - 36px) / 7); min-height: 64px; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 0 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); color: var(--text-primary); font: inherit; cursor: pointer; }
+.sleep-strip__item[aria-current='date'] { border-color: var(--accent-line); box-shadow: 0 0 0 1px var(--accent-line); }
+.sleep-strip__day { font-size: 11px; color: var(--text-secondary); }
+.sleep-strip__date { font-size: 17px; font-weight: 700; line-height: 1.2; }
+.sleep-strip__score { font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.sleep-strip__bar { width: 70%; height: 4px; margin-top: 3px; border-radius: 2px; background: var(--border); }
+.sleep-strip__bar--great { background: var(--band-great); }
+.sleep-strip__bar--good { background: var(--band-good); }
+.sleep-strip__bar--fair { background: var(--band-fair); }
+.sleep-strip__bar--low { background: var(--band-low); }
+.sleep-strip__bar--early { background: var(--band-early); }
 
 .sleep-detail__summary { display: flex; flex-direction: column; gap: 12px; }
 .sleep-detail__big { font-size: 26px; font-weight: 700; color: var(--text-primary); line-height: 1.1; }
@@ -1501,16 +1551,13 @@ body.in-pip .tile-menu-backdrop {
 /* Which camera the night was scored from. Only one camera is analysed, so when a child has several this says which. */
 .sleep-detail__source { font-size: 12px; color: var(--text-secondary); }
 .sleep-detail__source strong { font-weight: 600; color: var(--text-primary); }
-/* #361 PR 4a: which settings the night was worked out with (saved or today's), and the switch to the other. Secondary
-   text like the source line above; the switch is a real button sized like Recompute, allowed to wrap on a phone
-   because its longer label ("...the settings this night was saved with") is wider than a narrow card. */
+/* #361 PR 4a: which settings the night was worked out with (saved or today's). Secondary text like the source line
+   above. The switch to the other view is in the page's "⋯" menu since UI refresh PR E. */
 .sleep-settings-view { display: flex; flex-direction: column; gap: 10px; }
 .sleep-settings-view__text { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); }
-.sleep-settings-view__switch { width: auto; align-self: flex-start; white-space: normal; text-align: left; }
-/* Admin-only recompute control, and the before -> after table it shows. Every colour comes from a
-   token so both themes follow; `is-changed` is what the eye should land on, so only that row uses
-   the accent. Digits are tabular so the two columns line up. */
-.sleep-detail__recompute { width: auto; align-self: flex-start; margin-top: 2px; }
+/* Admin-only recompute (its menu item is .more-menu__item; its error line and dialog are here), and the before -> after
+   table the dialog shows. Every colour comes from a token so both themes follow; `is-changed` is what the eye should
+   land on, so only that row uses the accent. Digits are tabular so the two columns line up. */
 .sleep-detail__recompute-error { font-size: 12px; color: var(--offline); margin-top: 6px; }
 .recompute-diff { display: flex; flex-direction: column; gap: 2px; margin: 12px 0 16px; font-variant-numeric: tabular-nums; }
 .recompute-diff__row { display: grid; grid-template-columns: 1fr auto 16px auto; align-items: baseline; gap: 8px; padding: 7px 10px; border-radius: 8px; font-size: 13px; }
@@ -1528,8 +1575,6 @@ body.in-pip .tile-menu-backdrop {
 .recompute-choice__option:has(input:disabled) { cursor: default; opacity: 0.55; }
 .recompute-choice__help { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); margin-left: 28px; }
 .recompute-choice__help strong { font-weight: 600; color: var(--text-primary); }
-/* On a no-data / no-sleep card (SleepDetail), which has no padding of its own around this control. */
-.sleep-detail__recompute-unscored { padding: 0 14px 14px; }
 .sleep-detail__section-title { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-secondary); margin: 0 0 12px; }
 
 .sleep-tl { padding-top: 2px; }

@@ -477,7 +477,9 @@ describe('SleepDetail: the score follows the night on screen', () => {
     // The page's estimate line covers the score while one is shown, and the timeline title is untouched.
     expect(screen.getByText(/the sleep score included — a sleep-pattern guide, not a medical measurement\./)).toBeInTheDocument();
     expect(screen.getByText('Night timeline')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Show with today’s settings' }));
+    // The switch is in the page's "⋯" menu (UI refresh PR E).
+    await user.click(await screen.findByRole('button', { name: /more options for this night/i }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Show with today’s settings' }));
     expect(await screen.findByRole('button', { name: 'Sleep score 57, Fair. How this is scored' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Sleep score 82/ })).not.toBeInTheDocument();
   });

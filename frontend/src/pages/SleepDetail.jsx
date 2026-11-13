@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play, Video } from 'lucide-react';
+import { Calendar, SlidersHorizontal, ChevronDown, Moon, DoorOpen, Thermometer, Sparkles, Zap, AudioLines, Play, Video } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import MoreMenu from '../components/MoreMenu.jsx';
+import SleepNightStrip from '../components/SleepNightStrip.jsx';
 import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
 import ImagePreviewModal from '../components/ImagePreviewModal.jsx';
 import WakeClipPlayerModal from '../components/WakeClipPlayerModal.jsx';
@@ -14,9 +16,9 @@ import ReviewNightButton from '../components/ReviewNightButton.jsx';
 import ReviewReceipt from '../components/ReviewReceipt.jsx';
 import LoadFailed from '../components/LoadFailed.jsx';
 import SleepScoreCard from '../components/SleepScoreCard.jsx';
-import { scoreOf } from '../lib/sleepScoreText.js';
+import { scoreOf, bandOf } from '../lib/sleepScoreText.js';
 import { showsInBed } from '../lib/inBed.js';
-import { nightDetailPath, describeSettings } from '../lib/nightView.js';
+import { addDays, nightDetailPath, describeSettings } from '../lib/nightView.js';
 
 // Sleep detail: a to-scale timeline of one night for a child, with the wake-ups marked, plus a date
 // picker to browse back through the retained nights (~30 days of activity_samples). Reached by tapping
@@ -31,12 +33,8 @@ import { nightDetailPath, describeSettings } from '../lib/nightView.js';
 
 const HISTORY_DAYS = 30; // how far back the underlying activity_samples are retained
 
-export function addDays(dateStr, n) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() + n);
-  return dt.toISOString().slice(0, 10);
-}
+// Moved to lib/nightView.js (the night strip needs it too, and the strip is imported by this page); still exported from here.
+export { addDays };
 
 export function fmtDur(min) {
   if (min == null) return '';
@@ -205,49 +203,83 @@ export default function SleepDetail() {
     return () => { alive = false; };
   }, [id, date, searchParams]);
 
+  // The calendar button's floor and ceiling. The previous / next arrows that used to enforce the same range are gone
+  // (UI refresh PR E): the strip reaches the newest seven nights and this picker everything else in range, so no night
+  // the arrows could reach is out of reach.
   const minDate = maxDate ? addDays(maxDate, -(HISTORY_DAYS - 1)) : null;
-  const canPrev = date && minDate && date > minDate;
-  const canNext = date && maxDate && date < maxDate;
+
+  // The "⋯" menu (UI refresh PR E): what is in it, and whether there is any menu at all. "Show with today's settings" is
+  // known from the night; "Recompute this night" is reported by RecomputeNight itself (admin-only, and on a night today's
+  // settings cannot score it depends on its own read), so the page asks it and shows no "⋯" while neither is on offer.
+  const settingsSwitch = settingsSwitchOf(night);
+  const [recomputeAvailable, setRecomputeAvailable] = useState(false);
+  const [menuSlot, setMenuSlot] = useState(null); // the element inside the open menu that Recompute's item is portaled into
+  const hasMenu = !!settingsSwitch || recomputeAvailable;
+  // Bumped when a Recompute saves, so the strip re-reads: its bar for a re-scored night would otherwise go on showing the old score.
+  const [stripVersion, setStripVersion] = useState(0);
+  // The line under the header follows the night on screen: its band, neutral for no score and for an early estimate
+  // ('early' is neutral by construction, bandOf). Decorative; the score and its word are on the night card.
+  const band = bandOf(scoreOf(night)) || 'none';
 
   const fmtTime = (utc) => {
     if (!utc) return '';
     const d = new Date(String(utc).replace(' ', 'T') + 'Z');
     return new Intl.DateTimeFormat([], { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(d);
   };
-  const fmtDateLong = (dstr) => {
-    if (!dstr) return '';
-    const d = new Date(dstr + 'T00:00:00');
-    return new Intl.DateTimeFormat([], { weekday: 'long', day: 'numeric', month: 'short' }).format(d);
-  };
+  // "Mon, Nov 9": the date string alone, formatted at noon UTC in UTC so no zone can move the day (see SleepNightStrip).
+  const fmtNightTitle = (dstr) => (dstr
+    ? new Intl.DateTimeFormat([], { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${dstr}T12:00:00Z`))
+    : '');
 
   const back = { to: `/children/${id}`, label: kid?.name || 'Child' };
 
+  const menu = hasMenu ? (
+    <MoreMenu label="More options for this night" menuLabel="This night" onSlot={setMenuSlot}>
+      {settingsSwitch && (
+        <button type="button" role="menuitem" className="more-menu__item" onClick={() => chooseSettingsView(settingsSwitch.to)}>
+          <SlidersHorizontal size={16} aria-hidden="true" /> {settingsSwitch.label}
+        </button>
+      )}
+    </MoreMenu>
+  ) : null;
+
   return (
     <>
-      <AppHeader title="Sleep" back={back} />
+      <AppHeader title="Sleep" back={back} bandLine={band} actions={menu} />
       <main className="app-main">
-        {/* Date navigator */}
-        <div className="sleep-nav">
-          <button type="button" className="sleep-nav__arrow" disabled={!canPrev}
-            onClick={() => canPrev && setDate(addDays(date, -1))} aria-label="Previous night">
-            <ChevronLeft size={20} />
-          </button>
-          <label className="sleep-nav__date">
-            <span className="sleep-nav__date-label">
-              {date ? fmtDateLong(date) : '…'}
-              {night?.in_progress && <span className="sleep-live-badge">so far</span>}
-            </span>
-            <span className="sleep-nav__date-sub">night of</span>
-            {date && (
-              <input type="date" className="sleep-nav__date-input" value={date} min={minDate || undefined} max={maxDate || undefined}
-                onChange={(e) => e.target.value && setDate(e.target.value)} aria-label="Pick a night" />
-            )}
-          </label>
-          <button type="button" className="sleep-nav__arrow" disabled={!canNext}
-            onClick={() => canNext && setDate(addDays(date, 1))} aria-label="Next night">
-            <ChevronRight size={20} />
-          </button>
+        {/* "Night of …" and the calendar button. The native date input sits invisibly over the button, so a tap opens the
+            platform's own picker (min / max keep the history window the arrows used to enforce). Clicking it also asks
+            the browser to open the picker, because on desktop Chrome a click on the middle of a date input only
+            focuses a field of it. */}
+        <div className="sleep-title">
+          <h2 className="sleep-title__text">
+            Night of {date ? fmtNightTitle(date) : '…'}
+            {night?.in_progress && <span className="sleep-live-badge">so far</span>}
+          </h2>
+          {date && (
+            <label className="sleep-title__cal">
+              <Calendar size={20} aria-hidden="true" />
+              <input type="date" className="sleep-title__cal-input" value={date} min={minDate || undefined} max={maxDate || undefined}
+                onChange={(e) => e.target.value && setDate(e.target.value)}
+                onClick={(e) => { try { e.currentTarget.showPicker?.(); } catch { /* not allowed here: the native control still works */ } }}
+                aria-label="Pick a night" />
+            </label>
+          )}
         </div>
+
+        <SleepNightStrip childId={id} maxDate={maxDate} selected={date} onSelect={setDate} version={stripVersion} />
+
+        {/* Recompute (admin-only) lives in the "⋯" menu. Mounted once, here, for every status but `off` and for a night
+            that has been answered (null / loading: nothing to recompute): it was in each status's card before, which is the
+            same set. It shows nothing itself (the menu item is portaled into `menuSlot`, and its read-failure message and
+            dialog render here), and `key` makes a new night start with a clean slate, as the card did when it remounted. */}
+        {night && night.status !== 'off' && (
+          <RecomputeNight key={`${id}|${date}`} childId={id} date={date} night={night} fmtTime={fmtTime}
+            onRecomputed={(n) => { setNight(n); setStripVersion((v) => v + 1); }}
+            onCorrectionRemoved={() => { receiptRemovals.current += 1; setReceipt(null); }}
+            settingsView={settingsView} onSettingsViewChange={chooseSettingsView}
+            menuSlot={menuSlot} onAvailable={setRecomputeAvailable} />
+        )}
 
         {receipt && (
           <ReviewReceipt onsetAt={receipt.true_onset_at} wakeAt={receipt.true_wake_at} inBedAt={receipt.true_in_bed_at}
@@ -256,8 +288,7 @@ export default function SleepDetail() {
         )}
 
         <NightBody night={night} error={nightError} onRetry={() => setNightRetry((n) => n + 1)} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit}
-          childId={id} date={date} onRecomputed={setNight} onCorrectionRemoved={() => { receiptRemovals.current += 1; setReceipt(null); }}
-          settingsView={settingsView} onSettingsView={chooseSettingsView}
+          childId={id} date={date}
           onAlertProtectionChange={(clipId, value) => setNight((prev) => prev && ({ ...prev,
             alerts: (prev.alerts || []).map((clip) => clip.id === clipId ? { ...clip, protected: value } : clip),
           }))}
@@ -293,14 +324,12 @@ function NightBody({ night, error, onRetry, ...rest }) {
   // shape, so it coming and going does not remount NightContent either. It sits ABOVE NightContent, whose
   // statuses each return early, so it is there for every status that can carry it (plan D4/R3). For a saved
   // camera that no longer exists, the line takes the place of the no-data card's text (NightContent, below).
-  // #813: keep it in this slot even when the deleted-camera night changes to today's view, so its button
-  // remains the same focused element across the switch.
+  // #813: keep it in this slot even when the deleted-camera night changes to today's view, so the card does not
+  // remount across the switch. (The switch itself is in the "⋯" menu since UI refresh PR E.)
   return (
     <>
       {error && <LoadFailed what="this night" error={error} onRetry={onRetry} stale />}
-      {night?.scoring_view && (
-        <SettingsViewLine night={night} onSettingsView={rest.onSettingsView} />
-      )}
+      {night?.scoring_view && <SettingsViewLine night={night} />}
       {/* The sleep score (plan phase 2), under the date navigator and above the night for EVERY status: a night
           whose timeline has aged out reads `no_data` and can still carry its saved score. Always rendered in this
           slot (it returns nothing when there is nothing to say), so NightContent's position never changes and it
@@ -324,7 +353,11 @@ const savedCameraGone = (night) => night?.scoring?.problem === 'camera_deleted';
 // ⚠️ What the line names are the SETTINGS, from the server's two contexts, with the camera's LIVE name (a deleted one
 // reads "a camera that no longer exists"). The timezone it names is the one the night was saved in, while every
 // time on the page is shown in today's (the app setting): a stated limit (docs/sleep-tracking.md).
-function SettingsViewLine({ night, onSettingsView }) {
+//
+// UI refresh PR E: THE SWITCH ITSELF MOVED TO THE "⋯" MENU (`settingsSwitchOf` below is the one definition of it, used by
+// the menu), so this card is the explanation only and ends by saying where the switch went. Without that sentence a person
+// reading "Showing today's settings" would look for a button that is no longer under it.
+function SettingsViewLine({ night }) {
   if (!night?.scoring_view || night.status === 'off') return null;
   const v = night.scoring_view;
   const showingSaved = v.applied === 'stored';
@@ -343,15 +376,22 @@ function SettingsViewLine({ night, onSettingsView }) {
   return (
     <div className="card sleep-settings-view">
       <div className="sleep-settings-view__text">{text}</div>
-      <button type="button" className="btn btn-secondary btn-sm sleep-settings-view__switch"
-        onClick={() => onSettingsView?.(showingSaved ? 'current' : 'auto')}>
-        {showingSaved ? 'Show with today’s settings' : 'Show with the settings this night was saved with'}
-      </button>
+      {/* Its own element, so the explanation above stays one sentence that tests and readers can quote. */}
+      <div className="sleep-settings-view__text">Switch views in the ⋯ menu at the top.</div>
     </div>
   );
 }
 
-function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecomputed, onCorrectionRemoved, settingsView, onSettingsView, onAlertProtectionChange, onWakeProtectionChange }) {
+// The page's settings-view switch, for the "⋯" menu: which view it goes to and what it says. null when there is nothing to
+// switch between (the same test as the line above: the server sent `scoring_view`, and sleep tracking is not off).
+function settingsSwitchOf(night) {
+  if (!night?.scoring_view || night.status === 'off') return null;
+  return night.scoring_view.applied === 'stored'
+    ? { to: 'current', label: 'Show with today’s settings' }
+    : { to: 'auto', label: 'Show with the settings this night was saved with' };
+}
+
+function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProtectionChange, onWakeProtectionChange }) {
   // The wake↔alert clip currently open in the shared player (or null). Lives here so it survives a
   // 2-min live refresh of `night` without tearing the modal down mid-watch.
   const [clipFor, setClipFor] = useState(null);
@@ -359,9 +399,6 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
   // The saved bed-transition frame open in the viewer (or null), kept as the frame itself and not an index so it
   // also survives the 2-minute refresh (#907).
   const [frameFor, setFrameFor] = useState(null);
-  // #361 PR 4a: the page's settings view travels into every Recompute below, so its re-reads keep (or, after a
-  // save, reset) the view the page is in.
-  const viewProps = { settingsView, onSettingsViewChange: onSettingsView };
   if (night && night.status === 'off') {
     return (
       <div className="card">
@@ -371,27 +408,17 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
       </div>
     );
   }
-  // #361 PR 3 (plan R1): Recompute on a night TODAY's settings cannot score. The night the feature exists for (its
-  // camera turned off, moved or demoted since it was saved) reads exactly like this, and the control used to be
-  // unreachable here. RecomputeNight decides for itself whether to show anything: only for an admin, only after
-  // its own read finds usable saved settings that differ from today's on an unlocked night, and then it offers
-  // only the stored-settings re-score. Otherwise it renders nothing and these cards look as they always did. Not
-  // for a null night (nothing to compare) or `off` (tracking is off: nothing is scored either way).
   if (!night || night.status === 'no_data') {
-    // #813: the deleted-camera explanation is the stable settings line above this content. Its replay
-    // has no generic no-data explanation; only an offered Recompute control belongs below the line.
-    if (savedCameraGone(night) && night.scoring_view) {
-      return <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime}
-        onRecomputed={onRecomputed} onCorrectionRemoved={onCorrectionRemoved} standaloneCard {...viewProps} />;
-    }
+    // #813: the deleted-camera explanation is the stable settings line above this content, and a replay that
+    // names a deleted camera has no generic no-data explanation: nothing is drawn here (the "⋯" menu's Recompute,
+    // when offered, is the only thing left to do with such a night).
+    if (savedCameraGone(night) && night.scoring_view) return null;
     return (
       <div className="card">
         <div className="camera-tile__sub" style={{ padding: 14 }}>
           No sleep data for this night — either it predates tracking, or the cameras weren’t running motion/sound
           detection with enough coverage.
         </div>
-        {night && <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime}
-          onRecomputed={onRecomputed} onCorrectionRemoved={onCorrectionRemoved} {...viewProps} />}
       </div>
     );
   }
@@ -399,8 +426,6 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
     return (
       <div className="card">
         <div className="camera-tile__sub" style={{ padding: 14 }}>No clear sleep detected in this night’s window.</div>
-        <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime}
-          onRecomputed={onRecomputed} onCorrectionRemoved={onCorrectionRemoved} {...viewProps} />
       </div>
     );
   }
@@ -437,20 +462,8 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
             <ReviewNightButton childId={childId} date={date} corrected={night.corrected} />
           </div>
         )}
-        {/* #521: Recompute used to be unreachable here, because this branch returns before the `ok`-night
-            render below where it lives. An admin who tuned a threshold had no way to ask "does the detector
-            still call this night empty?" short of un-flagging the night first. It is the SAME component as on
-            an `ok` night, so every guard comes with it and none is re-implemented: admin-only, the dialog
-            previews the saved row against this one before anything is written (the second press applies),
-            and the server's allowDowngrade / locked refusals still decide what can be stored. A flagged night
-            is a corrected night, so it normally opens on "locked" (nothing to recompute until the correction
-            is removed). On no_data / no_sleep it is offered only for the stored-settings re-score (#361 PR 3,
-            see those branches above): with today's settings those are a coverage or scoring question, not a
-            "did the detector change its mind" one. */}
-        <div style={{ padding: '0 14px 14px' }}>
-          <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime} onRecomputed={onRecomputed}
-            onCorrectionRemoved={onCorrectionRemoved} {...viewProps} />
-        </div>
+        {/* Recompute on an `empty` night (#521) is in the page's "⋯" menu like every other status: see where
+            SleepDetail mounts RecomputeNight. */}
       </div>
     );
   }
@@ -501,8 +514,6 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onRecompute
         {!night.in_progress && (
           <ReviewNightButton childId={childId} date={date} corrected={night.corrected} />
         )}
-        <RecomputeNight childId={childId} date={date} night={night} fmtTime={fmtTime} onRecomputed={onRecomputed}
-          onCorrectionRemoved={onCorrectionRemoved} {...viewProps} />
       </div>
 
       <div className="card">
