@@ -38,10 +38,13 @@ const alert = (cameraId, i = 0) => ({
 });
 
 // Path-aware so the child cards (sleep summary, morning review, timelapses, recordings) each get
-// something harmless while the test drives only the alerts feed.
-function mockApi({ alerts = [] } = {}) {
+// something harmless while the test drives only the alerts feed. The timelapse and recording lists are empty unless
+// a test passes some (the two cards render nothing for an empty list).
+function mockApi({ alerts = [], timelapses = [], recordings = [] } = {}) {
   vi.spyOn(api, 'get').mockImplementation((path) => {
     if (String(path).includes('/cameras/alerts')) return Promise.resolve(alerts);
+    if (String(path).includes('/timelapses/child/')) return Promise.resolve(timelapses);
+    if (String(path).includes('/recordings/child/')) return Promise.resolve(recordings);
     return Promise.resolve(null);
   });
   vi.spyOn(api, 'put').mockResolvedValue({});
@@ -117,7 +120,6 @@ describe('a child detail screen', () => {
     expect(screen.getByText('Child B Cot')).toBeTruthy();
     expect(screen.queryByText('Child A Room')).toBeNull();
     expect(screen.queryByText('Hallway')).toBeNull();
-    expect(screen.getByText('Cameras · 2')).toBeTruthy();
   });
 
   // The hero card is tinted by the band of the night the sleep card shows (index.css `.night--<band>`).
@@ -183,19 +185,22 @@ describe('a child detail screen', () => {
     expect(await screen.findByText('No cameras assigned yet — an admin can assign one from the Cameras tab.')).toBeTruthy();
   });
 
-  // ★ The role gate. CameraRow renders a <button> when it is given an onClick and a <div> when it is
-  // not, so "can this person tap through to camera settings" is directly observable.
-  test('an admin can tap a camera row through to its settings', async () => {
-    renderAsAdmin(detailRoutes, atChild('kid-1'));
-    const row = await screen.findByText('Child B Room');
-    expect(row.closest('button')).toBeTruthy();
+  // ★ The role gate. Camera settings are admin-only, so only an admin's tile carries the gear that goes there
+  // (ChildCameraTile gets `onSettings` for an admin and nothing for a caregiver).
+  test('an admin can get from a camera tile to its settings', async () => {
+    const settings = <Routes><Route path="/children/:id" element={<ChildDetail />} /><Route path="/cameras/:id" element={<div>camera settings page</div>} /></Routes>;
+    const { user } = renderAsAdmin(settings, atChild('kid-1'));
+    await user.click(await screen.findByRole('button', { name: 'Camera settings for Child B Room' }));
+    expect(await screen.findByText('camera settings page')).toBeTruthy();
   });
 
-  test('a caregiver sees the same cameras but cannot tap into them', async () => {
+  test('a caregiver sees the same cameras but has no way into their settings', async () => {
     renderAsCaregiver(detailRoutes, atChild('kid-1'));
-    const row = await screen.findByText('Child B Room');
-    expect(row).toBeTruthy();
-    expect(row.closest('button')).toBeNull();
+    expect(await screen.findByText('Child B Room')).toBeTruthy();
+    expect(screen.getByText('Child B Cot')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Camera settings for/ })).toBeNull();
+    // Watching live is for everyone.
+    expect(screen.getAllByRole('button', { name: 'Watch live' })).toHaveLength(2);
   });
 
   test('a child that has not loaded yet renders a placeholder rather than crashing', async () => {
@@ -363,10 +368,12 @@ describe('the alerts feed on a child screen', () => {
     expect(screen.getByText(/No alerts for Child B yet/)).toBeTruthy();
   });
 
-  test('the feed is capped at 20 however many arrive', async () => {
+  test('the feed is capped at 20 however many arrive (and the page shows the newest three until "See all alerts")', async () => {
     mockApi({ alerts: Array.from({ length: 25 }, (_, i) => alert('cam-a1', i)) });
-    renderAsAdmin(detailRoutes, atChild('kid-1'));
+    const { user } = renderAsAdmin(detailRoutes, atChild('kid-1'));
     await waitFor(() => expect(screen.getAllByText('Motion').length).toBeGreaterThan(0));
+    expect(screen.getAllByText('Motion').length).toBe(3);
+    await user.click(screen.getByRole('button', { name: 'See all alerts' }));
     expect(screen.getAllByText('Motion').length).toBe(20);
   });
 
@@ -418,6 +425,112 @@ describe('the alerts feed on a child screen', () => {
     expect(screen.queryByText(/No alerts for Child B yet/)).toBeNull();
     // The cameras card still renders — a dead feed must not take the screen down with it.
     expect(screen.getByText('Child B Room')).toBeTruthy();
-    expect(screen.getByText('Cameras · 2')).toBeTruthy();
+  });
+});
+
+// --- everything below the night card (UI refresh PR D) ------------------------------------------
+
+describe('the child page below the night card', () => {
+  const TIMELAPSES = [
+    { id: 't-1', night_date: '2026-09-01', duration_s: 42 },
+    { id: 't-2', night_date: '2026-08-31', duration_s: 40 },
+  ];
+  const RECORDINGS = [{ id: 'r-1', status: 'ready', camera_name: 'Child B Room', started_at: '2026-09-02 10:00:00', duration_s: 30 }];
+  const FIVE_ALERTS = [1, 2, 3, 4, 5].map((i) => ({ ...alert('cam-a1', i), created_at: `2026-09-0${i} 10:00:00` }));
+  const full = () => mockApi({ alerts: FIVE_ALERTS, timelapses: TIMELAPSES, recordings: RECORDINGS });
+  // True when `a` comes before `b` in the document: the DOM order IS the phone layout and the keyboard order (the two-column
+  // desktop layout is CSS grid placement only, never a reorder).
+  const before = (a, b) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  beforeEach(() => vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`));
+
+  test('★ the sections come in the designed order: night card, camera, timelapse, recent alerts, recordings', async () => {
+    full();
+    const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    const q = (s) => container.querySelector(s);
+    await waitFor(() => expect(q('.recordings-card')).not.toBeNull());
+    await waitFor(() => expect(q('.alert-item')).not.toBeNull());
+    await waitFor(() => expect(q('.timelapse-card')).not.toBeNull());
+    const order = [q('.night'), q('.child-cam'), q('.timelapse-card'), q('.alert-list'), q('.recordings-card')];
+    for (let i = 0; i < order.length - 1; i += 1) expect(before(order[i], order[i + 1]), `section ${i} should precede section ${i + 1}`).toBe(true);
+  });
+
+  test('★ the old "Cameras · n" heading and the "<child> camera" suffix are gone; the tile carries the status and "Watch live"', async () => {
+    full();
+    const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    await screen.findByText('Child B Room');
+    expect(screen.queryByText(/^Cameras ·/)).toBeNull();
+    expect(container.querySelector('.cam-row')).toBeNull();
+    // Both of the child's cameras get a tile (one tile each); the offline one says so in words.
+    expect(container.querySelectorAll('.child-cam')).toHaveLength(2);
+    expect(screen.getByText(/· Offline/)).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Watch live' })).toHaveLength(2);
+  });
+
+  test('★ "Watch live" goes to the Live tab', async () => {
+    full();
+    const routes = <Routes><Route path="/children/:id" element={<ChildDetail />} /><Route path="/" element={<div>the live tab</div>} /></Routes>;
+    const { user } = renderAsAdmin(routes, atChild('kid-1'));
+    await user.click((await screen.findAllByRole('button', { name: 'Watch live' }))[0]);
+    expect(await screen.findByText('the live tab')).toBeTruthy();
+  });
+
+  test('★ recent alerts: three rows, a "See all alerts" row, and the rest on request', async () => {
+    full();
+    const { container, user } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    await waitFor(() => expect(container.querySelectorAll('.alert-item')).toHaveLength(3));
+    expect(screen.getByText('Recent alerts')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'See all alerts' }));
+    expect(container.querySelectorAll('.alert-item')).toHaveLength(5);
+  });
+
+  test('★ the timelapse has one player and a strip of recent nights as small thumbnails labelled by weekday', async () => {
+    full();
+    const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    await waitFor(() => expect(container.querySelectorAll('.timelapse-strip__item')).toHaveLength(2));
+    const labels = [...container.querySelectorAll('.timelapse-strip__item')].map((el) => el.textContent);
+    expect(labels).toEqual(['Tue', 'Mon']); // 2026-09-01 is a Tuesday, 2026-08-31 a Monday
+    expect(container.querySelectorAll('.timelapse-hero')).toHaveLength(1);
+  });
+
+  test('★ recordings are one row with the newest time, and the thumbnails open from it', async () => {
+    full();
+    const { container, user } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    const row = await screen.findByRole('button', { name: /^Recordings/ });
+    expect(row).toHaveAttribute('aria-expanded', 'false');
+    expect(container.querySelector('.rec-strip')).toBeNull();
+    await user.click(row);
+    expect(container.querySelectorAll('.rec-strip__item')).toHaveLength(1);
+  });
+
+  // The quiet empty states: each section that has nothing leaves no placeholder behind, and the ones that explain say so.
+  test('★ with nothing to show: no timelapse card, no recordings row, and the alerts card says there are none', async () => {
+    mockApi();
+    const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/recordings/child/kid-1'));
+    await screen.findByText(/No alerts for Child B yet/);
+    expect(container.querySelector('.timelapse-card')).toBeNull();
+    expect(container.querySelector('.recordings-card')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'See all alerts' })).toBeNull();
+    // The alerts card keeps its title even when empty.
+    expect(screen.getByText('Recent alerts')).toBeTruthy();
+  });
+
+  test('a child with no camera gets no tile, only the explanation', async () => {
+    mockApi();
+    const { container } = renderAsAdmin(detailRoutes, { ...atChild('kid-1'), cameras: [] });
+    await screen.findByText('No cameras assigned yet — assign one from the Cameras tab.');
+    expect(container.querySelector('.child-cam')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Watch live' })).toBeNull();
+  });
+
+  test('★ a caregiver sees every section an admin sees, and none of the admin-only controls', async () => {
+    full();
+    const { container } = renderAsCaregiver(detailRoutes, atChild('kid-1'));
+    await waitFor(() => expect(container.querySelector('.timelapse-card')).not.toBeNull());
+    await waitFor(() => expect(container.querySelector('.recordings-card')).not.toBeNull());
+    expect(container.querySelectorAll('.child-cam')).toHaveLength(2);
+    expect(container.querySelectorAll('.alert-item')).toHaveLength(3);
+    expect(screen.queryByRole('button', { name: /Camera settings for/ })).toBeNull();
   });
 });

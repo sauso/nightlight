@@ -237,16 +237,19 @@ describe('RecordingsCard', () => {
     return renderAsAdmin(<RecordingsCard childId="kid-1" />, { settings: { timezone } });
   };
 
+  // The card is one row now; its thumbnails open from it.
+  const open = async (user) => { await user.click(await screen.findByRole('button', { name: /^Recordings/ })); };
+
   test('★ the entry\'s time is HOME time with the label', async () => {
-    const { container } = mount(LA);
-    await screen.findByText('Recordings');
+    const { container, user } = mount(LA);
+    await open(user);
     await waitFor(() => expect(container.querySelector('.rec-strip__item')).not.toBeNull());
     expect(container.querySelector('.rec-strip__item').textContent).toContain('Sun, 30 Aug, 7:00 pm GMT-7');
   });
 
   test('★ no label when the device is at home', async () => {
-    const { container } = mount(DEVICE);
-    await screen.findByText('Recordings');
+    const { container, user } = mount(DEVICE);
+    await open(user);
     await waitFor(() => expect(container.querySelector('.rec-strip__item')).not.toBeNull());
     const text = container.querySelector('.rec-strip__item').textContent;
     expect(text).toContain('Mon, 31 Aug, 2:00 pm');

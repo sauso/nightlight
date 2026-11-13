@@ -757,11 +757,44 @@ Not yet: Logs (a failed fetch shows its error banner above "No log activity yet"
 events and Recent alerts (they show their error and hide the empty copy, but have only "Refresh now", not
 **Retry**), and the Night review, Timelapse, Recordings and sensor cards.
 
-### List row (`.cam-row`)
-Full-width button, `padding: 11px 14px`, 12px gap, hairline `--border` between rows (none on the
-last), `--bg-elevated-2` on hover, 15px/600 name with a meta row 6px under. Thumbnails are 54 × 40
-(radius 9px) or 40 × 30 `.sm` (radius 7px), with a radial-gradient placeholder and a 6px live dot
-ringed in translucent `--live`. Offline thumbs get `filter: grayscale(1) brightness(0.62)`.
+### The child page below the night card (`pages/ChildDetail.jsx`, UI refresh PR D, 2026-11-13)
+The `.night` card is described under "Child hero card" above. Below it, in this order (which is also the DOM order, the
+reading order and the keyboard order):
+
+1. **Camera tile** (`components/ChildCameraTile.jsx`, `.child-cam`): one large dark tile per camera of the child, 18px radius,
+   192px minimum height, a dark navy gradient from `--thumb-hi`/`--thumb-lo` in both themes (like a camera picture). Top left a
+   status chip (a dot and the camera's name; offline and disabled add " · Offline" / " · Disabled" in words, so the colour is
+   never the only signal; online adds visually hidden "(online)" only); a quiet bed icon in the middle; **Watch live** bottom
+   right (44px, `#8995ff` with `#14142a` text, the night card's action pair), which goes to the Live tab. An admin also gets a
+   44px settings gear top right ("Camera settings for <name>"); a caregiver does not (camera settings are admin-only). It is
+   **not a live picture**: no stream is opened by opening the page. There is no "Cameras · n" heading and no Online/Offline pill or
+   MOTION/SOUND/PTZ/TALK badges (those are on the Cameras tab). A child with no camera gets a plain card with the existing
+   "No cameras assigned yet" sentence (the admin and caregiver wordings differ, as before).
+2. **Timelapse** (`components/TimelapseCard.jsx`): the card title (15px bold, accent icon), one player (the newest night, 16:9),
+   and a strip of recent nights as small thumbnails, four in view and scrolling for the rest, each labelled with its **weekday**
+   in a dark chip on the picture. A weekday repeats weekly, so the full date is the accessible name ("Show Tue, 1 Sept
+   timelapse") and the tooltip. Renders nothing at all when the child has no timelapse (no empty card).
+3. **Recent alerts** (`components/AlertList.jsx`, `.alert-list`): the newest **three**, each row 56px or more: a 56 × 40 thumbnail,
+   the kind (icon and word, "Motion" or "Sound") and under it the **clock time** in the home timezone ("3:12 AM"; an earlier day
+   adds "Wed, 11 Nov, "; the zone label appears when the device is elsewhere, as on every time in the app). A row **with a clip**
+   is one button (the whole row; accessible name "Play clip from <camera>") with a chevron; a row without one is plain, with no
+   chevron. The camera name is the row's tooltip, not printed. **See all alerts** (44px, only when there are more than three)
+   expands the rest in place (the page already holds the newest 20), and becomes "Show fewer". There is no alerts page to link
+   to. The empty and failed states keep the title and say what happened, as before ("No alerts for <name> yet.", or the failed
+   message with Retry).
+4. **Recordings** (`components/RecordingsCard.jsx`, `.recordings-row`): one 56px row, "Recordings", the newest recording's time, a
+   chevron. It is a disclosure (`aria-expanded`): the row opens the strip of thumbnails below it, so older recordings stay
+   reachable (recordings have no retention). A newest recording that failed says "Couldn't be saved" on the row. Renders
+   nothing when there are none.
+5. **Sensor history** (a camera with an MQTT topic), unchanged.
+
+From **1024px** the same elements sit in two columns by grid placement (never `order`): the night card then recent alerts on the
+left; the camera, timelapse, recordings and sensor history on the right. The camera column stretches to the night card's height.
+The page is 1040px wide at that size (the other pages stay at 720px). Cards take their margin on the inside of their wrapper, so
+an absent section leaves no gap.
+
+Known limits: the layout has been checked in a desktop browser at 375 and 1280 wide, light and dark; it has not been seen on a
+real phone or tablet, and a screen reader has not been run over it.
 
 ---
 

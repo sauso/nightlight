@@ -5,9 +5,10 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import { formatDayKey } from '../lib/homeTime.js';
 import MediaPlayerModal from './MediaPlayerModal.jsx';
 
-// "Memories" card on a child's detail page: the nightly sleep timelapse (see lib/timelapse.js). Shows
-// the most recent night as a hero thumbnail that plays in a modal; older nights sit in a strip below to
-// pick from. Renders nothing until the first timelapse exists, so it never shows an empty placeholder.
+// "Timelapse" card on a child's detail page: the nightly sleep timelapse (see lib/timelapse.js). Shows
+// the most recent night as a hero thumbnail that plays in a modal; recent nights sit in a strip below as small
+// weekday-labelled thumbnails to pick from (UI refresh PR D). Renders nothing until the first timelapse exists, so it
+// never shows an empty placeholder (a child with no timelapse, or one whose timelapse is off, gets no card at all).
 
 // `night_date` is a calendar date the server worked out in HOME time (the night that began that evening),
 // so it is already the same for every viewer and has no clock to convert. It is printed through
@@ -15,6 +16,12 @@ import MediaPlayerModal from './MediaPlayerModal.jsx';
 // land it in a daylight-saving gap the way `new Date(date + 'T00:00:00')` (local midnight) could.
 function nightLabel(nightDate) {
   return formatDayKey(nightDate, { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+// The strip's short label: the weekday of the same calendar date, built the same way (see above), so it can never disagree
+// with the full label next to it. An unparseable date comes back as the raw text, like nightLabel.
+function weekdayLabel(nightDate) {
+  return formatDayKey(nightDate, { weekday: 'short' });
 }
 
 export default function TimelapseCard({ childId }) {
@@ -84,15 +91,20 @@ export default function TimelapseCard({ childId }) {
       {list.length > 1 && (
         <div className="timelapse-strip">
           {list.map((t) => (
+            // The tile prints only the weekday (the design: "Tue", "Mon"), over the thumbnail. A weekday alone repeats once a
+            // week, so the FULL date is the accessible name and the tooltip, and the picture is decoration (alt="") so a
+            // screen reader hears "Show Tue, 1 Sept timelapse" once, not the date twice.
             <button
               key={t.id}
               type="button"
               className={`timelapse-strip__item${t.id === sel.id ? ' timelapse-strip__item--active' : ''}`}
               onClick={() => setSelId(t.id)}
               title={nightLabel(t.night_date)}
+              aria-label={`Show ${nightLabel(t.night_date)} timelapse`}
+              aria-pressed={t.id === sel.id}
             >
-              <img src={api.url(`/timelapses/${t.id}/thumb`)} alt={nightLabel(t.night_date)} loading="lazy" />
-              <span>{nightLabel(t.night_date)}</span>
+              <img src={api.url(`/timelapses/${t.id}/thumb`)} alt="" loading="lazy" />
+              <span>{weekdayLabel(t.night_date)}</span>
             </button>
           ))}
         </div>
