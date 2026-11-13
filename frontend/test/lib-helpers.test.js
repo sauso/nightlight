@@ -135,6 +135,24 @@ describe('showsInBed (issue #501)', () => {
     expect(showsInBed({ ...night('2026-09-01 08:47:12'), algo_onset_at: ONSET, corrected: true })).toBe(true);
   });
 
+  // Moved here from childCards.test.jsx (UI refresh PR C): the child's card no longer shows the "In bed" line, so the rule is
+  // pinned where it is now read, with the helper both the sleep page and the catalogue entries "in-bed/lock F1/F2" target.
+  test('★ a put-down the PARENT gave shows beside their own corrected asleep time — the put-down night', () => {
+    // The corrected-onset rule above hides the DETECTOR's put-down, because it belongs to the bedtime the person overrode. A
+    // put-down the person gave themselves (`in_bed_corrected`) is not that, so it shows: put down 18:49, asleep 19:13.
+    const parent = {
+      algo_onset_at: ONSET, onset_at: '2026-09-01 09:13:00', corrected: true,
+      in_bed_at: '2026-09-01 08:49:20', in_bed_corrected: true,
+    };
+    expect(showsInBed(parent)).toBe(true);
+    expect(showsInBed({ ...parent, in_bed_corrected: false }), 'the detector's own put-down stays hidden').toBe(false);
+  });
+
+  test('...but a put-down the parent gave that is not a minute before asleep still reads as one time', () => {
+    const parent = { corrected: true, algo_onset_at: ONSET, onset_at: ONSET, in_bed_at: '2026-09-01 09:09:30', in_bed_corrected: true };
+    expect(showsInBed(parent)).toBe(false);
+  });
+
   test('needs both times', () => {
     expect(showsInBed(night(null))).toBe(false);
     expect(showsInBed(night('2026-09-01 08:47:12', null))).toBe(false);
