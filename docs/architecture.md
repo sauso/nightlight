@@ -489,7 +489,8 @@ more than `correction_span_tolerance_minutes` drops the wake-up and longest-stre
 each observation's params; the phrase library `frontend/src/lib/nightSummaryPhrases.js` is tested against it, so a key
 added on one side only fails a test. The library picks a variant with `hash(seed + key)`, skips unknown keys and
 formats times with `lib/homeTime.js`; it is in the browser so retuned wording needs no server release.
-`components/SleepScoreCard.jsx` is the "Night summary" card (the earlier "Sleep score" card when there is no `summary`),
+`components/SleepScoreCard.jsx` is the sleep page's night card (ring, duration, a blurb from `nightBlurbText`, the
+"Why this score?" sheet and the review row; a card without a blurb when there is no `summary`),
 and `SleepSummaryCard.jsx` shows the headline on one line.
 `lib/sleepScore.js` holds `lib/sleepScore.js` holds `SCORE_VERSION`, the one frozen `SCORE_CONFIG` (weights, curve anchors, the cap
 margin, band edges, thresholds: change any and bump the version), `toScoringInput(night, { context, nowMs })` and the

@@ -406,6 +406,26 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     expect(rules.find((r) => r.startsWith('.score-ring--dark .score-ring__num {'))).toContain('fill: #fff');
   });
 
+  test.each([['day', day], ['night', night]])('%s: factor bars use card band tokens at 3:1 against the track', (_name, t) => {
+    const track = t['--border'];
+    for (const band of ['great', 'good', 'fair', 'low']) {
+      const rule = rules.find((r) => r.startsWith(`.score-part__bar--${band} span {`));
+      expect(rule, `${band} bar rule`).toContain(`background: var(--band-${band})`);
+      expect(contrast(t[`--band-${band}`], track), `${band} against track`).toBeGreaterThanOrEqual(3);
+    }
+    expect(rules.find((r) => r.startsWith('.score-part__bar--empty {'))).toContain('border: 1px dashed');
+  });
+
+  // The close button and the long-text wrapping are layout, so they are read from the stylesheet rather than measured
+  // (jsdom has no layout); the screenshots at 320 and 375px are the check of record (PR #1063).
+  test('the sheet\'s close button has a 44px target and a focus ring; long words in the sheet wrap', () => {
+    const close = rules.find((r) => r.startsWith('.sleep-night-card .modal-card__actions .icon-btn {'));
+    expect(close).toContain('min-width: 44px');
+    expect(close).toContain('min-height: 44px');
+    expect(rules.find((r) => r.startsWith('.sleep-night-card .modal-card__actions .icon-btn:focus-visible {'))).toContain('outline: 2px solid');
+    expect(rules.find((r) => r.startsWith('.score-part, .sleep-score__numbers li {'))).toContain('overflow-wrap: anywhere');
+  });
+
   test('★ the .night rules take their text colours from the card\'s properties, not from literals', () => {
     const nightRules = rules.filter((rule) => /^\.night(__|\s|\.)/.test(rule) && !rule.startsWith('.night {'));
     expect(nightRules.length, 'the .night__* rules were found').toBeGreaterThan(8);

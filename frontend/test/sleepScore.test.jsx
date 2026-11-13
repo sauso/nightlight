@@ -3,9 +3,8 @@
 //
 // WHAT IS PINNED, and each sits where two plausible implementations part ways:
 //   no number, no ring ............ `score` absent (the child's switch is off), null (scoring failed), and
-//                                   `{ score: null }` (in progress, no score) all leave the card as it was;
-//   the score is SPOKEN ........... the card's button has an aria-label that hides its contents, and the ring is
-//                                   decorative, so the label must carry the number and the band;
+//                                   `{ score: null }` (in progress) keep the duration but no score action;
+//   the score is SPOKEN ........... the sheet button carries the number and band in its name; the ring is decorative;
 //   an early estimate has no band . even if a server sent one;
 //   a missing part says why ....... by its `reason`, in words;
 //   a newer server cannot crash an older tab: an unknown reason or component key gets a neutral line or is skipped;
@@ -22,7 +21,7 @@ import SleepScoreCard from '../src/components/SleepScoreCard.jsx';
 import SleepDetail from '../src/pages/SleepDetail.jsx';
 import { api } from '../src/lib/api.js';
 import {
-  scoreOf, bandWord, bandOf, scoreLabel, unavailableText, UNAVAILABLE_FALLBACK, noScoreText, componentName, componentDetail,
+  scoreOf, sheetScoreOf, clampFactorScore, bandWord, bandOf, bandOfValue, FACTOR_BAND_EDGES, scoreLabel, unavailableText, UNAVAILABLE_FALLBACK, noScoreText, componentName, componentDetail,
   lowConfidenceText, cappedText, minutesText, clockText,
 } from '../src/lib/sleepScoreText.js';
 
@@ -54,6 +53,21 @@ const NO_SCORE = { score: null, reason: 'in_progress', version: 2 };
 // ------------------------------------------------ the wording --------------------------------------------------
 
 describe('sleepScoreText', () => {
+  test('factor bands mirror the server edges in one named mapping', () => {
+    expect(FACTOR_BAND_EDGES).toEqual({ great: 85, good: 70, fair: 55 });
+    expect([54, 55, 69, 70, 84, 85, 100].map(bandOfValue))
+      .toEqual(['low', 'fair', 'fair', 'good', 'good', 'great', 'great']);
+    expect(bandOfValue(null)).toBe(null);
+    // Outside 0..100 is held inside it; not a number at all has no band (the factor reads as not counted).
+    expect([-1, 101].map(bandOfValue)).toEqual(['low', 'great']);
+    expect([NaN, Infinity, '70', undefined].map(bandOfValue)).toEqual([null, null, null, null]);
+    expect([-1, 101, 42.5, NaN].map(clampFactorScore)).toEqual([0, 100, 42.5, null]);
+  });
+  test('sheetScoreOf: the card\'s score is none while the night is in progress, whatever the response carries', () => {
+    expect(sheetScoreOf({ score: SCORE })).toBe(SCORE);
+    expect(sheetScoreOf({ in_progress: true, score: SCORE })).toBe(null);
+    expect(sheetScoreOf({ score: NO_SCORE })).toBe(null);
+  });
   test('scoreOf: only a night whose score carries a number has one', () => {
     expect(scoreOf({ score: SCORE })).toBe(SCORE);
     expect(scoreOf({ score: NO_SCORE })).toBe(null);
@@ -288,7 +302,7 @@ describe('SleepScoreCard: the detail page card and the breakdown sheet', () => {
   const PART_NAMES = ['Duration', 'Continuity', 'Settling', 'Restlessness', 'Consistency'];
   const rowName = (li) => PART_NAMES.find((n) => li.textContent.startsWith(n)) ?? li.textContent;
   const open = async (user) => {
-    await user.click(screen.getByRole('button', { name: /How this is scored/ }));
+    await user.click(screen.getByRole('button', { name: /Why this score/ }));
     return screen.getByRole('dialog');
   };
 
@@ -298,10 +312,10 @@ describe('SleepScoreCard: the detail page card and the breakdown sheet', () => {
     ['fair', { score: 60, band: 'fair' }, false],
     ['low', { score: 48, band: null }, false],
     ['early', { score: 64, band: 'good', early_estimate: true }, true],
-  ])('★ the detail card\'s ring carries the %s band class on the themed-card surface; dashed track only when early', (band, over, dashed) => {
+  ])('★ the detail card\'s ring carries the %s band class on the night surface; dashed track only when early', (band, over, dashed) => {
     const { container } = show({ ...NIGHT, score: { ...SCORE, ...over } });
     const ring = container.querySelector('svg.score-ring');
-    expect(ring.classList.contains('score-ring--card')).toBe(true);
+    expect(ring.classList.contains('score-ring--dark')).toBe(true);
     expect(ring.getAttribute('class').match(/score-ring--(great|good|fair|low|early)/g)).toEqual([`score-ring--${band}`]);
     expect(Boolean(ring.querySelector('.score-ring__track').getAttribute('stroke-dasharray'))).toBe(dashed);
     expect(ring.getAttribute('aria-hidden')).toBe('true');
@@ -309,31 +323,138 @@ describe('SleepScoreCard: the detail page card and the breakdown sheet', () => {
 
   test('a band key from a newer server leaves the ring uncoloured (today\'s neutral arc), not rose', () => {
     const { container } = show({ ...NIGHT, score: { ...SCORE, score: 90, band: 'superb' } });
-    expect(container.querySelector('svg.score-ring').getAttribute('class')).toBe('score-ring score-ring--card');
+    expect(container.querySelector('svg.score-ring').getAttribute('class')).toBe('score-ring score-ring--dark');
   });
 
   test('a scored night: a real button named with the score, the band word beside the ring, and the sheet on a tap', async () => {
     const { user } = show({ ...NIGHT, score: SCORE });
-    const button = screen.getByRole('button', { name: 'Sleep score 82, Good. How this is scored' });
-    expect(within(button).getByText('How this is scored')).toBeInTheDocument();
-    expect(within(button).getByText('Good')).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: 'Sleep score 82, Good. Why this score?' });
+    expect(button).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(within(button).getByText('Why this score?')).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); // precondition: closed until asked for
     const dialog = await open(user);
-    expect(within(dialog).getByRole('heading', { name: 'Sleep score 82, Good' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('heading', { name: 'Why this score?' })).toBeInTheDocument();
     // One row per part, with its own score and figures.
     expect(within(dialog).getAllByRole('listitem').map((li) => rowName(li)))
       .toEqual(['Duration', 'Continuity', 'Settling', 'Restlessness', 'Consistency']);
     expect(within(dialog).getByText('10h 0m asleep. Usual: 10h 16m.')).toBeInTheDocument();
-    expect(within(dialog).getByText('About the sleep score')).toBeInTheDocument();
-    expect(within(dialog).getByText(/not a medical measurement/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/medical measurement/)).not.toBeInTheDocument();
     // Nothing that is not true of this score.
     expect(within(dialog).queryByText(/may still change/)).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/Low confidence/)).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/Held down/)).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/no longer available/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/Early estimate: until/)).not.toBeInTheDocument();
   });
 
-  test('tonight, in progress: the so-far facts show under the Night summary, with only the existing "No score yet" line and no ring or comparison', () => {
+  test('the five factors have measured values, plain words and their own band-coloured fills', async () => {
+    const night = { ...NIGHT, wake_count: 6, longest_stretch_minutes: 140 };
+    const factors = SCORE.components.map((c, i) => ({ ...c, score: [90, 75, 60, 40, 92][i] }));
+    const { user } = show({ ...night, score: { ...SCORE, components: factors } });
+    const dialog = await open(user);
+    const rows = [...dialog.querySelectorAll('.score-part')];
+    expect(rows.map((row) => row.querySelector('.score-part__name').textContent))
+      .toEqual(['Duration', 'Continuity', 'Settling', 'Restlessness', 'Consistency']);
+    expect(rows[1].textContent).toContain('6 wake-ups · longest 2h 20m');
+    expect(rows.map((row) => row.querySelector('.score-part__bar').className))
+      .toEqual(['score-part__bar score-part__bar--great', 'score-part__bar score-part__bar--good',
+        'score-part__bar score-part__bar--fair', 'score-part__bar score-part__bar--low',
+        'score-part__bar score-part__bar--great']);
+    expect(rows.every((row) => row.querySelector('.score-part__detail').textContent.length > 0)).toBe(true);
+  });
+
+  test('the sheet closes by Escape, backdrop and Close, restoring focus to its opener', async () => {
+    const { user, container } = show({ ...NIGHT, score: SCORE });
+    const button = screen.getByRole('button', { name: /Why this score/ });
+    button.focus();
+    await open(user);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(button);
+    await open(user);
+    await user.click(container.querySelector('.modal-overlay'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(button);
+    await open(user);
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(button);
+  });
+
+  test('the numbers list omits missing values and keeps coverage from the former stats grid', async () => {
+    const { user } = show({ ...NIGHT, onset_at: '2026-09-01 20:00:00', asleep_minutes: 480,
+      wake_count: 2, coverage_minutes: 600, window_start: '2026-09-01 19:00:00', window_end: '2026-09-02 07:00:00',
+      score: SCORE });
+    const dialog = await open(user);
+    const numbers = within(dialog).getByRole('heading', { name: 'The night in numbers' }).closest('section');
+    expect(numbers.textContent).toContain('2 wake-ups');
+    expect(numbers.textContent).toContain('Coverage 83%');
+    expect(numbers.textContent).not.toMatch(/In bed|Room |Measured from|Longest stretch/);
+  });
+
+  // The old stats row said "from X · still asleep at <window end>" for a night with no confirmed wake; the sheet
+  // replaced that row for scored nights, so it has to say the same. Fails if the window end is dropped again.
+  test('a night with no confirmed wake says it was still asleep at the window end; with a wake it does not', async () => {
+    const base = { ...NIGHT, onset_at: '2026-09-01 20:00:00', window_end: '2026-09-02 07:00:00', score: SCORE };
+    const first = show({ ...base, wake_at: null });
+    const open1 = await open(first.user);
+    expect(within(open1).getByText(/^Asleep from .+, still asleep at .+/)).toBeInTheDocument();
+    first.unmount();
+    const second = show({ ...base, wake_at: '2026-09-02 06:00:00' });
+    const open2 = await open(second.user);
+    expect(within(open2).getByText(/^Asleep .+ to .+/)).toBeInTheDocument();
+    expect(within(open2).queryByText(/still asleep/)).not.toBeInTheDocument();
+  });
+
+  // Continuity can be scored from a subset of its terms; the word must not name one that did not count.
+  test.each([
+    ['efficiency only', [['efficiency', true], ['longest_share', false], ['wake_count', false]], 'Based on time asleep'],
+    ['wake-ups and stretch', [['efficiency', false], ['longest_share', true], ['wake_count', true]], 'Based on wake-ups and longest stretch'],
+    ['all three', [['efficiency', true], ['longest_share', true], ['wake_count', true]], 'Based on wake-ups, longest stretch and time asleep'],
+    ['none usable', [['efficiency', false], ['longest_share', false], ['wake_count', false]], 'Measured this night'],
+  ])('the Continuity word names only the terms that counted: %s', async (_name, terms, word) => {
+    const components = SCORE.components.map((c) => (c.key === 'continuity'
+      ? { ...c, terms: terms.map(([key, available]) => part(key, available ? 70 : null, { available, reason: available ? null : 'missing' })) }
+      : c));
+    const { user } = show({ ...NIGHT, score: { ...SCORE, components } });
+    const dialog = await open(user);
+    const row = within(dialog).getAllByRole('listitem').find((li) => li.textContent.startsWith('Continuity'));
+    expect(row.querySelector('.score-part__detail').textContent).toContain(word);
+  });
+
+  test('a factor score outside 0 to 100 is held inside it: band, bar and what a screen reader hears', async () => {
+    const components = SCORE.components.map((c, i) => (i === 0 ? { ...c, score: 101 } : i === 3 ? { ...c, score: -4 } : c));
+    const { user } = show({ ...NIGHT, score: { ...SCORE, components } });
+    const dialog = await open(user);
+    const rows = [...dialog.querySelectorAll('.score-part')];
+    expect(rows[0].textContent).toContain('100 out of 100');
+    expect(rows[0].textContent).not.toContain('101');
+    expect(rows[0].querySelector('.score-part__bar span').style.width).toBe('100%');
+    expect(rows[3].textContent).toContain('0 out of 100');
+    expect(rows[3].querySelector('.score-part__bar').className).toContain('--low');
+    expect(rows[3].querySelector('.score-part__bar span').style.width).toBe('0%');
+  });
+
+  test('the sheet\'s close button is a named button inside the night card (its 44px target is the scoped rule in paletteTokens)', async () => {
+    const { user, container } = show({ ...NIGHT, score: SCORE });
+    const dialog = await open(user);
+    const close = within(dialog).getByRole('button', { name: 'Close' });
+    expect(container.querySelector('.sleep-night-card .modal-card__actions').contains(close)).toBe(true);
+  });
+
+  test('each applicable note appears only for its flag, including the saved-night fallback', async () => {
+    const { user } = show({ ...NIGHT, window_end: '2026-09-02 07:00:00', score_source: 'stored',
+      score: { ...SCORE, early_estimate: true, provisional: true, capped_by: 'duration',
+        low_confidence: true, low_confidence_reasons: ['wake_unconfirmed'] } });
+    const dialog = await open(user);
+    expect(within(dialog).getByText(/may still change until about/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Early estimate: until/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Held down by duration/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Low confidence:/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/timeline for this night is no longer available/)).toBeInTheDocument();
+  });
+
+  test('tonight, in progress: so-far facts and "No score yet" appear without a ring or comparison', () => {
     const { container } = show({
       ...NIGHT,
       in_progress: true,
@@ -349,12 +470,10 @@ describe('SleepScoreCard: the detail page card and the breakdown sheet', () => {
       },
       live: { state: 'awake', since: '2026-09-02 02:10:00' },
     });
-    expect(screen.getByText('Night summary')).toBeInTheDocument();
-    const items = screen.getAllByRole('listitem').map((li) => li.textContent);
-    expect(items).toHaveLength(3);
-    expect(items[0]).toMatch(/4h 35m.*so far|so far.*4h 35m/);
-    expect(items[1]).toMatch(/counted/);
-    expect(items[2]).toMatch(/2h 10m/);
+    const blurb = container.querySelector('.sleep-night-card__blurb');
+    expect(blurb.textContent).toMatch(/4h 35m.*so far|so far.*4h 35m/);
+    expect(blurb.textContent).toMatch(/counted/);
+    expect(blurb.textContent).toMatch(/2h 10m/);
     // The one score line there ever was: "No score yet" and the reason. No ring figure, no button, nothing about "usual".
     expect(screen.getByText('No score yet. The night is still in progress.')).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
@@ -364,6 +483,12 @@ describe('SleepScoreCard: the detail page card and the breakdown sheet', () => {
     expect(container.textContent).not.toMatch(/awake since|asleep since/i);
   });
 
+  test('an in-progress night never draws a score even if a stale response carries a number', () => {
+    const { container } = show({ ...NIGHT, in_progress: true, score: SCORE });
+    expect(container.querySelector('.score-ring')).toBeNull();
+    expect(screen.getByText('No score yet. The night is still in progress.')).toBeInTheDocument();
+  });
+
   test('a part that could not be measured is listed as not counted, with its reason in words', async () => {
     const components = SCORE.components.map((c) => (c.key === 'settling'
       ? { ...c, score: null, available: false, reason: 'no_in_bed', value: null }
@@ -371,7 +496,9 @@ describe('SleepScoreCard: the detail page card and the breakdown sheet', () => {
     const { user } = show({ ...NIGHT, score: { ...SCORE, components } });
     const dialog = await open(user);
     const row = within(dialog).getAllByRole('listitem').find((li) => li.textContent.startsWith('Settling'));
-    expect(row.textContent).toBe('SettlingNot countedNo put-down was detected for this night.');
+    expect(row.textContent).toContain('SettlingNot countedNo put-down was detected for this night.');
+    expect(row.querySelector('.score-part__bar--empty')).toBeInTheDocument();
+    expect(row.querySelector('.score-part__bar span')).toBeNull();
   });
 
   test('a figure dropped inside a part that still scored gets its own line', async () => {
@@ -392,7 +519,7 @@ describe('SleepScoreCard: the detail page card and the breakdown sheet', () => {
     const { user } = show({ ...NIGHT, score: { ...SCORE, capped_by: 'dream_quality', low_confidence: true, low_confidence_reasons: ['new_reason'], components } });
     const dialog = await open(user);
     const names = within(dialog).getAllByRole('listitem').map((li) => rowName(li));
-    expect(names).toEqual(['Duration', 'Continuity', 'Settling', 'Consistency', 'Restlessness']);
+    expect(names).toEqual(['Duration', 'Continuity', 'Settling', 'Restlessness', 'Consistency']);
     expect(within(dialog).getByText('Not available for this night.')).toBeInTheDocument();
     expect(within(dialog).queryByText(/Held down/)).not.toBeInTheDocument();
     expect(within(dialog).getByText('Low confidence: parts of this night were not measured well.')).toBeInTheDocument();
@@ -411,15 +538,15 @@ describe('SleepScoreCard: the detail page card and the breakdown sheet', () => {
 
   test('an early estimate shows the number with "Early estimate" and no band word, even if one was sent', () => {
     show({ ...NIGHT, score: { ...SCORE, score: 64, band: 'good', early_estimate: true } });
-    const button = screen.getByRole('button', { name: 'Sleep score 64, early estimate. How this is scored' });
-    expect(within(button).getByText('Early estimate')).toBeInTheDocument();
-    expect(within(button).queryByText('Good')).not.toBeInTheDocument();
+    screen.getByRole('button', { name: 'Sleep score 64, early estimate. Why this score?' });
+    expect(screen.getByText('Early estimate')).toBeInTheDocument();
+    expect(screen.queryByText('Good')).not.toBeInTheDocument();
   });
 
   test('a score lent by the saved night says the timeline is gone and where the score comes from', () => {
     show({ status: 'no_data', night_date: '2026-09-01', score: SCORE, score_source: 'stored' });
     expect(screen.getByText('The timeline for this night is no longer available. The score comes from the saved night.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /How this is scored/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Why this score/ })).toBeInTheDocument();
   });
 
   test('no score: "No score yet" with the reason, and no button; an unknown reason leaves the plain line', () => {
@@ -432,13 +559,18 @@ describe('SleepScoreCard: the detail page card and the breakdown sheet', () => {
   });
 
   test.each([
-    ['the switch is off (no score key)', { status: 'ok', night_date: '2026-09-01' }],
-    ['scoring failed (score: null)', { status: 'ok', night_date: '2026-09-01', score: null }],
     ['tracking is off', { status: 'off', score: { score: null, reason: 'not_ok', version: 2 } }],
     ['there is no night', null],
   ])('renders nothing at all when %s', (_name, night) => {
     const { container } = show(night);
     expect(container.textContent).toBe('');
+  });
+
+  test('score switch off or a failed score keeps the duration without a score action', () => {
+    const { container } = show({ ...NIGHT, asleep_minutes: 480, score: null });
+    expect(screen.getByText('8h 0m asleep')).toBeInTheDocument();
+    expect(container.querySelector('.score-ring')).toBeNull();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 });
 
@@ -456,8 +588,10 @@ describe('SleepDetail: the score follows the night on screen', () => {
   const view = (applied) => ({
     applied, stored: CTX, current: { ...CTX, camera_id: 'cam-b' }, camera_names: { stored: 'Cam one', current: 'Cam two' }, algo_differs: false,
   });
-  function mount(nightFor) {
+  const REVIEW = { child_id: 'kid-1', night_date: '2026-08-30', computed: {}, review: { true_wake_at: '2026-08-30 20:15:00' }, transitions: [] };
+  function mount(nightFor, route = '/children/kid-1/sleep') {
     vi.spyOn(api, 'get').mockImplementation((path) => {
+      if (path.includes('/review/')) return Promise.resolve(REVIEW);
       if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'last', night: { night_date: '2026-08-30' } });
       if (path.includes('/sleep/insights')) return Promise.resolve(null);
       if (path.includes('/sleep/')) return Promise.resolve(nightFor(path));
@@ -465,7 +599,7 @@ describe('SleepDetail: the score follows the night on screen', () => {
     });
     return renderAsAdmin(
       <Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes>,
-      { kids: [KID], route: '/children/kid-1/sleep' }
+      { kids: [KID], route }
     );
   }
 
@@ -473,15 +607,53 @@ describe('SleepDetail: the score follows the night on screen', () => {
     const saved = { ...BASE, scoring_view: view('stored'), score: SCORE };
     const today = { ...BASE, scoring_view: view('current'), score: { ...SCORE, score: 57, band: 'fair' } };
     const { user } = mount((path) => (path.includes('context=current') ? today : saved));
-    expect(await screen.findByRole('button', { name: 'Sleep score 82, Good. How this is scored' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Sleep score 82, Good. Why this score?' })).toBeInTheDocument();
     // The page's estimate line covers the score while one is shown, and the timeline keeps its title.
     expect(screen.getByText(/the sleep score included — a sleep-pattern guide, not a medical measurement\./)).toBeInTheDocument();
     expect(screen.getByText('Timeline', { exact: true })).toBeInTheDocument();
     // The switch is in the page's "⋯" menu (UI refresh PR E).
     await user.click(await screen.findByRole('button', { name: /more options for this night/i }));
     await user.click(await screen.findByRole('menuitem', { name: 'Show with today’s settings' }));
-    expect(await screen.findByRole('button', { name: 'Sleep score 57, Fair. How this is scored' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Sleep score 57, Fair. Why this score?' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Sleep score 82/ })).not.toBeInTheDocument();
+  });
+
+  test('the existing review action sits inside the scored night card', async () => {
+    mount(() => ({ ...BASE, score: SCORE }));
+    const review = await screen.findByRole('button', { name: 'Was this night right?' });
+    expect(review.closest('.sleep-night-card')).toBeInTheDocument();
+  });
+
+  // The receipt moved into the card on an ok night; a night still in progress has the receipt but no review
+  // button, exactly as before the move. Fails if the card's review slot drops the receipt for an unfinished night.
+  test('an unfinished ok night keeps its review receipt (inside the card) and still has no review button', async () => {
+    mount(() => ({ ...BASE, in_progress: true, wake_at: null }), '/children/kid-1/sleep?saved=1');
+    const receipt = await screen.findByText('Thanks — that’s recorded');
+    expect(receipt.closest('.sleep-night-card')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Was this night right?' })).not.toBeInTheDocument();
+  });
+
+  // The stats grid's facts are in the sheet for a scored night; a night without a score keeps the grid on the
+  // page, so no fact becomes unreachable. Fails if the grid is hidden for an unscored night or shown twice.
+  test('the on-page stats grid shows only for a night without a score', async () => {
+    const first = mount(() => ({ ...BASE, wake_count: 2, longest_stretch_minutes: 200, score: SCORE }));
+    await screen.findByText('Timeline', { exact: true });
+    expect(screen.queryByText('Longest stretch')).not.toBeInTheDocument();
+    first.unmount();
+    mount(() => ({ ...BASE, wake_count: 2, longest_stretch_minutes: 200 }));
+    await screen.findByText('Timeline', { exact: true });
+    expect(screen.getByText('Longest stretch')).toBeInTheDocument();
+    expect(screen.getByText('Wake-ups')).toBeInTheDocument();
+  });
+
+  // The card draws no score and no sheet while a night is in progress, so the page must keep the facts it would
+  // otherwise have handed to the sheet. Fails if the grid is decided by a different test than the card's.
+  test('an in-progress night carrying a stale score still shows the facts grid, and no score claim', async () => {
+    mount(() => ({ ...BASE, in_progress: true, wake_at: null, wake_count: 2, longest_stretch_minutes: 200, score: SCORE }));
+    await screen.findByText('Timeline', { exact: true });
+    expect(screen.getByText('Longest stretch')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Why this score/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/the sleep score included/)).not.toBeInTheDocument();
   });
 
   test('with the switch off (no score key) the page has no score card and the estimate line does not mention a score', async () => {
@@ -490,6 +662,6 @@ describe('SleepDetail: the score follows the night on screen', () => {
     await waitFor(() => expect(screen.getByText(/Estimated from movement & sound over the night\s+window — a sleep-pattern guide/)).toBeInTheDocument());
     expect(screen.queryByText('Sleep score')).not.toBeInTheDocument();
     expect(screen.queryByText(/No score yet/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /How this is scored/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Why this score/ })).not.toBeInTheDocument();
   });
 });

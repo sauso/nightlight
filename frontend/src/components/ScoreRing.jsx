@@ -3,7 +3,7 @@
 //
 // DECORATIVE, ON PURPOSE (`aria-hidden`). A ring drawn in SVG reads to a screen reader as nothing, or as a bare
 // number with no meaning. The accessible text is always on the control AROUND the ring: the child card's button
-// (SleepSummaryCard.jsx) and the "How this is scored" button (SleepScoreCard.jsx) both put the score in their name.
+// (SleepSummaryCard.jsx) and the "Why this score?" button (SleepScoreCard.jsx) both put the score in their name.
 //
 // BAND-COLOURED ARC (owner approved the colour-scaled design, 2026-11-12; until then the ring was one colour, because
 // a red or green ring can read as a verdict on a screen a parent sees first thing in the morning). It is acceptable now

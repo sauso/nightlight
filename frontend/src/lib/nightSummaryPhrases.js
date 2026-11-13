@@ -8,8 +8,8 @@
 //   1. DESCRIPTIVE ONLY. What was measured, and how it compares with this child's own recent nights. Never a cause,
 //      advice, a diagnosis, praise or blame, and never a sleep stage (no REM, deep or light sleep): the score and the
 //      summary come from a camera and a microphone, and docs/sleep-tracking.md says so.
-//   2. Calm, short, past tense, one sentence under about 90 characters, no emoji, no exclamation marks. "A child" or
-//      "they", never a name: the page knows the child's name and no default phrase needs it (`childName` is accepted
+//   2. Calm, short, past tense, one sentence under about 90 characters, no emoji, no exclamation marks. Never a pronoun for the
+//      child ("they", "them", "their" and the rest are banned by the guardrail test) and never a name: the page knows the child's name and no default phrase needs it (`childName` is accepted
 //      and filled into a `{childName}` token should a phrase ever want it). The bed is "bed", never crib or cot.
 //   3. A PLURAL NEVER READS WRONG. A count of 0 or 1 gets its own group (`zero`, `one`) where the noun is part of the
 //      sentence, and a comparison puts the number last ("...than usual: 3"), so "1 wake-ups" cannot be built.
@@ -161,7 +161,7 @@ export const OBSERVATION_PHRASES = Object.freeze({
   ),
   wake_clustering: plain(
     '{count} of the wake-ups came between {from_at} and {to_at}.',
-    'Most wake-ups were close together, {count} of them between {from_at} and {to_at}.',
+    'Most wake-ups were close together, with {count} between {from_at} and {to_at}.',
     '{count} wake-ups fell in the window from {from_at} to {to_at}.',
   ),
   room_activity_near_wakes: plain(
@@ -370,4 +370,82 @@ export function nightSummaryText(summary, opts = {}) {
     if (line) observations.push(line);
   }
   return { headline, observations };
+}
+
+// The sleep page joins the two related end-of-night measurements into one sentence. These are fixed
+// variants, selected by the same seed/key hash as the observation library; unpaired facts keep their
+// existing sentences so a newer server or a partial night never produces a broken clause.
+export const BLURB_PHRASES = Object.freeze({
+  stretch_settle: [
+    'The longest stretch was {minutes}, and settling took {settle_minutes}.',
+    'The longest stretch lasted {minutes}; settling took {settle_minutes}.',
+  ],
+  stretch_settle_more: [
+    'The longest stretch was {minutes}, a larger share than usual; settling took {settle_minutes}.',
+    'A {minutes} stretch made up more of the night than usual; settling took {settle_minutes}.',
+  ],
+  stretch_settle_less: [
+    'The longest stretch was {minutes}, a smaller share than usual; settling took {settle_minutes}.',
+    'A {minutes} stretch made up less of the night than usual; settling took {settle_minutes}.',
+  ],
+  stretch_settle_about_the_same: [
+    'The longest stretch was {minutes}, about the usual share; settling took {settle_minutes}.',
+    'A {minutes} stretch was about the usual share of the night; settling took {settle_minutes}.',
+  ],
+  // The night card's heading already shows the time asleep ("8h 55m asleep"), so beside it the comparison is said
+  // without restating the figure (owner review of PR #1063: the same minutes twice in a row read as a stutter).
+  // Used only when the caller says the duration is on screen (opts.durationShown).
+  usual_more: [
+    'Time asleep was longer than the usual {usual_minutes}.',
+    'Sleep ran longer than the usual {usual_minutes}.',
+  ],
+  usual_less: [
+    'Time asleep was shorter than the usual {usual_minutes}.',
+    'Sleep ran shorter than the usual {usual_minutes}.',
+  ],
+  usual_about_the_same: [
+    'Time asleep was about the usual {usual_minutes}.',
+    'Sleep was close to the usual {usual_minutes}.',
+  ],
+});
+
+export function nightBlurbText(summary, opts = {}) {
+  const base = nightSummaryText(summary, opts);
+  if (!base) return null;
+  const entries = Array.isArray(summary.observations) ? summary.observations : [];
+  const stretch = entries.find((o) => o?.key === 'longest_stretch' || o?.key === 'longest_stretch_vs_usual');
+  const settle = entries.find((o) => o?.key === 'settling_time');
+  // Validate the whole observation first: a null usual or other required param must never be
+  // smuggled into a merged sentence just because its minutes field happens to be present.
+  const stretchValid = stretch && sentence(OBSERVATION_PHRASES[stretch.key], stretch.key, stretch.params ?? {}, summary.seed, opts);
+  const settleValid = settle && sentence(OBSERVATION_PHRASES.settling_time, 'settling_time', settle.params ?? {}, summary.seed, opts);
+  const stretchText = stretchValid && PARAM_FORMATTERS.minutes(stretch.params.minutes);
+  const settleText = settleValid && PARAM_FORMATTERS.minutes(settle.params.minutes);
+  const mergeKey = stretch?.key === 'longest_stretch_vs_usual' ? `stretch_settle_${stretch.params?.direction}` : 'stretch_settle';
+  const variants = BLURB_PHRASES[mergeKey];
+  const merged = stretchText && settleText && variants
+    ? fill(variants[variantIndex(summary.seed, mergeKey, variants.length)],
+      { minutes: stretchText, settle_minutes: settleText }, opts.childName)
+    : null;
+  const lines = [];
+  for (const o of entries) {
+    if (!o || typeof o.key !== 'string' || !Object.hasOwn(OBSERVATION_PHRASES, o.key)) continue;
+    if (merged && o === settle) continue;
+    if (merged && o === stretch) { lines.push(merged); continue; }
+    if (opts.durationShown && (o.key === 'total_sleep' || o.key === 'total_sleep_so_far')) continue; // the heading says it
+    if (opts.durationShown && o.key === 'total_sleep_vs_usual') {
+      // Validate the whole observation first (a null param drops it), then say only the comparison.
+      const full = sentence(OBSERVATION_PHRASES.total_sleep_vs_usual, o.key, o.params ?? {}, summary.seed, opts);
+      const compareKey = `usual_${o.params?.direction}`;
+      const variants = BLURB_PHRASES[compareKey];
+      if (full && variants) {
+        lines.push(fill(variants[variantIndex(summary.seed, compareKey, variants.length)],
+          { usual_minutes: PARAM_FORMATTERS.usual_minutes(o.params.usual_minutes) }, opts.childName));
+        continue;
+      }
+    }
+    const line = sentence(OBSERVATION_PHRASES[o.key], o.key, o.params ?? {}, summary.seed, opts);
+    if (line) lines.push(line);
+  }
+  return lines.slice(0, 3);
 }
