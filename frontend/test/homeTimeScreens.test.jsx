@@ -234,8 +234,13 @@ describe('RecordingsCard', () => {
     vi.spyOn(api, 'get').mockResolvedValue(ROWS);
     vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
     vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
+    // The short label shows a weekday only for a recording under 7 days old; pin "now" two days after X so it stays that way.
+    // Only Date is faked, so waitFor and userEvent keep working.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-02T00:00:00Z'));
     return renderAsAdmin(<RecordingsCard childId="kid-1" />, { settings: { timezone } });
   };
+  afterEach(() => { vi.useRealTimers(); });
 
   // The card is one row now; its thumbnails open from it.
   const open = async (user) => { await user.click(await screen.findByRole('button', { name: /^Recordings/ })); };
@@ -244,7 +249,9 @@ describe('RecordingsCard', () => {
     const { container, user } = mount(LA);
     await open(user);
     await waitFor(() => expect(container.querySelector('.rec-strip__item')).not.toBeNull());
-    expect(container.querySelector('.rec-strip__item').textContent).toContain('Sun, 30 Aug, 7:00 pm GMT-7');
+    const tile = container.querySelector('.rec-strip__item');
+    expect(tile.textContent).toContain('Sun 7:00 pm GMT-7');
+    expect(tile).toHaveAccessibleName(/Sun, 30 Aug, 7:00 pm GMT-7/);
   });
 
   test('★ no label when the device is at home', async () => {
@@ -252,8 +259,9 @@ describe('RecordingsCard', () => {
     await open(user);
     await waitFor(() => expect(container.querySelector('.rec-strip__item')).not.toBeNull());
     const text = container.querySelector('.rec-strip__item').textContent;
-    expect(text).toContain('Mon, 31 Aug, 2:00 pm');
+    expect(text).toContain('Mon 2:00 pm');
     expect(text).not.toMatch(/GMT|NZST|NZDT/);
+    expect(container.querySelector('.rec-strip__item')).toHaveAccessibleName(/Mon, 31 Aug, 2:00 pm/);
   });
 });
 

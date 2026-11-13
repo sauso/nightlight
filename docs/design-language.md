@@ -837,10 +837,20 @@ reading order and the keyboard order):
    to. The empty and failed states keep the title and say what happened, as before ("No alerts for <name> yet.", or the failed
    message with Retry).
 4. **Recordings** (`components/RecordingsCard.jsx`, `.recordings-row`): one 56px row, "Recordings", the newest recording's time, a
-   chevron. It is a disclosure (`aria-expanded`): the row opens the strip of thumbnails below it, so older recordings stay
-   reachable (recordings have no retention). A newest recording that failed says "Couldn't be saved" on the row. Renders
-   nothing when there are none.
+   chevron. It is a disclosure (`aria-expanded`), closed until tapped. It opens a scrolling strip of 16:9 pictures with a peek of
+   the next one; each picture carries a short chip and a play mark: weekday and home time ("Wed 12:09 am") for a recording
+   under seven days old, the date and time ("30 Aug, 7:00 pm") from seven days on, so an old recording is not mistaken for
+   this week's. The full date and time are the accessible name and the tooltip. The row's own time uses the same short form
+   (the long form lost its AM/PM at 320px) and keeps the full one as its name and tooltip. Tap a picture to play it. A failed recording has a warning mark and opens
+   its explanation instead. Older recordings stay reachable (recordings have no retention). A newest recording that failed says
+   "Couldn't be saved" on the row. Renders nothing when there are none.
 5. **Sensor history** (a camera with an MQTT topic), unchanged.
+
+On these child-page cards, the alerts disclosure and Recordings row keep the card colour when open. A pointer hover gives them
+a light tint, and pressing gives a slightly stronger one; on a touch screen there is no lingering hover fill after a tap.
+Alert rows with clips use the same treatment. Focus rings stay visible for keyboard users. Timelapse and recording pictures
+also show a focus ring. The camera tile's controls retain their own light-on-dark colours and only show hover feedback to a
+hovering pointer.
 
 From **1024px** the same elements sit in two columns by grid placement (never `order`): the night card then recent alerts on the
 left; the camera, timelapse, recordings and sensor history on the right. The camera column stretches to the night card's height.
