@@ -13,6 +13,7 @@ const LOG_FILTERS = [
   { label: 'ONVIF motion', q: 'onvif-motion' },
   { label: 'Sound', q: 'sound' },
   { label: 'MQTT', q: 'mqtt' },
+  { label: 'ESPHome', q: 'esphome' },
   { label: 'WebRTC', q: 'webrtc' },
   { label: 'HLS', q: 'hls' },
   { label: 'Recording', q: 'clip' },
