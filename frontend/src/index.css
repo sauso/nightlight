@@ -3518,7 +3518,6 @@ input[type='range'] {
   min-height: 44px; padding: 0 14px; border-radius: 22px; cursor: pointer; font: inherit; font-size: 14px;
   border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary);
 }
-.review-suggest__btn[aria-pressed="true"] { border-color: var(--accent-line); background: color-mix(in srgb, var(--accent) 16%, transparent); font-weight: 600; }
 .review-suggest__btn:disabled { opacity: 0.5; cursor: default; }
 
 /* "+ Add a note": a plain text action, 44px tall. */

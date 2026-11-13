@@ -430,9 +430,10 @@ describe('the review screen', () => {
       expect(api.put).not.toHaveBeenCalled();
     });
 
-    test('★ correcting only the asleep time sends that time and NOT the app\'s wake: the sheet is not the "That\'s right" question', async () => {
-      // The old disclosure rode along with "That's right", which sent the shown wake. This Save is its own button: sending the
-      // detector's 05:48 here would store the app's guess as the parent's answer from a tap on a different question.
+    test('★ correcting only the asleep time sends the SAME body the old page sent: that time AND the wake the page shows (no saved-data change)', async () => {
+      // The fields used to sit on the page beside "That's right", whose save always sent the shown wake. The sheet's Save sends
+      // it too, so this change alters nothing that is stored. (Omitting it would let a note-only save leave a night neither
+      // locked nor asked again.) Identical to the pre-sheet test of the same name, key for key.
       const { user } = at();
       await thatsRight();
       const sheet = within(await openSheet(user));
@@ -442,9 +443,43 @@ describe('the review screen', () => {
       await user.click(sheet.getByRole('button', { name: 'Save' }));
 
       await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
-      expect(lastBody()).toMatchObject({ true_onset_local: '19:20' });
-      expect(lastBody()).not.toHaveProperty('true_wake_local');
-      expect(keysOf(lastBody())).toEqual(['computed_onset_at', 'computed_wake_at', 'settings_key', 'true_onset_local']);
+      expect(lastBody()).toMatchObject({ true_wake_local: '05:48', true_onset_local: '19:20' });
+      expect(keysOf(lastBody())).toEqual([...WAKE_ONLY_KEYS, 'true_onset_local'].sort());
+    });
+
+    test('★ a note-only save from the sheet sends the shown wake too, exactly as the old page did', async () => {
+      const { user } = at();
+      await thatsRight();
+      const sheet = within(await openSheet(user));
+      await user.click(sheet.getByRole('button', { name: /Add a note/ }));
+      await user.type(sheet.getByLabelText(/worth noting/), 'a cold');
+      await user.click(sheet.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+      expect(lastBody()).toEqual({
+        true_wake_local: '05:48',
+        note: 'a cold',
+        computed_onset_at: '2026-08-29 09:33:00',
+        computed_wake_at: '2026-08-29 19:48:00',
+        settings_key: '',
+      });
+    });
+
+    test('★ an error from the page does not greet the sheet, and one from the sheet does not stay on the page behind it', async () => {
+      // One error slot serves both; open and close each clear it.
+      api.put.mockRejectedValueOnce(new Error('page boom'));
+      const { user } = at();
+      await user.click(await thatsRight());
+      expect(await screen.findByText('page boom')).toBeInTheDocument();
+      const dialog = await openSheet(user);
+      expect(within(dialog).queryByText('page boom')).not.toBeInTheDocument();
+      expect(screen.queryByText('page boom')).not.toBeInTheDocument();
+
+      api.put.mockRejectedValueOnce(new Error('sheet boom'));
+      await user.type(within(dialog).getByLabelText(/In bed/), '19:05');
+      await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+      expect(await within(dialog).findByText('sheet boom')).toBeInTheDocument();
+      await user.keyboard('{Escape}');
+      expect(screen.queryByText('sheet boom')).not.toBeInTheDocument();
     });
 
     test('★ from the correcting step, in bed, asleep and a note typed in the sheet are sent alongside the wake that step shows', async () => {
@@ -524,8 +559,8 @@ describe('the review screen', () => {
 
   describe('the -5m / +5m stepper on the "Not quite" step (UI refresh PR I)', () => {
     const wakeField = () => screen.getByLabelText(/Got up for the day/);
-    const earlier = () => screen.getByRole('button', { name: '5 minutes earlier' });
-    const later = () => screen.getByRole('button', { name: '5 minutes later' });
+    const earlier = () => screen.getByRole('button', { name: '−5m, 5 minutes earlier' });
+    const later = () => screen.getByRole('button', { name: '+5m, 5 minutes later' });
     // A stored answer opens straight into the step; 14:02Z is 00:02 Melbourne and 13:57Z is 23:57 (UTC+10 in August).
     const answeredAt = (utc, extra = {}) => ({ ...NIGHT, review: { true_wake_at: utc, true_onset_at: null, note: null, ...extra } });
 
@@ -633,7 +668,6 @@ describe('the review screen', () => {
       await user.click(await screen.findByRole('button', { name: 'Not quite' }));
       await user.click(screen.getByRole('button', { name: SUGGEST_540 }));
       expect(wakeField()).toHaveValue('05:40');
-      expect(screen.getByRole('button', { name: SUGGEST_540 })).toHaveAttribute('aria-pressed', 'true');
       await user.click(screen.getByRole('button', { name: 'Save' }));
       await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
       expect(lastBody()).toMatchObject({ true_wake_local: '05:40', true_wake_transition_id: 21 });
@@ -645,9 +679,8 @@ describe('the review screen', () => {
       const { user } = at();
       await user.click(await screen.findByRole('button', { name: 'Not quite' }));
       await user.click(screen.getByRole('button', { name: SUGGEST_540 }));
-      await user.click(screen.getByRole('button', { name: '5 minutes later' }));
+      await user.click(screen.getByRole('button', { name: '+5m, 5 minutes later' }));
       expect(wakeField()).toHaveValue('05:45');
-      expect(screen.getByRole('button', { name: SUGGEST_540 })).toHaveAttribute('aria-pressed', 'false');
       await user.click(screen.getByRole('button', { name: 'Save' }));
       await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
       expect(lastBody().true_wake_local).toBe('05:45');
@@ -808,7 +841,7 @@ describe('the review screen', () => {
     // Nothing to save until a time is typed, so an empty field can never be sent as an answer.
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
     // ...and the stepper has nothing to step from, so it does not invent a starting time.
-    expect(screen.getByRole('button', { name: '5 minutes later' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '+5m, 5 minutes later' })).toBeDisabled();
     await user.type(wake, '06:05');
     // The wake is typed on the page and the asleep time in the sheet, whose Save sends both: the page was already on the
     // wake question, so its value is an answer.

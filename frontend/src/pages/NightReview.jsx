@@ -236,9 +236,11 @@ export default function NightReview() {
     if (key === 'wake') setFrame(null);
   };
   const setDraftField = (key, value) => setDraft((d) => ({ ...d, [key]: value }));
-  const openSheet = () => { setDraft({}); setSheetNoteOpen(false); setSheetOpen(true); };
+  // The error slot is shared (the page shows it under the card, the sheet inside itself), so both open and close clear it: a
+  // failure from the page must not greet the sheet, nor a sheet failure the page behind it.
+  const openSheet = () => { setDraft({}); setSheetNoteOpen(false); setError(null); setSheetOpen(true); };
   // Closing DISCARDS what was typed in the sheet (the draft), whichever way it was closed. Nothing is sent.
-  const closeSheet = () => { setSheetOpen(false); setDraft({}); };
+  const closeSheet = () => { setSheetOpen(false); setDraft({}); setError(null); };
   const pickSuggestion = (t) => {
     setTyped((prev) => ({ ...prev, wake: toLocalHhmm(t.created_at, tz) }));
     setFrame(t.id);
@@ -272,12 +274,11 @@ export default function NightReview() {
   // ones "That's right" already goes through). Absent for every other caller.
   //
   // `sheetDraft`: set ONLY by the "Edit sleep times" sheet's Save, and it is what was typed in the sheet. It is laid over
-  // `typed` for this one save (`t` below). ⚠️ A sheet save does not CONFIRM the app's wake: on a night still waiting at
-  // "Up at 6:20. Is that right?" the wake shown is the detector's guess, and the old page sent it along with a bedtime fix
-  // because the one "That's right" button did both. The sheet's Save is its own button on its own question, so it sends
-  // the wake only when the person has answered it (typed it, or the page is already on the wake field, where Save always
-  // sent the shown value). Anything else would store the app's guess as the parent's answer from a tap on a different
-  // question, the exact failure the confirm-or-correct design exists to prevent.
+  // `typed` for this one save (`t` below). ⚠️ THE BODY IS EXACTLY WHAT THE OLD PAGE'S SAVE SENT FOR THE SAME STATE (owner's
+  // decision on review of this change): the bedtime / fell-asleep / note fields used to sit on the page beside "That's right"
+  // and Save, which always sent the shown wake (the app's guess, on a night not yet answered) with them. The sheet's Save
+  // does the same, so this change alters no saved data. Omitting the wake instead would have let a note-only save leave a
+  // night neither locked nor asked again.
   const save = async (wakeOverride, sheetDraft) => {
     const t = sheetDraft ? { ...typed, ...sheetDraft } : typed;
     // Never a time read in the placeholder zone, whichever button asked (see `timesReady`).
@@ -306,9 +307,7 @@ export default function NightReview() {
     };
     // The wake: a time to send, else — only if the person emptied the field themselves — null, which clears
     // it (exactly as the old screen did). An untouched empty wake (a night with none) omits the key.
-    const wakeAnswered = editing || 'wake' in t;
     if (wakeOverride) body.true_wake_local = wakeOverride;
-    else if (sheetDraft && !wakeAnswered) { /* the sheet is not the wake question: omit the key (see above) */ }
     else if (wakeShown) body.true_wake_local = wakeShown;
     else if ('wake' in t) body.true_wake_local = null;
     if ('onset' in t) body.true_onset_local = t.onset || null;
@@ -475,7 +474,7 @@ export default function NightReview() {
                     </div>
                   )}
                   <div className="review-stepper">
-                    <button type="button" className="review-stepper__btn" aria-label={`${STEP_MINUTES} minutes earlier`}
+                    <button type="button" className="review-stepper__btn" aria-label={`−${STEP_MINUTES}m, ${STEP_MINUTES} minutes earlier`}
                       disabled={!timesReady || !wakeShown} onClick={() => stepWake(-STEP_MINUTES)}>
                       −{STEP_MINUTES}m
                     </button>
@@ -483,7 +482,7 @@ export default function NightReview() {
                       <span className="review-sr">Got up for the day</span>
                       <input type="time" value={wakeShown} disabled={!timesReady} onChange={onType('wake')} />
                     </label>
-                    <button type="button" className="review-stepper__btn" aria-label={`${STEP_MINUTES} minutes later`}
+                    <button type="button" className="review-stepper__btn" aria-label={`+${STEP_MINUTES}m, ${STEP_MINUTES} minutes later`}
                       disabled={!timesReady || !wakeShown} onClick={() => stepWake(STEP_MINUTES)}>
                       +{STEP_MINUTES}m
                     </button>
@@ -491,7 +490,7 @@ export default function NightReview() {
                   {suggestions.length > 0 && (
                     <div className="review-suggest" role="group" aria-label="Logged out-of-bed times">
                       {suggestions.map((s) => (
-                        <button key={s.id} type="button" className="review-suggest__btn" aria-pressed={frame === s.id}
+                        <button key={s.id} type="button" className="review-suggest__btn"
                           disabled={busy} onClick={() => pickSuggestion(s)}>
                           {readable(s.created_at)} · out of bed
                         </button>

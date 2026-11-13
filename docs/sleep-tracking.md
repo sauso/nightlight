@@ -1019,12 +1019,15 @@ night card under the summary: when they got up.
   for the night at all, there is nothing to confirm, so the screen opens straight onto the time field,
   and the row says to add when they went to bed and fell asleep (both are needed to make it a slept
   night).
-- **The sheet's Save is its own answer, not a confirmation of the wake.** Saving a bedtime or
-  fell-asleep time from the sheet on a night you have not answered yet records only what you typed
-  there; it does not also record the app's guessed wake-up time as yours. (Before this screen existed
-  the bedtime fields rode along with **That's right**, which did record the shown wake-up time.) If
-  you have typed a wake-up time on the page behind it, or the page is already on the time field, that
-  time is saved with it, as **Save** has always done.
+- **The sheet's Save sends what the page's buttons always sent.** Saving a bedtime, fell-asleep time or
+  note from the sheet also records the wake-up time the page shows (the app's guess, if you have not
+  changed it), exactly as the bedtime fields did when they sat beside **That's right**. Nothing the
+  server stores changed with the sheet.
+- **Stepping or typing a wake-up time across or after noon follows the server's noon rule.** A bare
+  time before 12:00 is the morning after the night, and from 12:00 it is the night's own day. A time
+  that therefore lands on the wrong day (for example a wake that comes out before the asleep time) is
+  refused with an ordering message, never stored as a wrong time. The -5m / +5m buttons never wrap
+  past midnight.
 - **No one was in the bed** is inside the sheet. It sends only that answer (and a note, if you typed
   one); any time typed on the page or in the sheet is dropped, never sent beside it. See
   ["No one was in the bed" says the whole night was wrong](#no-one-was-in-the-bed-says-the-whole-night-was-wrong-not-just-a-time).

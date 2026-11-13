@@ -149,9 +149,8 @@ describe('#512 — the repro, replayed against the real SettingsProvider', () =>
     await user.type(sheet.getByLabelText(/In bed/), '19:05');
     await user.click(sheet.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(api.put).toHaveBeenCalled());
-    // The sheet's Save is its own question: it sends the typed bedtime and NOT the app's wake (see NightReview's save).
-    expect(lastBody()).toMatchObject({ true_in_bed_local: '19:05' });
-    expect(lastBody().true_wake_local).toBeUndefined();
+    // The same body the old page sent for this state (see NightReview's save): the shown wake in HOME time, the typed bedtime.
+    expect(lastBody()).toMatchObject({ true_wake_local: '05:48', true_in_bed_local: '19:05' });
     expect(lastBody().true_onset_local).toBeUndefined();
   });
 

@@ -139,10 +139,10 @@ describe('the review screen in range mode', () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Another time' }));
     // Empty, as before: stepping from one of the rejected estimates would put a time the person just turned down in the box.
-    expect(screen.getByRole('button', { name: '5 minutes later' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '5 minutes earlier' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '+5m, 5 minutes later' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '−5m, 5 minutes earlier' })).toBeDisabled();
     await user.type(screen.getByLabelText('Got up for the day'), '0610');
-    await user.click(screen.getByRole('button', { name: '5 minutes later' }));
+    await user.click(screen.getByRole('button', { name: '+5m, 5 minutes later' }));
     expect(screen.getByLabelText('Got up for the day')).toHaveValue('06:15');
     await user.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(put).toHaveBeenCalledTimes(1));

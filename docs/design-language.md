@@ -676,7 +676,7 @@ UI refresh PR H. Every state keeps the same words it had; what is new is the sha
 - **The review screen** keeps one question card ("Up at 6:20 AM. Is that right?" with That's right and Not quite). **Not quite** opens
   the correcting step as drawn (UI refresh PR I): "When did <child> get up for the day?", a "We had 6:20 am." line, a **-5m / time / +5m
   stepper**, the logged out-of-bed times near it as tappable chips ("6:20 am · out of bed"), "Add a note" and Save. The middle of the
-  stepper is a real time field (typing still works and is sent as typed), the side buttons are labelled "5 minutes earlier" and "5 minutes
+  stepper is a real time field (typing still works and is sent as typed), the side buttons are labelled "-5m, 5 minutes earlier" and "+5m, 5 minutes
   later", and every control is at least 44px. The stepper **stops at 00:00 and 23:59 instead of wrapping**: a wrap would silently
   change the calendar day the server picks for a bare time. It does nothing on an empty field (it never invents a starting time). The
   chips are out-of-bed events within an hour of a time the page already shows, at most four; a tap sets the time and records which
