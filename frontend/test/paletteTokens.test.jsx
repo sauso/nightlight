@@ -330,7 +330,7 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     // The token reader above reads exactly `:root` and `:root[data-theme='dark']`, so a declaration anywhere else
     // (for instance `html[data-theme='dark'] { --bg: ... }`, which has higher specificity) would win in the browser and be invisible
     // here. Every place that declares one of the pinned tokens is therefore listed; the only deliberate exceptions are named:
-    //   .night  declares the --night-* custom properties (and nothing else of the palette), by design.
+    //   .night declares the --night-* custom properties, including search-card error text (and nothing else of the palette).
     // There are no others on this branch. Custom properties set in JSX style props are out of reach of this check.
     const pinned = /^--(?:bg|bg-elevated|bg-elevated-2|field-bg|text-primary|text-secondary|border|bar|bar-text|on-accent|band-[a-z-]+|sleep-[a-z-]+|night-[a-z-]+)$/;
     //   .night--<band> sets --night-tint (the tint colour, one of that band's --band-*-ring tokens) inside the @supports block that
@@ -356,6 +356,12 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
       return at >= 0 && /\.night(?![\w-])/.test(rule.slice(0, at)) && /background(?:-image)?:[^;]*gradient/.test(rule.slice(at + 1));
     });
     expect(gradientRules.length, `.night gradient rules: ${gradientRules.join(' | ')}`).toBe(1);
+  });
+
+  test('--night-error is readable on the ESPHome search card at its lightest gradient stop', () => {
+    expect(nightTokens['--night-error']).toBe('#f4a3ad');
+    expect(contrast(nightTokens['--night-error'], gradientLight)).toBeGreaterThanOrEqual(4.5);
+    expect(css).toMatch(/\.esp-find__error\s*\{[^}]*color:\s*var\(--night-error\)/);
   });
 
   test('★ text is never set in a band colour: no rule uses a --band-* token for `color`', () => {

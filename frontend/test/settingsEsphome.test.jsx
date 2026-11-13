@@ -40,7 +40,12 @@ function mockApi({ devices = [device()], onDevices = null, children = CHILDREN, 
   getTextSpy = vi.spyOn(api, 'getText').mockImplementation(getText || (async () => 'minute_utc\r\n'));
 }
 const deferred = () => { let resolve; let reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
-const cardOf = (name) => screen.getByText(name).closest('.card');
+const cardOf = (name) => screen.getByText(name).closest('.esp-dev');
+const menuItem = async (name, cardName = 'Device A') => {
+  if (!screen.queryByText(cardName)) await screen.findByText(cardName);
+  fireEvent.click(within(cardOf(cardName)).getByRole('button', { name: `More for ${cardName}` }));
+  return within(cardOf(cardName)).getByRole('menuitem', { name });
+};
 const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(0); });
 // The page has a Save of its own (retention) beside the dialog's: inside an open dialog, the dialog's.
 const saveButton = () => within(screen.queryByRole('dialog') || document.body).getByRole('button', { name: 'Save' });
@@ -49,6 +54,75 @@ beforeEach(() => { mockApi(); vi.mocked(saveTextDownload).mockClear(); });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('the device list', () => {
+  test('search comes before Your devices and is present with zero devices', async () => {
+    mockApi({ devices: [] });
+    renderAsAdmin(<SettingsEsphome />);
+    const search = screen.getByRole('region', { name: 'Find devices' });
+    const heading = screen.getByRole('heading', { name: /Your devices/ });
+    expect(search.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(await screen.findByText(/No devices yet/)).toBeInTheDocument();
+  });
+
+  test('an empty search offers Add by IP address inside its card and opens the add form', async () => {
+    mockApi({ devices: [], discovery: [] });
+    postSpy.mockImplementation(async (path) => path === '/esphome/discover'
+      ? { scanId: '12345678-1234-1234-1234-123456789abc', endsAt: Date.now() + 30000 } : {});
+    const { user } = renderAsAdmin(<SettingsEsphome />);
+    await user.click(screen.getByRole('button', { name: 'Find devices on my network' }));
+    const search = within(screen.getByRole('region', { name: 'Find devices' }));
+    await search.findByText(/No devices found/);
+    await user.click(search.getByRole('button', { name: 'Add by IP address' }));
+    expect(screen.getByRole('dialog', { name: 'Add a device' })).toBeInTheDocument();
+  });
+
+  test('search stays visible during list loading; picks wait for the count, but a failed list load permits a pick', async () => {
+    const pending = deferred();
+    mockApi({ onDevices: () => pending.promise, discovery: [{ id: 'one', name: 'living-room-sensor', ip: '10.0.0.9', port: 6053 }] });
+    postSpy.mockImplementation(async (path) => path === '/esphome/discover'
+      ? { scanId: '12345678-1234-1234-1234-123456789abc', endsAt: Date.now() + 30000 } : {});
+    const { user } = renderAsAdmin(<SettingsEsphome />);
+    expect(screen.getByRole('region', { name: 'Find devices' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Find devices on my network' }));
+    const row = await screen.findByRole('button', { name: /living-room-sensor/ });
+    expect(row).toHaveAttribute('aria-disabled', 'true');
+    await user.click(row);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await act(async () => { pending.reject(new Error('Could not load devices.')); });
+    expect(row).not.toHaveAttribute('aria-disabled');
+    await user.click(row);
+    expect(screen.getByRole('dialog', { name: 'Add a device' })).toBeInTheDocument();
+  });
+
+  test('About this data is closed until opened and explains the safety limit', async () => {
+    const { user } = renderAsAdmin(<SettingsEsphome />);
+    const button = screen.getByRole('button', { name: 'About this data' });
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByText(/not a medical or safety device/)).not.toBeVisible();
+    await user.click(button);
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText(/not a medical or safety device/)).toBeVisible();
+  });
+
+  test('each device has its own keyboard menu; Escape returns focus, Edit opens the form, and Delete asks first', async () => {
+    mockApi({ devices: [device(), device({ id: 2, name: 'Device B' })] });
+    const { user } = renderAsAdmin(<SettingsEsphome />);
+    await screen.findByText('Device B');
+    const first = screen.getByRole('button', { name: 'More for Device A' });
+    expect(screen.getByRole('button', { name: 'More for Device B' })).toBeInTheDocument();
+    first.focus();
+    await user.keyboard('{Enter}');
+    expect(within(cardOf('Device A')).getByRole('menuitem', { name: 'Edit' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(first).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    expect(within(cardOf('Device A')).getByRole('menuitem', { name: 'Edit' })).toHaveFocus();
+    await user.click(within(cardOf('Device A')).getByRole('menuitem', { name: 'Edit' }));
+    expect(screen.getByRole('dialog', { name: 'Edit device' })).toBeInTheDocument();
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    await user.click(await menuItem('Delete device'));
+    expect(screen.getByRole('dialog', { name: 'Delete this device?' })).toBeInTheDocument();
+    expect(delSpy).not.toHaveBeenCalled();
+  });
   test('a discovered device pre-fills name, IP and non-default port, leaving child and key empty (#1071)', async () => {
     mockApi({ devices: [], discovery: [{ id: 'one', name: 'living-room-sensor', ip: '10.0.0.9', port: 6054, encrypted: true }] });
     postSpy.mockImplementation(async (path) => path === '/esphome/discover'
@@ -74,24 +148,26 @@ describe('the device list', () => {
     expect(within(screen.getByRole('dialog')).getByLabelText('Port')).toHaveValue(null);
   });
   test.each([
-    ['connected', 'Connected', 'status-badge--ok'],
-    ['connecting', 'Connecting', 'status-badge--off'],
-    ['disconnected', 'Disconnected', 'status-badge--bad'],
-    ['failed', 'Failed', 'status-badge--bad'],
-    ['disabled', 'Off', 'status-badge--off'],
+    ['connected', 'Connected', 'breathing--live'],
+    ['connecting', 'Connecting', 'breathing--connecting'],
+    ['disconnected', 'Disconnected', 'breathing--offline'],
+    ['failed', 'Failed', 'breathing--offline'],
+    ['disabled', 'Off', 'esp-dot--off'],
   ])('a %s device shows %s', async (state, text, cls) => {
     mockApi({ devices: [device({ enabled: state !== 'disabled', status: status({ state }) })] });
     renderAsAdmin(<SettingsEsphome />);
     await screen.findByText('Device A');
-    expect(within(cardOf('Device A')).getByText(text)).toHaveClass(cls);
+    expect(within(cardOf('Device A')).getByText(text).querySelector(`.${cls}`)).toBeInTheDocument();
+    if (state === 'disabled') expect(cardOf('Device A').querySelector('.breathing--offline')).toBeNull();
   });
 
   test('shows the address, the child, the last reading and the sensor count', async () => {
     mockApi({ devices: [device({ child_id: 'c2' })] });
     renderAsAdmin(<SettingsEsphome />);
-    const card = within(await screen.findByText('Device A').then((el) => el.closest('.card')));
+    const card = within(await screen.findByText('Device A').then((el) => el.closest('.esp-dev')));
     expect(card.getByText(/10\.0\.0\.5:6053 · Second child/)).toBeInTheDocument();
-    expect(card.getByText(/Last reading: 2 min ago · 410 in the last hour · 7 sensors/)).toBeInTheDocument();
+    expect(card.getByText(/Last reading: 2 min ago · 410 in the last hour/)).toBeInTheDocument();
+    expect(card.getByRole('button', { name: /Sensors 7/ })).toBeInTheDocument();
   });
 
   test('a child that is not in the list reads "A child", and none reads "No child"; an IPv6 address is bracketed', async () => {
@@ -132,7 +208,7 @@ describe('the device list', () => {
     mockApi({ devices: [] });
     renderAsAdmin(<SettingsEsphome />);
     expect(await screen.findByText(/No devices yet/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add a device' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Add by IP address' })).toBeEnabled();
   });
 
   test('★ a failed first load says so and can be retried; it does not look like "no devices"', async () => {
@@ -151,12 +227,12 @@ describe('the device list', () => {
     mockApi({ devices: eight });
     renderAsAdmin(<SettingsEsphome />);
     await screen.findByText('Device 1');
-    expect(screen.getByRole('button', { name: 'Add a device' })).toBeDisabled();
-    expect(screen.getByText(/limit of 8 devices/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add by IP address' })).toBeDisabled();
+    expect(screen.getByText(/reached the limit of 8 devices/)).toBeInTheDocument();
     vi.restoreAllMocks();
     mockApi({ devices: eight.slice(0, 7) });
     renderAsAdmin(<SettingsEsphome />);
-    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Add a device' }).at(-1)).toBeEnabled());
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Add by IP address' }).at(-1)).toBeEnabled());
   });
 
   test('Sensors lists each entity with its latest value and age', async () => {
@@ -168,11 +244,14 @@ describe('the device list', () => {
       ],
     });
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Sensors' }));
+    await user.click(await screen.findByRole('button', { name: /Sensors/ }));
     expect(await screen.findByText(/72 bpm · 3 s ago/)).toBeInTheDocument();
     expect(screen.getByText(/on · no update yet/)).toBeInTheDocument();
     expect(screen.getByText(/no reading yet · no update yet/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Hide sensors' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: /Sensors/ })).toHaveAttribute('aria-expanded', 'true');
+    await user.click(screen.getByRole('button', { name: /Sensors/ }));
+    expect(screen.getByRole('button', { name: /Sensors/ })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText(/72 bpm · 3 s ago/)).toBeNull();
   });
 });
 
@@ -201,7 +280,7 @@ describe('refreshing while the page is open', () => {
     expect(calls, 'single-flight: the next tick waits for the read in flight').toBe(2);
 
     // Adding a device reads the list again straight away, while the tick's read is still waiting.
-    fireEvent.click(screen.getByRole('button', { name: 'Add a device' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add by IP address' }));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Device B' } });
     fireEvent.change(screen.getByLabelText('IP address'), { target: { value: '10.0.0.6' } });
     fireEvent.click(saveButton());
@@ -231,7 +310,7 @@ describe('refreshing while the page is open', () => {
     renderAsAdmin(<SettingsEsphome />);
     await settle();
     await act(async () => { await vi.advanceTimersByTimeAsync(10000); }); // the slow tick read
-    fireEvent.click(within(cardOf('Device B')).getByRole('button', { name: 'Delete' }));
+    fireEvent.click(await menuItem('Delete device', 'Device B'));
     fireEvent.click(screen.getByRole('button', { name: /Delete device and readings/ }));
     await settle();
     expect(screen.queryByText('Device B')).toBeNull();
@@ -290,7 +369,7 @@ describe('refreshing while the page is open', () => {
 describe('adding a device', () => {
   test('a port that was entered is the port that is sent', async () => {
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Add a device' }));
+    await user.click(await screen.findByRole('button', { name: 'Add by IP address' }));
     await user.type(screen.getByLabelText('Name'), 'Device Z');
     await user.type(screen.getByLabelText('IP address'), '10.0.0.9');
     await user.type(screen.getByLabelText('Port'), '6054');
@@ -305,7 +384,7 @@ describe('adding a device', () => {
     const slow = deferred();
     mockApi({ post: () => slow.promise });
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Add a device' }));
+    await user.click(await screen.findByRole('button', { name: 'Add by IP address' }));
     await user.type(screen.getByLabelText('Name'), 'Device Z');
     await user.type(screen.getByLabelText('IP address'), '10.0.0.9');
     const save = saveButton();
@@ -317,7 +396,7 @@ describe('adding a device', () => {
 
   test('★ the request carries exactly what was entered; the key only when typed, the port only when given', async () => {
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Add a device' }));
+    await user.click(await screen.findByRole('button', { name: 'Add by IP address' }));
     await user.type(screen.getByLabelText('Name'), 'Device Z');
     await user.type(screen.getByLabelText('IP address'), ' 10.0.0.9 ');
     await user.type(screen.getByLabelText(/Encryption key/), SECRET);
@@ -329,7 +408,7 @@ describe('adding a device', () => {
 
   test('with no key, no port and no child, the request has no key, no port and a null child', async () => {
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Add a device' }));
+    await user.click(await screen.findByRole('button', { name: 'Add by IP address' }));
     await user.type(screen.getByLabelText('Name'), 'Device Z');
     await user.type(screen.getByLabelText('IP address'), '10.0.0.9');
     await user.click(saveButton());
@@ -340,7 +419,7 @@ describe('adding a device', () => {
   test('★ a refusal from the server is shown in the dialog, and the dialog stays open', async () => {
     mockApi({ post: async () => { throw new Error("Use the device's IP address; names ending in .local do not resolve inside the container."); } });
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Add a device' }));
+    await user.click(await screen.findByRole('button', { name: 'Add by IP address' }));
     await user.type(screen.getByLabelText('Name'), 'Device Z');
     await user.type(screen.getByLabelText('IP address'), 'bed.local');
     await user.click(saveButton());
@@ -356,7 +435,7 @@ describe('adding a device', () => {
     ['a port of 60.5', { name: 'Device Z', host: '10.0.0.9', port: '60.5' }, /port must be a whole number/],
   ])('%s is refused here, with no request', async (_label, values, message) => {
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Add a device' }));
+    await user.click(await screen.findByRole('button', { name: 'Add by IP address' }));
     if (values.name) await user.type(screen.getByLabelText('Name'), values.name);
     if (values.host) await user.type(screen.getByLabelText('IP address'), values.host);
     if (values.port) fireEvent.change(screen.getByLabelText('Port'), { target: { value: values.port } });
@@ -370,7 +449,7 @@ describe('adding a device', () => {
   test('if the children cannot be loaded the form says so and offers "No child"', async () => {
     mockApi({ childrenFail: true });
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Add a device' }));
+    await user.click(await screen.findByRole('button', { name: 'Add by IP address' }));
     await waitFor(() => expect(screen.getByText(/Children could not be loaded/)).toBeInTheDocument());
     expect(within(screen.getByLabelText('Child')).getAllByRole('option')).toHaveLength(1);
   });
@@ -379,7 +458,7 @@ describe('adding a device', () => {
 describe('editing a device', () => {
   const open = async () => {
     const view = renderAsAdmin(<SettingsEsphome />);
-    await view.user.click(await screen.findByRole('button', { name: 'Edit' }));
+    await view.user.click(await menuItem('Edit'));
     return view;
   };
 
@@ -434,7 +513,7 @@ describe('★ the encryption key is a secret', () => {
     await screen.findByText('Device A');
     expect(document.body.innerHTML).not.toContain('DECOY');
 
-    await user.click(screen.getByRole('button', { name: 'Add a device' }));
+    await user.click(screen.getByRole('button', { name: 'Add by IP address' }));
     await user.type(screen.getByLabelText('Name'), 'Device Z');
     await user.type(screen.getByLabelText('IP address'), '10.0.0.9');
     await user.type(screen.getByLabelText(/Encryption key/), SECRET);
@@ -455,17 +534,17 @@ describe('★ the encryption key is a secret', () => {
     for (const call of [...postSpy.mock.calls, ...putSpy.mock.calls]) expect(String(call[0])).not.toContain(SECRET);
 
     // Reopened, the field is empty again.
-    await user.click(screen.getByRole('button', { name: 'Add a device' }));
+    await user.click(screen.getByRole('button', { name: 'Add by IP address' }));
     expect(screen.getByLabelText(/Encryption key/)).toHaveValue('');
   });
 
   test('cancelling the dialog also drops what was typed', async () => {
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Add a device' }));
+    await user.click(await screen.findByRole('button', { name: 'Add by IP address' }));
     await user.type(screen.getByLabelText(/Encryption key/), SECRET);
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(document.body.innerHTML).not.toContain(SECRET);
-    await user.click(screen.getByRole('button', { name: 'Add a device' }));
+    await user.click(screen.getByRole('button', { name: 'Add by IP address' }));
     expect(screen.getByLabelText(/Encryption key/)).toHaveValue('');
   });
 });
@@ -474,7 +553,7 @@ describe('testing a connection', () => {
   test('a saved device is tested by its number, and a good result is shown', async () => {
     mockApi({ post: async () => ({ ok: true, encrypted: true, entities: [{}, {}, {}] }) });
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Test' }));
+    await user.click(await menuItem('Test connection'));
     expect(await screen.findByText(/Connected and encrypted · 3 sensors found/)).toBeInTheDocument();
     expect(postSpy).toHaveBeenCalledWith('/esphome/test', { device_id: 1 });
   });
@@ -482,7 +561,7 @@ describe('testing a connection', () => {
   test('★ a connection that works but is not encrypted is a warning, not a plain success', async () => {
     mockApi({ post: async () => ({ ok: true, encrypted: false, entities: [] }) });
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Test' }));
+    await user.click(await menuItem('Test connection'));
     const note = await screen.findByText(/the connection is not encrypted: anyone on your network can read it/);
     expect(note).toHaveClass('esphome-warn');
   });
@@ -493,7 +572,7 @@ describe('testing a connection', () => {
   ])('%s shows the server sentence', async (_label, sentence) => {
     mockApi({ post: async () => { throw new Error(sentence); } });
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Test' }));
+    await user.click(await menuItem('Test connection'));
     expect(await screen.findByText(sentence)).toBeInTheDocument();
   });
 
@@ -505,9 +584,9 @@ describe('testing a connection', () => {
       put: async () => { host = '10.0.0.6'; return {}; },
     });
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Test' }));
+    await user.click(await menuItem('Test connection'));
     expect(await screen.findByText(/Connected and encrypted/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    await user.click(await menuItem('Edit'));
     await user.click(saveButton());
     await waitFor(() => expect(screen.getByText(/10\.0\.0\.6:6053/)).toBeInTheDocument());
     expect(screen.queryByText(/Connected and encrypted/)).toBeNull();
@@ -516,7 +595,7 @@ describe('testing a connection', () => {
   test('inside the Add form the values typed so far are tested (no port, no key when blank)', async () => {
     mockApi({ post: async () => ({ ok: true, encrypted: false, entities: [] }) });
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Add a device' }));
+    await user.click(await screen.findByRole('button', { name: 'Add by IP address' }));
     await user.click(screen.getByRole('button', { name: 'Test connection' }));
     expect(await screen.findByText(/Enter the device.s IP address/)).toBeInTheDocument();
     expect(postSpy).not.toHaveBeenCalled();
@@ -529,7 +608,7 @@ describe('testing a connection', () => {
 describe('deleting a device', () => {
   test('★ asks first, says the readings go too, and focuses Cancel', async () => {
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Delete' }));
+    await user.click(await menuItem('Delete device'));
     expect(screen.getByText(/deletes all the readings stored for it/)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus());
     expect(delSpy).not.toHaveBeenCalled();
@@ -543,7 +622,7 @@ describe('deleting a device', () => {
     let deleted = false;
     mockApi({ onDevices: async () => (deleted ? [] : [device({ id: 4, name: 'Device A' })]), del: async () => { deleted = true; return { ok: true }; } });
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Delete' }));
+    await user.click(await menuItem('Delete device'));
     await user.click(screen.getByRole('button', { name: /Delete device and readings/ }));
     await waitFor(() => expect(delSpy).toHaveBeenCalledWith('/esphome/devices/4'));
     await waitFor(() => expect(screen.queryByText('Device A')).toBeNull());
@@ -552,7 +631,7 @@ describe('deleting a device', () => {
   test('a refusal is shown in the dialog and the device stays', async () => {
     mockApi({ del: async () => { throw new Error('Device not found.'); } });
     const { user } = renderAsAdmin(<SettingsEsphome />);
-    await user.click(await screen.findByRole('button', { name: 'Delete' }));
+    await user.click(await menuItem('Delete device'));
     await user.click(screen.getByRole('button', { name: /Delete device and readings/ }));
     expect(await screen.findByText('Device not found.')).toBeInTheDocument();
   });
@@ -600,7 +679,7 @@ describe('downloading a CSV', () => {
   const openExport = async (devices) => {
     if (devices) mockApi({ devices });
     const view = renderAsAdmin(<SettingsEsphome />);
-    await view.user.click(await screen.findByRole('button', { name: 'Download CSV' }));
+    await view.user.click(await menuItem('Download CSV'));
     return view;
   };
   const setDates = (from, to) => {

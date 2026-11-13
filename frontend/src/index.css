@@ -1448,7 +1448,7 @@ body.in-pip .tile-menu-backdrop {
    the big figure, as in the design. The 2026-11-12 trial collapsed the old lavender ladder (#eef0ff, #cdd0ff, #b9bdf0,
    #9fa3e0, #8f93d0) to a few tints; that structure stays, because its dimmest step (#8f93d0, 4.28:1, under the 4.5:1 text needs) was the weakest text on
    the card and one muted tint is easier to keep readable. test/paletteTokens.test.jsx recomputes these from this rule. */
-.night { --night-text: #eef0ff; --night-muted: #b9bdf0; --night-link: #c7caff; --night-number: #ffffff; --night-divider: rgba(255, 255, 255, 0.1); --night-action: #8995ff; --night-on-action: #14142a; background: linear-gradient(165deg, #2c2f63 0%, #191b38 100%); color: var(--night-text); border-radius: 18px; padding: 16px; margin-bottom: 14px; box-shadow: 0 18px 42px -26px rgba(18, 20, 58, 0.8); }
+.night { --night-text: #eef0ff; --night-muted: #b9bdf0; --night-link: #c7caff; --night-number: #ffffff; --night-divider: rgba(255, 255, 255, 0.1); --night-action: #8995ff; --night-on-action: #14142a; --night-error: #f4a3ad; background: linear-gradient(165deg, #2c2f63 0%, #191b38 100%); color: var(--night-text); border-radius: 18px; padding: 16px; margin-bottom: 14px; box-shadow: 0 18px 42px -26px rgba(18, 20, 58, 0.8); }
 /* A 12% wash of the night's band colour over the card's gradient (owner approved the colour-scaled design, 2026-11-12).
    ChildDetail.jsx puts `night--<band>` on the card while a score is shown; the band's --band-*-ring colour becomes
    --night-tint and the card paints it as a flat layer ABOVE the gradient (a background layer, not a pseudo-element, so it
@@ -3645,14 +3645,79 @@ input[type='range'] {
   color: var(--text-secondary);
 }
 
-/* ESPHome settings page (#506). `.btn` is width:100%, so a wrapping group of buttons needs `.btn { width: auto }` or
-   each one takes a whole line (the same trap as the bed-zone buttons). The head wraps its badge under a long name
-   rather than widening the page on a phone. */
-.esphome-device__head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 4px; }
-.esphome-device__title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
-.esphome-device .camera-tile__sub { overflow-wrap: anywhere; }
-.esphome-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.esphome-actions .btn { width: auto; }
+/* #1074: discovery is the page's main action; saved devices keep their actions in a menu. */
+.esp-about { margin-bottom: 14px; }
+.esp-about p { margin: 0 0 4px; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+.esp-about button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 0 2px; border: 0; background: none; color: var(--accent-text); font: inherit; font-size: 14px; font-weight: 600; text-align: left; cursor: pointer; }
+.esp-about button svg { margin-left: auto; color: var(--text-secondary); transition: transform 0.15s ease; }
+.esp-about button[aria-expanded="true"] svg { transform: rotate(180deg); }
+.esp-about button:focus-visible, .esp-add button:focus-visible, .esp-dev__sensors:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.esp-about [hidden] { display: none; }
+.esp-find__head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.esp-find__icon { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 40px; height: 40px; border-radius: 50%; background: var(--night-divider); color: var(--night-link); }
+.esp-find h2 { margin: 0; color: var(--night-text); font: 800 18px var(--font-display); }
+.esp-find__head p, .esp-find__note { margin: 2px 0 0; color: var(--night-muted); font-size: 13px; line-height: 1.5; }
+.esp-find__action, .esp-find__manual { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 44px; border: 0; border-radius: 10px; background: var(--night-action); color: var(--night-on-action); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.esp-find__action:disabled { background: var(--night-divider); color: var(--night-link); cursor: default; }
+.esp-find__manual { margin-top: 10px; border: 1px solid var(--night-link); background: transparent; color: var(--night-link); }
+.esp-find__action:focus-visible, .esp-find__manual:focus-visible, .esp-find__result:focus-visible { outline: 2px solid var(--night-link); outline-offset: 2px; }
+.esp-find__action:active:not(:disabled), .esp-find__manual:active, .esp-find__result:active:not([aria-disabled="true"]) { filter: brightness(0.9); }
+.esp-find__busy-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--night-action); animation: esp-find-breathe 1.4s ease-in-out infinite; }
+@keyframes esp-find-breathe { 50% { box-shadow: 0 0 0 5px var(--night-divider); } }
+.esp-find__progress { height: 3px; margin-top: 10px; border-radius: 2px; background: var(--night-divider); overflow: hidden; }
+.esp-find__progress span { display: block; height: 100%; background: var(--night-action); }
+.esp-find__note { margin-top: 10px; }
+.esp-find__error { margin: 10px 0 0; color: var(--night-error); font-size: 13px; }
+.esp-find__sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.esp-find__results { list-style: none; margin: 14px 0 0; padding: 0; border-top: 1px solid var(--night-divider); }
+.esp-find__results li + li { border-top: 1px solid var(--night-divider); }
+.esp-find__result { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 8px 0; border: 0; background: none; color: var(--night-text); font: inherit; text-align: left; cursor: pointer; }
+.esp-find__result[aria-disabled="true"] { cursor: default; }
+.esp-find__tile { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 32px; height: 32px; border-radius: 9px; background: var(--night-divider); color: var(--night-link); }
+.esp-find__result-text { display: grid; gap: 2px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.esp-find__result-text strong { font-size: 15px; }
+.esp-find__result-text span { color: var(--night-muted); font-size: 13px; }
+.esp-find__side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; color: var(--night-link); }
+.esp-find__chip, .esp-find__availability { display: inline-flex; align-items: center; gap: 4px; color: var(--night-link); font-size: 11px; font-weight: 600; }
+.esp-find__chip { padding: 2px 8px; border: 1px solid var(--night-link); border-radius: 999px; }
+.esp-find__availability { color: var(--night-muted); font-size: 12px; }
+.esp-devices-title { display: flex; justify-content: space-between; align-items: baseline; }
+.esp-devices-title span { font-weight: 600; text-transform: none; letter-spacing: 0; }
+.esp-dev { position: relative; margin-bottom: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); }
+.esp-dev__main { display: flex; align-items: flex-start; gap: 10px; padding: 14px 4px 12px 14px; }
+.esp-dev__body { flex: 1; min-width: 0; }
+.esp-dev__state { display: flex; align-items: center; gap: 6px; min-height: 18px; margin-bottom: 2px; font-size: 13px; font-weight: 600; }
+.esp-dot--off { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--text-secondary); }
+.esp-dev__name { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.esp-dev__line { color: var(--text-secondary); font-size: 13px; overflow-wrap: anywhere; }
+.esp-dev__encryption { display: flex; align-items: center; gap: 5px; margin-top: 2px; color: var(--text-secondary); font-size: 13px; }
+.esp-dev__error { margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: var(--bg-elevated-2); font-size: 13px; }
+.more-menu--card { flex: none; }
+.more-menu--card .more-menu__btn { width: 44px; height: 44px; margin-top: -8px; border-radius: 10px; color: var(--text-secondary); }
+.more-menu--card .more-menu__panel { top: calc(100% + 2px); right: 0; z-index: 50; min-width: 220px; }
+.more-menu--card .more-menu__btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.esp-dev__menu-divider { height: 1px; margin: 4px 8px; background: var(--border); }
+.more-menu__item.esp-dev__delete { color: var(--offline); }
+.esp-dev__sensors { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 48px; padding: 0 14px; border: 0; border-top: 1px solid var(--border); border-radius: 0 0 12px 12px; background: none; color: var(--text-primary); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.esp-dev__sensors span { color: var(--text-secondary); font-size: 13px; font-weight: 400; }
+.esp-dev__sensors svg { margin-left: auto; color: var(--text-secondary); transition: transform 0.15s ease; }
+.esp-dev__sensors[aria-expanded="true"] svg { transform: rotate(90deg); }
+.esp-dev .esphome-entities { margin: 0; padding: 8px 14px; border-top: 1px solid var(--border); }
+.esp-dev .esphome-entities li { padding: 8px 0; }
+.esp-add { margin: 14px 0; }
+.esp-add .btn { min-height: 44px; }
+.esp-add .camera-tile__sub { margin-top: 8px; }
+.esp-retention { margin-top: 22px; }
+.esp-retention h2 { margin: 0 0 4px; font: 800 16px var(--font-display); }
+.esp-retention .btn { min-height: 44px; }
+.esp-from-search { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 12px; padding: 3px 10px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent-text); font-size: 12px; font-weight: 600; } /* the .cam-chip recipe: --accent-text on a 12% tint; --accent-soft is light in BOTH themes, so accent text on it fails at night */
+.esp-encryption-callout { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; padding: 9px 11px; border-radius: 10px; background: var(--bg-elevated-2); font-size: 13px; }
+.esp-encryption-callout svg { flex: none; margin-top: 2px; }
+@media (hover: hover) {
+  .esp-find__action:hover:not(:disabled), .esp-find__manual:hover, .esp-find__result:hover:not([aria-disabled="true"]) { filter: brightness(1.1); }
+  .more-menu--card .more-menu__btn:hover, .esp-dev__sensors:hover { background: var(--child-action-hover); }
+}
+@media (prefers-reduced-motion: reduce) { .esp-find__busy-dot { animation: none; } .esp-about button svg, .esp-dev__sensors svg { transition: none; } }
 .esphome-warn { color: var(--offline); }
 .esphome-entities { list-style: none; margin: 10px 0 0; padding: 8px 0 0; border-top: 1px dashed var(--border); display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .esphome-entities li { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }

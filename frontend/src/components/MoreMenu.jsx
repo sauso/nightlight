@@ -23,7 +23,7 @@ import { MoreHorizontal } from 'lucide-react';
 // The close-on-focus-out listens on the DOCUMENT's focusin, not on the button's blur: Safari does not focus a <button>
 // when it is clicked, so a blur-based close fires with no `relatedTarget` on the press that is about to choose an item,
 // hides the panel under the pointer, and the click never lands.
-export default function MoreMenu({ label = 'More options', menuLabel = 'Options', onSlot, children }) {
+export default function MoreMenu({ label = 'More options', menuLabel = 'Options', className = '', onSlot, children }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
   const buttonRef = useRef(null);
@@ -96,7 +96,7 @@ export default function MoreMenu({ label = 'More options', menuLabel = 'Options'
   }, [open, close]);
 
   return (
-    <div className="more-menu" ref={wrapRef}>
+    <div className={`more-menu${className ? ` ${className}` : ''}`} ref={wrapRef}>
       <button type="button" ref={buttonRef} className="more-menu__btn" aria-label={label}
         aria-haspopup="menu" aria-expanded={open} aria-controls={panelId}
         onClick={() => setOpen((o) => !o)}>
