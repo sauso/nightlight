@@ -1025,7 +1025,11 @@ Other rules:
   names them). **The same goes for `:hover`**: no `:hover` rule anywhere uses an inset token (`paletteTokens.test.jsx` fails one),
   because a hover fill was the same near-black bar at night. Hover tints use `--child-action-hover`, and only inside
   `@media (hover: hover)`. That is how the sleep page's `⋯` menu items, the clip calendar's buttons and days (the selected day keeps its
-  accent fill under the pointer), the desktop sidebar's hovered link and the unused `.hamburger-item` were fixed. The sidebar's
+  accent fill under the pointer), the desktop sidebar's hovered link and the unused `.hamburger-item` were fixed. **Any `:hover`
+  rule that sets a background fill is inside `@media (hover: hover)`** (a phone keeps a tapped control in `:hover`, so an unwrapped
+  fill stays painted; `.tile-menu__item` and `.night__settings` were the last two), and the test enforces it for the whole
+  stylesheet. The deliberate exceptions set no fill: `.clip-datepicker__trigger`, `.detect-toggle` and `.log-chip` change only a border
+  or text colour (the last two exclude their lit state with `:not(...)`), and are named in the test. The sidebar's
   *selected* link keeps `--bg-elevated-2` on purpose: it is a resting surface, not a hover. `.btn` has its own, `brightness(0.92)` (a tint cannot work: secondary and danger are transparent outlines).
   Specific tints: the review stepper buttons, the logged-time chips, the "Something else was off" row, the sleep strip, and
   the child page's rows and tiles. **Everything else relies on the generic dim** (`.more-menu__btn`, the tabs,

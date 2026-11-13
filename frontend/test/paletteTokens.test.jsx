@@ -593,6 +593,43 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     expect(rules.find((r) => r.startsWith('.more-menu__item:active'))).toContain('var(--child-action-active)');
   });
 
+  // ★ The general form of the rule (review of #1069): ANY :hover rule that sets a background or background-color FILL must sit inside
+  // @media (hover: hover), not only the controls named above. A phone keeps the :hover state on a tapped control, so an unwrapped fill
+  // stays painted until the next tap elsewhere (found on .night__settings and .tile-menu__item). A :hover rule that only changes a
+  // border, a text colour, opacity, a transform or a shadow may stay unwrapped: those are listed as the deliberate exceptions below, so
+  // a new one has to be looked at, not waved through. (`background: none` / `transparent` is not a fill and is not flagged.)
+  test('★ every :hover rule that sets a background fill is inside @media (hover: hover)', () => {
+    const parts = css.split(/([{}])/);
+    const stack = [];
+    const unwrapped = [];
+    let hoverFills = 0;
+    for (let i = 0; i < parts.length; i += 1) {
+      if (parts[i] === '{') {
+        const selector = parts[i - 1].trim();
+        const body = parts[i + 1] ?? '';
+        const leaf = !body.includes('{') && parts[i + 2] === '}';
+        if (leaf && /:hover\b/.test(selector)) {
+          const fill = /(^|[;\s])background(-color)?\s*:\s*(?!none\b|transparent\b)[^;}]+/.test(body);
+          if (fill) {
+            hoverFills += 1;
+            if (!stack.some((p) => /^@media\s*\(hover:\s*hover\)/.test(p))) unwrapped.push(selector);
+          }
+        }
+        stack.push(selector);
+      } else if (parts[i] === '}') stack.pop();
+    }
+    expect(hoverFills, 'it really found the hover fills').toBeGreaterThan(8);
+    expect(unwrapped, `a :hover background fill outside (hover: hover): ${unwrapped.join(' | ')}`).toEqual([]);
+    // The deliberate exceptions: hover rules that set NO background fill, so a sticky hover on a phone repaints only a border or text
+    // colour (and these two are guarded against sticking on a lit control with :not(...)). They are named so the list is checked.
+    const noFill = ['.clip-datepicker__trigger:hover', '.detect-toggle:hover:not(:disabled):not(.detect-toggle--on)', '.log-chip:hover:not(.log-chip--active)'];
+    for (const selector of noFill) {
+      const rule = rules.find((r) => r.startsWith(`${selector} {`));
+      expect(rule, selector).toBeTruthy();
+      expect(rule, `${selector} sets no background`).not.toMatch(/background/);
+    }
+  });
+
   test('★ the .night rules take their text colours from the card\'s properties, not from literals', () => {
     const nightRules = rules.filter((rule) => /^\.night(__|\s|\.)/.test(rule) && !rule.startsWith('.night {'));
     expect(nightRules.length, 'the .night__* rules were found').toBeGreaterThan(8);

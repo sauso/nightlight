@@ -1103,8 +1103,11 @@ body.in-pip .tile-menu-backdrop {
   cursor: pointer;
 }
 
-.tile-menu__item:hover {
-  background: var(--bg-elevated);
+/* Pointer-only: a hover FILL on a phone stays on the item after a tap (same fault as #1064's rows). */
+@media (hover: hover) {
+  .tile-menu__item:hover {
+    background: var(--bg-elevated);
+  }
 }
 
 .tile-menu__item--active {
@@ -1485,7 +1488,8 @@ body.in-pip .tile-menu-backdrop {
 /* The settings entry: one gear, 44px square (the touch-target floor), on the card's right. It replaced the name/age buttons and
    the "Edit ›" link, which all went to the same place. */
 .night__settings { flex: none; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; background: none; border: none; border-radius: 50%; cursor: pointer; color: var(--night-link); }
-.night__settings:hover { background: var(--night-divider); }
+/* Pointer-only: on a phone the fill would stay on the button after a tap. */
+@media (hover: hover) { .night__settings:hover { background: var(--night-divider); } }
 .night__settings:focus-visible { outline: 2px solid var(--night-link); outline-offset: 2px; }
 .night__sleep { display: block; margin-top: 14px; padding: 14px 0 0; border-top: 1px solid var(--night-divider); color: var(--night-muted); }
 /* The label / duration column, the ring and the chevron on one row; the headline sits under the row, full width, so the ring no

@@ -766,8 +766,10 @@ function WakeItem({ wake, hits, clip, fmtTime, onPlay, onPlayWake, morningAt }) 
 //
 // Expandable only when a saved frame lies near the row; a row with none is a plain line, with no arrow and no
 // empty state. It lists ALL the frames near it, never one picked for the row: a row can span two bed events,
-// and choosing between them here would hide the very frame someone is looking for. The head may wrap onto a
-// second line on a narrow screen rather than push the page sideways.
+// and choosing between them here would hide the very frame someone is looking for. The head is ONE line at 320px
+// for a viewer at home: the right group (chip, duration, arrow) never drops under the time (index.css, the
+// `.sleep-wakes__head--visit` rules). The only wrap left is INSIDE the time cell, for a viewer away from home whose two
+// times each carry a zone suffix and cannot fit; the time wraps there rather than being cut or pushing the page sideways.
 export function VisitItem({ visit, frames, fmtTime, onShowFrame }) {
   const [open, setOpen] = useState(false);
   const expandable = frames.length > 0;
