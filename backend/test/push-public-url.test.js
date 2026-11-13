@@ -329,7 +329,7 @@ describe('★ registerToken drops a malformed base URL instead of storing it —
     // Pins which side of the COALESCE wins. Nothing else in this file moves a device's address from one
     // valid value to another, so a flipped COALESCE (old value always wins) would otherwise go unseen.
     const sid = makeSession(db, 'u-cg');
-    registerToken('tok-c', 'android', 'u-cg', 'http://192.168.1.100:8080', sid);
+    registerToken('tok-c', 'android', 'u-cg', 'http://192.168.1.20:8080', sid);
     registerToken('tok-c', 'android', 'u-cg', GOOD, sid);
     assert.equal(tokenRow('tok-c').base_url, GOOD, 'a device that changed address kept its old one');
   });
@@ -345,8 +345,8 @@ describe('normalizeBaseUrl', () => {
   const ACCEPT = [
     ['https://nightlight.example', 'https://nightlight.example'],
     ['https://nightlight.example/', 'https://nightlight.example'],
-    ['http://192.168.1.100:8080', 'http://192.168.1.100:8080'],
-    ['http://192.168.1.100:8080/', 'http://192.168.1.100:8080'],
+    ['http://192.168.1.20:8080', 'http://192.168.1.20:8080'],
+    ['http://192.168.1.20:8080/', 'http://192.168.1.20:8080'],
     ['HTTPS://Example.COM', 'https://example.com'],
     ['https://a.example:443', 'https://a.example'],
     ['  https://a.example  ', 'https://a.example'],
@@ -354,7 +354,7 @@ describe('normalizeBaseUrl', () => {
     // Underscore is not valid in a DNS name but a LAN machine name can have one, and a browser
     // happily reports it as its origin.
     ['http://nas_box.local:8080', 'http://nas_box.local:8080'],
-    ['HTTP://192.168.1.100', 'http://192.168.1.100'],
+    ['HTTP://192.168.1.20', 'http://192.168.1.20'],
     // Single-label hosts are what a home server is usually reached by (a NAS name, localhost), and a
     // five-digit port is legal: both were unpinned until a review proposed mutants that dropped them.
     ['http://tower:8080', 'http://tower:8080'],
@@ -535,7 +535,7 @@ describe("★ sendToAll: each device is sent ITS OWN address, never another devi
 
     // tok-n is a device that never reported an address (an older app). It must get NO address at all —
     // not a neighbour's — which a fixture where every device has one cannot tell apart.
-    const own = { 'tok-a': 'https://admin-phone.example', 'tok-c': 'http://192.168.1.100:8080', 'tok-e': EVIL, 'tok-n': null };
+    const own = { 'tok-a': 'https://admin-phone.example', 'tok-c': 'http://192.168.1.20:8080', 'tok-e': EVIL, 'tok-n': null };
     registerToken('tok-a', 'android', 'u-admin', own['tok-a'], makeSession(db, 'u-admin'));
     registerToken('tok-c', 'android', 'u-cg', own['tok-c'], makeSession(db, 'u-cg'));
     registerToken('tok-e', 'android', 'u-cg', own['tok-e'], makeSession(db, 'u-cg'));

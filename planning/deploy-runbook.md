@@ -23,8 +23,9 @@ you read when something does not look right, and it records the traps that have 
 | ☐ | `node scripts/check-changelog.mjs` exit 0 | |
 | ☐ | `df -h /c \| tail -1` shows > 2 GB free | C: hit 100% mid-release once; fastest safe fix is `npm cache clean --force`. |
 
-**Access.** `ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100`. Containers: **`nightlight`** (production)
-and **`nightlight-dev`** (staging), both on `br0.10` with their own routable LAN IPs.
+**Access.** `ssh -i ~/.ssh/<key-file> root@<server-ip>` (the real address and key file name are kept in the
+owner's private notes, not in this repo). Containers: **`nightlight`** (production) and **`nightlight-dev`**
+(staging), each on its own network address.
 
 ⚠️ **Prod database writes are blocked to the agent** (reads are fine), as are prod API writes. Anything
 that needs one — pressing a button, changing a setting — is handed to the owner to do in the app.
@@ -57,7 +58,7 @@ gh run watch <id> --repo sauso/nightlight --exit-status     # GATE: must end "su
 
 ### 1.3 Deploy
 ```bash
-ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100 'bash /boot/config/nightlight-deploy.sh dev'
+ssh -i ~/.ssh/<key-file> root@<server-ip> 'bash /boot/config/nightlight-deploy.sh dev'
 ```
 
 ⚠️⚠️ **NEVER hand-roll `docker run`.** It recreates the container without the
@@ -67,7 +68,7 @@ this cannot happen by accident.
 
 ### 1.4 Verify — and mind the trap in the script's own output
 ```bash
-ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100 '
+ssh -i ~/.ssh/<key-file> root@<server-ip> '
   c=nightlight-dev
   docker inspect -f "managed={{index .Config.Labels \"net.unraid.docker.managed\"}}" $c
   docker inspect -f "{{range .Config.Env}}{{println .}}{{end}}" $c | grep NIGHTLIGHT_GIT_SHA
@@ -171,8 +172,8 @@ publication finds nothing. Publishing earlier would disclose with no released fi
 ## 3. Production
 
 ```bash
-ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100 'bash /boot/config/nightlight-deploy.sh prod'
-ssh -i ~/.ssh/unraid_nightlight root@192.168.1.100 'bash /boot/config/nightlight-deploy.sh dev'  # resync staging
+ssh -i ~/.ssh/<key-file> root@<server-ip> 'bash /boot/config/nightlight-deploy.sh prod'
+ssh -i ~/.ssh/<key-file> root@<server-ip> 'bash /boot/config/nightlight-deploy.sh dev'  # resync staging
 ```
 
 Verify exactly as in §1.4, against the **release commit** — remembering that the OCI label is empty on

@@ -10,7 +10,7 @@ reason about. The container needs its own routable LAN IP so WebRTC has no NAT/I
 (MediaMTX advertises that IP to browsers). There are two supported ways to give it one: **host
 networking** (the README quick-start default — the container shares the host's IP), or an
 **ipvlan network with a dedicated IP**. The Unraid prod + staging deployments both use the latter
-(both on `br0.10` — see Branching and deploy pipeline in `CLAUDE.md`); the host-networking path is what an
+(both on a custom network — see Branching and deploy pipeline in `CLAUDE.md`); the host-networking path is what an
 out-of-the-box `docker run` uses.
 
 ## The video pipeline (the core thing to understand before touching camera code)

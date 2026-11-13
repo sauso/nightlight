@@ -291,7 +291,7 @@ About that one shared address:
   like any other server setting that only an admin can change.
 - **What counts as an address.** A plain `http://` or `https://` address with an optional port — the
   same thing your browser shows before the first `/` — such as `https://nightlight.example.com` or
-  `http://192.168.1.100:8080`. Anything else (another scheme, a login name or password, a path, a
+  `http://192.168.1.20:8080`. Anything else (another scheme, a login name or password, a path, a
   `?query` or `#fragment`, or spaces or unusual characters inside it) is ignored. The phone still
   registers and still receives its alerts; it just contributes no address. Only the *shape* is
   checked — the server cannot know whether an address is actually reachable from outside, or that it
