@@ -1353,7 +1353,8 @@ body.in-pip .tile-menu-backdrop {
 /* Enlarged child photo in a modal (tapped from the detail hero). */
 .photo-full { display: block; width: 100%; border-radius: 12px; }
 .night__id { flex: 1; min-width: 0; }
-.night__name { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 800; line-height: 1.1; }
+/* One line, cut with an ellipsis: a long or unbroken name must not push the gear off a 375px card (.night__id is a min-width: 0 flex child). */
+.night__name { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 800; line-height: 1.1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .night__age { display: block; font-size: 12.5px; color: var(--night-muted); margin-top: 3px; }
 /* The settings entry: one gear, 44px square (the touch-target floor), on the card's right. It replaced the name/age buttons and
    the "Edit ›" link, which all went to the same place. */
@@ -3191,12 +3192,6 @@ input[type='range'] {
 
 .review-card__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .review-card__go { color: var(--accent-line); font-size: 20px; padding-right: 12px; }
-
-.review-card__dismiss {
-  order: 2; align-self: flex-start; flex-shrink: 0;
-  padding: 10px 12px; background: none; border: 0; cursor: pointer; color: var(--text-secondary);
-}
-.review-card__dismiss:hover { color: var(--text-primary); }
 
 /* The review screen (pages/NightReview.jsx): one question, one primary action, everything else quiet.
    Tokens only; the focus ring is the global :focus-visible one. */

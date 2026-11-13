@@ -22,6 +22,8 @@ const WAKE = '2026-09-01 20:47:00';
 const ONSET = '2026-09-01 09:10:00';
 const PENDING = { state: 'ask', night_date: '2026-09-01', onset_at: ONSET, wake_at: WAKE, transition_count: 3 };
 const DONE = { state: 'done', night_date: '2026-09-01', true_onset_at: null, true_wake_at: WAKE, true_in_bed_at: null, nobody_in_bed: false };
+const DST_EARLIER = '2026-04-04 15:30:00';
+const DST_LATER = '2026-04-04 16:30:00';
 const REVIEW = {
   child_id: 'c-1',
   night_date: '2026-09-01',
@@ -101,6 +103,25 @@ describe('"That\'s right" on the night card', () => {
     expect(putCalls()).toHaveLength(1);
   });
 
+  test('★ two taps before the read has even answered are still one read and one save, and both buttons are disabled meanwhile', async () => {
+    let answer;
+    vi.spyOn(api, 'get').mockImplementation((path) => (String(path).endsWith('/review/pending')
+      ? Promise.resolve(PENDING)
+      : new Promise((resolve) => { answer = resolve; })));
+    vi.spyOn(api, 'put').mockResolvedValue({});
+    const { user } = renderAsAdmin(routes, { settings: { timezone: TZ } });
+    const yes = await thatsRight();
+    await user.click(yes);
+    await user.click(yes);
+    await user.click(screen.getByRole('button', { name: 'Not quite' }));
+    expect(yes).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Not quite' })).toBeDisabled();
+    expect(screen.queryByText(/review screen for/)).not.toBeInTheDocument();
+    answer(REVIEW);
+    await waitFor(() => expect(putCalls()).toHaveLength(1));
+    expect(api.get.mock.calls.filter(([p]) => String(p).includes('/review/2026-09-01'))).toHaveLength(1);
+  });
+
   test('a refused save says why, stays a question, and can be tried again', async () => {
     mockApi({ put: () => Promise.reject(new Error('The settings for this night changed while you were reviewing.')) });
     const { user } = renderAsAdmin(routes, { settings: { timezone: TZ } });
@@ -116,10 +137,15 @@ describe('"That\'s right" on the night card', () => {
   test.each([
     ['two wake estimates 10+ minutes apart (the screen asks "Up between A and B")', { wake_range: { from: '2026-09-01 20:30:00', to: '2026-09-01 20:47:00' } }],
     ['the night already carries an answer (another phone got there first)', { review: { true_wake_at: '2026-09-01 20:30:00' } }],
+    // The review's flag is a raw 0/1 column on this route. Saving a wake over it would clear "no one was in the bed" (the screen
+    // shows the flag's own question instead of "That's right"), so a stale card must hand it over.
+    ['"no one was in the bed" was answered on another device (the raw 1 the route sends)', { review: { nobody_in_bed: 1 } }],
     ['the screen has no wake to confirm', { computed: { status: 'no_data', onset_at: null, wake_at: null } }],
     ['the screen\'s wake is not the one the card showed (the card reads the stored night, the screen recomputes)', { computed: { status: 'ok', onset_at: ONSET, wake_at: '2026-09-01 20:52:00' } }],
-  ])('★ %s: opens the review screen and writes nothing', async (_why, over) => {
-    mockApi({ review: { ...REVIEW, ...over } });
+    // Clocks go back in Melbourne on 2026-04-05: 15:30Z (AEDT) and 16:30Z (AEST) BOTH read 02:30. The card showed the first.
+    ['the recomputed wake reads the same on the clock but is an hour away (clocks went back)', { computed: { status: 'ok', onset_at: ONSET, wake_at: DST_LATER } }, { pending: { ...PENDING, wake_at: DST_EARLIER } }],
+  ])('★ %s: opens the review screen and writes nothing', async (_why, over, extra = {}) => {
+    mockApi({ review: { ...REVIEW, ...over }, ...(extra.pending ? { pending: [extra.pending] } : {}) });
     const { user } = renderAsAdmin(routes, { settings: { timezone: TZ } });
     await user.click(await thatsRight());
     expect(await screen.findByText('review screen for c-1 on 2026-09-01')).toBeInTheDocument();
@@ -148,7 +174,7 @@ describe('"That\'s right" on the night card', () => {
   // as the parent's own answer. Neither the question nor a button that sends a time may be there yet.
   test('★ nothing that sends a time works before the real timezone has arrived', async () => {
     mockApi();
-    const { rerenderWith } = renderAsAdmin(routes, { settings: { timezone: 'UTC' }, settingsLoaded: false });
+    const { rerenderWith } = renderAsAdmin(routes, { settings: { timezone: 'UTC' }, settingsLoaded: false, loading: true });
     await waitFor(() => expect(api.get).toHaveBeenCalled());
     const yes = await thatsRight();
     expect(yes).toBeDisabled();
@@ -158,6 +184,19 @@ describe('"That\'s right" on the night card', () => {
     rerenderWith({ settings: { timezone: TZ }, settingsLoaded: true });
     expect(await screen.findByText('Up at 06:47. Is that right?')).toBeInTheDocument();
     expect(await thatsRight()).not.toBeDisabled();
+  });
+
+  // A FAILED /settings request never resolves this visit (`loaded` stays false while `loading` goes false), so waiting would be a
+  // lie: no time is shown or saved, and the person gets the one button into the screen, which says what is wrong.
+  test('★ when /settings failed, no time is shown or saved: one button into the review screen', async () => {
+    mockApi();
+    const { user } = renderAsAdmin(routes, { settings: { timezone: 'UTC' }, settingsLoaded: false, loading: false });
+    expect(await screen.findByText(/Tap to check the times/)).toBeInTheDocument();
+    expect(screen.queryByText(/Is that right\?/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'That’s right' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Check the times' }));
+    expect(await screen.findByText('review screen for c-1 on 2026-09-01')).toBeInTheDocument();
+    expect(putCalls()).toHaveLength(0);
   });
 });
 
@@ -171,6 +210,22 @@ describe('confirmWakeBody', () => {
   test('the wake is the wall clock in the GIVEN zone, so the same night reads differently under another one', () => {
     expect(confirmWakeBody(REVIEW, 'UTC', WAKE).true_wake_local).toBe('20:47');
     expect(confirmWakeBody(REVIEW, TZ, WAKE).true_wake_local).toBe('06:47');
+  });
+
+  test('★ "no one was in the bed" blocks a confirm, as a stored wake does', () => {
+    expect(confirmWakeBody({ ...REVIEW, review: { nobody_in_bed: 1 } }, TZ, WAKE)).toBeNull();
+    expect(confirmWakeBody({ ...REVIEW, review: { nobody_in_bed: 0 } }, TZ, WAKE)).not.toBeNull();
+  });
+
+  test('★ the shown wake is compared as an INSTANT: the two readings of 02:30 when clocks go back are not the same wake', () => {
+    const night = (wake) => ({ ...REVIEW, computed: { status: 'ok', onset_at: ONSET, wake_at: wake } });
+    // Both read 02:30 in Melbourne, an hour apart.
+    expect(confirmWakeBody(night(DST_LATER), TZ, DST_EARLIER)).toBeNull();
+    expect(confirmWakeBody(night(DST_EARLIER), TZ, DST_LATER)).toBeNull();
+    expect(confirmWakeBody(night(DST_LATER), TZ, DST_LATER).true_wake_local).toBe('02:30');
+    // The same minute with different seconds is the same wake; an unreadable instant is never the same.
+    expect(confirmWakeBody(night('2026-04-04 16:30:40'), TZ, DST_LATER)).not.toBeNull();
+    expect(confirmWakeBody(night(DST_LATER), TZ, 'not a time')).toBeNull();
   });
 
   test('a missing onset is sent as null (recorded as "no opinion"), never left out', () => {

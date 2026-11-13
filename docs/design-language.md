@@ -115,13 +115,15 @@ the quiet birthday line use `--night-link`. The score ring's colours on this car
    (`.night__headline`, 15px bold, ends in an ellipsis). No time range, no wake-up count, no longest stretch, no "In bed" line, no
    bullet list and no estimate note: they are all on the sleep page, one tap away. The button's name still carries the headline and
    the score ("View sleep detail and history. A fairly steady night overall. Sleep score 82, Good").
-3. A hairline, then the **morning question** (`components/MorningReviewCard.jsx`) while a night is waiting to be reviewed: "Up at
+3. Under the sleep row, a quiet "Add a birthday in settings to see a score sooner" line, only when a night has no score for want of a birthday.
+4. A hairline, then the **morning question** (`components/MorningReviewCard.jsx`) while a night is waiting to be reviewed: "Up at
    6:20 AM. Is that right?" with two 44px buttons, **That's right** (the card's own periwinkle, `--night-action` with
    `--night-on-action` text, which are NOT the theme's `--accent` pair because this card is the same navy in both themes) and
    **Not quite** (an outline). It is asked once, here; there is no separate review card below the hero. Answered, it becomes a
    one-line receipt ("Thanks — that's recorded / You said up at 6:20 AM. Tap to change it.") in the same place. A small dismiss
-   (44px hit area) is kept at the question's right edge, as on the old card.
-4. A quiet "Add a birthday in settings to see a score sooner" line only when a night has no score for want of a birthday.
+   (44px hit area) is kept at the question's right edge, as on the old card. While the app's settings are still loading the
+   question is not drawn (no time is shown in a guessed timezone); if the settings request failed, the card shows "Was last night
+   right? Tap to check the times." with one **Check the times** button into the review screen and no way to save from the card.
 
 States without a score (tracking off, loading, no data, no clear sleep, an empty bed) keep their wording and show no ring.
 Colour is never the only signal: the band word and the number are drawn, and the button's name says both.

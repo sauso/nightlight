@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X } from 'lucide-react';
 import { api } from '../lib/api.js';
@@ -27,12 +27,18 @@ export default function MorningReviewCard({ childId, fmtTime }) {
   // ⚠️ NOTHING THAT SENDS A TIME WORKS UNTIL THE REAL TIMEZONE HAS ARRIVED (#512, same rule as NightReview.jsx). Until
   // /settings resolves `tz` is the placeholder 'UTC', so a time read in it and saved would be a wrong time stored as the
   // parent's own answer. The question is not drawn either, so the placeholder zone's time is never on screen to confirm.
-  const { settings, loaded: settingsLoaded } = useSettings();
+  const { settings, loaded: settingsLoaded, loading: settingsLoading } = useSettings();
+  // `loading` false with `loaded` still false is a FAILED first /settings request (SettingsContext clears `loading` when a request
+  // settles and only a success sets `loaded`), so this visit is stuck on the placeholder zone for good. Same reading as NightReview.jsx.
+  const settingsFailed = !settingsLoaded && !settingsLoading;
   const tz = settings?.timezone;
   const [card, setCard] = useState(null);
   const [hidden, setHidden] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // A guard that is true the instant a tap starts, before React has re-rendered the disabled buttons: two taps in one frame must
+  // still be one save.
+  const inFlight = useRef(false);
 
   const loadPending = useCallback(
     () => api.get(`/children/${childId}/review/pending`),
@@ -68,8 +74,15 @@ export default function MorningReviewCard({ childId, fmtTime }) {
   // today's tap. On success the pending state is read again so the receipt comes from the server's own view of the answer;
   // if only that read fails, the receipt is built from what was just saved, because a prompt that vanishes looks like a
   // failed save.
+  //
+  // ⚠️ KNOWN LIMIT, THE SAME AS THE REVIEW SCREEN'S OWN: the PUT has no server-side precondition (it upserts), so a second device
+  // that answers between this GET and this PUT is overwritten. The screen has the identical gap between ITS load and ITS save;
+  // closing it is a server change (an "unanswered" precondition) and out of scope here. What this does to keep the window small:
+  // the PUT goes out immediately after the GET's answer, with nothing awaited in between, and both buttons are disabled (and
+  // `inFlight` set) for the whole round trip, so one tap cannot become two saves.
   const confirm = async () => {
-    if (busy || !settingsLoaded) return;
+    if (inFlight.current || busy || !settingsLoaded) return;
+    inFlight.current = true;
     setBusy(true);
     setError('');
     try {
@@ -85,6 +98,7 @@ export default function MorningReviewCard({ childId, fmtTime }) {
     } catch (e) {
       setError(e?.message || 'Could not save');
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
@@ -110,8 +124,11 @@ export default function MorningReviewCard({ childId, fmtTime }) {
     );
   }
 
-  // A night the app found no wake for has no time to confirm: one button into the screen, which opens at its time field.
-  const hasWake = Boolean(card.wake_at);
+  // A night the app found no wake for has no time to confirm: one button into the screen, which opens at its time field. The same
+  // goes when /settings FAILED to load: the time cannot be read in the real zone, so no time is shown and nothing here can save one;
+  // the screen explains the state (and still offers "No one was in the bed"). While settings are merely LOADING the question is just
+  // not drawn yet, and arrives a moment later.
+  const hasWake = Boolean(card.wake_at) && !settingsFailed;
   return (
     <div className="night__review">
       {/* A 44px hit area around a 16px icon, top right of the question, where the old card kept it. */}
