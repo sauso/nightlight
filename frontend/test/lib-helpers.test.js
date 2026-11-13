@@ -145,7 +145,7 @@ describe('showsInBed (issue #501)', () => {
       in_bed_at: '2026-09-01 08:49:20', in_bed_corrected: true,
     };
     expect(showsInBed(parent)).toBe(true);
-    expect(showsInBed({ ...parent, in_bed_corrected: false }), 'the detector's own put-down stays hidden').toBe(false);
+    expect(showsInBed({ ...parent, in_bed_corrected: false }), 'the detector own put-down stays hidden').toBe(false);
   });
 
   test('...but a put-down the parent gave that is not a minute before asleep still reads as one time', () => {
