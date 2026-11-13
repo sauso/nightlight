@@ -637,11 +637,11 @@ describe('SleepDetail: the score follows the night on screen', () => {
   // page, so no fact becomes unreachable. Fails if the grid is hidden for an unscored night or shown twice.
   test('the on-page stats grid shows only for a night without a score', async () => {
     const first = mount(() => ({ ...BASE, wake_count: 2, longest_stretch_minutes: 200, score: SCORE }));
-    await screen.findByText('Night timeline');
+    await screen.findByText('Timeline', { exact: true });
     expect(screen.queryByText('Longest stretch')).not.toBeInTheDocument();
     first.unmount();
     mount(() => ({ ...BASE, wake_count: 2, longest_stretch_minutes: 200 }));
-    await screen.findByText('Night timeline');
+    await screen.findByText('Timeline', { exact: true });
     expect(screen.getByText('Longest stretch')).toBeInTheDocument();
     expect(screen.getByText('Wake-ups')).toBeInTheDocument();
   });
@@ -650,7 +650,7 @@ describe('SleepDetail: the score follows the night on screen', () => {
   // otherwise have handed to the sheet. Fails if the grid is decided by a different test than the card's.
   test('an in-progress night carrying a stale score still shows the facts grid, and no score claim', async () => {
     mount(() => ({ ...BASE, in_progress: true, wake_at: null, wake_count: 2, longest_stretch_minutes: 200, score: SCORE }));
-    await screen.findByText('Night timeline');
+    await screen.findByText('Timeline', { exact: true });
     expect(screen.getByText('Longest stretch')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Why this score/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/the sleep score included/)).not.toBeInTheDocument();
