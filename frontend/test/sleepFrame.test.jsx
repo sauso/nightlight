@@ -184,16 +184,17 @@ describe('AppHeader: the frame additions', () => {
 
   test('★ no band line and no actions slot unless asked for: every other page is unchanged', () => {
     const { container } = renderHeader({});
-    expect(container.querySelector('.app-header__band')).toBeNull();
+    expect(container.querySelector('header').className).toBe('app-header');
     expect(container.querySelector('.app-header__actions')).toBeNull();
   });
 
-  test('★ the band line is decorative: aria-hidden, and it names the band in a modifier class only', () => {
+  test('★ the band line is a modifier class on the header itself (painted over the bar, nothing in the accessibility tree)', () => {
+    // Not a child element: a child positioned at the bar's edge could be drawn on the page background, where the band colours
+    // do not reach 3:1 (review of PR #1061). The colour is in CSS, checked against --bar in paletteTokens.test.jsx.
     const { container } = renderHeader({ bandLine: 'fair' });
-    const line = container.querySelector('.app-header__band');
-    expect(line.getAttribute('aria-hidden')).toBe('true');
-    expect(line.className).toContain('app-header__band--fair');
-    expect(line.textContent).toBe(''); // a colour is never text
+    const header = container.querySelector('header');
+    expect(header.className).toContain('app-header--band-fair');
+    expect(header.querySelector('[class*="band"]')).toBeNull();
   });
 
   test('actions are rendered in the title row', () => {
@@ -204,36 +205,74 @@ describe('AppHeader: the frame additions', () => {
 
 describe('stripDates: which nights the strip shows', () => {
   const row = (d) => ({ night_date: d });
+  const MIN = '2026-08-01'; // the calendar's floor when the newest night is 2026-08-30 (30 nights, both ends included)
+  const days = (from, to) => { const out = []; for (let d = from; d <= to; d = d.slice(0, 8) + String(Number(d.slice(8)) + 1).padStart(2, '0')) out.push(d); return out; };
+  const MONTH = days('2026-08-01', '2026-08-30').map(row);
 
   test('seven calendar dates ending at the newest night, oldest first', () => {
-    const rows = ['2026-08-24', '2026-08-25', '2026-08-26', '2026-08-27', '2026-08-28', '2026-08-29', '2026-08-30'].map(row);
-    expect(stripDates('2026-08-30', rows)).toEqual(['2026-08-24', '2026-08-25', '2026-08-26', '2026-08-27', '2026-08-28', '2026-08-29', '2026-08-30']);
+    expect(stripDates('2026-08-30', MIN, MONTH, null)).toEqual(days('2026-08-24', '2026-08-30'));
     expect(STRIP_NIGHTS).toBe(7);
   });
 
+  test('★ a selected night among the newest seven keeps the newest-seven window', () => {
+    expect(stripDates('2026-08-30', MIN, MONTH, '2026-08-26')).toEqual(days('2026-08-24', '2026-08-30'));
+    expect(stripDates('2026-08-30', MIN, MONTH, '2026-08-24')).toEqual(days('2026-08-24', '2026-08-30'));
+  });
+
+  test('★ an older selected night slides the window to put it in the CENTRE: its neighbours are in the strip on both sides', () => {
+    const window = stripDates('2026-08-30', MIN, MONTH, '2026-08-15');
+    expect(window).toEqual(days('2026-08-12', '2026-08-18'));
+    expect(window[3]).toBe('2026-08-15');
+  });
+
+  test('★ the first night of the history window: the window stops at it (clamped, still seven wide)', () => {
+    expect(stripDates('2026-08-30', MIN, MONTH, '2026-08-01')).toEqual(days('2026-08-01', '2026-08-07'));
+    expect(stripDates('2026-08-30', MIN, MONTH, '2026-08-03')).toEqual(days('2026-08-01', '2026-08-07'));
+  });
+
+  test('★ the last browsable night is in the newest-seven window, the window never runs past it', () => {
+    expect(stripDates('2026-08-30', MIN, MONTH, '2026-08-30').at(-1)).toBe('2026-08-30');
+    // the edge of "older than the newest seven": 08-23 centres on 08-26, still inside the last night
+    expect(stripDates('2026-08-30', MIN, MONTH, '2026-08-23')).toEqual(days('2026-08-20', '2026-08-26'));
+  });
+
+  test('★ a night older than the first stored one (picked from the calendar) is in the strip and reaches the floor: dashes either side', () => {
+    const rows = days('2026-08-10', '2026-08-30').map(row);
+    const window = stripDates('2026-08-30', MIN, rows, '2026-08-05');
+    expect(window).toEqual(days('2026-08-02', '2026-08-08'));
+    expect(window).toContain('2026-08-05');
+  });
+
   test('★ a child with fewer than seven nights sees what exists, not seven', () => {
-    expect(stripDates('2026-08-30', [row('2026-08-29'), row('2026-08-28')])).toEqual(['2026-08-28', '2026-08-29', '2026-08-30']);
+    expect(stripDates('2026-08-30', MIN, [row('2026-08-29'), row('2026-08-28')], null)).toEqual(['2026-08-28', '2026-08-29', '2026-08-30']);
+  });
+
+  test('a selected night outside the page range (or none) leaves the newest-seven window', () => {
+    expect(stripDates('2026-08-30', MIN, MONTH, '2026-09-15')).toEqual(days('2026-08-24', '2026-08-30'));
+    expect(stripDates('2026-08-30', MIN, MONTH, '2026-07-01')).toEqual(days('2026-08-24', '2026-08-30'));
+    expect(stripDates('2026-08-30', MIN, MONTH, undefined)).toEqual(days('2026-08-24', '2026-08-30'));
   });
 
   test('the live night (no stored row yet) is still in the strip, because the page lands on it', () => {
-    expect(stripDates('2026-08-31', [row('2026-08-30'), row('2026-08-29')]).at(-1)).toBe('2026-08-31');
+    expect(stripDates('2026-08-31', MIN, [row('2026-08-30'), row('2026-08-29')], null).at(-1)).toBe('2026-08-31');
   });
 
   test('a gap in the stored nights stays a (dash) item: it is a night someone may open', () => {
-    const dates = stripDates('2026-08-30', [row('2026-08-30'), row('2026-08-28'), row('2026-08-24')]);
+    const dates = stripDates('2026-08-30', MIN, [row('2026-08-30'), row('2026-08-28'), row('2026-08-24')], null);
     expect(dates).toContain('2026-08-29');
     expect(dates).toHaveLength(7);
   });
 
   test('crosses a month and a year boundary by calendar, not by subtracting 1 from the day', () => {
-    expect(stripDates('2027-01-02', [row('2026-12-20')])).toEqual(['2026-12-27', '2026-12-28', '2026-12-29', '2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02']);
+    expect(stripDates('2027-01-02', '2026-12-04', [row('2026-12-20')], null)).toEqual(['2026-12-27', '2026-12-28', '2026-12-29', '2026-12-30', '2026-12-31', '2027-01-01', '2027-01-02']);
+    expect(stripDates('2027-01-02', '2026-12-04', [row('2026-12-04')], '2026-12-20')).toEqual(['2026-12-17', '2026-12-18', '2026-12-19', '2026-12-20', '2026-12-21', '2026-12-22', '2026-12-23']);
   });
 
   test('★ nothing to show for no rows, a non-list, rows without a usable date, or no newest night', () => {
-    expect(stripDates('2026-08-30', [])).toEqual([]);
-    expect(stripDates('2026-08-30', null)).toEqual([]);
-    expect(stripDates('2026-08-30', { nights: [] })).toEqual([]);
-    expect(stripDates('2026-08-30', [{}, { night_date: 5 }, { night_date: 'soon' }, null])).toEqual([]);
-    expect(stripDates(null, [row('2026-08-30')])).toEqual([]);
+    expect(stripDates('2026-08-30', MIN, [], null)).toEqual([]);
+    expect(stripDates('2026-08-30', MIN, null, null)).toEqual([]);
+    expect(stripDates('2026-08-30', MIN, { nights: [] }, null)).toEqual([]);
+    expect(stripDates('2026-08-30', MIN, [{}, { night_date: 5 }, { night_date: 'soon' }, null], null)).toEqual([]);
+    expect(stripDates(null, MIN, [row('2026-08-30')], null)).toEqual([]);
   });
 });

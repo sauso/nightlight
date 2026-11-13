@@ -21,7 +21,7 @@
 // send someone to check the wrong thing.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within, fireEvent, act, render } from '@testing-library/react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Link } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver, renderAs, forEachRole } from './helpers/render.jsx';
 import SleepDetail, { addDays, framesForVisit, VisitItem } from '../src/pages/SleepDetail.jsx';
 import NightReview from '../src/pages/NightReview.jsx';
@@ -457,6 +457,30 @@ describe('moving between nights', () => {
     // precisely the PR #229 class, an inclusive/exclusive slip that would offer a 31st night the
     // underlying activity_samples retention does not cover, which reads as data silently missing.
     expect(min).toBe(addDays(picker.getAttribute('max'), -29));
+  });
+
+  // The old arrows were walked to BOTH ends by a test; the replacement only read the input's min (review of PR #1061). These open
+  // the floor night and the newest night and check the page loads each and the selected date follows.
+  test('★ the FLOOR night and the NEWEST night can both be opened, and the page loads each', async () => {
+    const get = mockSleep();
+    mount();
+    const picker = await screen.findByLabelText('Pick a night');
+    const min = picker.getAttribute('min');
+    const max = picker.getAttribute('max');
+    await waitFor(() => expect(lastNightPath(get)).toBe(`/children/kid-1/sleep/${max}?detail=1&context=auto`));
+
+    fireEvent.change(screen.getByLabelText('Pick a night'), { target: { value: min } });
+    await waitFor(() => expect(lastNightPath(get)).toBe(`/children/kid-1/sleep/${min}?detail=1&context=auto`));
+    expect(screen.getByLabelText('Pick a night').value).toBe(min);
+    // The strip is at the very start of the history: nothing older than the floor is offered.
+    const labels = screen.getAllByRole('button', { name: /score|no score/ }).map((b) => b.getAttribute('aria-label'));
+    expect(labels[0]).toMatch(/(Aug 1|1 Aug),/);
+    expect(labels).toHaveLength(7);
+
+    fireEvent.change(screen.getByLabelText('Pick a night'), { target: { value: max } });
+    await waitFor(() => expect(lastNightPath(get)).toBe(`/children/kid-1/sleep/${max}?detail=1&context=auto`));
+    expect(screen.getByLabelText('Pick a night').value).toBe(max);
+    expect(screen.getByRole('heading', { level: 2, name: /^Night of .*(Aug 30|30 Aug)/ })).toBeInTheDocument();
   });
 
   test('picking a date from the calendar loads that night', async () => {
@@ -1679,9 +1703,47 @@ describe('UI refresh PR E: the frame', () => {
   const stripGroup = () => screen.queryByRole('group', { name: 'Recent nights' });
   const stripItems = () => within(stripGroup()).getAllByRole('button');
   const stripBar = (btn) => btn.querySelector('.sleep-strip__bar').className;
-  const bandLineClass = () => document.querySelector('.app-header__band')?.className;
+  const bandLineClass = () => document.querySelector('.app-header')?.className;
   const scored = (score, extra = {}) => ({ score, band: 'fair', early_estimate: false, version: 2, provisional: false, low_confidence: false,
     low_confidence_reasons: [], capped_by: null, unwatched_minutes: 0, components: [], ...extra });
+
+  describe('switching to another child', () => {
+    // The page stays mounted when the route moves to another child, and /sleep/live has to answer before the newest night is known
+    // again. Held in plain state, the new child spent that time with the PREVIOUS child's newest night, so its strip rows were drawn
+    // against the wrong night (review of PR #1061).
+    test('★ the strip never draws the new child’s rows against the previous child’s newest night', async () => {
+      const KID2 = { id: 'kid-2', name: 'Child C' };
+      let releaseLive;
+      vi.spyOn(api, 'get').mockImplementation((path) => {
+        if (path.includes('/children/kid-2/sleep/live')) return new Promise((resolve) => { releaseLive = () => resolve({ scope: 'last', night: { night_date: '2026-09-02' } }); });
+        if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'last', night: { night_date: '2026-08-30' } });
+        if (path.includes('/sleep/insights')) return Promise.resolve(null);
+        if (path.includes('/children/kid-2/sleep?nights=')) return Promise.resolve({ nights: [{ night_date: '2026-08-28', score: scored(61) }, { night_date: '2026-08-27', score: scored(62) }] });
+        if (path.includes('/sleep?nights=')) return Promise.resolve({ nights: STRIP_ROWS });
+        if (path.includes('/sleep/')) return Promise.resolve(NIGHT);
+        return Promise.resolve(null);
+      });
+      const { user } = renderAsAdmin(
+        <><Link to="/children/kid-2/sleep">other child</Link><Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes></>,
+        { kids: [KID, KID2], settings: { timezone: 'Australia/Melbourne' }, route: '/children/kid-1/sleep' }
+      );
+      await screen.findByRole('group', { name: 'Recent nights' });
+      expect(stripItems()).toHaveLength(7);
+
+      await user.click(screen.getByRole('link', { name: 'other child' }));
+      // The new child's live night has not answered: no newest night is known, so no strip (not child 1's, and not child 2's rows
+      // drawn against child 1's 2026-08-30: its rows are older than that, so the old code DID draw them), and no calendar either.
+      await act(async () => {});
+      expect(stripGroup()).toBeNull();
+      expect(screen.queryByLabelText('Pick a night')).toBeNull();
+
+      await act(async () => { releaseLive(); });
+      await screen.findByRole('group', { name: 'Recent nights' });
+      expect(stripItems().map((b) => b.getAttribute('aria-label')).at(-1)).toMatch(/(Sep\w* 2|2 Sep\w*), no score/);
+      expect(stripItems().map((b) => b.getAttribute('aria-label')).some((l) => /(Aug 28|28 Aug), score 61/.test(l))).toBe(true);
+      expect(screen.getByLabelText('Pick a night').getAttribute('max')).toBe('2026-09-02');
+    });
+  });
 
   describe('the "⋯" menu', () => {
     test('★ an admin on an ordinary night has a menu with Recompute in it, and nothing else', async () => {
@@ -1794,23 +1856,23 @@ describe('UI refresh PR E: the frame', () => {
         },
       });
       const { user } = mount();
-      await waitFor(() => expect(bandLineClass()).toContain('app-header__band--fair'));
+      await waitFor(() => expect(bandLineClass()).toContain('app-header--band-fair'));
       await user.click(await screen.findByRole('button', { name: /(Aug 29|29 Aug), score/ }));
-      await waitFor(() => expect(bandLineClass()).toContain('app-header__band--early'));
+      await waitFor(() => expect(bandLineClass()).toContain('app-header--band-early'));
     });
 
     test('a night with no score (and the moments before the night has loaded) is neutral', async () => {
       mockSleep();
       mount();
-      expect(bandLineClass()).toContain('app-header__band--none'); // before the night has loaded
+      expect(bandLineClass()).toContain('app-header--band-none'); // before the night has loaded
       await screen.findByText('Wake-ups');
-      expect(bandLineClass()).toContain('app-header__band--none'); // NIGHT carries no score
+      expect(bandLineClass()).toContain('app-header--band-none'); // NIGHT carries no score
     });
 
     test('a below-the-lowest-band score is "low", which has its own colour (not neutral)', async () => {
       mockSleep({ night: { ...NIGHT, score: scored(41, { band: null }) } });
       mount();
-      await waitFor(() => expect(bandLineClass()).toContain('app-header__band--low'));
+      await waitFor(() => expect(bandLineClass()).toContain('app-header--band-low'));
     });
   });
 
@@ -1824,7 +1886,7 @@ describe('UI refresh PR E: the frame', () => {
       expect(await screen.findByRole('heading', { level: 2, name: /^Night of .*(Aug 12|12 Aug)/ })).toBeInTheDocument();
     });
 
-    test('★ every night the old arrows could reach is reachable: the strip covers the newest seven, the calendar the whole window', async () => {
+    test('★ every night the old arrows could reach is reachable: the strip the newest seven (and a window round any older night), the calendar the whole window', async () => {
       mockSleep();
       mount();
       await screen.findByRole('group', { name: 'Recent nights' });
@@ -1886,14 +1948,83 @@ describe('UI refresh PR E: the frame', () => {
       expect(current[0].getAttribute('aria-label')).toMatch(/Aug 26|26 Aug/);
     });
 
-    test('a night picked from the calendar that is older than the strip leaves nothing marked (the title names it)', async () => {
+    // The strip is a seven-night WINDOW that always holds the selected night (review of PR #1061: with a fixed newest-seven window,
+    // an older night picked from the calendar left the strip with nothing to tap, and its neighbour needed the calendar again,
+    // where the arrows it replaced were one tap each).
+    const dayLabel = (b) => b.querySelector('.sleep-strip__date').textContent;
+    const stripDays = () => stripItems().map(dayLabel);
+    const current = () => stripItems().filter((b) => b.getAttribute('aria-current') === 'date');
+    const pick = (date) => fireEvent.change(screen.getByLabelText('Pick a night'), { target: { value: date } });
+
+    test('★★ an older night picked from the calendar is IN the strip, marked, in the centre, with its neighbours one tap away', async () => {
+      const get = mockSleep();
+      const { user } = mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      pick('2026-08-12');
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-12'));
+      expect(stripDays()).toEqual(['9', '10', '11', '12', '13', '14', '15']);
+      expect(current()).toHaveLength(1);
+      expect(dayLabel(current()[0])).toBe('12');
+      // The older neighbour is one tap, and the strip keeps it marked afterwards...
+      await user.click(stripItems().find((b) => dayLabel(b) === '11'));
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-11'));
+      expect(dayLabel(current()[0])).toBe('11');
+      // ...and so is the newer one.
+      await user.click(stripItems().find((b) => dayLabel(b) === '12'));
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-12'));
+      expect(dayLabel(current()[0])).toBe('12');
+      await user.click(stripItems().find((b) => dayLabel(b) === '13'));
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-13'));
+      expect(dayLabel(current()[0])).toBe('13');
+    });
+
+    test('★ walking back night by night from the strip stays possible all the way to the floor (what the arrows did)', async () => {
+      const get = mockSleep();
+      const { user } = mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      pick('2026-08-05');
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-05'));
+      for (const day of ['4', '3', '2', '1']) {
+        await user.click(stripItems().find((b) => dayLabel(b) === day));
+        await waitFor(() => expect(lastNightPath(get)).toContain(`2026-08-0${day}`));
+        expect(dayLabel(current()[0])).toBe(day);
+      }
+      expect(stripDays()).toEqual(['1', '2', '3', '4', '5', '6', '7']); // clamped at the first night: still seven wide
+    });
+
+    test('a night with no stored row in the strip shows a dash and says "no score"', async () => {
       mockSleep();
       mount();
       await screen.findByRole('group', { name: 'Recent nights' });
-      fireEvent.change(screen.getByLabelText('Pick a night'), { target: { value: '2026-08-12' } });
+      pick('2026-08-12');
       await screen.findByRole('heading', { level: 2, name: /(Aug 12|12 Aug)/ });
-      expect(stripItems().filter((b) => b.getAttribute('aria-current') === 'date')).toHaveLength(0);
-      expect(stripItems()).toHaveLength(7); // and it does not shuffle under the finger
+      const twelve = current()[0];
+      expect(twelve.textContent).toContain('–');
+      expect(twelve.getAttribute('aria-label')).toMatch(/no score/);
+    });
+
+    test('★ the newest-seven window comes back when the newest nights are chosen again', async () => {
+      mockSleep();
+      mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      pick('2026-08-12');
+      await waitFor(() => expect(stripDays()).toEqual(['9', '10', '11', '12', '13', '14', '15']));
+      pick('2026-08-30');
+      await waitFor(() => expect(stripDays()).toEqual(['24', '25', '26', '27', '28', '29', '30']));
+      expect(dayLabel(current()[0])).toBe('30');
+    });
+
+    test('★ the strip is read ONCE for the whole history (30 nights) and moving between nights makes no further request', async () => {
+      const get = mockSleep();
+      const { user } = mount();
+      await screen.findByRole('group', { name: 'Recent nights' });
+      const stripReads = () => get.mock.calls.map((c) => c[0]).filter((p) => p.includes('/sleep?nights='));
+      expect(stripReads()).toEqual(['/children/kid-1/sleep?nights=30']);
+      pick('2026-08-12');
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-12'));
+      await user.click(stripItems().find((b) => dayLabel(b) === '11'));
+      await waitFor(() => expect(lastNightPath(get)).toContain('2026-08-11'));
+      expect(stripReads()).toHaveLength(1);
     });
 
     test('★ fewer than seven nights: shows the ones that exist', async () => {

@@ -89,8 +89,9 @@ another room less well.
 Tap the sleep summary for the full **night timeline**: a to-scale bar of
 asleep / stirring / awake stretches on a real time axis, every wake-up listed with its time
 and length, a **movement outside the bed** list, and a way to step back through
-roughly the last month of nights: a strip of the last seven nights (each with its score and a small
-colour bar; tap one to open it) and a calendar button for anything older. The strip is a heat map of the
+roughly the last month of nights: a strip of seven nights (each with its score and a small
+colour bar; tap one to open it) that starts at the newest nights, and a calendar button. Pick an older night
+and the strip slides to centre on it, so the nights either side are one tap away. The strip is a heat map of the
 week, so seven bars sit side by side; the number is always printed too, and a night with no score
 shows a dash. A new child sees only the nights that exist. If the strip cannot be loaded it is left out
 and the page works without it. A thin line under the page's header takes the colour of the night on

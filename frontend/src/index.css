@@ -258,16 +258,16 @@ button {
   align-items: center;
 }
 
-/* The band-coloured line along the bar's bottom edge on the sleep page: a mark, never text. The bar is navy in both themes,
-   so the line takes the FIXED ring colours (--band-*-ring, the ones made for the navy card), not the themed --band-* ones.
-   'early' (an early estimate) and 'none' (no score) are neutral: the bar's own text colour at low strength, so it reads as
-   an ordinary rule on the bar rather than a missing band. aria-hidden in the markup. */
-.app-header__band { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; }
-.app-header__band--great { background: var(--band-great-ring); }
-.app-header__band--good { background: var(--band-good-ring); }
-.app-header__band--fair { background: var(--band-fair-ring); }
-.app-header__band--low { background: var(--band-low-ring); }
-.app-header__band--early, .app-header__band--none { background: var(--bar-text); opacity: 0.22; }
+/* The band-coloured line along the bar's bottom edge on the sleep page: a mark, never text. It is an INSET shadow of the header
+   itself, so it is painted over the bar's own navy (--bar, one navy in both themes) and can never sit on the page background,
+   where the band colours would not reach the 3:1 a graphic needs. It takes the FIXED ring colours (--band-*-ring, made for
+   navy), at full strength, never an opacity blend. 'early' (an early estimate) and 'none' (no score) are one solid neutral,
+   --band-early-ring. test/paletteTokens.test.jsx recomputes every one of these against --bar (all above 5:1). */
+.app-header--band-great { box-shadow: inset 0 -3px 0 var(--band-great-ring); }
+.app-header--band-good { box-shadow: inset 0 -3px 0 var(--band-good-ring); }
+.app-header--band-fair { box-shadow: inset 0 -3px 0 var(--band-fair-ring); }
+.app-header--band-low { box-shadow: inset 0 -3px 0 var(--band-low-ring); }
+.app-header--band-early, .app-header--band-none { box-shadow: inset 0 -3px 0 var(--band-early-ring); }
 
 /* The "⋯" menu (components/MoreMenu.jsx). The button lives on the navy bar, so it takes the bar's soft accent like the back
    link; it stays compact (32px) while its hit area reaches 44px, the same device as the theme toggle (#381). The panel is a

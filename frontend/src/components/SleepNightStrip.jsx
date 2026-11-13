@@ -6,22 +6,42 @@ import { scoreOf, bandOf } from '../lib/sleepScoreText.js';
 // How many nights the strip shows. The design draws seven (a week); it is a layout width, not a score rule.
 export const STRIP_NIGHTS = 7;
 
-// The nights the strip shows, oldest first: the STRIP_NIGHTS calendar dates ending at `maxDate` (the newest night the
-// page can show), cut off at the child's first stored night so a new child sees the nights that exist and not a row of
-// empty ones. `rows` is the /sleep?nights= answer. No rows at all (a new child, a bad answer) gives no strip.
-//
-// The window is FIXED to the newest nights, not centred on the selected one: tapping a night must not shuffle the row
-// under the finger. A night older than the window is chosen with the calendar button, and then nothing in the strip is
-// marked (the title above it names the night).
-export function stripDates(maxDate, rows) {
+// How many nights are READ, once per child. The page's history window is 30 nights (SleepDetail's HISTORY_DAYS: what the
+// activity data is kept for, and the calendar's range); the route allows up to 60. The strip shows seven at a time and slides
+// over these, so walking back through older nights is a tap each (the previous / next arrows it replaced were one tap each).
+export const STRIP_READ_NIGHTS = 30;
+
+// The nights the strip shows, oldest first, as up to STRIP_NIGHTS calendar dates.
+//   - `maxDate` is the newest night the page can show, `minDate` the oldest (the calendar's floor), `rows` the
+//     /sleep?nights= answer, `selected` the night on screen.
+//   - The strip never reaches back past the child's first stored night, so a new child sees the nights that exist and not a
+//     row of empty ones (unless the selected night itself is older: it is always inside the strip, with a dash, and the
+//     strip then reaches down to the calendar's floor so it can still be walked back).
+//   - While the selected night is among the newest seven the window is the newest seven (the common case, and where the page
+//     opens). A night older than that, picked from the calendar or by walking back, slides the window so the selected night is
+//     in the CENTRE, clamped so the window stays inside the first and last available night: its neighbours are then one tap
+//     away on both sides. A selected night outside the page's range (or none) leaves the newest-seven window.
+//   - No rows at all (a new child, a bad answer) or no `maxDate` gives no strip.
+export function stripDates(maxDate, minDate, rows, selected) {
   if (!maxDate || !Array.isArray(rows)) return [];
   const stored = rows.map((r) => r?.night_date).filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d));
   if (!stored.length) return [];
   const first = stored.reduce((a, b) => (b < a ? b : a));
+  const inRange = typeof selected === 'string' && selected <= maxDate && (!minDate || selected >= minDate);
+  let lo = minDate && minDate > first ? minDate : first;
+  // Older than the child's first stored night (a calendar pick before tracking began): the floor is the calendar's, so its
+  // neighbours on both sides are in the strip (as dashes) and walking back stays one tap each.
+  if (inRange && selected < lo) lo = minDate || selected;
+  let end = maxDate;
+  if (inRange && selected < addDays(maxDate, -(STRIP_NIGHTS - 1))) {
+    end = addDays(selected, Math.floor(STRIP_NIGHTS / 2));
+    if (addDays(end, -(STRIP_NIGHTS - 1)) < lo) end = addDays(lo, STRIP_NIGHTS - 1);
+    if (end > maxDate) end = maxDate;
+  }
   const out = [];
   for (let i = STRIP_NIGHTS - 1; i >= 0; i -= 1) {
-    const d = addDays(maxDate, -i);
-    if (d >= first) out.push(d);
+    const d = addDays(end, -i);
+    if (d >= lo) out.push(d);
   }
   return out;
 }
@@ -42,8 +62,9 @@ const longOf = (d) => new Intl.DateTimeFormat([], { timeZone: 'UTC', weekday: 's
 //
 // ⚠️ IT IS OPTIONAL. The page works without it, so while the request is in flight and when it fails the strip renders
 // nothing at all (no spinner, no error line): a failed decoration must not read as a failed page. `version` is bumped by the
-// page after a Recompute save so a re-scored night's bar does not go stale.
-export default function SleepNightStrip({ childId, maxDate, selected, onSelect, version = 0 }) {
+// page after a Recompute save so a re-scored night's bar does not go stale. The selected night is always in the strip and
+// always marked; a night with no stored row shows a dash. One read per child (30 nights), sliced here: a tap makes no request.
+export default function SleepNightStrip({ childId, maxDate, minDate, selected, onSelect, version = 0 }) {
   // The answer is kept WITH the child it was for, so a different child never wears the previous child's bars while its
   // own request is in flight; a `version` bump (same child) keeps the old bars on screen until the new answer lands.
   const [data, setData] = useState(null);
@@ -52,14 +73,14 @@ export default function SleepNightStrip({ childId, maxDate, selected, onSelect, 
     if (!childId) return undefined;
     let alive = true;
     // Additive use of the existing list route (stored nights, newest first, each with `score`): no server change.
-    api.get(`/children/${childId}/sleep?nights=${STRIP_NIGHTS}`)
+    api.get(`/children/${childId}/sleep?nights=${STRIP_READ_NIGHTS}`)
       .then((r) => { if (alive) setData(Array.isArray(r?.nights) ? { childId, nights: r.nights } : null); })
       .catch(() => { if (alive) setData(null); });
     return () => { alive = false; };
   }, [childId, version]);
 
   const rows = data?.childId === childId ? data.nights : null;
-  const dates = stripDates(maxDate, rows);
+  const dates = stripDates(maxDate, minDate, rows, selected);
   if (!dates.length) return null;
   const byDate = new Map(rows.map((r) => [r?.night_date, r]));
 

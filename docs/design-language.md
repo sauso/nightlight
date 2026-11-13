@@ -640,8 +640,12 @@ headline cannot contradict the score. See the voice rules at the top of `lib/nig
 The top of the sleep detail page, as drawn in the UI refresh.
 - **Header.** Back link, "Sleep", and a **⋯** button on the right (`MoreMenu`, passed to `AppHeader` as `actions`). Along the
   bar's bottom edge runs a 3px **band line** (`bandLine`): the night on screen's band colour, or neutral for no score and for an
-  early estimate. It uses the fixed `--band-*-ring` colours (the bar is navy in both themes), is `aria-hidden`, and is a mark, not text.
-  Those ring colours were measured on the lighter card gradient, so on the darker bar they clear 3:1 by a wider margin.
+  early estimate. It is an **inset shadow of the header itself** (a modifier class `app-header--band-<band>` on the `<header>`, not a child
+  element), so it is always painted over the bar's navy (`--bar` `#14142A`, one navy in both themes) and can never land on the page
+  background, where the band colours do not reach 3:1 (they are 1.24 to 2.99:1 on the light page, which is why it is not a child at the
+  edge). It uses the fixed `--band-*-ring` colours at full strength, never an opacity blend; an early estimate and no score share one
+  solid neutral, `--band-early-ring`. Contrast against `--bar`: great 13.34, good 8.36, fair 7.58, low 5.56, neutral 11.73 (needs 3:1);
+  `test/paletteTokens.test.jsx` recomputes all five from the stylesheet. It is a mark, not text, and nothing for assistive technology.
 - **`⋯` menu.** A menu button (`aria-haspopup="menu"`, `aria-expanded`) over a popover of `role="menuitem"` buttons, each at least
   44px tall. Enter, Space or ArrowDown opens it and focuses the first item; Up, Down, Home and End move; Escape closes it and
   returns focus to the button; so does choosing an item; a press outside, or tabbing out, closes it without taking focus back.
@@ -655,9 +659,14 @@ The top of the sleep detail page, as drawn in the UI refresh.
 - **Night strip.** Seven buttons, oldest to newest, right-aligned: weekday, date number, score (a dash with no score), and a 4px
   band bar. The selected night has `aria-current="date"` and an accent border. Each button's accessible name carries the date and
   the score ("Sat, Aug 29, score 75", "…, no score", "…, score 58 (early estimate)"). It is a **heat map by design** (the owner
-  accepted that): no comparison wording is added, and the bar is never the only signal. The window is fixed to the newest nights, so
-  tapping never shuffles it; a night picked from the calendar that is older than the window leaves nothing marked. It uses the
-  stored scores from `GET /children/:id/sleep?nights=7` and renders nothing while loading or if the request fails.
+  accepted that): no comparison wording is added, and the bar is never the only signal. The window is the newest seven nights while the selected
+  night is among them. An older night (picked from the calendar, or reached by walking back) slides the window so the selected night
+  is in the **centre**, clamped at the first and last night available, so its neighbours are one tap away on both sides and walking
+  back to the 30-night floor is a tap per night. A night with no stored row shows a dash. The strip is cut off at the child's first
+  stored night unless the selected night is older (then it reaches the calendar's floor). It reads the stored scores once per child
+  from `GET /children/:id/sleep?nights=30` (the history window; the route allows 60), slices them in the browser, and renders nothing
+  while loading or if the request fails. It is not shown for a child until that child's own newest night is known, so it is never
+  drawn against the previous child's.
 
 ### Modal (`components/Modal.jsx`)
 On phone widths a **sheet**, not a centred dialog: overlay `rgba(10, 13, 28, 0.7)`, card

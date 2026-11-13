@@ -677,3 +677,42 @@ describe('the default avatar', () => {
     expect([...chosen].some((el) => el.style.color === 'rgb(255, 255, 255)')).toBe(true);
   });
 });
+
+// UI refresh PR E: the band line along the sleep page header's bottom edge. A graphic needs 3:1 against what it is drawn ON. The
+// first version was a child element at the bar's edge, and measured against the light page background (where it can land) the
+// bands were 1.24 / 1.99 / 2.19 / 2.99 and the neutral 9.06 (PR #1061 review). It is now an inset shadow of the header itself,
+// so what it is drawn on is --bar, at full strength in the fixed --band-*-ring colours, and the neutral is a solid colour, not
+// an opacity blend. These recompute every pair from the stylesheet.
+describe('the band line under the sleep page header', () => {
+  const LINE_BANDS = ['great', 'good', 'fair', 'low', 'early'];
+  const lineRule = (key) => rules.find((rule) => rule.startsWith(`.app-header--band-${key}`) || rule.includes(`, .app-header--band-${key} {`));
+
+  test.each(LINE_BANDS)('★ %s: the line colour clears 3:1 on --bar in both themes', (band) => {
+    for (const [name, t] of [['day', day], ['night', night]]) {
+      expect(contrast(t[`--band-${band}-ring`], t['--bar']), `${name} ${band}`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  test('★ the neutral state (early estimate, no score) is a solid colour that also clears 3:1 on --bar', () => {
+    for (const key of ['early', 'none']) {
+      const rule = lineRule(key);
+      expect(rule, `a rule for the ${key} line`).toBeTruthy();
+      expect(rule).toContain('inset 0 -3px 0 var(--band-early-ring)');
+    }
+    expect(contrast(day['--band-early-ring'], day['--bar'])).toBeGreaterThanOrEqual(3);
+  });
+
+  test.each(['great', 'good', 'fair', 'low'])('%s: the line is drawn in its own ring colour', (band) => {
+    expect(lineRule(band), `a rule for the ${band} line`).toContain(`inset 0 -3px 0 var(--band-${band}-ring)`);
+  });
+
+  test('★ the line is painted by the header itself at full strength: an inset shadow, never a child over the page, never an opacity blend', () => {
+    const lines = rules.filter((rule) => rule.includes('.app-header--band-'));
+    expect(lines.length).toBeGreaterThanOrEqual(5);
+    for (const rule of lines) {
+      expect(rule, rule).toContain('box-shadow: inset');
+      expect(rule, rule).not.toMatch(/opacity|rgba|transparent/);
+    }
+    expect(css).not.toContain('.app-header__band');
+  });
+});

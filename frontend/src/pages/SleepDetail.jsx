@@ -60,8 +60,15 @@ export default function SleepDetail() {
   const kid = kids.find((k) => k.id === id);
 
   const [searchParams] = useSearchParams();
-  const [maxDate, setMaxDate] = useState(null); // latest browsable night (last completed)
-  const [date, setDate] = useState(null); // selected night's local start date
+  // The latest browsable night (last completed) and the selected night's local start date, KEPT WITH THE CHILD THEY WERE WORKED OUT
+  // FOR. This page stays mounted when the route moves to another child, and /sleep/live has to answer before either is known
+  // again: held in plain state, the new child spent that time with the PREVIOUS child's newest night and selected date (the
+  // strip drew the new child's rows against the old night, review of PR #1061). Read through `id`, they are null until the new
+  // child's own answer lands.
+  const [pos, setPos] = useState({ childId: null, maxDate: null, date: null });
+  const maxDate = pos.childId === id ? pos.maxDate : null;
+  const date = pos.childId === id ? pos.date : null;
+  const setDate = (d) => setPos((p) => ({ ...p, childId: id, date: d }));
   const [night, setNight] = useState(undefined); // undefined = loading (or failed: see nightError)
   // The failure of the night request, kept apart from `night` (#375). A failed request used to become
   // `null`, the very value the server's "nothing recorded" answer produces, so an outage read as "No sleep
@@ -119,14 +126,12 @@ export default function SleepDetail() {
         const nd = r?.night?.night_date || fallback;
         if (!alive) return;
         const max = nd > fallback ? nd : fallback;
-        setMaxDate(max);
         // Clamp: the picker will not go past `max`, so neither may a hand-typed or stale URL.
-        setDate(wanted && wanted <= max ? wanted : nd);
+        setPos({ childId: id, maxDate: max, date: wanted && wanted <= max ? wanted : nd });
       })
       .catch(() => {
         if (!alive) return;
-        setMaxDate(fallback);
-        setDate(wanted && wanted <= fallback ? wanted : fallback);
+        setPos({ childId: id, maxDate: fallback, date: wanted && wanted <= fallback ? wanted : fallback });
       });
     return () => { alive = false; };
   }, [id, todayLocal, searchParams]);
@@ -267,7 +272,7 @@ export default function SleepDetail() {
           )}
         </div>
 
-        <SleepNightStrip childId={id} maxDate={maxDate} selected={date} onSelect={setDate} version={stripVersion} />
+        <SleepNightStrip childId={id} maxDate={maxDate} minDate={minDate} selected={date} onSelect={setDate} version={stripVersion} />
 
         {/* Recompute (admin-only) lives in the "⋯" menu. Mounted once, here, for every status but `off` and for a night
             that has been answered (null / loading: nothing to recompute): it was in each status's card before, which is the
