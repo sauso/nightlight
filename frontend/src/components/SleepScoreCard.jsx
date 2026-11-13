@@ -7,8 +7,8 @@ import { nightBlurbText } from '../lib/nightSummaryPhrases.js';
 import { formatInZone, TIME } from '../lib/homeTime.js';
 import { showsInBed } from '../lib/inBed.js';
 import {
-  scoreOf, scoreQualifier, scoreLabel, componentName, componentDetail, droppedTerms, unavailableText, noScoreText,
-  lowConfidenceText, cappedText, bandOf, bandOfValue, minutesText, clockText,
+  sheetScoreOf, scoreQualifier, scoreLabel, componentName, componentDetail, droppedTerms, unavailableText, noScoreText,
+  lowConfidenceText, cappedText, bandOf, bandOfValue, clampFactorScore, minutesText, clockText,
 } from '../lib/sleepScoreText.js';
 
 const ORDER = ['duration', 'continuity', 'settling', 'restlessness', 'consistency'];
@@ -57,7 +57,12 @@ function factorWord(c) {
     const wakes = Array.isArray(c.terms) ? c.terms.find((t) => t?.key === 'wake_count' && t.available) : null;
     if (wakes && measured(wakes.value) && measured(wakes.usual))
       return wakes.value > wakes.usual ? 'More wake-ups' : wakes.value < wakes.usual ? 'Fewer wake-ups' : 'About usual';
-    return 'Wake-ups and longest stretch';
+    // Continuity can be scored from any of its three terms (the server drops one it could not measure), so the
+    // fallback names only the terms that counted, never one that did not.
+    const has = (key) => Array.isArray(c.terms) && c.terms.some((t) => t?.key === key && t.available);
+    const used = [has('wake_count') && 'wake-ups', has('longest_share') && 'longest stretch', has('efficiency') && 'time asleep'].filter(Boolean);
+    if (used.length === 0) return 'Measured this night';
+    return `Based on ${used.length > 1 ? `${used.slice(0, -1).join(', ')} and ${used[used.length - 1]}` : used[0]}`;
   }
   if (c.key === 'settling') {
     if (measured(c.usual) && measured(c.value))
@@ -89,8 +94,10 @@ function nightNumbers(night, score, zone, unit) {
   if (inBed) lines.push(`In bed ${inBed}${outBed ? `, out of bed ${outBed}` : ''}`);
   else if (outBed) lines.push(`Out of bed ${outBed}`);
   const onset = time(night.onset_at, zone);
+  // No confirmed wake: the old stats row said "still asleep at <window end>", so the sheet keeps that fact.
+  const windowEnd = time(night.window_end, zone);
   if (onset && up) lines.push(`Asleep ${onset} to ${up}`);
-  else if (onset) lines.push(`Asleep from ${onset}`);
+  else if (onset) lines.push(`Asleep from ${onset}${windowEnd ? `, still asleep at ${windowEnd}` : ''}`);
   if (measured(night.wake_count)) lines.push(`${night.wake_count} wake-up${night.wake_count === 1 ? '' : 's'}${minutesText(night.awake_minutes) ? `, ${minutesText(night.awake_minutes)} awake in all` : ''}`);
   if (minutesText(night.longest_stretch_minutes)) lines.push(`Longest stretch ${minutesText(night.longest_stretch_minutes)}`);
   if (minutesText(night.asleep_minutes)) {
@@ -121,8 +128,9 @@ export default function SleepScoreCard({ night, reviewAction = null }) {
   if (!night || night.status === 'off') return null;
   const raw = night.score;
   const hasScore = Boolean(raw) && typeof raw === 'object';
-  const score = night.in_progress ? null : scoreOf(night);
-  const blurb = nightBlurbText(night.summary, { zone: settings?.timezone, tempUnit: settings?.temp_unit });
+  const score = sheetScoreOf(night);
+  // The heading already shows the time asleep, so the blurb says how it compares without restating it.
+  const blurb = nightBlurbText(night.summary, { zone: settings?.timezone, tempUnit: settings?.temp_unit, durationShown: measured(night.asleep_minutes) });
   if (!hasScore && !blurb && night.status !== 'ok') return null;
   const fromSaved = night.score_source === 'stored';
   const why = hasScore && !score ? noScoreText(night.in_progress ? 'in_progress' : raw.reason) : '';
@@ -165,11 +173,15 @@ function ScoreBreakdown({ night, score, fromSaved, zone, unit, onClose }) {
           const band = counted ? bandOfValue(c.score) : null;
           return <li key={c.key} className="score-part">
             <div className="score-part__head"><span className="score-part__name">{componentName(c.key)}</span>
-              <span className="score-part__score">{counted ? factorValue(c, night) || `${Math.round(c.score)} / 100` : 'Not counted'}</span></div>
-            <div className={`score-part__bar${band ? ` score-part__bar--${band}` : ' score-part__bar--empty'}`} aria-hidden="true">
-              {counted && <span style={{ width: `${Math.max(0, Math.min(100, c.score))}%` }} />}
+              <span className="score-part__score">{counted ? factorValue(c, night) || `${Math.round(clampFactorScore(c.score))} / 100` : 'Not counted'}</span></div>
+            <div className="score-part__line">
+              <div className={`score-part__bar${band ? ` score-part__bar--${band}` : ' score-part__bar--empty'}`} aria-hidden="true">
+                {counted && <span style={{ width: `${clampFactorScore(c.score)}%` }} />}
+              </div>
+              {/* The factor's number is for a screen reader only: the bar and the word are the sighted signals, and
+                  the printed number made each row wrap on a phone (owner, 11-13). It is held to 0..100. */}
+              <div className="score-part__detail">{counted ? <>{factorWord(c)}<span className="score-part__num">, {Math.round(clampFactorScore(c.score))} out of 100</span></> : unavailableText(c.reason)}</div>
             </div>
-            <div className="score-part__detail">{counted ? `${factorWord(c)} · ${Math.round(c.score)}/100` : unavailableText(c.reason)}</div>
             {counted && componentDetail(c) && <div className="score-part__detail score-part__detail--extra">{componentDetail(c)}</div>}
             {droppedTerms(c).map((line) => <div key={line} className="score-part__detail score-part__detail--extra">{line}</div>)}
           </li>;

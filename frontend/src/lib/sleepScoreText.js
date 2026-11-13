@@ -23,6 +23,12 @@ export function scoreOf(night) {
   const s = night?.score;
   return s && typeof s === 'object' && typeof s.score === 'number' && Number.isFinite(s.score) ? s : null;
 }
+// The score the night card draws, and therefore the one whose "Why this score?" sheet exists: none while the night is
+// still in progress, whatever a stale response carries. SleepDetail decides whether the page keeps its own facts grid
+// with THIS same function, so the grid shows exactly when the card has no sheet to hold those facts.
+export function sheetScoreOf(night) {
+  return night?.in_progress ? null : scoreOf(night);
+}
 
 // The server's band key, worded. Under the lowest band the server sends null and the number stands alone.
 const BAND_WORDS = { great: 'Great', good: 'Good', fair: 'Fair' };
@@ -51,8 +57,16 @@ const COLOUR_BANDS = ['great', 'good', 'fair'];
 // The server's SCORE_CONFIG.bands uses these edges. A factor has no band key in the response, so the sheet
 // mirrors them here in one place; changing the server edges requires changing this tested display mapping too.
 export const FACTOR_BAND_EDGES = Object.freeze({ great: 85, good: 70, fair: 55 });
-export function bandOfValue(value) {
+// A factor score is 0 to 100 by construction (sleepScore.js curveAt). A value outside it can only be a newer or
+// faulty server, so what is printed and what picks the band is held inside the range rather than showing "101/100".
+// Null for anything that is not a finite number (the factor then reads as not counted).
+export function clampFactorScore(value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(100, value));
+}
+export function bandOfValue(value) {
+  value = clampFactorScore(value);
+  if (value == null) return null;
   if (value >= FACTOR_BAND_EDGES.great) return 'great';
   if (value >= FACTOR_BAND_EDGES.good) return 'good';
   if (value >= FACTOR_BAND_EDGES.fair) return 'fair';

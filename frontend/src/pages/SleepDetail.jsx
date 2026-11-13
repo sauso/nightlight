@@ -16,7 +16,7 @@ import ReviewNightButton from '../components/ReviewNightButton.jsx';
 import ReviewReceipt from '../components/ReviewReceipt.jsx';
 import LoadFailed from '../components/LoadFailed.jsx';
 import SleepScoreCard from '../components/SleepScoreCard.jsx';
-import { scoreOf, bandOf } from '../lib/sleepScoreText.js';
+import { scoreOf, sheetScoreOf, bandOf } from '../lib/sleepScoreText.js';
 import { showsInBed } from '../lib/inBed.js';
 import { addDays, nightDetailPath, describeSettings } from '../lib/nightView.js';
 import { timelineDrawingSegments } from '../lib/timelineDrawing.js';
@@ -310,7 +310,7 @@ export default function SleepDetail() {
         <div className="sleep-detail__est">
           {/* The score is part of the same estimate, so the line says so whenever a score is on the page. */}
           <Moon size={13} aria-hidden="true" /> Estimated from movement &amp; sound over the night
-          window{scoreOf(night) ? ', the sleep score included' : ''} — a sleep-pattern guide, not a medical measurement.
+          window{sheetScoreOf(night) ? ', the sleep score included' : ''} — a sleep-pattern guide, not a medical measurement.
         </div>
       </main>
     </>
@@ -516,9 +516,10 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
 
   return (
     <>
-      {/* A night without an available score has no numbers sheet, so its facts remain here. A scored
-          night gets these same facts in the sheet; the tools below remain reachable on the page. */}
-      {!scoreOf(night) && <div className="card sleep-detail__summary">
+      {/* A night whose card has no sheet (no score, or still in progress with a stale one) keeps its facts here.
+          A scored night gets these same facts in the sheet (sheetScoreOf is the card's own test); the tools below
+          remain reachable on the page. */}
+      {!sheetScoreOf(night) && <div className="card sleep-detail__summary">
         <div className="sleep-detail__stats">
           {/* "In bed" first, so the two times read in the order they happened. Only when the put-down
               is a real minute or more before sleep — see showsInBed for why that check is one-way. */}

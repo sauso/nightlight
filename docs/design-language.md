@@ -645,7 +645,10 @@ also in the button's `aria-label`, so nothing the ellipsis cuts is lost to a scr
 child's card at all.
 
 The detail card's **Why this score?** button opens a bottom sheet on a phone and a centred dialog from
-1024px. Each of the five factors has a measured value, a short word and a 72px bar. The fill uses the
+1024px. Each of the five factors has the name and measured value on one row, and under it a 72px bar and a
+short word on one line (the factor's number is read out by screen readers, not drawn), then a muted line
+of detail. On a phone the card's ring and time asleep share the top row and the blurb takes the full width
+beneath. The close button has a 44px target. Long names wrap rather than scroll. The fill uses the
 factor's own score band through `--band-great`, `--band-good`, `--band-fair` or `--band-low` on the
 card surface, against the `--border` track. These pairs are checked at 3:1 in both themes. A factor
 left out of the score has a dashed empty track and a reason. The sheet follows with available night

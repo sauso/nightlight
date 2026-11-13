@@ -8,8 +8,8 @@
 //   1. DESCRIPTIVE ONLY. What was measured, and how it compares with this child's own recent nights. Never a cause,
 //      advice, a diagnosis, praise or blame, and never a sleep stage (no REM, deep or light sleep): the score and the
 //      summary come from a camera and a microphone, and docs/sleep-tracking.md says so.
-//   2. Calm, short, past tense, one sentence under about 90 characters, no emoji, no exclamation marks. "A child" or
-//      "they", never a name: the page knows the child's name and no default phrase needs it (`childName` is accepted
+//   2. Calm, short, past tense, one sentence under about 90 characters, no emoji, no exclamation marks. Never a pronoun for the
+//      child ("they", "them", "their" and the rest are banned by the guardrail test) and never a name: the page knows the child's name and no default phrase needs it (`childName` is accepted
 //      and filled into a `{childName}` token should a phrase ever want it). The bed is "bed", never crib or cot.
 //   3. A PLURAL NEVER READS WRONG. A count of 0 or 1 gets its own group (`zero`, `one`) where the noun is part of the
 //      sentence, and a comparison puts the number last ("...than usual: 3"), so "1 wake-ups" cannot be built.
@@ -161,7 +161,7 @@ export const OBSERVATION_PHRASES = Object.freeze({
   ),
   wake_clustering: plain(
     '{count} of the wake-ups came between {from_at} and {to_at}.',
-    'Most wake-ups were close together, {count} of them between {from_at} and {to_at}.',
+    'Most wake-ups were close together, with {count} between {from_at} and {to_at}.',
     '{count} wake-ups fell in the window from {from_at} to {to_at}.',
   ),
   room_activity_near_wakes: plain(
@@ -392,6 +392,21 @@ export const BLURB_PHRASES = Object.freeze({
     'The longest stretch was {minutes}, about the usual share; settling took {settle_minutes}.',
     'A {minutes} stretch was about the usual share of the night; settling took {settle_minutes}.',
   ],
+  // The night card's heading already shows the time asleep ("8h 55m asleep"), so beside it the comparison is said
+  // without restating the figure (owner review of PR #1063: the same minutes twice in a row read as a stutter).
+  // Used only when the caller says the duration is on screen (opts.durationShown).
+  usual_more: [
+    'Time asleep was longer than the usual {usual_minutes}.',
+    'Sleep ran longer than the usual {usual_minutes}.',
+  ],
+  usual_less: [
+    'Time asleep was shorter than the usual {usual_minutes}.',
+    'Sleep ran shorter than the usual {usual_minutes}.',
+  ],
+  usual_about_the_same: [
+    'Time asleep was about the usual {usual_minutes}.',
+    'Sleep was close to the usual {usual_minutes}.',
+  ],
 });
 
 export function nightBlurbText(summary, opts = {}) {
@@ -417,6 +432,18 @@ export function nightBlurbText(summary, opts = {}) {
     if (!o || typeof o.key !== 'string' || !Object.hasOwn(OBSERVATION_PHRASES, o.key)) continue;
     if (merged && o === settle) continue;
     if (merged && o === stretch) { lines.push(merged); continue; }
+    if (opts.durationShown && (o.key === 'total_sleep' || o.key === 'total_sleep_so_far')) continue; // the heading says it
+    if (opts.durationShown && o.key === 'total_sleep_vs_usual') {
+      // Validate the whole observation first (a null param drops it), then say only the comparison.
+      const full = sentence(OBSERVATION_PHRASES.total_sleep_vs_usual, o.key, o.params ?? {}, summary.seed, opts);
+      const compareKey = `usual_${o.params?.direction}`;
+      const variants = BLURB_PHRASES[compareKey];
+      if (full && variants) {
+        lines.push(fill(variants[variantIndex(summary.seed, compareKey, variants.length)],
+          { usual_minutes: PARAM_FORMATTERS.usual_minutes(o.params.usual_minutes) }, opts.childName));
+        continue;
+      }
+    }
     const line = sentence(OBSERVATION_PHRASES[o.key], o.key, o.params ?? {}, summary.seed, opts);
     if (line) lines.push(line);
   }

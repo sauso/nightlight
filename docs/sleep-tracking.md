@@ -640,7 +640,9 @@ measurement, it says nothing about sleep stages, and it is no reason to worry on
 - **Why this score?** opens a sheet on a phone or a dialog on desktop. Each of the five parts has
   its measured value, a bar coloured for that part's own score, and a plain word. A part left out
   has a dashed empty bar and a reason. The sheet also lists the available night figures and says
-  when a score was held down, may still change, is an early estimate, or has low confidence.
+  when a score was held down, may still change, is an early estimate, or has low confidence. For a night
+  with no confirmed wake-up it says "still asleep at" the end of the window. The blurb does not repeat the
+  time asleep that the card's heading shows.
 - A night with no score shows **No score yet** and the reason.
 
 The ring's arc is coloured by band: green for Great, teal for Good, amber for Fair, a soft rose for a score
@@ -831,7 +833,8 @@ measurement.
   the duration and score ring. With the child's [Show sleep score](#turning-the-score-off) switch
   off, the card still describes the night and its figures remain on the page.
 - **On the child's card**, the headline on one line under the duration. On a narrow phone a long headline
-  is cut short with "…" rather than wrapped; the full text is on the sleep page.
+  is cut short with "…" rather than wrapped. The sleep page does not repeat the headline: it has the blurb
+  instead, and does not restate the time asleep that the card already shows.
 - Times are shown in your home timezone and your device's 12 or 24 hour clock, and room temperatures in
   the unit chosen in Settings.
 

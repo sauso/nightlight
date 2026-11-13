@@ -21,7 +21,7 @@ import SleepScoreCard from '../src/components/SleepScoreCard.jsx';
 import SleepDetail from '../src/pages/SleepDetail.jsx';
 import { api } from '../src/lib/api.js';
 import {
-  scoreOf, bandWord, bandOf, bandOfValue, FACTOR_BAND_EDGES, scoreLabel, unavailableText, UNAVAILABLE_FALLBACK, noScoreText, componentName, componentDetail,
+  scoreOf, sheetScoreOf, clampFactorScore, bandWord, bandOf, bandOfValue, FACTOR_BAND_EDGES, scoreLabel, unavailableText, UNAVAILABLE_FALLBACK, noScoreText, componentName, componentDetail,
   lowConfidenceText, cappedText, minutesText, clockText,
 } from '../src/lib/sleepScoreText.js';
 
@@ -58,6 +58,15 @@ describe('sleepScoreText', () => {
     expect([54, 55, 69, 70, 84, 85, 100].map(bandOfValue))
       .toEqual(['low', 'fair', 'fair', 'good', 'good', 'great', 'great']);
     expect(bandOfValue(null)).toBe(null);
+    // Outside 0..100 is held inside it; not a number at all has no band (the factor reads as not counted).
+    expect([-1, 101].map(bandOfValue)).toEqual(['low', 'great']);
+    expect([NaN, Infinity, '70', undefined].map(bandOfValue)).toEqual([null, null, null, null]);
+    expect([-1, 101, 42.5, NaN].map(clampFactorScore)).toEqual([0, 100, 42.5, null]);
+  });
+  test('sheetScoreOf: the card\'s score is none while the night is in progress, whatever the response carries', () => {
+    expect(sheetScoreOf({ score: SCORE })).toBe(SCORE);
+    expect(sheetScoreOf({ in_progress: true, score: SCORE })).toBe(null);
+    expect(sheetScoreOf({ score: NO_SCORE })).toBe(null);
   });
   test('scoreOf: only a night whose score carries a number has one', () => {
     expect(scoreOf({ score: SCORE })).toBe(SCORE);
@@ -383,6 +392,56 @@ describe('SleepScoreCard: the detail page card and the breakdown sheet', () => {
     expect(numbers.textContent).not.toMatch(/In bed|Room |Measured from|Longest stretch/);
   });
 
+  // The old stats row said "from X · still asleep at <window end>" for a night with no confirmed wake; the sheet
+  // replaced that row for scored nights, so it has to say the same. Fails if the window end is dropped again.
+  test('a night with no confirmed wake says it was still asleep at the window end; with a wake it does not', async () => {
+    const base = { ...NIGHT, onset_at: '2026-09-01 20:00:00', window_end: '2026-09-02 07:00:00', score: SCORE };
+    const first = show({ ...base, wake_at: null });
+    const open1 = await open(first.user);
+    expect(within(open1).getByText(/^Asleep from .+, still asleep at .+/)).toBeInTheDocument();
+    first.unmount();
+    const second = show({ ...base, wake_at: '2026-09-02 06:00:00' });
+    const open2 = await open(second.user);
+    expect(within(open2).getByText(/^Asleep .+ to .+/)).toBeInTheDocument();
+    expect(within(open2).queryByText(/still asleep/)).not.toBeInTheDocument();
+  });
+
+  // Continuity can be scored from a subset of its terms; the word must not name one that did not count.
+  test.each([
+    ['efficiency only', [['efficiency', true], ['longest_share', false], ['wake_count', false]], 'Based on time asleep'],
+    ['wake-ups and stretch', [['efficiency', false], ['longest_share', true], ['wake_count', true]], 'Based on wake-ups and longest stretch'],
+    ['all three', [['efficiency', true], ['longest_share', true], ['wake_count', true]], 'Based on wake-ups, longest stretch and time asleep'],
+    ['none usable', [['efficiency', false], ['longest_share', false], ['wake_count', false]], 'Measured this night'],
+  ])('the Continuity word names only the terms that counted: %s', async (_name, terms, word) => {
+    const components = SCORE.components.map((c) => (c.key === 'continuity'
+      ? { ...c, terms: terms.map(([key, available]) => part(key, available ? 70 : null, { available, reason: available ? null : 'missing' })) }
+      : c));
+    const { user } = show({ ...NIGHT, score: { ...SCORE, components } });
+    const dialog = await open(user);
+    const row = within(dialog).getAllByRole('listitem').find((li) => li.textContent.startsWith('Continuity'));
+    expect(row.querySelector('.score-part__detail').textContent).toContain(word);
+  });
+
+  test('a factor score outside 0 to 100 is held inside it: band, bar and what a screen reader hears', async () => {
+    const components = SCORE.components.map((c, i) => (i === 0 ? { ...c, score: 101 } : i === 3 ? { ...c, score: -4 } : c));
+    const { user } = show({ ...NIGHT, score: { ...SCORE, components } });
+    const dialog = await open(user);
+    const rows = [...dialog.querySelectorAll('.score-part')];
+    expect(rows[0].textContent).toContain('100 out of 100');
+    expect(rows[0].textContent).not.toContain('101');
+    expect(rows[0].querySelector('.score-part__bar span').style.width).toBe('100%');
+    expect(rows[3].textContent).toContain('0 out of 100');
+    expect(rows[3].querySelector('.score-part__bar').className).toContain('--low');
+    expect(rows[3].querySelector('.score-part__bar span').style.width).toBe('0%');
+  });
+
+  test('the sheet\'s close button is a named button inside the night card (its 44px target is the scoped rule in paletteTokens)', async () => {
+    const { user, container } = show({ ...NIGHT, score: SCORE });
+    const dialog = await open(user);
+    const close = within(dialog).getByRole('button', { name: 'Close' });
+    expect(container.querySelector('.sleep-night-card .modal-card__actions').contains(close)).toBe(true);
+  });
+
   test('each applicable note appears only for its flag, including the saved-night fallback', async () => {
     const { user } = show({ ...NIGHT, window_end: '2026-09-02 07:00:00', score_source: 'stored',
       score: { ...SCORE, early_estimate: true, provisional: true, capped_by: 'duration',
@@ -585,6 +644,16 @@ describe('SleepDetail: the score follows the night on screen', () => {
     await screen.findByText('Night timeline');
     expect(screen.getByText('Longest stretch')).toBeInTheDocument();
     expect(screen.getByText('Wake-ups')).toBeInTheDocument();
+  });
+
+  // The card draws no score and no sheet while a night is in progress, so the page must keep the facts it would
+  // otherwise have handed to the sheet. Fails if the grid is decided by a different test than the card's.
+  test('an in-progress night carrying a stale score still shows the facts grid, and no score claim', async () => {
+    mount(() => ({ ...BASE, in_progress: true, wake_at: null, wake_count: 2, longest_stretch_minutes: 200, score: SCORE }));
+    await screen.findByText('Night timeline');
+    expect(screen.getByText('Longest stretch')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Why this score/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/the sleep score included/)).not.toBeInTheDocument();
   });
 
   test('with the switch off (no score key) the page has no score card and the estimate line does not mention a score', async () => {

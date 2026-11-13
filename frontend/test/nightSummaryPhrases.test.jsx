@@ -44,7 +44,10 @@ const label = (p) => `${p.kind} ${p.key}/${p.group}[${p.i}]: "${p.text}"`;
 // "healthy", "badly" and "poor" are verdicts; "parent", "mum" and "dad" name a person the camera cannot tell from anyone
 // else; "REM", "deep sleep" and "light sleep" are sleep stages the app does not measure; "crib" and "cot" are not the
 // app's word for the bed.
-const BANNED = ['ideal', 'safe', 'healthy', 'badly', 'poor', 'because', 'parent', 'mum', 'dad', 'deep sleep', 'REM', 'light sleep', 'should', 'crib', 'cot'];
+const BANNED = ['ideal', 'safe', 'healthy', 'badly', 'poor', 'because', 'parent', 'mum', 'dad', 'deep sleep', 'REM', 'light sleep', 'should', 'crib', 'cot',
+  // Pronouns: the project never guesses one for a child, and "them"/"their" would also read as about a person (owner
+  // rule; found by review of PR #1063 in the one variant that said "3 of them").
+  'he', 'she', 'they', 'them', 'their', 'his', 'her', 'him', 'hers'];
 const bannedRe = (word) => new RegExp(`(^|[^\\p{L}])${word.replace(/ /g, '\\s+')}($|[^\\p{L}])`, 'iu');
 
 describe('the guardrails, over every variant of every key', () => {
@@ -81,7 +84,7 @@ describe('the guardrails, over every variant of every key', () => {
     for (const p of ALL) {
       const names = [...p.text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
       const allowed = p.kind === 'headline' ? [] : p.kind === 'blurb'
-        ? ['minutes', 'settle_minutes'] : OBSERVATION_PARAMS[p.key].filter((n) => n !== 'direction');
+        ? ['minutes', 'settle_minutes', 'usual_minutes'] : OBSERVATION_PARAMS[p.key].filter((n) => n !== 'direction');
       for (const name of names) expect([label(p), allowed.includes(name)]).toEqual([label(p), true]);
     }
     // Precondition: the check can fail.
@@ -167,7 +170,7 @@ describe('what the library does with what the server sends', () => {
     expect(t.observations).toEqual([
       'Asleep for 10h 0m, less than the usual 10h 40m.',
       '3 wake-ups were counted overnight.',
-      expect.stringMatching(/^Most wake-ups were close together, 3 of them between (2:00 am|02:00) and (3:37 am|03:37)\.$/i),
+      expect.stringMatching(/^Most wake-ups were close together, with 3 between (2:00 am|02:00) and (3:37 am|03:37)\.$/i),
       'Room temperature ranged from 19°C to 21°C.',
     ]);
   });
@@ -388,9 +391,50 @@ describe('the sleep-page blurb', () => {
   });
 });
 
+describe('the blurb beside a heading that already shows the time asleep (durationShown)', () => {
+  test('the comparison is kept and the figure is not restated, for every direction', () => {
+    for (const direction of ['more', 'less', 'about_the_same']) {
+      const summary = { ...SUMMARY, observations: [
+        { key: 'total_sleep_vs_usual', params: { minutes: 600, usual_minutes: 640, direction } },
+        { key: 'wake_ups', params: { count: 3 } }] };
+      const lines = nightBlurbText(summary, { durationShown: true });
+      expect(lines).toHaveLength(2);
+      expect(lines[0]).toContain('10h 40m'); // the usual is the new information
+      expect(lines[0]).not.toContain('10h 0m'); // the shown duration is not repeated
+      expect(lines[1]).toBe(SECOND);
+      // Without the flag nothing changes: the child's own wording stays complete.
+      expect(nightBlurbText(summary)[0]).toContain('10h 0m');
+    }
+  });
+
+  test('a plain total, and a so-far total, are left to the heading; an unreadable comparison falls back and never throws', () => {
+    const summary = { ...SUMMARY, observations: [
+      { key: 'total_sleep', params: { minutes: 600 } },
+      { key: 'total_sleep_so_far', params: { minutes: 275 } },
+      { key: 'wake_ups', params: { count: 3 } }] };
+    expect(nightBlurbText(summary, { durationShown: true })).toEqual([SECOND]);
+    const bad = { ...SUMMARY, observations: [{ key: 'total_sleep_vs_usual', params: { minutes: 600, usual_minutes: null, direction: 'less' } }] };
+    expect(nightBlurbText(bad, { durationShown: true })).toEqual([]);
+  });
+
+  test('no pronoun for the child in any sentence the blurb can make (guardrail twin of the library list)', () => {
+    for (const [key, variants] of Object.entries(BLURB_PHRASES)) {
+      for (const text of variants) expect([key, /\b(he|she|they|them|their|his|her|him|hers)\b/i.test(text)]).toEqual([key, false]);
+    }
+  });
+});
+
 describe('the night card blurb on the detail page', () => {
   const NIGHT = { status: 'ok', night_date: '2026-03-10' };
   const show = (night) => renderAsAdmin(<SleepScoreCard night={night} />);
+
+  test('with the time asleep in the heading, the blurb does not say it again', () => {
+    const { container } = show({ ...NIGHT, asleep_minutes: 600, score: SCORE, summary: SUMMARY });
+    expect(container.querySelector('.sleep-night-card__duration').textContent).toBe('10h 0m asleep');
+    const blurb = container.querySelector('.sleep-night-card__blurb').textContent;
+    expect(blurb).not.toContain('10h 0m');
+    expect(blurb).toContain('10h 40m');
+  });
 
   test('with a summary and score the night card has a flowing blurb and opens the sheet', () => {
     const { container } = show({ ...NIGHT, score: SCORE, summary: SUMMARY });
