@@ -634,13 +634,13 @@ measurement, it says nothing about sleep stages, and it is no reason to worry on
 
 - **On the child's card**, as a small ring beside last night's sleep, with the number in it. A night
   still in progress has no ring.
-- **On the sleep detail page**, in the [Night summary](#night-summary) card under the date, below its
-  sentences: the ring, the word for the score ("Great", "Good", "Fair", or "Early estimate"), and
-  **How this is scored**.
-- **How this is scored** opens the breakdown: one bar for each of the five parts with its own score, what
-  was measured and the child's usual. A part that was left out says why (for example "No put-down was
-  detected for this night"). The sheet also says when the score was held down by one part, when it may
-  still change, and when it is low confidence.
+- **On the sleep detail page**, one night card under the date shows the time asleep, a ring, its word
+  ("Great", "Good", "Fair", or "Early estimate"), a short blurb and **Why this score?**. The review
+  action sits in the card too.
+- **Why this score?** opens a sheet on a phone or a dialog on desktop. Each of the five parts has
+  its measured value, a bar coloured for that part's own score, and a plain word. A part left out
+  has a dashed empty bar and a reason. The sheet also lists the available night figures and says
+  when a score was held down, may still change, is an early estimate, or has low confidence.
 - A night with no score shows **No score yet** and the reason.
 
 The ring's arc is coloured by band: green for Great, teal for Good, amber for Fair, a soft rose for a score
@@ -814,9 +814,9 @@ other key is still the fresh `no_data` night; read `?stored=1` or the list for t
 
 ## Night summary
 
-Above the score, a few plain sentences about the night: a **headline** and two to four short
-**observations**. For example: "Sleep was mostly steady, with some waking or stirring." followed by
-"Asleep for 10h 0m, less than the usual 10h 40m." and "3 wake-ups were counted overnight."
+The child's card shows a one-line headline. The sleep page turns the night's observations into
+two or three flowing sentences, joining related facts such as the longest stretch and settling time.
+When those facts cannot be joined, it uses their individual sentences.
 
 It describes what was measured and how that compares with this child's own recent nights. It does not say
 why anything happened, gives no advice, and never mentions sleep stages. It is not written by an AI: the
@@ -827,10 +827,9 @@ measurement.
 
 ### Where you see it
 
-- **On the sleep detail page**, in a **Night summary** card under the date: the headline, the
-  observations, and below them the score ring and **How this is scored** (see
-  [Sleep score](#sleep-score)). With the child's [Show sleep score](#turning-the-score-off) switch off,
-  the card is the sentences alone.
+- **On the sleep detail page**, the night card combines related facts into a short blurb beside
+  the duration and score ring. With the child's [Show sleep score](#turning-the-score-off) switch
+  off, the card still describes the night and its figures remain on the page.
 - **On the child's card**, the headline on one line under the duration. On a narrow phone a long headline
   is cut short with "…" rather than wrapped; the full text is on the sleep page.
 - Times are shown in your home timezone and your device's 12 or 24 hour clock, and room temperatures in
@@ -918,7 +917,7 @@ Known limits:
 - "No wake-ups so far" means none have been counted yet. The wake-up in progress is counted once it ends.
 - The 4-minute and 6-minute figures are starting values, set from how the detector joins wake-ups and how
   often the page asks; nothing measured them across other homes.
-- **What the app shows today.** The facts so far appear under the **Night summary** on tonight's sleep page,
+- **What the app shows today.** The facts so far appear in the blurb of the night card on tonight's sleep page,
   with the usual "No score yet" line. The child's card still shows only the headline. The where-the-child-is
   state (`live`) is in the API response only: no screen shows it yet, a later design change will.
 

@@ -371,3 +371,54 @@ export function nightSummaryText(summary, opts = {}) {
   }
   return { headline, observations };
 }
+
+// The sleep page joins the two related end-of-night measurements into one sentence. These are fixed
+// variants, selected by the same seed/key hash as the observation library; unpaired facts keep their
+// existing sentences so a newer server or a partial night never produces a broken clause.
+export const BLURB_PHRASES = Object.freeze({
+  stretch_settle: [
+    'The longest stretch was {minutes}, and settling took {settle_minutes}.',
+    'The longest stretch lasted {minutes}; settling took {settle_minutes}.',
+  ],
+  stretch_settle_more: [
+    'The longest stretch was {minutes}, a larger share than usual; settling took {settle_minutes}.',
+    'A {minutes} stretch made up more of the night than usual; settling took {settle_minutes}.',
+  ],
+  stretch_settle_less: [
+    'The longest stretch was {minutes}, a smaller share than usual; settling took {settle_minutes}.',
+    'A {minutes} stretch made up less of the night than usual; settling took {settle_minutes}.',
+  ],
+  stretch_settle_about_the_same: [
+    'The longest stretch was {minutes}, about the usual share; settling took {settle_minutes}.',
+    'A {minutes} stretch was about the usual share of the night; settling took {settle_minutes}.',
+  ],
+});
+
+export function nightBlurbText(summary, opts = {}) {
+  const base = nightSummaryText(summary, opts);
+  if (!base) return null;
+  const entries = Array.isArray(summary.observations) ? summary.observations : [];
+  const stretch = entries.find((o) => o?.key === 'longest_stretch' || o?.key === 'longest_stretch_vs_usual');
+  const settle = entries.find((o) => o?.key === 'settling_time');
+  // Validate the whole observation first: a null usual or other required param must never be
+  // smuggled into a merged sentence just because its minutes field happens to be present.
+  const stretchValid = stretch && sentence(OBSERVATION_PHRASES[stretch.key], stretch.key, stretch.params ?? {}, summary.seed, opts);
+  const settleValid = settle && sentence(OBSERVATION_PHRASES.settling_time, 'settling_time', settle.params ?? {}, summary.seed, opts);
+  const stretchText = stretchValid && PARAM_FORMATTERS.minutes(stretch.params.minutes);
+  const settleText = settleValid && PARAM_FORMATTERS.minutes(settle.params.minutes);
+  const mergeKey = stretch?.key === 'longest_stretch_vs_usual' ? `stretch_settle_${stretch.params?.direction}` : 'stretch_settle';
+  const variants = BLURB_PHRASES[mergeKey];
+  const merged = stretchText && settleText && variants
+    ? fill(variants[variantIndex(summary.seed, mergeKey, variants.length)],
+      { minutes: stretchText, settle_minutes: settleText }, opts.childName)
+    : null;
+  const lines = [];
+  for (const o of entries) {
+    if (!o || typeof o.key !== 'string' || !Object.hasOwn(OBSERVATION_PHRASES, o.key)) continue;
+    if (merged && o === settle) continue;
+    if (merged && o === stretch) { lines.push(merged); continue; }
+    const line = sentence(OBSERVATION_PHRASES[o.key], o.key, o.params ?? {}, summary.seed, opts);
+    if (line) lines.push(line);
+  }
+  return lines.slice(0, 3);
+}

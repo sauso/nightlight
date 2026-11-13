@@ -131,8 +131,8 @@ Colour is never the only signal: the band word and the number are drawn, and the
 ### Band colours
 
 Five score bands get colours so the ring, the nights strip and the breakdown bars can show how a night went at a glance.
-The tokens are `--band-*` in `index.css`. Today the score ring (see "Score ring"), the seven-night strip's bars and the
-line under the sleep page's header use them; the breakdown bars follow in a later change. **A colour is never the only signal** (the
+The tokens are `--band-*` in `index.css`. Today the score ring (see "Score ring"), the seven-night strip's bars, the
+line under the sleep page's header and the "Why this score?" sheet's factor bars use them. **A colour is never the only signal** (the
 band word and the number always show) and **text is never set in a band colour**: they are marks (rings, bars, dots) only.
 
 | Band | `--band-*` by day (card / inset) | `--band-*` at night (card / inset) | `--band-*-ring` on the night card (card / track) |
@@ -617,7 +617,7 @@ stroke's width is not part of the WCAG ratio. (The design canvas drew 7 to 11 an
 `surface` picks the colours. On a `.card`: the arc is `--band-<band>` (which switches with the theme, contrast in "Band colours")
 on a `--border` track and the number is `--text-primary` (the number 16.65:1 and 12.53:1; with no band the arc is
 `--accent-line`, 5.06:1 on a day card, 5.87:1 on a night card, 3.57:1 and 4.40:1 against the track).
-On the child's hero card (`.night`), which is the same navy gradient in both themes, the colours are **literals or fixed
+On the child and sleep-page night cards (`.night`), which use the same navy gradient in both themes, the colours are **literals or fixed
 tokens**, because the day `--accent-line` is only 2.45:1 there: the arc is `--band-<band>-ring` (the same in both themes;
 with no band, the literal periwinkle `#A7B1FF`, 6.13:1 at the gradient's lightest point, `#2C2F63`, and 7.60:1 against its
 track), the number `#FFFFFF` (12.40:1), the track near-black at 35% (`rgba(10, 8, 12, 0.35)`, which composites to the navy
@@ -637,15 +637,19 @@ needed), `--night-link` 5.82 to 6.74:1, and the arc against the tinted card 6.79
 (a graphic needs 3:1; rose is the weakest). `test/paletteTokens.test.jsx` recomputes them from the stylesheet, including the 12%.
 
 ### Night summary (`components/SleepScoreCard.jsx`, `lib/nightSummaryPhrases.js`)
-A few plain sentences about the night, above the score. On the sleep detail page it is the card under the night strip,
-titled "Night summary" with the same moon icon as `.sleep-insight__title`: a **headline** as the card's one prominent line
-(17px, weight 600, `--text-primary`), the **observations** as a quiet list under it (13px, `--text-secondary`, 2 to 4 items),
-and, when the child's "Show sleep score" switch is on, the score ring and its "How this is scored" button under a hairline
-(`.sleep-summary__score`). With the switch off the card is the sentences alone. When the server sends no `summary` the card is
-the earlier "Sleep score" card, unchanged. On the child's card the headline is **one line** under the duration
+A few plain sentences about the night sit beside the score ring and duration in one navy card under the date.
+The detail page joins related observations into a two or three sentence blurb. The child's card keeps the
+headline as **one line** under the duration
 (`.night__headline`, 15px bold, under the sleep row at the card's full width) and **ends in an ellipsis rather than wrapping**. It is
 also in the button's `aria-label`, so nothing the ellipsis cuts is lost to a screen reader. The observations list is not on the
 child's card at all.
+
+The detail card's **Why this score?** button opens a bottom sheet on a phone and a centred dialog from
+1024px. Each of the five factors has a measured value, a short word and a 72px bar. The fill uses the
+factor's own score band through `--band-great`, `--band-good`, `--band-fair` or `--band-low` on the
+card surface, against the `--border` track. These pairs are checked at 3:1 in both themes. A factor
+left out of the score has a dashed empty track and a reason. The sheet follows with available night
+figures and notes that apply to this score. The page's estimate line remains at its foot.
 
 The words are descriptive only: what was measured and how it compares with this child's own recent nights, never a cause, advice,
 praise or blame, never a sleep stage, no emoji and no exclamation mark. The headline's class follows the score's parts, so a

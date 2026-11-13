@@ -275,7 +275,7 @@ export default function SleepDetail() {
           )}
         </div>
 
-        <SleepNightStrip childId={id} maxDate={maxDate} minDate={minDate} selected={date} onSelect={setDate} version={stripVersion} />
+        <SleepNightStripchildId={id} maxDate={maxDate} minDate={minDate} selected={date} onSelect={setDate} version={stripVersion} />
 
         {/* Recompute (admin-only) lives in the "⋯" menu. Mounted once, here, for every status but `off` and for a night
             that has been answered (null / loading: nothing to recompute): it was in each status's card before, which is the
@@ -289,14 +289,15 @@ export default function SleepDetail() {
             menuSlot={menuSlot} onAvailable={setRecomputeAvailable} />
         )}
 
-        {receipt && (
+        {/* On an `ok` night the receipt sits inside the night card (NightBody); other statuses keep it here. */}
+        {receipt && night?.status !== 'ok' && (
           <ReviewReceipt onsetAt={receipt.true_onset_at} wakeAt={receipt.true_wake_at} inBedAt={receipt.true_in_bed_at}
             nobodyInBed={!!receipt.nobody_in_bed}
             fmtTime={fmtTime} onOpen={() => navigate(`/children/${id}/review/${date}`)} />
         )}
 
         <NightBody night={night} error={nightError} onRetry={() => setNightRetry((n) => n + 1)} fmtTime={fmtTime} tz={tz} tempUnit={settings.temp_unit}
-          childId={id} date={date}
+          childId={id} date={date} receipt={receipt} onReview={() => navigate(`/children/${id}/review/${date}`)}
           onAlertProtectionChange={(clipId, value) => setNight((prev) => prev && ({ ...prev,
             alerts: (prev.alerts || []).map((clip) => clip.id === clipId ? { ...clip, protected: value } : clip),
           }))}
@@ -338,11 +339,22 @@ function NightBody({ night, error, onRetry, ...rest }) {
     <>
       {error && <LoadFailed what="this night" error={error} onRetry={onRetry} stale />}
       {night?.scoring_view && <SettingsViewLine night={night} />}
-      {/* The sleep score (plan phase 2), under the date navigator and above the night for EVERY status: a night
-          whose timeline has aged out reads `no_data` and can still carry its saved score. Always rendered in this
-          slot (it returns nothing when there is nothing to say), so NightContent's position never changes and it
-          keeps its state. It is handed the night on screen, so it follows a switch to today's settings. */}
-      <SleepScoreCard night={night} />
+      {/* The night card sits under the date navigator and above the night for EVERY status: a night whose
+          timeline has aged out reads `no_data` and can still carry its saved score. Always rendered in this
+          slot (it returns nothing when there is nothing to say), so NightContent's position never changes and
+          it keeps its state. It is handed the night on screen, so it follows a switch to today's settings.
+          The review receipt and button keep their old conditions (the receipt for any answered night, the button
+          only for a finished one); only their position moves, into the night card of an `ok` night. Other
+          statuses keep their old routes (receipt above the date navigator, button in NightContent's early
+          returns). A saved score on no_data still renders. */}
+      <SleepScoreCard night={night} reviewAction={night?.status === 'ok' && (rest.receipt || !night.in_progress)
+        ? <>
+            {rest.receipt && <ReviewReceipt onsetAt={rest.receipt.true_onset_at} wakeAt={rest.receipt.true_wake_at}
+              inBedAt={rest.receipt.true_in_bed_at} nobodyInBed={!!rest.receipt.nobody_in_bed}
+              fmtTime={rest.fmtTime} onOpen={rest.onReview} embedded />}
+            {!night.in_progress && <ReviewNightButton childId={rest.childId} date={rest.date} corrected={night.corrected} />}
+          </>
+        : null} />
       <NightContent night={night} {...rest} />
     </>
   );
@@ -504,8 +516,9 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
 
   return (
     <>
-      <div className="card sleep-detail__summary">
-        <div className="sleep-detail__big">{fmtDurBig(night.asleep_minutes)}<span> asleep{night.in_progress ? ' so far' : ''}</span></div>
+      {/* A night without an available score has no numbers sheet, so its facts remain here. A scored
+          night gets these same facts in the sheet; the tools below remain reachable on the page. */}
+      {!scoreOf(night) && <div className="card sleep-detail__summary">
         <div className="sleep-detail__stats">
           {/* "In bed" first, so the two times read in the order they happened. Only when the put-down
               is a real minute or more before sleep — see showsInBed for why that check is one-way. */}
@@ -515,6 +528,8 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
           <Stat label="Longest stretch" value={fmtDurAbbr(night.longest_stretch_minutes)} />
           {partialCoverage && <Stat label="Coverage" value={`${covPct}%`} />}
         </div>
+      </div>}
+      <div className="sleep-detail__tools">
         <RefinedTimes night={night} fmtTime={fmtTime} />
         {night.analysis_camera_name && (
           <div className="sleep-detail__source">
@@ -522,12 +537,7 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
           </div>
         )}
         <FaultyMicNote night={night} />
-        {/* The way into a review for any night, not just the one the card is offering. Without it a
-            mistake is permanent. Its own component because `navigate` belongs to whichever component
-            calls the hook — inline here it was out of scope and the button silently did nothing. */}
-        {!night.in_progress && (
-          <ReviewNightButton childId={childId} date={date} corrected={night.corrected} />
-        )}
+        {/* The review button for an `ok` night is inside the night card (NightBody); Recompute is in the "⋯" menu. */}
       </div>
 
       <div className="card">

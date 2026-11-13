@@ -1,5 +1,5 @@
 // The night summary's words and where they appear (sleep score plan, phase 3): the phrase library
-// (src/lib/nightSummaryPhrases.js), the "Night summary" card on the sleep detail page and the headline on the
+// (src/lib/nightSummaryPhrases.js), the night card blurb on the sleep detail page and the headline on the
 // child's card. The selection of WHICH facts to say is the server's (backend/test/night-summary.test.js).
 //
 // THE GUARDRAIL SUITE runs over EVERY variant of EVERY key, so a phrase added later is checked without anyone
@@ -21,7 +21,7 @@ import SleepScoreCard from '../src/components/SleepScoreCard.jsx';
 import SleepSummaryCard from '../src/components/SleepSummaryCard.jsx';
 import { api } from '../src/lib/api.js';
 import {
-  HEADLINE_PHRASES, OBSERVATION_PHRASES, PARAM_FORMATTERS, PHRASE_SELECTORS, variantIndex, nightSummaryText, headlineText,
+  HEADLINE_PHRASES, OBSERVATION_PHRASES, BLURB_PHRASES, PARAM_FORMATTERS, PHRASE_SELECTORS, variantIndex, nightSummaryText, nightBlurbText, headlineText,
 } from '../src/lib/nightSummaryPhrases.js';
 import { HEADLINE_KEYS, OBSERVATION_PARAMS, DIRECTIONS } from '../../backend/src/lib/nightSummaryKeys.js';
 
@@ -34,6 +34,9 @@ for (const [key, entry] of Object.entries(HEADLINE_PHRASES)) {
 }
 for (const [key, entry] of Object.entries(OBSERVATION_PHRASES)) {
   for (const [group, variants] of Object.entries(entry.groups)) variants.forEach((text, i) => ALL.push({ kind: 'observation', key, group, i, text }));
+}
+for (const [key, variants] of Object.entries(BLURB_PHRASES)) {
+  variants.forEach((text, i) => ALL.push({ kind: 'blurb', key, group: 'all', i, text }));
 }
 const label = (p) => `${p.kind} ${p.key}/${p.group}[${p.i}]: "${p.text}"`;
 
@@ -77,7 +80,8 @@ describe('the guardrails, over every variant of every key', () => {
   test('every {placeholder} is a param the server declares for that key; a headline has none; no phrase needs the child\'s name', () => {
     for (const p of ALL) {
       const names = [...p.text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
-      const allowed = p.kind === 'headline' ? [] : OBSERVATION_PARAMS[p.key].filter((n) => n !== 'direction');
+      const allowed = p.kind === 'headline' ? [] : p.kind === 'blurb'
+        ? ['minutes', 'settle_minutes'] : OBSERVATION_PARAMS[p.key].filter((n) => n !== 'direction');
       for (const name of names) expect([label(p), allowed.includes(name)]).toEqual([label(p), true]);
     }
     // Precondition: the check can fail.
@@ -356,24 +360,47 @@ const HEADLINE = 'Steady, with some waking or stirring.';
 const FIRST = 'Asleep for 10h 0m, less than the usual 10h 40m.';
 const SECOND = '3 wake-ups were counted overnight.';
 
-describe('the Night summary card on the detail page', () => {
+describe('the sleep-page blurb', () => {
+  test('joins a typical stretch and settling into a third sentence, with deterministic variants', () => {
+    const summary = { ...SUMMARY, observations: [...SUMMARY.observations,
+      { key: 'longest_stretch', params: { minutes: 190 } },
+      { key: 'settling_time', params: { minutes: 12 } }] };
+    const first = nightBlurbText(summary);
+    expect(first).toHaveLength(3);
+    expect(first[0]).toContain('10h 0m');
+    expect(first[1]).toContain('3 wake-ups');
+    expect(first[2]).toMatch(/3h 10m.*12m/);
+    expect(nightBlurbText(summary)).toEqual(first);
+  });
+
+  test('an unmergeable pair falls back to the individual phrase, and unknown or null facts are skipped', () => {
+    const summary = { ...SUMMARY, observations: [
+      { key: 'longest_stretch_vs_usual', params: { minutes: 190, direction: null } },
+      { key: 'settling_time', params: { minutes: 12 } },
+      { key: 'new_server_fact', params: { minutes: 2 } },
+    ] };
+    expect(nightBlurbText(summary)).toHaveLength(1);
+    expect(nightBlurbText(summary)[0]).toMatch(/12m/);
+    const alone = { ...summary, observations: [{ key: 'longest_stretch', params: { minutes: 190 } }] };
+    expect(nightBlurbText(alone)[0]).toMatch(/3h 10m/);
+    const nullSettle = { ...alone, observations: [...alone.observations, { key: 'settling_time', params: { minutes: null } }] };
+    expect(nightBlurbText(nullSettle)).toEqual(nightBlurbText(alone));
+  });
+});
+
+describe('the night card blurb on the detail page', () => {
   const NIGHT = { status: 'ok', night_date: '2026-03-10' };
   const show = (night) => renderAsAdmin(<SleepScoreCard night={night} />);
 
-  test('with a summary and a score: the card is "Night summary", the headline, the observations, and the score button inside it', () => {
-    show({ ...NIGHT, score: SCORE, summary: SUMMARY });
-    expect(screen.getByText('Night summary')).toBeInTheDocument();
-    expect(screen.queryByText('Sleep score')).not.toBeInTheDocument();
-    expect(screen.getByText(HEADLINE)).toBeInTheDocument();
-    expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual([FIRST, SECOND]);
-    // The score part is exactly the phase 2 control.
-    expect(screen.getByRole('button', { name: 'Sleep score 82, Good. How this is scored' })).toBeInTheDocument();
+  test('with a summary and score the night card has a flowing blurb and opens the sheet', () => {
+    const { container } = show({ ...NIGHT, score: SCORE, summary: SUMMARY });
+    expect(container.querySelector('.sleep-night-card__blurb').textContent).toBe(`${FIRST} ${SECOND}`);
+    expect(screen.getByRole('button', { name: 'Sleep score 82, Good. Why this score?' })).toBeInTheDocument();
   });
 
   test('with the switch off (a summary and no score key): the sentences alone, no ring, no button, no "No score yet"', () => {
     const { container } = show({ ...NIGHT, summary: SUMMARY });
-    expect(screen.getByText('Night summary')).toBeInTheDocument();
-    expect(screen.getByText(HEADLINE)).toBeInTheDocument();
+    expect(container.querySelector('.sleep-night-card__blurb').textContent).toBe(`${FIRST} ${SECOND}`);
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(container.querySelector('svg text')).toBe(null);
     expect(screen.queryByText(/No score yet/)).not.toBeInTheDocument();
@@ -382,28 +409,23 @@ describe('the Night summary card on the detail page', () => {
   test('a night with no score keeps its reason under the summary', () => {
     show({ ...NIGHT, score: { score: null, reason: 'promoted_from_empty', version: 2 },
       summary: { headline: { key: 'neutral_last_night' }, observations: [{ key: 'times_entered_by_hand', params: {} }], seed: 'child-a|2026-03-10' } });
-    expect(screen.getByText('Night summary')).toBeInTheDocument();
     expect(screen.getByText('No score yet. The times for this night were entered by hand, so its wake-ups were never measured.')).toBeInTheDocument();
-    expect(screen.getAllByRole('listitem')).toHaveLength(1);
   });
 
-  test('no summary (an older server, or a failure): exactly the earlier "Sleep score" card, and nothing at all when there is no score either', () => {
+  test('no summary (an older server, or a failure): keep the score without inventing a blurb', () => {
     const first = show({ ...NIGHT, score: SCORE, summary: null });
-    expect(screen.getByText('Sleep score')).toBeInTheDocument();
-    expect(screen.queryByText('Night summary')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Sleep score 82, Good. How this is scored' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sleep score 82, Good. Why this score?' })).toBeInTheDocument();
     first.unmount();
     const second = show({ ...NIGHT, score: SCORE }); // the key is absent altogether
-    expect(screen.getByText('Sleep score')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Why this score/ })).toBeInTheDocument();
     second.unmount();
     const empty = show({ ...NIGHT, summary: null });
-    expect(empty.container.textContent).toBe('');
+    expect(empty.container.querySelector('.score-ring')).toBeNull();
   });
 
   test('an unusable summary (no headline object) falls back the same way', () => {
     show({ ...NIGHT, score: SCORE, summary: { observations: 'x' } });
-    // The headline falls back to the neutral line, and the card is still the Night summary card.
-    expect(screen.getByText('Night summary')).toBeInTheDocument();
+    // The headline falls back, but without observations there is no invented blurb.
     expect(screen.queryAllByRole('listitem')).toHaveLength(0);
   });
 

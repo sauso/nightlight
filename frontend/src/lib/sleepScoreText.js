@@ -48,6 +48,16 @@ export function bandWord(score) {
 //     'low' for an unknown key would colour a possibly GOOD night rose; null keeps today's neutral periwinkle ring, and
 //     the number and the server's words still say how the night went. Same rule as the unknown reason keys above.
 const COLOUR_BANDS = ['great', 'good', 'fair'];
+// The server's SCORE_CONFIG.bands uses these edges. A factor has no band key in the response, so the sheet
+// mirrors them here in one place; changing the server edges requires changing this tested display mapping too.
+export const FACTOR_BAND_EDGES = Object.freeze({ great: 85, good: 70, fair: 55 });
+export function bandOfValue(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  if (value >= FACTOR_BAND_EDGES.great) return 'great';
+  if (value >= FACTOR_BAND_EDGES.good) return 'good';
+  if (value >= FACTOR_BAND_EDGES.fair) return 'fair';
+  return 'low';
+}
 export function bandOf(score) {
   if (!score || typeof score.score !== 'number' || !Number.isFinite(score.score)) return null;
   if (score.early_estimate) return 'early';

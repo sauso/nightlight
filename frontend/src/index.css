@@ -1539,8 +1539,6 @@ body.in-pip .tile-menu-backdrop {
 .sleep-strip__bar--early { background: var(--band-early); }
 
 .sleep-detail__summary { display: flex; flex-direction: column; gap: 12px; }
-.sleep-detail__big { font-size: 26px; font-weight: 700; color: var(--text-primary); line-height: 1.1; }
-.sleep-detail__big span { font-size: 15px; font-weight: 500; color: var(--text-secondary); }
 .sleep-detail__stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
 .sleep-stat__label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
 .sleep-stat__value { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-top: 1px; }
@@ -1840,28 +1838,59 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 /* On the child's card the ring sits beside the heading and the duration line, not centred on the whole card. */
 .night__score { flex: none; align-self: flex-start; line-height: 0; }
 
-/* Sleep score card on the sleep detail page, and its breakdown sheet (components/SleepScoreCard.jsx). */
-.sleep-score__open { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 44px; padding: 4px 0; background: none; border: none; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 10px; }
-.sleep-score__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.sleep-score__band { font-size: 16px; font-weight: 700; color: var(--text-primary); }
-.sleep-score__how { font-size: 13px; color: var(--accent-text); }
-.sleep-score__chev { flex: none; color: var(--accent-line); }
-.sleep-score__note { font-size: 12px; line-height: 1.45; color: var(--text-secondary); margin: 10px 0 0; }
-.sleep-score__lead { font-size: 13px; line-height: 1.45; color: var(--text-secondary); margin: 0 0 14px; }
-.score-parts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+/* The sleep page uses the same navy card tokens as the child card. The ring is a mark on that
+   gradient, so it uses the fixed --band-*-ring colours; the sheet uses card-surface --band-* colours. */
+.sleep-night-card { display: flex; flex-direction: column; gap: 12px; }
+.sleep-night-card__main { display: flex; align-items: flex-start; gap: 16px; }
+.sleep-night-card__main .score-ring { flex: none; }
+.sleep-night-card__story { min-width: 0; }
+.sleep-night-card__duration { color: var(--night-number); font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sleep-night-card__qualifier { color: var(--night-muted); font-size: 13px; margin-top: 2px; }
+.sleep-night-card__blurb { color: var(--night-text); font-size: 14px; line-height: 1.5; margin: 8px 0 0; }
+.sleep-night-card .sleep-score__note { color: var(--night-muted); }
+.sleep-score__open { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 44px; padding: 4px 0; background: none; border: none; color: var(--night-link); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; border-radius: 10px; }
+.sleep-score__open:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.sleep-night-card__review { padding-top: 10px; border-top: 1px solid var(--night-divider); }
+.sleep-night-card__review a, .sleep-night-card__review button { min-height: 44px; }
+.sleep-night-card__review .btn, .sleep-night-card__review .camera-tile__sub { color: var(--night-text); }
+.sleep-night-card__review .sleep-detail__review { background: var(--night-action); color: var(--night-on-action); border: 0; }
+.sleep-night-card__review .sleep-detail__review:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.sleep-night-card__review .review-card__go { color: var(--night-link); }
+.sleep-night-card__review .card-title { color: var(--night-text); }
+.sleep-score__note { font-size: 12px; line-height: 1.45; color: var(--text-secondary); margin: 8px 0 0; }
+.sleep-detail__tools { display: flex; flex-direction: column; gap: 8px; }
+/* Spacing below the tools only when something rendered; a card gets its own margin, this plain div does not. */
+.sleep-detail__tools:not(:empty) { margin-bottom: 14px; }
+.score-parts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.score-part { padding-bottom: 10px; border-bottom: 1px solid var(--border); }
 .score-part__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .score-part__name { font-size: 15px; font-weight: 600; color: var(--text-primary); }
-.score-part__score { font-size: 13px; font-weight: 600; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
-.score-part__bar { height: 6px; border-radius: 999px; background: var(--border); margin-top: 6px; overflow: hidden; }
-.score-part__bar span { display: block; height: 100%; border-radius: 999px; background: var(--accent-line); }
-.score-part__detail { font-size: 12px; line-height: 1.45; color: var(--text-secondary); margin-top: 5px; }
-.sleep-score__about-title { font-family: inherit; font-size: 13px; font-weight: 700; color: var(--text-primary); margin: 18px 0 4px; }
-.sleep-score__about { font-size: 12px; line-height: 1.5; color: var(--text-secondary); margin: 0; }
-/* Night summary (the same card with a server `summary`): the headline is the card's one prominent line, 17px/600 on the
-   type scale (the compact header's title size), then the observations as a quiet list, then the score under a hairline. */
-.sleep-summary__headline { font-size: 17px; font-weight: 600; line-height: 1.35; color: var(--text-primary); margin: 0 0 10px; text-wrap: balance; }
-.sleep-summary__list { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.45; color: var(--text-secondary); }
-.sleep-summary__score { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
+.score-part__score { font-size: 13px; font-weight: 600; color: var(--text-primary); text-align: right; font-variant-numeric: tabular-nums; }
+.score-part__bar { display: inline-block; vertical-align: middle; width: 72px; height: 7px; border-radius: 999px; background: var(--border); margin: 8px 8px 0 0; overflow: hidden; }
+.score-part__bar span { display: block; height: 100%; border-radius: 999px; }
+.score-part__bar--great span { background: var(--band-great); }
+.score-part__bar--good span { background: var(--band-good); }
+.score-part__bar--fair span { background: var(--band-fair); }
+.score-part__bar--low span { background: var(--band-low); }
+.score-part__bar--empty { box-sizing: border-box; border: 1px dashed var(--text-secondary); background: transparent; }
+.score-part__detail { display: inline; font-size: 12px; line-height: 1.45; color: var(--text-secondary); }
+.score-part__detail--extra { display: block; margin-top: 5px; }
+.sleep-score__numbers { margin-top: 18px; }
+.sleep-score__numbers h3 { color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.sleep-score__numbers ul { margin: 8px 0; padding-left: 20px; font-size: 13px; line-height: 1.6; }
+.sleep-score__note-box { margin: 10px 0 0; padding: 10px 12px; border-radius: 10px; background: var(--bg-elevated-2); color: var(--text-primary); font-size: 12px; line-height: 1.5; }
+/* The dialog is nested under the navy card for focus restoration, but paints the normal card surface. */
+.sleep-night-card .modal-card { color: var(--text-primary); }
+@media (min-width: 1024px) {
+  .sleep-night-card .modal-overlay--wide .modal-card { max-width: min(620px, 92vw); }
+  .sleep-night-card .score-part { display: grid; grid-template-columns: 112px minmax(0, 1fr) 72px 170px; align-items: center; gap: 8px; }
+  .sleep-night-card .score-part__head { display: contents; }
+  .sleep-night-card .score-part__score { text-align: left; }
+  .sleep-night-card .score-part__bar { margin: 0; }
+  .sleep-night-card .score-part__detail--extra { grid-column: 2 / -1; }
+  .sleep-night-card .sleep-score__numbers ul { columns: 2; column-gap: 20px; }
+  .sleep-night-card .sleep-score__numbers li { break-inside: avoid; }
+}
 
 .sleep-detail__est { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding: 0 4px; font-size: 11px; color: var(--text-secondary); }
 

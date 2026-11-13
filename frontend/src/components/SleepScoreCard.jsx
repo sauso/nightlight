@@ -1,153 +1,188 @@
 import { useContext, useState } from 'react';
-import { Moon, ChevronRight } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import Modal from './Modal.jsx';
 import ScoreRing from './ScoreRing.jsx';
 import { SettingsContext } from '../lib/SettingsContext.jsx';
-import { nightSummaryText } from '../lib/nightSummaryPhrases.js';
+import { nightBlurbText } from '../lib/nightSummaryPhrases.js';
+import { formatInZone, TIME } from '../lib/homeTime.js';
+import { showsInBed } from '../lib/inBed.js';
 import {
   scoreOf, scoreQualifier, scoreLabel, componentName, componentDetail, droppedTerms, unavailableText, noScoreText,
-  lowConfidenceText, cappedText, bandOf,
+  lowConfidenceText, cappedText, bandOf, bandOfValue, minutesText, clockText,
 } from '../lib/sleepScoreText.js';
 
-// The night summary and the sleep score on the sleep detail page (sleep score plan, phases 2 and 3): a card under the
-// date navigator. With a `summary` from the server it is the "Night summary" card: a headline, a few observations,
-// and (when the child's switch shows the score) the ring inside a real button below them. Without a summary it is the
-// phase 2 "Sleep score" card, unchanged. The button opens a sheet that shows how the number was made.
-//
-// IT FOLLOWS THE NIGHT OBJECT IT IS GIVEN, and keeps no copy. The detail page can swap the night under it (another
-// date, the two-minute refresh, "Show with today's settings", a Recompute), and the score is part of that object
-// (the server works it out from the exact night it returns), so the ring can never show one night's score beside
-// another night's figures.
-//
-// WHAT IT SHOWS, by what `night.score` is:
-//   absent  : the child's "Show sleep score" switch is off (the server leaves the key out). No score part; the
-//             summary, if there is one, still shows.
-//   null    : scoring failed on the server. No score part: there is nothing true to say about it.
-//   { score: null, reason } : "No score yet" and the reason in plain words.
-//   a score : the ring, the band word (or "Early estimate"), and the button to the breakdown.
-// Tracking off (`status: 'off'`) shows nothing either: that page already says tracking is off.
-//
-// All wording comes from lib/sleepScoreText.js, which also holds the rule that an unknown key from a newer server
-// never throws: an unknown component is skipped here, an unknown reason gets a neutral line.
-export default function SleepScoreCard({ night }) {
+const ORDER = ['duration', 'continuity', 'settling', 'restlessness', 'consistency'];
+// The nightly job rechecks the end of a window for three hours (sleepAnalysis.runNightlySleepJob).
+// The server's provisional flag, rather than this offset, decides whether the note appears.
+const PROVISIONAL_CHECK_HOURS = 3;
+const measured = (n) => typeof n === 'number' && Number.isFinite(n);
+const utcDate = (s) => {
+  if (typeof s !== 'string' || !s) return null;
+  const d = new Date(`${s.replace(' ', 'T')}Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+const time = (s, zone) => {
+  const d = utcDate(s);
+  return d ? formatInZone(d, zone, TIME) : null;
+};
+const temp = (v, unit) => measured(v) ? `${Math.round(unit === 'F' ? v * 9 / 5 + 32 : v)}°${unit === 'F' ? 'F' : 'C'}` : null;
+
+// Continuity's component.value is efficiency. The night also carries the measured wake count and
+// longest stretch, which the approved row shows together without changing the score calculation.
+function factorValue(c, night) {
+  switch (c.key) {
+    case 'duration': return minutesText(c.value);
+    case 'continuity': {
+      const wakes = measured(night.wake_count) ? `${night.wake_count} wake-up${night.wake_count === 1 ? '' : 's'}` : null;
+      const stretch = minutesText(night.longest_stretch_minutes);
+      return [wakes, stretch && `longest ${stretch}`].filter(Boolean).join(' · ');
+    }
+    case 'settling': return minutesText(c.value);
+    case 'restlessness': return measured(c.value) ? `${c.value.toFixed(1)} min/h` : null;
+    case 'consistency': {
+      const onset = Array.isArray(c.terms) ? c.terms.find((t) => t?.key === 'onset' && t.available) : null;
+      const at = onset ? clockText(onset.value) : null;
+      return at ? `Asleep ${at}` : null;
+    }
+    default: return null;
+  }
+}
+
+// A plain phrase accompanies every scored bar; the colour is never the only comparison.
+function factorWord(c) {
+  if (c.key === 'duration' && c.basis === 'span_vs_age') return 'Compared with age figure';
+  if (c.key === 'duration' && measured(c.usual) && measured(c.value))
+    return c.value < c.usual ? 'Less than usual' : c.value > c.usual ? 'More than usual' : 'About usual';
+  if (c.key === 'continuity') {
+    const wakes = Array.isArray(c.terms) ? c.terms.find((t) => t?.key === 'wake_count' && t.available) : null;
+    if (wakes && measured(wakes.value) && measured(wakes.usual))
+      return wakes.value > wakes.usual ? 'More wake-ups' : wakes.value < wakes.usual ? 'Fewer wake-ups' : 'About usual';
+    return 'Wake-ups and longest stretch';
+  }
+  if (c.key === 'settling') {
+    if (measured(c.usual) && measured(c.value))
+      return c.value > c.usual ? 'Longer than usual' : c.value < c.usual ? 'Shorter than usual' : 'About usual';
+    return 'Time to fall asleep';
+  }
+  if (c.key === 'restlessness' && measured(c.usual) && measured(c.value))
+    return c.value > c.usual ? 'More stirring' : c.value < c.usual ? 'Less stirring' : 'About usual';
+  if (c.key === 'consistency') {
+    const onset = Array.isArray(c.terms) ? c.terms.find((t) => t?.key === 'onset' && t.available) : null;
+    if (onset && measured(onset.value) && measured(onset.usual)) {
+      // The server stores clock times since noon. Compare by the shorter way around midnight so
+      // a time just past noon does not read as a day later than a time just before it.
+      const delta = ((onset.value - onset.usual + 2160) % 1440) - 720;
+      return delta > 0 ? 'Later' : delta < 0 ? 'Earlier' : 'About usual';
+    }
+    return 'Timing of sleep';
+  }
+  return 'Measured this night';
+}
+
+function nightNumbers(night, score, zone, unit) {
+  const lines = [];
+  const inBed = showsInBed(night) ? time(night.in_bed_at, zone) : null;
+  const up = time(night.wake_at, zone);
+  const outEvent = Array.isArray(night.transitions)
+    ? night.transitions.find((t) => t?.type === 'out_of_bed') : null;
+  const outBed = time(outEvent?.at, zone);
+  if (inBed) lines.push(`In bed ${inBed}${outBed ? `, out of bed ${outBed}` : ''}`);
+  else if (outBed) lines.push(`Out of bed ${outBed}`);
+  const onset = time(night.onset_at, zone);
+  if (onset && up) lines.push(`Asleep ${onset} to ${up}`);
+  else if (onset) lines.push(`Asleep from ${onset}`);
+  if (measured(night.wake_count)) lines.push(`${night.wake_count} wake-up${night.wake_count === 1 ? '' : 's'}${minutesText(night.awake_minutes) ? `, ${minutesText(night.awake_minutes)} awake in all` : ''}`);
+  if (minutesText(night.longest_stretch_minutes)) lines.push(`Longest stretch ${minutesText(night.longest_stretch_minutes)}`);
+  if (minutesText(night.asleep_minutes)) {
+    const duration = Array.isArray(score.components) ? score.components.find((c) => c?.key === 'duration' && c.basis === 'asleep_vs_usual') : null;
+    const usual = minutesText(duration?.usual);
+    lines.push(`${minutesText(night.asleep_minutes)} asleep${usual ? `; usually ${usual}` : ''}`);
+  }
+  let facts = night.summary_facts;
+  if (typeof facts === 'string') { try { facts = JSON.parse(facts); } catch { facts = null; } }
+  const climate = facts?.climate ?? night.climate;
+  const range = Array.isArray(night.summary?.observations)
+    ? night.summary.observations.find((o) => o?.key === 'temperature_range')?.params : null;
+  const min = temp(climate?.temp_min ?? range?.min_c, unit);
+  const max = temp(climate?.temp_max ?? range?.max_c, unit);
+  if (min && max) lines.push(`Room ${min} to ${max}`);
+  if (night.analysis_camera_name) lines.push(`Measured from ${night.analysis_camera_name}`);
+  const start = utcDate(night.window_start);
+  const end = utcDate(night.window_end);
+  if (measured(night.coverage_minutes) && start && end && end > start)
+    lines.push(`Coverage ${Math.round(night.coverage_minutes / Math.max(1, Math.round((end - start) / 60000)) * 100)}%`);
+  return lines;
+}
+
+// The ring, summary and sheet follow the same response object through date and settings changes.
+export default function SleepScoreCard({ night, reviewAction = null }) {
   const [open, setOpen] = useState(false);
-  // The home zone and temperature unit for the summary's times and room temperatures. Read from the context
-  // directly, as useHomeTime does: a screen rendered outside a provider gets the defaults instead of a crash.
   const settings = useContext(SettingsContext)?.settings;
   if (!night || night.status === 'off') return null;
   const raw = night.score;
   const hasScore = Boolean(raw) && typeof raw === 'object';
-
-  // THE NIGHT SUMMARY (phase 3): the same card, now led by a headline and a few observations from the server's
-  // `summary`. Null (an older server, a failure, a night with nothing to say) leaves the card EXACTLY as it was
-  // before the summary existed. A summary can be present with no score at all: the child's "Show sleep score"
-  // switch hides the score, not the description of the night.
-  const text = nightSummaryText(night.summary, { zone: settings?.timezone, tempUnit: settings?.temp_unit });
-  if (!text && !hasScore) return null;
-
-  const score = scoreOf(night);
-  let scorePart = null;
-  if (hasScore) {
-    if (!score) {
-      const why = noScoreText(raw.reason);
-      scorePart = <div className="sleep-insight__body">No score yet.{why ? ` ${why}` : ''}</div>;
-    } else {
-      const qualifier = scoreQualifier(score);
-      // The saved night's score lent to a night that can no longer be drawn (attachScore, `score_source`).
-      const fromSaved = night.score_source === 'stored';
-      scorePart = (
-        <>
-          {/* The ring is decorative, so the button's name carries the number. It ends with the visible text, so what a
-              voice user says ("How this is scored") matches. The class sets a 44px minimum height (it is taller). */}
-          <button type="button" className="sleep-score__open" onClick={() => setOpen(true)}
-            aria-label={`Sleep score ${scoreLabel(score)}. How this is scored`}>
-            <ScoreRing value={score.score} size="lg" surface="card" band={bandOf(score)} />
-            <span className="sleep-score__text">
-              {qualifier && <span className="sleep-score__band">{qualifier}</span>}
-              <span className="sleep-score__how">How this is scored</span>
-            </span>
-            <ChevronRight size={18} aria-hidden="true" className="sleep-score__chev" />
-          </button>
-          {score.provisional && <div className="sleep-score__note">This score may still change.</div>}
-          {fromSaved && (
-            <div className="sleep-score__note">
-              The timeline for this night is no longer available. The score comes from the saved night.
-            </div>
-          )}
-          {open && <ScoreBreakdown score={score} fromSaved={fromSaved} onClose={() => setOpen(false)} />}
-        </>
-      );
-    }
-  }
-
-  if (!text) {
-    return (
-      <div className="card sleep-score">
-        <div className="sleep-insight__title"><Moon size={15} aria-hidden="true" /> Sleep score</div>
-        {scorePart}
-      </div>
-    );
-  }
+  const score = night.in_progress ? null : scoreOf(night);
+  const blurb = nightBlurbText(night.summary, { zone: settings?.timezone, tempUnit: settings?.temp_unit });
+  if (!hasScore && !blurb && night.status !== 'ok') return null;
+  const fromSaved = night.score_source === 'stored';
+  const why = hasScore && !score ? noScoreText(night.in_progress ? 'in_progress' : raw.reason) : '';
   return (
-    <div className="card sleep-score sleep-summary">
-      <div className="sleep-insight__title"><Moon size={15} aria-hidden="true" /> Night summary</div>
-      <p className="sleep-summary__headline">{text.headline}</p>
-      {text.observations.length > 0 && (
-        <ul className="sleep-summary__list">
-          {text.observations.map((line, i) => <li key={i}>{line}</li>)}
-        </ul>
-      )}
-      {scorePart && <div className="sleep-summary__score">{scorePart}</div>}
+    <div className="card night sleep-score sleep-night-card">
+      <div className="sleep-night-card__main">
+        {score && <ScoreRing value={score.score} size="xl" surface="dark" band={bandOf(score)} word={score.early_estimate ? 'Early' : scoreQualifier(score)} />}
+        <div className="sleep-night-card__story">
+          {measured(night.asleep_minutes) && <div className="sleep-night-card__duration">{minutesText(night.asleep_minutes)} asleep{night.in_progress ? ' so far' : ''}</div>}
+          {score?.early_estimate && <div className="sleep-night-card__qualifier">Early estimate</div>}
+          {blurb?.length > 0 && <p className="sleep-night-card__blurb">{blurb.join(' ')}</p>}
+          {hasScore && !score && <p className="sleep-night-card__blurb">No score yet.{why ? ` ${why}` : ''}</p>}
+          {score?.provisional && <p className="sleep-score__note">This score may still change.</p>}
+          {fromSaved && <p className="sleep-score__note">The timeline for this night is no longer available. The score comes from the saved night.</p>}
+        </div>
+      </div>
+      {score && <button type="button" className="sleep-score__open" aria-haspopup="dialog" onClick={() => setOpen(true)}
+        aria-label={`Sleep score ${scoreLabel(score)}. Why this score?`}>Why this score? <ChevronRight size={18} aria-hidden="true" /></button>}
+      {reviewAction && <div className="sleep-night-card__review">{reviewAction}</div>}
+      {open && score && <ScoreBreakdown night={night} score={score} fromSaved={fromSaved} zone={settings?.timezone}
+        unit={settings?.temp_unit} onClose={() => setOpen(false)} />}
     </div>
   );
 }
 
-// The sheet: one bar per part, then whatever qualifies the number, then what the score is.
-function ScoreBreakdown({ score, fromSaved, onClose }) {
-  // Unknown parts (a newer server) are skipped, not shown as a blank row.
-  const parts = (Array.isArray(score.components) ? score.components : []).filter((c) => c && componentName(c.key));
+function ScoreBreakdown({ night, score, fromSaved, zone, unit, onClose }) {
+  // Unknown keys from a newer server are skipped; known factors retain the approved order.
+  const components = Array.isArray(score.components) ? score.components : [];
+  const parts = ORDER.map((key) => components.find((c) => c?.key === key)).filter((c) => c && componentName(c.key));
   const capped = cappedText(score);
   const lowConfidence = lowConfidenceText(score);
+  const end = utcDate(night.window_end);
+  const finalAt = end ? formatInZone(new Date(end.getTime() + PROVISIONAL_CHECK_HOURS * 60 * 60 * 1000), zone, TIME) : null;
+  const numbers = nightNumbers(night, score, zone, unit);
   return (
-    <Modal title={`Sleep score ${scoreLabel(score)}`} onClose={onClose}>
-      <p className="sleep-score__lead">Each part is scored 0 to 100, then they are combined. A part that could not be measured is left out.</p>
+    <Modal title="Why this score?" onClose={onClose} wide>
       <ul className="score-parts">
         {parts.map((c) => {
-          const counted = c.available && typeof c.score === 'number';
-          const detail = counted ? componentDetail(c) : '';
-          return (
-            <li key={c.key} className="score-part">
-              <div className="score-part__head">
-                <span className="score-part__name">{componentName(c.key)}</span>
-                <span className="score-part__score">{counted ? Math.round(c.score) : 'Not counted'}</span>
-              </div>
-              {counted && (
-                <div className="score-part__bar" aria-hidden="true">
-                  <span style={{ width: `${Math.max(0, Math.min(100, c.score))}%` }} />
-                </div>
-              )}
-              {counted
-                ? detail && <div className="score-part__detail">{detail}</div>
-                : <div className="score-part__detail">{unavailableText(c.reason)}</div>}
-              {droppedTerms(c).map((line) => <div key={line} className="score-part__detail">{line}</div>)}
-            </li>
-          );
+          const counted = c.available && measured(c.score);
+          const band = counted ? bandOfValue(c.score) : null;
+          return <li key={c.key} className="score-part">
+            <div className="score-part__head"><span className="score-part__name">{componentName(c.key)}</span>
+              <span className="score-part__score">{counted ? factorValue(c, night) || `${Math.round(c.score)} / 100` : 'Not counted'}</span></div>
+            <div className={`score-part__bar${band ? ` score-part__bar--${band}` : ' score-part__bar--empty'}`} aria-hidden="true">
+              {counted && <span style={{ width: `${Math.max(0, Math.min(100, c.score))}%` }} />}
+            </div>
+            <div className="score-part__detail">{counted ? `${factorWord(c)} · ${Math.round(c.score)}/100` : unavailableText(c.reason)}</div>
+            {counted && componentDetail(c) && <div className="score-part__detail score-part__detail--extra">{componentDetail(c)}</div>}
+            {droppedTerms(c).map((line) => <div key={line} className="score-part__detail score-part__detail--extra">{line}</div>)}
+          </li>;
         })}
       </ul>
-      {capped && <p className="sleep-score__note">{capped}</p>}
-      {score.provisional && <p className="sleep-score__note">This score may still change.</p>}
-      {lowConfidence && <p className="sleep-score__note">{lowConfidence}</p>}
-      {fromSaved && (
-        <p className="sleep-score__note">The timeline for this night is no longer available. The score comes from the saved night.</p>
-      )}
-      <h3 className="sleep-score__about-title">About the sleep score</h3>
-      <p className="sleep-score__about">
-        {score.early_estimate
-          ? 'Until there are enough recent nights to know what is usual for this child, the score is an early estimate that uses general figures instead.'
-          : 'The score compares this night with this child’s own recent nights.'}
-        {' '}It is an estimate from what the camera and
-        microphone observed, not a medical measurement, and it is not comparable between children or rooms.
-      </p>
+      {numbers.length > 0 && <section className="sleep-score__numbers">
+        <h3>The night in numbers</h3><ul>{numbers.map((line) => <li key={line}>{line}</li>)}</ul>
+      </section>}
+      {score.provisional && <p className="sleep-score__note-box">This score may still change{finalAt ? ` until about ${finalAt}, while the end of the night is checked` : ''}.</p>}
+      {score.early_estimate && <p className="sleep-score__note-box">Early estimate: until there are enough recent nights, duration uses a general figure for this age.</p>}
+      {capped && <p className="sleep-score__note-box">{capped}</p>}
+      {lowConfidence && <p className="sleep-score__note-box">{lowConfidence}</p>}
+      {fromSaved && <p className="sleep-score__note-box">The timeline for this night is no longer available. The score comes from the saved night.</p>}
     </Modal>
   );
 }

@@ -406,6 +406,16 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     expect(rules.find((r) => r.startsWith('.score-ring--dark .score-ring__num {'))).toContain('fill: #fff');
   });
 
+  test.each([['day', day], ['night', night]])('%s: factor bars use card band tokens at 3:1 against the track', (_name, t) => {
+    const track = t['--border'];
+    for (const band of ['great', 'good', 'fair', 'low']) {
+      const rule = rules.find((r) => r.startsWith(`.score-part__bar--${band} span {`));
+      expect(rule, `${band} bar rule`).toContain(`background: var(--band-${band})`);
+      expect(contrast(t[`--band-${band}`], track), `${band} against track`).toBeGreaterThanOrEqual(3);
+    }
+    expect(rules.find((r) => r.startsWith('.score-part__bar--empty {'))).toContain('border: 1px dashed');
+  });
+
   test('★ the .night rules take their text colours from the card\'s properties, not from literals', () => {
     const nightRules = rules.filter((rule) => /^\.night(__|\s|\.)/.test(rule) && !rule.startsWith('.night {'));
     expect(nightRules.length, 'the .night__* rules were found').toBeGreaterThan(8);
