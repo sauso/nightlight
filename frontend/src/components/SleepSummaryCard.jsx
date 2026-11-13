@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { Moon, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
-import { scoreOf, scoreLabel, bandOf, bandWord } from '../lib/sleepScoreText.js';
+import { scoreOf, scoreLabel, bandOf, bandWord, pendingNightText } from '../lib/sleepScoreText.js';
 import { nightSummaryText } from '../lib/nightSummaryPhrases.js';
 import ScoreRing from './ScoreRing.jsx';
+import NightPendingRing from './NightPendingRing.jsx';
 
 // Sleep summary in the Child detail hero. Reads the LIVE endpoint: while a night is in progress it shows
 // "Tonight · so far" (recomputed on demand, capped at now — so a morning wake shows within a minute or
@@ -33,7 +34,11 @@ function fmtDur(min) {
 // quiet line under the card: a night with no score BECAUSE there is no birthday and no week of history yet is the one case
 // where "add a birthday" is real information (the age figure is what scores such a night), and the child page no longer
 // carries the old "Tap to add birthday & photo" invitation on the age line.
-export default function SleepSummaryCard({ childId, onBand, birthdaySet = true }) {
+//
+// `onNightShown` (optional): told the date of the FINISHED night the card shows ("Last night"), or null while loading, while
+// tonight is in progress, and with tracking off or no night. The child page uses it so the morning question and its receipt
+// (fetched by child alone, about the last completed night) are drawn only under the night they belong to.
+export default function SleepSummaryCard({ childId, onBand, onNightShown, birthdaySet = true }) {
   const { settings } = useSettings();
   const navigate = useNavigate();
   const tz = settings.timezone || 'UTC';
@@ -79,12 +84,28 @@ export default function SleepSummaryCard({ childId, onBand, birthdaySet = true }
     return () => onBand(null);
   }, [band, onBand]);
 
+  // The finished night on screen, for the review question under the card. A night in progress (`tonight`, or a night flagged
+  // `in_progress`) is not finished, so it has no review row: nothing is promoted until the window is over (sleepReviews.js).
+  const shownDate = !tonight && night && !night.in_progress && typeof night.night_date === 'string' ? night.night_date : null;
+  useEffect(() => {
+    if (!onNightShown) return undefined;
+    onNightShown(shownDate);
+    return () => onNightShown(null);
+  }, [shownDate, onNightShown]);
+
   // The night summary's headline (phase 3), ONE line on a scored (`ok`) night, under the duration. Null when the server
   // sent no summary (an older server, a failure), and the card is exactly as it was. It shows with the child's "Show
   // sleep score" switch off too: the switch hides the number, not the description of the night.
-  const headline = night?.status === 'ok'
+  const summaryHeadline = night?.status === 'ok'
     ? nightSummaryText(night.summary, { zone: tz, tempUnit: settings.temp_unit })?.headline ?? null
     : null;
+
+  // A night still in progress (UI refresh PR H): a dashed ring where the score will go and "Score and night summary after
+  // 7:00 AM" in place of the headline, so tonight's card makes no whole-night statement (the headline of a night in progress is
+  // "Sleep so far tonight, as measured", which is the summary the line says is still to come). Null for a night with no window
+  // end, an older server, or a child whose score switch is off (no `score` key): the card is then exactly as it was before.
+  const pendingLine = night?.status === 'ok' ? pendingNightText(night, tz) : null;
+  const headline = pendingLine ? null : summaryHeadline;
 
   // The label above the duration: a small moon and the words. The moon marks "overnight sleep" the way it did when it sat
   // at the left of the card; one place for it so every state that has a label gets the same one.
@@ -164,7 +185,7 @@ export default function SleepSummaryCard({ childId, onBand, birthdaySet = true }
   // overall. Sleep score 82, Good". Its own full stop is dropped so the label does not carry two.
   const label = scope === 'off'
     ? 'Turn on sleep tracking in settings'
-    : `View sleep detail and history${headline ? `. ${headline.replace(/\.$/, '')}` : ''}${score ? `. Sleep score ${scoreLabel(score)}` : ''}`;
+    : `View sleep detail and history${headline ? `. ${headline.replace(/\.$/, '')}` : ''}${pendingLine ? `. ${pendingLine}` : ''}${score ? `. Sleep score ${scoreLabel(score)}` : ''}`;
 
   // "Add a birthday" is shown ONLY for a night that has no score for want of one (the server's own reason key, the same one
   // the sleep page words as "...or a birthday in this child's settings") AND the child really has none. Anything else, a
@@ -184,10 +205,12 @@ export default function SleepSummaryCard({ childId, onBand, birthdaySet = true }
               <ScoreRing value={score.score} size="xl" surface="dark" band={band} word={ringWord} />
             </span>
           )}
+          {pendingLine && <span className="night__score"><NightPendingRing surface="dark" /></span>}
           <ChevronRight size={18} aria-hidden="true" className="night__sleep-chev" />
         </div>
-        {/* One line that ends in an ellipsis rather than wrapping. The full text is in the button's name above. */}
+        {/* The headline wraps (two lines at 320px) instead of ending in an ellipsis that hides what it says. */}
         {headline && <div className="night__headline">{headline}</div>}
+        {pendingLine && <div className="night__pending-line">{pendingLine}</div>}
       </button>
       {needsBirthday && (
         <button type="button" className="night__nudge" onClick={() => navigate(`/children/${childId}/edit`)}>

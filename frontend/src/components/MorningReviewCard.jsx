@@ -22,7 +22,12 @@ import ReviewReceipt from './ReviewReceipt.jsx';
 // "That's right" SAVES FROM HERE (one tap, as drawn); "Not quite" opens the review screen, where the time is corrected. The
 // screen stays the one place that decides what may be confirmed (see confirmWakeBody for the nights it sends there
 // instead), and the route the push notification opens (/children/:id/review/:date) is untouched.
-export default function MorningReviewCard({ childId, fmtTime }) {
+//
+// `forNight` (optional, a 'YYYY-MM-DD' night date or null): the night the card above shows. Given, the question or the receipt is
+// drawn ONLY when the server's answer is about that same night: while tonight is in progress (null) there is no row at all, and a
+// receipt from the previous night never sits under "Tonight · so far" (the server answers about the last completed night whatever
+// the card shows). Omitted (undefined), the card behaves as before, for any other caller.
+export default function MorningReviewCard({ childId, fmtTime, forNight }) {
   const navigate = useNavigate();
   // ⚠️ NOTHING THAT SENDS A TIME WORKS UNTIL THE REAL TIMEZONE HAS ARRIVED (#512, same rule as NightReview.jsx). Until
   // /settings resolves `tz` is the placeholder 'UTC', so a time read in it and saved would be a wrong time stored as the
@@ -56,6 +61,7 @@ export default function MorningReviewCard({ childId, fmtTime }) {
   }, [loadPending]);
 
   if (!card || hidden || card.state === 'none') return null;
+  if (forNight !== undefined && card.night_date !== forNight) return null;
 
   const open = () => navigate(`/children/${childId}/review/${card.night_date}`);
 

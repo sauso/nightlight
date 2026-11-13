@@ -16,6 +16,7 @@ import ReviewNightButton from '../components/ReviewNightButton.jsx';
 import ReviewReceipt from '../components/ReviewReceipt.jsx';
 import LoadFailed from '../components/LoadFailed.jsx';
 import SleepScoreCard from '../components/SleepScoreCard.jsx';
+import NightPendingRing from '../components/NightPendingRing.jsx';
 import { scoreOf, sheetScoreOf, bandOf } from '../lib/sleepScoreText.js';
 import { showsInBed } from '../lib/inBed.js';
 import { addDays, nightDetailPath, describeSettings } from '../lib/nightView.js';
@@ -433,9 +434,12 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
     // names a deleted camera has no generic no-data explanation: nothing is drawn here (the "⋯" menu's Recompute,
     // when offered, is the only thing left to do with such a night).
     if (savedCameraGone(night) && night.scoring_view) return null;
+    // The dashed moon ring (UI refresh PR H, the approved "no data" state) says "nothing here" by shape; the words under it are
+    // unchanged, and the Recompute entry stays in the "⋯" menu (the design's "Go to last night" button is not built: see the PR).
     return (
-      <div className="card">
-        <div className="camera-tile__sub" style={{ padding: 14 }}>
+      <div className="card sleep-empty">
+        <NightPendingRing surface="card" />
+        <div className="camera-tile__sub">
           No sleep data for this night — either it predates tracking, or the cameras weren’t running motion/sound
           detection with enough coverage.
         </div>
@@ -597,6 +601,8 @@ function NightEventTabs({ wakes: allWakes, wakeCount, visits, alerts, wakeClips,
   const { counted: wakes, morning } = splitMorningWake(allWakes, wakeCount);
   // The parent keys this component by child and night, so a newly opened night chooses its own useful default.
   const [selected, setSelected] = useState(() => wakes.length === 0 && visits.length > 0 ? 'room' : 'wakes');
+  // The Room activity explanation is behind a "What is this?" button (owner, staging phone 2026-11-13: a six-line paragraph above the list).
+  const [explainOpen, setExplainOpen] = useState(false);
   const tabs = ['wakes', 'room'];
   const chooseFromKey = (event, index) => {
     let next;
@@ -656,7 +662,18 @@ function NightEventTabs({ wakes: allWakes, wakeCount, visits, alerts, wakeClips,
       </div>
       <div role="tabpanel" id="sleep-events-room-panel" aria-labelledby="sleep-events-room-tab" hidden={selected !== 'room'}>
         <>
-            {visits.length > 0 && <div className="camera-tile__sub sleep-events__explain">Movement the camera saw away from the bed. Before a child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.{frames.length > 0 && ' Where the camera saved a frame when it decided the bed was entered or left, the row opens to show it. Older nights have none.'}</div>}
+            {visits.length > 0 && (
+              <>
+                {/* ONE short line: the kind every plain row stands for (the dot is the same teal as the timeline's ring), and the button that
+                    opens the full explanation, unchanged. The rows themselves no longer repeat "Movement outside the bed" as a chip. */}
+                <div className="sleep-events__explain">
+                  <span className="sleep-events__caption"><i className="sleep-visit-dot" aria-hidden="true" /> Movement outside the bed</span>
+                  <button type="button" className="sleep-events__what" aria-expanded={explainOpen} aria-controls="sleep-events-explain"
+                    onClick={() => setExplainOpen((o) => !o)}>What is this?</button>
+                </div>
+                {explainOpen && <div id="sleep-events-explain" className="camera-tile__sub sleep-events__explain-text">Movement the camera saw away from the bed. Before a child settles and after they get up it&rsquo;s them; in between, it could be them or someone else — the camera can&rsquo;t tell who.{frames.length > 0 && ' Where the camera saved a frame when it decided the bed was entered or left, the row opens to show it. Older nights have none.'}</div>}
+              </>
+            )}
             {visits.length === 0 ? <div className="camera-tile__sub sleep-events__empty">No room activity recorded.</div> : (
               <ul className="sleep-wakes">
                 {/* A live update may insert a row before an open one; time and type keep its state with that row. */}
@@ -738,9 +755,16 @@ export function VisitItem({ visit, frames, fmtTime, onShowFrame }) {
   const isOut = visit.type === 'child_out';
   const head = (
     <>
-      <span className="sleep-wakes__time">{fmtTime(visit.start_at)}{visit.minutes > 1 ? ` – ${fmtTime(visit.end_at)}` : ''}</span>
+      <span className="sleep-wakes__time">
+        {/* The common kind is a dot with the full wording as its name and title (a screen reader still hears "Movement outside the bed" on
+            every row, and a pointer shows it), and only the less common "Out of bed" keeps a chip. One line per row: the long chip made every
+            row wrap on a phone and put the time on a line of its own. */}
+        {!isOut && <span className="sleep-visit-dot" role="img" aria-label="Movement outside the bed" title="Movement outside the bed" />}
+        {isOut && <span className="sleep-visit-dot sleep-visit-dot--out" aria-hidden="true" />}
+        {fmtTime(visit.start_at)}{visit.minutes > 1 ? ` – ${fmtTime(visit.end_at)}` : ''}
+      </span>
       <span className="sleep-visit-right">
-        <span className={`sleep-visit-tag${isOut ? ' sleep-visit-tag--out' : ''}`}>{isOut ? 'Out of bed' : 'Movement outside the bed'}</span>
+        {isOut && <span className="sleep-visit-tag sleep-visit-tag--out">Out of bed</span>}
         <span className={`sleep-wakes__dur ${isOut ? 'sleep-wakes__dur--out' : 'sleep-wakes__dur--visit'}`}>{fmtDur(visit.minutes)}</span>
         {expandable && <ChevronDown size={16} className={`sleep-wakes__chev${open ? ' is-open' : ''}`} aria-hidden="true" />}
       </span>

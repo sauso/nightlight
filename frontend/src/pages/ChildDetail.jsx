@@ -57,6 +57,15 @@ export default function ChildDetail() {
   const onBand = useCallback((band) => setReported({ id, band }), [id]);
   const nightBand = reported.id === id ? reported.band : null;
 
+  // ★ WHICH NIGHT THE CARD IS SHOWING (owner, staging phone 2026-11-13). The morning question and its receipt are fetched by child
+  // alone, and the server answers about the LAST COMPLETED night. While tonight is in progress the card above says "Tonight · so
+  // far", so last night's "Thanks, that's recorded. You said up at 5:56 am." sat under a night it was not about. The sleep card
+  // reports the date of the FINISHED night it shows (null while loading, for tonight in progress and for tracking off), and the
+  // question is drawn only for that night. Keyed by child for the same reason as the band above.
+  const [shownNight, setShownNight] = useState({ id: null, date: null });
+  const onNightShown = useCallback((date) => setShownNight({ id, date }), [id]);
+  const reviewNight = shownNight.id === id ? shownNight.date : null;
+
   async function loadAlerts() {
     const camIds = new Set(cameras.filter((c) => c.child_id === id).map((c) => c.id));
     try {
@@ -144,10 +153,11 @@ export default function ChildDetail() {
               <Settings size={20} aria-hidden="true" />
             </button>
           </div>
-          <SleepSummaryCard key={id} childId={id} onBand={onBand} birthdaySet={Boolean(kid.birthday)} />
+          <SleepSummaryCard key={id} childId={id} onBand={onBand} onNightShown={onNightShown} birthdaySet={Boolean(kid.birthday)} />
           {/* The morning question lives IN the card (one place, asked once); it is keyed by child like the sleep card so a
-              question loaded for one child never shows under another's name while that child's request is pending. */}
-          <MorningReviewCard key={`review-${id}`} childId={id} fmtTime={fmtTime} />
+              question loaded for one child never shows under another's name while that child's request is pending. It is
+              about the night the card above shows and no other (`forNight`: nothing while tonight is in progress). */}
+          <MorningReviewCard key={`review-${id}`} childId={id} fmtTime={fmtTime} forNight={reviewNight} />
         </div>
         </div>
 

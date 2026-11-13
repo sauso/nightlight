@@ -643,7 +643,10 @@ measurement, it says nothing about sleep stages, and it is no reason to worry on
   when a score was held down, may still change, is an early estimate, or has low confidence. For a night
   with no confirmed wake-up it says "still asleep at" the end of the window. The blurb does not repeat the
   time asleep that the card's heading shows.
-- A night with no score shows **No score yet** and the reason.
+- A night with no score shows **No score yet** and the reason. A night that is **still in progress** instead shows a dashed ring and
+  "Score and night summary after 7:00 AM" (the end of the night window, in your timezone) on both the child's card and this page; a night
+  with no data shows the same dashed ring above its explanation. The child's card does not show last night's review question or
+  receipt while tonight is in progress: that question is about the last finished night.
 
 The ring's arc is coloured by band: green for Great, teal for Good, amber for Fair, a soft rose for a score
 with no band word (under 55), and a neutral grey ring on a dashed track for an early estimate. The colour
@@ -921,7 +924,7 @@ Known limits:
 - The 4-minute and 6-minute figures are starting values, set from how the detector joins wake-ups and how
   often the page asks; nothing measured them across other homes.
 - **What the app shows today.** The facts so far appear in the blurb of the night card on tonight's sleep page,
-  with the usual "No score yet" line. The child's card still shows only the headline. The where-the-child-is
+  with "Score and night summary after <time>" in place of the "No score yet" line. The child's card shows that same line instead of a headline. The where-the-child-is
   state (`live`) is in the API response only: no screen shows it yet, a later design change will.
 
 ### After you correct a night

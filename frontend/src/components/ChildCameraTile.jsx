@@ -1,8 +1,13 @@
-import { BedSingle, Settings, Video } from 'lucide-react';
+import { Settings, Video } from 'lucide-react';
 
-// A child's camera on their page (UI refresh PR D, the approved design): one large dark tile with a status chip, a quiet bed
-// placeholder and a "Watch live" button. It is NOT a live picture. The page opens often and a stream per child per visit is
-// the wrong cost; the live picture is one tap away on the Live tab, which is what the button does.
+// A child's camera on their page (UI refresh PR D, the approved design): a dark tile with a status chip and a "Watch live" button.
+// It is NOT a live picture. The page opens often and a stream per child per visit is the wrong cost; the live picture is one
+// tap away on the Live tab, which is what the button does.
+//
+// ★ A SLIM ROW, NOT A PICTURE AREA (owner, staging phone 2026-11-13). It used to be a 192px tile with a big empty bed icon where a
+// picture would be. This tile never has a picture (nothing here fetches a snapshot or a stream), so that space was always empty
+// and pushed everything below it down a screen. It is now one row: status dot and name with the detection line under it, then
+// Watch live and the gear. If a preview image is ever added here, it belongs ABOVE this row at 16:9 and only when an image exists.
 //
 // It replaces the small CameraRow list (and its "Cameras · n" heading, the Online/Offline pill and the MOTION/SOUND/PTZ/TALK
 // badges). The PTZ and TALK badges are on the Cameras tab, which is where a camera is looked after. Whether motion and sound
@@ -35,25 +40,26 @@ export default function ChildCameraTile({ cam, onWatch, onSettings }) {
   const detection = detectionLine(cam);
   return (
     <div className={`child-cam child-cam--${status}`}>
-      <span className="child-cam__chip">
-        <span className="child-cam__dot" aria-hidden="true" />
-        <span className="child-cam__name">{cam.name}</span>
-        {status === 'online' && <span className="child-cam__sr"> (online)</span>}
-        {status === 'offline' && <span className="child-cam__state">· Offline</span>}
-        {status === 'disabled' && <span className="child-cam__state">· Disabled</span>}
-      </span>
-      {onSettings && (
-        <button type="button" className="child-cam__settings" onClick={onSettings} aria-label={`Camera settings for ${cam.name}`}>
-          <Settings size={18} aria-hidden="true" />
-        </button>
-      )}
-      <BedSingle className="child-cam__bed" size={64} strokeWidth={1.25} aria-hidden="true" />
-      {detection && <span className="child-cam__detect">{detection}</span>}
+      <div className="child-cam__info">
+        <span className="child-cam__chip">
+          <span className="child-cam__dot" aria-hidden="true" />
+          <span className="child-cam__name">{cam.name}</span>
+          {status === 'online' && <span className="child-cam__sr"> (online)</span>}
+          {status === 'offline' && <span className="child-cam__state">· Offline</span>}
+          {status === 'disabled' && <span className="child-cam__state">· Disabled</span>}
+        </span>
+        {detection && <span className="child-cam__detect">{detection}</span>}
+      </div>
       {/* Not on a disabled camera: the Live tab hides disabled cameras (LiveMonitor filters them out), so the button would
           open a page that does not show this camera. The chip already says "Disabled". */}
       {status !== 'disabled' && (
         <button type="button" className="child-cam__watch" onClick={onWatch}>
           <Video size={16} aria-hidden="true" /> Watch live
+        </button>
+      )}
+      {onSettings && (
+        <button type="button" className="child-cam__settings" onClick={onSettings} aria-label={`Camera settings for ${cam.name}`}>
+          <Settings size={18} aria-hidden="true" />
         </button>
       )}
     </div>
