@@ -134,7 +134,7 @@ export default function SettingsEsphome() {
         </div>
 
         <EsphomeDiscovery full={full} loading={list === null && !devices.error}
-          onAddManually={() => setDialog({ kind: 'form' })} onPick={(candidate) => {
+          onAddManually={() => { if (!full && (list || devices.error)) setDialog({ kind: 'form' }); }} onPick={(candidate) => {
             if (!full && (list || devices.error)) setDialog({ kind: 'form', prefill: { name: candidate.name, host: candidate.ip,
               port: candidate.port, encrypted: candidate.encrypted === true } });
           }} />
@@ -157,7 +157,7 @@ export default function SettingsEsphome() {
           <div className="card camera-tile__sub">No devices yet. Search above, or add one by IP address.</div>
         )}
         {list && list.map((device) => (
-          <DeviceCard key={`${device.id}:${cardVersion[device.id] || 0}`} device={device} childName={childName(device.child_id)}
+          <DeviceCard key={device.id} version={cardVersion[device.id] || 0} device={device} childName={childName(device.child_id)}
             onEdit={() => setDialog({ kind: 'form', device })}
             onDelete={() => setDialog({ kind: 'delete', device })}
             onExport={() => setDialog({ kind: 'export', device })} />
@@ -188,9 +188,13 @@ export default function SettingsEsphome() {
   );
 }
 
-function DeviceCard({ device, childName, onEdit, onDelete, onExport }) {
+function DeviceCard({ device, version, childName, onEdit, onDelete, onExport }) {
   const [entitiesOpen, setEntitiesOpen] = useState(false);
   const [test, setTest] = useState(null);
+  // An edit changes the address or key that a Test result described, so the result is dropped when `version` changes. The
+  // card is NOT remounted for it (it used to be, through its key): a remount destroys the ⋯ button that the Edit dialog
+  // returns focus to, and focus fell to the top of the page after every save (found in the #1075 review).
+  useEffect(() => { setTest(null); }, [version]);
   const badge = stateBadge(device);
   const dot = stateDot(device);
   const enc = encryptionNote(device);

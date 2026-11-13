@@ -75,6 +75,34 @@ describe('the device list', () => {
     expect(screen.getByRole('dialog', { name: 'Add a device' })).toBeInTheDocument();
   });
 
+  test('★ the in-card Add by IP address waits for the device count, like a pick does (#1075 review)', async () => {
+    const pending = deferred();
+    mockApi({ onDevices: () => pending.promise, discovery: [] });
+    postSpy.mockImplementation(async (path) => path === '/esphome/discover'
+      ? { scanId: '12345678-1234-1234-1234-123456789abc', endsAt: Date.now() + 30000 } : {});
+    const { user } = renderAsAdmin(<SettingsEsphome />);
+    await user.click(screen.getByRole('button', { name: 'Find devices on my network' }));
+    const search = within(screen.getByRole('region', { name: 'Find devices' }));
+    await search.findByText(/No devices found/);
+    const manual = search.getByRole('button', { name: 'Add by IP address' });
+    expect(manual).toHaveAttribute('aria-disabled', 'true');
+    await user.click(manual);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    pending.resolve([device()]);
+    await waitFor(() => expect(search.getByRole('button', { name: 'Add by IP address' })).not.toHaveAttribute('aria-disabled'));
+    await user.click(search.getByRole('button', { name: 'Add by IP address' }));
+    expect(screen.getByRole('dialog', { name: 'Add a device' })).toBeInTheDocument();
+  });
+
+  test('★ saving an edit leaves focus on that device\'s menu button, not at the top of the page (#1075 review)', async () => {
+    mockApi({ put: async () => ({}) });
+    const { user } = renderAsAdmin(<SettingsEsphome />);
+    await user.click(await menuItem('Edit'));
+    await user.click(saveButton());
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'More for Device A' })).toHaveFocus());
+  });
+
   test('search stays visible during list loading; picks wait for the count, but a failed list load permits a pick', async () => {
     const pending = deferred();
     mockApi({ onDevices: () => pending.promise, discovery: [{ id: 'one', name: 'living-room-sensor', ip: '10.0.0.9', port: 6053 }] });

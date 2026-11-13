@@ -25,7 +25,9 @@ export default function EsphomeDiscovery({ onPick, onAddManually, full = false, 
       {error && <p className="esp-find__error" role="alert">{error}</p>}
       {scan?.done && candidates.length === 0 && !error && <>
         <p className="esp-find__note">{HELP}</p>
-        {!full && <button type="button" className="esp-find__manual" onClick={onAddManually}>Add by IP address</button>}
+        {/* Same rule as a pick: no add form before the device count is known (#1075 review). */}
+        {!full && <button type="button" className="esp-find__manual" aria-disabled={loading || undefined}
+          onClick={() => { if (!loading) onAddManually?.(); }}>Add by IP address</button>}
       </>}
       {full && <p className="esp-find__note">You have 8 devices, which is the limit. Delete one to add another.</p>}
       {candidates.length > 0 && <ul className="esp-find__results" aria-label="Devices found">
