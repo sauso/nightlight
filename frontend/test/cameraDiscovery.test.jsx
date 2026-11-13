@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { act, screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { renderAsAdmin } from './helpers/render.jsx';
 import CameraDiscovery from '../src/components/CameraDiscovery.jsx';
 import { api } from '../src/lib/api.js';
@@ -27,6 +27,33 @@ test('poll results appear as text and picking passes the candidate', async () =>
   expect(row.querySelector('img')).toBeNull();
   await view.user.click(row);
   expect(onPick).toHaveBeenCalledWith(candidate);
+});
+
+test('selected row is pressed and an added row stays legible but cannot be picked', async () => {
+  const onPick = vi.fn();
+  api.get.mockResolvedValue({ done: true, candidates: [candidate, { ...candidate, id: 'two', name: 'Saved camera', alreadyAdded: true }], endsAt: Date.now() });
+  const view = renderAsAdmin(<CameraDiscovery onPick={onPick} selectedId="one" />);
+  await view.user.click(screen.getByRole('button', { name: 'Find cameras on my network' }));
+  const results = await screen.findByRole('list', { name: 'Cameras found' });
+  const chosen = within(results).getByRole('button', { name: /<img onerror/ });
+  const added = within(results).getByRole('button', { name: /Saved camera/ });
+  expect(chosen).toHaveAttribute('aria-pressed', 'true');
+  expect(added).toHaveAttribute('aria-disabled', 'true');
+  expect(added).toHaveTextContent('Added');
+  expect(added).not.toHaveClass('is-added');
+  await view.user.click(added);
+  expect(onPick).not.toHaveBeenCalled();
+});
+
+test('nothing found offers an in-card manual action', async () => {
+  api.get.mockResolvedValue({ done: true, candidates: [], endsAt: Date.now() });
+  const onAddManually = vi.fn();
+  const view = renderAsAdmin(<CameraDiscovery onPick={vi.fn()} onAddManually={onAddManually} />);
+  await view.user.click(screen.getByRole('button', { name: 'Find cameras on my network' }));
+  const manual = await screen.findByRole('button', { name: 'Add a camera manually' });
+  expect(manual.closest('.find-card')).toBeInTheDocument();
+  await view.user.click(manual);
+  expect(onAddManually).toHaveBeenCalledOnce();
 });
 
 test('empty search shows help and can search again; 429 message is shown', async () => {

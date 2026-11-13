@@ -361,7 +361,7 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
   test('--night-error is readable on the ESPHome search card at its lightest gradient stop', () => {
     expect(nightTokens['--night-error']).toBe('#f4a3ad');
     expect(contrast(nightTokens['--night-error'], gradientLight)).toBeGreaterThanOrEqual(4.5);
-    expect(css).toMatch(/\.esp-find__error\s*\{[^}]*color:\s*var\(--night-error\)/);
+    expect(css).toMatch(/\.find-card__error\s*\{[^}]*color:\s*var\(--night-error\)/);
   });
 
   test('★ text is never set in a band colour: no rule uses a --band-* token for `color`', () => {
