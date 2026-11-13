@@ -234,8 +234,13 @@ describe('RecordingsCard', () => {
     vi.spyOn(api, 'get').mockResolvedValue(ROWS);
     vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
     vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
+    // The short label shows a weekday only for a recording under 7 days old; pin "now" two days after X so it stays that way.
+    // Only Date is faked, so waitFor and userEvent keep working.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-02T00:00:00Z'));
     return renderAsAdmin(<RecordingsCard childId="kid-1" />, { settings: { timezone } });
   };
+  afterEach(() => { vi.useRealTimers(); });
 
   // The card is one row now; its thumbnails open from it.
   const open = async (user) => { await user.click(await screen.findByRole('button', { name: /^Recordings/ })); };

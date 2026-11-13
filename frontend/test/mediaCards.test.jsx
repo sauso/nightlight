@@ -368,7 +368,12 @@ describe('RecordingsCard', () => {
     vi.spyOn(api, 'url').mockImplementation((p) => `http://host${p}`);
     vi.spyOn(nativeBridge, 'isNativeApp').mockReturnValue(false);
     vi.spyOn(api, 'del').mockResolvedValue({});
+    // Only Date is faked (timers stay real so waitFor and userEvent work). The short label depends on how old a recording is,
+    // so "now" is pinned a day after the fixtures below; without it these would age past the 7-day line as the real clock moves.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-03T00:00:00Z'));
   });
+  afterEach(() => { vi.useRealTimers(); });
 
   test('renders NOTHING at all until a recording exists', async () => {
     vi.spyOn(api, 'get').mockResolvedValue([]);
@@ -396,8 +401,12 @@ describe('RecordingsCard', () => {
     // aria-controls must not point at an element that is not mounted: it is set only while the strip is open.
     expect(row).not.toHaveAttribute('aria-controls');
     // ROWS[0] (10:00 on 2 Sept) is the newest, not the older 20:15 on 1 Sept.
-    expect(row.textContent).toContain('Wed, 2 Sept');
-    expect(row.textContent).not.toContain('1 Sept');
+    // The row shows the SHORT form (the long one lost its AM/PM at 320px) and keeps the long one as its name and tooltip.
+    expect(row.textContent).toMatch(/Wed \d{1,2}:\d{2} [ap]m/);
+    expect(row.textContent).not.toContain('Wed, 2 Sept');
+    expect(row).toHaveAccessibleName(/^Recordings, latest Wed, 2 Sept, \d{1,2}:\d{2} [ap]m/);
+    expect(row.getAttribute('title')).toContain('Wed, 2 Sept');
+    expect(row.textContent).not.toContain('Tue');
     await user.click(row);
     expect(row).toHaveAttribute('aria-expanded', 'true');
     expect(row).toHaveAttribute('aria-controls', container.querySelector('.rec-strip').id);
@@ -424,6 +433,25 @@ describe('RecordingsCard', () => {
     expect(tile).toHaveAccessibleName(/Child B Room · Wed, 2 Sept, \d{1,2}:\d{2} [ap]m/);
     expect(tile.getAttribute('title')).toContain('Wed, 2 Sept');
     expect(tile.querySelector('.rec-strip__play')).toBeInTheDocument();
+  });
+
+  // The short label names a weekday for a recording under 7 home-time days old and the DATE from 7 days on: a bare "Wed"
+  // cannot tell last Wednesday from one a month ago. Both sides of the line, in an explicit home zone (UTC) so the day count
+  // does not depend on the test machine; "now" is 3 Sept 2026 00:00 UTC (the beforeEach), so 28 Aug is 6 days back, 27 Aug is 7.
+  test('★ the short label shows the weekday at 6 days old and the date at 7', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue([
+      { id: 'r-6', camera_name: 'Child B Room', started_at: '2026-08-28 12:00:00', duration_s: 30 },
+      { id: 'r-7', camera_name: 'Child B Room', started_at: '2026-08-27 12:00:00', duration_s: 30 },
+    ]);
+    const { container, user } = renderAsAdmin(<RecordingsCard childId="kid-1" />, { settings: { timezone: 'UTC' } });
+    await openStrip(user);
+    await waitFor(() => expect(container.querySelectorAll('.rec-strip__label')).toHaveLength(2));
+    const [six, seven] = [...container.querySelectorAll('.rec-strip__label')];
+    expect(six.textContent).toMatch(/^Fri 12:00 pm/);
+    expect(seven.textContent).toMatch(/^(27 Aug|Aug 27), 12:00 pm/);
+    expect(seven.textContent).not.toMatch(/^Thu/);
+    // The long form (accessible name) always carries the date, whatever the age.
+    expect(container.querySelectorAll('.rec-strip__item')[0]).toHaveAccessibleName(/Fri, 28 Aug/);
   });
 
   // --- failed recordings (issue #276) ---

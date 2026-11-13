@@ -27,12 +27,22 @@ function when(startedAt, home) {
   return home.time(d, WHEN);
 }
 
-// Keep the thumbnail readable at phone width; the full home-time date remains on the button for
-// assistive tech and the tooltip. Both forms use the same home-zone formatter, including its zone suffix.
+// A recording this many home-time days old (or more) shows its DATE on the short label instead of a weekday: "Wed" alone
+// cannot tell last Wednesday from one three weeks ago, and recordings have no retention, so old ones are normal. Under it,
+// the weekday reads fine (a week is unambiguous). Counted in HOME calendar days, not 24-hour spans, so it does not move
+// with the viewer's device zone.
+const DATE_AFTER_DAYS = 7;
+const dayNumber = (key) => { const [y, m, d] = key.split('-').map(Number); return Date.UTC(y, m - 1, d) / 86400000; };
+
+// The short form for the thumbnail chip and the row: it must fit at phone width (320px). The full home-time date stays
+// on the button as its accessible name and tooltip. Both forms use the same home-zone formatters, including the zone suffix.
 function shortWhen(startedAt, home) {
   const d = parseUtc(startedAt);
   if (Number.isNaN(d.getTime())) return startedAt;
-  return `${home.day(d, { weekday: 'short' })} ${home.time(d, { hour: 'numeric', minute: '2-digit' })}`;
+  const time = home.time(d, { hour: 'numeric', minute: '2-digit' });
+  const age = dayNumber(home.todayKey()) - dayNumber(home.dayKey(d));
+  if (age >= DATE_AFTER_DAYS) return `${home.day(d, { day: 'numeric', month: 'short' })}, ${time}`;
+  return `${home.day(d, { weekday: 'short' })} ${time}`;
 }
 
 export default function RecordingsCard({ childId, refreshNonce = 0 }) {
@@ -93,11 +103,13 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
         className="recordings-row"
         aria-expanded={expanded}
         aria-controls={expanded ? stripId : undefined}
+        {...(list[0].status === 'failed' ? null : { title: `Latest: ${when(list[0].started_at, home)}`, 'aria-label': `Recordings, latest ${when(list[0].started_at, home)}` })}
         onClick={() => setExpanded((v) => !v)}
       >
         <Video size={16} aria-hidden="true" className="recordings-row__icon" />
         <span className="recordings-row__title">Recordings</span>
-        <span className="recordings-row__latest">{list[0].status === 'failed' ? 'Couldn’t be saved' : when(list[0].started_at, home)}</span>
+        {/* The SHORT form: the long one ("Fri, 13 Nov, 4:12 am GMT+11") lost its AM/PM to an ellipsis at 320px. */}
+        <span className="recordings-row__latest">{list[0].status === 'failed' ? 'Couldn’t be saved' : shortWhen(list[0].started_at, home)}</span>
         <ChevronRight size={18} aria-hidden="true" className="recordings-row__chev" />
       </button>
 

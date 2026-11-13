@@ -838,8 +838,10 @@ reading order and the keyboard order):
    message with Retry).
 4. **Recordings** (`components/RecordingsCard.jsx`, `.recordings-row`): one 56px row, "Recordings", the newest recording's time, a
    chevron. It is a disclosure (`aria-expanded`), closed until tapped. It opens a scrolling strip of 16:9 pictures with a peek of
-   the next one; each picture carries a short weekday and home-time chip and a play mark, while its full date and time are
-   available to a screen reader and in the tooltip. Tap a picture to play it. A failed recording has a warning mark and opens
+   the next one; each picture carries a short chip and a play mark: weekday and home time ("Wed 12:09 am") for a recording
+   under seven days old, the date and time ("30 Aug, 7:00 pm") from seven days on, so an old recording is not mistaken for
+   this week's. The full date and time are the accessible name and the tooltip. The row's own time uses the same short form
+   (the long form lost its AM/PM at 320px) and keeps the full one as its name and tooltip. Tap a picture to play it. A failed recording has a warning mark and opens
    its explanation instead. Older recordings stay reachable (recordings have no retention). A newest recording that failed says
    "Couldn't be saved" on the row. Renders nothing when there are none.
 5. **Sensor history** (a camera with an MQTT topic), unchanged.
