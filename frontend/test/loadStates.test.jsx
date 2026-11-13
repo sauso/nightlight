@@ -77,11 +77,19 @@ describe('Cameras tab', () => {
     expect(screen.getByText(DOWN)).toBeTruthy();
     expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy();
     expect(screen.queryByText('No cameras added yet.')).toBeNull();
-    expect(screen.queryByRole('button', { name: '+ Add camera' })).toBeNull();
+    // The button's name lost its "+" when it got a plus icon (#1076); the old name would make this pass for nothing.
+    expect(screen.queryByRole('button', { name: 'Add camera' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Add your first camera' })).toBeNull();
   });
-  test('empty: the empty copy', () => {
+  test('empty: the empty copy (an admin is invited to add the first camera, a caregiver reads the sentence)', () => {
     renderAsAdmin(<Cameras />, { cameras: [] });
+    expect(screen.getByRole('heading', { name: 'Add your first camera' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add camera' })).toBeTruthy();
+  });
+  test('empty, as a caregiver: the sentence and no way to add', () => {
+    renderAsCaregiver(<Cameras />, { cameras: [] });
     expect(screen.getByText('No cameras added yet.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Add camera' })).toBeNull();
   });
   test('loading: neither', () => {
     renderAsAdmin(<Cameras />, { cameras: [], ...LOADING });
