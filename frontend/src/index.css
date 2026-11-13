@@ -36,8 +36,8 @@
   --field-bg: #eae3f8;
   --radius: 16px;
 
-  /* Score band colours (docs/design-language.md, "Band colours"). Defined here, used by the score ring, strip and breakdown
-     bars from the next change. Two rules that hold wherever they are used: a colour is NEVER the only signal (the band word
+  /* Score band colours (docs/design-language.md, "Band colours"). Defined here, used by the score ring (and the child card's 12% tint,
+     `.night--<band>`); the strip and breakdown bars follow in later changes. Two rules that hold wherever they are used: a colour is NEVER the only signal (the band word
      and the number always show), and TEXT IS NEVER SET IN A BAND COLOUR (they are marks: bars, rings, dots). Contrast is
      WCAG, measured 2026-11-13 on the design v3 colours, which are the 2026-11-12 accents re-tuned for the navy surfaces
      (a mark needs 3:1).
@@ -56,7 +56,7 @@
        great #a8edbe 9.16 / 11.37   good #5cbfc6 5.74 / 7.12   fair #d99c50 5.21 / 6.46
        low   #c77790 3.82 / 4.74    early #d3cde6 8.06 / 10.00
      (The design's own ring-on-card figures, 6.79 / 4.63 / 4.32 / 3.27 / 6.08, include the 12% band tint it lays over the
-     card, which arrives with the ring; the track figures are identical.) The weakest pairs are the day rose bar (3.51:1 on
+     card, which is now laid over it (`.night--<band>`); the track figures are identical.) The weakest pairs are the day rose bar (3.51:1 on
      the inset), the day early bar (3.53:1) and the ring's rose (3.27:1 with the tint): all clear the 3:1 a graphic needs,
      none by much. */
   --band-great: #1e6b3d;
@@ -1320,6 +1320,29 @@ body.in-pip .tile-menu-backdrop {
    #9fa3e0, #8f93d0) to a few tints; that structure stays, because its dimmest step (#8f93d0, 4.28:1, under the 4.5:1 text needs) was the weakest text on
    the card and one muted tint is easier to keep readable. test/paletteTokens.test.jsx recomputes these from this rule. */
 .night { --night-text: #eef0ff; --night-muted: #b9bdf0; --night-link: #c7caff; --night-number: #ffffff; --night-divider: rgba(255, 255, 255, 0.1); background: linear-gradient(165deg, #2c2f63 0%, #191b38 100%); color: var(--night-text); border-radius: 18px; padding: 16px; margin-bottom: 14px; box-shadow: 0 18px 42px -26px rgba(18, 20, 58, 0.8); }
+/* A 12% wash of the night's band colour over the card's gradient (owner approved the colour-scaled design, 2026-11-12).
+   ChildDetail.jsx puts `night--<band>` on the card while a score is shown; the band's --band-*-ring colour becomes
+   --night-tint and the card paints it as a flat layer ABOVE the gradient (a background layer, not a pseudo-element, so it
+   cannot sit over the text or intercept a tap). No class means the plain gradient from the `.night` rule above. The wash
+   only moves each pixel 12% of the way to the tint, so the text colours were re-measured on the TINTED lightest stop for
+   every band (paletteTokens.test.jsx recomputes them from this sheet).
+   ⚠️ INSIDE @supports, ON PURPOSE. A declaration that holds var() is valid at PARSE time on every engine and only checked
+   at computed-value time, so on a WebView with no color-mix() (iOS 15 to 16.1, Android WebView before Chromium 111) a
+   `background` using color-mix(... var(--night-tint) ...) would be "invalid at computed-value time" and the WHOLE
+   background would fall to transparent: white text on the page colour. @supports is decided at parse time, so an engine
+   without color-mix skips the block and keeps the plain gradient. The gradient is repeated here (a later rule has to
+   restate the whole `background`); paletteTokens.test.jsx fails if the two copies drift apart, and if any color-mix
+   background on .night ever appears outside an @supports block. */
+@supports (background: color-mix(in srgb, red 12%, transparent)) {
+  .night--great { --night-tint: var(--band-great-ring); }
+  .night--good { --night-tint: var(--band-good-ring); }
+  .night--fair { --night-tint: var(--band-fair-ring); }
+  .night--low { --night-tint: var(--band-low-ring); }
+  .night--early { --night-tint: var(--band-early-ring); }
+  .night--great, .night--good, .night--fair, .night--low, .night--early {
+    background: linear-gradient(color-mix(in srgb, var(--night-tint) 12%, transparent), color-mix(in srgb, var(--night-tint) 12%, transparent)), linear-gradient(165deg, #2c2f63 0%, #191b38 100%);
+  }
+}
 .night__head { display: flex; align-items: center; gap: 13px; width: 100%; }
 .night__avatar-btn { background: none; border: none; padding: 0; cursor: pointer; flex-shrink: 0; border-radius: 50%; line-height: 0; }
 .night__avatar-btn:focus-visible { outline: 2px solid var(--night-link); outline-offset: 3px; }
@@ -1554,7 +1577,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .sleep-insight__sub { font-size: 11px; color: var(--text-secondary); margin-top: 3px; font-variant-numeric: tabular-nums; }
 .sleep-insight__foot { font-size: 11px; color: var(--text-secondary); line-height: 1.4; margin-top: 12px; }
 
-/* Sleep score ring (components/ScoreRing.jsx). One colour, no animation: see the component for why.
+/* Sleep score ring (components/ScoreRing.jsx). Band-coloured arc (below), no animation: see the component for why.
    On a .card it uses the theme tokens. Measured (WCAG formula, 2026-11-12): the arc, --accent-line, is 5.06:1 on a
    white card by day and 5.87:1 on a night card, and 3.57:1 / 4.40:1 against its own --border track (3:1 is the
    target for a graphic); the number is --text-primary, 16.65:1 and 12.53:1. */
@@ -1571,10 +1594,27 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
             composites to a navy (#202145) over the card, so it is not a charcoal; kept from the 2026-11-12 trial because the
             design v3 ring ratios (--band-*-ring) are measured against exactly this track (white at 16% was the first
             version, and it left the rose ring at 2.34:1). Decoration only: the number carries the value.
-   The arc stays this one periwinkle until the next change recolours it per score band (--band-*-ring). */
+   The arc stays this periwinkle when no band is passed (a caller that does not know the band is unchanged); with one it
+   takes the band colour below. */
 .score-ring--dark .score-ring__track { stroke: rgba(10, 8, 12, 0.35); }
 .score-ring--dark .score-ring__arc { stroke: #a7b1ff; }
 .score-ring--dark .score-ring__num { fill: #fff; }
+/* Band colours (owner approved the colour-scaled ring, 2026-11-12). ONLY the arc is coloured: the number stays
+   --text-primary / white, because text is never set in a band colour, and the band word and number always show, so colour
+   is never the only signal. On a themed card the arc is --band-<band> (switches with the theme); on the child page's fixed
+   dark card it is --band-<band>-ring (the same in both themes). Contrast of each pair is in the --band-* comment in :root
+   and pinned by paletteTokens.test.jsx. The 'early' ring is neutral and its track is dashed by ScoreRing.jsx (shape, not
+   colour, says "provisional"). Specificity: two classes beat the one-class arc rules above, so the order does not matter. */
+.score-ring--card.score-ring--great .score-ring__arc { stroke: var(--band-great); }
+.score-ring--card.score-ring--good .score-ring__arc { stroke: var(--band-good); }
+.score-ring--card.score-ring--fair .score-ring__arc { stroke: var(--band-fair); }
+.score-ring--card.score-ring--low .score-ring__arc { stroke: var(--band-low); }
+.score-ring--card.score-ring--early .score-ring__arc { stroke: var(--band-early); }
+.score-ring--dark.score-ring--great .score-ring__arc { stroke: var(--band-great-ring); }
+.score-ring--dark.score-ring--good .score-ring__arc { stroke: var(--band-good-ring); }
+.score-ring--dark.score-ring--fair .score-ring__arc { stroke: var(--band-fair-ring); }
+.score-ring--dark.score-ring--low .score-ring__arc { stroke: var(--band-low-ring); }
+.score-ring--dark.score-ring--early .score-ring__arc { stroke: var(--band-early-ring); }
 /* On the child's card the ring sits beside the heading and the duration line, not centred on the whole card. */
 .night__score { flex: none; align-self: flex-start; line-height: 0; }
 

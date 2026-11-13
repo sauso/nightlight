@@ -22,7 +22,7 @@ import SleepScoreCard from '../src/components/SleepScoreCard.jsx';
 import SleepDetail from '../src/pages/SleepDetail.jsx';
 import { api } from '../src/lib/api.js';
 import {
-  scoreOf, bandWord, scoreLabel, unavailableText, UNAVAILABLE_FALLBACK, noScoreText, componentName, componentDetail,
+  scoreOf, bandWord, bandOf, scoreLabel, unavailableText, UNAVAILABLE_FALLBACK, noScoreText, componentName, componentDetail,
   lowConfidenceText, cappedText, minutesText, clockText,
 } from '../src/lib/sleepScoreText.js';
 
@@ -75,6 +75,36 @@ describe('sleepScoreText', () => {
     expect(bandWord({ ...SCORE, early_estimate: true })).toBe(null);
     expect(scoreLabel({ ...SCORE, early_estimate: true })).toBe('82, early estimate');
     expect(bandWord({ ...SCORE, band: 'superb' })).toBe(null);
+  });
+
+  // The ring's colour key. It follows the SERVER's band key and repeats none of its edges (85/70/55): the fixtures below
+  // deliberately carry scores that DISAGREE with those edges, so an implementation that re-derived the band from the
+  // number in the browser would fail here.
+  test('★ bandOf: the server\'s great, good and fair keys; low for a number the server gave no band; early beats the band', () => {
+    expect(bandOf({ ...SCORE, score: 91, band: 'great' })).toBe('great');
+    expect(bandOf({ ...SCORE, score: 82, band: 'good' })).toBe('good');
+    expect(bandOf({ ...SCORE, score: 60, band: 'fair' })).toBe('fair');
+    expect(bandOf({ ...SCORE, score: 48, band: null })).toBe('low');
+    // The server's key wins over the number: a retuned server cannot leave the colour disagreeing with the word.
+    expect(bandOf({ ...SCORE, score: 99, band: 'fair' })).toBe('fair');
+    expect(bandOf({ ...SCORE, score: 10, band: 'great' })).toBe('great');
+    // An early estimate is 'early' even when the server sent a band (and a low number under no band).
+    expect(bandOf({ ...SCORE, score: 90, band: 'great', early_estimate: true })).toBe('early');
+    expect(bandOf({ ...SCORE, score: 40, band: null, early_estimate: true })).toBe('early');
+  });
+
+  test('bandOf: no score, no number, and a band key this build does not know all give no colour (never a guessed rose)', () => {
+    expect(bandOf(null)).toBe(null);
+    expect(bandOf(undefined)).toBe(null);
+    expect(bandOf({ score: null, reason: 'in_progress' })).toBe(null);
+    expect(bandOf({ score: Number.NaN, band: 'good' })).toBe(null);
+    expect(bandOf({ score: 3, band: 'good' })).toBe('good'); // precondition: a number plus a known key does colour
+    // A newer server's band: unknown, so neutral. 'low' here would paint a possibly good night rose.
+    expect(bandOf({ ...SCORE, band: 'superb' })).toBe(null);
+    expect(bandOf({ ...SCORE, band: undefined })).toBe(null);
+    // ...even when the number is a low one: the browser does not re-derive "low" from the score, only from the server's null.
+    expect(bandOf({ ...SCORE, score: 20, band: 'superb' })).toBe(null);
+    expect(bandOf({ ...SCORE, score: 20, band: undefined })).toBe(null);
   });
 
   test('every reason the server can give for a missing part has its own sentence; an unknown one gets the neutral line', () => {
@@ -171,6 +201,41 @@ describe('SleepSummaryCard: the ring and the spoken score', () => {
     expect(screen.getByRole('button').getAttribute('aria-label')).toBe('View sleep detail and history. Sleep score 64, early estimate');
   });
 
+  // The ring's classes, for every band: the child card sits on the fixed dark card, so it asks for the dark surface.
+  test.each([
+    ['great', { score: 91, band: 'great' }, false],
+    ['good', { score: 82, band: 'good' }, false],
+    ['fair', { score: 60, band: 'fair' }, false],
+    ['low', { score: 48, band: null }, false],
+    ['early', { score: 64, band: 'good', early_estimate: true }, true],
+  ])('★ the child card\'s ring carries the %s band class, and a dashed track only for an early estimate', async (band, over, dashed) => {
+    const { container } = show({ ...OK_NIGHT, score: { ...SCORE, ...over } });
+    await screen.findByText('10h 37m asleep');
+    const ring = container.querySelector('svg.score-ring');
+    expect(ring.getAttribute('class')).toContain('score-ring--dark');
+    expect(ring.classList.contains(`score-ring--${band}`)).toBe(true);
+    expect(ring.getAttribute('class').match(/score-ring--(great|good|fair|low|early)/g)).toEqual([`score-ring--${band}`]);
+    expect(Boolean(ring.querySelector('.score-ring__track').getAttribute('stroke-dasharray'))).toBe(dashed);
+  });
+
+  test('the card tells its parent the band, and clears it when the score goes (so the hero tint never outlives the ring)', async () => {
+    const onBand = vi.fn();
+    vi.spyOn(api, 'get').mockResolvedValue({ scope: 'last', night: { ...OK_NIGHT, score: { ...SCORE, score: 60, band: 'fair' } } });
+    const { unmount } = renderAsAdmin(<SleepSummaryCard childId="kid-1" onBand={onBand} />);
+    await screen.findByText('10h 37m asleep');
+    expect(onBand).toHaveBeenLastCalledWith('fair');
+    unmount();
+    expect(onBand).toHaveBeenLastCalledWith(null);
+  });
+
+  test('a night with no score reports no band', async () => {
+    const onBand = vi.fn();
+    vi.spyOn(api, 'get').mockResolvedValue({ scope: 'last', night: { ...OK_NIGHT, score: NO_SCORE } });
+    renderAsAdmin(<SleepSummaryCard childId="kid-1" onBand={onBand} />);
+    await screen.findByText('10h 37m asleep');
+    expect(onBand).not.toHaveBeenCalledWith(expect.any(String));
+  });
+
   // Each of these is a night that must look exactly as it did before the score existed.
   test.each([
     ['the switch is off (no score key)', OK_NIGHT, 'last'],
@@ -207,6 +272,26 @@ describe('SleepScoreCard: the detail page card and the breakdown sheet', () => {
     await user.click(screen.getByRole('button', { name: /How this is scored/ }));
     return screen.getByRole('dialog');
   };
+
+  test.each([
+    ['great', { score: 91, band: 'great' }, false],
+    ['good', { score: 82, band: 'good' }, false],
+    ['fair', { score: 60, band: 'fair' }, false],
+    ['low', { score: 48, band: null }, false],
+    ['early', { score: 64, band: 'good', early_estimate: true }, true],
+  ])('★ the detail card\'s ring carries the %s band class on the themed-card surface; dashed track only when early', (band, over, dashed) => {
+    const { container } = show({ ...NIGHT, score: { ...SCORE, ...over } });
+    const ring = container.querySelector('svg.score-ring');
+    expect(ring.classList.contains('score-ring--card')).toBe(true);
+    expect(ring.getAttribute('class').match(/score-ring--(great|good|fair|low|early)/g)).toEqual([`score-ring--${band}`]);
+    expect(Boolean(ring.querySelector('.score-ring__track').getAttribute('stroke-dasharray'))).toBe(dashed);
+    expect(ring.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  test('a band key from a newer server leaves the ring uncoloured (today\'s neutral arc), not rose', () => {
+    const { container } = show({ ...NIGHT, score: { ...SCORE, score: 90, band: 'superb' } });
+    expect(container.querySelector('svg.score-ring').getAttribute('class')).toBe('score-ring score-ring--card');
+  });
 
   test('a scored night: a real button named with the score, the band word beside the ring, and the sheet on a tap', async () => {
     const { user } = show({ ...NIGHT, score: SCORE });

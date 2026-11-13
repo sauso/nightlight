@@ -35,6 +35,26 @@ export function bandWord(score) {
   return BAND_WORDS[score.band] ?? null;
 }
 
+// The band as a COLOUR key for the ring: 'great' | 'good' | 'fair' | 'low' | 'early', or null for "no colour".
+// (index.css: --band-<key> and --band-<key>-ring; docs/design-language.md, "Band colours".)
+//   - 'early' for an early estimate, whatever `band` says (the same second lock as bandWord): the ring goes neutral and
+//     its track dashed, so a provisional number does not look like a verdict.
+//   - the server's own band key when it is great, good or fair. The 85/70/55 edges live ONLY in the server's
+//     SCORE_CONFIG.bands; they are deliberately NOT repeated here, so a retuned server cannot leave the colours
+//     disagreeing with the word beside the ring.
+//   - 'low' when the server sent `band: null` for a numeric score: that IS the server's "under the lowest edge, the
+//     number stands alone", and it gets a colour of its own (a soft rose, not red) while still having no word.
+//   - null for a band key this build does not know (a newer server that added one) and for no number at all. Guessing
+//     'low' for an unknown key would colour a possibly GOOD night rose; null keeps today's neutral periwinkle ring, and
+//     the number and the server's words still say how the night went. Same rule as the unknown reason keys above.
+const COLOUR_BANDS = ['great', 'good', 'fair'];
+export function bandOf(score) {
+  if (!score || typeof score.score !== 'number' || !Number.isFinite(score.score)) return null;
+  if (score.early_estimate) return 'early';
+  if (COLOUR_BANDS.includes(score.band)) return score.band;
+  return score.band === null ? 'low' : null;
+}
+
 // What sits beside the number: the band word, "Early estimate", or nothing.
 export function scoreQualifier(score) {
   if (!score) return null;

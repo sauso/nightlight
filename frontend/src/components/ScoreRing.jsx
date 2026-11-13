@@ -5,15 +5,23 @@
 // number with no meaning. The accessible text is always on the control AROUND the ring: the child card's button
 // (SleepSummaryCard.jsx) and the "How this is scored" button (SleepScoreCard.jsx) both put the score in their name.
 //
-// ONE COLOUR, NO BAND COLOURS, NO MOUNT ANIMATION. The band is said in words beside the ring; colouring the ring
-// red or green would turn a description into a verdict, on a screen a parent reads first thing in the morning. And
-// motion here reports nothing (docs/design-language.md, section 7: motion is status, not decoration), so the arc is
-// simply drawn where it ends.
+// BAND-COLOURED ARC (owner approved the colour-scaled design, 2026-11-12; until then the ring was one colour, because
+// a red or green ring can read as a verdict on a screen a parent sees first thing in the morning). It is acceptable now
+// for three reasons that must keep holding: (1) COLOUR IS NEVER THE ONLY SIGNAL, the band word and the number are
+// always shown beside it (an early estimate says "Early estimate"); (2) TEXT IS NEVER SET IN A BAND COLOUR, only the
+// arc is, so the number stays `--text-primary` / white; (3) the low band is a soft rose, not an alarm red.
+// `band` ('great' | 'good' | 'fair' | 'low' | 'early', from bandOf in lib/sleepScoreText.js) only picks a class. Absent or
+// unknown means the old periwinkle arc, so a caller that does not pass one is unchanged.
+// An early estimate (`band="early"`) is a NEUTRAL arc on a DASHED track: it reads as provisional by shape, with no
+// colour needed, because the score is measured against an age figure rather than the child's own usual.
+//
+// NO MOUNT ANIMATION. Motion here reports nothing (docs/design-language.md, section 7: motion is status, not
+// decoration), so the arc is simply drawn where it ends.
 //
 // `surface` says what it sits on, because the two surfaces need different colours (index.css, `.score-ring`):
-//   'card' : an ordinary `.card`. `--accent-line` on a `--border` track, the number in `--text-primary`.
-//   'dark' : the child's hero card, a fixed dark gradient in BOTH themes. Literal colours there, see the stylesheet
-//            for the measured contrast and why a theme token cannot be used.
+//   'card' : an ordinary `.card`. `--band-*` (which switch with the theme) on a `--border` track, the number in `--text-primary`.
+//   'dark' : the child's hero card, a fixed dark gradient in BOTH themes. `--band-*-ring` there (they do not switch), see
+//            the stylesheet for the measured contrast and why a theme token cannot be used.
 //
 // Sizes come from the type scale (design-language.md, section 3): 'sm' has a 15px number, 'lg' the 20px "large
 // numeric readout". The viewBox is in real pixels, so the number is exactly that size.
@@ -22,7 +30,9 @@ const SIZES = {
   lg: { box: 64, stroke: 6, font: 20 },
 };
 
-export default function ScoreRing({ value, size = 'sm', surface = 'card' }) {
+const BANDS = ['great', 'good', 'fair', 'low', 'early'];
+
+export default function ScoreRing({ value, size = 'sm', surface = 'card', band }) {
   // No number, no ring: never an empty circle or a "0" standing in for "unknown".
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   const s = SIZES[size] || SIZES.sm;
@@ -30,10 +40,13 @@ export default function ScoreRing({ value, size = 'sm', surface = 'card' }) {
   const mid = s.box / 2;
   const r = (s.box - s.stroke) / 2;
   const around = 2 * Math.PI * r;
+  const known = BANDS.includes(band) ? band : null;
   return (
-    <svg className={`score-ring score-ring--${surface === 'dark' ? 'dark' : 'card'}`} width={s.box} height={s.box}
-      viewBox={`0 0 ${s.box} ${s.box}`} aria-hidden="true" focusable="false">
-      <circle className="score-ring__track" cx={mid} cy={mid} r={r} fill="none" strokeWidth={s.stroke} />
+    <svg className={`score-ring score-ring--${surface === 'dark' ? 'dark' : 'card'}${known ? ` score-ring--${known}` : ''}`}
+      width={s.box} height={s.box} viewBox={`0 0 ${s.box} ${s.box}`} aria-hidden="true" focusable="false">
+      {/* A dashed track marks an early estimate by shape, so it does not rely on the neutral colour alone. */}
+      <circle className="score-ring__track" cx={mid} cy={mid} r={r} fill="none" strokeWidth={s.stroke}
+        strokeDasharray={known === 'early' ? '2 3' : undefined} />
       {/* Not drawn at 0: a round line cap would leave a dot that reads as "a little". Starts at 12 o'clock. */}
       {shown > 0 && (
         <circle className="score-ring__arc" cx={mid} cy={mid} r={r} fill="none" strokeWidth={s.stroke}
