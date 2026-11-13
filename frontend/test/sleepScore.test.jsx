@@ -529,8 +529,10 @@ describe('SleepDetail: the score follows the night on screen', () => {
   const view = (applied) => ({
     applied, stored: CTX, current: { ...CTX, camera_id: 'cam-b' }, camera_names: { stored: 'Cam one', current: 'Cam two' }, algo_differs: false,
   });
-  function mount(nightFor) {
+  const REVIEW = { child_id: 'kid-1', night_date: '2026-08-30', computed: {}, review: { true_wake_at: '2026-08-30 20:15:00' }, transitions: [] };
+  function mount(nightFor, route = '/children/kid-1/sleep') {
     vi.spyOn(api, 'get').mockImplementation((path) => {
+      if (path.includes('/review/')) return Promise.resolve(REVIEW);
       if (path.includes('/sleep/live')) return Promise.resolve({ scope: 'last', night: { night_date: '2026-08-30' } });
       if (path.includes('/sleep/insights')) return Promise.resolve(null);
       if (path.includes('/sleep/')) return Promise.resolve(nightFor(path));
@@ -538,7 +540,7 @@ describe('SleepDetail: the score follows the night on screen', () => {
     });
     return renderAsAdmin(
       <Routes><Route path="/children/:id/sleep" element={<SleepDetail />} /></Routes>,
-      { kids: [KID], route: '/children/kid-1/sleep' }
+      { kids: [KID], route }
     );
   }
 
@@ -561,6 +563,28 @@ describe('SleepDetail: the score follows the night on screen', () => {
     mount(() => ({ ...BASE, score: SCORE }));
     const review = await screen.findByRole('button', { name: 'Was this night right?' });
     expect(review.closest('.sleep-night-card')).toBeInTheDocument();
+  });
+
+  // The receipt moved into the card on an ok night; a night still in progress has the receipt but no review
+  // button, exactly as before the move. Fails if the card's review slot drops the receipt for an unfinished night.
+  test('an unfinished ok night keeps its review receipt (inside the card) and still has no review button', async () => {
+    mount(() => ({ ...BASE, in_progress: true, wake_at: null }), '/children/kid-1/sleep?saved=1');
+    const receipt = await screen.findByText('Thanks — that’s recorded');
+    expect(receipt.closest('.sleep-night-card')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Was this night right?' })).not.toBeInTheDocument();
+  });
+
+  // The stats grid's facts are in the sheet for a scored night; a night without a score keeps the grid on the
+  // page, so no fact becomes unreachable. Fails if the grid is hidden for an unscored night or shown twice.
+  test('the on-page stats grid shows only for a night without a score', async () => {
+    const first = mount(() => ({ ...BASE, wake_count: 2, longest_stretch_minutes: 200, score: SCORE }));
+    await screen.findByText('Night timeline');
+    expect(screen.queryByText('Longest stretch')).not.toBeInTheDocument();
+    first.unmount();
+    mount(() => ({ ...BASE, wake_count: 2, longest_stretch_minutes: 200 }));
+    await screen.findByText('Night timeline');
+    expect(screen.getByText('Longest stretch')).toBeInTheDocument();
+    expect(screen.getByText('Wake-ups')).toBeInTheDocument();
   });
 
   test('with the switch off (no score key) the page has no score card and the estimate line does not mention a score', async () => {

@@ -275,7 +275,7 @@ export default function SleepDetail() {
           )}
         </div>
 
-        <SleepNightStripchildId={id} maxDate={maxDate} minDate={minDate} selected={date} onSelect={setDate} version={stripVersion} />
+        <SleepNightStrip childId={id} maxDate={maxDate} minDate={minDate} selected={date} onSelect={setDate} version={stripVersion} />
 
         {/* Recompute (admin-only) lives in the "⋯" menu. Mounted once, here, for every status but `off` and for a night
             that has been answered (null / loading: nothing to recompute): it was in each status's card before, which is the
