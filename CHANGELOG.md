@@ -65,6 +65,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Fixed
 
+- Sleep detail: after you correct a night, the night card no longer shows two divider lines (with an empty gap between them) above the "Thanks, that's recorded" row; it shows one.
 - **A password that is not valid text is refused at once instead of failing slowly (found in the review of #1094).** A password holding a lone half of a two-part character (an unpaired UTF-16 surrogate, which no keyboard or password manager produces) used to end, after a delay, in a server error. Choosing one (first set-up, adding a user, changing a password, an invite link) now answers "That password contains characters that cannot be used", and signing in with one is treated as a wrong password. Emoji and other ordinary characters work as before.
 
 ## [0.47.0] - 2026-11-10

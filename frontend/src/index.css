@@ -2025,6 +2025,12 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .sleep-night-card__review .sleep-detail__review:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .sleep-night-card__review .review-card__go { color: var(--night-link); }
 .sleep-night-card__review .card-title { color: var(--night-text); }
+/* The "Thanks, that's recorded" receipt is the same component the child page's card uses (`.night__review`), which draws its own
+   hairline and top spacing. Here the wrapper above already draws the one divider, so the receipt would add a SECOND line with an
+   empty gap between the two (owner screenshot, 2026-11-15, after correcting a night). Drop the receipt's own and keep a gap
+   before the button that follows it. */
+.sleep-night-card__review .night__review { margin-top: 0; padding-top: 0; border-top: 0; }
+.sleep-night-card__review .night__review--done { margin-bottom: 12px; }
 .sleep-score__note { font-size: 12px; line-height: 1.45; color: var(--text-secondary); margin: 8px 0 0; }
 .sleep-detail__tools { display: flex; flex-direction: column; gap: 8px; }
 /* Spacing below the tools only when something rendered; a card gets its own margin, this plain div does not. */
