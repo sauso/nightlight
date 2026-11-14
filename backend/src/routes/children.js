@@ -112,7 +112,12 @@ const NAME_NOT_TEXT = 'Name must be text';
 //   - birthday: a real calendar date YYYY-MM-DD, what <input type="date"> sends and ageLabel() parses. '' stays
 //     legal because it is how the form CLEARS a birthday (children-route.test.js). A future date is accepted:
 //     ageLabel already shows no age for one, and a clock-dependent rule would be a fixture with a shelf life.
-// null / undefined / '' mean "not sent" / default / clear exactly as before; only a non-blank value is checked, and
+// Colour is OPTIONAL (owner, 2026-11-15): a child can have none, stored as '' (the column is TEXT NOT NULL DEFAULT '#F5D9A8',
+// so '' satisfies NOT NULL: no migration, nothing stored is rewritten). POST: '' stores '' (none); undefined / null still store
+// the default, so an older client and the setup wizard (which sends no colour) are unchanged. PUT: '' CLEARS the colour;
+// undefined / null keep the stored one (a partial PUT, such as the photo-only save, must not touch it); a hex sets it.
+// The readers cope with '': the app draws no photo ring and a plain initials disc, and diagnostics.js only echoes the value.
+// null / undefined / '' mean "not sent" / default / clear exactly as before (for colour see above); only a non-blank value is checked, and
 // (as for photos and the primary camera) only when it CHANGES: the edit form re-sends the whole record, so a value
 // stored before this check must not block every later save of that child.
 const CHILD_COLOR = /^#[0-9a-fA-F]{6}$/;
@@ -169,7 +174,8 @@ router.post('/', requireAdmin, (req, res) => {
     id,
     name.trim(),
     birthday || null,
-    color || '#F5D9A8',
+    // '' is "no colour" and is kept; only an absent / null colour gets the default (see the note above CHILD_COLOR).
+    color === undefined || color === null ? '#F5D9A8' : color,
     photo,
     track_sleep === undefined ? 1 : track_sleep ? 1 : 0,
     sleep_window_start || '19:00',
@@ -267,7 +273,8 @@ router.put('/:id', (req, res) => {
   ).run(
     name?.trim() || existing.name,
     birthday !== undefined ? birthday : existing.birthday,
-    color || existing.color,
+    // '' clears the colour; absent / null keep it (explicit, because `color || existing.color` could not tell '' from absent).
+    color === undefined || color === null ? existing.color : color,
     photo,
     newTrack,
     nextStart,

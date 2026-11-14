@@ -24,6 +24,7 @@ import { Routes, Route, useLocation } from 'react-router-dom';
 import { renderAs, renderAsAdmin, ADMIN, CAREGIVER } from './helpers/render.jsx';
 import ChildSettings from '../src/pages/ChildSettings.jsx';
 import { api } from '../src/lib/api.js';
+import { ringSpreadPx } from './helpers/ringSpread.js';
 
 const KID = {
   id: 'kid-1',
@@ -289,17 +290,17 @@ describe('the colour picker', () => {
   const swatches = () => within(screen.getByRole('group', { name: 'Colour' })).getAllByRole('button');
   const pressed = () => swatches().filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('aria-label'));
 
-  test('★ offers the six colours by hue name and marks exactly the chosen one (not by colour alone)', async () => {
+  test('★ offers "No colour" first, then the six colours by hue name, and marks exactly the chosen one (not by colour alone)', async () => {
     mount();
     await screen.findByLabelText('Name');
-    expect(swatches().map((b) => b.getAttribute('aria-label'))).toEqual(['Yellow', 'Green', 'Blue', 'Pink', 'Orange', 'Violet']);
+    expect(swatches().map((b) => b.getAttribute('aria-label'))).toEqual(['No colour', 'Yellow', 'Green', 'Blue', 'Pink', 'Orange', 'Violet']);
     expect(pressed()).toEqual(['Green']); // KID.color is the stored green
     const green = screen.getByRole('button', { name: 'Green' });
     expect(green.querySelector('svg'), 'the chosen swatch carries a check').not.toBeNull();
     expect(screen.getByRole('button', { name: 'Blue' }).querySelector('svg')).toBeNull();
   });
 
-  test('★ the swatches show the theme-aware shades the cards use, not the stored pastels', async () => {
+  test('★ the swatches show the theme-aware shades the avatar and its photo ring use, not the stored pastels', async () => {
     mount();
     await screen.findByLabelText('Name');
     const disc = (name) => screen.getByRole('button', { name }).querySelector('span');
@@ -339,10 +340,112 @@ describe('the colour picker', () => {
     expect(putSpy.mock.calls[0][1].name).toBe('Renamed');
   });
 
-  test('a child with no stored colour starts on the first swatch, as a new child does', async () => {
+  test('a child whose record has no colour field at all starts on the first swatch, as a new child does', async () => {
     mount({ kid: { ...KID, color: null } });
     await screen.findByLabelText('Name');
     expect(pressed()).toEqual(['Yellow']);
+  });
+
+  // The colour is optional (owner, 2026-11-15). '' is a real stored value ("No colour"), never replaced by the yellow default.
+  describe('No colour', () => {
+    const ringed = () => document.querySelector('.avatar-editor [data-child-ring]');
+
+    test('★ "No colour" is a 44px, labelled, slashed-circle button (an icon, not colour alone), pressed only when the child has none', async () => {
+      mount();
+      await screen.findByLabelText('Name');
+      const none = screen.getByRole('button', { name: 'No colour' });
+      expect(none.style.width).toBe('44px');
+      expect(none.style.height).toBe('44px');
+      expect(none.getAttribute('aria-pressed')).toBe('false');
+      expect(none.querySelector('.lucide-ban'), 'the slashed-circle mark, not chosen').not.toBeNull();
+    });
+
+    test('★ the slashed circle is on "No colour" in BOTH states, and the chosen state is not a check in its place', async () => {
+      const { user } = mount(); // starts on a colour
+      await screen.findByLabelText('Name');
+      const none = () => screen.getByRole('button', { name: 'No colour' });
+      expect(none().querySelector('.lucide-ban')).not.toBeNull();
+      expect(none().getAttribute('aria-pressed')).toBe('false');
+      await user.click(none());
+      expect(none().getAttribute('aria-pressed')).toBe('true');
+      expect(none().querySelector('.lucide-ban'), 'still the slashed circle once chosen').not.toBeNull();
+      expect(none().querySelector('.lucide-check'), 'no check hides the slash').toBeNull();
+      expect(none().querySelector('span').style.boxShadow, 'the selected outline the swatches use').not.toBe('none');
+      await user.click(screen.getByRole('button', { name: 'Blue' }));
+      expect(none().getAttribute('aria-pressed')).toBe('false');
+      expect(none().querySelector('.lucide-ban')).not.toBeNull();
+    });
+
+    test('★ a stored colour that is not a hex we map (a legacy row) is drawn as none, so "No colour" is pressed and no swatch is; saving untouched sends it unchanged', async () => {
+      const { user } = mount({ kid: { ...KID, color: 'rebeccapurple' } });
+      const name = await screen.findByLabelText('Name');
+      expect(pressed()).toEqual(['No colour']);
+      expect(document.querySelector('.avatar-editor [data-child-ring]'), 'drawn as none: a plain photo').toBeNull();
+      await user.clear(name);
+      await user.type(name, 'Renamed');
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() => expect(putSpy).toHaveBeenCalled());
+      expect(putSpy.mock.calls[0][1].color, 'not rewritten to "" or a swatch').toBe('rebeccapurple');
+    });
+
+    test('★ a child stored with no colour shows "No colour" pressed (not yellow), and saving untouched sends the empty colour', async () => {
+      const { user } = mount({ kid: { ...KID, color: '' } });
+      const name = await screen.findByLabelText('Name');
+      expect(pressed()).toEqual(['No colour']);
+      // The slashed circle stays when "No colour" is chosen: selection is shown by the outline, not by swapping the mark for a
+      // check (PR #1100 review: the chosen state then had nothing that said "none").
+      expect(screen.getByRole('button', { name: 'No colour' }).querySelector('.lucide-ban'), 'the slashed circle, chosen').not.toBeNull();
+      await user.clear(name);
+      await user.type(name, 'Renamed');
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() => expect(putSpy).toHaveBeenCalled());
+      expect(putSpy.mock.calls[0][1].color).toBe('');
+    });
+
+    test('★ choosing "No colour" then Save sends color: "" (it clears the colour, it is not left out)', async () => {
+      const { user } = mount();
+      await screen.findByLabelText('Name');
+      await user.click(screen.getByRole('button', { name: 'No colour' }));
+      expect(putSpy).not.toHaveBeenCalled();
+      expect(pressed()).toEqual(['No colour']);
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
+      expect(putSpy.mock.calls[0][1].color).toBe('');
+    });
+
+    test('choosing "No colour" and then a swatch before saving sends that swatch hex (the choice is not sticky)', async () => {
+      const { user } = mount();
+      await screen.findByLabelText('Name');
+      await user.click(screen.getByRole('button', { name: 'No colour' }));
+      await user.click(screen.getByRole('button', { name: 'Pink' }));
+      expect(pressed()).toEqual(['Pink']);
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
+      expect(putSpy.mock.calls[0][1].color).toBe('#E0A5C9');
+    });
+
+    test('★ the edit-screen photo follows the choice live: ringed with a colour, plain with none', async () => {
+      const { user } = mount(); // KID has a photo and the stored green
+      await screen.findByLabelText('Name');
+      expect(ringed(), 'a photo and a colour: ringed').not.toBeNull();
+      expect(ringed().getAttribute('style')).toContain('var(--child-green)');
+      expect(ringSpreadPx(ringed()), 'the ring has a visible width').toBeGreaterThan(0);
+      await user.click(screen.getByRole('button', { name: 'No colour' }));
+      expect(ringed(), 'no colour: a plain photo').toBeNull();
+      await user.click(screen.getByRole('button', { name: 'Blue' }));
+      expect(ringed().getAttribute('style')).toContain('var(--child-blue)');
+    });
+
+    test('a new child starts on yellow (the default is unchanged) and can choose none before the first save', async () => {
+      const { user } = mount({ kid: null, id: 'new' });
+      await screen.findByLabelText('Name');
+      expect(pressed()).toEqual(['Yellow']);
+      await user.type(screen.getByLabelText('Name'), 'Newborn');
+      await user.click(screen.getByRole('button', { name: 'No colour' }));
+      await user.click(screen.getByRole('button', { name: 'Add child' }));
+      await waitFor(() => expect(postSpy).toHaveBeenCalled());
+      expect(postSpy.mock.calls[0][1].color).toBe('');
+    });
   });
 });
 

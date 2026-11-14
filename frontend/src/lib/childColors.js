@@ -55,7 +55,7 @@ export function childColorId(stored) {
   return best;
 }
 
-// The CSS values for a stored colour, or null. `fill` and `on` are for the avatar disc and its initials; `ring` is the card ring.
+// The CSS values for a stored colour, or null. `fill` and `on` are for the avatar disc and its initials; `ring` is the ring around the child's PHOTO (themed shade), `ringOnNight` the same on the child page's navy card.
 export function childColorVars(stored) {
   const id = childColorId(stored);
   if (!id) return null;

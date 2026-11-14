@@ -5,6 +5,7 @@ import { renderAsAdmin } from './helpers/render.jsx';
 import Children from '../src/pages/Children.jsx';
 import { useLiveSleep } from '../src/lib/useLiveSleep.js';
 import { api } from '../src/lib/api.js';
+import { ringSpreadPx } from './helpers/ringSpread.js';
 
 const FIRST = { id: 'first', name: 'First child', birthday: null };
 const SECOND = { id: 'second', name: 'Second child', birthday: null };
@@ -83,27 +84,47 @@ describe('Children list sleep', () => {
     expect(card().getAttribute('aria-label')).toBeNull();
   });
 
-  // The colour ring (owner, 2026-11-15): the card's own themed shade, via `--child-ring`; decorative, so the name and the sleep row are untouched.
+  // The colour goes around the child's PHOTO only (owner, 2026-11-15: "Not around the status child. Should only be around the child
+  // photo"), never around the card. The card ring (`child-card--ringed`, `--child-ring`) of the first attempt is gone.
+  const PHOTO = 'data:image/png;base64,AAAA';
+  const photoStyle = () => card().querySelector('img').getAttribute('style');
   test.each([
     ['#f4c56a', 'yellow'], ['#7FBFA3', 'green'], ['#8A9FE0', 'blue'], ['#E0A5C9', 'pink'], ['#E0B27F', 'orange'], ['#7c83db', 'violet'],
     ['#F5D9A8', 'yellow'], // the server default, a legacy value: its nearest colour (display only)
-  ])('★ a child with colour %s has a ring in --child-%s', (color, id) => {
+  ])('★ a child with a photo and colour %s has a photo ring in the themed --child-%s, and the card has none', (color, id) => {
     vi.spyOn(api, 'get').mockImplementation(() => new Promise(() => {}));
-    show([{ ...FIRST, color }]);
-    expect(card().classList.contains('child-card--ringed')).toBe(true);
-    expect(card().style.getPropertyValue('--child-ring')).toBe(`var(--child-${id})`);
-  });
-
-  test.each([[undefined], [null], ['']])('★ a child with no colour (%j) keeps the plain card: no ring class, no style', (color) => {
-    vi.spyOn(api, 'get').mockImplementation(() => new Promise(() => {}));
-    show([{ ...FIRST, color }]);
+    show([{ ...FIRST, color, photo: PHOTO }]);
+    const img = card().querySelector('img');
+    expect(img.hasAttribute('data-child-ring')).toBe(true);
+    // The list card is the themed surface: the themed token, not the -night one the navy card uses.
+    expect(photoStyle()).toContain(`var(--child-${id})`);
+    expect(photoStyle()).not.toContain('-night');
+    expect(ringSpreadPx(img), 'the ring has a visible width').toBeGreaterThan(0);
     expect(card().className).toBe('child-card');
     expect(card().getAttribute('style')).toBeNull();
   });
 
-  test('the ring changes nothing the card says: the same button name with and without a colour', async () => {
-    vi.spyOn(api, 'get').mockResolvedValue(scored);
+  test.each([[undefined], [null], ['']])('★ a child with no colour (%j) and a photo has a plain photo and the plain card', (color) => {
+    vi.spyOn(api, 'get').mockImplementation(() => new Promise(() => {}));
+    show([{ ...FIRST, color, photo: PHOTO }]);
+    expect(card().querySelector('img').hasAttribute('data-child-ring')).toBe(false);
+    expect(card().querySelector('img').getAttribute('style')).not.toContain('box-shadow');
+    expect(card().className).toBe('child-card');
+    expect(card().getAttribute('style')).toBeNull();
+  });
+
+  test('a child with a colour but no photo has the coloured initials disc, no ring, and the plain card', () => {
+    vi.spyOn(api, 'get').mockImplementation(() => new Promise(() => {}));
     show([{ ...FIRST, color: '#7FBFA3' }]);
+    expect(card().querySelector('[data-child-ring]')).toBeNull();
+    expect(card().querySelector('.child-card__top span').getAttribute('style')).toContain('var(--child-green)');
+    expect(card().className).toBe('child-card');
+    expect(card().getAttribute('style')).toBeNull();
+  });
+
+  test('the photo ring changes nothing the card says: the same button name with and without a colour', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(scored);
+    show([{ ...FIRST, color: '#7FBFA3', photo: PHOTO }]);
     expect(await screen.findByText('7h 12m asleep')).toBeInTheDocument();
     expect(card().getAttribute('aria-label')).toBe('First child, 2 cameras, Last night 7h 12m asleep, Sleep score 82, Good');
   });

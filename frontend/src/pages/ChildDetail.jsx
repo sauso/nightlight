@@ -18,7 +18,6 @@ import RecordingsCard from '../components/RecordingsCard.jsx';
 import MorningReviewCard from '../components/MorningReviewCard.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { ageLabel } from '../lib/age.js';
-import { childColorVars } from '../lib/childColors.js';
 
 // A child's hub: ONE night card (identity, last night's sleep, the morning question), then their camera, timelapse, alerts and recordings.
 // The avatar opens the photo (or Child settings when there is none) and the gear opens Child settings (name / birthday /
@@ -115,7 +114,6 @@ export default function ChildDetail() {
   }
   const alertsState = loadState({ loaded: alertsLoaded, error: alertsError, count: alerts.length });
   const age = ageLabel(kid.birthday);
-  const ringColor = childColorVars(kid.color);
 
   return (
     <>
@@ -131,13 +129,7 @@ export default function ChildDetail() {
           child to the next. */}
       <main className="app-main child-page">
         <div className="child-page__night">
-        {/* The ring in the child's colour (owner, 2026-11-15). This card is the same navy in both themes, so it takes the
-            `-night` shade (lib/childColors.js), not the themed one the list card uses. Drawn by `.night--ringed`; a child with no
-            usable colour gets today's plain card. Decorative: no text, no aria. */}
-        <div
-          className={['night', nightBand && `night--${nightBand}`, ringColor && 'night--ringed'].filter(Boolean).join(' ')}
-          style={ringColor ? { '--child-ring': ringColor.ringOnNight } : undefined}
-        >
+        <div className={nightBand ? `night night--${nightBand}` : 'night'}>
           <div className="night__head">
             {/* The avatar opens the photo, or settings when there is none; the "Tap to add birthday & photo" line that used to say so
                 is gone (design, 2026-11-12) and so is the small camera badge (owner, 2026-11-15: the badge lives on the edit screens). */}
@@ -147,7 +139,10 @@ export default function ChildDetail() {
               onClick={() => (kid.photo ? setPhotoOpen(true) : navigate(`/children/${id}/edit`))}
               aria-label={kid.photo ? `View ${kid.name}'s photo` : `Add a photo for ${kid.name}`}
             >
-              <Avatar name={kid.name} src={kid.photo} color={kid.color} size={64} />
+              {/* `surface="night"`: this card is the same navy in both themes, so the photo's colour ring (a plain 3px
+                  box-shadow around the photo, no gap: Avatar.jsx) takes the `-night` shade, not the themed shade the list and edit
+                  screens use. */}
+              <Avatar name={kid.name} src={kid.photo} color={kid.color} size={64} surface="night" />
             </button>
             {/* Name and age are plain text now. The two buttons that wrapped them and the "Edit ›" link all went to child
                 settings, which is what the one gear does; settings is also where the birthday is set. No age (no birthday)
