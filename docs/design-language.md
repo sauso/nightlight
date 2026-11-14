@@ -125,7 +125,9 @@ the quiet birthday line use `--night-link`. The score ring's colours on this car
 **The colour ring.** The card has a 2px ring in the child's colour (`.night--ringed`, the `--child-<id>-night` shade; see
 "Child colours" below). It is the card's border, with the padding reduced by 2px, so the card's size and everything inside it
 stay where they were. A child with no colour gets no ring. The band wash, the shadow and the focus rings are separate and
-unchanged.
+unchanged. A 1px hairline in the card's own navy (`#191b38`) sits just outside the ring, as the first box-shadow layer: on the
+light page the pastel `-night` shades are only 1.48 to 2.53:1, below the 3:1 a non-text edge needs, and the navy hairline is
+about 15:1 there (on the dark page it is nearly invisible, and the ring is already clear).
 
 **What the card holds (UI refresh PR C, 2026-11-13).** Top to bottom, one card, nothing else:
 1. **Identity row**: the avatar (64px, no badge: tapping it opens the photo, or goes to child settings when there is none;

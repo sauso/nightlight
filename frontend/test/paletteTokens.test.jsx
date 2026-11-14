@@ -332,7 +332,9 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     // here. Every place that declares one of the pinned tokens is therefore listed; the only deliberate exceptions are named:
     //   .night declares the --night-* custom properties, including search-card error text (and nothing else of the palette).
     // There are no others on this branch. Custom properties set in JSX style props are out of reach of this check.
-    const pinned = /^--(?:bg|bg-elevated|bg-elevated-2|field-bg|text-primary|text-secondary|border|bar|bar-text|on-accent|band-[a-z-]+|sleep-[a-z-]+|night-[a-z-]+)$/;
+    const pinned = /^--(?:bg|bg-elevated|bg-elevated-2|field-bg|text-primary|text-secondary|border|bar|bar-text|on-accent|band-[a-z-]+|sleep-[a-z-]+|night-[a-z-]+|child-(?!ring$)[a-z]+(?:-on|-night)?)$/;
+    // The child colours (--child-<id>, -on, -night) are pinned too, so a later override elsewhere fails here. --child-ring is NOT:
+    // it is a per-element value (set by an inline style and read by the ring rules), not a palette token.
     //   .night--<band> sets --night-tint (the tint colour, one of that band's --band-*-ring tokens) inside the @supports block that
     //           guards color-mix; the next test and "each band class feeds the tint from its own ring colour" pin its value.
     const allowed = (selector, token) => {
@@ -977,6 +979,22 @@ describe('child colours: the ring, the avatar disc and the initials on it', () =
       expect(ring, 'ring rule').toMatch(/border:\s*2px solid var\(--child-ring\)/);
       expect(sides(ring)).toEqual(sides(plain));
     });
+
+  // The ring is read against the navy on its inside, but its outside edge sits on the page, which is pale in the light theme, where
+  // the pastel -night shades are only 1.48 to 2.53:1 (Codex review of PR #1098). A 1px hairline just outside the ring (the first
+  // box-shadow layer: a spread, so it takes no layout) gives the card a distinct edge there. Recomputed from the real rule.
+  test('★ the ringed night card has a 1px outer hairline that clears 3:1 on the light page (the ring alone does not)', () => {
+    const ring = rules.find((rule) => rule.startsWith('.night--ringed {'));
+    expect(ring, 'ring rule').toBeTruthy();
+    const layers = (ring.match(/box-shadow:\s*([^;]+)/) || [])[1];
+    expect(layers, 'the ring rule declares a box-shadow').toBeTruthy();
+    const hairline = layers.match(/^0 0 0 1px (#[0-9a-fA-F]{6})\s*(?:,|$)/);
+    expect(hairline, `the first box-shadow layer is a 1px spread in a hex colour: ${layers}`).toBeTruthy();
+    expect(contrast(hairline[1].toLowerCase(), day['--bg']), 'hairline on the light page').toBeGreaterThanOrEqual(3);
+    // The plain card's drop shadow is kept as a later layer (a later box-shadow replaces the whole value).
+    const plainShadow = (rules.find((rule) => rule.startsWith('.night {')).match(/box-shadow:\s*([^;]+)/) || [])[1];
+    expect(layers).toContain(plainShadow);
+  });
 });
 
 // UI refresh PR E: the band line along the sleep page header's bottom edge. A graphic needs 3:1 against what it is drawn ON. The

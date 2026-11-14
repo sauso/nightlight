@@ -186,6 +186,19 @@ describe('setup steps', () => {
     expect(await screen.findByRole('button', { name: 'Add camera form' })).toBeInTheDocument();
   });
 
+  // The wizard sends no colour (the server default, which reads as yellow, is stored), so the preview disc must be that yellow and
+  // not the brand accent it fell back to when AvatarEditor was given no colour (agy review of PR #1098).
+  test('★ the first child\'s avatar disc previews the yellow the child is created with, not the brand accent; the POST carries no colour', async () => {
+    const view = wizard({ kids: [], cameras: [] });
+    await view.user.type(await screen.findByRole('textbox', { name: "Child's name" }), 'A child');
+    const disc = document.querySelector('.avatar-editor span[aria-hidden="true"]');
+    expect(disc, 'the initials disc').not.toBeNull();
+    expect(disc.style.background).toBe('var(--child-yellow)');
+    expect(disc.style.color).toBe('var(--child-yellow-on)');
+    await view.user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(api.post).toHaveBeenCalledWith('/children', { name: 'A child' });
+  });
+
   test('picking a suggestion opens the login card, with advanced settings in the manual card', async () => {
     state = initial('in_progress', 'camera');
     const view = wizard();

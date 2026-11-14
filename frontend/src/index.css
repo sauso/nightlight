@@ -1532,8 +1532,14 @@ body.in-pip .tile-menu-backdrop {
 /* The child's colour ring (owner, 2026-11-15), set by ChildDetail from the child's colour (`--child-ring`: the `-night` shade,
    because this card is the same navy in both themes). A border, with the padding cut by the same 2px, so the card's size and
    everything inside it stay exactly where they were; the box-shadow, the band wash (`.night--<band>`, a background layer) and
-   the focus rings are untouched. A card with no colour does not get the class and keeps today's look. Decorative: no text. */
-.night--ringed { border: 2px solid var(--child-ring); padding: 14px; }
+   the focus rings are untouched. A card with no colour does not get the class and keeps today's look. Decorative: no text.
+   The first box-shadow layer is a 1px hairline in the gradient's own navy (#191b38), just OUTSIDE the ring. WHY: the ring is
+   measured against the navy on its inside, but on its outside it sits straight on the page, which is pale in the light theme
+   (--bg #f7f4fd), where the pastel -night shades are only 1.48 to 2.53:1 (the owner's floor for a non-text edge is 3:1). The navy
+   hairline is about 15:1 on that page, so the card has a distinct outer edge. On the dark page (--bg #14142a) it is barely
+   visible, which is fine: the ring is already 3:1 or more there. A shadow takes no layout, so the card's size is unchanged. The
+   second layer restates the plain `.night` drop shadow, because a later box-shadow replaces the whole value. */
+.night--ringed { border: 2px solid var(--child-ring); padding: 14px; box-shadow: 0 0 0 1px #191b38, 0 18px 42px -26px rgba(18, 20, 58, 0.8); }
 /* Enlarged child photo in a modal (tapped from the detail hero). */
 .photo-full { display: block; width: 100%; border-radius: 12px; }
 .night__id { flex: 1; min-width: 0; }
