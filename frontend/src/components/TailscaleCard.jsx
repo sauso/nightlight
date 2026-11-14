@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import qrcode from 'qrcode-generator';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useDemoStatus } from '../lib/demoStatus.js';
 import { useTailscale } from '../lib/useTailscale.js';
@@ -9,6 +8,7 @@ import { copyText } from '../lib/copyText.js';
 import LoadFailed from './LoadFailed.jsx';
 import Modal from './Modal.jsx';
 import ModalActions from './ModalActions.jsx';
+import QrCode from './QrCode.jsx';
 
 const NETWORK_DOCS = 'https://github.com/sauso/nightlight/blob/main/docs/networking.md';
 
@@ -32,26 +32,6 @@ function httpsLink(value) {
 function secureAddress(name) {
   return typeof name === 'string' && /^(?:[a-z0-9-]+\.)+ts\.net$/.test(name)
     ? `https://${name}/` : null;
-}
-
-function QrCode({ value, label }) {
-  const qr = qrcode(0, 'M');
-  qr.addData(value);
-  qr.make();
-  const count = qr.getModuleCount();
-  const cells = [];
-  for (let row = 0; row < count; row += 1) {
-    for (let column = 0; column < count; column += 1) {
-      if (qr.isDark(row, column)) cells.push(<rect key={`${row}-${column}`} x={column + 4} y={row + 4} width="1" height="1" />);
-    }
-  }
-  return <figure className="tailscale-qr">
-    <svg role="img" aria-label={label} viewBox={`0 0 ${count + 8} ${count + 8}`} xmlns="http://www.w3.org/2000/svg">
-      <rect width={count + 8} height={count + 8} className="tailscale-qr__background" />
-      <g className="tailscale-qr__modules">{cells}</g>
-    </svg>
-    <figcaption>{label}</figcaption>
-  </figure>;
 }
 
 export default function TailscaleCard({ compact = false, publicHostSet = false, onReady }) {

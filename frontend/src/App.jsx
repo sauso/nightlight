@@ -36,6 +36,8 @@ const SleepDetail = lazyPage(() => import('./pages/SleepDetail.jsx'));
 const ChildSettings = lazyPage(() => import('./pages/ChildSettings.jsx'));
 const CameraSettings = lazyPage(() => import('./pages/CameraSettings.jsx'));
 const Setup = lazyPage(() => import('./pages/Setup.jsx'));
+// #1094: the page a caregiver opens from an invite link. Lazy like Setup (only the person holding a link ever needs it), and PUBLIC.
+const AcceptInvite = lazyPage(() => import('./pages/AcceptInvite.jsx'));
 const DetectionSettings = lazyPage(() => import('./pages/DetectionSettings.jsx'));
 const SettingsGeneral = lazyPage(() => import('./pages/SettingsGeneral.jsx'));
 const SettingsCamera = lazyPage(() => import('./pages/SettingsCamera.jsx'));
@@ -209,6 +211,11 @@ function Shell() {
       <PushBanner />
       <Routes>
         <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+        {/* #1094: the caregiver invite page, PUBLIC and outside the signed-in shell (a new caregiver has no account to sign in to yet).
+            It handles a signed-in visitor itself (it asks, it never replaces a session). The optional `:token?` makes `/invite/<token>`
+            and `/invite` ONE route, so the page stays mounted when it replaces the address with `/invite` to take the token out of
+            history; two routes would remount it and ask the server twice. The server blocks the underlying calls in the public demo. */}
+        <Route path="/invite/:token?" element={<AcceptInvite />} />
         <Route
           path="/*"
           element={
