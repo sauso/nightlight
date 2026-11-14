@@ -10,7 +10,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 - [Cameras and caregivers](cameras.md) — add cameras and share access
 - [Adding caregivers](caregivers.md) — what caregivers and admins can each do, and how long a sign-in lasts (`SESSION_TTL_DAYS`)
 - [Networking and remote access](networking.md) — LAN options, WebRTC, STUN, HTTPS and privacy
-- [Watch from anywhere](remote-access.md) — Tailscale, SWAG, `TRUST_PROXY`, `STUN_SERVERS`, `CLOUDFLARE_ANALYTICS`, Settings → Remote Access, watching away from home
+- [Watch from anywhere](remote-access.md) — Tailscale, SWAG, `TRUST_PROXY`, `STUN_SERVERS`, `CLOUDFLARE_ANALYTICS`, Settings → Remote access, watching away from home
 - [Troubleshooting](troubleshooting.md) — common problems and first checks
 - [Known issues](../KNOWN-ISSUES.md) — documented limitations and workarounds
 
@@ -22,7 +22,7 @@ On About, **Got an idea?** opens a GitHub issue; you need a GitHub account. The 
 after the next release to `main`; until then, the link opens a plain new issue.
 
 - [Visual walkthrough](#visual-walkthrough) — setup, live view, sleep, alerts, notifications and a caregiver's view
-- [Camera controls](camera-controls.md) — PTZ, offline and long-silence alerts under Settings → Camera and Recording
+- [Camera controls](camera-controls.md) — PTZ, offline and long-silence alerts under Settings → Camera and recording
 - [Sleep tracking](sleep-tracking.md) — how nights are estimated, corrected and reviewed, and its known limits
 - [Recording](recording.md) — clips, wake events, manual recordings and retention
 - [Your home screen and the mobile apps](mobile.md) — install as an app, Android and iOS, push on the apps

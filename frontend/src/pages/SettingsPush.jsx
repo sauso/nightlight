@@ -12,7 +12,7 @@ import NtfyIcon from '../components/icons/NtfyIcon.jsx';
 // drilling into its own config page. An alert fires to every provider that's enabled. State comes
 // from /notifications/status so each row can show On / Off / Not set up at a glance (see badgeFor).
 const PERI = 'var(--accent-line)';
-const BACK = { state: { from: { to: '/settings/integrations/notifications', label: 'Push notifications' } } };
+const BACK = { state: { from: { to: '/settings/integrations/notifications', label: 'Notifications' } } };
 
 const PROVIDERS = [
   { key: 'pushover', to: '/settings/integrations/notifications/pushover', Icon: PushoverIcon, label: 'Pushover', desc: 'Simple paid app; works on iOS. Snapshots included.' },

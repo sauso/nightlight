@@ -89,7 +89,7 @@ export default function SettingsRemoteAccess() {
   const checklist = buildChecklist({ setup, network, via, result, protocol: window.location.protocol, canTest: Boolean(camera) });
 
   return <>
-    <AppHeader title="Remote Access" back={{ to: '/settings', label: 'Settings' }} />
+    <AppHeader title="Remote access" back={{ to: '/settings', label: 'Settings' }} />
     <main className="app-main">
       <TailscaleCard publicHostSet={Boolean(setup?.public_host_set)} />
       {loading && !setup && <p>Loading…</p>}

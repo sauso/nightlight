@@ -61,3 +61,23 @@ test('camera tile controls and the drag handle are tappable 21px beyond their ce
     if (await el.isVisible()) await expectTappable(page, el, sel);
   }
 });
+
+// UI consistency (PR-A): measure the shared controls on a real settings form. This needs the Docker e2e stack.
+test('settings back control, text field and standard button have 44px targets', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/settings/general');
+
+  const back = page.getByRole('button', { name: 'Back to Settings' });
+  await expect(back).toBeVisible();
+  await expectTappable(page, back, 'header back control');
+
+  for (const [name, el] of [
+    ['App name field', page.getByRole('textbox', { name: 'App name' })],
+    ['Save changes button', page.getByRole('button', { name: 'Save changes' })],
+  ]) {
+    await expect(el).toBeVisible();
+    const box = await el.boundingBox();
+    expect(box, `${name} has a rendered box`).not.toBeNull();
+    expect(box.height, `${name} is at least 44px high`).toBeGreaterThanOrEqual(44);
+  }
+});
