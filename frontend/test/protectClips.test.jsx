@@ -93,7 +93,7 @@ describe('clip management', () => {
 
   test('Protected section shows alert and wake clips; unprotect removes the alert but leaves its day row', async () => {
     const { user } = setup();
-    const heading = await screen.findByText('Protected', { selector: '.card-title' });
+    const heading = await screen.findByRole('heading', { name: 'Protected', level: 2 });
     const section = heading.closest('.card');
     expect(within(section).getByText('Wake-up clip · a child', { exact: false })).toBeInTheDocument();
     expect(within(section).getByText('Motion', { exact: false })).toBeInTheDocument();
@@ -117,7 +117,7 @@ describe('clip management', () => {
 
   test('a protected wake clip can be played and removed from the section by unprotecting', async () => {
     const { user } = setup();
-    const section = (await screen.findByText('Protected', { selector: '.card-title' })).closest('.card');
+    const section = (await screen.findByRole('heading', { name: 'Protected', level: 2 })).closest('.card');
     await user.click(within(section).getByRole('button', { name: 'Play protected wake-up clip from Camera A' }));
     expect(screen.queryByRole('button', { name: 'Delete clip' })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Unprotect this clip' }));

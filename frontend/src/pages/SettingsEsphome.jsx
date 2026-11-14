@@ -561,7 +561,7 @@ function RetentionCard({ flash }) {
 
   return (
     <form className="card esp-retention" onSubmit={save}>
-      <h2>Keeping readings</h2>
+      <h2 className="card-heading">Keeping readings</h2>
       <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
         Older readings are deleted automatically. A device with 5 numeric sensors and 1 on/off sensor adds roughly 0.4 MB
         a day (an estimate, not a measurement of your sensors).
@@ -573,7 +573,7 @@ function RetentionCard({ flash }) {
         <input id="esphome-retention" type="number" min={RETENTION_MIN_DAYS} max={RETENTION_MAX_DAYS} step="1"
           value={value} disabled={!loaded} onChange={(e) => setValue(e.target.value)} />
       </div>
-      <button className="btn btn-secondary" type="submit" disabled={!loaded || busy}>{busy ? 'Saving…' : 'Save'}</button>
+      <button className="btn btn-primary" type="submit" disabled={!loaded || busy}>{busy ? 'Saving…' : 'Save'}</button>
     </form>
   );
 }

@@ -743,15 +743,15 @@ body.in-pip .tile-menu-backdrop {
 .tailscale-card, .about-card { min-width: 0; }
 .tailscale-card__heading, .about-card__heading, .tailscale-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .tailscale-card__heading, .about-card__heading { justify-content: space-between; }
-.tailscale-card__heading .card-title, .about-card__heading .card-title { margin: 0; }
+.tailscale-card__heading .card-title { margin: 0; }
+.about-card__heading { margin-bottom: 12px; }
+.about-card__heading .card-heading { margin: 0; }
 .tailscale-card .btn, .remote-advanced summary, .tailscale-advanced summary { min-height: 44px; }
 .tailscale-actions .btn { flex: 1 1 130px; width: auto; }
 .tailscale-card p, .tailscale-card li, .about-card p, .about-card li { line-height: 1.5; }
 /* About's Support and safety text sits under the title (the Connection card's text follows an h3, which carries its own margin). */
 .about-card__text { margin: 12px 0; }
 .about-card__text:last-child { margin-bottom: 0; }
-/* A button straight under the title (Remote access -> Test Low latency video) would touch it: the heading carries no bottom margin. */
-.about-card__heading + .btn { margin-top: 12px; }
 /* Owner testing 2026-11-05: the card's content outranked its own title. The title is the 12px grey .card-title, the h3s fell
    back to the browser default (~18px) and the address was 17.6px. Everything here now sits on the design-language scale
    (docs/design-language.md §3): title 16 (sheet-title size), sub-heading 14, address 15, body 14. The wizard shows the same
@@ -761,7 +761,7 @@ body.in-pip .tile-menu-backdrop {
    four cards under "Use your own domain or port forward (advanced)" had the old 12px grey title over 16px body text, the same
    inversion as 2026-11-05, so they are .about-card too (16px/800 title, 14px text). */
 .tailscale-card, .about-card { font-size: 14px; }
-.tailscale-card__heading .card-title, .about-card__heading .card-title { font-size: 16px; font-weight: 800; color: var(--text-primary); }
+.tailscale-card__heading .card-title { font-size: 16px; font-weight: 800; color: var(--text-primary); }
 .tailscale-card h3, .about-card h3 { font-size: 14px; font-weight: 700; margin: 18px 0 6px; }
 /* Owner 2026-11-07: the sub-heading on About is Inter, like the address and text under it (headings h1-h3 are Nunito by default,
    design-language.md section 3). Only the card TITLES stay Nunito. The Remote access card keeps the default for now. */
@@ -1601,12 +1601,24 @@ body.in-pip .tile-menu-backdrop {
 .sleep-detail__stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
 .sleep-stat__label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; }
 .sleep-stat__value { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-top: 1px; }
-/* Canonical in-card title — the Room-climate card-title style, reused across cards, drill-down
-   sections, and settings tiles so titles are consistent everywhere. Sits as the first line inside a card. */
+/* Small captions remain on sleep cards; settings cards use the stronger .card-heading below. */
 .card-title,
 .sensor-card__title,
 /* Which camera the night was scored from. Only one camera is analysed, so when a child has several this says which. */
 .sleep-detail__source { font-size: 12px; color: var(--text-secondary); }
+.card-heading { margin: 0 0 12px; color: var(--text-primary); font: 800 16px var(--font-display); }
+.page-intro { font-size: 13px; color: var(--text-secondary); margin: 0 0 12px; }
+.form-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
+.form-actions > .btn { width: 100%; }
+.switch-row__line { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; }
+.switch-row__copy { min-width: 0; }
+.switch-row__label { display: block; color: var(--text-primary); font-size: 16px; font-weight: 600; cursor: pointer; }
+.switch-row__sub, .switch-row__note { display: block; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+.switch-row__line .switch { flex: none; width: var(--tap); height: var(--tap); align-items: center; justify-content: center; }
+.switch-row__line .switch__track { width: 42px; height: 24px; }
+.switch-row__line .switch__thumb { top: 13px; }
+.switch-row__note { margin: 0 0 12px; }
+.switch-row__sub { cursor: pointer; }
 .sleep-detail__source strong { font-weight: 600; color: var(--text-primary); }
 /* #361 PR 4a: which settings the night was worked out with (saved or today's). Secondary text like the source line
    above. The switch to the other view is in the page's "⋯" menu since UI refresh PR E. */
@@ -2568,36 +2580,6 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   margin-bottom: 14px;
 }
 
-.preset-row {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
-}
-
-.unit-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  border-radius: 12px;
-  padding: 10px 14px;
-  cursor: pointer;
-  color: var(--text-secondary);
-  min-width: 84px;
-}
-
-.unit-btn--active {
-  border-color: var(--accent-line);
-  color: var(--text-primary);
-}
-
-.unit-btn__label {
-  font-size: 11px;
-}
-
 .empty-state {
   text-align: center;
   color: var(--text-secondary);
@@ -2722,6 +2704,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .nav-row__left { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .nav-row__right { display: flex; align-items: center; gap: 6px; flex: none; color: var(--text-secondary); font-size: 14px; }
 .nav-row__chip { width: 34px; height: 34px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent-text); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.nav-row__leading { display: inline-flex; flex: none; }
 .nav-row__copy { min-width: 0; }
 .nav-row__label, .nav-row__sub { display: block; overflow-wrap: anywhere; }
 .nav-row__label { font-size: 15px; font-weight: 600; }
@@ -2751,16 +2734,19 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .camera-form__hint { margin: 8px 0 0; font-size: 13px; line-height: 1.45; color: var(--text-secondary); }
 .camera-form__nav-card { padding: 0; overflow: hidden; }
 .camera-form__advanced { padding: 0; overflow: hidden; }
-.camera-form__disclosure { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 56px; padding: 8px 14px; border: 0; background: transparent; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
-.camera-form__disclosure-text { min-width: 0; }
-.camera-form__disclosure-text > * { display: block; }
-.camera-form__disclosure-text > strong { font-size: 15px; }
-.camera-form__disclosure-text > span { font-size: 13px; color: var(--text-secondary); }
-.camera-form__disclosure > svg { flex: none; color: var(--text-secondary); }
-.camera-form__disclosure[aria-expanded="true"] > svg { transform: rotate(180deg); }
-.camera-form__disclosure:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
-.camera-form__disclosure:active { background: var(--child-action-active); }
-@media (hover: hover) { .camera-form__disclosure:hover { background: var(--child-action-hover); } }
+.disclosure-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 56px; padding: 8px 14px; border: 0; background: transparent; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
+.disclosure-row__text { min-width: 0; }
+.disclosure-row__text > * { display: block; }
+.disclosure-row__text > strong { font-size: 15px; }
+.disclosure-row__text > span { font-size: 13px; color: var(--text-secondary); }
+.disclosure-row > svg { flex: none; color: var(--text-secondary); }
+.disclosure-row[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.disclosure-row:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.disclosure-row:active { background: var(--child-action-active); }
+@media (hover: hover) { .disclosure-row:hover { background: var(--child-action-hover); } }
+.remote-advanced summary.disclosure-row, .tailscale-advanced summary.disclosure-row { padding: 8px 14px; }
+.remote-advanced summary.disclosure-row::after, .tailscale-advanced summary.disclosure-row::after { content: '⌄'; color: var(--text-secondary); }
+.remote-advanced[open] summary.disclosure-row::after, .tailscale-advanced[open] summary.disclosure-row::after { transform: rotate(180deg); }
 .camera-form__advanced-fields { padding: 14px 14px 14px; border-top: 1px solid var(--border); }
 .camera-form__advanced-fields > .field:last-child, .camera-form__advanced-fields > .onvif-box:last-child { margin-bottom: 0; }
 /* The read-only "Recording and alerts" summary sits at the end of Advanced (#1076): clear of the last field above it. */
@@ -2819,18 +2805,18 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 /* Detection screens (DetectionSettings.jsx): enable-toggle row, slider legend, save flag. */
 .detection-card { padding: 14px; border-radius: 12px; }
 .detection-card--switch { padding: 0; overflow: hidden; }
-.detection-card__title { font-size: 16px; font-weight: 800; color: var(--text-primary); margin: 0 0 12px; }
 .detection-card .field:last-child { margin-bottom: 0; }
 .detection-card .field input { min-height: 44px; }
 .detection-card .field-row { grid-template-columns: 1fr 1fr; }
 .detection-card .field-row > .field { min-width: 0; }
 .detection-card .detection-slider label { font-size: 15px; font-weight: 600; color: var(--text-primary); }
 .detection-card .camera-tile__sub { line-height: 1.45; }
-/* `.detection-card` in the selector is what makes this win: `.tgl-row` (the older boxed row, defined further down the
-   file) has the same specificity as a bare `.detection-switch` and comes later, so its border, radius and fill drew a box
-   round the switch row inside the Recording card (owner screenshot, 2026-11-14). */
-.detection-card .detection-switch { min-height: 56px; border: 0; border-radius: 0; background: transparent; margin: 0; }
-.detection-card--switch .detection-switch > div > div:first-child { font-size: 16px; font-weight: 800; }
+/* Detection's switch card keeps its standard row inside the card surface. */
+.detection-card .detection-switch { border: 0; border-radius: 0; background: transparent; margin: 0; }
+.detection-card--switch .detection-switch { padding: 0 14px; }
+/* The switch card's label is its title (not a heading: see EnableToggle), so it takes the title weight. */
+.detection-card--switch .switch-row__label { font-size: 16px; font-weight: 800; }
+.detection-card--switch .detection-switch { padding-top: 6px; padding-bottom: 8px; }
 .detection-card:not(.detection-card--switch) .detection-switch { padding: 0; }
 .detection-status__dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: var(--text-secondary); }
 .detection-status__dot--live { background: var(--accent); }
@@ -2840,9 +2826,9 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .detection-disclosure:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .detection-disclosure:active { background: var(--child-action-active); }
 @media (hover: hover) { .detection-disclosure:hover { background: var(--child-action-hover); } }
-/* #1076 uses a local inset track; Account's shared .segmented stays as it is. */
+/* Settings selectors share one inset track. */
 .seg-track { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated-2); }
-.seg-track__btn { flex: 1; min-width: 0; min-height: 44px; padding: 8px 5px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 13px; cursor: pointer; }
+.seg-track__btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; min-height: var(--tap); padding: 8px 5px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 13px; cursor: pointer; }
 .seg-track__btn--active { background: var(--accent); color: var(--on-accent); font-weight: 700; }
 .seg-track__btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .seg-track__btn:active:not(.seg-track__btn--active) { background: var(--child-action-active); }
@@ -2851,16 +2837,9 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 
 /* #1076: global camera controls use the setting itself as the card title. The switch is still
    tied to that visible title, while numeric inputs keep the shared field styling. */
-.camera-controls__title { margin: 0 0 10px; color: var(--text-primary); font-family: Nunito, sans-serif; font-size: 16px; font-weight: 800; line-height: 1.3; }
-.camera-controls__title label { cursor: pointer; }
-.camera-controls__switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; }
-.camera-controls__switch-row > div { min-width: 0; }
-/* The shared Switch draws a 42×24 pill; its input gets a 44px target here without changing that pill. */
-.camera-controls__switch-row .switch { flex: none; width: 44px; height: 44px; align-items: center; }
-.camera-controls__switch-row .switch__track { width: 42px; height: 24px; }
-.camera-controls__switch-row .switch__thumb { top: 13px; }
+.card-heading label { cursor: pointer; }
+/* The shared Switch draws a 42×24 pill inside a 44px target. */
 .camera-controls .field input { min-height: 44px; }
-.camera-controls > .btn-primary { width: 100%; }
 .tgl-row {
   display: flex;
   align-items: center;
@@ -2896,41 +2875,8 @@ input[type='range'] {
   accent-color: var(--accent);
 }
 
-/* Segmented control (e.g. the Light / Dark / System theme picker in Account). */
-.segmented {
-  display: flex;
-  gap: 4px;
-  background: var(--bg-elevated-2);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 4px;
-}
-
-.segmented__btn {
-  flex: 1;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  background: none;
-  border: none;
-  border-radius: 9px;
-  padding: 10px 6px;
-  cursor: pointer;
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-family: inherit;
-}
-
-.segmented__btn--active {
-  background: var(--accent);
-  color: var(--on-accent);
-  font-weight: 600;
-}
-
 /* Camera tile detection quick-toggles — Motion / Sound / Alerts as three icon-over-label buttons
-   on one row. Off = dim outline; on = filled peri (matches .segmented__btn--active). */
+   on one row. Off = dim outline; on = filled peri (matches .seg-track__btn--active). */
 .detect-toggles {
   display: flex;
   gap: 8px;
@@ -3802,7 +3748,6 @@ input[type='range'] {
 
 .esp-add .camera-tile__sub { margin-top: 8px; }
 .esp-retention { margin-top: 22px; }
-.esp-retention h2 { margin: 0 0 4px; font: 800 16px var(--font-display); }
 
 .esp-from-search { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 12px; padding: 3px 10px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent-text); font-size: 12px; font-weight: 600; } /* the .cam-chip recipe: --accent-text on a 12% tint; --accent-soft is light in BOTH themes, so accent text on it fails at night */
 .esp-encryption-callout { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; padding: 9px 11px; border-radius: 10px; background: var(--bg-elevated-2); font-size: 13px; }

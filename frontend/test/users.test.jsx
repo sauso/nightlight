@@ -65,6 +65,10 @@ describe('the caregiver list', () => {
 
   test('lists everyone by display name, with their username and role', async () => {
     mountList();
+    expect(screen.getByRole('heading', { name: 'Users', level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Accounts', level: 2 }).closest('.card')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Active sessions', level: 2 }).closest('.card')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add user' }).closest('.card')).toBe(screen.getByRole('heading', { name: 'Accounts' }).closest('.card'));
     expect(await screen.findByText('Nanny McPhee')).toBeTruthy();
     expect(screen.getByText('nanny · caregiver')).toBeTruthy();
     expect(screen.getByText('Nacho Leone')).toBeTruthy();
@@ -102,9 +106,9 @@ describe('the caregiver list', () => {
     expect(await screen.findByText(`at /settings/users/${ADMIN.id}`)).toBeTruthy();
   });
 
-  test('Add caregiver goes to the new-caregiver screen', async () => {
+  test('Add user goes to the new-user screen', async () => {
     const { user } = mountList();
-    await user.click(await screen.findByRole('button', { name: /Add caregiver/ }));
+    await user.click(await screen.findByRole('button', { name: /Add user/ }));
     expect(await screen.findByText('at /settings/users/new')).toBeTruthy();
   });
 
@@ -294,6 +298,9 @@ describe('adding and editing a caregiver', () => {
   describe('adding', () => {
     test('starts blank, demands a password, and POSTs the whole form', async () => {
       const { user } = mountEdit('new');
+      expect(screen.getByRole('heading', { name: 'Add user', level: 1 })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Back to Users' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Details', level: 2 }).closest('.card')).toBeTruthy();
       const username = await screen.findByLabelText('Username (login)');
       expect(username.value).toBe('');
       const pw = screen.getByLabelText('Password');
@@ -302,7 +309,7 @@ describe('adding and editing a caregiver', () => {
 
       await user.type(username, 'newnanny');
       await user.type(pw, 'password123');
-      await user.click(screen.getByRole('button', { name: 'Add caregiver' }));
+      await user.click(screen.getByRole('button', { name: 'Add user' }));
 
       await waitFor(() => expect(postSpy).toHaveBeenCalled());
       const [path, body] = postSpy.mock.calls[0];
@@ -317,7 +324,7 @@ describe('adding and editing a caregiver', () => {
       await user.type(await screen.findByLabelText('Username (login)'), 'admin2');
       await user.type(screen.getByLabelText('Password'), 'password123');
       await user.selectOptions(screen.getByLabelText(/Role/), 'admin');
-      await user.click(screen.getByRole('button', { name: 'Add caregiver' }));
+      await user.click(screen.getByRole('button', { name: 'Add user' }));
       await waitFor(() => expect(postSpy).toHaveBeenCalled());
       expect(postSpy.mock.calls[0][1].role).toBe('admin');
     });

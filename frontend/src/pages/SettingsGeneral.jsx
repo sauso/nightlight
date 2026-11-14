@@ -93,7 +93,7 @@ export default function SettingsGeneral() {
 
         <form onSubmit={save}>
           <div className="card">
-            <div className="card-title">General Settings</div>
+            <h2 className="card-heading">General settings</h2>
             <div className="field">
               <label htmlFor="app-name">App name</label>
               <input
@@ -129,28 +129,32 @@ export default function SettingsGeneral() {
           </div>
 
           <div className="card">
-            <div className="card-title">Temperature unit</div>
-            <div className="preset-row" style={{ marginBottom: 0 }}>
+            <h2 className="card-heading">Temperature unit</h2>
+            <div className="seg-track" role="group" aria-label="Temperature unit">
               <button
                 type="button"
-                className={`unit-btn${form.temp_unit === 'C' ? ' unit-btn--active' : ''}`}
+                className={`seg-track__btn${form.temp_unit === 'C' ? ' seg-track__btn--active' : ''}`}
+                aria-pressed={form.temp_unit === 'C'}
                 onClick={() => setField('temp_unit', 'C')}
               >
-                <span className="unit-btn__label">°C</span>
+                <span>°C</span>
               </button>
               <button
                 type="button"
-                className={`unit-btn${form.temp_unit === 'F' ? ' unit-btn--active' : ''}`}
+                className={`seg-track__btn${form.temp_unit === 'F' ? ' seg-track__btn--active' : ''}`}
+                aria-pressed={form.temp_unit === 'F'}
                 onClick={() => setField('temp_unit', 'F')}
               >
-                <span className="unit-btn__label">°F</span>
+                <span>°F</span>
               </button>
             </div>
           </div>
 
-          <button className="btn btn-primary" type="submit" disabled={busy} style={{ marginTop: 20 }}>
-            {busy ? 'Saving…' : 'Save changes'}
-          </button>
+          <div className="form-actions">
+            <button className="btn btn-primary" type="submit" disabled={busy}>
+              {busy ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
         </form>
       </main>
     </>

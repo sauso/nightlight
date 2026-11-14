@@ -60,6 +60,7 @@ describe('the Android app Connection card', () => {
     route({ via: 'tailscale', tailscaleSaved: true, address: 'nightlight.example.ts.net', why: null });
     renderAsAdmin(<About />);
     const card = await connectionCard();
+    expect(within(card).getByRole('heading', { name: 'Connection', level: 2 })).toHaveClass('card-heading');
     expect(badgeOf(card)).toBe('Using Tailscale');
     expect(addressOf(card)).toBe('nightlight.example.ts.net');
     // Owner 2026-11-07: a saved address needs no line under it.

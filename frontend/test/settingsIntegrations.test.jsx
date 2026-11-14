@@ -8,7 +8,7 @@ import { api } from '../src/lib/api.js';
 afterEach(() => vi.restoreAllMocks());
 
 function mqttRow() {
-  return within(screen.getByText('MQTT').closest('.list-row'));
+  return within(screen.getByText('MQTT').closest('.nav-row'));
 }
 
 describe('Integrations hub', () => {
@@ -24,7 +24,7 @@ describe('Integrations hub', () => {
     );
     expect(screen.getByText('Push notifications')).toBeInTheDocument();
     expect(screen.getByText('MQTT')).toBeInTheDocument();
-    expect(within(screen.getByText('Push notifications').closest('.list-row')).queryByText(/Connected|Disconnected|Off/)).toBeNull();
+    expect(within(screen.getByText('Push notifications').closest('.nav-row')).queryByText(/Connected|Disconnected|Off/)).toBeNull();
     await user.click(screen.getByText('Push notifications'));
     expect(await screen.findByText('at /settings/integrations/notifications')).toBeInTheDocument();
   });
@@ -70,7 +70,7 @@ describe('Integrations hub', () => {
 });
 
 describe('Integrations hub: the ESPHome row (#506)', () => {
-  const espRow = () => within(screen.getByText('ESPHome').closest('.list-row'));
+  const espRow = () => within(screen.getByText('ESPHome').closest('.nav-row'));
   const dev = (state, enabled = true) => ({ id: 1, enabled, status: { state } });
   // Answers by address: the MQTT status and the ESPHome list are two different requests.
   const mockApis = (esphome) => vi.spyOn(api, 'get').mockImplementation(async (path) => {
@@ -90,9 +90,9 @@ describe('Integrations hub: the ESPHome row (#506)', () => {
     );
     expect(espRow().getByText('Collect readings from ESPHome sensors')).toBeInTheDocument();
     // The house icon (a mask, so the "E" is cut out), in the same colour as the other rows' icons.
-    const icon = screen.getByText('ESPHome').closest('.list-row').querySelector('svg mask');
+    const icon = screen.getByText('ESPHome').closest('.nav-row').querySelector('svg mask');
     expect(icon).not.toBeNull();
-    expect(screen.getByText('ESPHome').closest('.list-row').querySelector('svg path[fill="var(--accent-line)"]')).not.toBeNull();
+    expect(screen.getByText('ESPHome').closest('.nav-row').querySelector('svg path[fill="currentColor"]')).not.toBeNull();
     await user.click(screen.getByText('ESPHome'));
     expect(await screen.findByText('at /settings/integrations/esphome')).toBeInTheDocument();
   });
@@ -133,6 +133,6 @@ describe('Integrations hub: the ESPHome row (#506)', () => {
     mockApis({ unexpected: 'object' });
     renderAsAdmin(<SettingsIntegrations />);
     await waitFor(() => expect(api.get).toHaveBeenCalledWith('/esphome/devices'));
-    expect(within(screen.getAllByText('ESPHome').at(-1).closest('.list-row')).queryByText(/Connected|Disconnected|Off/)).toBeNull();
+    expect(within(screen.getAllByText('ESPHome').at(-1).closest('.nav-row')).queryByText(/Connected|Disconnected|Off/)).toBeNull();
   });
 });

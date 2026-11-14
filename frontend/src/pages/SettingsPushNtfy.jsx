@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useLater } from '../lib/useLater.js';
 import AppHeader from '../components/AppHeader.jsx';
-import Switch from '../components/Switch.jsx';
+import SwitchRow from '../components/SwitchRow.jsx';
 import SecretField from '../components/SecretField.jsx';
 import { hasUnsavedEdits, UNSAVED_TEST_HINT } from '../lib/unsavedEdits.js';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
@@ -89,17 +89,16 @@ export default function SettingsPushNtfy() {
           <UnsavedNotice restored={restored} onDiscard={discardChanges}
             note="The topic, access token and password are not kept if this page reloads; enter them again." />
         )}
-        <form onSubmit={save}>
-          <div className="card">
-            <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
+        <div className="page-intro">
               Sends alerts to an <strong>ntfy</strong> topic (ntfy.sh or your own server). Subscribe to the topic
               in the ntfy app or a browser; snapshots are attached inline. On a public server, pick a long,
               hard-to-guess topic name — anyone who knows it can read your alerts.
-            </div>
-            <label className="log-viewer__toggle" style={{ marginBottom: 14 }}>
-              <Switch checked={!!form.enabled} disabled={busy || !loaded} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
-              Enable ntfy notifications
-            </label>
+        </div>
+        <form onSubmit={save}>
+          <div className="card">
+            <h2 className="card-heading">Connection</h2>
+            <SwitchRow label="Enable ntfy notifications" checked={!!form.enabled} disabled={busy || !loaded}
+              onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
             <div className="field">
               <label htmlFor="ntfy-server">Server URL</label>
               <input id="ntfy-server" value={form.server_url || ''} onChange={(e) => setForm({ ...form, server_url: e.target.value })}
@@ -135,7 +134,7 @@ export default function SettingsPushNtfy() {
               </div>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className="form-actions">
             <button className="btn btn-primary" type="submit" disabled={busy || !loaded}>{busy ? 'Working…' : 'Save changes'}</button>
             <button className="btn btn-secondary" type="button" disabled={busy || !form.configured || dirty}
               aria-describedby={dirty ? 'ntfy-test-hint' : undefined} onClick={sendTest}>Send test with saved settings</button>

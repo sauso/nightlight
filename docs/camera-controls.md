@@ -5,6 +5,7 @@ every camera (the pan/tilt step, camera-offline alerts and long-silence alerts) 
 detection settings, which live on each camera's own **Cameras → edit → Motion detection** page.
 Each card is titled by the setting it controls. Change a value, then press **Save changes** once at
 the bottom; the switches on this page also wait for Save.
+The explanation for each alert switch stays visible below its row.
 
 ## Pan / tilt step size
 

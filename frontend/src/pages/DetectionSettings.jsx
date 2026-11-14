@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
-import Switch from '../components/Switch.jsx';
+import SwitchRow from '../components/SwitchRow.jsx';
 import CribZonePicker from '../components/CribZonePicker.jsx';
 import { queuePatch, flush, retry, useDetectionSave, pendingPatch, minToHHMM } from '../lib/detectionSaves.js';
 import { loadState } from '../lib/loadState.js';
@@ -77,7 +77,7 @@ function RecordClipsToggle({ d, apply }) {
 function DetectionCard({ title, switchCard = false, children }) {
   return (
     <section className={`detection-card card${switchCard ? ' detection-card--switch' : ''}`}>
-      {title && <h2 className="detection-card__title">{title}</h2>}
+      {title && <h2 className="card-heading">{title}</h2>}
       {children}
     </section>
   );
@@ -180,13 +180,10 @@ export default function DetectionSettings() {
 
 function EnableToggle({ checked, onChange, label, sub }) {
   return (
-    <label className="tgl-row detection-switch">
-      <div>
-        <div>{label}</div>
-        {sub && <div className="camera-tile__sub">{sub}</div>}
-      </div>
-      <Switch checked={checked} onChange={(e) => onChange(e.target.checked)} />
-    </label>
+    // Not a heading: on Motion and Sound the label repeats the page's h1, and inside the Recording card it would be a second h2
+    // after the card's own title (Codex review of #1087). The `sub` sits beside the switch, as it did, and is clickable.
+    <SwitchRow className="detection-switch" label={label} sub={sub}
+      checked={checked} onChange={(e) => onChange(e.target.checked)} />
   );
 }
 

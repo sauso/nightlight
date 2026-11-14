@@ -21,7 +21,7 @@
 // Role gating is not tested here: the route is <AdminProtected> (routeGuards.test.jsx).
 import { StrictMode } from 'react';
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
+import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin } from './helpers/render.jsx';
 import DetectionSettings from '../src/pages/DetectionSettings.jsx';
@@ -112,9 +112,25 @@ describe('#1076 detection cards', () => {
     const { container } = mount(kind);
     await screen.findByRole('heading', { name: titles[1] });
     const cards = [...container.querySelectorAll('.detection-card')];
-    expect(cards.map((card) => card.querySelector('h2')?.textContent || card.querySelector('.tgl-row > div > div')?.textContent))
+    expect(cards.map((card) => card.querySelector('h2')?.textContent || card.querySelector('.switch-row__label')?.textContent))
       .toEqual(titles);
-    expect(cards[0].querySelector('.tgl-row')).toBeTruthy();
+    expect(cards[0].querySelector('.switch-row')).toBeTruthy();
+  });
+
+  // Codex review of #1087: the switch label was an h2 (a second heading with the page title's text, and a second h2 inside the
+  // Recording card), and its explanation had moved out of the row and no longer toggled the switch.
+  test('the switch label is not a heading, and its explanation sits in the row and toggles the switch', async () => {
+    const { container } = mount('motion');
+    await screen.findByRole('heading', { name: 'Detection source' });
+    expect(screen.getAllByRole('heading', { name: 'Motion detection' })).toHaveLength(1); // the page's h1 only
+    const card = container.querySelector('.detection-card--switch');
+    const line = card.querySelector('.switch-row__line');
+    const sub = line.querySelector('.switch-row__sub');
+    expect(sub).toBeTruthy();
+    const toggle = within(card).getByRole('switch', { name: 'Motion detection' });
+    const before = toggle.checked;
+    fireEvent.click(sub);
+    expect(toggle.checked).toBe(!before);
   });
 
   test.each([

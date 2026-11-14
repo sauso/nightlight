@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useLater } from '../lib/useLater.js';
 import AppHeader from '../components/AppHeader.jsx';
-import Switch from '../components/Switch.jsx';
+import SwitchRow from '../components/SwitchRow.jsx';
 
 const BACK = { to: '/settings/integrations/notifications', label: 'Notifications' };
 
@@ -44,27 +44,28 @@ export default function SettingsPushFirebase() {
       <main className="app-main">
         {error && <div className="error-banner">{error}</div>}
         {saved && <div className="saved-banner">Saved ✓</div>}
-        <form onSubmit={save}>
-          <div className="card">
-            <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
+        <div className="page-intro">
               Delivers alerts straight to the Nightlight Android app via your own Firebase project — drop
               <strong> firebase-service-account.json</strong> and <strong>google-services.json</strong> into the
               data directory first; the next start moves them into its private folder (see
               <strong> docs/notifications.md</strong>). Android only.
-            </div>
-            <label className="log-viewer__toggle" style={{ margin: 0 }}>
-              <Switch checked={fbEnabled} disabled={busy || !pushStatus} onChange={(e) => setFbEnabled(e.target.checked)} />
-              Enable Firebase notifications
-            </label>
+        </div>
+        <form onSubmit={save}>
+          <div className="card">
+            <h2 className="card-heading">Connection</h2>
+            <SwitchRow label="Enable Firebase notifications" checked={fbEnabled} disabled={busy || !pushStatus}
+              onChange={(e) => setFbEnabled(e.target.checked)} />
             {pushStatus && !pushStatus.configured && (
               <div className="camera-tile__sub" style={{ marginTop: 10 }}>
                 Firebase files aren't detected in the data directory yet — add them, then enable.
               </div>
             )}
           </div>
-          <button className="btn btn-primary" type="submit" disabled={busy || !pushStatus}>
-            {busy ? 'Saving…' : 'Save changes'}
-          </button>
+          <div className="form-actions">
+            <button className="btn btn-primary" type="submit" disabled={busy || !pushStatus}>
+              {busy ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
         </form>
       </main>
     </>

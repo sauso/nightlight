@@ -73,7 +73,7 @@ test('admin sees Tailscale first and the four own-domain cards when expanded', a
   await openAdvanced();
   const titles = ["Where you're connecting from", 'Your setup', 'Setup checklist', 'Test Low latency video from this device'];
   for (const title of titles) {
-    expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: title })).toHaveClass('card-heading');
   }
   expect([...document.querySelectorAll('.remote-advanced > section h2')].map((heading) => heading.textContent)).toEqual(titles);
   expect(screen.queryByRole('heading', { name: 'Before watching from outside' })).toBeNull();

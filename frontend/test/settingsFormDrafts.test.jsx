@@ -426,7 +426,7 @@ describe('add / edit caregiver', () => {
     expect(screen.getByText('Unsaved changes restored.')).toBeInTheDocument();
 
     await second.user.type(screen.getByLabelText('Password'), 'long-enough-1');
-    await second.user.click(screen.getByRole('button', { name: 'Add caregiver' }));
+    await second.user.click(screen.getByRole('button', { name: 'Add user' }));
     expect(await screen.findByText('elsewhere')).toBeInTheDocument();
     expect(Object.keys(sessionStorage)).toEqual([]);
   });
