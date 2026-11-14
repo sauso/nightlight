@@ -127,6 +127,14 @@ const ROUTE_GATES = {
   'POST /api/auth/me/mfa/disable': SIGNED_IN,
   'DELETE /api/auth/users/:id/mfa': ADMIN,
   'DELETE /api/auth/users/:id': ADMIN,
+  // #1094 caregiver invites. Making, re-issuing and revoking an invite is account management (admin). Checking and
+  // redeeming one are PUBLIC: the person opening the link has no account they can sign in to yet, and the invite token
+  // in the body is the credential (one-time, 7 days, caregiver accounts only; failures-only limiter on both;
+  // auth-invite.test.js).
+  'POST /api/auth/users/:id/invite': ADMIN,
+  'DELETE /api/auth/users/:id/invite': ADMIN,
+  'POST /api/auth/invite/check': PUBLIC,
+  'POST /api/auth/invite/redeem': PUBLIC,
 
   // /api/children — `router.use(requireAuth)` gates the whole router; add and delete add requireAdmin.
   'GET /api/children': SIGNED_IN,

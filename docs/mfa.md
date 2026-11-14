@@ -128,7 +128,9 @@ docker exec nightlight node src/scripts/promote-admin.js -- <username>
 ```
 
 It never picks an account on its own — there is no "promote whoever was created first" option — an
-operator has to name the specific account being trusted with admin.
+operator has to name the specific account being trusted with admin. It also refuses an account that is still
+waiting on its [caregiver invite](caregivers.md#invite-a-caregiver-with-a-link) (whoever holds that link would
+choose an admin's password): ask that person to use their link first, or name another account.
 
 ## Optional: strengthening a pre-0.26.0 secret
 

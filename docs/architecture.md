@@ -256,7 +256,13 @@ admin routes that hash (`POST /users`, `PUT /users/:id`) also re-read the caller
 demotion (#261).
 `/me/mfa/enable` also allows one request per user at a time, refused before any hashing, because each
 one costs ten hashes in the shared worker. The worker module keeps each worker's pending jobs separately,
-so a crashed worker rejects only its own jobs. The TOTP replay check (`users.mfa_last_step`, nullable) is
+so a crashed worker rejects only its own jobs. A password that is not valid text (an unpaired UTF-16
+surrogate, which a JSON body can carry as `\ud800`) never reaches the worker: bcryptjs's own text conversion
+fails slowly on one. `lib/passwordHash.js` answers a compare `false` (so `/login` and the confirmation routes
+answer and count it as a wrong password) and rejects a hash with a 400 `UnusablePasswordError`; the routes
+that set a password (`/setup`, `POST`/`PUT /users`, `/me/password`, `/invite/redeem`) check first and answer
+`400 { "error": "That password contains characters that cannot be used" }` before any other work. An emoji is
+a well-formed pair and is accepted as before. The TOTP replay check (`users.mfa_last_step`, nullable) is
 a single `UPDATE ... WHERE mfa_last_step IS NULL OR mfa_last_step < ?` whose row count is the verdict. The
 per-user MFA limiter sits beside the per-source ones in `routes/auth.js` and is keyed on a *verified* MFA
 token; the admin MFA reset also empties it. User-facing rules:
@@ -327,6 +333,71 @@ but keeps the user, so the app stays on screen: `Shell` shows `ServerUnreachable
 lands after the sign-in has ended (no stored token any more) is ignored, so neither leaves a signed-out device on
 "Can't reach Nightlight". On the sign-in screen, once a status check has started the demo's guest sign-in no later
 check runs, so a retry timer that comes due in the same moment cannot open a second guest session.
+
+### Caregiver invites (#1094)
+
+An admin can create a caregiver account without a password and get a one-time link instead; the person opens it and
+chooses their own password. User-facing rules: [caregivers.md](caregivers.md#invite-a-caregiver-with-a-link).
+
+**Data.** `users.password_set` (INTEGER, default 1; added by a guarded `ALTER`, so every existing account is 1) is 0
+for an account still waiting on its invite; its `password_hash` is then a cost-10 bcrypt hash of 32 random bytes
+nobody knows (never empty). `user_invites` holds one row per invite: `token_hash` (sha256 hex of the token, UNIQUE;
+the token itself is never stored), `placeholder_hash` (the account's `password_hash` when the invite was made),
+`created_by`, and `created_at` / `expires_at` / `used_at` as UTC `YYYY-MM-DD HH:MM:SS` text like the session times.
+Rows cascade with their account and are purged daily once used or expired more than 30 days ago
+(`purgeOldInvites`, `middleware/auth.js`, scheduled beside `purgeExpiredSessions`).
+
+**Token.** `crypto.randomBytes(32)` in base64url (43 characters). A 256-bit random token needs no slow hash: lookup is
+by `sha256` equality. It is answered once, in the create (or re-issue) response, and is in no list, GET or log line.
+The public routes take it in the request body, never a query string. The link the web app will build (planned, the
+next update) carries it in the URL fragment, which a browser never sends to a server.
+
+**Routes** (all in `routes/auth.js`, because the redeem needs the module-private `createSession` and `sign`):
+
+| Route | Gate | Request | Answer |
+|---|---|---|---|
+| `POST /api/auth/users` | admin | `{ username, first_name?, last_name?, photo?, role?: 'caregiver', invite: true }` (no password) | `201`, the usual user object plus `invite: { token, expires_at }` |
+| `POST /api/auth/users/:id/invite` | admin | none | `201 { invite: { token, expires_at } }`; every unused invite of the account is deleted first |
+| `DELETE /api/auth/users/:id/invite` | admin | none | `200 { ok: true, revoked: <n> }`; the account stays pending |
+| `POST /api/auth/invite/check` | public | `{ token }` | `200 { first_name, username, app_name }` |
+| `POST /api/auth/invite/redeem` | public | `{ token, password }` | `200 { token, user }`, exactly like `/login`; `409 { "error": "invite_in_progress" }` while another redeem of the same token is hashing |
+
+Every token that cannot be used (unknown, expired, used, revoked, malformed, or the account is no longer a pending
+caregiver holding its placeholder) gets the same `404 { "error": "invite_invalid" }` from both public routes, after the
+same work. `invite` must be the boolean `true` (anything else takes the password path); `invite` with a password, or
+with a role other than `caregiver`, is a `400`. Re-issue answers `400` unless the account is a pending caregiver.
+`GET /api/auth/users` adds three keys to each account (added keys only): `password_set` (boolean),
+`invite_expires_at` (the expiry of an invite the link can still use, by exactly the rule `/invite/check` applies, or
+null when there is none: never made, expired, cancelled, used, or the account's hash was replaced behind it; a screen
+words a pending account with null as "no active invite", not "expired") and `invite_accepted_at` (when an invite was
+used, for 7 days after, else null).
+
+**Redeem.** The cheap checks first (token shape, a live invite, the account still a pending caregiver whose hash is
+still the invite's placeholder), then the 8-character rule and the not-valid-text rule (a `400`, see "Password
+hashing" above), then bcrypt. Two bounds keep the one shared bcrypt worker free for sign-ins: one redeem per token at a
+time and at most 4 invite hashes in flight across all tokens (the rest get the limiters' `429`); both are released
+when the hash fails too. A second redeem of the same token while the first is hashing gets `409 invite_in_progress`,
+not the 404: only a holder of a live token reaches it, so it reveals nothing `/invite/check` does not. **Contract for
+the screens:** disable the button while a redeem is in flight, and treat a `409` as "wait a moment, then try signing in
+with the password you chose". After the hash, the clock is read again and ONE transaction claims the
+invite (`used_at IS NULL AND expires_at > now`) and sets the password (`password_set = 0 AND role = 'caregiver' AND
+password_hash = <placeholder>`); either compare-and-swap missing throws, so the claim rolls back and answers the 404.
+The same transaction deletes the account's other unused invites, sessions and push registrations. After it commits,
+the account's password throttle and two-factor confirmation budget are emptied, and a session is made.
+
+**A pending account never authenticates.** `/login` treats it as a wrong password (the same compare, message and
+throttle count), `/login/mfa` refuses it, and the session check every request passes through joins on
+`users.password_set = 1`, so a session or token from before cannot be used either. `PUT /users/:id` refuses
+`role: 'admin'` for it unless the same request sets a password; an admin setting its password sets `password_set = 1`
+and deletes its unused invites. `keepingAnAdmin` counts only admins with `password_set = 1`, and
+`scripts/promote-admin.js` refuses a pending account.
+
+**Limits on the public routes.** One `express-rate-limit` instance shared by check and redeem, its own (not the
+per-client budget `/login` shares), counting failures only (`skipSuccessfulRequests`): 100 per 15 minutes per source
+address. Junk tokens cost one sha256 and one indexed lookup each and never reach bcrypt. Known limit: behind one proxy
+address (or Tailscale), 100 bad tokens, which anyone can send without holding a link, make the two invite routes
+answer 429 to everyone behind it for the rest of the 15-minute window (sign-in is not affected); a caregiver who sees
+"too many attempts" waits 15 minutes ([caregivers.md](caregivers.md#invite-a-caregiver-with-a-link) says so). Demo mode blocks all five routes (they are unlisted mutations). Tests: `auth-invite.test.js`.
 
 ## Data layer (`backend/src/db.js`)
 

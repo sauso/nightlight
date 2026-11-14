@@ -62,6 +62,13 @@ before(async () => {
   router.put('/api/cameras/alerts/:id/protected', record('protect-alert'));
   router.put('/api/recordings/:id/protected', record('protect-wake'));
   router.get('/api/health', record('health'));
+  // #1094: the caregiver invite routes. Not on the allowlist: the demo's shared admin must not mint links into
+  // accounts, and the public check/redeem have nothing to do on a demo.
+  router.post('/api/auth/users/:id/invite', record('invite-reissue'));
+  router.delete('/api/auth/users/:id/invite', record('invite-revoke'));
+  router.post('/api/auth/invite/check', record('invite-check'));
+  router.post('/api/auth/invite/redeem', record('invite-redeem'));
+  router.post('/api/auth/users', record('create-user'));
 
   // Mounted at '/' with demoGuard as global middleware, matching index.js's real registration
   // order (after express.json(), before every router) rather than nesting demoGuard inside a
@@ -178,6 +185,25 @@ describe('demoGuard — DEMO_MODE=true, mutation allowlist', () => {
   test('a mutation to a path with no route registered anywhere gets 403, not 404', async () => {
     const res = await call(`${server.url}/api/totally-made-up`, { method: 'POST' });
     assert.equal(res.status, 403);
+  });
+
+  // A GUARD, not a regression test: these are blocked by the default rule (an unlisted mutation), so this passes before
+  // and after #1094. It is kept because adding any of them to MUTATION_ALLOWLIST (say, to "let demo visitors try the
+  // invite page") would hand the public a way to mint accounts on the demo, and that must fail here.
+  test('#1094: making, re-issuing, revoking, checking and redeeming an invite are all blocked, handlers never invoked', async () => {
+    const cases = [
+      ['POST', '/api/auth/users', 'create-user', { username: 'x', invite: true }],
+      ['POST', '/api/auth/users/u-1/invite', 'invite-reissue'],
+      ['DELETE', '/api/auth/users/u-1/invite', 'invite-revoke'],
+      ['POST', '/api/auth/invite/check', 'invite-check', { token: 'x'.repeat(43) }],
+      ['POST', '/api/auth/invite/redeem', 'invite-redeem', { token: 'x'.repeat(43), password: 'long-enough-1' }],
+    ];
+    for (const [method, path, hit, body] of cases) {
+      const res = await call(`${server.url}${path}`, { method, body });
+      assert.equal(res.status, 403, `${method} ${path} was not blocked`);
+      assert.match(res.body.error, /read-only public demo/);
+      assert.equal(hits[hit], undefined, `${method} ${path} reached its handler`);
+    }
   });
 });
 

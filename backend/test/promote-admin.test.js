@@ -103,6 +103,33 @@ describe('promoteToAdmin — the #441 recovery path', () => {
     assert.equal(db.prepare("SELECT COUNT(*) c FROM users WHERE role = 'admin'").get().c, 0);
   });
 
+  test('★ #1094: an account still waiting on its invite is refused and left a caregiver', () => {
+    // Whoever holds that account's invite link would choose its password, so promoting it would make the link an admin
+    // account: the one thing invites are designed never to be (Opus plan review H1).
+    makeUser(db, { id: 'u-pend', username: 'pending', role: 'caregiver' });
+    db.prepare("UPDATE users SET password_set = 0 WHERE id = 'u-pend'").run();
+    assert.deepEqual(promoteToAdmin(db, 'pending'), { id: 'u-pend', username: 'pending', wasAdmin: false, pending: true });
+    assert.equal(db.prepare('SELECT role FROM users WHERE id = ?').get('u-pend').role, 'caregiver',
+      'a pending account was made an admin');
+    // The control: once it has a password it can be promoted.
+    db.prepare("UPDATE users SET password_set = 1 WHERE id = 'u-pend'").run();
+    assert.deepEqual(promoteToAdmin(db, 'pending'), { id: 'u-pend', username: 'pending', wasAdmin: false });
+  });
+
+  test('a database the new version has not started on yet (no password_set column) still promotes', () => {
+    // The script opens the database without db.js's migrations. A copy of the table without the column stands in for it.
+    const Database = db.constructor;
+    const old = new Database(':memory:');
+    try {
+      old.exec("CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'caregiver', created_at TEXT)");
+      old.prepare("INSERT INTO users (id, username, password_hash, role) VALUES ('u-1', 'alice', 'h', 'caregiver')").run();
+      assert.deepEqual(promoteToAdmin(old, 'alice'), { id: 'u-1', username: 'alice', wasAdmin: false });
+      assert.equal(old.prepare("SELECT role FROM users WHERE id = 'u-1'").get().role, 'admin');
+    } finally {
+      old.close();
+    }
+  });
+
   test('only the named account changes — an unrelated caregiver is left alone', () => {
     makeUser(db, { id: 'u-1', username: 'alice', role: 'caregiver' });
     makeUser(db, { id: 'u-2', username: 'bob', role: 'caregiver' });
