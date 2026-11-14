@@ -481,7 +481,7 @@ describe('adding and editing a caregiver', () => {
     test('there is nothing to remove or reset yet', async () => {
       mountEdit('new');
       await screen.findByLabelText('Username (login)');
-      expect(screen.queryByRole('button', { name: 'More options for this user' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Remove user' })).toBeNull();
       expect(screen.queryByRole('button', { name: 'Reset two-factor' })).toBeNull();
     });
   });
@@ -492,30 +492,51 @@ describe('adding and editing a caregiver', () => {
       // themselves out of their own install, and the right place to say no is before the click.
       mountEdit(ADMIN.id);
       await screen.findByLabelText('First name');
-      expect(screen.queryByRole('button', { name: 'More options for this user' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Remove user' })).toBeNull();
     });
 
     test('★ is not offered while the caregiver is still loading, and appears once loaded', async () => {
-      // Remove lives in the header menu, which (unlike the form it used to sit in) exists while the page
-      // says Loading…: an admin could confirm a DELETE for a caregiver the page had not shown (PR #1088 review).
+      // The button sits inside the form, which does not exist while the page says Loading…. PR #1088 moved it
+      // into the header, which did exist then, so an admin could confirm a DELETE for a caregiver the page
+      // had not shown; it is back in the form and gated on the record having loaded.
       let release;
       vi.spyOn(api, 'get').mockImplementation((path) => (path === '/auth/users'
         ? new Promise((resolve) => { release = () => resolve(USERS); })
         : Promise.resolve([])));
       mountEdit();
       expect(screen.getByText('Loading…')).toBeTruthy();
-      expect(screen.queryByRole('button', { name: 'More options for this user' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Remove user' })).toBeNull();
       await act(async () => { release(); });
-      expect(await screen.findByRole('button', { name: 'More options for this user' })).toBeTruthy();
+      expect(await screen.findByRole('button', { name: 'Remove user' })).toBeTruthy();
+    });
+
+    test('★ it is a visible red button at the bottom of the form, not in a header menu (owner could not find the menu)', async () => {
+      // PR #1088 moved Remove user into a "⋯" header menu and the owner reported losing the ability to delete a
+      // caregiver. The page has no such menu at all now; the button is the last thing in the form, after Save.
+      mountEdit();
+      const remove = await screen.findByRole('button', { name: 'Remove user' });
+      expect(screen.queryByRole('button', { name: 'More options for this user' }), 'no header menu on this page').toBeNull();
+      expect(screen.queryByRole('menuitem')).toBeNull();
+      expect(remove.className).toContain('btn-danger');
+      expect(remove.closest('form'), 'inside the form, so it cannot exist before the account has loaded').not.toBeNull();
+      const save = screen.getByRole('button', { name: 'Save changes' });
+      expect(save.compareDocumentPosition(remove) & Node.DOCUMENT_POSITION_FOLLOWING, 'below Save').toBeTruthy();
+      expect(remove.getAttribute('type'), 'a plain button: it must not submit the edit form').toBe('button');
+    });
+
+    test('★ a pending-invite account (no password yet) can be removed too', async () => {
+      // An unused invite is exactly the account an admin most often wants to delete.
+      mockApi({ users: [ME, { ...NANNY, password_set: false, invite_expires_at: '2099-01-01T00:00:00Z', invite_accepted_at: null }] });
+      const { user } = mountEdit();
+      await user.click(await screen.findByRole('button', { name: 'Remove user' }));
+      expect(await screen.findByText(/signed out everywhere/)).toBeTruthy();
     });
 
     test('is offered on someone else, behind a confirmation', async () => {
       const { user } = mountEdit();
-      await user.click(await screen.findByRole('button', { name: 'More options for this user' }));
-      await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
+      await user.click(await screen.findByRole('button', { name: 'Remove user' }));
       expect(await screen.findByText(/signed out everywhere/)).toBeTruthy();
-      // UI consistency (PR-C): the item is in the header menu (no red button left under Save), and the dialog uses the shared row.
-      expect(screen.queryByRole('button', { name: /^Remove (user|caregiver)$/ })).toBeNull();
+      // The dialog uses the shared button row: Cancel and the action side by side.
       expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }).closest('.modal-actions')).not.toBeNull();
       expect(delSpy, 'opening the dialog is not the deletion').not.toHaveBeenCalled();
 
@@ -526,8 +547,7 @@ describe('adding and editing a caregiver', () => {
 
     test('confirming deletes and returns to the list', async () => {
       const { user } = mountEdit();
-      await user.click(await screen.findByRole('button', { name: 'More options for this user' }));
-      await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
+      await user.click(await screen.findByRole('button', { name: 'Remove user' }));
       await user.click(await screen.findByRole('button', { name: 'Remove' }));
       await waitFor(() => expect(delSpy).toHaveBeenCalledWith('/auth/users/u-care'));
       expect(await screen.findByText('at /settings/users')).toBeTruthy();
@@ -538,8 +558,7 @@ describe('adding and editing a caregiver', () => {
       // be able to sign in.
       delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Cannot remove the last admin'));
       const { user } = mountEdit();
-      await user.click(await screen.findByRole('button', { name: 'More options for this user' }));
-      await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
+      await user.click(await screen.findByRole('button', { name: 'Remove user' }));
       await user.click(await screen.findByRole('button', { name: 'Remove' }));
       expect(await screen.findByText('Cannot remove the last admin')).toBeTruthy();
       expect(screen.getByText('at /settings/users/u-care')).toBeTruthy();
@@ -550,8 +569,7 @@ describe('adding and editing a caregiver', () => {
     test('★ #378 the failure is shown INSIDE the dialog, once, and the dialog stays open to retry', async () => {
       delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Refused: owns a session #378'));
       const { user } = mountEdit();
-      await user.click(await screen.findByRole('button', { name: 'More options for this user' }));
-      await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
+      await user.click(await screen.findByRole('button', { name: 'Remove user' }));
       await user.click(await screen.findByRole('button', { name: 'Remove' }));
 
       const dialog = screen.getByRole('dialog');
@@ -562,8 +580,7 @@ describe('adding and editing a caregiver', () => {
 
       await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-      await user.click(await screen.findByRole('button', { name: 'More options for this user' }));
-      await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
+      await user.click(await screen.findByRole('button', { name: 'Remove user' }));
       expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
     });
   });
@@ -636,8 +653,7 @@ describe('adding and editing a caregiver', () => {
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
       // ...and so is the Remove dialog: the reset failure is not its message.
-      await user.click(await screen.findByRole('button', { name: 'More options for this user' }));
-      await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
+      await user.click(await screen.findByRole('button', { name: 'Remove user' }));
       expect(within(screen.getByRole('dialog')).queryByText('Reset refused #378')).toBeNull();
       expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
     });

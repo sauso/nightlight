@@ -6,7 +6,7 @@ The **Users** page lists **Accounts**. **Add user** is at the bottom of the Acco
 
 **Signing a device out.** Each account that is signed in somewhere has a down arrow at the right of its row. Tap it to see that account's active sessions: the device, "(this device)" on the one you are using, and when it was last active. **Sign out** ends that one session, so that phone or browser has to log in again. The sessions are closed until you open them, and an account with no sessions has no arrow. Signing out your own current device logs you out of this one. Tapping the account itself, not the arrow, opens its details.
 
-To remove another account, open that user's page and choose **⋯ → Remove user**. The confirmation explains that the person will be signed out everywhere. You cannot remove your own account from this menu.
+To remove another account, open that user's page and choose the red **Remove user** button at the bottom. The confirmation explains that the person will be signed out everywhere. You cannot remove your own account.
 
 Instead of choosing a caregiver's password for them, an admin can send them a one-time link and let them choose
 their own: see [Invite a caregiver with a link](#invite-a-caregiver-with-a-link).

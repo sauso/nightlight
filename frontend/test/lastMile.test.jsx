@@ -158,8 +158,7 @@ describe('UserSettings', () => {
   test('removing a caregiver asks first, names them, and returns to the list', async () => {
     const { user } = mount();
     await screen.findByDisplayValue('nanny');
-    await user.click(screen.getByRole('button', { name: 'More options for this user' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
+    await user.click(screen.getByRole('button', { name: 'Remove user' }));
 
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText('Nanny McPhee')).toBeInTheDocument();
@@ -175,8 +174,7 @@ describe('UserSettings', () => {
     await screen.findByDisplayValue('nanny');
     let release;
     api.del.mockImplementation(() => new Promise((r) => { release = r; }));
-    await user.click(screen.getByRole('button', { name: 'More options for this user' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
+    await user.click(screen.getByRole('button', { name: 'Remove user' }));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
 
     const dialog = await screen.findByRole('dialog');
@@ -190,8 +188,7 @@ describe('UserSettings', () => {
     const { user } = mount();
     await screen.findByDisplayValue('nanny');
     api.del.mockRejectedValue(new Error('You cannot remove yourself'));
-    await user.click(screen.getByRole('button', { name: 'More options for this user' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
+    await user.click(screen.getByRole('button', { name: 'Remove user' }));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove' }));
     expect(await screen.findByText('You cannot remove yourself')).toBeInTheDocument();
   });
