@@ -18328,7 +18328,7 @@
   },
   {
     "label": "#554 CameraSettings: the Remove dialog stops asking \"Are you sure?\"",
-    "file": "frontend/src/components/CameraForm.jsx",
+    "file": "frontend/src/components/RemoveCameraDialog.jsx",
     "find": "<strong>Are you sure?</strong>",
     "replace": "<strong>Done?</strong>",
     "expect": "killed",
@@ -18336,15 +18336,15 @@
   },
   {
     "label": "#554 CameraSettings: the Remove dialog drops the event-log line",
-    "file": "frontend/src/components/CameraForm.jsx",
-    "find": "            <li>its event log and temperature and humidity history</li>\n",
+    "file": "frontend/src/components/RemoveCameraDialog.jsx",
+    "find": "        <li>its event log and temperature and humidity history</li>\n",
     "replace": "",
     "expect": "killed",
     "tests": ["cameraSettings.test.jsx"]
   },
   {
     "label": "#554 CameraSettings: the Remove dialog promises adding the camera back restores it",
-    "file": "frontend/src/components/CameraForm.jsx",
+    "file": "frontend/src/components/RemoveCameraDialog.jsx",
     "find": "You can add the camera again, but none of this comes back.",
     "replace": "You can add the camera again.",
     "expect": "killed",

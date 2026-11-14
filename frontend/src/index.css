@@ -2614,8 +2614,8 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .list-row__title { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
 .list-row .icon-btn { flex-shrink: 0; white-space: nowrap; }
 
-/* Detection rows (Motion / Sound / Alert schedule) with a tinted periwinkle icon chip — shared
-   between Camera settings (drill-in) and the camera cog sheet (quick toggle) so they match. */
+/* .det-row: the plain 14px-padded row the Recording and alerts panel (RecordingScopePanel) is built from. The
+   Detection drill-in rows on Edit camera are NavRow (.nav-row below), not this (#1076). */
 .det-row {
   display: flex;
   align-items: center;
@@ -2640,21 +2640,75 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 }
 .scope-group:first-child { border-top: none; }
 .scope-row__value { text-align: right; max-width: 55%; font-size: 15px; color: var(--text-secondary); }
-.det-row--clickable { cursor: pointer; }
-.det-row__left { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .det-row__label { font-size: 16px; font-weight: 500; }
-.det-row__right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--text-secondary); }
-.det-chip {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent-text);
-  display: inline-flex;
+
+/* #1076: NavRow, the 56px "go deeper" row (icon chip, label, optional sub line, current value, chevron) used by the
+   Detection group on Edit camera. A real <button> / <a>, so it needs the resets below: a button is not full width,
+   centred text or transparent by default. Replaces DetectionRow's .det-row--clickable / .det-chip, which nothing else
+   used (RecordingScopePanel keeps .det-row and .det-row__label). No transition, so nothing to opt out of for
+   prefers-reduced-motion; hover only where a pointer can hover (touch has no hover and would leave it stuck). */
+.nav-row {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
 }
+.nav-row:last-child { border-bottom: 0; }
+.nav-row__left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.nav-row__right { display: flex; align-items: center; gap: 6px; flex: none; color: var(--text-secondary); font-size: 14px; }
+.nav-row__chip { width: 34px; height: 34px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent-text); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.nav-row__copy { min-width: 0; }
+.nav-row__label, .nav-row__sub { display: block; overflow-wrap: anywhere; }
+.nav-row__label { font-size: 15px; font-weight: 600; }
+.nav-row__sub { font-size: 13px; color: var(--text-secondary); }
+.nav-row:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.nav-row:active { background: var(--child-action-active); }
+@media (hover: hover) { .nav-row:hover { background: var(--child-action-hover); } }
+
+/* #1076: Edit camera in groups. Every <input>/<select> below sits inside a `.field` wrapper, which is where the page's
+   field look lives (.field input, .field select: background, border, radius, padding); a control outside `.field`
+   renders as a bare browser control (the Cameras list's "Assigned to" select shipped that way). The 44px minimum is a
+   touch target, set on the inputs themselves because .field input's own padding gives about 42px. */
+.camera-form__card { padding: 14px; }
+.camera-form__card .field input, .camera-form__card .field select,
+.camera-form__advanced .field input { min-height: 44px; }
+.camera-form__last-field { margin-bottom: 0; }
+/* Address + port, and username + password, side by side. A grid (not the flex .onvif-box__row, whose 140px minimum
+   made the port as wide as the address and wrapped both on a phone). Address gets twice the port's width. The login
+   pair stacks below 360px: "•••••• (unchanged)" does not fit half of a 320px card. */
+.camera-form__pair { display: grid; gap: 10px; }
+.camera-form__pair--host { grid-template-columns: 2fr 1fr; }
+.camera-form__pair--login { grid-template-columns: 1fr 1fr; }
+.camera-form__pair > .field { min-width: 0; }
+@media (max-width: 359px) { .camera-form__pair--login { grid-template-columns: 1fr; gap: 0; } }
+.camera-form__onvif { margin-top: 2px; }
+.camera-form__fetch { min-height: 44px; }
+.camera-form__hint { margin: 8px 0 0; font-size: 13px; line-height: 1.45; color: var(--text-secondary); }
+.camera-form__nav-card { padding: 0; overflow: hidden; }
+.camera-form__advanced { padding: 0; overflow: hidden; }
+.camera-form__disclosure { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 56px; padding: 8px 14px; border: 0; background: transparent; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; }
+.camera-form__disclosure-text { min-width: 0; }
+.camera-form__disclosure-text > * { display: block; }
+.camera-form__disclosure-text > strong { font-size: 15px; }
+.camera-form__disclosure-text > span { font-size: 13px; color: var(--text-secondary); }
+.camera-form__disclosure > svg { flex: none; color: var(--text-secondary); }
+.camera-form__disclosure[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.camera-form__disclosure:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.camera-form__disclosure:active { background: var(--child-action-active); }
+@media (hover: hover) { .camera-form__disclosure:hover { background: var(--child-action-hover); } }
+.camera-form__advanced-fields { padding: 14px 14px 14px; border-top: 1px solid var(--border); }
+.camera-form__advanced-fields > .field:last-child, .camera-form__advanced-fields > .onvif-box:last-child { margin-bottom: 0; }
 
 .tag {
   display: inline-block;

@@ -101,6 +101,16 @@ ESPHome and Cameras use one `.night.find-card` search surface: **Find devices** 
 
 Saved ESPHome devices and cameras share `.dev-card`: a status dot and word, wrapping name, muted address, optional detail lines, and a 44px **⋯** action menu. ESPHome keeps Edit, Test connection, Download CSV and Delete device, plus a separate **Sensors** disclosure. Camera cards show only supported capability chips, a Motion/Sound line when available, and a visible **Assigned to** foot row. The camera menu holds Edit camera, Enable/Disable camera and Remove camera. A disabled camera has a neutral dot; an unknown status keeps the amber connecting dot. The camera list's Remove dialog gives the full permanent-deletion warning.
 
+### Edit camera in groups, and the navigation row (#1076)
+
+`components/CameraForm.jsx` (Edit camera, and the manual card on Add camera and in the setup guide) is four groups, each a `.section-title` over a `.card`: **Camera** (name; address and RTSP port on a `2fr 1fr` grid; username and password on a `1fr 1fr` grid that stacks below 360px; a quiet **Fetch from ONVIF** button with one hint sentence), **Assigned to** (the **Child (optional)** select), **Detection** (existing camera only; three navigation rows, then the read-only recording summary) and a collapsed **Advanced** row. Every control sits inside a `.field`: the page's field look is `.field input` / `.field select`, so a bare `<select>` or `<input>` outside one renders as a browser default (the Cameras list's "Assigned to" select shipped that way). Inputs in these cards are 44px tall.
+
+**Advanced** is a button with `aria-expanded` that mounts its fields (stream path, low-quality path, two-way audio, MQTT topic) only while open, so a closed row leaves nothing for a keyboard to land on. It is closed for a saved camera, and opens by itself in three cases: a new or embedded form whose stream path is empty; the first save error, Save-anyway question or ONVIF failure shown (those messages name no field, so the likely ones are exposed and nothing is focused); and a restored draft holding a value inside it. The person can close it again; it does not reopen for the same message.
+
+**`NavRow`** (`components/NavRow.jsx`) is the 56px "go deeper" row: icon chip, label, optional sub line, the current value and a chevron. It is a real `<button type="button">` (or a `<Link>` given `to`), so Enter and Space come from the browser; its accessible name is the visible label followed by the value ("Motion detection On"). Hover is pointer-only and the focus ring is `--accent-line`. It replaced `DetectionRow`; `.det-row` stays only for the recording summary.
+
+**Remove camera** is the one item of the header **⋯** menu (`MoreMenu` through `AppHeader`'s `actions`), shown to an admin on a saved camera. There is no red button under Save. It opens the same `RemoveCameraDialog` as the Cameras list.
+
 ### Child hero card (`.night`)
 
 One fixed navy gradient in both themes: `linear-gradient(165deg, #2C2F63 0%, #191B38 100%)`, so its text colours are

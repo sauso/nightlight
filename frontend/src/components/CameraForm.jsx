@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Zap, AudioLines, Clock, ChevronRight } from 'lucide-react';
+import { Zap, AudioLines, Clock, RotateCcw, Trash2, ChevronDown } from 'lucide-react';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
-import Modal from '../components/Modal.jsx';
+import MoreMenu from '../components/MoreMenu.jsx';
+import RemoveCameraDialog from '../components/RemoveCameraDialog.jsx';
+import { useAuth } from '../lib/AuthContext.jsx';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
 import { loadDraft, clearDraft } from '../lib/formDraft.js';
 import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
-import DetectionRow from '../components/DetectionRow.jsx';
+import NavRow from '../components/NavRow.jsx';
 import CameraReportButton from '../components/CameraReportButton.jsx';
 import RecordingScopePanel from '../components/RecordingScopePanel.jsx';
 import { useDetectionSave, retry } from '../lib/detectionSaves.js';
@@ -33,6 +35,22 @@ const DRAFT_FIELDS = [
   'name', 'rtsp_host', 'rtsp_port', 'rtsp_path', 'rtsp_username', 'child_id', 'mqtt_topic', 'talk_username', 'sub_rtsp_path',
 ];
 
+// The draft fields that live inside the closed "Advanced" disclosure (#1076). A restored draft holding a value in one
+// of them must open it: otherwise the person's own half-typed stream path would be restored invisibly (the "unsaved
+// changes restored" notice would say so, but nothing on screen would show what).
+const ADVANCED_DRAFT_FIELDS = ['rtsp_path', 'sub_rtsp_path', 'mqtt_topic', 'talk_username'];
+// "Holds a value" is not the test: a draft that CLEARS a saved path (key present, value '') is just as hidden, and a
+// later Save would send that blank path with nothing on screen to show it (Codex review of #1080). So the test is
+// "differs from what is stored", compared to `base` (the loaded camera, or the empty form on a new camera).
+const draftTouchesAdvanced = (draft, base) => !!draft
+  && ADVANCED_DRAFT_FIELDS.some((key) => key in draft && (draft[key] ?? '') !== (base[key] ?? ''));
+
+// The two messages the form raises ITSELF about a field that is NOT inside Advanced (the IP is in Camera, the child in
+// Assigned to). They arrive through `pageError` like a server message, but opening Advanced for them would jump the
+// layout under the person for no reason (Codex review of #1080), so the open-on-error rule below skips them.
+const IP_FIRST_ERROR = 'Enter the camera IP first';
+const CHILD_FIRST_ERROR = 'Assign this camera to a child before continuing setup.';
+
 // Per-camera settings as a routed screen (replaces the old edit modal). /cameras/new adds a
 // camera; /cameras/:id edits one. Only connection/identity fields live here — motion, sound and
 // schedule are their own screens (see DetectionSettings.jsx), reachable from the Detection rows
@@ -43,6 +61,7 @@ const DRAFT_FIELDS = [
 export default function CameraForm({ onCreated, initialChildId = '', embedded = false, prefill, requireChild = embedded }) {
   const { id } = useParams();
   const isNew = !id || id === 'new';
+  const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { kids: children, cameras, loaded: camerasLoaded, error: camerasError, refresh } = useCameras();
@@ -75,6 +94,13 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
   const [busy, setBusy] = useState(false);
   const [onvifBusy, setOnvifBusy] = useState(false);
   const [onvifMsg, setOnvifMsg] = useState('');
+  // Whether the "Advanced" disclosure (stream paths, two-way audio, MQTT topic) is open (#1076). It is controlled
+  // state, not <details>, so the rules below can open it and the person can still close it again. It starts OPEN when
+  // the form cannot work without it: a NEW or EMBEDDED form (the Add screen's manual card, the setup guide) whose
+  // stream path is still empty, because the person who typed an address by hand has to give a path too, unless the
+  // ONVIF fetch fills it. (Embedded forms are always new: they have no :id.) It also starts open for a restored
+  // draft that holds a value inside it. An existing camera starts CLOSED: its path is already saved.
+  const [advancedOpen, setAdvancedOpen] = useState(() => draftTouchesAdvanced(restoredDraft, EMPTY_FORM) || (isNew && !restoredDraft?.rtsp_path));
   const [talkVerifyBusy, setTalkVerifyBusy] = useState(false);
   const [talkVerifyMsg, setTalkVerifyMsg] = useState(null);
   const [pageError, setPageError] = useState('');
@@ -118,6 +144,8 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
     setBaseline(loaded);
     setForm({ ...loaded, ...draft });
     setRestored(!!draft);
+    // An edit's draft is read here, after the camera loads, so the same rule as the initial state is applied now.
+    if (draftTouchesAdvanced(draft, loaded)) setAdvancedOpen(true);
     setFormReady(true);
     setCaps({
       backchannel_supported: cam.backchannel_supported,
@@ -132,6 +160,17 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
     secrets: [form.rtsp_password, form.talk_password],
   });
 
+  // A failed save, the stream-test question ("Save anyway") or a failed ONVIF fetch has no field name: the server says
+  // "couldn't reach the stream", not "the path is wrong". The path, the low-quality path and the talk login are what
+  // such a message is almost always about, and they sit behind the closed Advanced row, so a new message of that kind
+  // opens it (#1076, amendment 2). The effect runs only when a message APPEARS or CHANGES, never on a later render, so
+  // a person who closes Advanced again while the same message is still on screen is not fought. No field is
+  // focused: which one is at fault is not known, so nothing is promised. (The stream path has no `required`, so there
+  // is no native validation message hiding in a closed section either.)
+  useEffect(() => {
+    if (confirmMsg || (pageError && pageError !== IP_FIRST_ERROR && pageError !== CHILD_FIRST_ERROR)) setAdvancedOpen(true);
+  }, [pageError, confirmMsg]);
+
   // Back to what is stored. useFormDraft sees form == baseline and removes the stored draft.
   function discardDraft() {
     setForm(baseline);
@@ -140,7 +179,7 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
 
   async function fetchFromOnvif() {
     const host = form.rtsp_host.trim();
-    if (!host) { setPageError('Enter the camera IP first'); return; }
+    if (!host) { setPageError(IP_FIRST_ERROR); return; }
     setOnvifBusy(true); setOnvifMsg(''); setPageError('');
     try {
       const r = await probeCamera({
@@ -156,6 +195,11 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
       extraRef.current = r.extra;
       setCaps((c) => ({ ...c, ...r.caps }));
       setOnvifMsg(r.summary);
+      // A successful fetch that finds two-way audio which is NOT carried by the stream (`backchannel_verified === false`
+      // is the Hikvision-style camera) makes the talk LOGIN necessary, and that block is behind Advanced: open it, or the
+      // summary says "two-way audio" while the field it needs is unreachable and a Save would send an empty talk
+      // username, which the server reads as "turn talk-back off" (Codex review of #1080).
+      if (r.caps.backchannel_supported === 'yes' && r.caps.backchannel_verified === false) setAdvancedOpen(true);
     } catch (err) {
       setPageError(err.message);
     } finally {
@@ -199,7 +243,7 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
   async function doSave(force) {
     setBusy(true); setPageError('');
     if (requireChild && !form.child_id) {
-      setPageError('Assign this camera to a child before continuing setup.');
+      setPageError(CHILD_FIRST_ERROR);
       setBusy(false);
       return;
     }
@@ -285,7 +329,20 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
   const ContentTag = embedded ? 'div' : 'main';
   return (
     <>
-      {!embedded && <AppHeader title={isNew ? 'Add camera' : (cam?.name || 'Camera')} back={back} />}
+      {/* "Remove camera" moved out of a red button under Save (a mis-tap away from the primary action) into the header's
+          ⋯ menu, as on the sleep page (#1076). Only for a saved camera that has loaded (there is nothing to remove on
+          Add camera or while loading) and only for an admin: the route is admin-only already, and the role is checked
+          here the way the Cameras list does, so the item never depends on the route guard alone. The dialog it opens
+          is the same one the Cameras list uses, so both screens warn about the same deletion. */}
+      {!embedded && <AppHeader title={isNew ? 'Add camera' : (cam?.name || 'Camera')} back={back}
+        actions={!isNew && cam && user?.role === 'admin' ? (
+          <MoreMenu label="More options for this camera" menuLabel="Camera">
+            <button type="button" role="menuitem" className="more-menu__item dev-card__delete"
+              onClick={() => { setRemoveError(''); setRemoving(true); }}>
+              <Trash2 size={16} aria-hidden="true" />Remove camera
+            </button>
+          </MoreMenu>
+        ) : null} />}
       <ContentTag className="app-main">
         {!isNew && detSave.state === 'failed' && (
           // A sibling of <form> below, never a descendant of it — see the comment on `detSave` above.
@@ -307,136 +364,160 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
               <UnsavedNotice restored={restored} onDiscard={discardDraft}
                 note={restored ? 'Passwords are never kept on the device, so type them again.' : ''} />
             )}
-            <div className="field">
-              <label htmlFor="cam-name">Name</label>
-              <input id="cam-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required placeholder="e.g. Nursery cam" />
-            </div>
-
-            <div className="onvif-box__row">
+            {/* Four groups instead of one 15-field scroll (#1076). Every field, id, label (bar the two shortened ones),
+                validation and request is what it was; only the grouping and the order changed. */}
+            <div className="section-title">Camera</div>
+            <div className="card camera-form__card">
               <div className="field">
-                <label htmlFor="cam-host">Camera IP address</label>
-                <input id="cam-host" value={form.rtsp_host} onChange={(e) => setForm({ ...form, rtsp_host: e.target.value })}
-                  required placeholder="192.168.1.50" />
+                <label htmlFor="cam-name">Name</label>
+                <input id="cam-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  required placeholder="e.g. Nursery cam" />
               </div>
-              <div className="field" style={{ maxWidth: 90 }}>
-                <label htmlFor="cam-port">RTSP port</label>
-                <input id="cam-port" value={form.rtsp_port} onChange={(e) => setForm({ ...form, rtsp_port: e.target.value })} placeholder="554" />
+
+              <div className="camera-form__pair camera-form__pair--host">
+                <div className="field">
+                  <label htmlFor="cam-host">Camera IP address</label>
+                  <input id="cam-host" value={form.rtsp_host} onChange={(e) => setForm({ ...form, rtsp_host: e.target.value })}
+                    required placeholder="192.168.1.50" />
+                </div>
+                <div className="field">
+                  <label htmlFor="cam-port">RTSP port</label>
+                  <input id="cam-port" value={form.rtsp_port} onChange={(e) => setForm({ ...form, rtsp_port: e.target.value })} placeholder="554" />
+                </div>
+              </div>
+
+              <div className="camera-form__pair camera-form__pair--login">
+                <div className="field">
+                  <label htmlFor="cam-user">Username</label>
+                  <input id="cam-user" value={form.rtsp_username} onChange={(e) => setForm({ ...form, rtsp_username: e.target.value })}
+                    autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+                </div>
+                <div className="field">
+                  <label htmlFor="cam-pass">Password</label>
+                  <input id="cam-pass" type="password" value={form.rtsp_password}
+                    onChange={(e) => setForm({ ...form, rtsp_password: e.target.value })}
+                    autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                    placeholder={!isNew && caps.rtsp_has_password ? '•••••• (unchanged)' : ''} />
+                </div>
+              </div>
+
+              <div className="camera-form__onvif">
+                <button type="button" className="btn btn-peri camera-form__fetch" onClick={fetchFromOnvif} disabled={onvifBusy}>
+                  {onvifBusy ? 'Fetching…' : <><RotateCcw size={16} aria-hidden="true" />Fetch from ONVIF</>}
+                </button>
+                <p className="camera-form__hint">
+                  Optional: fetch the stream port, path and capabilities (two-way audio, PTZ) over ONVIF using
+                  the IP and login above. Most cameras don't need a login for this; if yours does, fill it in first.
+                </p>
+                {onvifMsg && <div className="onvif-box__ok">{onvifMsg}</div>}
               </div>
             </div>
 
-            <div className="onvif-box__row">
-              <div className="field">
-                <label htmlFor="cam-user">Username</label>
-                <input id="cam-user" value={form.rtsp_username} onChange={(e) => setForm({ ...form, rtsp_username: e.target.value })}
-                  autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
-              </div>
-              <div className="field">
-                <label htmlFor="cam-pass">Password</label>
-                <input id="cam-pass" type="password" value={form.rtsp_password}
-                  onChange={(e) => setForm({ ...form, rtsp_password: e.target.value })}
-                  autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-                  placeholder={!isNew && caps.rtsp_has_password ? '•••••• (unchanged)' : ''} />
+            <div className="section-title">Assigned to</div>
+            <div className="card camera-form__card">
+              <div className="field camera-form__last-field">
+                <label htmlFor="cam-child">Child (optional)</label>
+                <select id="cam-child" value={form.child_id} onChange={(e) => setForm({ ...form, child_id: e.target.value })}>
+                  <option value="">Unassigned</option>
+                  {children.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}
+                </select>
               </div>
             </div>
 
-            <div className="onvif-fetch">
-              <button type="button" className="btn btn-peri" onClick={fetchFromOnvif} disabled={onvifBusy}>
-                {onvifBusy ? 'Fetching…' : '↻ Fetch port, path & capabilities from ONVIF'}
-              </button>
-              <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                Optional: fetch the stream port, path and capabilities (two-way audio, PTZ) over ONVIF using
-                the IP and login above. Most cameras don't need a login for this; if yours does, fill it in first.
-              </div>
-              {onvifMsg && <div className="onvif-box__ok">{onvifMsg}</div>}
-            </div>
-
-            <div className="field">
-              <label htmlFor="cam-path">Stream path</label>
-              <input id="cam-path" value={form.rtsp_path} onChange={(e) => setForm({ ...form, rtsp_path: e.target.value })}
-                placeholder="/Streaming/Channels/101" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
-              <p className="onvif-box__hint">The main (high-quality) stream path. Filled in by the ONVIF fetch, or enter it manually.</p>
-            </div>
-
-            <div className="field">
-              <label htmlFor="cam-sub-path">Low-quality stream path (optional)</label>
-              <input id="cam-sub-path" value={form.sub_rtsp_path} onChange={(e) => setForm({ ...form, sub_rtsp_path: e.target.value })}
-                autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="/Streaming/Channels/102" />
-              <p className="onvif-box__hint">A second, lower-resolution stream that adds a "Low" quality option on the tile — it reuses the address and login above.</p>
-            </div>
-
-            {showTalk && (
-              <div className="onvif-box">
-                <div className="onvif-box__title">Two-way audio (talk-back)</div>
-                {talkOverStream ? (
-                  <p className="onvif-box__hint">
-                    This camera plays talk-back over its own stream audio, so it needs <strong>no separate
-                    login</strong> — the hold-to-talk button is enabled automatically using the stream
-                    credentials above.
-                  </p>
-                ) : (
-                  <>
-                    <p className="onvif-box__hint">
-                      This camera needs its <strong>web login</strong> to enable the hold-to-talk button — for
-                      Hikvision that's the User Management account (separate from the ONVIF user). Leave the
-                      username blank to turn it off.
-                    </p>
-                    <div className="onvif-box__row">
-                      <div className="field">
-                        <label htmlFor="cam-talk-user">Talk username</label>
-                        <input id="cam-talk-user" value={form.talk_username} onChange={(e) => setForm({ ...form, talk_username: e.target.value })}
-                          autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
-                      </div>
-                      <div className="field">
-                        <label htmlFor="cam-talk-pass">Talk password</label>
-                        <input id="cam-talk-pass" type="password" value={form.talk_password}
-                          onChange={(e) => setForm({ ...form, talk_password: e.target.value })}
-                          autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false}
-                          placeholder={caps.talk_has_password ? '•••••• (unchanged)' : ''} />
-                      </div>
-                    </div>
-                    <button type="button" className="btn btn-peri" onClick={verifyTalk} disabled={talkVerifyBusy} style={{ marginTop: 4 }}>
-                      {talkVerifyBusy ? 'Verifying…' : 'Verify login'}
-                    </button>
-                    {talkVerifyMsg && <div className={talkVerifyMsg.ok ? 'onvif-box__ok' : 'onvif-box__err'}>{talkVerifyMsg.text}</div>}
-                  </>
-                )}
-              </div>
-            )}
-
-            <div className="field">
-              <label htmlFor="cam-child">Assign to child (optional)</label>
-              <select id="cam-child" value={form.child_id} onChange={(e) => setForm({ ...form, child_id: e.target.value })}>
-                <option value="">Unassigned</option>
-                {children.map((child) => <option key={child.id} value={child.id}>{child.name}</option>)}
-              </select>
-            </div>
-
-            <div className="field">
-              <label htmlFor="cam-mqtt-topic">MQTT topic for temp/humidity (optional)</label>
-              <input id="cam-mqtt-topic" value={form.mqtt_topic} onChange={(e) => setForm({ ...form, mqtt_topic: e.target.value })}
-                placeholder="e.g. zigbee2mqtt/Child B Room Temp" />
-            </div>
-
-            {/* Detection lives on its own screens — only once the camera exists. */}
+            {/* Detection lives on its own screens, so it only exists once the camera does. Each row shows the
+                CURRENT setting and carries the same back-link state (`detFrom`) the old rows did. */}
             {!isNew && cam && (
               <>
                 <div className="section-title">Detection</div>
-                <div className="card" style={{ padding: 0 }}>
-                  <DetectionRow Icon={Zap} label="Motion detection"
-                    right={<><span className="camera-tile__sub">{cam.detect_motion_enabled ? 'On' : 'Off'}</span><ChevronRight size={18} style={{ opacity: 0.45 }} aria-hidden="true" /></>}
+                <div className="card camera-form__nav-card">
+                  <NavRow Icon={Zap} label="Motion detection" value={cam.detect_motion_enabled ? 'On' : 'Off'}
                     onClick={() => navigate(`/cameras/${id}/motion`, detFrom)} />
-                  <DetectionRow Icon={AudioLines} label="Sound detection"
-                    right={<><span className="camera-tile__sub">{cam.detect_sound_enabled ? 'On' : 'Off'}</span><ChevronRight size={18} style={{ opacity: 0.45 }} aria-hidden="true" /></>}
+                  <NavRow Icon={AudioLines} label="Sound detection" value={cam.detect_sound_enabled ? 'On' : 'Off'}
                     onClick={() => navigate(`/cameras/${id}/sound`, detFrom)} />
-                  <DetectionRow Icon={Clock} label="Alert schedule"
-                    right={<><span className="camera-tile__sub">{cam.detect_schedule_enabled ? `${minToHHMM(cam.detect_start)}–${minToHHMM(cam.detect_end)}` : 'Always'}</span><ChevronRight size={18} style={{ opacity: 0.45 }} aria-hidden="true" /></>}
+                  <NavRow Icon={Clock} label="Alert schedule"
+                    value={cam.detect_schedule_enabled ? `${minToHHMM(cam.detect_start)}–${minToHHMM(cam.detect_end)}` : 'Always'}
                     onClick={() => navigate(`/cameras/${id}/schedule`, detFrom)} />
                 </div>
                 {/* Read-only summary of what this camera alerts on and records, and whether it is ready (#394). */}
                 <RecordingScopePanel cam={cam} />
               </>
             )}
+
+            {/* The rarely used fields. Unmounted while closed (not just hidden), so a closed row holds nothing a
+                keyboard or screen reader could land on. The row is a real button with aria-expanded; the
+                `advancedOpen` rules above open it for the cases where something inside is needed. */}
+            <div className="card camera-form__advanced">
+              <button type="button" className="camera-form__disclosure" aria-expanded={advancedOpen}
+                aria-controls="camera-advanced-fields" onClick={() => setAdvancedOpen((open) => !open)}>
+                <span className="camera-form__disclosure-text">
+                  <strong>Advanced</strong>
+                  <span>Stream paths, two-way audio, MQTT topic</span>
+                </span>
+                <ChevronDown size={18} aria-hidden="true" />
+              </button>
+              {advancedOpen && (
+                <div id="camera-advanced-fields" className="camera-form__advanced-fields">
+                  <div className="field">
+                    <label htmlFor="cam-path">Stream path</label>
+                    <input id="cam-path" value={form.rtsp_path} onChange={(e) => setForm({ ...form, rtsp_path: e.target.value })}
+                      placeholder="/Streaming/Channels/101" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+                    <p className="onvif-box__hint">The main (high-quality) stream path. Filled in by the ONVIF fetch, or enter it manually.</p>
+                  </div>
+
+                  <div className="field">
+                    <label htmlFor="cam-sub-path">Low-quality stream path (optional)</label>
+                    <input id="cam-sub-path" value={form.sub_rtsp_path} onChange={(e) => setForm({ ...form, sub_rtsp_path: e.target.value })}
+                      autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="/Streaming/Channels/102" />
+                    <p className="onvif-box__hint">A second, lower-resolution stream that adds a "Low" quality option on the tile — it reuses the address and login above.</p>
+                  </div>
+
+                  {showTalk && (
+                    <div className="onvif-box">
+                      <div className="onvif-box__title">Two-way audio (talk-back)</div>
+                      {talkOverStream ? (
+                        <p className="onvif-box__hint">
+                          This camera plays talk-back over its own stream audio, so it needs <strong>no separate
+                          login</strong> — the hold-to-talk button is enabled automatically using the stream
+                          credentials above.
+                        </p>
+                      ) : (
+                        <>
+                          <p className="onvif-box__hint">
+                            This camera needs its <strong>web login</strong> to enable the hold-to-talk button — for
+                            Hikvision that's the User Management account (separate from the ONVIF user). Leave the
+                            username blank to turn it off.
+                          </p>
+                          <div className="onvif-box__row">
+                            <div className="field">
+                              <label htmlFor="cam-talk-user">Talk username</label>
+                              <input id="cam-talk-user" value={form.talk_username} onChange={(e) => setForm({ ...form, talk_username: e.target.value })}
+                                autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+                            </div>
+                            <div className="field">
+                              <label htmlFor="cam-talk-pass">Talk password</label>
+                              <input id="cam-talk-pass" type="password" value={form.talk_password}
+                                onChange={(e) => setForm({ ...form, talk_password: e.target.value })}
+                                autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                                placeholder={caps.talk_has_password ? '•••••• (unchanged)' : ''} />
+                            </div>
+                          </div>
+                          <button type="button" className="btn btn-peri" onClick={verifyTalk} disabled={talkVerifyBusy} style={{ marginTop: 4 }}>
+                            {talkVerifyBusy ? 'Verifying…' : 'Verify login'}
+                          </button>
+                          {talkVerifyMsg && <div className={talkVerifyMsg.ok ? 'onvif-box__ok' : 'onvif-box__err'}>{talkVerifyMsg.text}</div>}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="field">
+                    <label htmlFor="cam-mqtt-topic">MQTT topic for temp/humidity (optional)</label>
+                    <input id="cam-mqtt-topic" value={form.mqtt_topic} onChange={(e) => setForm({ ...form, mqtt_topic: e.target.value })}
+                      placeholder="e.g. zigbee2mqtt/Child B Room Temp" />
+                  </div>
+                </div>
+              )}
+            </div>
 
             {pageError && <div className="error-banner" style={{ marginBottom: 12 }}>{pageError}</div>}
             {confirmMsg && (
@@ -474,47 +555,12 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
               )}
             </div>
 
-            {!isNew && (
-              <button className="btn btn-danger" type="button" style={{ marginTop: 10 }} onClick={() => { setRemoveError(''); setRemoving(true); }}>
-                Remove camera
-              </button>
-            )}
           </form>
         )}
       </ContentTag>
 
-      {removing && (
-        <Modal title="Remove camera" placement="top" error={removeError} onClose={() => (removeBusy ? null : setRemoving(false))}>
-          {/* #554: removing a camera deletes EVERYTHING recorded by it, files included. The list is the
-              contract with lib/entityPurge.js. "Are you sure?" is a sentence in the dialog, not confirm(). */}
-          <p style={{ marginTop: 0 }}>
-            Remove <strong>{cam?.name}</strong>? This stops its stream and permanently deletes everything for this camera:
-          </p>
-          <ul style={{ margin: '0 0 12px', paddingLeft: 20 }}>
-            <li>bed transitions and their snapshot photos</li>
-            <li>the activity history it recorded</li>
-            <li>alerts, with their clips and snapshots</li>
-            <li>recordings and wake clips, including the video files</li>
-            <li>its event log and temperature and humidity history</li>
-          </ul>
-          {/* #719 review: a child's nights are the child's, so their saved summary stays, but the night's detail
-              and its review photos are built from this camera's activity history and bed transitions, which go.
-              Timelapses (and their frames) are keyed by child, not camera, so they stay too (#719 re-review). */}
-          <p>
-            Nights it recorded keep their saved summary and their timelapse but lose their detail and their
-            morning-review photos.
-          </p>
-          <p>
-            You can add the camera again, but none of this comes back. <strong>Are you sure?</strong>
-          </p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button className="btn" type="button" onClick={() => setRemoving(false)} disabled={removeBusy}>Cancel</button>
-            <button className="btn btn-danger" type="button" onClick={confirmRemove} disabled={removeBusy}>
-              {removeBusy ? 'Removing…' : 'Remove'}
-            </button>
-          </div>
-        </Modal>
-      )}
+      {removing && cam && <RemoveCameraDialog camera={cam} error={removeError} busy={removeBusy}
+        onClose={() => setRemoving(false)} onConfirm={confirmRemove} />}
     </>
   );
 }

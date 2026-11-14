@@ -1,4 +1,4 @@
-// The small shared components — AppHeader, BackLink, ChildCameraTile, DetectionRow, AlertList (whose clip
+// The small shared components — AppHeader, BackLink, ChildCameraTile, AlertList (whose clip
 // delete is admin-only since #538) — and the
 // route table in App.jsx.
 //
@@ -8,9 +8,7 @@
 //      child, or from the Cameras tab) must return to where you actually came from. It reads
 //      `location.state.from` and falls back to the page's default parent — get it wrong and the back
 //      button silently teleports people.
-//   2. DetectionRow IS KEYBOARD-OPERABLE ONLY IF onClick EXISTS. It is a <div role="button">, so
-//      `tabIndex` and the Enter/Space handler are the only things making it reachable at all; and a
-//      NON-clickable row must not advertise itself as a button.
+//   2. (DetectionRow's keyboard test lived here until #1076 replaced it with NavRow, a real <button>: navRow.test.jsx.)
 //   3. AlertList's row time is the CLOCK TIME in HOME time, with the day only when it is not today (the HOME zone's today).
 //   4. App.jsx's route table is the ONLY place role gating is applied to whole screens — and it is
 //      where the shipped 403-for-everyone bug would have been visible.
@@ -22,7 +20,6 @@ import { renderAs, renderAsAdmin, renderAsCaregiver, ADMIN, CAREGIVER } from './
 import AppHeader from '../src/components/AppHeader.jsx';
 import BackLink from '../src/components/BackLink.jsx';
 import ChildCameraTile from '../src/components/ChildCameraTile.jsx';
-import DetectionRow from '../src/components/DetectionRow.jsx';
 import AlertList from '../src/components/AlertList.jsx';
 import { Protected, AdminProtected } from '../src/App.jsx';
 import { api } from '../src/lib/api.js';
@@ -198,57 +195,6 @@ describe('ChildCameraTile', () => {
     render(<ChildCameraTile cam={CAM} onWatch={vi.fn()} onSettings={onSettings} />);
     await user.click(screen.getByRole('button', { name: 'Camera settings for Child B Room' }));
     expect(onSettings).toHaveBeenCalledTimes(1);
-  });
-});
-
-// --- DetectionRow -------------------------------------------------------------------------------
-
-describe('DetectionRow', () => {
-  const Icon = (p) => <svg {...p} data-testid="icon" />;
-
-  test('a clickable row is announced as a button and reachable by keyboard', async () => {
-    const user = userEvent.setup();
-    const onClick = vi.fn();
-    render(<DetectionRow Icon={Icon} label="Motion" sub="On · 50" right="›" onClick={onClick} />);
-    const row = screen.getByRole('button', { name: /Motion/ });
-    expect(row).toHaveAttribute('tabindex', '0');
-    expect(row).toHaveClass('det-row--clickable');
-
-    // ⚠️ It is a <div>, so without tabIndex + this handler the row is invisible to a keyboard. Tab to
-    // it rather than calling focus(), so the test proves it is actually in the tab order.
-    await user.tab();
-    expect(row).toHaveFocus();
-    await user.keyboard('{Enter}');
-    await user.keyboard(' ');
-    expect(onClick).toHaveBeenCalledTimes(2);
-  });
-
-  test('an unrelated key does nothing', async () => {
-    const user = userEvent.setup();
-    const onClick = vi.fn();
-    render(<DetectionRow Icon={Icon} label="Motion" onClick={onClick} />);
-    await user.tab();
-    await user.keyboard('{Escape}a{ArrowDown}');
-    expect(onClick).not.toHaveBeenCalled();
-  });
-
-  test('a NON-clickable row advertises nothing it cannot do', () => {
-    const { container } = render(<DetectionRow Icon={Icon} label="Motion" right={<span>off</span>} />);
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
-    const row = container.querySelector('.det-row');
-    expect(row).not.toHaveAttribute('tabindex');
-    expect(row).not.toHaveClass('det-row--clickable');
-  });
-
-  test('renders as a <label> when asked, so it can wrap a Switch', () => {
-    const { container } = render(<DetectionRow as="label" Icon={Icon} label="Motion" right={<input type="checkbox" />} />);
-    // The cog sheet quick-toggles in place; a <label> is what makes the whole row hit the switch.
-    expect(container.querySelector('label.det-row')).not.toBeNull();
-  });
-
-  test('the sub-line is omitted entirely when there is none', () => {
-    const { container } = render(<DetectionRow Icon={Icon} label="Motion" />);
-    expect(container.querySelector('.camera-tile__sub')).toBeNull();
   });
 });
 

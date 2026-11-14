@@ -87,7 +87,7 @@ Motion and sound alerts are listed on the child's page, each with a snapshot fro
 
 ### 7. Add a camera
 
-**Find cameras on my network** searches in the navy card and lists cameras it finds. A saved camera reads **Added**. When none are found, **Add a camera manually** opens the same manual row below; enter its address and stream details, or use the ONVIF button to fill them in. This form holds example values and was not saved. See [Cameras and caregivers](cameras.md).
+**Find cameras on my network** searches in the navy card and lists cameras it finds. A saved camera reads **Added**. When none are found, **Add a camera manually** opens the same manual row below; enter its address and stream details, or use **Fetch from ONVIF** to fill them in. The stream path sits under **Advanced**, which opens by itself while it is empty. This form holds example values and was not saved. See [Cameras and caregivers](cameras.md).
 
 ![Add camera on a phone](screenshots/add-camera-mobile.png)
 

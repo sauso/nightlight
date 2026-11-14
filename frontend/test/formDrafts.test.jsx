@@ -165,6 +165,8 @@ describe('camera form', () => {
     await first.user.clear(name);
     await first.user.type(name, 'Renamed');
     await first.user.type(screen.getByLabelText('Password'), PASSWORD);
+    // The talk login is behind the Advanced row (#1076).
+    await first.user.click(screen.getByRole('button', { name: /^Advanced/ }));
     await first.user.type(screen.getByLabelText('Talk password'), TALK_PASSWORD);
 
     // The marker is on screen (so the test is not vacuous), and absent from every storage value.
@@ -174,9 +176,10 @@ describe('camera form', () => {
     expect(everythingStored()).not.toContain(TALK_PASSWORD);
     first.unmount();
 
-    mountCamera();
+    const second = mountCamera();
     expect((await screen.findByLabelText('Name')).value).toBe('Renamed');
     expect(screen.getByLabelText('Password').value).toBe('');
+    await second.user.click(screen.getByRole('button', { name: /^Advanced/ }));
     expect(screen.getByLabelText('Talk password').value).toBe('');
     expect(screen.getByText(/Passwords are never kept on the device/)).toBeInTheDocument();
     expect(everythingStored()).not.toContain(PASSWORD);
@@ -227,7 +230,9 @@ describe('camera form', () => {
     const { user } = mountCamera();
     await user.type(await screen.findByLabelText('Name'), ' 2');
     expect(Object.keys(sessionStorage)).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: /Remove camera/ }));
+    // "Remove camera" is in the header's ⋯ menu (#1076).
+    await user.click(screen.getByRole('button', { name: 'More options for this camera' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove camera' }));
     await user.click(screen.getByRole('button', { name: 'Remove' }));
     await screen.findByText('elsewhere');
     expect(Object.keys(sessionStorage)).toEqual([]);
