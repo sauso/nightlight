@@ -20,6 +20,8 @@ import { describe, test, expect, vi, afterEach } from 'vitest';
 import { screen, within } from '@testing-library/react';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import LiveMonitor from '../src/components/LiveMonitor.jsx';
+import CameraTile from '../src/components/CameraTile.jsx';
+import { Route, Routes, useLocation } from 'react-router-dom';
 import { api } from '../src/lib/api.js';
 import { setTheme } from '../src/lib/theme.js';
 
@@ -134,6 +136,83 @@ describe('what a tile is labelled with', () => {
     // whole grid down — every camera — over one stale assignment.
     mount({ cameras: [{ id: 'c9', name: 'Hallway', mediamtx_path: 'p9', child_id: 'gone' }], kids: KIDS });
     expect(screen.getByText('Hallway')).toBeTruthy();
+  });
+});
+
+describe('Live tile strip and sheet (#1076)', () => {
+  test.each([
+    ['live', false, false, 'Online', 'breathing--live'],
+    ['connecting', false, false, 'Connecting', 'breathing--connecting'],
+    ['offline', false, false, 'Offline', 'breathing--offline'],
+    ['connecting', true, false, 'Status unknown', 'breathing--connecting'],
+    ['offline', false, true, 'Disabled', 'dot--neutral'],
+  ])('cameraState renders %s / unknown %s / disabled %s as %s', (statusLevel, statusUnknown, disabled, word, dot) => {
+    const { container } = renderAsAdmin(<CameraTile camera={{ id: 'state', name: 'Camera', statusLevel, statusUnknown, disabled }} childName="A child" />);
+    const strip = container.querySelector('.camera-tile__meta');
+    expect(within(strip).getByText(word)).toBeInTheDocument();
+    expect(strip.querySelector(`.${dot}`)).toBeInTheDocument();
+    expect(within(strip).getByText('Camera')).toBeInTheDocument();
+    expect(within(strip).getByText('A child')).toBeInTheDocument();
+  });
+
+  test('temperature and humidity are separate icon chips beside a wrapping name and the drag handle', () => {
+    const { container } = renderAsAdmin(<CameraTile camera={{ id: 'readings', name: 'A long camera name', mqtt: { temperature: 21.5, humidity: 48 } }}
+      childName="A child" dragHandleProps={{}} />);
+    const strip = container.querySelector('.camera-tile__meta');
+    expect(strip.querySelector('.camera-tile__name')).toHaveTextContent('A long camera name');
+    expect(within(strip).getByRole('button', { name: 'Reorder A long camera name' })).toBeInTheDocument();
+    const chips = strip.querySelectorAll('.camera-tile__reading');
+    expect(chips).toHaveLength(2);
+    expect(chips[0]).toHaveTextContent('21.5°C');
+    expect(chips[1]).toHaveTextContent('48%');
+    expect(chips[0].querySelector('svg')).toBeInTheDocument();
+    expect(chips[1].querySelector('svg')).toBeInTheDocument();
+  });
+
+  test('segmented buttons keep pressed state and change their selections', async () => {
+    const { user, container } = mount({ cameras: [{ ...CAMS[0], has_sub: true }] });
+    await user.click(screen.getByRole('button', { name: 'Camera settings' }));
+    for (const groupName of ['Connection mode', 'Stream quality']) {
+      expect(screen.getByRole('group', { name: groupName })).toHaveClass('seg-track');
+    }
+    const mode = screen.getByRole('group', { name: 'Connection mode' });
+    await user.click(within(mode).getByRole('button', { name: 'Compatibility' }));
+    expect(within(mode).getByRole('button', { name: 'Compatibility' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(mode).getByRole('button', { name: 'Low latency' })).toHaveAttribute('aria-pressed', 'false');
+    const quality = screen.getByRole('group', { name: 'Stream quality' });
+    await user.click(within(quality).getByRole('button', { name: 'Low' }));
+    expect(within(quality).getByRole('button', { name: 'Low' })).toHaveAttribute('aria-pressed', 'true');
+    expect(container.querySelector('.tile-menu__actions')).toBeInTheDocument();
+  });
+
+  test('Stop and Camera settings are rows with unchanged actions; caregiver has no settings row', async () => {
+    const { user, unmount } = mount({ cameras: [CAMS[0]] });
+    await user.click(screen.getByRole('button', { name: 'Camera settings' }));
+    const stop = screen.getByRole('button', { name: 'Stop', exact: true });
+    expect(stop).toHaveClass('tile-menu__action');
+    expect(within(document.querySelector('.tile-menu')).getByRole('button', { name: 'Camera settings', exact: true })).toHaveClass('tile-menu__action');
+    await user.click(stop);
+    expect(screen.getByText('Camera stopped')).toBeInTheDocument();
+    unmount();
+    localStorage.removeItem('nightlight_stopped_c1');
+    const carer = renderAsCaregiver(<LiveMonitor />, { cameras: [{ ...CAMS[0], id: 'c-care' }], kids: KIDS });
+    await carer.user.click(screen.getByRole('button', { name: 'Camera settings' }));
+    expect(within(document.querySelector('.tile-menu')).queryByRole('button', { name: 'Camera settings', exact: true })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Stop', exact: true })).toHaveClass('tile-menu__action');
+  });
+
+  test('Camera settings row still opens this camera with Live as its back destination', async () => {
+    function Destination() {
+      const location = useLocation();
+      return <div>Camera route {location.pathname}, back {location.state?.from?.to}</div>;
+    }
+    const { user } = renderAsAdmin(<Routes>
+      <Route path="/" element={<LiveMonitor />} />
+      <Route path="/cameras/:id" element={<Destination />} />
+    </Routes>, { cameras: [CAMS[0]], kids: KIDS });
+    await user.click(screen.getByRole('button', { name: 'Camera settings' }));
+    await user.click(within(document.querySelector('.tile-menu')).getByRole('button', { name: 'Camera settings' }));
+    expect(screen.getByText('Camera route /cameras/c1, back /')).toBeInTheDocument();
   });
 });
 

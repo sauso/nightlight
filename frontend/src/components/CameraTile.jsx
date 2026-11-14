@@ -13,6 +13,7 @@ import { useLater } from '../lib/useLater.js';
 import WhepPlayer from './WhepPlayer.jsx';
 import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
+import { cameraState } from '../lib/cameraStatus.js';
 import RecordIcon from './icons/RecordIcon.jsx';
 
 // The tile's quick motion/sound/schedule toggles write to the same /detection endpoint the full
@@ -698,6 +699,7 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
   }
   // Stop any active hold-loop if the tile unmounts mid-press.
   useEffect(() => () => { ptzHoldingRef.current = false; }, []);
+  const tileState = cameraState(camera);
 
   return (
     <div className="camera-tile">
@@ -778,17 +780,19 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               <div className="tile-menu__title">{camera.name}</div>
 
               <div className="tile-menu__label">Connection mode</div>
-              <div className="segmented" role="group" aria-label="Connection mode" style={{ marginBottom: 12 }}>
+              <div className="seg-track" role="group" aria-label="Connection mode" style={{ marginBottom: 12 }}>
                 <button
                   type="button"
-                  className={`segmented__btn${mode === 'live' ? ' segmented__btn--active' : ''}`}
+                  className={`seg-track__btn${mode === 'live' ? ' seg-track__btn--active' : ''}`}
+                  aria-pressed={mode === 'live'}
                   onClick={() => selectMode('live')}
                 >
                   Low latency
                 </button>
                 <button
                   type="button"
-                  className={`segmented__btn${mode === 'compat' ? ' segmented__btn--active' : ''}`}
+                  className={`seg-track__btn${mode === 'compat' ? ' seg-track__btn--active' : ''}`}
+                  aria-pressed={mode === 'compat'}
                   onClick={() => selectMode('compat')}
                 >
                   Compatibility
@@ -798,17 +802,19 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               {camera.has_sub && (
                 <>
                   <div className="tile-menu__label">Quality</div>
-                  <div className="segmented" role="group" aria-label="Stream quality" style={{ marginBottom: 12 }}>
+                  <div className="seg-track" role="group" aria-label="Stream quality" style={{ marginBottom: 12 }}>
                     <button
                       type="button"
-                      className={`segmented__btn${quality === 'high' ? ' segmented__btn--active' : ''}`}
+                      className={`seg-track__btn${quality === 'high' ? ' seg-track__btn--active' : ''}`}
+                      aria-pressed={quality === 'high'}
                       onClick={() => setQuality('high')}
                     >
                       High
                     </button>
                     <button
                       type="button"
-                      className={`segmented__btn${quality === 'low' ? ' segmented__btn--active' : ''}`}
+                      className={`seg-track__btn${quality === 'low' ? ' seg-track__btn--active' : ''}`}
+                      aria-pressed={quality === 'low'}
                       onClick={() => setQuality('low')}
                     >
                       Low
@@ -890,19 +896,18 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                 )}
               </div>
 
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <div className="tile-menu__actions">
                 <button
                   type="button"
-                  className="btn btn-danger"
-                  style={{ flex: 1 }}
+                  className="tile-menu__action tile-menu__action--stop"
                   onClick={() => { setStopped(!stopped); closeMenu(); }}
                 >
-                  {stopped ? <Play size={16} /> : <Square size={16} />}
+                  {stopped ? <Play size={18} aria-hidden="true" /> : <Square size={18} aria-hidden="true" />}
                   {stopped ? 'Start' : 'Stop'}
                 </button>
                 {isAdmin && (
-                  <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={openCameraSettings}>
-                    <Settings size={16} />
+                  <button type="button" className="tile-menu__action" onClick={openCameraSettings}>
+                    <Settings size={18} aria-hidden="true" />
                     Camera settings
                   </button>
                 )}
@@ -1075,7 +1080,13 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               <GripVertical size={16} />
             </button>
           )}
-          <div>
+          <div className="camera-tile__identity">
+            <div className="camera-tile__state">
+              {tileState.dot === 'neutral'
+                ? <span className="dot--neutral" aria-hidden="true" />
+                : <BreathingDot status={tileState.dot} />}
+              <span>{tileState.word}</span>
+            </div>
             <div className="camera-tile__name">{camera.name}</div>
             <div className="camera-tile__sub">{childName || 'Unassigned'}</div>
           </div>
@@ -1093,7 +1104,6 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
               {text}
             </span>
           ))}
-          <BreathingDot status={camera.statusLevel || 'connecting'} />
         </div>
       </div>
     </div>

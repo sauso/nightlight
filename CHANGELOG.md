@@ -22,6 +22,7 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ### Changed
 
+- #1076 The Camera and Recording menu now uses the same icon rows as other camera settings. Camera controls has clearer card titles and one full-width Save button. On Live, each camera tile shows its status in words beside the dot, and its sheet has inset Connection mode and Quality choices plus larger Stop and Camera settings rows. The controls and what they save are unchanged. The documentation screenshots have not been regenerated.
 - #1076 Motion, Sound and Alert schedule settings now share a switch-first card layout. Sound keeps its first detector limit visible and folds the other four behind **Show the other four**; the longer timing note sits behind **More about timing**. All fields and automatic saving work as before. The documentation screenshots have not been regenerated.
 
 - #1076 The Cameras tab now shows camera cards with status words, supported feature chips, an Assigned to row and a per-camera ⋯ menu for Edit, Enable/Disable and Remove. The single **Add camera** button and navy **Add your first camera** card lead to a shared search card; saved search results read **Added**, and an empty search offers a manual-add row. The list's Remove dialog now gives the complete warning about deleted recordings, alerts, history and photos. ESPHome keeps its search and device behavior with the shared card styling. The documentation screenshots have not been regenerated.

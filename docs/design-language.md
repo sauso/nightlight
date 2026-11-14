@@ -853,13 +853,18 @@ in-app `Modal` (the camera-remove flow is the reference implementation).
 a 38 × 4 grabber, uppercase 12px section labels, `--bg-elevated-2` grouped sections, 15px items,
 `--accent` + weight 600 for the active choice, supports a submenu (`--submenu` row with a `--value` on
 the right, plus a `--back` item). Backdrop `rgba(0,0,0,0.45)`, `sheet-fade` 0.16s in.
+Connection mode and Quality use `.seg-track` with 44px buttons and `aria-pressed`; the shared
+`.segmented` control elsewhere keeps its own style. Stop/Start and Camera settings are separate
+56px rows. Camera settings remains admin-only.
 
 ### Camera tile
 The signature component. `--bg-elevated`, 1px `--border`, **radius 10px**, `overflow: hidden`.
 The video wrap is 16:9 (`height: 50vh` when not fullscreen) so `object-fit: cover` fills exactly
 rather than cropping the camera's own timestamp overlay. Stopped state is a `#0a0d1c` panel with a
 centred restart button. Controls overlay the video; identity (name, child, drag handle, live dot)
-sits in the strip below.
+sits in the strip below. The strip is at least 56px tall and shows a status dot and word, the
+wrapping name, child, optional temperature and humidity chips, and the drag handle. It uses
+`cameraState`, including amber **Status unknown** when a status check times out.
 
 Picture-in-Picture hides every control and panel over the video, including Record. Fullscreen
 in the updated Android app hides the system status and gesture bars so they do not cover the

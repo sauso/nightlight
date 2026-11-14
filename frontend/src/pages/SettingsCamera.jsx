@@ -59,11 +59,10 @@ export default function SettingsCamera() {
         {error && <div className="error-banner">{error}</div>}
         {saved && <div className="saved-banner">Saved ✓</div>}
 
-        <form onSubmit={save}>
+        <form className="camera-controls" onSubmit={save}>
           <div className="card">
-            <div className="card-title">Pan / tilt</div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label htmlFor="ptz-step">PTZ step size</label>
+              <h3 className="camera-controls__title"><label htmlFor="ptz-step">PTZ step size</label></h3>
               <input
                 id="ptz-step"
                 type="number"
@@ -82,10 +81,9 @@ export default function SettingsCamera() {
           </div>
 
           <div className="card">
-            <div className="card-title">Offline alerts</div>
-            <div className="list-row" style={{ padding: 0 }}>
+            <h3 className="camera-controls__title"><label htmlFor="offline-alerts">Notify when a camera goes offline</label></h3>
+            <div className="camera-controls__switch-row">
               <div>
-                <div>Notify when a camera goes offline</div>
                 <div className="camera-tile__sub">
                   Send a push notification if a camera stops delivering video for longer than the
                   threshold below, and another when it comes back. Uses whichever push channels you've
@@ -93,6 +91,7 @@ export default function SettingsCamera() {
                 </div>
               </div>
               <Switch
+                id="offline-alerts"
                 checked={offlineOn}
                 disabled={busy}
                 aria-label="Notify when a camera goes offline"
@@ -121,10 +120,9 @@ export default function SettingsCamera() {
           {/* #552. Who receives it is stated here, not only in the docs, because it differs by channel and the
               difference is the part people get wrong: only the app's own push can leave someone out. */}
           <div className="card">
-            <div className="card-title">Long silence alerts</div>
-            <div className="list-row" style={{ padding: 0 }}>
+            <h3 className="camera-controls__title"><label htmlFor="silence-alerts">Notify admins when a camera's alerts stay silenced for a long time</label></h3>
+            <div className="camera-controls__switch-row">
               <div>
-                <div>Notify admins when a camera's alerts stay silenced for a long time</div>
                 <div className="camera-tile__sub">
                   Anyone signed in can silence a camera's alerts from its tile. Admins get one notification
                   when a camera's alerts are kept silenced, on and off, for longer than the time below. In the
@@ -135,6 +133,7 @@ export default function SettingsCamera() {
                 </div>
               </div>
               <Switch
+                id="silence-alerts"
                 checked={silenceOn}
                 disabled={busy}
                 aria-label="Notify admins when a camera's alerts stay silenced for a long time"

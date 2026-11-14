@@ -1146,6 +1146,14 @@ body.in-pip .tile-menu-backdrop {
   cursor: pointer;
 }
 
+/* #1076: the sheet's two destinations are full-width rows, with a clear 56px tap target. */
+.tile-menu__actions { display: grid; gap: 4px; margin-bottom: 8px; }
+.tile-menu__action { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text-primary); font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; }
+.tile-menu__action--stop { color: var(--offline); }
+.tile-menu__action:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.tile-menu__action:active { background: var(--child-action-active); }
+@media (hover: hover) { .tile-menu__action:hover { background: var(--child-action-hover); } }
+
 /* Shown over a tile the user has stopped (per-device playback off, stream torn down). */
 .camera-tile__stopped {
   position: absolute;
@@ -2305,6 +2313,8 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  min-height: 56px;
   padding: 10px 14px 9px;
 }
 
@@ -2312,7 +2322,11 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
+.camera-tile__identity { min-width: 0; }
+.camera-tile__state { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+.camera-tile__state .breathing { flex: none; }
 
 .drag-handle {
   display: flex;
@@ -2345,6 +2359,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .camera-tile__name {
   font-size: 15px;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .camera-tile__sub {
@@ -2367,8 +2382,10 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 
 .status-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex: none;
 }
 
 .camera-tile__reading {
@@ -2379,6 +2396,9 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   font-weight: 600;
   color: var(--text-secondary);
   white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--bg-elevated-2);
 }
 
 .camera-tile__reading-icon {
@@ -2789,6 +2809,19 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .seg-track__btn:active:not(.seg-track__btn--active) { background: var(--child-action-active); }
 @media (hover: hover) { .seg-track__btn:hover:not(.seg-track__btn--active) { background: var(--child-action-hover); } }
 @media (prefers-reduced-motion: reduce) { .seg-track__btn { transition: none; } }
+
+/* #1076: global camera controls use the setting itself as the card title. The switch is still
+   tied to that visible title, while numeric inputs keep the shared field styling. */
+.camera-controls__title { margin: 0 0 10px; color: var(--text-primary); font-family: Nunito, sans-serif; font-size: 16px; font-weight: 800; line-height: 1.3; }
+.camera-controls__title label { cursor: pointer; }
+.camera-controls__switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; }
+.camera-controls__switch-row > div { min-width: 0; }
+/* The shared Switch draws a 42×24 pill; its input gets a 44px target here without changing that pill. */
+.camera-controls__switch-row .switch { flex: none; width: 44px; height: 44px; align-items: center; }
+.camera-controls__switch-row .switch__track { width: 42px; height: 24px; }
+.camera-controls__switch-row .switch__thumb { top: 13px; }
+.camera-controls .field input { min-height: 44px; }
+.camera-controls > .btn-primary { width: 100%; min-height: 44px; }
 .tgl-row {
   display: flex;
   align-items: center;
