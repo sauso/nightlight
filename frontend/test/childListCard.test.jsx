@@ -63,6 +63,26 @@ describe('Children list sleep', () => {
     expect(screen.getByRole('button', { name: 'First child2 cameras' })).toBe(card());
   });
 
+  // Codex review of #1086 (surviving mutants): the two guards below had no fixture that needed them.
+  test('a night flagged in_progress is "Tonight so far" with no ring even when the scope says last and a score object is present', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      scope: 'last', night: { status: 'ok', asleep_minutes: 267, in_progress: true, score: { score: 70, band: 'good' } },
+    });
+    show();
+    expect(await screen.findByText('4h 27m asleep')).toBeInTheDocument();
+    expect(card().querySelector('.child-card__sleep-caption')).toHaveTextContent('Tonight so far');
+    expect(card().querySelector('.score-ring')).toBeNull();
+  });
+
+  test('tracking off wins over a night that is still in the payload', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({ scope: 'off', night: { status: 'ok', asleep_minutes: 432, score: { score: 82, band: 'good' } } });
+    show();
+    await waitFor(() => expect(api.get).toHaveBeenCalled());
+    await act(async () => {});
+    expect(card().querySelector('.child-card__sleep')).toBeNull();
+    expect(card().getAttribute('aria-label')).toBeNull();
+  });
+
   test('loading keeps exactly the old card', () => {
     vi.spyOn(api, 'get').mockImplementation(() => new Promise(() => {}));
     show();
