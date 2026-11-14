@@ -53,7 +53,7 @@ The first time you open Nightlight, a welcome screen lists the setup steps. The 
 
 ### 2. Watch live
 
-The Live tab shows every enabled camera, with its status, name, assigned child and available room readings under the picture. The gear opens its controls; Camera settings in that sheet is for admins. On a wide screen the navigation moves from the bottom of the screen to a side bar on the left. The phone image was captured without a picture, so its tiles say "No signal"; a camera that is working shows its video there, as in the desktop image. The screenshots have not been regenerated for the current layout.
+The Live tab shows every enabled camera, with its status, name, assigned child and available room readings under the picture. The gear opens its controls; Camera settings in that sheet is for admins. On a wide screen the navigation moves from the bottom of the screen to a side bar on the left. The picture in these images is a plain synthetic one, standing in for a camera's video.
 
 ![Live view on a phone](screenshots/live-mobile.png)
 
@@ -61,7 +61,7 @@ The Live tab shows every enabled camera, with its status, name, assigned child a
 
 ### 3. A child's overview
 
-Each child has a page showing last night's sleep, a prompt to check it, the nightly timelapse, recordings and recent alerts. See [Sleep tracking](sleep-tracking.md) for how nights are estimated and what the limits are.
+Each child has a page showing last night's sleep with its score and a one-line summary, a prompt to check the wake time, the camera, the nightly timelapse, recent alerts and recordings. See [Sleep tracking](sleep-tracking.md) for how nights are estimated and what the limits are.
 
 ![A child's overview on a phone](screenshots/child-mobile.png)
 
@@ -69,7 +69,7 @@ Each child has a page showing last night's sleep, a prompt to check it, the nigh
 
 ### 4. Last night in detail
 
-Tap the summary to see the night as a timeline, with each wake-up. The numbers are an estimate from movement and sound, not a medical measurement.
+Tap the summary card to open the night. The strip at the top moves between nights; below it are the score, a short written summary, **Why this score?** and the timeline with each wake-up. The numbers are an estimate from movement and sound, not a medical measurement.
 
 ![A night's detail on a phone](screenshots/sleep-mobile.png)
 
