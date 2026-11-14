@@ -391,6 +391,31 @@ db.exec(`
     platform TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- #1094: one-time invites. An admin creates a caregiver account WITHOUT a password and gets a link that
+  -- carries a random token; the caregiver opens it and chooses their own password (routes/auth.js,
+  -- /invite/check and /invite/redeem). Only sha256(token), as hex, is stored: the token itself is 256 random
+  -- bits, so a fast hash is enough (nothing to brute-force), and the lookup is by equality on token_hash.
+  -- Times are UTC TEXT 'YYYY-MM-DD HH:MM:SS', the same shape as datetime('now') and users/sessions, so they
+  -- compare as text and come back in the API like every other time here. expires_at = created_at + 7 days;
+  -- used_at is set once, by the redeem that wins (NULL = not used). The account owns its invites: removing
+  -- it removes them (CASCADE). created_by is the admin's user id, informational only (no FK, so removing
+  -- that admin leaves the row alone). Purged daily once used or expired more than 30 days ago
+  -- (middleware/auth.js, purgeOldInvites).
+  -- placeholder_hash: the account's password_hash when this invite was made (the unknowable placeholder).
+  -- A link only ever replaces exactly that hash, so a password set some other way since (an admin, or an
+  -- OLDER version of the app, which knows nothing of invites) is never overwritten by a link (plan review M4).
+  CREATE TABLE IF NOT EXISTS user_invites (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    placeholder_hash TEXT NOT NULL,
+    created_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    used_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_invites_user ON user_invites(user_id);
 `);
 
 // Migrations: columns added after the initial release, for databases created before them.
@@ -424,6 +449,15 @@ if (!usersColumns.includes('mfa_last_step')) {
 // Optional caregiver/admin avatar photo — same browser-resized base64 data-URL as children.photo.
 if (!usersColumns.includes('photo')) {
   db.exec('ALTER TABLE users ADD COLUMN photo TEXT');
+}
+// #1094: has this account chosen (or been given) a password? 0 = an invited caregiver who has not opened their
+// invite yet: their password_hash is a bcrypt hash of 32 random bytes nobody knows, and no sign-in path accepts
+// them (/login, /login/mfa and every session check require 1). DEFAULT 1, so every account that existed before
+// this column keeps working exactly as before. An older build ignores the column: if it sets a password for a
+// pending account, the account stays 0 here until an admin sets the password again from this version
+// (docs/caregivers.md says so).
+if (!usersColumns.includes('password_set')) {
+  db.exec('ALTER TABLE users ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1');
 }
 
 // Optional child avatar photo — a browser-resized (~256px square) base64 data-URL, stored inline

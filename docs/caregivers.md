@@ -8,6 +8,9 @@ The **Users** page lists **Accounts**. **Add user** is at the bottom of the Acco
 
 To remove another account, open that user's page and choose **⋯ → Remove user**. The confirmation explains that the person will be signed out everywhere. You cannot remove your own account from this menu.
 
+Instead of choosing a caregiver's password for them, an admin can send them a one-time link and let them choose
+their own: see [Invite a caregiver with a link](#invite-a-caregiver-with-a-link).
+
 The rule (owner decision, 2026-10-10): **a caregiver can watch and act in the moment, but cannot
 destroy or reconfigure.**
 
@@ -78,6 +81,50 @@ for them rather than the whole screen being off-limits.
 they’re signed in on. Demoting an admin to caregiver does *not* sign them out: they keep browsing as
 a caregiver and simply lose the admin-only screens. Deleting an account, by contrast, ends its
 sessions at once and signs that person out everywhere.
+
+## Invite a caregiver with a link
+
+Rather than choosing a password for someone and telling it to them, an admin can create the caregiver's account
+without one and send them a link (or show it as a QR code). They open the link, choose their own password, and are
+signed in. The link never contains a password.
+
+> **Planned:** the server side of this is in place (#1094); the screens to create an invite, show its QR code and
+> manage it from **Settings → Users** come in a following update. Until then it can only be used through the API
+> ([docs/architecture.md](architecture.md#caregiver-invites-1094) lists the routes).
+
+**How an invite works:**
+
+- **Caregivers only.** An invite always makes a caregiver account. An admin account is created with a password.
+- **Once, within 7 days.** The link works one time, for 7 days from when it was made (not configurable). After that,
+  or once it has been used, it shows as no longer valid, and the person needs a new one.
+- **Until it is used, the account cannot sign in at all**, and it cannot be made an admin. To make it an admin, set
+  a password for it in the same change.
+- **A new link, or none.** An admin can make a new link for an account that is still waiting (the old one stops
+  working at once) or cancel the invite without making another. Setting a password for the account yourself also
+  cancels it. Removing the account removes its invite.
+- **Where the link leads.** It uses the address you are using when you make it, so it only works where that address
+  works: a home-network address works only at home.
+- **The phone app.** The link opens Nightlight in a browser. After choosing a password there, sign in to the
+  Nightlight app with the username shown on that page and the new password.
+- The admin's list of accounts says which ones are still waiting on an invite and when it runs out, and, for 7 days
+  after, when an invite was used.
+
+**What a leaked link gives.** Anyone who has the link before it is used can choose the password and sign in as that
+caregiver: watch and listen to the cameras and talk through them, record, change children's names and photos, answer
+the morning review, and everything else in the caregiver column of [the table above](#what-caregivers-and-admins-can-do).
+Never an admin, and never for more than 7 days or more than once. Send it only to the person it is for. If it went
+somewhere else, cancel it (or make a new one) before they open it. If the person tells you the link no longer works
+and they never used it, someone else may have: remove that account.
+
+### After restoring a backup, or going back to an older version
+
+- **A restored backup can bring an invite back.** A backup taken while an invite was open still holds it open, so
+  restoring that backup makes the link work again, even if it was used or cancelled since, until its 7 days run out.
+  After a restore, look at your accounts and cancel any invite you do not expect.
+- **An older version knows nothing about invites.** If you go back to an older version and set a password there for
+  an account that was still waiting, then upgrade again, that account still counts as waiting and cannot sign in
+  (and its link will not replace that password). Set its password again from the current version: that finishes the
+  account and cancels the invite.
 
 ## `SESSION_TTL_DAYS` — how long a sign-in lasts
 

@@ -35,10 +35,21 @@ export function listUsers(db) {
  * Set one account's role to 'admin'. Returns { id, username, wasAdmin }, or null if no account has
  * that username. `wasAdmin` lets the caller report "already an admin" instead of implying a change
  * that did not happen - the same distinction reset-mfa.js makes for a user who already had MFA off.
+ * Returns { id, username, wasAdmin: false, pending: true } and changes nothing for an account still
+ * waiting on its invite (#1094).
  */
 export function promoteToAdmin(db, username) {
-  const user = db.prepare('SELECT id, username, role FROM users WHERE username = ?').get(username);
+  // #1094 (Opus plan review H1): an account that has not chosen its password yet is never made an admin.
+  // Whoever holds its invite link would choose the password and so get admin, and invites are for
+  // caregivers only precisely so that a leaked link can never be an admin account. The column is read only
+  // if it exists: this script opens the database without running db.js's migrations, so it may meet a
+  // database the new version has not started on yet, where every account has a password.
+  const hasPasswordSet = db.prepare('PRAGMA table_info(users)').all().some((c) => c.name === 'password_set');
+  const user = db
+    .prepare(`SELECT id, username, role${hasPasswordSet ? ', password_set' : ''} FROM users WHERE username = ?`)
+    .get(username);
   if (!user) return null;
+  if (hasPasswordSet && user.password_set !== 1) return { id: user.id, username: user.username, wasAdmin: false, pending: true };
   const wasAdmin = user.role === 'admin';
   if (!wasAdmin) db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(user.id);
   return { id: user.id, username: user.username, wasAdmin };
@@ -98,6 +109,13 @@ if (isMainModule()) {
   const result = promoteToAdmin(db, username);
   if (!result) {
     console.error(`No user named "${username}". Run with no argument to see accounts.`);
+    process.exit(1);
+  }
+  if (result.pending) {
+    console.error(
+      `"${username}" has not chosen a password yet (their invite is still open), so it was not made an admin. ` +
+        'Ask them to open their invite link and choose a password first, then run this again, or name another account.'
+    );
     process.exit(1);
   }
   console.log(

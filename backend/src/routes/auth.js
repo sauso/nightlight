@@ -2,8 +2,8 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import * as passwordHash from '../lib/passwordHash.js';
 import jwt from 'jsonwebtoken';
-import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
-import { createHash } from 'node:crypto';
+import rateLimit, { ipKeyGenerator, MemoryStore } from 'express-rate-limit';
+import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { v4 as uuid } from 'uuid';
@@ -405,7 +405,12 @@ function userCount() {
 // mutation would leave no admin" apart from any other error and answer 409 instead of 500.
 class LastAdminError extends Error {}
 
-const adminCount = db.prepare("SELECT COUNT(*) AS c FROM users WHERE role = 'admin'");
+// Only admins who can actually sign in count (#1094, Opus plan review H1). An account still waiting on its invite
+// (password_set = 0) cannot, so an install whose only "admin" is pending has no admin at all, and the guard below must
+// refuse the change that would leave it so. The API never makes a pending admin (invites are for caregivers, and PUT
+// /users/:id refuses the role while the account is pending), so this only matters for a database edited by hand or
+// restored from elsewhere; it is the same post-condition, counted honestly.
+const adminCount = db.prepare("SELECT COUNT(*) AS c FROM users WHERE role = 'admin' AND password_set = 1");
 
 // Issue #441: the sole admin could demote themselves via PUT (sending role=caregiver), and the very
 // next request from ANYONE reads the new role straight from the database (middleware/auth.js, issue
@@ -669,10 +674,14 @@ router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   const hashToCheck = user ? user.password_hash : DUMMY_HASH;
   // The compare runs for an unknown name too (against DUMMY_HASH), and a miss on an unknown name is counted exactly
   // like a miss on a real one: neither the status, the body nor the timing says which names exist.
+  // An account still waiting on its invite (#1094, password_set = 0) is a miss too, AFTER the same compare (against
+  // its placeholder hash, same cost) and counted the same way, so it answers exactly like a wrong password. Its
+  // placeholder is a hash of 32 random bytes nobody knows and can never match; this guard is what holds if the stored
+  // hash is ever one somebody knows (an older version set a password, a database edited by hand).
   const attempt = await throttledPasswordCheck(
     loginThrottle,
     loginAccountKey(username),
-    async () => (await passwordHash.compare(String(password || ''), hashToCheck)) && !!user,
+    async () => (await passwordHash.compare(String(password || ''), hashToCheck)) && !!user && user.password_set === 1,
     { known: !!user }
   );
   if (attempt.throttled) return answerThrottled(res, attempt.retryAfterSec);
@@ -712,6 +721,9 @@ router.post('/login/mfa', mfaLimiter, asyncHandler(async (req, res) => {
   if (payload.purpose !== 'mfa') return res.status(401).json({ error: 'Invalid verification token' });
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id);
   if (!user || !user.mfa_enabled) return res.status(401).json({ error: 'Invalid verification token' });
+  // #1094 (Codex plan review C1): an MFA token minted before the account was made pending must not finish a sign-in.
+  // The same answer as a token for an account that no longer exists.
+  if (user.password_set !== 1) return res.status(401).json({ error: 'Invalid verification token' });
 
   // Try the authenticator code first, then fall back to consuming a one-time backup code.
   //
@@ -801,12 +813,21 @@ router.delete('/sessions/:id', requireAuth, (req, res) => {
 });
 
 // Admin: manage caregiver accounts.
+// The list only (not every user object) also says, per account, whether it has a password and where its invite stands
+// (#1094): `password_set`, `invite_expires_at` and `invite_accepted_at` (see inviteFields). Added keys only, so a page
+// opened before the update keeps working.
 router.get('/users', requireAuth, requireAdmin, (req, res) => {
   const users = db.prepare('SELECT * FROM users ORDER BY created_at').all();
-  res.json(users.map(toPublicUser));
+  const invites = inviteStatesByUser();
+  res.json(users.map((u) => ({ ...toPublicUser(u), ...inviteFields(u, invites.get(u.id)) })));
 });
 
 router.post('/users', requireAuth, requireAdmin, asyncHandler(async (req, res) => {
+  // #1094: `invite: true` creates the account WITHOUT a password and answers with a one-time invite (its own function,
+  // in the invites section at the end of this file). The boolean true only, like `restart` on /me/mfa/setup: a sloppy
+  // "true" string or a 1 takes the password path below and is refused there for having no password, never quietly
+  // turned into an invite. Everything below is the password path, unchanged.
+  if (req.body?.invite === true) return createInvitedUser(req, res);
   const { username, password, role, first_name, last_name } = req.body || {};
   if (!username || !password || password.length < 8) {
     return res.status(400).json({ error: 'Username and an 8+ character password are required' });
@@ -867,6 +888,12 @@ router.put('/users/:id', requireAuth, requireAdmin, asyncHandler(async (req, res
   if (password !== undefined && password !== '' && password.length < 8) {
     return res.status(400).json({ error: 'Password must be at least 8 characters' });
   }
+  // #1094 (Opus plan review H1): an account still waiting on its invite is never made an admin, or whoever holds the
+  // link would choose an admin's password. Allowed when this same request sets a password: the account then stops
+  // being pending and its invites are deleted in the same transaction (below), so no link is left to use.
+  if (role === 'admin' && existing.password_set !== 1 && !password) {
+    return res.status(400).json({ error: PENDING_CANNOT_BE_ADMIN });
+  }
 
   // (`newHash ?? await` only reaches the await for a non-string truthy password, where bcrypt throws as
   // it always did, before any write.)
@@ -908,6 +935,15 @@ router.put('/users/:id', requireAuth, requireAdmin, asyncHandler(async (req, res
       );
       // Inside keepingAnAdmin like the session deletes above, so a refused demotion rolls this back too (#441).
       if (password) discardPendingSetup.run(req.params.id);
+      // #1094: a password an admin sets ends any invite. The account is no longer pending, and its unused invite links
+      // are deleted so they stop working at once, not merely outranked: a link that still looked valid would be a
+      // second way in. This is also the recovery when an older version set the password (that leaves the account
+      // pending here): set it again from this version (docs/caregivers.md). Inside the transaction, so a refused
+      // change leaves the invite alone too.
+      if (password) {
+        markPasswordSet.run(req.params.id);
+        revokeUnusedInvites.run(req.params.id);
+      }
     });
   } catch (e) {
     if (e instanceof LastAdminError) return res.status(409).json({ error: LAST_ADMIN_MESSAGE });
@@ -1262,5 +1298,333 @@ router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
   resetMfaEnableLimit(req.params.id);
   res.status(204).end();
 });
+
+// --- Caregiver invites (#1094) -----------------------------------------------------------------------------------
+//
+// An admin creates a caregiver account WITHOUT a password and gets a one-time link (a QR code in the app); the
+// caregiver opens it and chooses their own password. Design: PLAN D, with the Opus (H1, M1-M4, L1-L8) and Codex
+// (C1-C5) plan-review amendments; docs/caregivers.md and SECURITY.md say what it means for the people using it.
+//
+// The link carries a TOKEN, never a password: 32 random bytes (256 bits), base64url, 43 characters. Only its sha256 is
+// stored (user_invites.token_hash): with 256 random bits there is nothing to brute-force, so a slow hash would buy
+// nothing, and the lookup is by equality. The token is answered ONCE, to the admin who made it, and never again: no
+// list, GET or log line carries it (secrets-never-returned.test.js plants a marker in token_hash).
+//
+// The rules that keep a leaked link from being worse than the account it was made for:
+//   * invites are for role `caregiver` only (a link is never an admin account), and the redeem's compare-and-swap
+//     re-checks the role, so an account promoted while its invite was open cannot be claimed (H1);
+//   * single use: a compare-and-swap on `used_at IS NULL`, inside one transaction with the password write (M1);
+//   * 7 days (owner's answer, 2026-11-14), checked again AFTER the bcrypt await, so an invite that runs out while its
+//     password is hashing is refused (M1);
+//   * the password write is a compare-and-swap on the placeholder hash the invite was made with (stored on the invite
+//     row, read before the await), so a password an admin, or an older version of the app (C2), set since is never
+//     overwritten by a link (M4);
+//   * no session or MFA step is ever given to an account that is still pending (/login, /login/mfa and the session
+//     check in middleware/auth.js all require password_set = 1: C1).
+
+// Owner's answer when the feature was asked for (2026-11-14): an invite is valid for 7 days, single use.
+const INVITE_TTL_DAYS = 7;
+// The exact shape the app hands out: 43 base64url characters (32 bytes, no padding). Anything else is refused with the
+// same answer as an unknown token, after the same lookup (see liveInvite).
+const INVITE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+// ONE answer for every invite that cannot be used: unknown, expired, already used, revoked, malformed, or one whose
+// account is no longer a pending caregiver. Same status, same body, about the same work, so nothing tells a
+// guesser which of those it was (no enumeration). A machine-readable code, not a sentence: the page words it.
+const INVITE_INVALID = { error: 'invite_invalid' };
+// How long the Users list keeps saying an invite was accepted ("joined", L7). Not a security rule: long enough for an
+// admin to notice, short enough not to clutter the list.
+const INVITE_ACCEPTED_SHOWN_DAYS = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const INVITE_CAREGIVER_ONLY = 'An invite can only create a caregiver account. Create an admin with a password.';
+const PENDING_CANNOT_BE_ADMIN =
+  'This account has not chosen its password yet, so it cannot be an admin. Set a password for it in the same change, or wait until the invite is used.';
+
+// The UTC 'YYYY-MM-DD HH:MM:SS' text SQLite's datetime('now') writes, so invite times compare as text with each other
+// and read like every other time in this API (sessions, users). Taken from the JavaScript clock rather than SQLite's
+// so a test can move it across the redeem's bcrypt await (node:test mock timers); in the app both are the system clock.
+function utcText(ms) {
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function inviteTokenHash(token) {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+// --- the limits on the two public routes --------------------------------------------------------------------------
+//
+// ONE limiter for /invite/check AND /invite/redeem, its OWN instance (Opus plan review M2), counting FAILURES only.
+//   * Its own: perClientLimiter is the budget /login shares, and behind a reverse proxy or Tailscale every remote user
+//     is one bucket there. Junk tokens sprayed at the invite routes must not lock the household out of signing in.
+//   * Failures only (skipSuccessfulRequests): a caregiver who opens their link, reloads the page and redeems never
+//     spends anything. A wrong, expired or used token, a short password and the aggregate 429 below all count.
+//   * 100 per 15 minutes per source address, the order of the login per-client limit (PER_CLIENT_LIMIT). A judgement,
+//     not a measurement: a 256-bit token cannot be guessed whatever the limit, so this only bounds noise; the CPU is
+//     bounded by the hashing limits below, which a junk token never reaches. Known limit: behind one proxy address a
+//     spray of 100 bad tokens makes the invite routes answer 429 to everyone behind it for the rest of the window
+//     (sign-in is not affected). There is NO per-token limiter (dropped in M2): a junk token gets a fresh bucket for
+//     free, and the real token is covered by the single flight below.
+// In memory, like every limiter here: a restart empties it.
+export const INVITE_FAILURES_PER_WINDOW = 100;
+const inviteLimiterStore = new MemoryStore();
+const inviteLimiter = rateLimit({
+  windowMs: RATE_WINDOW_MS,
+  limit: INVITE_FAILURES_PER_WINDOW,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: limiterMessage,
+  keyGenerator: clientKey,
+  store: inviteLimiterStore,
+  skipSuccessfulRequests: true, // #1094 M2: failures only (see above)
+});
+
+// Tests share the module-level store across cases, as they do the other limiters (see resetMfaUserLimit).
+export function resetInviteAttemptLimits() {
+  inviteLimiterStore.resetAll();
+}
+
+// The redeem is the only unauthenticated route that hashes a password with bcrypt (cost 10, about 80 ms of the ONE
+// shared worker that every sign-in also queues on: lib/passwordHash.js). Two bounds, both checked and taken with no
+// await in between, both released in `finally`:
+//   * per token (M1): one redeem per token hash at a time. A second request for the same token while one is hashing
+//     is refused before it queues a hash, with the same 404 the losing compare-and-swap would give (only one can win).
+//   * across tokens (Codex plan review C3): at most INVITE_MAX_HASHES_IN_FLIGHT invite hashes queued at once. Each one
+//     needs a VALID invite, so this only engages when many real invites are redeemed at the same moment, or when
+//     someone holding several links replays them; the excess gets the limiter's 429 and can simply try again. 4 is a
+//     judgement (not measured): about a third of a second of the worker at most, so a burst of invite redeems cannot
+//     hold up the household's sign-ins behind it, while no real household redeems more than a few at once.
+// In memory, per process: the app is one process, and the compare-and-swap still guards the write if that changes.
+const INVITE_MAX_HASHES_IN_FLIGHT = 4;
+let inviteHashesInFlight = 0;
+const inviteRedeemInFlight = new Set();
+
+// --- statements ---------------------------------------------------------------------------------------------------
+
+// The cheap check both public routes start with: an invite that is unused, unexpired, and whose account is still a
+// pending caregiver holding the placeholder the invite was made with. The redeem repeats every one of these conditions
+// in its compare-and-swap after the await; this copy is what keeps a stale or junk token from ever reaching bcrypt.
+// `u.password_hash = i.placeholder_hash` (M4, C2): an account whose password was set some other way since the invite
+// was made (an OLDER version of the app sets it and leaves password_set at 0, as it knows nothing of the column) has
+// a password somebody chose, and the link must not replace it. Comparing with the hash read at request time instead
+// would only catch a change made during the hashing, never one made before the link was opened.
+const liveInviteByHash = db.prepare(
+  `SELECT i.token_hash, i.placeholder_hash, i.user_id, u.username, u.first_name
+   FROM user_invites i JOIN users u ON u.id = i.user_id
+   WHERE i.token_hash = ? AND i.used_at IS NULL AND i.expires_at > ? AND u.password_set = 0 AND u.role = 'caregiver'
+     AND u.password_hash = i.placeholder_hash`
+);
+const insertInvite = db.prepare(
+  'INSERT INTO user_invites (id, user_id, token_hash, placeholder_hash, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+);
+// Unused invites only: a used one is the record that the account was claimed (the "joined" line in the Users list,
+// and the purge's 30 days), and can never be used again anyway.
+const revokeUnusedInvites = db.prepare('DELETE FROM user_invites WHERE user_id = ? AND used_at IS NULL');
+const markPasswordSet = db.prepare('UPDATE users SET password_set = 1 WHERE id = ?');
+const insertInvitedUser = db.prepare(
+  'INSERT INTO users (id, username, password_hash, role, first_name, last_name, photo, password_set) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
+);
+// The redeem's two compare-and-swaps (see the route).
+const claimInvite = db.prepare('UPDATE user_invites SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?');
+const inviteOwner = db.prepare('SELECT user_id FROM user_invites WHERE token_hash = ?');
+const setInvitedPassword = db.prepare(
+  "UPDATE users SET password_hash = ?, password_set = 1 WHERE id = ? AND password_set = 0 AND role = 'caregiver' AND password_hash = ?"
+);
+// Per account, for the Users list: the expiry of its newest live invite, and when an invite was last accepted within
+// INVITE_ACCEPTED_SHOWN_DAYS. Grouped in one query rather than two per account.
+const inviteStates = db.prepare(
+  `SELECT user_id,
+     MAX(CASE WHEN used_at IS NULL AND expires_at > ? THEN expires_at END) AS live_expires_at,
+     MAX(CASE WHEN used_at > ? THEN used_at END) AS accepted_at
+   FROM user_invites GROUP BY user_id`
+);
+
+// --- helpers ------------------------------------------------------------------------------------------------------
+
+// The live invite a token names, or null. The token's shape is checked AFTER the lookup, which then runs on the hash
+// of an empty string for a malformed token: a malformed, an unknown, a used and an expired token all cost one sha256
+// and one indexed SELECT, and all answer the same 404 (as near equal timing as this can make it).
+function liveInvite(token, now) {
+  const wellFormed = typeof token === 'string' && INVITE_TOKEN_PATTERN.test(token);
+  const row = liveInviteByHash.get(inviteTokenHash(wellFormed ? token : ''), now);
+  return wellFormed ? row ?? null : null;
+}
+
+// A new invite for `userId`, bound to the account's current placeholder hash: the token (answered once, never stored)
+// and its expiry. Callers run it inside their transaction, so an account is never left with a half-made invite.
+function mintInvite(userId, placeholderHash, createdBy) {
+  const token = randomBytes(32).toString('base64url');
+  const now = Date.now();
+  const expiresAt = utcText(now + INVITE_TTL_DAYS * DAY_MS);
+  insertInvite.run(uuid(), userId, inviteTokenHash(token), placeholderHash, createdBy, utcText(now), expiresAt);
+  return { token, expires_at: expiresAt };
+}
+
+function inviteStatesByUser() {
+  const now = Date.now();
+  const rows = inviteStates.all(utcText(now), utcText(now - INVITE_ACCEPTED_SHOWN_DAYS * DAY_MS));
+  return new Map(rows.map((r) => [r.user_id, r]));
+}
+
+// The Users list's three invite keys for one account:
+//   password_set        false while the account waits on its invite;
+//   invite_expires_at   when its invite stops working, or null when it has none that works (none made, expired,
+//                       revoked, used, or the account is no longer a pending caregiver). Pending + null = "expired";
+//   invite_accepted_at  when an invite was used, for INVITE_ACCEPTED_SHOWN_DAYS after it, else null.
+// Times are UTC 'YYYY-MM-DD HH:MM:SS', like the session times. Never the token or its hash.
+function inviteFields(u, state) {
+  const pending = u.password_set !== 1;
+  return {
+    password_set: !pending,
+    invite_expires_at: pending && u.role === 'caregiver' ? state?.live_expires_at ?? null : null,
+    invite_accepted_at: state?.accepted_at ?? null,
+  };
+}
+
+// A names field the invite path accepts: absent, null, or text. (The password path keeps its old handling.)
+const optionalText = (v) => v === undefined || v === null || typeof v === 'string';
+
+// POST /users with `invite: true` (see that route). Every field is type-checked (Opus plan review L3) before anything
+// costs a hash; then the same discipline as the password path: the hash first, then adminRightsEnded and the
+// username check with no await before the INSERT.
+async function createInvitedUser(req, res) {
+  const { username, password, role, first_name, last_name } = req.body;
+  // Both at once is a client bug, not a choice to guess at. An empty or null password means "none" (a form that left
+  // the field blank).
+  if (password !== undefined && password !== null && password !== '') {
+    return res.status(400).json({ error: 'Send either a password or invite: true, not both.' });
+  }
+  if (typeof username !== 'string' || !username.trim()) {
+    return res.status(400).json({ error: 'A username is required' });
+  }
+  if (role !== undefined && role !== null && role !== 'caregiver') {
+    return res.status(400).json({ error: INVITE_CAREGIVER_ONLY });
+  }
+  if (!optionalText(first_name) || !optionalText(last_name)) {
+    return res.status(400).json({ error: 'First and last name must be text' });
+  }
+  // The account still needs a password_hash (NOT NULL). A real bcrypt hash of 32 random bytes nobody ever sees, never
+  // '': it can never match anything typed at /login (which also refuses a pending account outright), and the redeem
+  // swaps it out only if it is still exactly this value.
+  const placeholder = await passwordHash.hash(randomBytes(32).toString('base64url'), 10);
+  if (adminRightsEnded(req, res)) return;
+  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+  if (existing) return res.status(400).json({ error: 'That username is already taken' });
+  let photo;
+  try { photo = normalizePhoto(req.body?.photo, null); } catch (e) { return res.status(400).json({ error: e.message }); }
+  const id = uuid();
+  // ONE transaction (M1): never an account without its invite, nor an invite without its account.
+  const invite = db.transaction(() => {
+    insertInvitedUser.run(id, username, placeholder, 'caregiver', first_name?.trim() || null, last_name?.trim() || null, photo);
+    return mintInvite(id, placeholder, req.user.id);
+  })();
+  // The usual user object, plus the invite. The ONLY answer that ever carries the token.
+  res.status(201).json({ ...toPublicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id)), invite });
+}
+
+// Admin: a new invite for an account that is still waiting on one (the old link was lost, or ran out). Every unused
+// invite of the account is deleted in the same transaction, so the old link stops working the moment the new one
+// exists. Refused for an account that has a password (an invite would be a back door into it: resetting a password is
+// PUT /users/:id) and for any role but caregiver (H1). Synchronous: no await between the checks and the writes.
+// The new invite is bound to the account's hash as it is NOW. For an account an older version gave a password while
+// it was pending, that is the admin choosing, on this version, to hand the account to whoever opens the new link.
+router.post('/users/:id/invite', requireAuth, requireAdmin, (req, res) => {
+  const user = db.prepare('SELECT id, role, password_set, password_hash FROM users WHERE id = ?').get(req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (user.password_set !== 0 || user.role !== 'caregiver') {
+    return res.status(400).json({ error: 'Only a caregiver account that has not chosen its password yet can be sent a new invite.' });
+  }
+  const invite = db.transaction(() => {
+    revokeUnusedInvites.run(user.id);
+    return mintInvite(user.id, user.password_hash, req.user.id);
+  })();
+  res.status(201).json({ invite });
+});
+
+// Admin: stop an account's open invite without making a new one (L2). The account stays pending: it can be sent a new
+// invite, given a password (PUT /users/:id), or removed. `revoked` is how many links stopped working (0 or 1 in
+// practice).
+router.delete('/users/:id/invite', requireAuth, requireAdmin, (req, res) => {
+  const user = db.prepare('SELECT id FROM users WHERE id = ?').get(req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const { changes } = revokeUnusedInvites.run(user.id);
+  res.json({ ok: true, revoked: changes });
+});
+
+// Public: is this invite usable, and whose is it? For the page the link opens, before the person types a password.
+// The token travels in the BODY (never a query string, which proxies and browsers log; the link itself carries it in
+// the URL fragment, which never reaches a server). The username is answered so the page can show it and a password
+// manager can save the pair (L5).
+router.post('/invite/check', inviteLimiter, (req, res) => {
+  const invite = liveInvite(req.body?.token, utcText(Date.now()));
+  if (!invite) return res.status(404).json(INVITE_INVALID);
+  res.json({ first_name: invite.first_name || null, username: invite.username, app_name: appName() });
+});
+
+// Thrown inside the redeem transaction for any compare-and-swap that misses, so the transaction rolls back (a plain
+// return from a better-sqlite3 transaction COMMITS whatever ran before it, e.g. the invite marked used). Never sent.
+class InviteGoneError extends Error {}
+
+// The claim, as one transaction:
+//   1. the invite: used_at set only if still unused and unexpired at `now` (the time read AFTER the hash);
+//   2. the account, found through the invite row: the new password only if it is still pending, still a caregiver,
+//      and still holds the invite's placeholder, as read before the hash (so a password set before the link was
+//      opened, or while it was hashing, is never overwritten);
+//   3. its other unused invites, sessions and push registrations go (M4: a session or alert registration that
+//      predates the account having a password must not survive into it; there should be none, this makes sure).
+// Each compare-and-swap must change exactly one row, or the whole claim rolls back and the route answers the 404.
+const redeemInvite = db.transaction((tokenHash, placeholderHash, newHash, now) => {
+  if (claimInvite.run(now, tokenHash, now).changes !== 1) throw new InviteGoneError();
+  const { user_id: userId } = inviteOwner.get(tokenHash);
+  if (setInvitedPassword.run(newHash, userId, placeholderHash).changes !== 1) throw new InviteGoneError();
+  revokeUnusedInvites.run(userId);
+  db.prepare('DELETE FROM push_tokens WHERE user_id = ? OR session_id IN (SELECT id FROM sessions WHERE user_id = ?)')
+    .run(userId, userId);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+});
+
+// Public: choose a password with an invite, and be signed in. Answers exactly like /login: `{ token, user }` (or the
+// MFA step, which a pending account cannot have set up, so in practice never).
+router.post('/invite/redeem', inviteLimiter, asyncHandler(async (req, res) => {
+  const { token, password } = req.body || {};
+  // The cheap checks first, so a junk or stale token never costs a bcrypt hash.
+  const checkedAt = utcText(Date.now());
+  const invite = liveInvite(token, checkedAt);
+  if (!invite) return res.status(404).json(INVITE_INVALID);
+  // The same 8-character rule as creating an account. Refused before anything is written, so the invite still works.
+  if (typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ error: 'Choose a password of at least 8 characters' });
+  }
+  if (inviteRedeemInFlight.has(invite.token_hash)) return res.status(404).json(INVITE_INVALID);
+  if (inviteHashesInFlight >= INVITE_MAX_HASHES_IN_FLIGHT) return res.status(429).json(limiterMessage);
+  inviteRedeemInFlight.add(invite.token_hash);
+  inviteHashesInFlight += 1;
+  try {
+    let newHash;
+    try {
+      newHash = await passwordHash.hash(password, 10);
+    } finally {
+      inviteHashesInFlight -= 1;
+    }
+    // The clock is read again AFTER the await (M1): an invite that ran out while its password was hashing is refused.
+    const now = utcText(Date.now());
+    let user;
+    try {
+      user = redeemInvite(invite.token_hash, invite.placeholder_hash, newHash, now);
+    } catch (e) {
+      if (e instanceof InviteGoneError) return res.status(404).json(INVITE_INVALID);
+      throw e;
+    }
+    // After the commit (L1): a new password empties the account's password guesses and its two-factor confirmation
+    // budget, as both other password-setting paths do.
+    resetPasswordThrottles(user.id, user.username);
+    resetMfaEnableLimit(user.id);
+    if (user.mfa_enabled) return res.json({ mfaRequired: true, mfaToken: signMfaToken(user.id) });
+    const sessionId = createSession(user.id, req.headers['user-agent']);
+    res.json({ token: sign(user, sessionId), user: toPublicUser(user) });
+  } finally {
+    inviteRedeemInFlight.delete(invite.token_hash);
+  }
+}));
 
 export default router;

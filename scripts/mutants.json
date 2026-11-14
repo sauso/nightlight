@@ -25910,5 +25910,310 @@
     "expect": "killed",
     "tests": ["dependency-hygiene.test.js"],
     "namePattern": "^T6:"
+  },
+  {
+    "label": "#1094 invite redeem: the clock is read BEFORE the hash await, not after",
+    "file": "backend/src/routes/auth.js",
+    "find": "const now = utcText(Date.now());",
+    "replace": "const now = checkedAt;",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "runs out WHILE its password is hashing",
+    "note": "Opus plan review M1: an invite that expires while its password hashes would still be claimed. The test moves a mocked Date across the await."
+  },
+  {
+    "label": "#1094 invite redeem: the claim drops the expiry comparison",
+    "file": "backend/src/routes/auth.js",
+    "find": "WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?'",
+    "replace": "WHERE token_hash = ? AND used_at IS NULL AND ? IS NOT NULL'",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "runs out WHILE its password is hashing"
+  },
+  {
+    "label": "#1094 invite check: the up-front lookup drops the expiry comparison",
+    "file": "backend/src/routes/auth.js",
+    "find": "AND i.expires_at > ? AND u.password_set = 0",
+    "replace": "AND ? IS NOT NULL AND u.password_set = 0",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "unknown, expired, used and malformed tokens all get the SAME 404"
+  },
+  {
+    "label": "#1094 invite redeem: the claim drops used_at IS NULL (single use)",
+    "file": "backend/src/routes/auth.js",
+    "find": "SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
+    "replace": "SET used_at = ? WHERE token_hash = ? AND expires_at > ?",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "an invite used meanwhile"
+  },
+  {
+    "label": "#1094 invite redeem: the invite claim's row count is ignored",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (claimInvite.run(now, tokenHash, now).changes !== 1) throw new InviteGoneError();",
+    "replace": "claimInvite.run(now, tokenHash, now);",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "an invite used meanwhile"
+  },
+  {
+    "label": "#1094 invite redeem: the account compare-and-swap's row count is ignored",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (setInvitedPassword.run(newHash, userId, placeholderHash).changes !== 1) throw new InviteGoneError();",
+    "replace": "setInvitedPassword.run(newHash, userId, placeholderHash);",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "an account made an admin meanwhile"
+  },
+  {
+    "label": "#1094 invite redeem: the account compare-and-swap drops password_set = 0",
+    "file": "backend/src/routes/auth.js",
+    "find": "WHERE id = ? AND password_set = 0 AND role = 'caregiver' AND password_hash = ?",
+    "replace": "WHERE id = ? AND role = 'caregiver' AND password_hash = ?",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "an account given a password meanwhile"
+  },
+  {
+    "label": "#1094 invite redeem: the account compare-and-swap drops the caregiver role",
+    "file": "backend/src/routes/auth.js",
+    "find": "WHERE id = ? AND password_set = 0 AND role = 'caregiver' AND password_hash = ?",
+    "replace": "WHERE id = ? AND password_set = 0 AND password_hash = ?",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "an account made an admin meanwhile",
+    "note": "Opus plan review H1: a link would set the password of an account promoted to admin while it hashed."
+  },
+  {
+    "label": "#1094 invite redeem: the account compare-and-swap drops the placeholder match",
+    "file": "backend/src/routes/auth.js",
+    "find": "AND role = 'caregiver' AND password_hash = ?\"",
+    "replace": "AND role = 'caregiver' AND ? IS NOT NULL\"",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "a password hash replaced meanwhile",
+    "note": "Opus plan review M4: a password set while the link hashed would be overwritten."
+  },
+  {
+    "label": "#1094 invite check: a password set before the link was opened is ignored (placeholder binding)",
+    "file": "backend/src/routes/auth.js",
+    "find": "AND u.password_hash = i.placeholder_hash",
+    "replace": "AND 1",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "no longer a pending caregiver",
+    "note": "Codex plan review C2. The redeem is still refused by its compare-and-swap; the check route is what tells."
+  },
+  {
+    "label": "#1094 invite check: the up-front lookup ignores whether the account is a pending caregiver",
+    "file": "backend/src/routes/auth.js",
+    "find": "AND u.password_set = 0 AND u.role = 'caregiver'",
+    "replace": "AND 1",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "no longer a pending caregiver"
+  },
+  {
+    "label": "#1094 invite: /login lets a pending account in with a password its hash matches",
+    "file": "backend/src/routes/auth.js",
+    "find": "&& !!user && user.password_set === 1,",
+    "replace": "&& !!user,",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "even with the password its stored hash really matches",
+    "note": "Opus plan review M3: only a planted hash of a KNOWN password can show this guard; the real placeholder never matches."
+  },
+  {
+    "label": "#1094 invite: requireAuth accepts a session of a pending account",
+    "file": "backend/src/middleware/auth.js",
+    "find": "JOIN users u ON u.id = s.user_id AND u.password_set = 1 WHERE",
+    "replace": "JOIN users u ON u.id = s.user_id WHERE",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "a session that already exists stops working",
+    "note": "Codex plan review C1."
+  },
+  {
+    "label": "#1094 invite: /login/mfa lets a pending account finish the second step",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (user.password_set !== 1) return res.status(401).json({ error: 'Invalid verification token' });",
+    "replace": "if (false) return res.status(401).json({ error: 'Invalid verification token' });",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "refuses an MFA token for a pending account",
+    "note": "Codex plan review C1."
+  },
+  {
+    "label": "#1094 invite redeem: no single flight per token",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (inviteRedeemInFlight.has(invite.token_hash)) return res.status(404).json(INVITE_INVALID);",
+    "replace": "if (false) return res.status(404).json(INVITE_INVALID);",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "two redeems of one token at the same moment",
+    "note": "Opus plan review M1. The compare-and-swap still gives one winner without it; the test counts the bcrypt jobs submitted."
+  },
+  {
+    "label": "#1094 invite redeem: no cap on invite hashes across tokens",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (inviteHashesInFlight >= INVITE_MAX_HASHES_IN_FLIGHT) return res.status(429).json(limiterMessage);",
+    "replace": "if (false) return res.status(429).json(limiterMessage);",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "at most 4 invite hashes queue at once",
+    "note": "Codex plan review C3."
+  },
+  {
+    "label": "#1094 invite redeem: the in-flight hash count never comes back down",
+    "file": "backend/src/routes/auth.js",
+    "find": "      inviteHashesInFlight -= 1;",
+    "replace": "      void 0;",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "at most 4 invite hashes queue at once"
+  },
+  {
+    "label": "#1094 invite limiter: successes are counted too",
+    "file": "backend/src/routes/auth.js",
+    "find": "skipSuccessfulRequests: true, // #1094 M2: failures only (see above)",
+    "replace": "skipSuccessfulRequests: false, // #1094 M2: failures only (see above)",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "successes do not count",
+    "note": "Opus plan review M2: a caregiver reloading the invite page would be limited."
+  },
+  {
+    "label": "#1094 invite limiter: redeem is not in the shared bucket",
+    "file": "backend/src/routes/auth.js",
+    "find": "router.post('/invite/redeem', inviteLimiter, asyncHandler(",
+    "replace": "router.post('/invite/redeem', asyncHandler(",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "share ONE failures-only bucket",
+    "note": "Codex plan review C5: the shared check/redeem failure counter."
+  },
+  {
+    "label": "#1094 invite: adminCount counts an admin who cannot sign in",
+    "file": "backend/src/routes/auth.js",
+    "find": "WHERE role = 'admin' AND password_set = 1\"",
+    "replace": "WHERE role = 'admin'\"",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "a pending admin does not count as an admin",
+    "note": "Opus plan review H1(d)."
+  },
+  {
+    "label": "#1094 invite: PUT /users/:id makes a pending account an admin",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (role === 'admin' && existing.password_set !== 1 && !password) {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "it cannot be made an admin, unless",
+    "note": "Opus plan review H1(b)."
+  },
+  {
+    "label": "#1094 invite: an admin-set password leaves the account pending",
+    "file": "backend/src/routes/auth.js",
+    "find": "markPasswordSet.run(req.params.id);",
+    "replace": "void 0;",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "an admin setting its password ends the invite",
+    "note": "Also the recovery after an older version set the password (Codex plan review C2)."
+  },
+  {
+    "label": "#1094 invite: re-issue keeps the old link working",
+    "file": "backend/src/routes/auth.js",
+    "find": "revokeUnusedInvites.run(user.id);\n    return mintInvite(user.id, user.password_hash, req.user.id);",
+    "replace": "return mintInvite(user.id, user.password_hash, req.user.id);",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "a new invite replaces the old one"
+  },
+  {
+    "label": "#1094 invite: re-issue for an account that has a password",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (user.password_set !== 0 || user.role !== 'caregiver') {",
+    "replace": "if (user.role !== 'caregiver') {",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "re-issue is refused for an account with a password"
+  },
+  {
+    "label": "#1094 invite: re-issue for a pending admin",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (user.password_set !== 0 || user.role !== 'caregiver') {",
+    "replace": "if (user.password_set !== 0) {",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "re-issue is refused for an account with a password",
+    "note": "Opus plan review H1(c)."
+  },
+  {
+    "label": "#1094 invite: create accepts a role other than caregiver",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (role !== undefined && role !== null && role !== 'caregiver') {",
+    "replace": "if (false) {",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "the refusals: a password too, an admin role"
+  },
+  {
+    "label": "#1094 invite redeem: a short password is accepted",
+    "file": "backend/src/routes/auth.js",
+    "find": "if (typeof password !== 'string' || password.length < 8) {",
+    "replace": "if (typeof password !== 'string') {",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "a password under 8 characters is refused"
+  },
+  {
+    "label": "#1094 invite redeem: earlier sessions survive the redeem",
+    "file": "backend/src/routes/auth.js",
+    "find": "db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);",
+    "replace": "void 0;",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "redeeming signs out every earlier session",
+    "note": "Opus plan review M4."
+  },
+  {
+    "label": "#1094 invite redeem: the password throttle is not emptied",
+    "file": "backend/src/routes/auth.js",
+    "find": "resetPasswordThrottles(user.id, user.username);",
+    "replace": "void 0;",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "redeeming empties the",
+    "note": "Opus plan review L1."
+  },
+  {
+    "label": "#1094 invite: the token itself is stored, not its sha256",
+    "file": "backend/src/routes/auth.js",
+    "find": "insertInvite.run(uuid(), userId, inviteTokenHash(token), placeholderHash,",
+    "replace": "insertInvite.run(uuid(), userId, token, placeholderHash,",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "makes a pending caregiver and answers the token ONCE"
+  },
+  {
+    "label": "#1094 invite purge: keeps nothing past its end",
+    "file": "backend/src/middleware/auth.js",
+    "find": "const INVITE_KEEP_DAYS = 30;",
+    "replace": "const INVITE_KEEP_DAYS = 0;",
+    "expect": "killed",
+    "tests": ["auth-invite.test.js"],
+    "namePattern": "purgeOldInvites removes invites used or expired"
+  },
+  {
+    "label": "#1094 invite: promote-admin makes a pending account an admin",
+    "file": "backend/src/scripts/promote-admin.js",
+    "find": "if (hasPasswordSet && user.password_set !== 1) return",
+    "replace": "if (false) return",
+    "expect": "killed",
+    "tests": ["promote-admin.test.js"],
+    "namePattern": "an account still waiting on its invite is refused"
   }
 ]

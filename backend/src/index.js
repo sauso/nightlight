@@ -27,7 +27,7 @@ import gotifyRoutes from './routes/gotify.js';
 import notificationsRoutes from './routes/notifications.js';
 import timelapsesRoutes from './routes/timelapses.js';
 import recordingsRoutes from './routes/recordings.js';
-import { requireAuth, requireAuthQueryOrHeader, verifyToken, isLiveSessionId, purgeExpiredSessions } from './middleware/auth.js';
+import { requireAuth, requireAuthQueryOrHeader, verifyToken, isLiveSessionId, purgeExpiredSessions, purgeOldInvites } from './middleware/auth.js';
 import { demoGuard, demoRequestLimiter, isDemoModeActive } from './middleware/demoMode.js';
 import { whepOnlyGuard } from './middleware/whepOnlyGuard.js';
 import { errorHandler } from './middleware/errorHandler.js';
@@ -412,6 +412,10 @@ safeInterval('reconcile', 5 * 60 * 1000, reconcileCameraPaths);
 // file cannot be imported by a test (it boots the app), and a copy of the rule here is what drifts.
 purgeExpiredSessions();
 safeInterval('purge-sessions', 24 * 60 * 60 * 1000, purgeExpiredSessions);
+// #1094: caregiver invites used or expired more than 30 days ago, on the same start-and-daily schedule (the rule
+// and its why are in middleware/auth.js, beside the session purge).
+purgeOldInvites();
+safeInterval('purge-invites', 24 * 60 * 60 * 1000, purgeOldInvites);
 
 // Closes the gap recordWebrtcSessionOwner exists for (see the /live mount's own comment): a login
 // session revoked while its owner is already watching a camera doesn't tear down that view on its
