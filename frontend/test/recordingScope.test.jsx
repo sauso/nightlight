@@ -11,6 +11,7 @@
 //      request. Tested through the real guard, not by assuming it.
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
 import { renderAsAdmin, renderAsCaregiver } from './helpers/render.jsx';
 import CameraSettings from '../src/pages/CameraSettings.jsx';
@@ -246,7 +247,15 @@ const mount = ({ cam = CAM, settings = {}, as = renderAsAdmin, guarded = false }
     { cameras: [cam], kids: KIDS, settings, route: `/cameras/${cam.id}` }
   );
 };
-const panel = async () => within(await screen.findByRole('region', { name: 'Recording and alerts' }));
+// #1076: the panel sits behind the Advanced row, closed until someone opens it. Opening it is part of "looking at the panel".
+const openAdvanced = async () => {
+  const row = await screen.findByRole('button', { name: /^Advanced/ });
+  if (row.getAttribute('aria-expanded') === 'false') await userEvent.click(row);
+};
+const panel = async () => {
+  await openAdvanced();
+  return within(await screen.findByRole('region', { name: 'Recording and alerts' }));
+};
 const readinessCalls = () => getSpy.mock.calls.filter(([p]) => String(p).includes('recording-readiness'));
 
 beforeEach(() => {
@@ -365,7 +374,16 @@ describe('the panel, as an admin', () => {
 describe('role: the page is admin-only, so the panel and its request are too', () => {
   test('an admin gets the panel through the real guard', async () => {
     mount({ guarded: true });
-    expect(await screen.findByRole('region', { name: 'Recording and alerts' })).toBeTruthy();
+    await panel();
+    await waitFor(() => expect(readinessCalls()).toHaveLength(1));
+  });
+
+  test('#1076: the panel is behind Advanced, so while Advanced is closed there is no panel and no readiness request', async () => {
+    mount();
+    await screen.findByRole('button', { name: /^Advanced/ });
+    expect(screen.queryByRole('region', { name: 'Recording and alerts' })).toBeNull();
+    expect(readinessCalls()).toHaveLength(0);
+    await panel(); // opens Advanced
     await waitFor(() => expect(readinessCalls()).toHaveLength(1));
   });
 

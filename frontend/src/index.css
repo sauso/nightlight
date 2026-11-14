@@ -2709,6 +2709,8 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 @media (hover: hover) { .camera-form__disclosure:hover { background: var(--child-action-hover); } }
 .camera-form__advanced-fields { padding: 14px 14px 14px; border-top: 1px solid var(--border); }
 .camera-form__advanced-fields > .field:last-child, .camera-form__advanced-fields > .onvif-box:last-child { margin-bottom: 0; }
+/* The read-only "Recording and alerts" summary sits at the end of Advanced (#1076): clear of the last field above it. */
+.camera-form__scope { margin-top: 8px; }
 
 .tag {
   display: inline-block;

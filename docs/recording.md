@@ -94,7 +94,7 @@ and [Silencing a camera's alerts](camera-controls.md#silencing-a-cameras-alerts-
 
 ## The "Recording and alerts" panel (per camera, read-only)
 
-**Cameras → edit** a camera → **Recording and alerts**, under Detection. It shows, in one place, what
+**Cameras → edit** a camera → **Advanced** → **Recording and alerts** (the Advanced row is closed until you open it). It shows, in one place, what
 this camera is set up to alert on and record, and whether it is **ready right now**. It is a summary
 only: it has no switch, changes nothing, and adds no setting (so there is no default or range). Admin
 only, like the page it sits on; a caregiver cannot open that page.
