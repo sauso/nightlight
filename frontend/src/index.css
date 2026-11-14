@@ -2792,7 +2792,10 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .detection-card .field-row > .field { min-width: 0; }
 .detection-card .detection-slider label { font-size: 15px; font-weight: 600; color: var(--text-primary); }
 .detection-card .camera-tile__sub { line-height: 1.45; }
-.detection-switch { min-height: 56px; border: 0; border-radius: 0; margin: 0; }
+/* `.detection-card` in the selector is what makes this win: `.tgl-row` (the older boxed row, defined further down the
+   file) has the same specificity as a bare `.detection-switch` and comes later, so its border, radius and fill drew a box
+   round the switch row inside the Recording card (owner screenshot, 2026-11-14). */
+.detection-card .detection-switch { min-height: 56px; border: 0; border-radius: 0; background: transparent; margin: 0; }
 .detection-card--switch .detection-switch > div > div:first-child { font-size: 16px; font-weight: 800; }
 .detection-card:not(.detection-card--switch) .detection-switch { padding: 0; }
 .detection-status__dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: var(--text-secondary); }
