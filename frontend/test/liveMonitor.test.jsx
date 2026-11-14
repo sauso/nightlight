@@ -149,10 +149,42 @@ describe('Live tile strip and sheet (#1076)', () => {
   ])('cameraState renders %s / unknown %s / disabled %s as %s', (statusLevel, statusUnknown, disabled, word, dot) => {
     const { container } = renderAsAdmin(<CameraTile camera={{ id: 'state', name: 'Camera', statusLevel, statusUnknown, disabled }} childName="A child" />);
     const strip = container.querySelector('.camera-tile__meta');
-    expect(within(strip).getByText(word)).toBeInTheDocument();
-    expect(strip.querySelector(`.${dot}`)).toBeInTheDocument();
-    expect(within(strip).getByText('Camera')).toBeInTheDocument();
+    // Strip: the dot sits in the SAME row as the name, before it (owner decision, option C), and the word is only
+    // visually hidden text after the name, part of the row's accessible text ("Camera, Online").
+    const row = within(strip).getByText('Camera').closest('.camera-tile__title');
+    expect(row).not.toBeNull();
+    expect(row.querySelector(`.${dot}`)).toBeInTheDocument();
+    const dotBox = row.querySelector('.camera-tile__dot');
+    expect(dotBox).toHaveAttribute('aria-hidden', 'true');
+    expect(dotBox.compareDocumentPosition(within(row).getByText('Camera')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(row.querySelector('.camera-tile__sr')).toHaveTextContent(`, ${word}`);
+    expect(row).toHaveTextContent(`Camera, ${word}`);
+    // Nothing prints the word in the strip any more: no status line above the name, no visible word.
+    expect(strip.querySelector('.camera-tile__state')).toBeNull();
+    expect(within(strip).queryByText(word)).toBeNull();
     expect(within(strip).getByText('A child')).toBeInTheDocument();
+  });
+
+  // The word the strip no longer prints is printed (visibly, not in a visually hidden element) in the camera's
+  // sheet with the same dot, so colour is never the only signal.
+  test.each([
+    ['live', false, false, 'Online', 'breathing--live'],
+    ['connecting', false, false, 'Connecting', 'breathing--connecting'],
+    ['offline', false, false, 'Offline', 'breathing--offline'],
+    ['connecting', true, false, 'Status unknown', 'breathing--connecting'],
+    ['offline', false, true, 'Disabled', 'dot--neutral'],
+  ])('the camera sheet prints the status dot and word for %s / unknown %s / disabled %s as %s', async (statusLevel, statusUnknown, disabled, word, dot) => {
+    const { user } = renderAsAdmin(<CameraTile camera={{ id: 'sheet', name: 'Camera', statusLevel, statusUnknown, disabled }} childName="A child" />);
+    await user.click(screen.getByRole('button', { name: 'Camera settings' }));
+    const sheet = document.querySelector('.tile-menu');
+    const state = sheet.querySelector('.tile-menu__state');
+    expect(state).toHaveTextContent(word);
+    expect(within(sheet).getByText(word)).toBeVisible();
+    expect(within(sheet).getByText(word).closest('.camera-tile__sr')).toBeNull();
+    expect(state.querySelector(`.${dot}`)).toBeInTheDocument();
+    expect(state.querySelector('.camera-tile__dot')).toHaveAttribute('aria-hidden', 'true');
+    // The state line sits right under the camera name in the sheet header.
+    expect(sheet.querySelector('.tile-menu__title').nextElementSibling).toBe(state);
   });
 
   test('temperature and humidity are separate icon chips beside a wrapping name and the drag handle', () => {

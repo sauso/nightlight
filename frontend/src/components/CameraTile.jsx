@@ -63,6 +63,18 @@ export function fmtElapsed(sec) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+// The status dot shown in the tile strip (before the name) and in the camera sheet. It is decorative to assistive
+// tech (aria-hidden): the same state is always spelled out as a word next to it (hidden in the strip, printed in the
+// sheet), so the dot is never the only carrier. The wrapper is a fixed 14px box so the neutral dot (8px, no ring)
+// and the breathing dot (14px) leave the name at the same left edge. The dot components themselves are unchanged.
+function TileStatusDot({ dot }) {
+  return (
+    <span className="camera-tile__dot" aria-hidden="true">
+      {dot === 'neutral' ? <span className="dot--neutral" /> : <BreathingDot status={dot} />}
+    </span>
+  );
+}
+
 export default function CameraTile({ camera, childName, dragHandleProps, refreshNonce = 0, onRecordingSaved, frameTestId, onFrames }) {
   const { settings } = useSettings();
   const { user } = useAuth();
@@ -778,6 +790,13 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             >
               <div className="tile-menu__grabber" aria-hidden="true" />
               <div className="tile-menu__title">{camera.name}</div>
+              {/* The status word is no longer printed in the tile strip (the dot stands there and the word is
+                  visually hidden), so the sheet is where a sighted user can always read it: colour must never be
+                  the only signal. Same dot and word as the strip, from the same cameraState(). */}
+              <div className="tile-menu__state">
+                <TileStatusDot dot={tileState.dot} />
+                <span>{tileState.word}</span>
+              </div>
 
               <div className="tile-menu__label">Connection mode</div>
               <div className="seg-track" role="group" aria-label="Connection mode" style={{ marginBottom: 12 }}>
@@ -1081,13 +1100,14 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
             </button>
           )}
           <div className="camera-tile__identity">
-            <div className="camera-tile__state">
-              {tileState.dot === 'neutral'
-                ? <span className="dot--neutral" aria-hidden="true" />
-                : <BreathingDot status={tileState.dot} />}
-              <span>{tileState.word}</span>
+            {/* One line: the status dot, then the name. The word ("Online", "Offline", ...) is not printed here:
+                it follows the name as visually hidden text so a screen reader still reads "Camera, Online", and the
+                camera's sheet prints it for everyone else (owner decision, Live card option C). */}
+            <div className="camera-tile__title">
+              <TileStatusDot dot={tileState.dot} />
+              <div className="camera-tile__name">{camera.name}</div>
+              <span className="camera-tile__sr">, {tileState.word}</span>
             </div>
-            <div className="camera-tile__name">{camera.name}</div>
             <div className="camera-tile__sub">{childName || 'Unassigned'}</div>
           </div>
         </div>

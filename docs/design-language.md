@@ -880,9 +880,13 @@ The signature component. `--bg-elevated`, 1px `--border`, **radius 10px**, `over
 The video wrap is 16:9 (`height: 50vh` when not fullscreen) so `object-fit: cover` fills exactly
 rather than cropping the camera's own timestamp overlay. Stopped state is a `#0a0d1c` panel with a
 centred restart button. Controls overlay the video; identity (name, child, drag handle, live dot)
-sits in the strip below. The strip is at least 56px tall and shows a status dot and word, the
-wrapping name, child, optional temperature and humidity chips, and the drag handle. It uses
-`cameraState`, including amber **Status unknown** when a status check times out.
+sits in the strip below. The strip is at least 56px tall and shows one line, the status dot and then the
+wrapping name (dot before the name, centred on it), with the child under it, optional temperature and humidity chips,
+and the drag handle. **The status word is not printed in the strip**: it follows the name as visually hidden text
+(`.camera-tile__sr`, so a screen reader reads "Name, Online"; the dot is `aria-hidden`), and the camera's sheet prints
+the same dot and word under the name (`.tile-menu__state`), so colour is never the only signal. It uses
+`cameraState`, including amber **Status unknown** when a status check times out. (The Cameras tab cards still print
+the word above the name; only the Live tile changed.)
 
 Picture-in-Picture hides every control and panel over the video, including Record. Fullscreen
 in the updated Android app hides the system status and gesture bars so they do not cover the
