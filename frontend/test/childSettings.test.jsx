@@ -500,6 +500,18 @@ describe('★★ what a caregiver can change (#542)', () => {
     expect(await screen.findByRole('button', { name: 'More options for this child' })).toBeTruthy();
   });
 
+  test('★ while the child is still loading there is no ⋯ menu, so Remove child cannot be reached; it appears once loaded', async () => {
+    // Remove moved from inside the form (absent while loading) to the header menu, which is not. An
+    // admin could then confirm and send DELETE for a child the page had not shown yet (PR #1088 review).
+    const first = mount({ kid: null });
+    expect(screen.getByText('Loading…')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'More options for this child' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Remove child' })).toBeNull();
+    first.unmount();
+    mount();
+    expect(await screen.findByRole('button', { name: 'More options for this child' })).toBeTruthy();
+  });
+
   test('★ a caregiver on Add child is told an admin adds children, with no form to fill in', async () => {
     mount({ who: CAREGIVER, id: 'new' });
     expect(await screen.findByText('Only an admin can add a child. Ask an admin to add them.')).toBeTruthy();

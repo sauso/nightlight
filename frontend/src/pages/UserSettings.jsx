@@ -193,7 +193,11 @@ function UserSettingsForm() {
   return (
     <>
       <AppHeader title={isNew ? 'Add user' : (fullName || 'Caregiver')} back={back}
-        actions={!isNew && id !== me?.id ? <MoreMenu label="More options for this user" menuLabel="User">
+        // Offered only once the user record has loaded (formReady is set when the GET found it).
+        // Remove used to sit inside the form, which does not exist while loading; in the header it was
+        // reachable then, so an admin could confirm and send a DELETE for someone the page had not
+        // shown yet (PR #1088 review).
+        actions={!isNew && formReady && id !== me?.id ? <MoreMenu label="More options for this user" menuLabel="User">
           <button type="button" role="menuitem" className="more-menu__item dev-card__delete"
             onClick={() => { setRemoveError(''); setRemoving(true); }}>
             <Trash2 size={16} aria-hidden="true" />Remove user

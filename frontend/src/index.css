@@ -1612,6 +1612,11 @@ body.in-pip .tile-menu-backdrop {
 .modal-actions { display: flex; gap: 8px; width: 100%; }
 .modal-actions > .btn { flex: 1 1 0; min-width: 0; }
 .seg-track--tabs { width: 100%; }
+/* The sleep detail tabs sit on a card, where the shared night track (--bg-elevated-2, #100f1c) is near-black against the card
+   (#221f3c, 1.20:1): the owner rejected exactly that look on these tabs on 2026-11-13. In the dark theme they keep the accent-tinted
+   track they had before the shared look (same token mix as the old .sleep-events__tabs). Measured from the token values: inactive
+   label (--text-secondary) on it 6.5:1, selected label (--on-accent on --accent) 6.7:1. The light theme keeps the shared track. */
+:root[data-theme='dark'] .seg-track--tabs { background: color-mix(in srgb, var(--accent-line) 12%, var(--bg-elevated)); }
 .seg-track--tabs .seg-track__btn { text-align: center; }
 /* UI consistency (PR-C): the Logs toolbars (Recent alerts, Camera history, Recent logs) are a SwitchRow plus two text buttons. At
    phone width they do not fit on one line, so the row wraps and each control keeps its own 44px target (`--tap`) instead of
@@ -1816,8 +1821,8 @@ body.in-pip .tile-menu-backdrop {
 /* The Wake-ups | Room activity tabs. UI consistency (PR-C): they take the shared .seg-track look (theme and unit pickers, the camera
    screens) so every segmented control reads as one; the markup stays a tablist (role="tab", aria-selected, arrow keys) because the
    tabs switch a panel rather than set a pressed value. The earlier accent-tinted track with its own 3px indicator is gone with that.
-   NOT checked on a phone: the owner flagged the near-black night track (--bg-elevated-2) on THESE tabs on 2026-11-13, and the shared
-   track uses that same fill, so look at it at night before release. */
+   The owner flagged the near-black night track (--bg-elevated-2) on THESE tabs on 2026-11-13, so in the dark theme they override the
+   track fill (see .seg-track--tabs above). NOT checked on a phone: look at it at night before release. */
 .sleep-events__tabs { margin-bottom: 12px; }
 .sleep-events__empty { padding: 2px 2px 4px; }
 /* Room activity: ONE caption line (the kind the plain rows stand for) and the "What is this?" button, 44px tall; the full explanation opens

@@ -215,7 +215,11 @@ export default function ChildSettings() {
   return (
     <>
       <AppHeader title={isNew ? 'Add child' : (kid?.name || 'Child')} back={back}
-        actions={!isNew && isAdmin ? <MoreMenu label="More options for this child" menuLabel="Child">
+        // Offered only once the child has loaded (same condition that swaps "Loading…" for the form).
+        // Remove used to sit inside the form, which does not exist while loading; in the header it was
+        // reachable then, so an admin could confirm and send a DELETE for a child the page had not
+        // shown yet (PR #1088 review).
+        actions={!isNew && isAdmin && kid ? <MoreMenu label="More options for this child" menuLabel="Child">
           <button type="button" role="menuitem" className="more-menu__item dev-card__delete"
             onClick={() => { setRemoveError(''); setRemoving(true); }}>
             <Trash2 size={16} aria-hidden="true" />Remove child
