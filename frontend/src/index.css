@@ -1618,6 +1618,7 @@ body.in-pip .tile-menu-backdrop {
 .switch-row__line .switch__track { width: 42px; height: 24px; }
 .switch-row__line .switch__thumb { top: 13px; }
 .switch-row__note { margin: 0 0 12px; }
+.switch-row__sub { cursor: pointer; }
 .sleep-detail__source strong { font-weight: 600; color: var(--text-primary); }
 /* #361 PR 4a: which settings the night was worked out with (saved or today's). Secondary text like the source line
    above. The switch to the other view is in the page's "⋯" menu since UI refresh PR E. */
@@ -2813,7 +2814,9 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 /* Detection's switch card keeps its standard row inside the card surface. */
 .detection-card .detection-switch { border: 0; border-radius: 0; background: transparent; margin: 0; }
 .detection-card--switch .detection-switch { padding: 0 14px; }
-.detection-card--switch .switch-row__note { margin: 0; padding-bottom: 14px; }
+/* The switch card's label is its title (not a heading: see EnableToggle), so it takes the title weight. */
+.detection-card--switch .switch-row__label { font-size: 16px; font-weight: 800; }
+.detection-card--switch .detection-switch { padding-top: 6px; padding-bottom: 8px; }
 .detection-card:not(.detection-card--switch) .detection-switch { padding: 0; }
 .detection-status__dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: var(--text-secondary); }
 .detection-status__dot--live { background: var(--accent); }

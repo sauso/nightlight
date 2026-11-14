@@ -12,7 +12,9 @@ export default function SwitchRow({ label, sub, children, id, checked, disabled,
         <div className="switch-row__copy">
           {heading ? <Heading className="card-heading"><label htmlFor={inputId}>{label}</label></Heading>
             : <label className="switch-row__label" htmlFor={inputId}>{label}</label>}
-          {sub && <span className="switch-row__sub">{sub}</span>}
+          {/* A <label> too, so a tap on the short explanation toggles the switch, as the old whole-row label did (Codex review of
+              #1087). The input's own aria-label still names it; the long `children` note below stays plain text. */}
+          {sub && <label className="switch-row__sub" htmlFor={inputId}>{sub}</label>}
         </div>
         <Switch id={inputId} aria-label={typeof label === 'string' ? label : undefined}
           checked={checked} disabled={disabled} onChange={onChange} {...inputProps} />

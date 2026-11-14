@@ -180,8 +180,10 @@ export default function DetectionSettings() {
 
 function EnableToggle({ checked, onChange, label, sub }) {
   return (
-    <SwitchRow className="detection-switch" heading headingLevel={2} label={label}
-      checked={checked} onChange={(e) => onChange(e.target.checked)}>{sub}</SwitchRow>
+    // Not a heading: on Motion and Sound the label repeats the page's h1, and inside the Recording card it would be a second h2
+    // after the card's own title (Codex review of #1087). The `sub` sits beside the switch, as it did, and is clickable.
+    <SwitchRow className="detection-switch" label={label} sub={sub}
+      checked={checked} onChange={(e) => onChange(e.target.checked)} />
   );
 }
 
