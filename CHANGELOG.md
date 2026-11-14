@@ -24,7 +24,6 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 - #1076 On the Motion and Sound detection screens, the **Save a clip when triggered** row no longer has a box drawn round it inside the Recording card (an older rule outranked the new one).
 - UI consistency (PR-A): Settings menu titles now use sentence case, camera and notification pages have shorter back labels, and standard buttons and text fields have 44px tap targets. Buttons styled as links no longer show an underline. The General row now names the app name, timezone and temperature unit; text on Children, first-run screens, Remote access and sleep timeline ticks is slightly larger.
-
 - #1076 The Camera and Recording menu now uses the same icon rows as other camera settings. Camera controls has clearer card titles and one full-width Save button. On Live, each camera tile shows its status in words beside the dot, and its sheet has inset Connection mode and Quality choices plus larger Stop and Camera settings rows. The controls and what they save are unchanged. The documentation screenshots have not been regenerated.
 - #1076 Motion, Sound and Alert schedule settings now share a switch-first card layout. Sound keeps its first detector limit visible and folds the other four behind **Show the other four**; the longer timing note sits behind **More about timing**. All fields and automatic saving work as before. The documentation screenshots have not been regenerated.
 

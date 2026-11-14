@@ -512,7 +512,7 @@ The Live page's theme button sits at the far right of the full-width bar, includ
 The bar stays navy in both themes, so the button uses `--accent-soft`, not the changing
 `--text-secondary`. It is compact in short landscape and keeps a 44px touch target.
 Other pages and sub-pages have no header theme button; use Account → Appearance instead.
-The back label uses up to about 35% of the bar, then ends with an ellipsis to leave room
+The back label uses up to about 42% of the bar, then ends with an ellipsis to leave room
 for the page title. This width is estimated from phone screenshots, not measured on devices.
 
 ### A read-only detail card (title, badge, sub-heading, value)

@@ -65,7 +65,8 @@ test('camera tile controls and the drag handle are tappable 21px beyond their ce
 // UI consistency (PR-A): measure the shared controls on a real settings form. This needs the Docker e2e stack.
 test('settings back control, text field and standard button have 44px targets', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/settings/general');
+  // The app uses a HashRouter: without the "#" this loads Live, where there is no "Back to Settings" (Codex review of #1084).
+  await page.goto('/#/settings/general');
 
   const back = page.getByRole('button', { name: 'Back to Settings' });
   await expect(back).toBeVisible();

@@ -340,7 +340,11 @@ button, a, summary, label, select, input[type='checkbox'], input[type='radio'], 
   gap: 2px;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 35%;
+  /* 42%, up from 35% (UI consistency PR-A): "Camera settings" needs about 106px of text room and 35% left only 92px at
+     390px wide (Codex review of #1084, measured at 15px). The label never wraps now (nowrap + ellipsis below), so the
+     owner's 2026-11-01 worry (wrapping) does not apply; the title still gets about 190px at 390px. At 320px the longest
+     label still ellipsises, which is the accepted limit. */
+  max-width: 42%;
   margin-left: -6px;
   padding: 4px 6px 4px 0;
   background: none;
@@ -829,6 +833,7 @@ body.in-pip .tile-menu-backdrop {
   .app-header h1 { font-size: 17px; }
   .app-header__top-row { min-height: 28px; } /* the slim bar's row: the 28px logo, as 36px is on the full bar */
   .app-header__icon { width: 28px; height: 28px; }
+  .app-header__icon-btn::after { inset: -8px; } /* 28px logo + 8px each side = the same 44px target as portrait */
   .app-header__theme { width: 26px; height: 26px; }
   .app-header__theme::after { inset: -9px; }
 
