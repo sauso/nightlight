@@ -33,18 +33,47 @@ const MIN_PASSWORD = 8;
 const GENERIC_BUSY = 'Just a moment. If you just chose a password, try signing in with it.';
 const GENERIC_LIMIT = 'Too many attempts. Please wait a few minutes and try again.';
 
+// A DIFFERENT invite opened in the same tab (review of #1096). The route is `/invite/:token?`, so the router keeps ONE mounted
+// AcceptInvite across `#/invite/A` -> `#/invite` -> `#/invite/B`, and the page below holds its token, its one-time check and its form
+// in state that was set up for A. Left alone, B's token would be scrubbed from the address without ever being kept, and a submit
+// would redeem A while the visitor believes they opened B. So when a NEW, non-empty route token differs from the last one seen, the
+// page below is REMOUNTED (the `key`): fresh state, a fresh one-time check for B, B stashed over A. The ordinary transition where
+// the page itself replaces `#/invite/<token>` with `#/invite` makes the route token EMPTY, which is not a new token, so it never
+// remounts and the check is not repeated.
 export default function AcceptInvite() {
   const { token: routeToken } = useParams();
+  const [seen, setSeen] = useState(routeToken || null);
+  const [generation, setGeneration] = useState(0);
+  // Adjusting state while rendering (React's documented pattern for "reset on a changed prop"): unlike a ref write in render, it is
+  // safe under StrictMode's double render.
+  if (routeToken && routeToken !== seen) {
+    setSeen(routeToken);
+    setGeneration((g) => g + 1);
+  }
+  return <InvitePage key={generation} routeToken={routeToken} />;
+}
+
+function InvitePage({ routeToken }) {
   const navigate = useNavigate();
   const { user, login, logout } = useAuth();
   const { settings } = useSettings();
 
   // Read from the route on the first render, else from where an earlier visit (or main.jsx) put it. Stashing here is idempotent, so
-  // React's double-invoked initialiser does no harm.
-  const [token] = useState(() => {
+  // React's double-invoked initialiser does no harm, and it overwrites (so removes) any token an earlier invite left behind.
+  // Set to null once the invite is redeemed, so a spent token cannot be sent again.
+  const [token, setToken] = useState(() => {
     if (routeToken) { stashInviteToken(routeToken); return routeToken; }
     return readInviteToken();
   });
+
+  // False once this page is gone. A request started for an invite that has since been replaced by another must not touch the page
+  // state or (worse) clear the NEW invite's stored token when it fails. The effect re-arms it so StrictMode's probe (mount, unmount,
+  // mount) leaves it true.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
 
   // The `?` in the route (`/invite/:token?`) keeps this ONE mounted component across the replace below, so the ref guard holds.
   useEffect(() => {
@@ -66,9 +95,11 @@ export default function AcceptInvite() {
     checkStarted.current = true;
     if (!token) { setPhase('invalid'); return; }
     api.post('/auth/invite/check', { token }).then((found) => {
+      if (!alive.current) return;
       setInvite(found);
       setPhase('ready');
     }).catch((err) => {
+      if (!alive.current) return; // another invite replaced this page: its stored token is not ours to clear
       // The server answers 404 for EVERY unusable link (unknown, used, expired, revoked, malformed), by design, so nothing finer can
       // be said and nothing is guessed.
       if (err.status === 404) { clearInviteToken(); setPhase('invalid'); return; }
@@ -83,6 +114,7 @@ export default function AcceptInvite() {
   const [pending, setPending] = useState(false);
   const [finished, setFinished] = useState(false);   // redeemed: signing in, so do not flash the "already signed in" view
   const [error, setError] = useState(null);          // { text, signIn } from a refused submit
+  const [claimed, setClaimed] = useState(false);     // the password IS set, but signing in with it failed (see submit)
 
   const tooShort = password.length < MIN_PASSWORD;
   const mismatch = password !== confirm;
@@ -96,27 +128,43 @@ export default function AcceptInvite() {
     if (tooShort || mismatch) return;
     setPending(true);
     setError(null);
+    // TWO steps with two different failure meanings, so two try blocks (review of #1096). A failed REDEEM means nothing happened and
+    // the form can be tried again; a failed LOGIN after a good redeem means the invite is spent and the password is set, so going
+    // back to the form would only retry a redeem that now answers 404 ("invalid").
+    let result;
     try {
-      const result = await api.post('/auth/invite/redeem', { token, password });
-      if (result.mfaRequired) {
-        // Not reachable through the API today (a pending account cannot have two-factor on). Handled so it fails safe: the password
-        // IS set, and the sign-in page asks for the code.
-        clearInviteToken();
-        setFinished(true);
-        navigate('/login', { replace: true });
-        return;
-      }
-      clearInviteToken(); // the token is spent; it must not outlive the redeem in this tab
-      setFinished(true);
-      // Must await: login() fetches the media token before setting the user, and navigating first would let Protected see a null
-      // user and bounce back to /login (the same rule as Login.jsx).
-      await login(result.token, result.user);
-      navigate('/', { replace: true });
+      result = await api.post('/auth/invite/redeem', { token, password });
     } catch (err) {
+      if (!alive.current) return; // a different invite replaced this page meanwhile: its stored token is not ours to clear
       if (err.status === 404) { clearInviteToken(); setPhase('invalid'); }
       else if (err.status === 409) setError({ text: GENERIC_BUSY, signIn: true });
       else if (err.status === 429) setError({ text: GENERIC_LIMIT, signIn: false });
       else setError({ text: err.message, signIn: false });
+      setPending(false);
+      return;
+    }
+    // If a different invite replaced this page while the request was out, the stored token is now THAT invite's: leave it alone.
+    if (!alive.current) return;
+    // The token is spent: it must not outlive the redeem, in storage or in this page's memory.
+    clearInviteToken();
+    setToken(null);
+    if (result.mfaRequired) {
+      // Not reachable through the API today (a pending account cannot have two-factor on). Handled so it fails safe: the password
+      // IS set, and the sign-in page asks for the code.
+      setFinished(true);
+      setPending(false);
+      navigate('/login', { replace: true });
+      return;
+    }
+    setFinished(true);
+    try {
+      // Must await: login() fetches the media token before setting the user, and navigating first would let Protected see a null
+      // user and bounce back to /login (the same rule as Login.jsx).
+      await login(result.token, result.user);
+      navigate('/', { replace: true });
+    } catch {
+      // The password is set; only the automatic sign-in failed (a network blip while fetching the media token, say).
+      setClaimed(true);
       setFinished(false);
     } finally {
       setPending(false);
@@ -147,6 +195,18 @@ export default function AcceptInvite() {
           Go to Nightlight
         </button>
         <button className="btn btn-secondary" type="button" style={{ marginTop: 8 }} onClick={logout}>Sign out</button>
+      </>
+    );
+  }
+
+  // The invite was redeemed (the password is set) but the automatic sign-in failed. No form and no retry: the invite is spent.
+  if (claimed) {
+    return shell(
+      <>
+        <p className="tagline" role="alert">
+          Your password is set. Sign in with your username and the password you just chose.
+        </p>
+        <Link className="btn btn-primary" to="/login">Go to sign in</Link>
       </>
     );
   }

@@ -215,6 +215,9 @@ function UserSettingsForm() {
 
   // Revoke the open invite: the account stays, still unable to sign in, until a new invite is made or a password is set.
   async function revokeInvite(userId, { leave }) {
+    // Busy while the DELETE is out, like reissueInvite: otherwise both Invite-card buttons stay live and a second click sends a
+    // duplicate revoke or races a new invite against it (review of #1096).
+    setInviteBusy(true);
     setError('');
     try {
       await api.del(`/auth/users/${userId}/invite`);
@@ -222,6 +225,8 @@ function UserSettingsForm() {
       setPending((p) => (p ? { ...p, expires: null } : p));
     } catch (err) {
       setError(err.message);
+    } finally {
+      setInviteBusy(false);
     }
   }
 
@@ -275,7 +280,7 @@ function UserSettingsForm() {
           <div className="empty-state">Loading…</div>
         ) : invitePanel ? (
           <>
-            {error && <div className="error-banner">{error}</div>}
+            {error && <div className="error-banner" role="alert">{error}</div>}
             <InvitePanel token={invitePanel.token} expiresAt={invitePanel.expiresAt} firstName={invitePanel.firstName}
               onDone={() => navigate(back.to)}
               onRevoke={() => revokeInvite(invitePanel.userId, { leave: true })} />

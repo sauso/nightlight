@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { fileToAvatarDataUrl } from '../lib/imageResize.js';
 import { useDemoStatus } from '../lib/demoStatus.js';
@@ -38,6 +38,15 @@ export default function SetupCaregivers({ onAdded }) {
   // is left.
   const panelOpen = !!panel;
   useEffect(() => (panelOpen ? holdReload() : undefined), [panelOpen]);
+
+  // "Done" swaps the panel for the form, which would drop focus to <body>; put it on the form's first field instead (review of
+  // #1096). Only after a panel has been closed: the first render, and a refused invite, must not steal focus.
+  const firstField = useRef(null);
+  const closedPanel = useRef(false);
+  useEffect(() => {
+    if (panelOpen) { closedPanel.current = true; return; }
+    if (closedPanel.current) { closedPanel.current = false; firstField.current?.focus(); }
+  }, [panelOpen]);
 
   const fullName = [form.first_name, form.last_name].map((part) => part.trim()).filter(Boolean).join(' ');
   const set = (field) => (event) => setForm((current) => ({ ...current, [field]: event.target.value }));
@@ -106,7 +115,7 @@ export default function SetupCaregivers({ onAdded }) {
         <div className="onvif-box__row">
           <div className="field">
             <label htmlFor="sc-first">First name</label>
-            <input id="sc-first" value={form.first_name} onChange={set('first_name')} autoComplete="off" disabled={busy || readOnly} />
+            <input id="sc-first" ref={firstField} value={form.first_name} onChange={set('first_name')} autoComplete="off" disabled={busy || readOnly} />
           </div>
           <div className="field">
             <label htmlFor="sc-last">Last name</label>

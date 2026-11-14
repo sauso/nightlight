@@ -112,7 +112,10 @@ password box stays available: setting a password makes the account a normal one 
 password to finish setting up your account.", shows their username, and asks for a password (at least 8
 characters) twice. When they save, they are signed in. The link's address is replaced on the page at once, so it
 does not stay in the browser's address bar or history. If that device is already signed in as someone else, the page
-says so and asks: **Sign out** (then it carries on with the invite) or **Go to Nightlight** (nothing is replaced).
+says so and asks: **Sign out** (then it carries on with the invite) or **Go to Nightlight** (nothing is replaced). If
+the password is saved but signing in straight after fails (a network hiccup, say), the page says "Your password is
+set. Sign in with your username and the password you just chose." with a link to the sign-in page; the link has been
+used up, so there is no need to ask for another.
 
 **How an invite works:**
 

@@ -42,10 +42,31 @@ export function clearInviteToken() {
 //
 // replaceState (not a hash assignment) so no new history entry is made and no hashchange fires; the router has not started yet
 // and reads the address when it is created.
+//
+// The segment is percent-DECODED before it is checked. A messaging app or a QR reader may re-encode a character of a perfectly valid
+// token (`%74` for `t`); the router decodes it too (so the page would work), but a check on the raw text would leave the secret in the
+// address bar and in history, which is exactly what this function exists to prevent. The decoded text is checked against the SAME
+// base64url alphabet, so `%2F` (a slash), `%20` and the like still do not match, and a malformed escape (`%zz`) is left alone rather
+// than thrown on, because this runs before React and a throw here would stop the whole app from starting.
+const TOKEN_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
+const HASH_PREFIX = '#/invite/';
+// Longest raw segment worth decoding: a 256-character token with every character escaped (3 characters each). Anything longer cannot
+// decode to a valid token.
+const MAX_RAW_SEGMENT = 256 * 3;
+
 export function captureInviteTokenFromLocation(win = window) {
-  const match = /^#\/invite\/([A-Za-z0-9_-]{1,256})$/.exec(win.location.hash);
-  if (!match) return false;
-  stashInviteToken(match[1]);
+  const hash = win.location.hash;
+  if (!hash.startsWith(HASH_PREFIX)) return false;
+  const raw = hash.slice(HASH_PREFIX.length);
+  if (raw.length === 0 || raw.length > MAX_RAW_SEGMENT) return false;
+  let token;
+  try {
+    token = decodeURIComponent(raw);
+  } catch {
+    return false;
+  }
+  if (!TOKEN_PATTERN.test(token)) return false;
+  stashInviteToken(token);
   win.history.replaceState(win.history.state, '', `${win.location.pathname}${win.location.search}#/invite`);
   return true;
 }

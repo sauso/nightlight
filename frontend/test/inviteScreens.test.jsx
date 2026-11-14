@@ -12,7 +12,7 @@
 import { StrictMode } from 'react';
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within, render, act, fireEvent } from '@testing-library/react';
-import { Routes, Route, useLocation, useNavigationType, HashRouter } from 'react-router-dom';
+import { Routes, Route, useLocation, useNavigate, useNavigationType, HashRouter } from 'react-router-dom';
 import { renderAs, renderAsAdmin, ADMIN, CAREGIVER, forEachRole } from './helpers/render.jsx';
 import UserSettings from '../src/pages/UserSettings.jsx';
 import SettingsUsers from '../src/pages/SettingsUsers.jsx';
@@ -109,6 +109,13 @@ describe('the invite panel', () => {
   test('an expiry the panel cannot read says nothing rather than a wrong time', () => {
     mount({ expiresAt: 'not a date' });
     expect(screen.queryByText(/Valid until/)).toBeNull();
+  });
+
+  test('★ focus moves to the panel heading when it appears (the form that had it is gone), and the heading is not a tab stop', () => {
+    mount();
+    const heading = screen.getByRole('heading', { name: 'Invite for Robin', level: 2 });
+    expect(heading).toHaveFocus();
+    expect(heading).toHaveAttribute('tabindex', '-1');
   });
 
   test('a missing first name still reads sensibly', () => {
@@ -345,6 +352,18 @@ describe('adding a caregiver: the choice between a password and an invite', () =
     expect(await screen.findByText('elsewhere')).toBeInTheDocument();
   });
 
+  test('★ the panel (not <body>) holds focus after "Create and show invite", and a refused revoke there is announced as an alert', async () => {
+    const { user } = mountUser('new');
+    await user.type(await screen.findByLabelText('Username (login)'), 'robin');
+    await chooseInvite(user);
+    await user.click(screen.getByRole('button', { name: 'Create and show invite' }));
+    expect(await screen.findByRole('heading', { name: /^Invite/, level: 2 })).toHaveFocus();
+
+    delSpy.mockRejectedValue(new Error('User not found'));
+    await user.click(screen.getByRole('button', { name: 'Revoke invite' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('User not found');
+  });
+
   test('★ a caregiver never reaches it: the route is admin-only, so no invite control is rendered for them', async () => {
     renderAs(CAREGIVER,
       <Routes>
@@ -416,6 +435,20 @@ describe('an account that has not chosen a password yet (its own page)', () => {
     await waitFor(() => expect(delSpy).toHaveBeenCalledWith('/auth/users/u-pend/invite'));
     expect(await screen.findByText('No usable invite')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Revoke invite' })).toBeNull();
+  });
+
+  test('★ while a revoke is in flight both Invite-card buttons are disabled (no duplicate DELETE, no new invite racing it)', async () => {
+    mockUsersApi({ users: [PENDING] });
+    let finish;
+    delSpy.mockImplementation(() => new Promise((resolve) => { finish = () => resolve({ ok: true, revoked: 1 }); }));
+    const { user } = mountUser(PENDING.id);
+    await user.click(await screen.findByRole('button', { name: 'Revoke invite' }));
+    expect(screen.getByRole('button', { name: 'Revoke invite' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Show a new invite' })).toBeDisabled();
+    await act(async () => { finish(); });
+    expect(await screen.findByText('No usable invite')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show a new invite' })).toBeEnabled();
+    expect(delSpy).toHaveBeenCalledTimes(1);
   });
 
   test('a refused new invite or revoke shows the server\'s reason', async () => {
@@ -521,6 +554,17 @@ describe('the setup guide: adding a caregiver', () => {
     await waitFor(() => expect(isReloadHeld()).toBe(false));
     expect(screen.getByLabelText('Username').value).toBe('');
     expect(screen.getByLabelText('Caregivers you added')).toHaveTextContent('Robin');
+  });
+
+  test('★ focus goes to the panel when it appears and back to the first field of the form on Done (never left on <body>)', async () => {
+    const { user } = renderAs(ADMIN, <SetupCaregivers />);
+    await user.click(await screen.findByRole('button', { name: 'Send an invite' }));
+    expect(screen.getByLabelText('First name'), 'opening the guide must not steal focus').not.toHaveFocus();
+    await user.type(screen.getByLabelText('Username'), 'robin');
+    await user.click(screen.getByRole('button', { name: 'Create and show invite' }));
+    expect(await screen.findByRole('heading', { name: /^Invite/, level: 2 })).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(screen.getByLabelText('First name')).toHaveFocus());
   });
 
   test('a refused invite shows the reason and no panel', async () => {
@@ -786,6 +830,82 @@ describe('the public invite page (AcceptInvite)', () => {
     expect(readInviteToken()).toBeNull();
   });
 
+  test('★★ the password is set but the automatic sign-in then fails: says so, offers sign-in, shows no form and never redeems twice', async () => {
+    mockServer();
+    const { user, auth } = page();
+    auth.login.mockRejectedValue(new Error('Request failed (500)'));
+    await fillAndSubmit(user, 'chosen-password');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your password is set. Sign in with your username and the password you just chose.');
+    expect(screen.queryByLabelText('Choose a password'), 'the invite is spent: a form would only retry a redeem that now says invalid').toBeNull();
+    expect(screen.queryByRole('button', { name: 'Set password and sign in' })).toBeNull();
+    expect(calls('/auth/invite/redeem')).toHaveLength(1);
+    expect(readInviteToken(), 'the spent token is gone from storage').toBeNull();
+    await user.click(screen.getByRole('link', { name: 'Go to sign in' }));
+    expect(await screen.findByText('the sign-in page')).toBeInTheDocument();
+  });
+
+  // The route is `/invite/:token?`, so ONE AcceptInvite stays mounted while the address goes A -> (scrubbed) -> B (review of #1096).
+  describe('a different invite opened in the same tab', () => {
+    const TOKEN_B = 'b-t0k3n-'.padEnd(43, 'Wy9_');
+    const GoTo = ({ to }) => { const navigate = useNavigate(); return <button type="button" onClick={() => navigate(to)}>open {to.slice(-4)}</button>; };
+    const byToken = {
+      [TOKEN]: { first_name: 'Robin', username: 'robin', app_name: 'Nightlight' },
+      [TOKEN_B]: { first_name: 'Blake', username: 'blake', app_name: 'Nightlight' },
+    };
+    const ui = (
+      <>
+        <Probe />
+        <GoTo to={`/invite/${TOKEN_B}`} />
+        <Routes>
+          <Route path="/invite/:token?" element={<AcceptInvite />} />
+          <Route path="/" element={<div>home</div>} />
+        </Routes>
+      </>
+    );
+    const serve = (check) => {
+      postSpy = vi.spyOn(api, 'post').mockImplementation((path, body) => {
+        if (path === '/auth/invite/check') return check ? check(body.token) : Promise.resolve(byToken[body.token]);
+        return Promise.resolve(SESSION);
+      });
+    };
+
+    test('★★ B is checked and stashed, the form is B\'s, a submit redeems B (never A), and A is gone from storage', async () => {
+      serve();
+      const { user, auth } = renderAs(null, ui, { route: `/invite/${TOKEN}` });
+      expect(await screen.findByText(/Welcome, Robin/)).toBeInTheDocument();
+      await user.type(screen.getByLabelText('Choose a password'), 'typed-for-a');
+      expect(at()).toBe('/invite|REPLACE');
+
+      await user.click(screen.getByRole('button', { name: /^open / }));
+      expect(await screen.findByText(/Welcome, Blake/)).toBeInTheDocument();
+      expect(screen.queryByText(/Welcome, Robin/)).toBeNull();
+      expect(at(), 'B left the address too').toBe('/invite|REPLACE');
+      expect(calls('/auth/invite/check').map(([, body]) => body.token), 'one check each, A then B, none repeated by the scrub').toEqual([TOKEN, TOKEN_B]);
+      expect(sessionStorage.getItem('nightlight_invite_token')).toBe(TOKEN_B);
+      expect(JSON.stringify({ ...sessionStorage })).not.toContain(TOKEN);
+      expect(screen.getByLabelText('Choose a password').value, 'what was typed for A is not carried into B').toBe('');
+
+      await user.type(screen.getByLabelText('Choose a password'), 'chosen-for-b');
+      await user.type(screen.getByLabelText('Confirm password'), 'chosen-for-b');
+      await user.click(screen.getByRole('button', { name: 'Set password and sign in' }));
+      await waitFor(() => expect(auth.login).toHaveBeenCalled());
+      expect(calls('/auth/invite/redeem')).toEqual([['/auth/invite/redeem', { token: TOKEN_B, password: 'chosen-for-b' }]]);
+    });
+
+    test('★ a slow answer for A that arrives after B opened does not touch B (a 404 must not clear B\'s stored token)', async () => {
+      let rejectA;
+      serve((token) => (token === TOKEN ? new Promise((_, reject) => { rejectA = reject; }) : Promise.resolve(byToken[token])));
+      const { user } = renderAs(null, ui, { route: `/invite/${TOKEN}` });
+      await screen.findByText('Checking your invite…');
+      await user.click(screen.getByRole('button', { name: /^open / }));
+      expect(await screen.findByText(/Welcome, Blake/)).toBeInTheDocument();
+
+      await act(async () => { rejectA(Object.assign(new Error('invite_invalid'), { status: 404 })); });
+      expect(screen.getByText(/Welcome, Blake/), 'still B\'s form, not an "invalid" page').toBeInTheDocument();
+      expect(sessionStorage.getItem('nightlight_invite_token')).toBe(TOKEN_B);
+    });
+  });
+
   test('★ a background reload is held while the page is open (checking, form, invalid and signed-in views) and released on leaving', async () => {
     mockServer();
     const form = page();
@@ -832,6 +952,25 @@ describe('lib/inviteToken: taking the token out of the address before React star
     expect(readInviteToken()).toBe(TOKEN);
     expect(sessionStorage.getItem('nightlight_invite_token')).toBe(TOKEN);
     expect(JSON.stringify({ ...localStorage })).not.toContain(TOKEN);
+  });
+
+  test('★ a valid token with a percent-encoded character (%74 for "t") is decoded, stashed DECODED and scrubbed from the address', () => {
+    window.history.replaceState(null, '', `#/invite/${TOKEN.replace('t', '%74')}`);
+    expect(window.location.hash).toContain('%74');
+    expect(captureInviteTokenFromLocation()).toBe(true);
+    expect(window.location.hash).toBe('#/invite');
+    expect(readInviteToken()).toBe(TOKEN);
+  });
+
+  test('★ a malformed escape does not throw (this runs before React) and is left alone; a decoded slash or space is not a token', () => {
+    for (const segment of ['abc%zz', 'abc%', '%E0%A4%A', 'abc%2Fdef', 'abc%20def', 'abc%00', 'a'.repeat(257), `${'%41'.repeat(257)}`]) {
+      window.history.replaceState(null, '', `#/invite/${segment}`);
+      const before = window.location.hash;
+      expect(() => captureInviteTokenFromLocation(), segment).not.toThrow();
+      expect(captureInviteTokenFromLocation(), segment).toBe(false);
+      expect(window.location.hash).toBe(before);
+    }
+    expect(readInviteToken()).toBeNull();
   });
 
   test('anything else in the address is left alone and nothing is stashed', () => {

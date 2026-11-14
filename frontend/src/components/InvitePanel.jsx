@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import QrCode from './QrCode.jsx';
 import { copyText } from '../lib/copyText.js';
 import { useHomeTime } from '../lib/useHomeTime.js';
@@ -33,6 +33,12 @@ export default function InvitePanel({ token, expiresAt, firstName, onRevoke, onD
   const [copied, setCopied] = useState(null); // null | 'copied' | 'manual' (see lib/copyText.js)
   const [revoking, setRevoking] = useState(false);
 
+  // The panel REPLACES the form whose button the admin just pressed, so focus would fall to <body> and a screen-reader or keyboard
+  // user would be left at the top of the page with no sign anything happened (review of #1096). Move it to the heading, which names
+  // what appeared. tabIndex -1 makes it focusable by script only (not a tab stop).
+  const headingRef = useRef(null);
+  useEffect(() => { headingRef.current?.focus(); }, []);
+
   const link = `${window.location.origin}${window.location.pathname}#/invite/${token}`;
   const expiry = parseUtcText(expiresAt);
   const expiryText = expiry ? dateTime(expiry, EXPIRY_FORMAT) : '';
@@ -49,7 +55,7 @@ export default function InvitePanel({ token, expiresAt, firstName, onRevoke, onD
 
   return (
     <section className="card invite-panel" aria-label="Caregiver invite">
-      <h2 className="card-heading">{firstName?.trim() ? `Invite for ${firstName.trim()}` : 'Invite ready'}</h2>
+      <h2 className="card-heading" ref={headingRef} tabIndex={-1} style={{ outline: 'none' }}>{firstName?.trim() ? `Invite for ${firstName.trim()}` : 'Invite ready'}</h2>
       <QrCode value={link} label="Scan to open your invite" />
       <p className="invite-panel__link">{link}</p>
       <div className="tailscale-actions">
