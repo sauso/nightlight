@@ -1195,19 +1195,25 @@ function VitalsTracks({ night, startMs, endMs }) {
   const showHr = hr.length >= 2;
   const showRr = rr.length >= 2;
   if (!showHr && !showRr) return null;
-  // "avg 82 bpm · 71–103" from the summary when the server sent one for that role.
-  const captionOf = (s, unit) => (s ? `avg ${s.avg}${unit} · ${s.min}–${s.max}` : '');
+  // "avg 82 bpm · 71–103" from the summary when the server sent one for that role. With NO summary (valid readings in the
+  // display span but none between onset and wake, so the track draws and its caption used to be blank) the range of the
+  // drawn points, "71–103 bpm", without "avg": there is no average over the time asleep to quote.
+  const captionOf = (s, unit, points) => {
+    if (s) return `avg ${s.avg}${unit} · ${s.min}–${s.max}`;
+    const vs = points.map((p) => Math.round(p.v));
+    return `${Math.min(...vs)}–${Math.max(...vs)}${unit}`;
+  };
   return (
     <>
       {showHr && (
         <LineTrack points={hr} startMs={startMs} endMs={endMs} color="var(--sleep-hr)" height={36} gapMs={VITALS_GAP_MS} labelsFromData
           className="sleep-climate--hr" icon={<HeartPulse size={13} aria-hidden="true" />} label="Heart rate"
-          caption={captionOf(vitals.hr, ' bpm')} format={(v) => String(Math.round(v))} />
+          caption={captionOf(vitals.hr, ' bpm', hr)} format={(v) => String(Math.round(v))} />
       )}
       {showRr && (
         <LineTrack points={rr} startMs={startMs} endMs={endMs} color="var(--sleep-rr)" height={36} gapMs={VITALS_GAP_MS} labelsFromData
           className={`sleep-climate--rr${showHr ? ' sleep-climate--next' : ''}`} icon={<Wind size={13} aria-hidden="true" />} label="Breathing"
-          caption={captionOf(vitals.rr, '/min')} format={(v) => String(Math.round(v))} />
+          caption={captionOf(vitals.rr, '/min', rr)} format={(v) => String(Math.round(v))} />
       )}
       <div className="sleep-vitals__note">Sensor estimates from the radar, not for medical use.</div>
     </>

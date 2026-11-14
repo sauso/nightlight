@@ -159,6 +159,17 @@ describe('the hold-and-scroll bubble', () => {
     expect(rows(far)).toEqual({ hr: null, rr: null });
   });
 
+  test('a point never shows BEFORE its own time by more than 5 minutes: one reading at 12:04, scrubbed at 11:55, shows none', async () => {
+    // The server stamps a point at the mean time of its valid minutes (backend/test/nightVitals.test.js), so 12:04 is the
+    // reading's real time. Kills: the server stamping the bucket start (12:00), which this bubble would show nine minutes
+    // earlier; here it pins the lookup's reach to the point's own time. 11:55 is 175 minutes in, 12:00 is 180.
+    const only = withVitals([pt('12:04', 84, 22)]);
+    expect(rows(await scrub(only, 175))).toEqual({ hr: null, rr: null });
+    vi.restoreAllMocks();
+    cleanup();
+    expect(rows(await scrub(only, 180))).toEqual({ hr: '84 bpm', rr: '22/min' });
+  });
+
   test('no vitals on the night: the bubble has no such rows', async () => {
     const container = await scrub(NIGHT, 182);
     expect(container.querySelector('.sleep-tl__tip')).toBeTruthy();
@@ -185,6 +196,21 @@ describe('the heart-rate and breathing tracks', () => {
     const hi = container.querySelector('.sleep-climate--hr .sleep-climate__hi').textContent;
     const lo = container.querySelector('.sleep-climate--hr .sleep-climate__lo').textContent;
     expect([hi, lo]).toEqual(['88', '70']);
+  });
+
+  test('no summary (readings in the span but none between onset and wake): the caption is the drawn range, without "avg"', async () => {
+    // Kills: the empty caption the track had when the server sent `hr: null` / `rr: null` with a non-empty series.
+    const container = await open(withVitals(SERIES, { hr: null, rr: null }));
+    const hrCaption = container.querySelector('.sleep-climate--hr .sleep-climate__caption').textContent;
+    const rrCaption = container.querySelector('.sleep-climate--rr .sleep-climate__caption').textContent;
+    expect([hrCaption, rrCaption]).toEqual(['70–88 bpm', '18–24/min']);
+    expect(hrCaption + rrCaption).not.toMatch(/avg/);
+    // One role with a summary and the other without: each uses its own.
+    vi.restoreAllMocks();
+    cleanup();
+    const mixed = await open(withVitals(SERIES, { hr: HR, rr: null }));
+    expect(mixed.querySelector('.sleep-climate--hr .sleep-climate__caption').textContent).toBe('avg 82 bpm · 71–103');
+    expect(mixed.querySelector('.sleep-climate--rr .sleep-climate__caption').textContent).toBe('18–24/min');
   });
 
   test('a caregiver sees the same tracks', async () => {

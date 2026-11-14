@@ -49,13 +49,22 @@ function summarise(rows, field, fromMin, toMin) {
 //   `startMs` is rounded DOWN and `endMs` UP to whole UTC minutes here (nothing throws: a display must not break a
 //   sleep route, and a bad bound is just "nothing to show").
 //   `series`: also return the 5-minute chart series.
-//   `summaryFromMs` / `summaryToMs`: the summary (avg / min / max) is over the valid minutes in this narrower span
-//   (the night's onset to its wake), the series over the whole range; both default to the range.
+//   `summaryFromMs` / `summaryToMs`: the summary (avg / min / max) is over the valid minutes in this span (the night's
+//   onset to its wake), the series over the range; both default to the range. The span may reach OUTSIDE the range
+//   (a child asleep before the window opened, a wake after it closed, a parent's corrected time): the minutes are read
+//   over the union of the two, so the summary of one night is the same whichever range a route asks for (the card reads
+//   the window, the detail page the display span: before, the same night showed two different averages), while the
+//   series is cut to the range so the tracks still line up with the timeline bar.
 //   `nowMs`: the clock. A minute not yet readable at it (sleepSensor.js ROW_READABLE_DELAY_MS) is left out.
-// null when the child has no heart-rate or breathing-rate entity, or no valid minute in the range at all. Otherwise
+// null when the child has no heart-rate or breathing-rate entity, or no valid minute in what was read. Otherwise
 // { hr: { avg, min, max, minutes } | null, rr: { ... } | null, series? }, where `series` is [{ t, hr, rr }], `t` the
-// bucket start as a UTC 'YYYY-MM-DD HH:MM:SS' string (the climate series' format) and `hr` / `rr` the mean of that
-// bucket's valid minutes (null when it has none; a bucket with neither is absent, so the chart breaks the line).
+// MEAN TIME of the bucket's valid minutes (whole minute) as a UTC 'YYYY-MM-DD HH:MM:SS' string (the climate series'
+// format) and `hr` / `rr` the mean of that bucket's valid minutes (null when it has none; a bucket with neither is
+// absent, so the chart breaks the line).
+// Why the mean time and not the bucket's start: the screen shows a point's value for any scrubbed time within 5 minutes
+// of it, and one valid reading at 12:04 stamped 12:00 was shown at 11:55, nine minutes BEFORE the only measurement,
+// across a gap (found in review of the display, #1092). A bucket is still 5 minutes wide, but the point sits where its
+// data is.
 // Several devices on one child are averaged per minute; a device without a valid row for the role contributes nothing.
 export function nightVitals(childId, startMs, endMs, {
   series = false, summaryFromMs = null, summaryToMs = null, nowMs = Date.now(),
@@ -64,9 +73,20 @@ export function nightVitals(childId, startMs, endMs, {
   // A summary bound that is given but not a number is "nothing to show", like a bad range; absent = the whole range.
   if ([summaryFromMs, summaryToMs].some((v) => v != null && !Number.isFinite(v))) return null;
   const startMin = Math.floor(startMs / MINUTE_MS);
-  const endMin = Math.min(Math.ceil(endMs / MINUTE_MS), readableLimitMin(nowMs));
+  const limitMin = readableLimitMin(nowMs);
+  const endMin = Math.min(Math.ceil(endMs / MINUTE_MS), limitMin);
   if (!(endMin > startMin)) return null;
-  const { perMinute, vitalsSeen } = readDeviceMinutes(childId, startMin, endMin);
+  // The summary window is in minutes too: a valid minute m counts when it STARTS inside [summaryFromMs, summaryToMs), so
+  // a start that is not on a minute rounds UP (the minute that began before the onset is not asleep time) and so does
+  // the end (the minute that begins before the wake, and so counts, ends after it). Absent bounds mean the whole,
+  // already rounded, range (not the caller's unrounded milliseconds).
+  const fromMin = summaryFromMs == null ? startMin : Math.ceil(summaryFromMs / MINUTE_MS);
+  const toMin = summaryToMs == null ? endMin : Math.ceil(summaryToMs / MINUTE_MS);
+  // Read the union of the display range and the summary window (the latter still capped by the replay clock).
+  const readFromMin = Math.min(startMin, fromMin);
+  const readToMin = Math.min(Math.max(Math.ceil(endMs / MINUTE_MS), toMin), limitMin);
+  if (!(readToMin > readFromMin)) return null;
+  const { perMinute, vitalsSeen } = readDeviceMinutes(childId, readFromMin, readToMin);
   if (!vitalsSeen) return null;
 
   // One value per minute and role: the mean over the devices with a valid row.
@@ -83,24 +103,24 @@ export function nightVitals(childId, startMs, endMs, {
   if (!minutes.length) return null;
   minutes.sort((a, b) => a.min - b.min);
 
-  // The summary window is in minutes too: a valid minute m counts when it STARTS inside [summaryFromMs, summaryToMs).
-  // Absent bounds mean the whole, already rounded, range (not the caller's unrounded milliseconds).
-  const fromMin = summaryFromMs == null ? startMin : Math.ceil(summaryFromMs / MINUTE_MS);
-  const toMin = summaryToMs == null ? endMin : Math.ceil(summaryToMs / MINUTE_MS);
   const out = { hr: summarise(minutes, 'hr', fromMin, toMin), rr: summarise(minutes, 'rr', fromMin, toMin) };
   if (series) {
     const buckets = new Map();
+    // Only the display range [startMin, endMin): minutes read for the summary alone stay out of the chart.
     for (const m of minutes) {
+      if (m.min < startMin || m.min >= endMin) continue;
       const key = Math.floor(m.min / BUCKET_MIN);
       let b = buckets.get(key);
-      if (!b) buckets.set(key, (b = { hrs: [], rrs: [] }));
+      if (!b) buckets.set(key, (b = { hrs: [], rrs: [], mins: [] }));
+      b.mins.push(m.min);
       if (m.hr != null) b.hrs.push(m.hr);
       if (m.rr != null) b.rrs.push(m.rr);
     }
-    // `minutes` is sorted, so the buckets were inserted in order. An empty bucket never exists: a minute is only kept
-    // when it has a value, so "a bucket with neither" cannot occur here, and the chart's gap is simply a missing key.
-    out.series = [...buckets].map(([key, b]) => ({
-      t: toSqlUtc(new Date(key * BUCKET_MIN * MINUTE_MS)),
+    // `minutes` is sorted, so the buckets were inserted in order, and the mean time of a bucket stays inside it (so the
+    // points stay sorted). An empty bucket never exists: a minute is only kept when it has a value, so "a bucket with
+    // neither" cannot occur here, and the chart's gap is simply a missing key.
+    out.series = [...buckets.values()].map((b) => ({
+      t: toSqlUtc(new Date(Math.round(mean(b.mins)) * MINUTE_MS)),
       hr: b.hrs.length ? whole(mean(b.hrs)) : null,
       rr: b.rrs.length ? whole(mean(b.rrs)) : null,
     }));
@@ -142,7 +162,11 @@ export function withNightVitals(childId, night, { series = false, inProgressToo 
       summaryToMs: Number.isFinite(summaryToMs) ? summaryToMs : endMs,
       nowMs,
     });
-    return vitals ? { ...night, vitals } : night;
+    // "Nothing to add" also covers valid minutes that exist only outside onset..wake on a summary-only read: both summaries
+    // are then null and `{ hr: null, rr: null }` would be a truthy, useless `vitals` key (and a byte change for a child
+    // whose card shows nothing). With a series asked for, a non-empty series is something to draw, so the object stays.
+    if (!vitals || (!vitals.hr && !vitals.rr && !(series && vitals.series?.length))) return night;
+    return { ...night, vitals };
   } catch {
     const now = Date.now();
     if (now - lastLoggedMs >= LOG_EVERY_MS) {

@@ -203,7 +203,7 @@ test('a caregiver reads the same vitals as an admin', async () => {
 });
 
 test('/sleep/:date: detail=1 adds the 5-minute series over the timeline span; a plain read has the summary only', async () => {
-  // Kills: no series on the detail read; a series on every plain read; the series on a grid other than 5 minutes.
+  // Kills: no series on the detail read; a series on every plain read; buckets other than 5 minutes wide.
   const { last, start, end } = layLastNight();
   laySensor(CHILD, start - 30 * MIN, end + 30 * MIN, planted(start, end));
   const detail = (await get(`/sleep/${last}?detail=1`)).body;
@@ -212,7 +212,12 @@ test('/sleep/:date: detail=1 adds the 5-minute series over the timeline span; a 
   assert.ok(Array.isArray(series) && series.length > 100, `a series over the night (${series?.length})`);
   for (const p of series) {
     assert.match(p.t, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:00$/);
-    assert.equal(Date.parse(`${p.t.replace(' ', 'T')}Z`) % (5 * MIN), 0, `${p.t} is on the 5-minute grid`);
+    assert.equal(Date.parse(`${p.t.replace(' ', 'T')}Z`) % MIN, 0, `${p.t} is a whole minute`);
+  }
+  // A point sits at the mean time of its bucket's valid minutes: this sensor reads every minute, so a bucket that is whole
+  // (not the first or last, which the span can cut) is 5 minutes wide and stamped at its middle minute, 2 past its start.
+  for (const p of series.slice(1, -1)) {
+    assert.equal(Date.parse(`${p.t.replace(' ', 'T')}Z`) % (5 * MIN), 2 * MIN, `${p.t} is the middle of a 5-minute bucket`);
   }
   // The summary is still onset..wake (90), while the series shows the 111 settling minutes and the 140 morning ones.
   assert.equal(detail.vitals.hr.avg, 90);

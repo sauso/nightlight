@@ -214,9 +214,10 @@ test('entities but no valid minute in the range: null, never zeros', () => {
 
 // ---------------------------------------------------------------- the series and the summary window
 
-test('series: a 5-minute grid on the UTC clock, the mean of the bucket\'s valid minutes, whole numbers, a gap is a missing point', () => {
+test('series: 5-minute buckets on the UTC clock, the mean of the bucket\'s valid minutes, whole numbers, a gap is a missing point', () => {
   // Kills: a different bucket size or origin; averaging over the wrong set; a null/placeholder point emitted for the
   // empty bucket (the chart would draw a line through the hole); `t` in another format than the climate series'.
+  // Each point is stamped at the MEAN TIME of its valid minutes (see the next tests), here: bucket 0 minutes 0..4 -> :02.
   const d = addDevice(CHILD);
   hr(d, 0, 80); hr(d, 1, 81); hr(d, 4, 83); // bucket 0: (80 + 81 + 83) / 3 = 81.33, whole numbers on the screen: 81
   rr(d, 2, 20.4); rr(d, 3, 21); // bucket 0 breathing: 20.7 -> 21
@@ -225,20 +226,43 @@ test('series: a 5-minute grid on the UTC clock, the mean of the bucket\'s valid 
   rr(d, 17, 30); // bucket 3: breathing only
   const v = run({ series: true });
   assert.deepEqual(v.series, [
-    { t: sql(at(0)), hr: 81, rr: 21 },
+    { t: sql(at(2)), hr: 81, rr: 21 },
     { t: sql(at(5)), hr: 90, rr: null },
-    { t: sql(at(15)), hr: null, rr: 30 },
+    { t: sql(at(17)), hr: null, rr: 30 },
   ]);
   assert.match(v.series[0].t, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:00$/);
   assert.equal(at(0) % (5 * MIN), 0, 'precondition: the fixture starts on the 5-minute grid');
   assert.equal('series' in run(), false, 'no series unless asked');
 });
 
-test('series: the grid is the clock\'s, not the range\'s: a range starting mid-bucket keeps that bucket\'s grid start', () => {
+test('series: the buckets are the clock\'s, not the range\'s: a range starting mid-bucket still groups minutes 3 and 4 together', () => {
   const d = addDevice(CHILD);
   hr(d, 3, 80); hr(d, 4, 82);
+  hr(d, 5, 90); // the next bucket: a range-anchored grid (3..7) would merge it with minutes 3 and 4
   const v = nightVitals(CHILD, at(3), at(10), { nowMs: NOW, series: true });
-  assert.deepEqual(v.series, [{ t: sql(at(0)), hr: 81, rr: null }]);
+  assert.deepEqual(v.series, [{ t: sql(at(4)), hr: 81, rr: null }, { t: sql(at(5)), hr: 90, rr: null }]); // minutes 3 and 4: mean 3.5 -> :04
+});
+
+test('series: a point is stamped at the mean time of its valid minutes, not at the bucket start (a lone reading at :04 is :04)', () => {
+  // Kills: stamping the bucket start. One valid reading at 12:04 published as 12:00 was shown by the hover lookup (nearest
+  // point within 5 minutes) at 11:55, nine minutes before the only measurement.
+  const lone = addDevice(CHILD);
+  hr(lone, 4, 80);
+  assert.deepEqual(run({ series: true }).series, [{ t: sql(at(4)), hr: 80, rr: null }]);
+  db.prepare('DELETE FROM esphome_readings').run();
+  hr(lone, 0, 80); hr(lone, 1, 80); hr(lone, 2, 80); hr(lone, 3, 80); hr(lone, 4, 80);
+  assert.deepEqual(run({ series: true }).series.map((p) => p.t), [sql(at(2))], 'minutes :00-:04 -> :02');
+});
+
+test('series: the stamp counts the minutes of either role, rounds to a whole minute, and the points stay sorted', () => {
+  // Kills: averaging only the heart-rate minutes; flooring instead of rounding; an unsorted series.
+  const d = addDevice(CHILD);
+  hr(d, 6, 70); rr(d, 9, 20); // bucket 1: minutes 6 and 9 -> 7.5 -> :08 (heart rate at 6, breathing at 9, one point)
+  hr(d, 0, 80); // bucket 0 inserted later than bucket 1 in the table, must still come first
+  hr(d, 11, 90); hr(d, 12, 90); hr(d, 13, 90); // bucket 2: 12
+  const s = run({ series: true }).series;
+  assert.deepEqual(s.map((p) => p.t), [sql(at(0)), sql(at(8)), sql(at(12))]);
+  assert.deepEqual(s.map((p) => p.t), [...s.map((p) => p.t)].sort());
 });
 
 test('summary: over the summary window only; the series still covers the whole range', () => {
@@ -251,6 +275,19 @@ test('summary: over the summary window only; the series still covers the whole r
   assert.deepEqual(narrow.hr, { avg: 105, min: 90, max: 120, minutes: 4 }, 'minutes 3, 4, 5, 6: 90, 100, 110, 120');
   assert.equal(narrow.series.length, 2, 'the series is the whole range (two 5-minute buckets)');
   assert.deepEqual(run({ summaryFromMs: at(3), summaryToMs: at(4) }, 0, 10).hr.minutes, 1, 'the end is exclusive, the start inclusive');
+});
+
+test('summary: a bound off the minute rounds UP at both ends (the minute that starts before the onset is not counted)', () => {
+  // Kills: Math.ceil -> Math.floor on the summary start (survived every minute-aligned fixture) or on the end.
+  const d = addDevice(CHILD);
+  for (let m = 0; m < 10; m++) hr(d, m, 60 + m * 10); // minute m = 60 + 10 m
+  // Onset 00:03:30: minute 3 STARTED before it and is out, minute 4 is the first counted. Wake 00:07:30: minute 7 starts
+  // before the wake, so it counts (and minute 8 does not): a minute counts when it STARTS inside [onset, wake).
+  const v = run({ summaryFromMs: at(3) + 30000, summaryToMs: at(7) + 30000 }, 0, 10);
+  assert.deepEqual(v.hr, { avg: 115, min: 100, max: 130, minutes: 4 }, 'minutes 4, 5, 6, 7 = 100, 110, 120, 130');
+  // Each end alone, so a fault at one cannot hide behind the other.
+  assert.deepEqual(run({ summaryFromMs: at(3) + 30000 }, 0, 10).hr.minutes, 6, 'start only: minutes 4..9');
+  assert.deepEqual(run({ summaryToMs: at(7) + 30000 }, 0, 10).hr.minutes, 8, 'end only: minutes 0..7');
 });
 
 test('summary: a window with no valid minute in it gives null summaries, the series (when asked) is still there', () => {
@@ -329,6 +366,49 @@ test('withNightVitals: the SAME object comes back when there is nothing to add',
   assert.equal(withNightVitals(CHILD, 'x'), 'x');
 });
 
+test('withNightVitals: onset before the window and wake after it still count: the summary is the same on every read', () => {
+  // The card reads the window, the detail page the display span: a child asleep before window_start (onset may be 3 h
+  // before it), or awake after window_end (the wake look-ahead), or a parent's corrected time, must not change the summary
+  // with the range asked for. Kills: clipping the summary to the range ([window_start, window_end) or the display span).
+  const d = addDevice(CHILD);
+  hr(d, -100, 70); // asleep, before the window opened
+  hr(d, 30, 80);
+  hr(d, 90, 100); // asleep, after the window closed
+  hr(d, -200, 150); // before the onset
+  hr(d, 130, 150); // after the wake
+  const night = { ...NIGHT, onset_at: sql(at(-120)), wake_at: sql(at(120)), display_start: sql(at(10)), display_end: sql(at(50)) };
+  const want = { avg: 83, min: 70, max: 100, minutes: 3 };
+  assert.deepEqual(withNightVitals(CHILD, night, { nowMs: NOW }).vitals.hr, want, 'the card (window)');
+  assert.deepEqual(withNightVitals(CHILD, night, { nowMs: NOW, series: true }).vitals.hr, want, 'detail without display');
+  const detail = withNightVitals(CHILD, night, { nowMs: NOW, series: true, display: true }).vitals;
+  assert.deepEqual(detail.hr, want, 'the detail page (display span 10..50)');
+  // The series is still only the display span, so the tracks line up with the timeline bar: minute 30 alone.
+  assert.deepEqual(detail.series, [{ t: sql(at(30)), hr: 80, rr: null }]);
+  const windowSeries = withNightVitals(CHILD, night, { nowMs: NOW, series: true }).vitals.series;
+  assert.deepEqual(windowSeries.map((p) => p.hr), [80], 'the window 0..60 holds minute 30 only');
+});
+
+test('withNightVitals: the summary stays inside the replay clock when it reaches past the range', () => {
+  // A wake after the window is read only up to what is readable at nowMs.
+  const d = addDevice(CHILD);
+  hr(d, 30, 80); hr(d, 90, 100);
+  const night = { ...NIGHT, wake_at: sql(at(120)) };
+  assert.deepEqual(withNightVitals(CHILD, night, { nowMs: at(91) + 9 }).vitals.hr.minutes, 1, 'minute 90 is not readable yet');
+  assert.deepEqual(withNightVitals(CHILD, night, { nowMs: at(91) + 10 }).vitals.hr.minutes, 2);
+});
+
+test('withNightVitals: a summary-only read whose valid minutes are all outside onset..wake adds nothing (the same object)', () => {
+  // Kills: returning `vitals: { hr: null, rr: null }` (truthy) for it. With a series asked for there IS something to draw.
+  const d = addDevice(CHILD);
+  hr(d, 5, 70); hr(d, 55, 90); // inside the window, before the onset (10) and after the wake (50)
+  assert.equal(withNightVitals(CHILD, NIGHT, { nowMs: NOW }), NIGHT);
+  const detail = withNightVitals(CHILD, NIGHT, { nowMs: NOW, series: true });
+  assert.notEqual(detail, NIGHT);
+  assert.equal(detail.vitals.hr, null);
+  assert.equal(detail.vitals.rr, null);
+  assert.deepEqual(detail.vitals.series.map((p) => p.hr), [70, 90]);
+});
+
 test('withNightVitals: a night in progress ends at as_of, with no onset the summary starts at the range start', () => {
   const d = addDevice(CHILD);
   hr(d, 5, 70); hr(d, 25, 90); hr(d, 40, 200);
@@ -345,7 +425,7 @@ test('withNightVitals: the detail view uses the timeline\'s display span for the
   hr(d, 2, 70); hr(d, 12, 80);
   const night = { ...NIGHT, display_start: sql(at(10)), display_end: sql(at(20)), onset_at: null, wake_at: null };
   const v = withNightVitals(CHILD, night, { nowMs: NOW, series: true, display: true }).vitals;
-  assert.deepEqual(v.series, [{ t: sql(at(10)), hr: 80, rr: null }]);
+  assert.deepEqual(v.series, [{ t: sql(at(12)), hr: 80, rr: null }]); // the lone minute 12 (display minutes 10..19)
   const plain = withNightVitals(CHILD, night, { nowMs: NOW, series: true }).vitals;
   assert.equal(plain.series.length, 2, 'without `display` the window is used');
 });
