@@ -63,6 +63,20 @@ const videosPlaying = (page) =>
     },
     null,
     { timeout: 45_000 }
+  ).then(() =>
+    // Found when refreshing for 0.48.0: the picture was taken while the tile still said "No signal". WebRTC cannot reach the
+    // throwaway container (only the HTTP port is published), so each tile fails its first WebRTC attempt (~2 s) and then
+    // falls back to HLS, which is what actually plays. The hidden HLS <video> already has a frame during that window, so the
+    // check above passes early. A player sets its <video> to opacity 1 only once its own state is 'live' (WhepPlayer and
+    // HlsPlayer both), so wait for every video to be shown, and for no overlay text, rather than for "a frame exists".
+    page.waitForFunction(
+      () => {
+        const v = [...document.querySelectorAll('video.whep-video')];
+        return v.length > 0 && v.every((el) => getComputedStyle(el).opacity === '1') && !/No signal|Connecting/i.test(document.body.innerText);
+      },
+      null,
+      { timeout: 45_000 }
+    )
   );
 
 // 1. First-run admin setup, on an empty install. The password field shows dots, which is the point.
@@ -141,6 +155,9 @@ for (const [suffix, form] of [['mobile', PHONE], ['desktop', DESKTOP]]) {
   await page.getByLabel('Camera IP address').fill('192.168.1.50');
   await page.getByLabel('RTSP port').fill('554');
   await page.getByLabel('Stream path', { exact: true }).fill('/Streaming/Channels/101');
+  // Filling the last field scrolls the page down, which left the "Unsaved changes" banner cut off under the sticky header
+  // in the 0.48.0 refresh. Back to the top so the picture starts at the top of the form.
+  await page.evaluate(() => window.scrollTo(0, 0));
   await shot('add-camera-mobile');
   await context.close();
 }
