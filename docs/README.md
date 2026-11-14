@@ -22,7 +22,7 @@ On About, **Got an idea?** opens a GitHub issue; you need a GitHub account. The 
 after the next release to `main`; until then, the link opens a plain new issue.
 
 - [Visual walkthrough](#visual-walkthrough) — setup, live view, sleep, alerts, notifications and a caregiver's view
-- [Camera controls](camera-controls.md) — PTZ and offline alerts under Settings → Camera and Recording
+- [Camera controls](camera-controls.md) — PTZ, offline and long-silence alerts under Settings → Camera and Recording
 - [Sleep tracking](sleep-tracking.md) — how nights are estimated, corrected and reviewed, and its known limits
 - [Recording](recording.md) — clips, wake events, manual recordings and retention
 - [Your home screen and the mobile apps](mobile.md) — install as an app, Android and iOS, push on the apps
@@ -53,7 +53,7 @@ The first time you open Nightlight, a welcome screen lists the setup steps. The 
 
 ### 2. Watch live
 
-The Live tab shows every camera. On a wide screen the navigation moves from the bottom of the screen to a side bar on the left. The phone image was captured without a picture, so its tiles say "No signal"; a camera that is working shows its video there, as in the desktop image.
+The Live tab shows every enabled camera, with its status, name, assigned child and available room readings under the picture. The gear opens its controls; Camera settings in that sheet is for admins. On a wide screen the navigation moves from the bottom of the screen to a side bar on the left. The phone image was captured without a picture, so its tiles say "No signal"; a camera that is working shows its video there, as in the desktop image. The screenshots have not been regenerated for the current layout.
 
 ![Live view on a phone](screenshots/live-mobile.png)
 

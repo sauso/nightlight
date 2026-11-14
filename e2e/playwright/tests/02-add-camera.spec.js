@@ -50,6 +50,9 @@ test('add a camera through the UI and see it go live on the grid', async ({ page
   // Exercise the mode menu (Low <-> Compatibility) — real UI interaction. The tile's gear opens the
   // cog bottom sheet (aria-label "Camera settings"); it holds the Connection mode segmented buttons.
   await tile.getByRole('button', { name: 'Camera settings', exact: true }).click();
+  await expect(page.getByRole('group', { name: 'Connection mode' })).toHaveClass(/seg-track/);
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCSS('min-height', '56px');
+  await expect(page.getByRole('button', { name: 'Camera settings', exact: true }).last()).toHaveCSS('min-height', '56px');
   await page.getByRole('button', { name: 'Compatibility', exact: true }).click();
 
   // Confirm the tile is wired to a genuinely LIVE stream: the camera's HLS manifest
