@@ -2775,7 +2775,8 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .detection-card:not(.detection-card--switch) .detection-switch { padding: 0; }
 .detection-status__dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: var(--text-secondary); }
 .detection-status__dot--live { background: var(--accent); }
-.detection-status__dot--error { background: var(--night-error); }
+/* --offline, not --night-error: that token is only defined inside .night, and this card is not one (Codex review of #1081: the dot was transparent). */
+.detection-status__dot--error { background: var(--offline); }
 .detection-disclosure { display: block; min-height: 44px; margin-top: 8px; padding: 0 4px; border: 0; background: transparent; color: var(--accent-text); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
 .detection-disclosure:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .detection-disclosure:active { background: var(--child-action-active); }
