@@ -91,6 +91,10 @@ Motion and sound alerts are listed on the child's page, each with a snapshot fro
 
 ![Add camera on a phone](screenshots/add-camera-mobile.png)
 
+The Motion, Sound and Alert schedule screens use matching cards for their switches and settings.
+Sound keeps its first detector limit in view and folds longer explanations behind two buttons.
+See [Detection settings](notifications.md#detection-settings-on-a-camera). These screenshots have not been updated for that layout.
+
 ### 8. Set up notifications
 
 Settings → Integrations → Push notifications lists the providers. An alert goes to every provider you turn on. See [Push notifications](notifications.md).

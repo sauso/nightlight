@@ -2761,6 +2761,33 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 }
 
 /* Detection screens (DetectionSettings.jsx): enable-toggle row, slider legend, save flag. */
+.detection-card { padding: 14px; border-radius: 12px; }
+.detection-card--switch { padding: 0; overflow: hidden; }
+.detection-card__title { font-size: 16px; font-weight: 800; color: var(--text-primary); margin: 0 0 12px; }
+.detection-card .field:last-child { margin-bottom: 0; }
+.detection-card .field input { min-height: 44px; }
+.detection-card .field-row { grid-template-columns: 1fr 1fr; }
+.detection-card .field-row > .field { min-width: 0; }
+.detection-card .detection-slider label { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.detection-card .camera-tile__sub { line-height: 1.45; }
+.detection-switch { min-height: 56px; border: 0; border-radius: 0; margin: 0; }
+.detection-card--switch .detection-switch > div > div:first-child { font-size: 16px; font-weight: 800; }
+.detection-card:not(.detection-card--switch) .detection-switch { padding: 0; }
+.detection-status__dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: var(--text-secondary); }
+.detection-status__dot--live { background: var(--accent); }
+.detection-status__dot--error { background: var(--night-error); }
+.detection-disclosure { display: block; min-height: 44px; margin-top: 8px; padding: 0 4px; border: 0; background: transparent; color: var(--accent-text); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.detection-disclosure:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.detection-disclosure:active { background: var(--child-action-active); }
+@media (hover: hover) { .detection-disclosure:hover { background: var(--child-action-hover); } }
+/* #1076 uses a local inset track; Account's shared .segmented stays as it is. */
+.seg-track { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated-2); }
+.seg-track__btn { flex: 1; min-width: 0; min-height: 44px; padding: 8px 5px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 13px; cursor: pointer; }
+.seg-track__btn--active { background: var(--accent); color: var(--on-accent); font-weight: 700; }
+.seg-track__btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.seg-track__btn:active:not(.seg-track__btn--active) { background: var(--child-action-active); }
+@media (hover: hover) { .seg-track__btn:hover:not(.seg-track__btn--active) { background: var(--child-action-hover); } }
+@media (prefers-reduced-motion: reduce) { .seg-track__btn { transition: none; } }
 .tgl-row {
   display: flex;
   align-items: center;

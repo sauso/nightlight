@@ -315,6 +315,13 @@ About that one shared address:
 **Cameras → edit** a camera. Motion and sound are independent detectors — either can be enabled
 without the other, and each has its own sensitivity, confirmation delay and cooldown.
 
+Each of the three screens starts with its on/off switch. When on, Motion shows **Detection source**,
+**Timing**, **Alert image**, **Bed area**, then **Recording**. Sound shows **Sensitivity**,
+**Calibration**, **Timing**, **Recording**, then **What this detector can and can't do**.
+Alert schedule shows **Active hours** with the **From** and **To** fields. When off, each screen
+shows its short explanation in place of the settings cards. The source buttons for Motion select
+Nightlight, MQTT or, where supported, ONVIF; choosing MQTT shows its topic and value fields.
+
 The camera's page also carries a read-only **Recording and alerts** summary of what the camera alerts on,
 whether alerts save a clip, and whether it is ready right now; see
 [the panel](recording.md#the-recording-and-alerts-panel-per-camera-read-only).
@@ -324,6 +331,10 @@ whether alerts save a clip, and whether it is ready right now; see
 The Motion, Sound and Alert schedule screens have no Save button — every change (a slider, a switch,
 a typed number) saves itself about a second after you stop moving it, and applies immediately: the
 camera's detector restarts to match.
+
+On Sound, the first limit, **It measures loudness, not crying**, stays visible. **Show the other four**
+opens the remaining limits. The first Timing sentence stays visible, while **More about timing**
+opens its longer explanation. These rows only reveal text; they do not change detection settings.
 
 A small flag above the settings says **Saving…**, then **Saved ✓**. Leaving the screen right away —
 tapping Back the instant you make a change — still saves it; you don't need to wait for the flag.
