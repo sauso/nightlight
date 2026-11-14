@@ -72,16 +72,35 @@ export function distanceCm(value, unit) {
   return factor == null || !Number.isFinite(value) ? null : value * factor;
 }
 
+// The distance cut of the rule, on its own: does this device's distance row for the minute let a vital sign stand?
+// (UNIT_TO_CM says what happens with no row or an unreadable unit.) Kept in one place because THREE readers need it:
+// the shadow (deviceMinuteHasVitals) and the two display helpers below.
+function distanceAllows(dist) {
+  if (!dist || !(dist.n > 0) || dist.mean == null) return true; // no distance this minute: see UNIT_TO_CM
+  const cm = distanceCm(dist.mean, dist.unit);
+  return cm != null && cm <= MAX_DISTANCE_CM;
+}
+
+// Is this device's heart-rate row for the minute a valid vital sign? `hr` and `dist` are that device's rows
+// ({ n, mean, unit }), each possibly absent. THE definition of "a measured heart beat": the shadow below and the
+// night's heart-rate display (lib/nightVitals.js) both use it, so the screen never shows a minute the sleep code
+// would have called "no vital signs" (and the other way round).
+export function validHrMinute(hr, dist) {
+  const hrOk = !!hr && hr.n >= VITALS_HR_MIN_N;
+  return hrOk && distanceAllows(dist);
+}
+
+// The same for a breathing-rate row: enough updates, and not the 1.0 placeholder (RR_PLACEHOLDER_BELOW).
+export function validRrMinute(rr, dist) {
+  const rrOk = !!rr && rr.n >= VITALS_RR_MIN_N && !(rr.mean != null && rr.mean < RR_PLACEHOLDER_BELOW);
+  return rrOk && distanceAllows(dist);
+}
+
 // Did ONE device measure valid vital signs in one minute? `hr`, `rr` and `dist` are that device's rows for the minute
 // ({ n, mean, unit }), each possibly absent. Per DEVICE, never per child (plan review): two devices on one child never
 // lend each other a distance, so a sensor across the room cannot borrow the bedside one's 50 cm.
 export function deviceMinuteHasVitals({ hr, rr, dist } = {}) {
-  const hrOk = !!hr && hr.n >= VITALS_HR_MIN_N;
-  const rrOk = !!rr && rr.n >= VITALS_RR_MIN_N && !(rr.mean != null && rr.mean < RR_PLACEHOLDER_BELOW);
-  if (!hrOk && !rrOk) return false;
-  if (!dist || !(dist.n > 0) || dist.mean == null) return true; // no distance this minute: see UNIT_TO_CM
-  const cm = distanceCm(dist.mean, dist.unit);
-  return cm != null && cm <= MAX_DISTANCE_CM;
+  return validHrMinute(hr, dist) || validRrMinute(rr, dist);
 }
 
 // SELECT ONLY. Every entity that was ever this child's, retired ones included: a device moved to another child is
@@ -98,6 +117,38 @@ const readingsStmt = db.prepare(
 // whose distance sensor has no device class has no distance here, so the 1 m cut never applies to it (and the cut is
 // weak anyway, MAX_DISTANCE_CM).
 const ROLE_KEY = Object.freeze({ heart_rate: 'hr', respiratory_rate: 'rr', distance: 'dist' });
+
+// The first UTC minute NOT yet readable at `nowMs`: minute m is readable when (m + 1) * 60000 + ROW_READABLE_DELAY_MS <=
+// nowMs, i.e. m < floor((nowMs - delay) / 60000). One copy for the shadow and the night's vitals display.
+export function readableLimitMin(nowMs) {
+  return Math.floor((nowMs - ROW_READABLE_DELAY_MS) / MINUTE_MS);
+}
+
+// The child's rows over the minute range [startMin, endMin) (whole UTC minutes since the epoch), grouped for the
+// readers: { perMinute: minute -> Map(device id -> { hr, rr, dist }), vitalsSeen }. `vitalsSeen` is true when a
+// heart-rate or breathing-rate row exists in the range (a distance row alone does not count). SELECT ONLY, the entity
+// rules are the ones above (every entity ever the child's, by role, one primary-key range query each). Shared by
+// sensorMinutesFor (the shadow) and lib/nightVitals.js (the display), so there is ONE reader of the raw tables, which
+// is what the boundary test pins; the callers clamp the range with readableLimitMin first.
+export function readDeviceMinutes(childId, startMin, endMin) {
+  const perMinute = new Map(); // minute -> Map(device id -> { hr, rr, dist })
+  let vitalsSeen = false;
+  for (const e of entitiesStmt.all(childId)) {
+    const key = ROLE_KEY[guessEsphomeCategory(e)];
+    if (!key) continue; // not a role the rule reads: its rows are never queried (above)
+    for (const r of readingsStmt.iterate(e.id, startMin, endMin)) {
+      let devices = perMinute.get(r.bucket);
+      if (!devices) perMinute.set(r.bucket, (devices = new Map())); // presence: a row of a role the rule reads
+      if (key !== 'dist') vitalsSeen = true;
+      let d = devices.get(e.device_id);
+      if (!d) devices.set(e.device_id, (d = {}));
+      // Two entities of one role on one device in one minute (a retired entity and its clone, in the minute of the
+      // move): the row with more updates, as the measurement did.
+      if (!d[key] || r.n > d[key].n) d[key] = { n: r.n, mean: r.mean, unit: e.unit };
+    }
+  }
+  return { perMinute, vitalsSeen };
+}
 
 // The child's sensor minutes over [startMs, endMs): one value per UTC minute, index i = the minute starting at
 // startMs + i minutes. computeNight passes its own minute origin (window start minus the 3 h lookbehind), so an index
@@ -118,25 +169,9 @@ export function sensorMinutesFor(childId, startMs, endMs, { nowMs = Date.now() }
   if (!Number.isInteger(startMs / MINUTE_MS)) throw new RangeError('sensorMinutesFor: startMs must be a whole UTC minute');
   const startMin = startMs / MINUTE_MS;
   const length = Math.max(0, Math.ceil((endMs - startMs) / MINUTE_MS));
-  // Minute m is readable when (m + 1) * 60000 + ROW_READABLE_DELAY_MS <= nowMs, i.e. m < floor((nowMs - delay) / 60000).
-  const endMin = Math.min(startMin + length, Math.floor((nowMs - ROW_READABLE_DELAY_MS) / MINUTE_MS));
+  const endMin = Math.min(startMin + length, readableLimitMin(nowMs));
   if (!(endMin > startMin)) return null;
-  const perMinute = new Map(); // minute -> Map(device id -> { hr, rr, dist })
-  let vitalsSeen = false;
-  for (const e of entitiesStmt.all(childId)) {
-    const key = ROLE_KEY[guessEsphomeCategory(e)];
-    if (!key) continue; // not a role the rule reads: its rows are never queried (above)
-    for (const r of readingsStmt.iterate(e.id, startMin, endMin)) {
-      let devices = perMinute.get(r.bucket);
-      if (!devices) perMinute.set(r.bucket, (devices = new Map())); // presence: a row of a role the rule reads
-      if (key !== 'dist') vitalsSeen = true;
-      let d = devices.get(e.device_id);
-      if (!d) devices.set(e.device_id, (d = {}));
-      // Two entities of one role on one device in one minute (a retired entity and its clone, in the minute of the
-      // move): the row with more updates, as the measurement did.
-      if (!d[key] || r.n > d[key].n) d[key] = { n: r.n, mean: r.mean, unit: e.unit };
-    }
-  }
+  const { perMinute, vitalsSeen } = readDeviceMinutes(childId, startMin, endMin);
   if (!vitalsSeen) return null;
   const minutes = new Array(length).fill(null);
   for (const [bucket, devices] of perMinute) {

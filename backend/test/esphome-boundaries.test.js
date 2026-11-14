@@ -47,7 +47,12 @@ test('#917 lib/sleepSensor.js only SELECTs, never writes, and is imported by sle
   assert.deepEqual(imports, ['../db.js', './esphomeRoles.js']);
   assert.doesNotMatch(source('lib/esphomeRoles.js'), /^\s*import\b/m, 'esphomeRoles.js stays import-free');
   const importers = walkSources(src).filter((f) => /from\s+['"][./]*(?:lib\/)?sleepSensor\.js['"]/.test(f.src)).map((f) => f.rel);
-  assert.deepEqual(importers, ['lib/sleepAnalysis.js']);
+  // lib/nightVitals.js is the display-only second importer (heart rate and breathing on the card and the timeline): it
+  // reads through readDeviceMinutes, so the raw tables are still named in this one file and still only SELECTed.
+  // Nothing in the sleep maths imports it (routes/children.js attaches its result after the night is worked out).
+  assert.deepEqual(importers, ['lib/nightVitals.js', 'lib/sleepAnalysis.js']);
+  const sleepMaths = ['lib/sleepAnalysis.js', 'lib/sleepScore.js', 'lib/sleepScoreAttach.js', 'lib/nightSummary.js', 'lib/sleepReviews.js'];
+  for (const file of sleepMaths) assert.doesNotMatch(source(file), /nightVitals/, `${file} must not read the display-only vitals`);
 });
 
 test('#506 adapter is the only client import and no source sends device controls', async () => {
