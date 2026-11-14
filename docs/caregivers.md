@@ -107,14 +107,22 @@ signed in. The link never contains a password.
 - **The phone app.** The link opens Nightlight in a browser. After choosing a password there, sign in to the
   Nightlight app with the username shown on that page and the new password.
 - The admin's list of accounts says which ones are still waiting on an invite and when it runs out, and, for 7 days
-  after, when an invite was used.
+  after, when an invite was used. An account that is waiting but shows no expiry has no link that works: it was
+  cancelled, ran out, or its password was set another way. Make a new link, or set its password yourself.
+- **"Too many attempts".** If the link's page says this, wait 15 minutes and open the link again. Each network
+  address gets 100 failed tries at invite links per 15 minutes, and everyone who reaches Nightlight through the same
+  reverse proxy, or through Tailscale, can share one address, so someone else's failed tries can use it up. Signing
+  in is not affected.
 
 **What a leaked link gives.** Anyone who has the link before it is used can choose the password and sign in as that
 caregiver: watch and listen to the cameras and talk through them, record, change children's names and photos, answer
 the morning review, and everything else in the caregiver column of [the table above](#what-caregivers-and-admins-can-do).
 Never an admin, and never for more than 7 days or more than once. Send it only to the person it is for. If it went
-somewhere else, cancel it (or make a new one) before they open it. If the person tells you the link no longer works
-and they never used it, someone else may have: remove that account.
+somewhere else, cancel it (or make a new one) before they open it.
+
+If the person tells you the link no longer works, first ask whether they have just chosen a password with it. If so,
+ask them to sign in with that password: a second tap on the button, or a page that lost its answer, can make a link
+that has just worked look used. If they never chose a password with it, someone else may have: remove that account.
 
 ### After restoring a backup, or going back to an older version
 

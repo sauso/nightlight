@@ -11,7 +11,12 @@
 //     placeholder hash the invite was made with (Opus plan review H1, M1, M4; Codex C2);
 //   * a pending account cannot sign in by any path: /login (even with a password its hash really matches), /login/mfa,
 //     or a session that already exists (C1); adminCount and PUT /users/:id never let a pending account be the admin;
-//   * the public routes share one failures-only limiter, and invite hashes are capped across tokens (M2, C3).
+//   * the public routes share one failures-only limiter, and invite hashes are capped across tokens (M2, C3); both
+//     bounds are released when a hash FAILS (the worker stopped mid-hash), not only when it succeeds (review M-2);
+//   * a second redeem of the same token while the first hashes answers 409 invite_in_progress, not the dead-link 404
+//     (review L1), and the Users list calls an invite open only when /invite/check would accept it (review L2);
+//   * a password that is not valid text (an unpaired UTF-16 surrogate) never reaches bcrypt on any route: a sign-in
+//     answers like a wrong password, counted; a route that sets a password answers 400; the invite is not spent.
 //
 // HOW THE "MEANWHILE" CASES WORK. The redeem awaits a bcrypt hash in the shared worker thread (lib/passwordHash.js).
 // duringTheHash() sends a request, waits until its hash job has been SUBMITTED (passwordWorkerStats), then changes the
@@ -296,11 +301,15 @@ describe('POST /invite/redeem', () => {
   test('★ unknown, expired, used and malformed tokens get the same 404, and nothing is written', async () => {
     const expired = plantPending({ expiresInMs: -60_000 });
     const used = plantPending({ usedAt: utc(Date.now() - 60_000) });
+    const before = stats().submitted;
     for (const token of [randomBytes(32).toString('base64url'), expired.token, used.token, 'short', 7, null]) {
       const res = await redeem(token);
       assert.equal(res.status, 404, `${JSON.stringify(token)} was not refused`);
       assert.deepEqual(res.body, INVALID);
     }
+    // The redeem's OWN up-front check refused them, before bcrypt (review L3): the claim after the hash would give the
+    // same 404, so only the work done can tell "refused up front" from "refused after a hash".
+    assert.equal(stats().submitted, before, 'a token that cannot be used cost a bcrypt hash');
     for (const p of [expired, used]) {
       assert.equal(userRow(p.id).password_set, 0);
       assert.equal(userRow(p.id).password_hash, p.placeholder);
@@ -318,7 +327,8 @@ describe('POST /invite/redeem', () => {
     }
     assert.equal(inviteRow(p.token).used_at, null, 'a refused password spent the invite');
     assert.equal(userRow(p.id).password_set, 0);
-    assert.equal((await redeem(p.token, CHOSEN)).status, 200, 'the invite no longer worked after a too-short try');
+    // The boundary (review L6): 7 characters was refused above, exactly 8 is accepted.
+    assert.equal((await redeem(p.token, 'exactly8')).status, 200, 'the invite no longer worked after a too-short try, or 8 characters is refused');
   });
 
   test('★ two redeems of one token at the same moment: exactly one wins, and only ONE password is hashed', async () => {
@@ -327,9 +337,10 @@ describe('POST /invite/redeem', () => {
     const before = stats().submitted;
     const [a, b] = await Promise.all([redeem(p.token, 'first-choice-1'), redeem(p.token, 'second-choice-2')]);
     await clog;
-    assert.deepEqual([a.status, b.status].sort(), [200, 404], `${a.status} ${JSON.stringify(a.body)} / ${b.status}`);
-    const loser = a.status === 404 ? a : b;
-    assert.deepEqual(loser.body, INVALID);
+    // The second is told "in progress" (409), not "invalid" (review L1): a double tap must not look like a dead link.
+    assert.deepEqual([a.status, b.status].sort(), [200, 409], `${a.status} ${JSON.stringify(a.body)} / ${b.status}`);
+    const loser = a.status === 409 ? a : b;
+    assert.deepEqual(loser.body, { error: 'invite_in_progress' });
     assert.equal(stats().submitted - before, 1, 'the second request queued a bcrypt job of its own (no single flight)');
     const winner = a.status === 200 ? 'first-choice-1' : 'second-choice-2';
     assert.ok(await bcrypt.compare(winner, userRow(p.id).password_hash));
@@ -456,6 +467,32 @@ describe('POST /invite/redeem', () => {
     assert.equal((await redeem(refused.token)).status, 200, 'the in-flight count never came back down');
   });
 
+  // Review M-2: both bounds above are released in `finally`, and a hash that FAILS is the path that needs it. The
+  // worker is stopped while a redeem's hash is pending (a real failure the app can meet: a worker that crashes), so
+  // the route answers 500 and must still let go of the token and of its slot in the cap.
+  const failedRedeem = async (token) => {
+    const res = await duringTheHash(() => redeem(token), () => { void passwordHash.stopPasswordWorker(); });
+    assert.equal(res.status, 500, `the stopped worker did not fail the redeem: ${res.status} ${JSON.stringify(res.body)}`);
+    return res;
+  };
+
+  test('★ a redeem whose hash fails releases its token: the same link works when tried again', async () => {
+    const p = plantPending();
+    await failedRedeem(p.token);
+    assert.equal(inviteRow(p.token).used_at, null, 'a failed redeem spent the invite');
+    const retry = await redeem(p.token);
+    assert.equal(retry.status, 200, `the link stayed locked after a failed hash: ${retry.status} ${JSON.stringify(retry.body)}`);
+  });
+
+  test('★ four failed hashes on one link do not use up the cap: another invite still redeems', async () => {
+    const a = plantPending();
+    const b = plantPending();
+    // Four, the cap: had any failure kept its slot, the cap would now be full.
+    for (let i = 0; i < 4; i++) await failedRedeem(a.token);
+    const other = await redeem(b.token);
+    assert.equal(other.status, 200, `the failed hashes kept their slots in the cap: ${other.status} ${JSON.stringify(other.body)}`);
+  });
+
   test('an account that somehow has two-factor on gets the second step, never a session from the link alone', async () => {
     // Not reachable through the API (a pending account cannot sign in to turn two-factor on); planted, because the
     // redeem answers like /login and must not skip a second factor if one is there.
@@ -511,7 +548,11 @@ describe('a pending account can never sign in', () => {
   test('★ /login refuses it even with the password its stored hash really matches, exactly like a wrong one, and counts it', async () => {
     // HOSTILE: a hash of a password this test knows, so only the guard can refuse it (M3).
     const p = plantPending({ hash: bcrypt.hashSync('known-pass-123', 4) });
+    const before = stats().submitted;
     const res = await login(p.username, 'known-pass-123');
+    // AFTER the same compare as any account (review L4): skipping bcrypt for a pending name would make it answer
+    // faster, which tells a guesser "this name is waiting on an invite".
+    assert.equal(stats().submitted - before, 1, 'a pending account was refused without the same bcrypt compare');
     assert.equal(res.status, 401, `a pending account signed in: ${JSON.stringify(res.body)}`);
     assert.deepEqual(res.body, WRONG_LOGIN);
     assert.equal(db.prepare('SELECT COUNT(*) c FROM sessions WHERE user_id = ?').get(p.id).c, 0);
@@ -607,6 +648,13 @@ describe('GET /users: where each account\'s invite stands', () => {
     const longAgo = plantPending({ expiresInMs: -6 * DAY, usedAt: utc(Date.now() - 8 * DAY) });
     db.prepare('UPDATE users SET password_set = 1 WHERE id = ?').run(longAgo.id);
     const pendingAdmin = plantPending({ role: 'admin' });
+    // Review L2 / Codex 2: an invite the link can no longer use is not listed as open. Its account's hash was replaced
+    // behind it (what an older version does when it sets a password), so /invite/check refuses it; and a cancelled one.
+    const rehashed = plantPending();
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync('set-by-older-version', 4), rehashed.id);
+    assert.equal((await check(rehashed.token)).status, 404, 'precondition: the link is refused by /invite/check');
+    const cancelled = plantPending();
+    assert.equal((await api('DELETE', `/users/${cancelled.id}/invite`, { token: adminToken })).status, 200);
     const res = await api('GET', '/users', { token: adminToken });
     assert.equal(res.status, 200);
     const by = Object.fromEntries(res.body.map((u) => [u.id, u]));
@@ -619,9 +667,12 @@ describe('GET /users: where each account\'s invite stands', () => {
     assert.notEqual(by[redeemed.id].invite_accepted_at, null);
     assert.deepEqual(pick(longAgo.id), { password_set: true, invite_expires_at: null, invite_accepted_at: null });
     assert.deepEqual(pick(pendingAdmin.id), { password_set: false, invite_expires_at: null, invite_accepted_at: null });
+    assert.deepEqual(pick(rehashed.id), { password_set: false, invite_expires_at: null, invite_accepted_at: null },
+      'an invite /invite/check refuses is listed as open');
+    assert.deepEqual(pick(cancelled.id), { password_set: false, invite_expires_at: null, invite_accepted_at: null });
     assert.deepEqual(pick('u-carer'), { password_set: true, invite_expires_at: null, invite_accepted_at: null });
     const text = JSON.stringify(res.body);
-    for (const p of [live, expired, redeemed, longAgo, pendingAdmin]) {
+    for (const p of [live, expired, redeemed, longAgo, pendingAdmin, rehashed, cancelled]) {
       assert.ok(!text.includes(p.token), 'the list carries an invite token');
       assert.ok(!text.includes(sha256(p.token)), 'the list carries a token hash');
     }
@@ -657,6 +708,92 @@ describe('the limits on the public routes', () => {
       assert.equal(res.status, 200, `the ${i + 1}th successful check was refused`);
     }
     assert.equal((await redeem(p.token, CHOSEN, { 'x-forwarded-for': ip })).status, 200);
+  });
+});
+
+// Found in the review of #1094 (verified by running): bcryptjs's own UTF-8 conversion fails slowly, on the ONE worker
+// every sign-in queues on, for a password holding an unpaired UTF-16 surrogate, and the route then answered 500. That
+// was reachable without signing in, through /login, and through /invite/redeem (where it also did not spend the invite,
+// so it could be repeated). lib/passwordHash.js now refuses one before the worker; these cases go through the routes.
+// FAILS WITHOUT THE FIX (verified by removing the guard): every refused case below answered 500 after the slow failure
+// and queued a worker job.
+describe('a password that is not valid text never reaches bcrypt', () => {
+  // An unpaired surrogate (half of a pair, alone) at the start, in the middle and at the end, and a pair in the wrong
+  // order (two lone halves). JSON.stringify writes each as a "\udXXX" escape, and the server's parser hands back that
+  // lone code unit: exactly what a hostile client can send.
+  const NOT_TEXT = ['\uD800abcdefgh', 'abcd\uDC00efgh', 'abcdefgh\uD800', 'abcdefgh\uDE00\uD83D'];
+  // A well-formed pair (an emoji) is ordinary text and must keep working.
+  const FINE = 'abcdefg😀';
+  const REFUSED = { error: 'That password contains characters that cannot be used' };
+
+  test('★ /login answers exactly like a wrong password, counts it, and queues no bcrypt job', async () => {
+    makeUser(db, { id: 'u-text', username: 'texttest', role: 'caregiver', password: 'text-password-1' });
+    const before = stats().submitted;
+    for (const password of NOT_TEXT) {
+      const res = await login('texttest', password);
+      assert.equal(res.status, 401, `${JSON.stringify(password)}: ${res.status} ${JSON.stringify(res.body)}`);
+      assert.deepEqual(res.body, WRONG_LOGIN);
+    }
+    assert.equal(stats().submitted, before, 'a password that is not valid text reached the bcrypt worker');
+    // Counted like a wrong password: FREE_FAILURES of them in all, and the account is slowed, even for the right one.
+    for (let i = NOT_TEXT.length; i < FREE_FAILURES; i++) await login('texttest', NOT_TEXT[i % NOT_TEXT.length]);
+    assert.equal((await login('texttest', 'text-password-1')).status, 429, 'the refused sign-ins were not counted');
+  });
+
+  test('★ the invite redeem answers 400 before taking a slot: no bcrypt job, nothing written, the invite still works', async () => {
+    const p = plantPending();
+    const before = stats().submitted;
+    for (const password of NOT_TEXT) {
+      const res = await redeem(p.token, password);
+      assert.equal(res.status, 400, `${JSON.stringify(password)}: ${res.status} ${JSON.stringify(res.body)}`);
+      assert.deepEqual(res.body, REFUSED);
+    }
+    assert.equal(stats().submitted, before, 'a password that is not valid text reached the bcrypt worker');
+    assert.equal(inviteRow(p.token).used_at, null, 'a refused password spent the invite');
+    assert.equal(userRow(p.id).password_hash, p.placeholder);
+    // BEFORE the single-flight slot: while a good redeem of the same link is hashing (held behind a slow job), the bad
+    // one gets its own 400, not the 409 meant for a second attempt at the same moment.
+    const clog = clogWorker();
+    let bad;
+    const good = await duringTheHash(() => redeem(p.token, FINE), () => { bad = redeem(p.token, NOT_TEXT[1]); });
+    await clog;
+    const badRes = await bad;
+    assert.equal(badRes.status, 400, `the check comes after the single-flight slot: ${badRes.status} ${JSON.stringify(badRes.body)}`);
+    assert.deepEqual(badRes.body, REFUSED);
+    // The good one, holding an emoji, was redeemed, and signs in.
+    assert.equal(good.status, 200, JSON.stringify(good.body));
+    assert.equal((await login(p.username, FINE)).status, 200);
+  });
+
+  test('★ the routes that set a password answer 400 and queue no bcrypt job; nothing is written', async () => {
+    const carerBefore = userRow('u-carer');
+    const before = stats().submitted;
+    const sends = (password) => [
+      ['POST /users', () => api('POST', '/users', { token: adminToken, body: { username: 'texttest', password } })],
+      ['PUT /users/:id', () => api('PUT', '/users/u-carer', { token: adminToken, body: { password } })],
+      ['PUT /me/password', () => api('PUT', '/me/password', {
+        token: carerToken, body: { current_password: 'carer-password', new_password: password }, headers: { 'x-forwarded-for': nextIp() },
+      })],
+    ];
+    for (const password of NOT_TEXT) {
+      for (const [route, send] of sends(password)) {
+        const res = await send();
+        assert.equal(res.status, 400, `${route} ${JSON.stringify(password)}: ${res.status} ${JSON.stringify(res.body)}`);
+        assert.deepEqual(res.body, REFUSED, route);
+      }
+    }
+    assert.deepEqual(userRow('u-carer'), carerBefore, 'a refused password changed the account');
+    assert.equal(db.prepare("SELECT COUNT(*) c FROM users WHERE username = 'texttest'").get().c, 0);
+    // /setup, on an installation with no account yet.
+    db.prepare('DELETE FROM users').run();
+    const setup = await api('POST', '/setup', { body: { username: 'first-admin', password: NOT_TEXT[2] } });
+    assert.equal(setup.status, 400, JSON.stringify(setup.body));
+    assert.deepEqual(setup.body, REFUSED);
+    assert.equal(db.prepare('SELECT COUNT(*) c FROM users').get().c, 0, 'a refused /setup created an account');
+    assert.equal(stats().submitted, before, 'a password that is not valid text reached the bcrypt worker');
+    // The control: the same route with a well-formed pair works, and that password signs in.
+    assert.equal((await api('POST', '/setup', { body: { username: 'first-admin', password: FINE } })).status, 200);
+    assert.equal((await login('first-admin', FINE)).status, 200);
   });
 });
 

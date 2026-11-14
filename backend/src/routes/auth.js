@@ -590,6 +590,17 @@ function refuseExposedLoopbackSetup(req, res) {
   return true;
 }
 
+// A password that is not valid text (an unpaired UTF-16 surrogate) is refused before hashing: see the warning at the
+// top of lib/passwordHash.js, which refuses it too. This early check is for the routes that SET a password, so the
+// refusal comes before their other work (the invite's single-flight slot, a counted confirmation guess) and with the
+// route's own 400. The routes that only COMPARE need nothing here: compare() answers false, a wrong password.
+// True (and the 400 already sent) when it refused.
+function refusedUnusablePassword(res, password) {
+  if (!passwordHash.isUnusablePassword(password)) return false;
+  res.status(400).json({ error: passwordHash.UNUSABLE_PASSWORD_MESSAGE });
+  return true;
+}
+
 // One-time: create the first admin account. Locked once any user exists.
 router.post('/setup', setupLimiter, asyncHandler(async (req, res) => {
   if (userCount() > 0) {
@@ -601,6 +612,7 @@ router.post('/setup', setupLimiter, asyncHandler(async (req, res) => {
   if (!username || !password || password.length < 8) {
     return res.status(400).json({ error: 'Username and an 8+ character password are required' });
   }
+  if (refusedUnusablePassword(res, password)) return;
   const id = uuid();
   const password_hash = await passwordHash.hash(password, 10);
   // The hash yields to the event loop (#548), so a second /setup can pass the check above while this one
@@ -674,6 +686,8 @@ router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   const hashToCheck = user ? user.password_hash : DUMMY_HASH;
   // The compare runs for an unknown name too (against DUMMY_HASH), and a miss on an unknown name is counted exactly
   // like a miss on a real one: neither the status, the body nor the timing says which names exist.
+  // (A password that is not valid text is a miss with no compare at all, for every name alike: lib/passwordHash.js
+  // answers false at once, so it is counted and answered like any wrong password and still says nothing about names.)
   // An account still waiting on its invite (#1094, password_set = 0) is a miss too, AFTER the same compare (against
   // its placeholder hash, same cost) and counted the same way, so it answers exactly like a wrong password. Its
   // placeholder is a hash of 32 random bytes nobody knows and can never match; this guard is what holds if the stored
@@ -832,6 +846,7 @@ router.post('/users', requireAuth, requireAdmin, asyncHandler(async (req, res) =
   if (!username || !password || password.length < 8) {
     return res.status(400).json({ error: 'Username and an 8+ character password are required' });
   }
+  if (refusedUnusablePassword(res, password)) return;
   // Hashed BEFORE the username-taken check, not after: the async hash yields, and a check made before it
   // would let two simultaneous creates of one name both pass and the second die on the UNIQUE index (500).
   // Everything from the check to the INSERT stays synchronous.
@@ -869,9 +884,11 @@ router.put('/users/:id', requireAuth, requireAdmin, asyncHandler(async (req, res
   // Hash first (#548), so every read-validate-write step below stays synchronous, as it was. Only for a
   // password that will pass the length check below; the rest fall through to the same 400/404 as before.
   // Hashing for a user that turns out not to exist is wasted work, bounded by the admin gate.
+  // Nor for a password that is not valid text: it is refused below, after the same checks as before
+  // (refusedUnusablePassword), so it never reaches the worker.
   const submittedPassword = req.body?.password;
   const newHash =
-    typeof submittedPassword === 'string' && submittedPassword.length >= 8
+    typeof submittedPassword === 'string' && submittedPassword.length >= 8 && !passwordHash.isUnusablePassword(submittedPassword)
       ? await passwordHash.hash(submittedPassword, 10)
       : null;
   const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
@@ -888,6 +905,7 @@ router.put('/users/:id', requireAuth, requireAdmin, asyncHandler(async (req, res
   if (password !== undefined && password !== '' && password.length < 8) {
     return res.status(400).json({ error: 'Password must be at least 8 characters' });
   }
+  if (refusedUnusablePassword(res, password)) return;
   // #1094 (Opus plan review H1): an account still waiting on its invite is never made an admin, or whoever holds the
   // link would choose an admin's password. Allowed when this same request sets a password: the account then stops
   // being pending and its invites are deleted in the same transaction (below), so no link is left to use.
@@ -984,6 +1002,9 @@ router.put('/me/password', requireAuth, sessionActionLimiter, asyncHandler(async
   if (!new_password || new_password.length < 8) {
     return res.status(400).json({ error: 'New password must be at least 8 characters' });
   }
+  // Before the current password is checked, so an unusable NEW password costs no guess. (An unusable CURRENT one
+  // needs nothing here: compare() answers false, the same 400 as a wrong one.)
+  if (refusedUnusablePassword(res, new_password)) return;
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   const attempt = await throttledPasswordCheck(
     sessionThrottle,
@@ -1385,16 +1406,25 @@ export function resetInviteAttemptLimits() {
 
 // The redeem is the only unauthenticated route that hashes a password with bcrypt (cost 10, about 80 ms of the ONE
 // shared worker that every sign-in also queues on: lib/passwordHash.js). Two bounds, both checked and taken with no
-// await in between, both released in `finally`:
+// await in between, both released in `finally` (a failed hash too: a worker that died mid-hash must not leave the link
+// locked, or the cap used up, until a restart; both are tested by stopping the worker during a redeem):
 //   * per token (M1): one redeem per token hash at a time. A second request for the same token while one is hashing
-//     is refused before it queues a hash, with the same 404 the losing compare-and-swap would give (only one can win).
+//     is refused before it queues a hash, with `409 invite_in_progress` (review of #1094, L1). Not the 404: a double
+//     tap, or a retry while the first is still hashing, would then show "this link is not valid" for a link that is
+//     about to work, and the docs tell an admin to remove an account whose person says that. It reveals nothing new:
+//     only someone holding a live token reaches this line, and /invite/check already tells them the token is valid.
+//     The page must disable its button while a redeem is in flight, and treat a 409 as "wait a moment, then try
+//     signing in with the password you chose".
 //   * across tokens (Codex plan review C3): at most INVITE_MAX_HASHES_IN_FLIGHT invite hashes queued at once. Each one
 //     needs a VALID invite, so this only engages when many real invites are redeemed at the same moment, or when
 //     someone holding several links replays them; the excess gets the limiter's 429 and can simply try again. 4 is a
-//     judgement (not measured): about a third of a second of the worker at most, so a burst of invite redeems cannot
-//     hold up the household's sign-ins behind it, while no real household redeems more than a few at once.
+//     judgement (not measured): about a third of a second of the worker at most (four cost-10 hashes), so a burst of
+//     invite redeems cannot hold up the household's sign-ins behind it, while no real household redeems more than a
+//     few at once. That bound holds only because a password that is not valid text is refused BEFORE it takes a slot
+//     (refusedUnusablePassword below; lib/passwordHash.js): bcryptjs spends far longer than one hash failing on one.
 // In memory, per process: the app is one process, and the compare-and-swap still guards the write if that changes.
 const INVITE_MAX_HASHES_IN_FLIGHT = 4;
+const INVITE_IN_PROGRESS = { error: 'invite_in_progress' };
 let inviteHashesInFlight = 0;
 const inviteRedeemInFlight = new Set();
 
@@ -1407,11 +1437,15 @@ const inviteRedeemInFlight = new Set();
 // was made (an OLDER version of the app sets it and leaves password_set at 0, as it knows nothing of the column) has
 // a password somebody chose, and the link must not replace it. Comparing with the hash read at request time instead
 // would only catch a change made during the hashing, never one made before the link was opened.
+// ONE text for "this invite can be used" (`i` an invite joined to its account `u`, `?` the time now), shared with the
+// Users list (inviteStates), so the list never calls a link open that /invite/check refuses (review of #1094, Codex 2
+// and Opus L2: a link whose account's hash was replaced behind it was listed as open).
+const USABLE_INVITE = `i.used_at IS NULL AND i.expires_at > ? AND u.password_set = 0 AND u.role = 'caregiver'
+     AND u.password_hash = i.placeholder_hash`;
 const liveInviteByHash = db.prepare(
   `SELECT i.token_hash, i.placeholder_hash, i.user_id, u.username, u.first_name
    FROM user_invites i JOIN users u ON u.id = i.user_id
-   WHERE i.token_hash = ? AND i.used_at IS NULL AND i.expires_at > ? AND u.password_set = 0 AND u.role = 'caregiver'
-     AND u.password_hash = i.placeholder_hash`
+   WHERE i.token_hash = ? AND ${USABLE_INVITE}`
 );
 const insertInvite = db.prepare(
   'INSERT INTO user_invites (id, user_id, token_hash, placeholder_hash, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
@@ -1429,13 +1463,14 @@ const inviteOwner = db.prepare('SELECT user_id FROM user_invites WHERE token_has
 const setInvitedPassword = db.prepare(
   "UPDATE users SET password_hash = ?, password_set = 1 WHERE id = ? AND password_set = 0 AND role = 'caregiver' AND password_hash = ?"
 );
-// Per account, for the Users list: the expiry of its newest live invite, and when an invite was last accepted within
-// INVITE_ACCEPTED_SHOWN_DAYS. Grouped in one query rather than two per account.
+// Per account, for the Users list: the expiry of its newest invite that can be used (the SAME rule as the public
+// routes, USABLE_INVITE), and when an invite was last accepted within INVITE_ACCEPTED_SHOWN_DAYS. Grouped in one query
+// rather than two per account.
 const inviteStates = db.prepare(
-  `SELECT user_id,
-     MAX(CASE WHEN used_at IS NULL AND expires_at > ? THEN expires_at END) AS live_expires_at,
-     MAX(CASE WHEN used_at > ? THEN used_at END) AS accepted_at
-   FROM user_invites GROUP BY user_id`
+  `SELECT i.user_id,
+     MAX(CASE WHEN ${USABLE_INVITE} THEN i.expires_at END) AS live_expires_at,
+     MAX(CASE WHEN i.used_at > ? THEN i.used_at END) AS accepted_at
+   FROM user_invites i JOIN users u ON u.id = i.user_id GROUP BY i.user_id`
 );
 
 // --- helpers ------------------------------------------------------------------------------------------------------
@@ -1467,15 +1502,17 @@ function inviteStatesByUser() {
 
 // The Users list's three invite keys for one account:
 //   password_set        false while the account waits on its invite;
-//   invite_expires_at   when its invite stops working, or null when it has none that works (none made, expired,
-//                       revoked, used, or the account is no longer a pending caregiver). Pending + null = "expired";
+//   invite_expires_at   when its invite stops working, or null when it has NO USABLE INVITE: none made, expired,
+//                       cancelled (revoked), used, or one the link can no longer use because the account is not a
+//                       pending caregiver still holding the invite's placeholder (exactly what /invite/check would
+//                       refuse: inviteStates uses the same USABLE_INVITE rule). Pending + null means "no active
+//                       invite" (the screens must not word it "expired": a cancelled one is null too);
 //   invite_accepted_at  when an invite was used, for INVITE_ACCEPTED_SHOWN_DAYS after it, else null.
 // Times are UTC 'YYYY-MM-DD HH:MM:SS', like the session times. Never the token or its hash.
 function inviteFields(u, state) {
-  const pending = u.password_set !== 1;
   return {
-    password_set: !pending,
-    invite_expires_at: pending && u.role === 'caregiver' ? state?.live_expires_at ?? null : null,
+    password_set: u.password_set === 1,
+    invite_expires_at: state?.live_expires_at ?? null,
     invite_accepted_at: state?.accepted_at ?? null,
   };
 }
@@ -1595,7 +1632,9 @@ router.post('/invite/redeem', inviteLimiter, asyncHandler(async (req, res) => {
   if (typeof password !== 'string' || password.length < 8) {
     return res.status(400).json({ error: 'Choose a password of at least 8 characters' });
   }
-  if (inviteRedeemInFlight.has(invite.token_hash)) return res.status(404).json(INVITE_INVALID);
+  // Before either slot is taken, and before anything is written, so the invite still works (see the bounds above).
+  if (refusedUnusablePassword(res, password)) return;
+  if (inviteRedeemInFlight.has(invite.token_hash)) return res.status(409).json(INVITE_IN_PROGRESS);
   if (inviteHashesInFlight >= INVITE_MAX_HASHES_IN_FLIGHT) return res.status(429).json(limiterMessage);
   inviteRedeemInFlight.add(invite.token_hash);
   inviteHashesInFlight += 1;

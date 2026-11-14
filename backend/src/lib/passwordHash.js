@@ -26,7 +26,39 @@
 //
 // createPasswordHasher() exists so a test can run this exact logic against a worker that crashes on
 // demand; the app only uses the default hasher below (hash, compare, stopPasswordWorker).
+//
+// ⚠️ A PASSWORD THAT IS NOT VALID TEXT NEVER REACHES bcrypt (found in the review of #1094, verified by running).
+// A JSON body can carry an unpaired UTF-16 surrogate ("\ud800": half of a pair, alone), and bcryptjs 2.4.3's own
+// UTF-8 conversion does not handle one: instead of failing at once it fails slowly, holding the ONE worker that every
+// sign-in queues on, and then throws (a 500). No real password contains one (a keyboard, a password manager and a
+// paste all produce whole characters; an emoji is a well-formed PAIR and is fine), so it is refused here, centrally,
+// before a job is queued:
+//   * compare() answers false at once: a sign-in or a confirmation answers exactly as for a wrong password, and is
+//     counted like one. Nothing stored can match it anyway: bcryptjs has always failed on one, so no stored hash
+//     was ever made from one.
+//   * hash() rejects with UnusablePasswordError, a 400 the error handler shows as is (middleware/errorHandler.js
+//     honours its `status` and `expose`), so a route that forgets its own early check still answers the caller's
+//     400, unlogged, instead of a 500. The routes that set a password check first (routes/auth.js,
+//     refusedUnusablePassword), so the refusal comes before their other work.
+// Non-strings are left alone: bcrypt rejects them itself, at once, as it always has.
 import { Worker } from 'node:worker_threads';
+
+export const UNUSABLE_PASSWORD_MESSAGE = 'That password contains characters that cannot be used';
+
+export class UnusablePasswordError extends Error {
+  constructor() {
+    super(UNUSABLE_PASSWORD_MESSAGE);
+    this.name = 'UnusablePasswordError';
+    this.status = 400;
+    this.expose = true;
+  }
+}
+
+// True for a string that is not well-formed UTF-16 (an unpaired surrogate anywhere in it). Node 24 (the only
+// supported version, package.json `engines`) has String.prototype.isWellFormed.
+export function isUnusablePassword(password) {
+  return typeof password === 'string' && !password.isWellFormed();
+}
 
 export function createPasswordHasher(workerUrl) {
   let current = null; // { worker, pending } for the live worker, or null before first use / after it died
@@ -80,8 +112,10 @@ export function createPasswordHasher(workerUrl) {
   }
 
   return {
-    hash: (password, cost = 10) => run('hash', [password, cost]),
-    compare: (password, hashed) => run('compare', [password, hashed]),
+    // The guard is here, before run(), so a refused password queues no job and is not counted in `submitted`.
+    hash: (password, cost = 10) =>
+      (isUnusablePassword(password) ? Promise.reject(new UnusablePasswordError()) : run('hash', [password, cost])),
+    compare: (password, hashed) => (isUnusablePassword(password) ? Promise.resolve(false) : run('compare', [password, hashed])),
     // Stops the live worker; the next call starts a new one.
     stop: () => (current ? current.worker.terminate() : Promise.resolve()),
     // Read-only counters for tests: jobs ever submitted, and jobs the live worker has not answered yet.

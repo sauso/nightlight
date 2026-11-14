@@ -570,6 +570,15 @@ describe('#548 an admin demoted while their request awaits bcrypt: refused, noth
         method: 'POST', token, body: { username: 'made-by-demoted', password: 'a-long-enough-password', role: 'admin' }, headers: { 'x-forwarded-for': freshIp() },
       }),
     },
+    {
+      // #1094: the invite path is its own function (createInvitedUser) that awaits a placeholder hash. Without its own
+      // re-check a demoted admin's parked request still made an account and a 7-day sign-in link (review of #1094, M-3,
+      // verified by running).
+      name: 'POST /users making an invite',
+      send: (token) => call(`${server.url}/api/auth/users`, {
+        method: 'POST', token, body: { username: 'made-by-demoted', invite: true }, headers: { 'x-forwarded-for': freshIp() },
+      }),
+    },
   ];
 
   for (const c of cases) {
@@ -611,6 +620,40 @@ describe('#548 lib/passwordHash.js (the worker)', () => {
     await assert.rejects(passwordHash.hash(12345678, 10), Error);
     // bcryptjs answers false (does not throw) for a malformed stored hash; the worker must pass that through.
     assert.equal(await passwordHash.compare('x', 'not-a-bcrypt-hash-at-all'), false);
+  });
+
+  // FAILS WITHOUT the guard in lib/passwordHash.js (review of #1094, verified by removing it): bcryptjs fails slowly on
+  // a password holding an unpaired UTF-16 surrogate, and both calls rejected with its internal error after queuing a job.
+  test('★ a password that is not valid text is refused before the worker: hash rejects with a 400, compare answers false', async () => {
+    const stored = bcrypt.hashSync('anything', 4);
+    const before = passwordHash.passwordWorkerStats().submitted;
+    for (const p of ['\uD800abcdefgh', 'abcd\uDC00efgh', 'abcdefgh\uD800']) {
+      await assert.rejects(passwordHash.hash(p, 10), (e) => e instanceof passwordHash.UnusablePasswordError
+        && e.status === 400 && e.expose === true && e.message === 'That password contains characters that cannot be used');
+      assert.equal(await passwordHash.compare(p, stored), false);
+    }
+    assert.equal(passwordHash.passwordWorkerStats().submitted, before, 'a password that is not valid text reached the worker');
+    // A well-formed pair (an emoji) is text like any other.
+    const h = await passwordHash.hash('abcdefg😀', 4);
+    assert.equal(await passwordHash.compare('abcdefg😀', h), true);
+  });
+
+  // The safety net: a route that forgot its own early check still answers the caller's 400 through the app's error
+  // handler (it honours the error's 4xx status and `expose`), not a logged 500.
+  test('a route that hashes without checking first still answers the 400, through the error handler', async () => {
+    const { Router } = await import('express');
+    const { asyncHandler } = await import('../src/lib/asyncHandler.js');
+    const { mountRouter } = await import('./helpers/harness.js');
+    const r = Router();
+    r.post('/hash', asyncHandler(async (req, res) => { await passwordHash.hash(req.body.password, 4); res.json({ ok: true }); }));
+    const s = await mountRouter('/t', r);
+    try {
+      const res = await call(`${s.url}/t/hash`, { method: 'POST', body: { password: 'abcdefgh\uD800' } });
+      assert.equal(res.status, 400, JSON.stringify(res.body));
+      assert.deepEqual(res.body, { error: 'That password contains characters that cannot be used' });
+    } finally {
+      await s.close();
+    }
   });
 
   test('★ a killed worker is replaced, and a call in flight is rejected rather than left hanging', async () => {
