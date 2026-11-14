@@ -201,6 +201,61 @@ describe('the caregiver list', () => {
       expect(screen.getAllByRole('button', { name: /Show sessions for/ })).toHaveLength(1);
     });
 
+    test('★ each arrow controls its OWN panel: aria-controls ids are unique and each matches exactly one element', async () => {
+      // A mutant giving every panel the same id survived the single-account check above: with one id, both arrows
+      // "pointed at a real element" and a screen reader would open the wrong panel for the second account.
+      mockApi({ sessions: SESSIONS });
+      mountList();
+      const nacho = await waitForToggle('Nacho Leone');
+      const nanny = toggleFor('Nanny McPhee');
+      const nachoId = nacho.getAttribute('aria-controls');
+      const nannyId = nanny.getAttribute('aria-controls');
+      expect(nachoId).toBeTruthy();
+      expect(nannyId).toBeTruthy();
+      expect(nachoId).not.toBe(nannyId);
+      for (const id of [nachoId, nannyId]) {
+        expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1);
+      }
+      // And each id is the panel holding that account's sessions, not the other's.
+      expect(within(document.getElementById(nachoId)).getByText('Firefox on Linux')).toBeInTheDocument();
+      expect(within(document.getElementById(nannyId)).getByText('Safari on iPhone')).toBeInTheDocument();
+    });
+
+    test('★ the users and the sessions are requested together and rendered together (no arrow-less first paint)', async () => {
+      // Sequential awaits asked for the sessions only after the users had arrived, then rendered the rows without
+      // arrows and moved them when the sessions came. Deferred promises make that order observable: both requests
+      // must be out before either reply, and nothing may render from the users reply alone.
+      let resolveUsers; let resolveSessions;
+      const gets = [];
+      vi.spyOn(api, 'get').mockImplementation((path) => {
+        gets.push(path);
+        if (path === '/auth/users') return new Promise((r) => { resolveUsers = r; });
+        if (path === '/auth/sessions/all') return new Promise((r) => { resolveSessions = r; });
+        return Promise.resolve(null);
+      });
+      mountList();
+      await waitFor(() => expect(gets).toContain('/auth/users'));
+      expect(gets).toContain('/auth/sessions/all'); // issued before the users reply: fails with the sequential version
+
+      resolveUsers(USERS);
+      // Let the users reply settle; the rows must still be absent because the sessions have not arrived.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(screen.queryByText('Nanny McPhee')).toBeNull();
+
+      resolveSessions(SESSIONS);
+      // First render that has rows already has the arrows.
+      expect(await waitForToggle('Nacho Leone')).toBeInTheDocument();
+      expect(toggleFor('Nanny McPhee')).toBeInTheDocument();
+    });
+
+    test('Sign out and Add user are type="button" (no accidental form submit if the list is ever wrapped in a form)', async () => {
+      mockApi({ sessions: SESSIONS });
+      const { user } = mountList();
+      const row = await sessionRow(user, 'Nanny McPhee', 'Safari on iPhone');
+      expect(within(row).getByRole('button', { name: 'Sign out' })).toHaveAttribute('type', 'button');
+      expect(screen.getByRole('button', { name: /Add user/ })).toHaveAttribute('type', 'button');
+    });
+
     test('★ the arrow is a sibling of the open-account row, not inside it, and does not open the account', async () => {
       mockApi({ sessions: SESSIONS });
       const { user } = mountList();

@@ -3945,6 +3945,11 @@ html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; 
 .user-row { border-bottom: 1px solid var(--border); }
 .user-row__line { display: flex; align-items: center; gap: 4px; }
 .user-row__open { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0 12px 14px; cursor: pointer; font-size: 16px; font-weight: 500; }
+/* The open area has no right padding because, on a row with sessions, the toggle's own margin supplies the gap. A row WITHOUT
+   a toggle has the open area as its last child, so it would put its arrow flush against the card edge. Give that case the
+   distance the toggle's chevron sits from the edge (margin 6px + the centring inside the --tap wide button around an 18px
+   icon), so the arrows line up down the list whether or not an account has sessions. */
+.user-row__open:last-child { padding-right: calc(6px + (var(--tap) - 18px) / 2); }
 .user-row__open:focus-visible, .user-row__toggle:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
 .user-row__toggle { flex: none; width: var(--tap); height: var(--tap); display: inline-flex; align-items: center; justify-content: center; margin-right: 6px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .user-row__toggle:active { background: var(--child-action-active); }

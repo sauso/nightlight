@@ -32,8 +32,16 @@ export default function SettingsUsers() {
 
   async function load() {
     try {
-      setUsers(await api.get('/auth/users'));
-      setAllSessions(await api.get('/auth/sessions/all'));
+      // Both reads are issued together and both states are set together. Two sequential awaits rendered the
+      // rows first WITHOUT their arrows and then shifted every row that has sessions when the second reply
+      // arrived (a layout jump), and a rename landing between the two reads left the join on username empty
+      // for that account until the next load.
+      const [nextUsers, nextSessions] = await Promise.all([
+        api.get('/auth/users'),
+        api.get('/auth/sessions/all'),
+      ]);
+      setUsers(nextUsers);
+      setAllSessions(nextSessions);
     } catch (err) {
       setError(err.message);
     }
@@ -121,7 +129,7 @@ export default function SettingsUsers() {
                           <div className="list-row__title">{s.device}{s.is_current ? ' (this device)' : ''}</div>
                           <div className="camera-tile__sub">Active {timeAgo(s.last_seen_at)}</div>
                         </div>
-                        <button className="icon-btn" onClick={() => terminateSession(s)}>Sign out</button>
+                        <button type="button" className="icon-btn" onClick={() => terminateSession(s)}>Sign out</button>
                       </div>
                     ))}
                   </div>
@@ -129,7 +137,7 @@ export default function SettingsUsers() {
               </div>
             );
           })}
-          <button className="btn btn-primary" onClick={() => navigate('/settings/users/new')} style={{ marginTop: 12 }}>
+          <button type="button" className="btn btn-primary" onClick={() => navigate('/settings/users/new')} style={{ marginTop: 12 }}>
             <Plus size={16} aria-hidden="true" /> Add user
           </button>
         </div>
