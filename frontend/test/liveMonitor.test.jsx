@@ -145,6 +145,9 @@ describe('Live tile strip and sheet (#1076)', () => {
     ['connecting', false, false, 'Connecting', 'breathing--connecting'],
     ['offline', false, false, 'Offline', 'breathing--offline'],
     ['connecting', true, false, 'Status unknown', 'breathing--connecting'],
+    // The level the tile was last told is OFFLINE but the status check itself timed out: unknown must win, so the
+    // dot is the connecting one and never the red offline one (a row with level 'connecting' cannot tell the two apart).
+    ['offline', true, false, 'Status unknown', 'breathing--connecting'],
     ['offline', false, true, 'Disabled', 'dot--neutral'],
   ])('cameraState renders %s / unknown %s / disabled %s as %s', (statusLevel, statusUnknown, disabled, word, dot) => {
     const { container } = renderAsAdmin(<CameraTile camera={{ id: 'state', name: 'Camera', statusLevel, statusUnknown, disabled }} childName="A child" />);
@@ -157,8 +160,15 @@ describe('Live tile strip and sheet (#1076)', () => {
     const dotBox = row.querySelector('.camera-tile__dot');
     expect(dotBox).toHaveAttribute('aria-hidden', 'true');
     expect(dotBox.compareDocumentPosition(within(row).getByText('Camera')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(row.querySelector('.camera-tile__sr')).toHaveTextContent(`, ${word}`);
+    // The hidden word must be its own element with the visually-hidden class (a class check, not a CSS value), and its
+    // text EXACTLY ", <word>": without this, the "word is not printed" assertion below would also pass if the word were
+    // dropped altogether.
+    const sr = row.querySelector('.camera-tile__sr');
+    expect(sr).not.toBeNull();
+    expect(sr.classList.contains('camera-tile__sr')).toBe(true);
+    expect(sr.textContent).toBe(`, ${word}`);
     expect(row).toHaveTextContent(`Camera, ${word}`);
+    if (word === 'Status unknown') expect(row.querySelector('.breathing--offline')).toBeNull();
     // Nothing prints the word in the strip any more: no status line above the name, no visible word.
     expect(strip.querySelector('.camera-tile__state')).toBeNull();
     expect(within(strip).queryByText(word)).toBeNull();
@@ -172,6 +182,7 @@ describe('Live tile strip and sheet (#1076)', () => {
     ['connecting', false, false, 'Connecting', 'breathing--connecting'],
     ['offline', false, false, 'Offline', 'breathing--offline'],
     ['connecting', true, false, 'Status unknown', 'breathing--connecting'],
+    ['offline', true, false, 'Status unknown', 'breathing--connecting'],
     ['offline', false, true, 'Disabled', 'dot--neutral'],
   ])('the camera sheet prints the status dot and word for %s / unknown %s / disabled %s as %s', async (statusLevel, statusUnknown, disabled, word, dot) => {
     const { user } = renderAsAdmin(<CameraTile camera={{ id: 'sheet', name: 'Camera', statusLevel, statusUnknown, disabled }} childName="A child" />);

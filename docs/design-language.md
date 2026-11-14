@@ -99,7 +99,7 @@ manifest's `theme_color` and `background_color` and the app icons' ground are th
 
 ESPHome and Cameras use one `.night.find-card` search surface: **Find devices** or **Find cameras**. The search button is its main action; the card's error line uses `--night-error` (`#F4A3AD`) on the lightest gradient stop (`#2C2F63`) to stay above 4.5:1 contrast. Results are 56px rows with wrapping names and full-opacity unavailable states labelled **Added** or **Not added**. The manual action appears inside the card after an empty search. It reads **Add by IP address** for ESPHome and **Add a camera manually** for cameras. The camera's manual disclosure row remains below the card.
 
-Saved ESPHome devices and cameras share `.dev-card`: a status dot and word, wrapping name, muted address, optional detail lines, and a 44px **⋯** action menu. ESPHome keeps Edit, Test connection, Download CSV and Delete device, plus a separate **Sensors** disclosure. Camera cards show only supported capability chips, a Motion/Sound line when available, and a visible **Assigned to** foot row. The camera menu holds Edit camera, Enable/Disable camera and Remove camera. A disabled camera has a neutral dot; an unknown status keeps the amber connecting dot. The camera list's Remove dialog gives the full permanent-deletion warning.
+Saved ESPHome devices and cameras share `.dev-card`: a status dot and word, wrapping name, muted address, optional detail lines, and a 44px **⋯** action menu. ESPHome keeps Edit, Test connection, Download CSV and Delete device, plus a separate **Sensors** disclosure. Camera cards show only supported capability chips, a Motion/Sound line when available, and a visible **Assigned to** foot row. The camera menu holds Edit camera, Enable/Disable camera and Remove camera. A disabled camera has a neutral dot; an unknown status uses the same dot as Connecting (the `--accent` violet), never red. The camera list's Remove dialog gives the full permanent-deletion warning.
 
 ### Edit camera in groups, and the navigation row (#1076)
 
@@ -639,7 +639,7 @@ if you add a state, pick its tempo deliberately.
 (the camera or its stream is down), and *Streaming service unavailable. Your camera may still be online.* (the
 server's own status check timed out, so the camera's state is unknown), the last as an icon, text and a Retry
 button in `--text-secondary`, not `--offline` red, because it does not claim the camera is down. Its dot stays
-on the amber "connecting" tempo and never turns red.
+on the "connecting" tempo and colour (`--accent` violet) and never turns red.
 
 ### Score ring (`components/ScoreRing.jsx`)
 On the Children list, a child card keeps its name and camera row, then adds a divided sleep row when the live endpoint has a usable duration. The 44px ring sits at the right with its band word printed below it; the caption and duration wrap at narrow widths. The whole card remains one button, whose name follows the printed order. The list makes one sleep request per child when opened and does not refresh on a timer; the child page retains its three-minute refresh.
@@ -885,7 +885,7 @@ wrapping name (dot before the name, centred on it), with the child under it, opt
 and the drag handle. **The status word is not printed in the strip**: it follows the name as visually hidden text
 (`.camera-tile__sr`, so a screen reader reads "Name, Online"; the dot is `aria-hidden`), and the camera's sheet prints
 the same dot and word under the name (`.tile-menu__state`), so colour is never the only signal. It uses
-`cameraState`, including amber **Status unknown** when a status check times out. (The Cameras tab cards still print
+`cameraState`, including **Status unknown** when a status check times out (it shows the same dot as Connecting, never red). (The Cameras tab cards still print
 the word above the name; only the Live tile changed.)
 
 Picture-in-Picture hides every control and panel over the video, including Record. Fullscreen

@@ -12,7 +12,7 @@ describe('cameraState (#1076)', () => {
     expect(cameraState(camera)).toEqual({ word, dot });
   });
 
-  test('unknown is amber even if the last level was offline; disabled stays neutral', () => {
+  test('unknown uses the connecting dot (not red) even if the last level was offline; disabled stays neutral', () => {
     expect(cameraState({ statusUnknown: true, statusLevel: 'offline' }).dot).toBe('connecting');
     expect(cameraState({ disabled: true, statusUnknown: true }).dot).toBe('neutral');
   });
