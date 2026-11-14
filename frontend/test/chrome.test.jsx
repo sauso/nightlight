@@ -249,8 +249,11 @@ describe('About', () => {
     const site = screen.getByRole('link', { name: 'Website' });
     expect(site).toHaveAttribute('href', 'https://nightlightbaby.app/');
     expect(site).toHaveAttribute('target', '_blank');
-    expect(site).toHaveAttribute('rel', 'noreferrer');
-    const labels = screen.getAllByRole('link').map((a) => a.textContent);
+    expect(site.getAttribute('rel')).toContain('noreferrer');
+    // UI consistency (PR-C): the outside links are the shared NavRow (icon chip, label, external mark), not bare list rows.
+    expect(site).toHaveClass('nav-row');
+    expect(site.querySelector('svg')).not.toBeNull();
+    const labels = screen.getAllByRole('link').map((a) => a.textContent.trim());
     expect(labels.indexOf('Website')).toBeLessThan(labels.indexOf('GitHub — Nightlight'));
   });
   test('Got an idea? opens the enhancement issue form safely', () => {
@@ -259,7 +262,7 @@ describe('About', () => {
     const idea = screen.getByRole('link', { name: 'Got an idea?' });
     expect(idea).toHaveAttribute('href', 'https://github.com/sauso/nightlight/issues/new?template=feature_request.yml');
     expect(idea).toHaveAttribute('target', '_blank');
-    expect(idea).toHaveAttribute('rel', 'noreferrer');
+    expect(idea.getAttribute('rel')).toContain('noreferrer');
   });
   test('shows the app name from settings and the version from the server', async () => {
     vi.spyOn(api, 'get').mockResolvedValue({ version: '0.29.0' });
@@ -391,7 +394,7 @@ describe('About', () => {
     for (const a of links) {
       expect(a).toHaveAttribute('target', '_blank');
       // Without rel=noreferrer the opened page keeps a window.opener handle back into the app.
-      expect(a).toHaveAttribute('rel', 'noreferrer');
+      expect(a.getAttribute('rel')).toContain('noreferrer');
     }
     unmount();
 

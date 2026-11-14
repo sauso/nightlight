@@ -111,6 +111,8 @@ Saved ESPHome devices and cameras share `.dev-card`: a status dot and word, wrap
 
 **Remove camera** is the one item of the header **⋯** menu (`MoreMenu` through `AppHeader`'s `actions`), shown to an admin on a saved camera. There is no red button under Save. It opens the same `RemoveCameraDialog` as the Cameras list.
 
+**Remove child** and **Remove user** follow the same header menu pattern on saved records. The child form has separate **Profile** and **Sleep** cards. The setup guide's finish screen keeps its centred heading; its child and camera summary is one card with two label and value rows. The welcome steps use plain bullets until each step is done.
+
 ### Child hero card (`.night`)
 
 One fixed navy gradient in both themes: `linear-gradient(165deg, #2C2F63 0%, #191B38 100%)`, so its text colours are
@@ -251,11 +253,6 @@ and fails if one stops being true, so a fix is noticed rather than silently left
 | Day: "No data" hatch `#C7C7C7` against stirring `#7279C6` / amber `#F0A257` / before-after `#D2D0E2` | 2.36 / 1.24 / 1.12 | Same: the stripes, not the colour, mark missing data. |
 | Night: "No data" hatch `#5A5C6E` against the card `#221F3C` / the inset track `#100F1C` | 2.40 / 2.88 | Same. |
 | Night: "No data" hatch `#5A5C6E` against asleep `#7C85E6` / before-after `#3C3F60` | 1.99 / 1.54 | Same. |
-
-One more pair sits under 3:1 and is named in the same test file, in its own block (it is not a timeline colour): the **Wake-ups | Room
-activity tab control**'s selected pill fill against its track, 1.22 by day and 1.31 at night. It is not what marks the selected tab: the
-3px `--accent-line` indicator is (3.54 and 3.69 against the pill, 4.31 and 4.83 against the track, both clearing 3:1), with the bolder,
-darker label as a second cue. The test fails if the indicator drops under 3:1 or the fill pair stops being what is documented.
 
 What v3.1 cleared and removed from this table: stirring against the card and the inset track in both themes (day 3.99 and
 3.20, night 7.33 and 8.80), room activity against the day track (2.47 to 3.06), and night stirring against the
@@ -511,7 +508,7 @@ Use an `h2.card-heading` for a settings card title (16px display face, weight 80
 
 Use `SwitchRow` for settings switches. It gives the switch a unique input id, a visible label tied to that input, a 56px row, and a 44px switch target. A short `sub` sits below the label; longer notes go in its `children` slot below the row. A page form puts its full-width primary Save button in `.form-actions` at the bottom. If it offers **Send test with saved settings**, place the full-width secondary button below Save and keep it disabled while edits are unsaved.
 
-Use `.seg-track` and `.seg-track__btn` for theme and temperature choices, with `aria-pressed` on each option. Settings hubs use `NavRow` for one real button or link per destination; its `value` shows the current setting and `badge` shows status. External destinations use `external`. Camera Advanced and Remote access Advanced use `.disclosure-row`; the latter keep native `details` and `summary` semantics.
+Use `.seg-track` and `.seg-track__btn` for theme and temperature choices, with `aria-pressed` on each option. A segmented control that switches a panel (the sleep detail's Wake-ups and Room activity) is a tablist, not a pressed-button group: it adds `.seg-track--tabs` to the same track, keeps `role="tab"` and `aria-selected`, and takes no `aria-pressed`. Settings hubs use `NavRow` for one real button or link per destination; its `value` shows the current setting and `badge` shows status. External destinations use `external`. Camera Advanced and Remote access Advanced use `.disclosure-row`; the latter keep native `details` and `summary` semantics.
 
 Settings sub-menus (Integrations and Camera and recording) share a pattern: a row on the Settings hub
 opens a sub-menu page. Its rows pass `state.from` for Back, and each destination has the sub-menu as
@@ -547,6 +544,8 @@ checkboxes, radio inputs and range inputs inside `.field` are excluded from the 
 The small `.btn-sm` buttons are the deliberate exception: Retry and Dismiss in status banners, camera tile
 snooze and restart controls, bed-zone editing tools, player reload, recording readiness check, and ESPHome
 recovery controls stay compact where they sit within a row.
+
+On **Logs**, filter chips, the filter box, auto-refresh switches, and refresh and clear controls also meet the 44px target. Inline text links inside explanatory paragraphs stay inline rather than expanding to a 44px block.
 
 | Variant | Style | Use |
 |---|---|---|
@@ -755,13 +754,8 @@ UI refresh PR H. Every state keeps the same words it had; what is new is the sha
   (which only repeats the chip's colour) is hidden, and the caption above is 12px. A viewer away from home sees a zone suffix on both
   times, which cannot fit on one line at 320px: there the **time wraps inside its own cell** and the chip stays on the row, rather
   than the time being cut (text that carries meaning wraps).
-- **The tab control** (Wake-ups | Room activity) has a light accent tint for its track and a stronger tint with a 3px `--accent-line`
-  indicator for the selected tab, in both themes. It was the near-black inset `--bg-elevated-2` at night, which read as a black hole
-  beside the raised selected tab. **Contrast, recomputed from the stylesheet** (`paletteTokens.test.jsx`): the selected pill's fill
-  against the track is only 1.22:1 by day and 1.31:1 at night (named in "Known pairs below their floor"), so the fill is not what
-  carries the state; the 3px `--accent-line` indicator is, and it is 3.54:1 (day) and 3.69:1 (night) against the pill fill and 4.31:1
-  and 4.83:1 against the track, over the 3:1 a non-text mark needs. The bolder, darker label is a second cue. The control's ids are
-  per instance (React `useId`), so two on one page never share an `aria-controls` target.
+- **The tab control** (Wake-ups | Room activity) uses the shared `.seg-track` look through `.seg-track--tabs` (it was a tinted track with its own indicator; the near-black night track of the shared control has not been looked at on a phone). It keeps tablist, tab and selected semantics, plus arrow, Home and End keys. The control's ids are per instance (React `useId`), so two on one page never share an `aria-controls` target.
+- **The Asleep stat of a night still in progress** reads `7:13 PM, ongoing` (it said "asleep since 7:13 PM (ongoing)", which repeated the label above it).
 - **"Up for the day"** is one row with **only the time** the child got up (the old row showed a start-to-end range and a duration;
   the owner approved the single time). The counted wake-ups above it keep their ranges. It is shown for a wake the detector did not
   doubt, and for one a **parent gave** in the review, even though the detector's own "set aside an earlier exit" note stays on the
@@ -807,6 +801,8 @@ The top of the sleep detail page, as drawn in the UI refresh.
   drawn against the previous child's.
 
 ### Modal (`components/Modal.jsx`)
+`ModalActions` lays out two dialog buttons as an equal-width row: a secondary Cancel or Close first, then the primary or danger action. A dialog with one action fills the row. Busy dialogs keep their existing disabled and dismiss rules.
+
 On phone widths a **sheet**, not a centred dialog: overlay `rgba(10, 13, 28, 0.7)`, card
 `max-width: 440`, hugging the bottom edge (`placement="top"` for the top), rounded 20px on the inner
 side only, title 18px, `✕` close button with `aria-label="Close"`. The close button is **44 x 44px** in every modal (its own class,

@@ -468,6 +468,8 @@ describe('timeline legend and night-event tabs', () => {
     mount();
     const wakeTab = await screen.findByRole('tab', { name: 'Wake-ups · 1' });
     const roomTab = screen.getByRole('tab', { name: 'Room activity · 1' });
+    expect(wakeTab.closest('[role="tablist"]')).toHaveClass('seg-track', 'seg-track--tabs');
+    expect(wakeTab).toHaveClass('seg-track__btn--active');
     expect(wakeTab).toHaveAttribute('aria-selected', 'true');
     expect(wakeTab).toHaveAttribute('tabindex', '0');
     expect(roomTab).toHaveAttribute('tabindex', '-1');
@@ -783,7 +785,10 @@ describe('what it shows for a night', () => {
   test('a live night still asleep says so rather than showing a wake time', async () => {
     mockSleep({ night: { ...NIGHT, in_progress: true, wake_at: null } });
     mount();
-    expect(await screen.findByText(/asleep since .* \(ongoing\)/)).toBeTruthy();
+    // UI consistency (PR-C): the stat sits under the label "Asleep", so its value is "<time>, ongoing", not "asleep since <time> (ongoing)".
+    const value = await screen.findByText(/, ongoing$/);
+    expect(value.textContent).toMatch(/^\d{1,2}:\d{2}(\s?[ap]m)?, ongoing$/i);
+    expect(screen.queryByText(/asleep since/i)).toBeNull();
   });
 
   // Issue #501: "In bed" and "Asleep" as two times, on a night with a real gap between them (a bedtime

@@ -3,6 +3,7 @@ import { Trash2 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useHomeTime } from '../lib/useHomeTime.js';
 import MediaPlayerModal from './MediaPlayerModal.jsx';
+import ModalActions from './ModalActions.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { ProtectButton, ProtectedBadge, ProtectionNote } from './ClipProtection.jsx';
 
@@ -106,12 +107,12 @@ export default function ClipPlayerModal({ ev, onClose, onDeleted, onProtectedCha
         confirming ? (
           <div className="clip-confirm">
             <span>{del === 'error' ? delError : 'Delete this clip? The alert stays.'}</span>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" className="btn" onClick={() => setDel('')} disabled={del === 'deleting'}>Cancel</button>
+            <ModalActions>
+              <button type="button" className="btn btn-secondary" onClick={() => setDel('')} disabled={del === 'deleting'}>Cancel</button>
               <button type="button" className="btn btn-danger" onClick={deleteClipNow} disabled={isProtected || del === 'deleting'}>
                 {del === 'deleting' ? 'Deleting…' : 'Delete'}
               </button>
-            </div>
+            </ModalActions>
           </div>
         ) : null
       }

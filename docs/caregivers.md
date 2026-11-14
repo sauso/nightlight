@@ -4,6 +4,8 @@ Add a login for someone you trust without giving them control over every setting
 as admin, go to **Settings → Users** to create additional logins (e.g. for a partner or babysitter).
 The **Users** page lists **Accounts** and **Active sessions**. **Add user** is at the bottom of the Accounts card; the form opens with a **Details** card and a back button labelled **Users**. The role choice still says **Caregiver**.
 
+To remove another account, open that user's page and choose **⋯ → Remove user**. The confirmation explains that the person will be signed out everywhere. You cannot remove your own account from this menu.
+
 The rule (owner decision, 2026-10-10): **a caregiver can watch and act in the moment, but cannot
 destroy or reconfigure.**
 

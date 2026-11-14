@@ -533,46 +533,21 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     expect(rules.find((r) => r.startsWith('.score-part, .sleep-score__numbers li {'))).toContain('overflow-wrap: anywhere');
   });
 
-  // ★ The Wake-ups | Room activity tab control (Codex review of #1062: the selected pill against its track measured 1.25:1 light and
-  // 1.20:1 dark on the OLD tabs; #1065 then added the indicator and the stronger tint). Recomputed here from the CURRENT rules, with
-  // the tints read out of the stylesheet's own color-mix percentages, so a re-tint cannot quietly change the answer. The honest result:
-  // the selected pill's FILL against the track is still under 3:1 (named below, with its number), and is not what carries the state;
-  // the 3px --accent-line indicator along the selected pill's foot is, and it clears 3:1 against BOTH the pill fill and the track it
-  // sits beside (3.54 and 4.31 by day, 3.69 and 4.83 at night). The bold/dark text is a second cue. So the selected state is
-  // distinguishable by a non-text mark that meets WCAG 1.4.11.
-  describe('the tab control: selected state vs track', () => {
-    const mixOf = (selector) => {
-      const rule = rules.find((r) => r.startsWith(`${selector} {`)) || '';
-      const m = /color-mix\(in srgb, var\(--accent-line\) (\d+)%, var\(--bg-elevated\)\)/.exec(rule);
-      return { rule, alpha: m ? Number(m[1]) / 100 : null };
-    };
-    const track = mixOf('.sleep-events__tabs');
-    const selected = mixOf('.sleep-events__tabs [role="tab"][aria-selected="true"]');
-    const colours = (t) => ({
-      trackFill: tint(t['--accent-line'], track.alpha, t['--bg-elevated']),
-      selectedFill: tint(t['--accent-line'], selected.alpha, t['--bg-elevated']),
-    });
+  // UI consistency (PR-C): the Wake-ups | Room activity tabs were retired from their own tinted-track rules (whose contrast this file
+  // used to recompute) onto the shared .seg-track. The guard: no tab-specific colour rule creeps back, so the tabs cannot drift from
+  // the other segmented controls, and the shared selected state keeps readable text (the shared pair is also checked above).
+  test('the sleep event tabs take their look from .seg-track, not from rules of their own', () => {
+    expect(rules.filter((r) => r.startsWith('.sleep-events__tabs [role="tab"]')), 'no tab-only colour rules').toEqual([]);
+    const own = rules.find((r) => r.startsWith('.sleep-events__tabs {'));
+    expect(own, 'only the spacing under the control is local').not.toMatch(/background|color/);
+    expect(rules.find((r) => r.startsWith('.seg-track--tabs {'))).toBeTruthy();
+    expect(rules.find((r) => r.startsWith('.seg-track__btn--active {'))).toContain('color: var(--on-accent)');
+  });
 
-    test('the tints and the 3px indicator are read from the stylesheet', () => {
-      expect(track.alpha, 'track tint').toBeGreaterThan(0);
-      expect(selected.alpha, 'selected tint is stronger than the track').toBeGreaterThan(track.alpha);
-      expect(selected.rule, 'the indicator is an inset 3px --accent-line bar').toMatch(/box-shadow:\s*inset 0 -3px 0 var\(--accent-line\)/);
-    });
-
-    test.each([['day', day, 3.54, 4.31, 1.22], ['night', night, 3.69, 4.83, 1.31]])(
-      '★ %s: the indicator clears 3:1 on the selected fill and on the track; the fill-vs-track pair is NAMED as under 3:1',
-      (_name, t, onFill, onTrack, fillVsTrack) => {
-        const { trackFill, selectedFill } = colours(t);
-        expect(round2(contrast(t['--accent-line'], selectedFill)), 'indicator on the selected fill').toBe(onFill);
-        expect(round2(contrast(t['--accent-line'], trackFill)), 'indicator on the track').toBe(onTrack);
-        expect(contrast(t['--accent-line'], selectedFill)).toBeGreaterThanOrEqual(3);
-        expect(contrast(t['--accent-line'], trackFill)).toBeGreaterThanOrEqual(3);
-        // The known pair below its floor (listed in docs/design-language.md, "Known pairs below their floor"): if this ever clears 3:1
-        // the entry is stale and goes; if it gets worse, the indicator is carrying more and the doc must say so.
-        expect(round2(contrast(selectedFill, trackFill)), 'selected fill against the track (documented)').toBe(fillVsTrack);
-        expect(contrast(selectedFill, trackFill)).toBeLessThan(3);
-      },
-    );
+  // UI consistency (PR-C): a tick means "done" in this app and none of the first-run welcome steps is, so they are plain bullets.
+  test('the first-run steps are plain bullets, with no tick mark drawn before them', () => {
+    expect(rules.filter((r) => /^.setup-checklist[^{]*::before/.test(r))).toEqual([]);
+    expect(rules.find((r) => r.startsWith('.setup-checklist {'))).toContain('list-style: disc');
   });
 
   // ★ Hover fills (#1064 fixed the child page's rows; this is the same root cause elsewhere: the sleep page's ⋯ menu and the clip

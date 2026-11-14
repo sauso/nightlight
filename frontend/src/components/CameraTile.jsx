@@ -15,6 +15,7 @@ import HlsPlayer from './HlsPlayer.jsx';
 import BreathingDot from './BreathingDot.jsx';
 import { cameraState } from '../lib/cameraStatus.js';
 import RecordIcon from './icons/RecordIcon.jsx';
+import ModalActions from './ModalActions.jsx';
 
 // The tile's quick motion/sound/schedule toggles write to the same /detection endpoint the full
 // DetectionSettings screens do, and since #444 both go through the same per-camera save queue
@@ -920,15 +921,15 @@ export default function CameraTile({ camera, childName, dragHandleProps, refresh
                       ? 'Power-cycle the camera? It goes fully offline for everyone for about 30–60 seconds while it reboots.'
                       : 'Restart the stream? It reloads the feed for everyone.'}
                   </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setConfirmAction(null)}>
+                  <ModalActions>
+                    <button type="button" className="btn btn-secondary" onClick={() => setConfirmAction(null)}>
                       Cancel
                     </button>
-                    <button type="button" className="btn btn-danger" style={{ flex: 1 }}
+                    <button type="button" className="btn btn-danger"
                       onClick={confirmAction === 'reboot' ? rebootCameraNow : restartStreamNow}>
                       {confirmAction === 'reboot' ? 'Restart camera' : 'Restart stream'}
                     </button>
-                  </div>
+                  </ModalActions>
                 </div>
               ) : (
                 <>

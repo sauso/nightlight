@@ -4,6 +4,9 @@ import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useLater } from '../lib/useLater.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
+import MoreMenu from '../components/MoreMenu.jsx';
+import ModalActions from '../components/ModalActions.jsx';
+import { Trash2 } from 'lucide-react';
 import AvatarEditor from '../components/AvatarEditor.jsx';
 import Modal from '../components/Modal.jsx';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
@@ -189,7 +192,13 @@ function UserSettingsForm() {
 
   return (
     <>
-      <AppHeader title={isNew ? 'Add user' : (fullName || 'Caregiver')} back={back} />
+      <AppHeader title={isNew ? 'Add user' : (fullName || 'Caregiver')} back={back}
+        actions={!isNew && id !== me?.id ? <MoreMenu label="More options for this user" menuLabel="User">
+          <button type="button" role="menuitem" className="more-menu__item dev-card__delete"
+            onClick={() => { setRemoveError(''); setRemoving(true); }}>
+            <Trash2 size={16} aria-hidden="true" />Remove user
+          </button>
+        </MoreMenu> : null} />
       <main className="app-main">
         {!loaded ? (
           <div className="empty-state">Loading…</div>
@@ -279,11 +288,6 @@ function UserSettingsForm() {
                 {busy ? 'Saving…' : isNew ? 'Add user' : 'Save changes'}
               </button>
             </div>
-            {!isNew && id !== me?.id && (
-              <button className="btn btn-danger" type="button" style={{ marginTop: 10 }} onClick={() => { setRemoveError(''); setRemoving(true); }}>
-                Remove caregiver
-              </button>
-            )}
           </form>
         )}
       </main>
@@ -294,24 +298,24 @@ function UserSettingsForm() {
             Turn off two-factor for <strong>{fullName}</strong>? They'll be able to sign in with just their
             password and will need to set two-factor up again.
           </p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button className="btn" type="button" onClick={() => setResettingMfa(false)} disabled={mfaResetBusy}>Cancel</button>
+          <ModalActions>
+            <button className="btn btn-secondary" type="button" onClick={() => setResettingMfa(false)} disabled={mfaResetBusy}>Cancel</button>
             <button className="btn btn-danger" type="button" onClick={confirmResetMfa} disabled={mfaResetBusy}>
               {mfaResetBusy ? 'Resetting…' : 'Reset two-factor'}
             </button>
-          </div>
+          </ModalActions>
         </Modal>
       )}
 
       {removing && (
-        <Modal title="Remove caregiver" placement="top" error={removeError} onClose={() => (removeBusy ? null : setRemoving(false))}>
+        <Modal title="Remove user" placement="top" error={removeError} onClose={() => (removeBusy ? null : setRemoving(false))}>
           <p style={{ marginTop: 0 }}>Remove <strong>{fullName}</strong>? They'll be signed out everywhere and can no longer log in.</p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button className="btn" type="button" onClick={() => setRemoving(false)} disabled={removeBusy}>Cancel</button>
+          <ModalActions>
+            <button className="btn btn-secondary" type="button" onClick={() => setRemoving(false)} disabled={removeBusy}>Cancel</button>
             <button className="btn btn-danger" type="button" onClick={confirmRemove} disabled={removeBusy}>
               {removeBusy ? 'Removing…' : 'Remove'}
             </button>
-          </div>
+          </ModalActions>
         </Modal>
       )}
     </>

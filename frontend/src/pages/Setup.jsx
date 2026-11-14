@@ -275,7 +275,7 @@ export default function Setup() {
       </>}
       {step === 'review' && <>
         <p>{verified ? 'The picture moved in this browser.' : 'You can return to the picture check at any time.'}</p>
-        <div className="setup-summary"><div>Child <strong>{reviewChild?.name || (setup.readiness.hasChild ? 'Added' : 'Still needed')}</strong></div>
+        <div className="card setup-summary"><div>Child <strong>{reviewChild?.name || (setup.readiness.hasChild ? 'Added' : 'Still needed')}</strong></div>
           <div>Camera <strong>{camera?.name || (setup.readiness.cameraAssigned ? 'Assigned' : 'Still needed')}</strong></div></div>
         {setup.status === 'completed' && <p>Setup is complete.</p>}
         {setup.status !== 'completed' && <>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import Modal from './Modal.jsx';
+import ModalActions from './ModalActions.jsx';
 
 // NAMING: the component and its CSS classes are still `Crib*`/`.crib__*`, and the column is still
 // `detect_zone`, but all user-facing wording is "bed" — the rename deliberately stopped short of
@@ -142,10 +143,10 @@ function ReplaceZoneConfirm({ title, message, confirmLabel, onCancel, onConfirm 
   return (
     <Modal title={title} placement="top" onClose={onCancel}>
       <p style={{ marginTop: 0 }}>{message}</p>
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <button className="btn" type="button" data-autofocus onClick={onCancel}>Cancel</button>
+      <ModalActions>
+        <button className="btn btn-secondary" type="button" data-autofocus onClick={onCancel}>Cancel</button>
         <button className="btn btn-danger" type="button" onClick={onConfirm}>{confirmLabel}</button>
-      </div>
+      </ModalActions>
     </Modal>
   );
 }
@@ -459,9 +460,9 @@ export default function CribZonePicker({ cameraId, zone, onChange }) {
               view, it lands in the same place of a different picture, so check it over the live frame afterwards.
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <ModalActions>
             <button className="btn btn-primary" type="button" onClick={applyPaste} disabled={!pasteText.trim()}>Apply</button>
-          </div>
+          </ModalActions>
         </Modal>
       )}
 

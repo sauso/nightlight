@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useHomeTime } from '../lib/useHomeTime.js';
 import Modal from './Modal.jsx';
+import ModalActions from './ModalActions.jsx';
+import SwitchRow from './SwitchRow.jsx';
 
 // Human-facing labels/colors for each event type the backend records (see
 // lib/cameraEvents.js EVENT). Anything unrecognized falls back to a neutral style so a
@@ -85,14 +87,8 @@ export default function EventLog() {
   return (
     <div className="event-log">
       <div className="log-viewer__toolbar">
-        <label className="log-viewer__toggle">
-          <input
-            type="checkbox"
-            checked={autoRefresh}
-            onChange={(e) => setAutoRefresh(e.target.checked)}
-          />
-          Auto-refresh
-        </label>
+        <SwitchRow label="Auto-refresh" checked={autoRefresh}
+          onChange={(e) => setAutoRefresh(e.target.checked)} />
         <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" className="icon-btn" onClick={load}>Refresh now</button>
           <button type="button" className="icon-btn" onClick={() => setConfirming(true)}>Clear log</button>
@@ -105,14 +101,14 @@ export default function EventLog() {
             Clear all camera history? This permanently deletes the up/down/restart history, including
             who silenced, restarted or rebooted a camera, and can't be undone.
           </p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button className="btn" type="button" onClick={() => setConfirming(false)} disabled={clearBusy}>
+          <ModalActions>
+            <button className="btn btn-secondary" type="button" onClick={() => setConfirming(false)} disabled={clearBusy}>
               Cancel
             </button>
             <button className="btn btn-danger" type="button" onClick={doClear} disabled={clearBusy}>
               {clearBusy ? 'Clearing…' : 'Clear log'}
             </button>
-          </div>
+          </ModalActions>
         </Modal>
       )}
 

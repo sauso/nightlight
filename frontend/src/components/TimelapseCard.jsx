@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { formatDayKey } from '../lib/homeTime.js';
 import MediaPlayerModal from './MediaPlayerModal.jsx';
+import ModalActions from './ModalActions.jsx';
 
 // "Timelapse" card on a child's detail page: the nightly sleep timelapse (see lib/timelapse.js). Shows
 // the most recent night as a hero thumbnail that plays in a modal; recent nights sit in a strip below as small
@@ -145,12 +146,12 @@ export default function TimelapseCard({ childId }) {
                     ? 'Couldn’t delete — try again.'
                     : 'Delete this timelapse? It can’t be rebuilt — the frames it was made from are gone.'}
                 </span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button type="button" className="btn" onClick={() => setDel('')} disabled={del === 'deleting'}>Cancel</button>
+                <ModalActions>
+                  <button type="button" className="btn btn-secondary" onClick={() => setDel('')} disabled={del === 'deleting'}>Cancel</button>
                   <button type="button" className="btn btn-danger" onClick={deleteNow} disabled={del === 'deleting'}>
                     {del === 'deleting' ? 'Deleting…' : 'Delete'}
                   </button>
-                </div>
+                </ModalActions>
               </div>
             ) : null
           }

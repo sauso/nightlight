@@ -26,7 +26,7 @@ export default function ServerCard() {
   if (!isolation) return null;
   return (
     <div className="card">
-      <div className="card-title">Server</div>
+      <h2 className="card-heading">Server</h2>
       <div className="list-row">
         <span>Media isolation</span>
         <span className="camera-tile__sub">{isolation === 'on' ? 'On' : 'Off'}</span>

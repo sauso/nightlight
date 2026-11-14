@@ -5,6 +5,7 @@ import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { nightDetailPath, settingsParts } from '../lib/nightView.js';
 import Modal from './Modal.jsx';
+import ModalActions from './ModalActions.jsx';
 
 // Durations read as "9h 01m" here, matching the summary card this dialog is comparing against.
 function fmtDur(min) {
@@ -497,10 +498,10 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
             </>
           )}
           {error && <div className="sleep-detail__recompute-error">{error}</div>}
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <ModalActions>
             {locked && confirming ? (
               <>
-                <button type="button" className="btn" onClick={() => { setConfirming(false); setError(null); }} disabled={busy}>
+                <button type="button" className="btn btn-secondary" onClick={() => { setConfirming(false); setError(null); }} disabled={busy}>
                   Keep my correction
                 </button>
                 <button type="button" className="btn btn-danger" onClick={removeCorrection} disabled={busy}>
@@ -508,7 +509,7 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
                 </button>
               </>
             ) : (
-              <button type="button" className="btn" onClick={closeDialog} disabled={busy}>
+              <button type="button" className="btn btn-secondary" onClick={closeDialog} disabled={busy}>
                 {canSave ? 'Cancel' : 'Close'}
               </button>
             )}
@@ -522,7 +523,7 @@ export default function RecomputeNight({ childId, date, night, fmtTime, onRecomp
                 {busy ? 'Saving…' : nothingSaved ? 'Save this night' : 'Save the new numbers'}
               </button>
             )}
-          </div>
+          </ModalActions>
         </Modal>
       )}
     </>

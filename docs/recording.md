@@ -585,7 +585,9 @@ is skipped, so recording can never be the thing that fills your disk.
 
 ⚠️ **This is not retention, and nothing here is kept, including protected clips.** Removing a child, or a camera, deletes everything
 that belongs to it, rows and files, and **cannot be undone**. The Remove dialog lists these before you
-confirm and asks "Are you sure?". The two are **different**, and so is what each leaves behind:
+confirm and asks "Are you sure?". Both are admin-only and both start from the **⋯** menu at the top right of the
+child's or the camera's settings page (**Remove child**, **Remove camera**), not from a button under Save. The two are
+**different**, and so is what each leaves behind:
 
 | | Removing a **child** | Removing a **camera** |
 |---|---|---|

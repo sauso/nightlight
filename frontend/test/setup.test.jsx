@@ -341,6 +341,8 @@ describe('setup steps', () => {
     wizard();
     await screen.findByRole('heading', { name: 'Setup' });
     expect(navHidden()).toBe(false);
+    expect(document.querySelector('.setup-summary')).toHaveClass('card');
+    expect(document.querySelectorAll('.setup-summary > div')).toHaveLength(2);
   });
 
   test('★ Save and exit gives the navigation back', async () => {

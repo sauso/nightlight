@@ -80,7 +80,7 @@ export default function DiagnosticsCard({ title }) {
 
   return (
     <div className="card">
-      {title && <div className="card-title">{title}</div>}
+      {title && <h2 className="card-heading">{title}</h2>}
       <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
         Hit a bug? Download a diagnostics bundle and attach it to a GitHub issue — it packages your
         version and build, host/runtime info, camera &amp; detection settings, live stream status,

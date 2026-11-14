@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useHomeTime } from '../lib/useHomeTime.js';
 import Modal from './Modal.jsx';
+import ModalActions from './ModalActions.jsx';
+import SwitchRow from './SwitchRow.jsx';
 import { ProtectedBadge } from './ClipProtection.jsx';
 
 // Detection alerts (motion now, sound later) — see backend lib/detectionEvents.js ALERT.
@@ -74,10 +76,8 @@ export default function RecentAlerts() {
   return (
     <div className="event-log">
       <div className="log-viewer__toolbar">
-        <label className="log-viewer__toggle">
-          <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
-          Auto-refresh
-        </label>
+        <SwitchRow label="Auto-refresh" checked={autoRefresh}
+          onChange={(e) => setAutoRefresh(e.target.checked)} />
         <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" className="icon-btn" onClick={load}>Refresh now</button>
           <button type="button" className="icon-btn" onClick={() => setConfirming(true)}>Clear log</button>
@@ -89,14 +89,14 @@ export default function RecentAlerts() {
           <p style={{ marginTop: 0 }}>
             Clear all recent alerts? This permanently deletes unprotected alert history and can't be undone. Protected alerts are kept.
           </p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button className="btn" type="button" onClick={() => setConfirming(false)} disabled={clearBusy}>
+          <ModalActions>
+            <button className="btn btn-secondary" type="button" onClick={() => setConfirming(false)} disabled={clearBusy}>
               Cancel
             </button>
             <button className="btn btn-danger" type="button" onClick={doClear} disabled={clearBusy}>
               {clearBusy ? 'Clearing…' : 'Clear log'}
             </button>
-          </div>
+          </ModalActions>
         </Modal>
       )}
 

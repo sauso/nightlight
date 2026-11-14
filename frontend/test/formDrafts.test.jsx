@@ -109,7 +109,8 @@ describe('child form', () => {
     const { user } = mountChild();
     await user.type(await screen.findByLabelText('Name'), ' edited');
     expect(Object.keys(sessionStorage)).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: 'Remove child' }));
+    await user.click(screen.getByRole('button', { name: 'More options for this child' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Remove child' }));
     await user.click(screen.getByRole('button', { name: 'Remove' }));
     await screen.findByText('elsewhere');
     expect(Object.keys(sessionStorage)).toEqual([]);

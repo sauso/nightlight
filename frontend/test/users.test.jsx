@@ -332,7 +332,7 @@ describe('adding and editing a caregiver', () => {
     test('there is nothing to remove or reset yet', async () => {
       mountEdit('new');
       await screen.findByLabelText('Username (login)');
-      expect(screen.queryByRole('button', { name: 'Remove caregiver' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'More options for this user' })).toBeNull();
       expect(screen.queryByRole('button', { name: 'Reset two-factor' })).toBeNull();
     });
   });
@@ -343,13 +343,17 @@ describe('adding and editing a caregiver', () => {
       // themselves out of their own install, and the right place to say no is before the click.
       mountEdit(ADMIN.id);
       await screen.findByLabelText('First name');
-      expect(screen.queryByRole('button', { name: 'Remove caregiver' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'More options for this user' })).toBeNull();
     });
 
     test('is offered on someone else, behind a confirmation', async () => {
       const { user } = mountEdit();
-      await user.click(await screen.findByRole('button', { name: 'Remove caregiver' }));
+      await user.click(screen.getByRole('button', { name: 'More options for this user' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
       expect(await screen.findByText(/signed out everywhere/)).toBeTruthy();
+      // UI consistency (PR-C): the item is in the header menu (no red button left under Save), and the dialog uses the shared row.
+      expect(screen.queryByRole('button', { name: /^Remove (user|caregiver)$/ })).toBeNull();
+      expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }).closest('.modal-actions')).not.toBeNull();
       expect(delSpy, 'opening the dialog is not the deletion').not.toHaveBeenCalled();
 
       await user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -359,7 +363,8 @@ describe('adding and editing a caregiver', () => {
 
     test('confirming deletes and returns to the list', async () => {
       const { user } = mountEdit();
-      await user.click(await screen.findByRole('button', { name: 'Remove caregiver' }));
+      await user.click(screen.getByRole('button', { name: 'More options for this user' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
       await user.click(await screen.findByRole('button', { name: 'Remove' }));
       await waitFor(() => expect(delSpy).toHaveBeenCalledWith('/auth/users/u-care'));
       expect(await screen.findByText('at /settings/users')).toBeTruthy();
@@ -370,7 +375,8 @@ describe('adding and editing a caregiver', () => {
       // be able to sign in.
       delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Cannot remove the last admin'));
       const { user } = mountEdit();
-      await user.click(await screen.findByRole('button', { name: 'Remove caregiver' }));
+      await user.click(screen.getByRole('button', { name: 'More options for this user' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
       await user.click(await screen.findByRole('button', { name: 'Remove' }));
       expect(await screen.findByText('Cannot remove the last admin')).toBeTruthy();
       expect(screen.getByText('at /settings/users/u-care')).toBeTruthy();
@@ -381,7 +387,8 @@ describe('adding and editing a caregiver', () => {
     test('★ #378 the failure is shown INSIDE the dialog, once, and the dialog stays open to retry', async () => {
       delSpy = vi.spyOn(api, 'del').mockRejectedValue(new Error('Refused: owns a session #378'));
       const { user } = mountEdit();
-      await user.click(await screen.findByRole('button', { name: 'Remove caregiver' }));
+      await user.click(screen.getByRole('button', { name: 'More options for this user' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
       await user.click(await screen.findByRole('button', { name: 'Remove' }));
 
       const dialog = screen.getByRole('dialog');
@@ -392,7 +399,8 @@ describe('adding and editing a caregiver', () => {
 
       await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-      await user.click(screen.getByRole('button', { name: 'Remove caregiver' }));
+      await user.click(screen.getByRole('button', { name: 'More options for this user' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
       expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
     });
   });
@@ -465,7 +473,8 @@ describe('adding and editing a caregiver', () => {
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
       // ...and so is the Remove dialog: the reset failure is not its message.
-      await user.click(screen.getByRole('button', { name: 'Remove caregiver' }));
+      await user.click(screen.getByRole('button', { name: 'More options for this user' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
       expect(within(screen.getByRole('dialog')).queryByText('Reset refused #378')).toBeNull();
       expect(within(screen.getByRole('dialog')).queryByRole('alert')).toBeNull();
     });

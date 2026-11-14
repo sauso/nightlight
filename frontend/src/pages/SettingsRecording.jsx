@@ -7,6 +7,7 @@ import AppHeader from '../components/AppHeader.jsx';
 import SwitchRow from '../components/SwitchRow.jsx';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
 import Modal from '../components/Modal.jsx';
+import ModalActions from '../components/ModalActions.jsx';
 import { useHomeTime } from '../lib/useHomeTime.js';
 import { loadDraft } from '../lib/formDraft.js';
 import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
@@ -410,14 +411,14 @@ export default function SettingsRecording() {
             <div className="camera-tile__sub" style={{ margin: '8px 0 12px' }}>
               The alerts and their pictures stay; only the video goes. Deleted clips can't be got back.
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setDeletePrompt(null)} disabled={busy}>
+            <ModalActions>
+              <button type="button" className="btn btn-secondary" onClick={() => setDeletePrompt(null)} disabled={busy}>
                 Cancel
               </button>
-              <button type="button" className="btn btn-danger" style={{ flex: 1 }} onClick={() => doSave(deletePrompt.payload)} disabled={busy}>
+              <button type="button" className="btn btn-danger" onClick={() => doSave(deletePrompt.payload)} disabled={busy}>
                 {busy ? 'Saving…' : 'Save and delete clips'}
               </button>
-            </div>
+            </ModalActions>
           </Modal>
         )}
       </main>
