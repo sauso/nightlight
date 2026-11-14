@@ -438,8 +438,6 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
                     value={cam.detect_schedule_enabled ? `${minToHHMM(cam.detect_start)}–${minToHHMM(cam.detect_end)}` : 'Always'}
                     onClick={() => navigate(`/cameras/${id}/schedule`, detFrom)} />
                 </div>
-                {/* Read-only summary of what this camera alerts on and records, and whether it is ready (#394). */}
-                <RecordingScopePanel cam={cam} />
               </>
             )}
 
@@ -451,7 +449,7 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
                 aria-controls="camera-advanced-fields" onClick={() => setAdvancedOpen((open) => !open)}>
                 <span className="camera-form__disclosure-text">
                   <strong>Advanced</strong>
-                  <span>Stream paths, two-way audio, MQTT topic</span>
+                  <span>{!isNew && cam ? 'Stream paths, two-way audio, MQTT topic, recording and alerts' : 'Stream paths, two-way audio, MQTT topic'}</span>
                 </span>
                 <ChevronDown size={18} aria-hidden="true" />
               </button>
@@ -515,6 +513,16 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
                     <input id="cam-mqtt-topic" value={form.mqtt_topic} onChange={(e) => setForm({ ...form, mqtt_topic: e.target.value })}
                       placeholder="e.g. zigbee2mqtt/Child B Room Temp" />
                   </div>
+
+                  {/* Read-only summary of what this camera alerts on and records, and whether it is ready (#394). It lives
+                      here, not under Detection, because it is a status read-out rather than something you set: the owner
+                      asked for it behind Advanced after seeing the sectioned form (#1076). Unmounted while Advanced is closed,
+                      so its readiness request is only made when someone opens it. Existing cameras only. */}
+                  {!isNew && cam && (
+                    <div className="camera-form__scope">
+                      <RecordingScopePanel cam={cam} />
+                    </div>
+                  )}
                 </div>
               )}
             </div>
