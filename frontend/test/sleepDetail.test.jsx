@@ -568,6 +568,55 @@ describe('timeline legend and night-event tabs', () => {
     for (const marker of markers) expect(marker.getAttribute('style') || '').toMatch(/clamp\(/);
   });
 
+  // Owner, 2026-11-14: a night in progress showed "7:00 pm ... 7:00 am" under a bar that stopped at 8:31 pm, and "7p" printed
+  // right above "7:00 pm". The bar is drawn from the start to NOW (display_end is clipped), so the labels must say so.
+  describe('a night still in progress labels the bar it really draws', () => {
+    // 09:00Z is 19:00 in Melbourne in August (UTC+10): the window is 7 pm to 7 am; "now" is 8:31 pm.
+    const live = (asOf, extra = {}) => ({
+      ...NIGHT, in_progress: true, wake_at: null, as_of: asOf, display_start: NIGHT.window_start, display_end: asOf, ...extra,
+    });
+    const endsOf = (container) => [...container.querySelectorAll('.sleep-tl__ends span')].map((s) => s.textContent);
+    const tickLabels = (container) => [...container.querySelectorAll('.sleep-tl__tick-label')].map((s) => s.textContent);
+
+    test('the right-hand end says "Now" with the time, not the window\'s 7:00 am; the first hour is not printed twice', async () => {
+      mockSleep({ night: live('2026-08-30 10:31:00') });
+      const { container } = mount();
+      await screen.findByRole('tab', { name: /Wake-ups/ });
+      const [left, right] = endsOf(container);
+      expect(left).toMatch(/^7:00\s?pm$/i);
+      expect(right).toMatch(/^Now, 8:31\s?pm$/i);
+      expect(right, 'never the configured window end').not.toMatch(/7:00\s?am/i);
+      // 7p sits on the left end (named below the bar already), so only 8p is labelled; every hour while the night is this short.
+      expect(tickLabels(container)).toEqual(['8p']);
+    });
+
+    test('a longer live night labels every second hour again, and never a tick sitting on either end', async () => {
+      mockSleep({ night: live('2026-08-30 15:00:00') });
+      const { container } = mount();
+      await screen.findByRole('tab', { name: /Wake-ups/ });
+      // 7p (start) and 1a (exactly now, the right end) are named by the row below; 9p and 11p are the 2-hourly labels between.
+      expect(tickLabels(container)).toEqual(['9p', '11p']);
+      expect(endsOf(container)[1]).toMatch(/^Now, 1:00\s?am$/i);
+    });
+
+    test('the left end follows the bar when it starts before the configured window', async () => {
+      mockSleep({ night: live('2026-08-30 10:31:00', { display_start: '2026-08-30 08:40:00' }) });
+      const { container } = mount();
+      await screen.findByRole('tab', { name: /Wake-ups/ });
+      expect(endsOf(container)[0]).toMatch(/^6:40\s?pm$/i);
+    });
+
+    test('a finished night is unchanged: window start and end, first and last hour labelled', async () => {
+      mockSleep({ night: NIGHT });
+      const { container } = mount();
+      await screen.findByRole('tab', { name: /Wake-ups/ });
+      const [left, right] = endsOf(container);
+      expect(left).toMatch(/^7:00\s?pm$/i);
+      expect(right).toMatch(/^7:00\s?am$/i);
+      expect(tickLabels(container)[0]).toBe('7p');
+    });
+  });
+
   test('hovering the bar does not redo the drawing merge', async () => {
     mockSleep({ night: { ...NIGHT, segments: [seg('stir', '2026-08-30 09:00:00', '2026-08-30 09:01:00', 1),
       seg('asleep', '2026-08-30 09:01:00', '2026-08-30 10:00:00', 59)] } });

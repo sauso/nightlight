@@ -1004,17 +1004,27 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
     setHover({ pct: f * 100, time: fmtMs(ms), status: labelFor(stateAt(ms)), temp: tempAt(ms), hr: vitalAt(ms, 'hr'), rr: vitalAt(ms, 'rr') });
   }
 
+  // A night still running: the bar is drawn from the start to NOW (display_end is clipped to the analysed minutes), so the
+  // window's configured end (7 am) is not where the bar ends. The owner saw "7:00 pm ... 7:00 am" under a bar that stopped at
+  // 8:31 pm (2026-11-14). Finished nights are left exactly as they were.
+  const live = Boolean(night.in_progress && night.as_of);
   const ticks = useMemo(() => {
     const out = [];
     // First whole hour at/after the window start (the window is aligned to a local hour, so stepping
     // by 1h keeps local-hour alignment). Label every 2h to avoid clutter.
+    // A live night is often only an hour or two long, so it labels EVERY hour while it is short, and leaves the label off a tick
+    // that sits on either end of the bar: the row below already names the start and the "Now" time there, and a second "7p"
+    // directly above "7:00 pm" read as a repeat.
+    const every = live && totalMs <= 4 * 3600000 ? 1 : 2;
     let ms = Math.ceil(startMs / 3600000) * 3600000;
     let n = 0;
     for (; ms <= endMs; ms += 3600000, n++) {
-      out.push({ pct: ((ms - startMs) / totalMs) * 100, label: n % 2 === 0 ? shortHour(ms, tz) : null });
+      const pct = ((ms - startMs) / totalMs) * 100;
+      const onEnd = live && (pct < 1 || pct > 99);
+      out.push({ pct, label: n % every === 0 && !onEnd ? shortHour(ms, tz) : null });
     }
     return out;
-  }, [startMs, endMs, totalMs, tz]);
+  }, [startMs, endMs, totalMs, tz, live]);
 
   const onsetPct = pctOf(night.onset_at, startMs, totalMs);
   const wakePct = night.wake_at ? pctOf(night.wake_at, startMs, totalMs) : null;
@@ -1092,8 +1102,10 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
         ))}
       </div>
       <div className="sleep-tl__ends">
-        <span>{fmtTime(night.window_start)}</span>
-        <span>{fmtTime(night.window_end)}</span>
+        {/* Live: label the ends the bar really has (it starts at display_start, which can be earlier than the configured window,
+            and ends now), not the window's configured ends. */}
+        <span>{fmtTime(live ? (night.display_start || night.window_start) : night.window_start)}</span>
+        <span>{live ? `Now, ${fmtTime(night.as_of)}` : fmtTime(night.window_end)}</span>
       </div>
     </div>
   );

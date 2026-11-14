@@ -93,6 +93,8 @@ another room less well.
 Tap the sleep summary for the **Timeline** card: a to-scale bar of
 asleep / stirring / awake stretches on a real time axis. Nearby short stirs join visually on the bar;
 the underlying times and counts stay separate, and the hover status follows the original segments.
+While a night is still going, the bar runs from the start of the night to now
+and its right-hand end reads **Now** with the time, not the morning end of the night (tonight's page refreshes every two minutes).
 The legend lists only the states present that night. Below it, one card with two tabs, **Wake-ups** and
 **Room activity**, shows each count and its own rows (with clips or saved frames where available).
 The **Wake-ups** count is the same number as the **Wake-ups** figure in the night's summary (mid-night wake-ups only):
