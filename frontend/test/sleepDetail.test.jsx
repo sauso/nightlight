@@ -599,6 +599,32 @@ describe('timeline legend and night-event tabs', () => {
       expect(endsOf(container)[1]).toMatch(/^Now, 1:00\s?am$/i);
     });
 
+    // The 4-hour edge of "label every hour while the live night is short". Melbourne is UTC+10 in August: 09:00Z is 7 pm.
+    test('exactly 4 hours is still short: every hour is labelled, except the ticks on the two ends', async () => {
+      mockSleep({ night: live('2026-08-30 13:00:00') });
+      const { container } = mount();
+      await screen.findByRole('tab', { name: /Wake-ups/ });
+      // Ticks at 7p (left end), 8p, 9p, 10p, 11p (right end = now): the interior three, every hour.
+      expect(tickLabels(container)).toEqual(['8p', '9p', '10p']);
+    });
+
+    test('4 hours 1 minute is no longer short: every SECOND hour again', async () => {
+      mockSleep({ night: live('2026-08-30 13:01:00') });
+      const { container } = mount();
+      await screen.findByRole('tab', { name: /Wake-ups/ });
+      // Ticks at 7p..11p; labels on every second one (7p, 9p, 11p), minus the two on the bar's ends (7p at 0%, 11p at 99.6%).
+      expect(tickLabels(container)).toEqual(['9p']);
+    });
+
+    test('a tick between 0.5% and 1% from the left, or between 99% and 99.5% from the right, is treated as on the end and not labelled', async () => {
+      // A 2 h 2 min bar, 18:59 to 21:01 local: the 7 pm tick is at 0.82% and the 9 pm tick at 99.18%. Both are within a
+      // pixel or two of a bar end, where the row below already prints the start / "Now" time, so neither gets a label.
+      mockSleep({ night: live('2026-08-30 11:01:00', { display_start: '2026-08-30 08:59:00' }) });
+      const { container } = mount();
+      await screen.findByRole('tab', { name: /Wake-ups/ });
+      expect(tickLabels(container)).toEqual(['8p']);
+    });
+
     test('the left end follows the bar when it starts before the configured window', async () => {
       mockSleep({ night: live('2026-08-30 10:31:00', { display_start: '2026-08-30 08:40:00' }) });
       const { container } = mount();
@@ -613,7 +639,11 @@ describe('timeline legend and night-event tabs', () => {
       const [left, right] = endsOf(container);
       expect(left).toMatch(/^7:00\s?pm$/i);
       expect(right).toMatch(/^7:00\s?am$/i);
-      expect(tickLabels(container)[0]).toBe('7p');
+      // Every second hour from the first tick, and on a finished night the tick at each end keeps its label (the live
+      // end-tick suppression must not leak): 7 pm is the first, 7 am (12 h on) the last.
+      const labels = tickLabels(container);
+      expect(labels[0]).toBe('7p');
+      expect(labels[labels.length - 1]).toBe('7a');
     });
   });
 
