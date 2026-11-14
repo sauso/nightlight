@@ -208,38 +208,18 @@ detector watchdog). Every threshold in it came from one house's runs.
 - **Late or missing morning wake (#700, #618 follow-ups) — `HELD`** until the shadow nights and reviews above exist.
 - **A sleep window of almost 24 hours never closes the wake watcher's gate (#922) — `IDEA`,** low priority.
 
-### 1.8 Sleep Score and Night summary — `IN PROGRESS`
+### 1.8 Sleep Score and Night summary — phases 0 to 4 `SHIPPED` (0.48.0), 5 to 7 open
 
-Approved 2026-11-11. Full plan: [`sleep-score-plan.md`](sleep-score-plan.md).
-
-A nightly Sleep Score (0-100) for each child and a short "Night summary" in plain language, on the
-child's sleep card and the sleep detail page. Nights only, no naps. The score is **computed on read**
-from the night an endpoint is about to return, so it always matches the figures beside it and a
-correction or a tuned formula applies at once; it is not stored. Five components: duration,
-continuity, settling, restlessness, consistency, compared with the child's own last 7 to 14 nights
-(age is only a fallback), with a weakest-link cap. Bands "Great", "Good", "Fair"; the lowest band
-shows the number alone. No score for a night in progress or one with no measured sleep. The summary
-is built from a phrase library, descriptive only: no causes, no advice, never a sleep-stage or medical
-claim. Every weight and curve is a starting value tuned on two cameras in one house.
+Phases 0 to 4 shipped in 0.48.0: the score on read, the breakdown sheet, the plain-words Night summary and the live night. The full text,
+the design rules and the phase table are in [`ROADMAP-archive.md`](ROADMAP-archive.md) §1.8, under the same sub-headings; the plan is
+[`sleep-score-plan.md`](sleep-score-plan.md). What is still open:
 
 | # | Phase | Review tier | Status |
 |---|---|---|---|
-| 0 | Documents: this entry, the plan, the roadmap archive | T0 | `DONE` on `dev` (#1038) |
-| 1a | Save the raw facts (`stir_minutes`, `summary_facts`). Ships first and alone: raw samples are deleted after 30 days, so every night stored without it loses restlessness for good | T2 | `DONE` on `dev` (#1039) |
-| 1b | Scoring maths: baseline, score, age table with citation, evidence script | T2 | `DONE` on `dev` (#1040) |
-| 1c | API: attach `score` on read; `docs/sleep-tracking.md`. Also the wake half of #1041 and the 15-minute correction rule (owner decision 2026-11-12) | T1 | `DONE` on `dev` (#1042) |
-| 2 | Score UI: ring on the card and detail page, breakdown sheet, per-child "Show sleep score" switch (default on). The docs screenshots are refreshed at release, not here | T2 | `DONE` on `dev` (#1051) |
-| 3 | Night summary: selection on the server, phrase library in the browser | T1 | `DONE` on `dev` (#1052) |
-| 4 | Live night: "so far" summary, current state | T2 | Server half `DONE` on `dev` (#1054); the screens that show it landed with the UI refresh (#1055 to #1066). Not released yet |
 | 5 | Trends over 7/14/30 days (replaces idea A1) | T1 or T2 | `HELD` |
 | 6 | Tappable timeline (independent of the score) | T1 | `HELD` |
 | 7 | Optional LLM rewording through a user-supplied endpoint | separate plan | `IDEA` |
 | later | "Disruptions" and self-settling rate; needs cry classification (§2.2) and a reliable caregiver signal | separate plans | `IDEA` |
-
-Phases 0 to 4 are merged to `dev` and not yet in a release. This section stays here, with phases 5 to 7
-as its open remainder, until they ship; at the release that carries phases 0 to 4 their text moves to
-[`ROADMAP-archive.md`](ROADMAP-archive.md) under this number and a stub stays behind, as the ground rule
-at the top of this file says.
 
 ## 2. Specced, not built
 
