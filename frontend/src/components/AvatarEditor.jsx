@@ -2,9 +2,9 @@ import { Camera } from 'lucide-react';
 import Avatar from './Avatar.jsx';
 
 // A tappable avatar: the photo (or the initials on their colour) with a small camera badge at the bottom-right; tapping it
-// opens the file picker. The same control on the child's settings and on your own account, so the two look alike (owner,
-// 2026-11-05, from a reference image: a round photo with a rounded-square camera badge; the badge border is the brand violet
-// rather than the reference's green).
+// opens the file picker. The same control on the child's settings, your own account, the caregiver form and the setup screens, so
+// they all look alike. The badge is the round camera disc (owner, 2026-11-15; it had been a rounded square with a gold border,
+// 2026-11-05), drawn in theme tokens in index.css so it reads in both themes.
 //
 // This is ONLY the picker. What happens with the file (resize, save now or hold until Save, the status text, the Remove
 // button) stays with the page, because those differ: a child's photo and your own are saved through different requests, and

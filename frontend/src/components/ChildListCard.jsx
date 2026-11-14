@@ -5,6 +5,7 @@ import { ageLabel } from '../lib/age.js';
 import { fmtDur } from '../lib/duration.js';
 import { useLiveSleep } from '../lib/useLiveSleep.js';
 import { scoreOf, scoreLabel, bandOf, bandWord } from '../lib/sleepScoreText.js';
+import { childColorVars } from '../lib/childColors.js';
 
 export default function ChildListCard({ child, cameraCount, onOpen }) {
   const data = useLiveSleep(child.id, { refreshMs: null });
@@ -22,8 +23,18 @@ export default function ChildListCard({ child, cameraCount, onOpen }) {
     ? `${child.name}, ${meta}, ${caption} ${duration}${score ? `, Sleep score ${scoreLabel(score)}` : ''}`
     : undefined;
 
+  // A 2px ring in the child's colour (owner, 2026-11-15), drawn by `.child-card--ringed` from `--child-ring`. The themed shade, so
+  // it clears 3:1 on the card in both themes. A child with no usable colour keeps the plain card. Decorative: the ring adds no text
+  // and the button's name is unchanged.
+  const vars = childColorVars(child.color);
   return (
-    <button type="button" className="child-card" onClick={onOpen} aria-label={label}>
+    <button
+      type="button"
+      className={vars ? 'child-card child-card--ringed' : 'child-card'}
+      style={vars ? { '--child-ring': vars.ring } : undefined}
+      onClick={onOpen}
+      aria-label={label}
+    >
       <span className="child-card__top">
         <Avatar name={child.name} src={child.photo} color={child.color} size={64} />
         <span className="child-card__id">

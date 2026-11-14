@@ -1,4 +1,5 @@
-// The tappable avatar with a camera badge (owner, 2026-11-05), used on the child's settings and on your own account.
+// The tappable avatar with a camera badge (owner, 2026-11-05; the badge became the round disc 2026-11-15, its colours are pinned in
+// paletteTokens.test.jsx), used on the child's settings, your own account, the caregiver form and the setup screens.
 //
 // The component is only the picker: what happens with the file stays with each page. So these tests cover the component's
 // own contract (name, change event, initials fallback) AND, on both pages, that picking a photo still reaches the same save
@@ -47,7 +48,10 @@ describe('AvatarEditor', () => {
 
   test('the camera badge is decoration: hidden from assistive technology, and the picker is only images', () => {
     const { container } = mount();
-    expect(container.querySelector('.avatar-editor__badge').getAttribute('aria-hidden')).toBe('true');
+    const badge = container.querySelector('.avatar-editor__badge');
+    expect(badge.getAttribute('aria-hidden')).toBe('true');
+    expect(badge.querySelector('svg'), 'the camera glyph is inside the badge').not.toBeNull();
+    expect(badge.style.width, 'the badge scales with the avatar').toBe('30px'); // round(88 * 0.34)
     expect(screen.getByLabelText('Add photo').getAttribute('accept')).toBe('image/*');
   });
 });

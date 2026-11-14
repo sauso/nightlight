@@ -131,6 +131,8 @@ describe('a child detail screen', () => {
     return Promise.resolve(null);
   });
   const SCORE = { score: 82, band: 'good', version: 2, provisional: false, low_confidence: false, low_confidence_reasons: [], capped_by: null, early_estimate: false, components: [] };
+  // The tint classes alone: the card also carries `night--ringed` (the child's colour ring, tested on its own below).
+  const tintClasses = (container) => container.querySelector('.night').className.replace(' night--ringed', '');
   // The duration is two elements (the figure and a smaller "asleep"): matched on the element that holds both.
   const asleepText = (text) => screen.findByText((_c, el) => el?.classList?.contains('night__sleep-big') && el.textContent === text);
 
@@ -144,7 +146,7 @@ describe('a child detail screen', () => {
     withNight(score);
     const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
     await waitFor(() => expect(container.querySelector('.night').classList.contains(`night--${band}`)).toBe(true));
-    expect(container.querySelector('.night').className).toBe(`night night--${band}`);
+    expect(tintClasses(container)).toBe(`night night--${band}`);
   });
 
   test('★ switching to another child never leaves the previous child\'s tint on the card while the new sleep request is pending', async () => {
@@ -161,10 +163,10 @@ describe('a child detail screen', () => {
     function Jump() { const go = useNavigate(); return <button type="button" onClick={() => go('/children/kid-2')}>jump</button>; }
     const { container, user } = renderAsAdmin(
       <Routes><Route path="/children/:id" element={<><Jump /><ChildDetail /></>} /></Routes>, atChild('kid-1'));
-    await waitFor(() => expect(container.querySelector('.night').className).toBe('night night--good'));
+    await waitFor(() => expect(tintClasses(container)).toBe('night night--good'));
     await user.click(screen.getByRole('button', { name: 'jump' }));
     await waitFor(() => expect(container.querySelector('.night__name').textContent).toBe('Child A')); // the new child's page is up
-    expect(container.querySelector('.night').className).toBe('night');
+    expect(tintClasses(container)).toBe('night');
     expect(screen.queryByText(/asleep/)).toBeNull(); // nor does the card still show the previous child's night
   });
 
@@ -172,7 +174,7 @@ describe('a child detail screen', () => {
     withNight({ score: null, reason: 'in_progress', version: 2 });
     const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
     await asleepText('10h 37m asleep');
-    expect(container.querySelector('.night').className).toBe('night');
+    expect(tintClasses(container)).toBe('night');
   });
 
   test('a child with no cameras is told how to assign one, and a caregiver that an admin assigns them', async () => {
@@ -235,6 +237,50 @@ describe('a child detail screen', () => {
     const second = renderAsAdmin(edit, atChild('kid-1'));
     await second.user.click(await screen.findByRole('button', { name: 'Add a photo for Child B' }));
     expect(await screen.findByText('child settings')).toBeTruthy();
+  });
+
+  // The child's colour ring (owner, 2026-11-15) and the removal of the camera badge from this card.
+  describe('the night card\'s colour ring and the avatar button', () => {
+    const night = (container) => container.querySelector('.night');
+
+    test('★ the night card carries a ring in the child\'s colour, the -night shade (this card is navy in both themes)', async () => {
+      const { container } = renderAsAdmin(detailRoutes, atChild('kid-2')); // kid-2 is the stored green
+      await screen.findByText('Child A Room');
+      expect(night(container).classList.contains('night--ringed')).toBe(true);
+      expect(night(container).style.getPropertyValue('--child-ring')).toBe('var(--child-green-night)');
+    });
+
+    test('★ a legacy stored colour is ringed in its nearest colour; nothing is rewritten', async () => {
+      const kids = [{ ...KIDS[0], color: '#F5D9A8' }];
+      const { container } = renderAsAdmin(detailRoutes, { ...atChild('kid-1'), kids });
+      await screen.findByText('Child B Room');
+      expect(night(container).style.getPropertyValue('--child-ring')).toBe('var(--child-yellow-night)');
+      expect(api.put).not.toHaveBeenCalled();
+    });
+
+    test('★ a child with no colour keeps the plain card: no ring class, no custom property', async () => {
+      const kids = [{ ...KIDS[0], color: null }];
+      const { container } = renderAsAdmin(detailRoutes, { ...atChild('kid-1'), kids });
+      await screen.findByText('Child B Room');
+      expect(night(container).classList.contains('night--ringed')).toBe(false);
+      expect(night(container).getAttribute('style')).toBeNull();
+    });
+
+    test('the ring and the band tint can be on the card together, in the order the stylesheet expects', async () => {
+      withNight(SCORE);
+      const { container } = renderAsAdmin(detailRoutes, atChild('kid-1'));
+      await waitFor(() => expect(night(container).className).toBe('night night--good night--ringed'));
+    });
+
+    test('★ the avatar has no camera badge, and the button is still named and still opens settings', async () => {
+      const edit = <Routes><Route path="/children/:id" element={<ChildDetail />} /><Route path="/children/:id/edit" element={<div>child settings</div>} /></Routes>;
+      const { container, user } = renderAsAdmin(edit, atChild('kid-1'));
+      const button = await screen.findByRole('button', { name: 'Add a photo for Child B' });
+      expect(container.querySelector('.night__avatar-badge')).toBeNull();
+      expect(button.querySelector('svg'), 'no glyph at all inside the avatar button').toBeNull();
+      await user.click(button);
+      expect(await screen.findByText('child settings')).toBeTruthy();
+    });
   });
 
   // The quiet birthday line: ONLY when a night has no score because there is no birthday (the server's own reason key) AND the
