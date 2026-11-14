@@ -12,6 +12,7 @@ import {
   parseScoringContext, scoringContextChoice, computeNightForDisplay, displayContextFor, currentScoringContext,
 } from '../lib/sleepAnalysis.js';
 import { attachScore } from '../lib/sleepScoreAttach.js';
+import { withNightVitals } from '../lib/nightVitals.js';
 import { startMotionDetector } from '../lib/motionDetector.js';
 import { reconcileClipRing } from '../lib/clipCapture.js';
 import { purgeChild, purgeFailureReason } from '../lib/entityPurge.js';
@@ -301,6 +302,13 @@ router.put('/:id', (req, res) => {
 //     `{ score: null, reason: 'in_progress' }`;
 //   - `last`, the saved row: none. A stored row carries its own `scoring_context`;
 //   - `last`, computed fresh: a plain compute again, so today's.
+//
+// `night.vitals` (heart rate and breathing, ADDED; every other key is unchanged): { hr: { avg, min, max, minutes } |
+// null, rr: { ... } | null } for an `ok` night of a child whose ESPHome radar measured them, summarised from the night's
+// onset to its wake (lib/nightVitals.js). It is attached to the answer AFTER the night, the score and the summary were
+// made, so it is in none of them and never reaches `sleep_nights`; a child without such a sensor gets NO `vitals` key,
+// so the answer is byte-identical to before. For a completed night it is worked out on read from the raw minute
+// readings, so a night older than the ESPHome retention (default 30 days) has none even when its stored row is `ok`.
 router.get('/:id/sleep/live', (req, res) => {
   const child = db.prepare('SELECT id, birthday FROM children WHERE id = ?').get(req.params.id);
   if (!child) return res.status(404).json({ error: 'Child not found' });
@@ -308,7 +316,8 @@ router.get('/:id/sleep/live', (req, res) => {
   const current = currentNightDate(req.params.id);
   if (current) {
     const tonight = computeNight(req.params.id, current);
-    return res.json({ scope: 'tonight', night: attachScore(child, tonight, { context: currentScoringContext(req.params.id) }) });
+    const shownTonight = attachScore(child, tonight, { context: currentScoringContext(req.params.id) });
+    return res.json({ scope: 'tonight', night: withNightVitals(req.params.id, shownTonight) });
   }
   // "Last night" must mean the last COMPLETED night, not "the newest row we happen to have saved" (#683).
   // The row for the night that just ended is only written by the nightly job, a 30-minute timer that
@@ -330,7 +339,7 @@ router.get('/:id/sleep/live', (req, res) => {
     // applyCorrection. A night somebody has told us the truth about must not keep showing the
     // algorithm's version of it.
     const nights = applyCorrections(req.params.id, [stored]);
-    return res.json({ scope: 'last', night: attachScore(child, nights[0] || null) });
+    return res.json({ scope: 'last', night: withNightVitals(req.params.id, attachScore(child, nights[0] || null)) });
   }
   // No saved row for it yet: compute that night fresh, exactly like the `tonight` branch above and
   // GET /:id/sleep/:date do. READ-ONLY: nothing is stored here (storing stays the nightly job's and the
@@ -339,7 +348,8 @@ router.get('/:id/sleep/live', (req, res) => {
   // fresh `no_data` is returned as it is (the card has wording for it) rather than falling back to an
   // older night, which is the very bug.
   const fresh = applyCorrection(req.params.id, computeNight(req.params.id, last));
-  return res.json({ scope: 'last', night: attachScore(child, fresh, { context: currentScoringContext(req.params.id) }) });
+  const shownLast = attachScore(child, fresh, { context: currentScoringContext(req.params.id) });
+  return res.json({ scope: 'last', night: withNightVitals(req.params.id, shownLast) });
 });
 
 // Phase 5: does room temperature correlate with this child's sleep across their recent nights? A
@@ -522,7 +532,16 @@ router.get('/:id/sleep/:date', (req, res) => {
     // `[]` when the night has no camera or no timeline, and ABSENT otherwise so the live card and the lists do not
     // grow. After the correction on purpose: a "nobody was in the bed" night has no timeline left, so it gets
     // `[]` rather than frames for rows that are not drawn. A page from before this field existed ignores it.
-    return res.json(includeTimeline ? { ...shown, transition_frames: framesForNight(shown) } : shown);
+    // `vitals` (heart rate and breathing, ADDED, after the score and the correction like the rest of what is laid over
+    // the night; see /sleep/live for the shape): on a display read (not a store) of an `ok` night or one in progress,
+    // and only on a timeline read (`detail=1`/`debug=1`) also `vitals.series`, the 5-minute points the detail page's two
+    // thin tracks and its hold-and-scroll bubble draw, over the timeline's own span. A plain read gets the summary only.
+    // Not for a `raw=1` or `context=stored` preview: those are the Recompute dialog's detector-only comparison, which
+    // has no use for a sensor figure.
+    const withVitals = raw || contextChoice === 'stored'
+      ? shown
+      : withNightVitals(req.params.id, shown, { series: includeTimeline, inProgressToo: true, display: true });
+    return res.json(includeTimeline ? { ...withVitals, transition_frames: framesForNight(shown) } : withVitals);
   }
   // Storing a recompute can only ever improve or re-score a night, never un-score one — see the
   // allowDowngrade guard in computeAndStoreNight. A refusal is not a server fault (the night is too old,

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Moon, ChevronRight } from 'lucide-react';
+import { Moon, ChevronRight, HeartPulse, Wind } from 'lucide-react';
 import { useLiveSleep } from '../lib/useLiveSleep.js';
 import { fmtDur } from '../lib/duration.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
@@ -88,6 +88,20 @@ export default function SleepSummaryCard({ childId, onBand, onNightShown, birthd
   // end, an older server, or a child whose score switch is off (no `score` key): the card is then exactly as it was before.
   const pendingLine = night?.status === 'ok' ? pendingNightText(night, tz) : null;
   const headline = pendingLine ? null : summaryHeadline;
+
+  // The radar's heart rate and breathing, averaged over the time asleep (`night.vitals`, ADDED by the server only for a child
+  // whose ESPHome radar measured them; nothing is drawn, and the card is exactly as it was, without it). ONE line under
+  // the headline, and the button's name says it too (below). It is a sensor ESTIMATE, not a medical measurement, so the
+  // name says so; the longer "not for medical use" note is on the sleep page, under the tracks, one tap away. Whole numbers:
+  // the server rounds them, so a figure never claims more precision than the sensor has. Each one only when present: a
+  // child can have one sensor reading without the other.
+  const vitals = night?.status === 'ok' ? night.vitals : null;
+  const hrAvg = Number.isFinite(vitals?.hr?.avg) ? vitals.hr.avg : null;
+  const rrAvg = Number.isFinite(vitals?.rr?.avg) ? vitals.rr.avg : null;
+  const vitalsLabel = hrAvg == null && rrAvg == null ? null : [
+    hrAvg != null && `heart rate ${hrAvg} beats per minute`,
+    rrAvg != null && `breathing ${rrAvg} breaths per minute`,
+  ].filter(Boolean).map((s) => `average ${s}`).join(', ').replace(/^a/, 'A') + ' (sensor estimate)';
 
   // The label above the duration: a small moon and the words. The moon marks "overnight sleep" the way it did when it sat
   // at the left of the card; one place for it so every state that has a label gets the same one.
@@ -184,7 +198,7 @@ export default function SleepSummaryCard({ childId, onBand, onNightShown, birthd
   // not what they could say. The destination, headline and score follow as before.
   const label = scope === 'off'
     ? `${lead}. Turn on sleep tracking in settings`
-    : `${lead}. View sleep detail and history${headline ? `. ${headline.replace(/\.$/, '')}` : ''}${pendingLine ? `. ${pendingLine}` : ''}${score ? `. Sleep score ${scoreLabel(score)}` : ''}`;
+    : `${lead}. View sleep detail and history${headline ? `. ${headline.replace(/\.$/, '')}` : ''}${pendingLine ? `. ${pendingLine}` : ''}${score ? `. Sleep score ${scoreLabel(score)}` : ''}${vitalsLabel ? `. ${vitalsLabel}` : ''}`;
 
   // "Add a birthday" is shown ONLY for a night that has no score for want of one (the server's own reason key, the same one
   // the sleep page words as "...or a birthday in this child's settings") AND the child really has none. Anything else, a
@@ -210,6 +224,12 @@ export default function SleepSummaryCard({ childId, onBand, onNightShown, birthd
         {/* The headline wraps (two lines at 320px) instead of ending in an ellipsis that hides what it says. */}
         {headline && <div className="night__headline">{headline}</div>}
         {pendingLine && <div className="night__pending-line">{pendingLine}</div>}
+        {vitalsLabel && (
+          <div className="night__vitals">
+            {hrAvg != null && <span className="night__vital"><HeartPulse size={14} aria-hidden="true" />{hrAvg} bpm avg</span>}
+            {rrAvg != null && <span className="night__vital"><Wind size={14} aria-hidden="true" />{rrAvg}/min avg</span>}
+          </div>
+        )}
       </button>
       {needsBirthday && (
         <button type="button" className="night__nudge" onClick={() => navigate(`/children/${childId}/edit`)}>

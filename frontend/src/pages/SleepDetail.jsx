@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { Calendar, SlidersHorizontal, ChevronDown, Moon, DoorOpen, Sunrise, Thermometer, Sparkles, Zap, AudioLines, Play, Video } from 'lucide-react';
+import { Calendar, SlidersHorizontal, ChevronDown, Moon, DoorOpen, Sunrise, Thermometer, Sparkles, Zap, AudioLines, Play, Video, HeartPulse, Wind } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useCameras } from '../lib/CamerasContext.jsx';
 import { useSettings } from '../lib/SettingsContext.jsx';
@@ -574,6 +574,7 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
           {transitionTypes.has('out_of_bed') && <span><i className="sleep-tl__tx sleep-tl__tx--out" aria-hidden="true" style={{ position: 'static', display: 'inline-block', transform: 'none', margin: '0 4px 0 0', verticalAlign: 'middle' }} /> Got out of bed</span>}
         </div>
         <ClimateTrack night={night} startMs={utcMs(night.display_start || night.window_start)} endMs={utcMs(night.display_end || night.window_end)} tempUnit={tempUnit} />
+        <VitalsTracks night={night} startMs={utcMs(night.display_start || night.window_start)} endMs={utcMs(night.display_end || night.window_end)} />
       </div>
 
       <NightEventTabs key={`${childId}|${date}`} wakes={wakes} wakeCount={night.wake_count} visits={visits} alerts={alerts}
@@ -914,6 +915,13 @@ function RefinedTimes({ night, fmtTime }) {
 // included) plus its 1px outer ring, so 5.5px to the edge; the into/out-of-bed triangle is 8px wide (4px). See .sleep-tl__visit / __tx.
 const VISIT_HALF_PX = 5.5;
 const TX_HALF_PX = 4;
+// A heart-rate or breathing point labels the scrubbed minute only within one grid step of it: the server's points are 5 minutes
+// apart, so this is "the bucket the finger is in or the one beside it", and anything further is a hole, not a reading.
+const VITALS_NEAR_MS = 5 * 60000;
+// The tracks break the line where two neighbouring points are further apart than this (a hole of at least two empty 5-minute
+// buckets), so a sensor that was off for half an hour does not read as a smooth line through the gap. One empty bucket (10
+// minutes between points) is bridged: a single missed bucket is ordinary and a break there would look like a fault.
+const VITALS_GAP_MS = 10 * 60000;
 
 // The to-scale bar: each segment positioned by its share of the window, plus hour tick labels and
 // onset/wake markers so the wake-ups read against a real time axis.
@@ -951,8 +959,25 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
     () => (night.climate?.series || []).filter((p) => p.temperature != null).map((p) => ({ ms: utcMs(p.t), c: p.temperature })),
     [night]
   );
+  // The radar's heart rate and breathing (`night.vitals.series`, the server's 5-minute points; only on the detail read). Each
+  // point holds the bucket's values or null; a bucket with neither is absent, which is a gap in the data and shown as one.
+  const vitalsSeries = useMemo(
+    () => (night.vitals?.series || []).map((p) => ({ ms: utcMs(p.t), hr: p.hr ?? null, rr: p.rr ?? null })),
+    [night]
+  );
   const toF = tempUnit === 'F';
   const tempUnitLabel = `°${tempUnit || 'C'}`;
+
+  // The nearest point's value for `key` ('hr' | 'rr') when it is within VITALS_NEAR_MS of the scrubbed time, else null: a hole
+  // in the data is not labelled with a reading from further away (the temperature does the same with a wider reach, below).
+  function vitalAt(ms, key) {
+    let best = null;
+    for (const p of vitalsSeries) {
+      if (p[key] == null) continue;
+      if (!best || Math.abs(p.ms - ms) < Math.abs(best.ms - ms)) best = p;
+    }
+    return best && Math.abs(best.ms - ms) <= VITALS_NEAR_MS ? best[key] : null;
+  }
 
   function stateAt(ms) {
     const s = segs.find((seg) => utcMs(seg.from_at) <= ms && ms < utcMs(seg.to_at));
@@ -976,7 +1001,7 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
     if (rect.width <= 0) return;
     const f = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const ms = startMs + f * totalMs;
-    setHover({ pct: f * 100, time: fmtMs(ms), status: labelFor(stateAt(ms)), temp: tempAt(ms) });
+    setHover({ pct: f * 100, time: fmtMs(ms), status: labelFor(stateAt(ms)), temp: tempAt(ms), hr: vitalAt(ms, 'hr'), rr: vitalAt(ms, 'rr') });
   }
 
   const ticks = useMemo(() => {
@@ -1053,6 +1078,8 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
             <span className="sleep-tl__tip-time">{hover.time}</span>
             <span className="sleep-tl__tip-status">{hover.status}</span>
             {hover.temp && <span className="sleep-tl__tip-temp"><Thermometer size={11} aria-hidden="true" />{hover.temp}</span>}
+            {hover.hr != null && <span className="sleep-tl__tip-hr"><HeartPulse size={11} aria-hidden="true" />{hover.hr} bpm</span>}
+            {hover.rr != null && <span className="sleep-tl__tip-rr"><Wind size={11} aria-hidden="true" />{hover.rr}/min</span>}
           </div>
         )}
         {hover && <span className="sleep-tl__cursor" style={{ left: `${hover.pct}%` }} aria-hidden="true" />}
@@ -1072,53 +1099,127 @@ function Timeline({ night, fmtTime, tz, tempUnit }) {
   );
 }
 
-// A companion track under the sleep bar: room temperature across the same time axis, so you can read a
-// wake against how warm the room was. Line is positioned by each reading's real timestamp (not index),
-// keeping it aligned to the timeline above. Temperature is stored in Celsius; converted to the user's
-// unit here. Draws nothing when the child's cameras have no sensor (or too few readings).
+// A companion track under the sleep bar: ONE line-and-area drawing, shared by the temperature track and the heart-rate and breathing
+// tracks (so there is one implementation of the path, the padding and the labels). `points` are { ms, v } in the unit that is
+// drawn, positioned by their real timestamp (not index) so the line stays aligned to the timeline above. Draws nothing under two
+// points. `gapMs`: break the line (a new `M`) between two neighbours further apart than this; null never breaks, which is the
+// temperature track's behaviour, so its path is exactly what it was before the extraction (pinned by a test on a fixed series).
+// The y range is the data's min..max, widened to at least 1 so a flat night is not pinned to the edge. `labelsFromData` writes the
+// two end labels from the data instead of from the widened range (a flat heart rate would otherwise read 82.5 on a whole-number
+// scale); the temperature keeps the widened range it always labelled.
+function LineTrack({ points, startMs, endMs, color, icon, label, caption, format, className = '', height = 46, gapMs = null, labelsFromData = false }) {
+  if (points.length < 2) return null;
+  const totalMs = Math.max(1, endMs - startMs);
+  const vals = points.map((p) => p.v);
+  const dataMin = Math.min(...vals);
+  const dataMax = Math.max(...vals);
+  let min = dataMin;
+  let max = dataMax;
+  if (max - min < 1) { min -= 0.5; max += 0.5; } // don't pin a near-flat night to the edges
+  const span = max - min;
+  const H = height;
+  const coords = points.map((p) => {
+    const x = Math.max(0, Math.min(100, ((p.ms - startMs) / totalMs) * 100));
+    const y = H - 5 - ((p.v - min) / span) * (H - 10);
+    return { x, y, ms: p.ms };
+  });
+  // Runs of points with no hole between them; each run is its own sub-path.
+  const runs = [];
+  for (const c of coords) {
+    const run = runs[runs.length - 1];
+    if (run && (gapMs == null || c.ms - run[run.length - 1].ms <= gapMs)) run.push(c);
+    else runs.push([c]);
+  }
+  const at = (c) => `${c.x.toFixed(2)} ${c.y.toFixed(2)}`;
+  // A run of one point (an island between two holes) is drawn as a dot: a lone `M` has no length, so nothing would show.
+  const runPath = (run) => (run.length === 1 ? `M${at(run[0])} L${at(run[0])}` : run.map((c, i) => `${i === 0 ? 'M' : 'L'}${at(c)}`).join(' '));
+  const d = runs.map(runPath).join(' ');
+  const area = runs
+    .filter((run) => run.length > 1)
+    .map((run) => `${runPath(run)} L${run[run.length - 1].x.toFixed(2)} ${H} L${run[0].x.toFixed(2)} ${H} Z`)
+    .join(' ');
+
+  return (
+    <div className={`sleep-climate${className ? ` ${className}` : ''}`}>
+      <div className="sleep-climate__head">
+        <span className="sleep-climate__label">{icon}{` ${label}`}</span>
+        <span className="sleep-climate__caption">{caption}</span>
+      </div>
+      <div className="sleep-climate__chart">
+        <svg width="100%" height={H} viewBox={`0 0 100 ${H}`} preserveAspectRatio="none" aria-hidden="true">
+          <path d={area} fill={color} opacity="0.12" />
+          <path d={d} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke"
+            strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+        <span className="sleep-climate__hi">{format(labelsFromData ? dataMax : max)}</span>
+        <span className="sleep-climate__lo">{format(labelsFromData ? dataMin : min)}</span>
+      </div>
+    </div>
+  );
+}
+
+// Room temperature across the same time axis, so you can read a wake against how warm the room was. Temperature is stored in
+// Celsius; converted to the user's unit here. Draws nothing when the child's cameras have no sensor (or too few readings).
 function ClimateTrack({ night, startMs, endMs, tempUnit }) {
   const climate = night.climate;
   const series = (climate?.series || []).filter((p) => p.temperature != null);
   if (series.length < 2) return null;
-  const totalMs = Math.max(1, endMs - startMs);
   const toF = tempUnit === 'F';
   const conv = (c) => (toF ? (c * 9) / 5 + 32 : c);
   const unit = `°${tempUnit || 'C'}`;
-  const vals = series.map((p) => conv(p.temperature));
-  let min = Math.min(...vals);
-  let max = Math.max(...vals);
-  if (max - min < 1) { min -= 0.5; max += 0.5; } // don't pin a near-flat night to the edges
-  const span = max - min;
-  const H = 46;
-  const coords = series.map((p) => {
-    const x = Math.max(0, Math.min(100, ((utcMs(p.t) - startMs) / totalMs) * 100));
-    const y = H - 5 - ((conv(p.temperature) - min) / span) * (H - 10);
-    return [x, y];
-  });
-  const d = coords.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${y.toFixed(2)}`).join(' ');
-  const area = `${d} L${coords[coords.length - 1][0].toFixed(2)} ${H} L${coords[0][0].toFixed(2)} ${H} Z`;
-
   const fmt1 = (c) => conv(c).toFixed(1);
   const caption = [`avg ${fmt1(climate.temp_avg)}${unit}`];
   if (climate.temp_min != null && climate.temp_max != null) caption.push(`${fmt1(climate.temp_min)}–${fmt1(climate.temp_max)}${unit}`);
   if (climate.humidity_avg != null) caption.push(`${climate.humidity_avg}% humidity`);
 
   return (
-    <div className="sleep-climate">
-      <div className="sleep-climate__head">
-        <span className="sleep-climate__label"><Thermometer size={13} aria-hidden="true" /> Room temperature</span>
-        <span className="sleep-climate__caption">{caption.join(' · ')}</span>
-      </div>
-      <div className="sleep-climate__chart">
-        <svg width="100%" height={H} viewBox={`0 0 100 ${H}`} preserveAspectRatio="none" aria-hidden="true">
-          <path d={area} fill="var(--sleep-temp)" opacity="0.12" />
-          <path d={d} fill="none" stroke="var(--sleep-temp)" strokeWidth="2" vectorEffect="non-scaling-stroke"
-            strokeLinejoin="round" strokeLinecap="round" />
-        </svg>
-        <span className="sleep-climate__hi">{max.toFixed(1)}{unit}</span>
-        <span className="sleep-climate__lo">{min.toFixed(1)}{unit}</span>
-      </div>
-    </div>
+    <LineTrack
+      points={series.map((p) => ({ ms: utcMs(p.t), v: conv(p.temperature) }))}
+      startMs={startMs} endMs={endMs} color="var(--sleep-temp)"
+      icon={<Thermometer size={13} aria-hidden="true" />} label="Room temperature" caption={caption.join(' · ')}
+      format={(v) => `${v.toFixed(1)}${unit}`}
+    />
+  );
+}
+
+// The radar sensor's heart rate and breathing across the same axis, as two thin tracks under the temperature one (`night.vitals`,
+// from the server; the 5-minute series only comes with the detail read). Each needs two points, else nothing is drawn. A hole in
+// the data is a hole in the line (VITALS_GAP_MS), never a line drawn through it. The caption is the server's summary, which is over
+// the time asleep (onset to wake), while the tracks show the whole timeline: a settling child or a parent at the bed can be on the
+// line but is not in the average. ⚠️ A SENSOR ESTIMATE, not a medical measurement: the sleep page says so under the tracks, and
+// nothing here is coloured as a warning.
+function VitalsTracks({ night, startMs, endMs }) {
+  const vitals = night.vitals;
+  const series = vitals?.series;
+  if (!Array.isArray(series)) return null;
+  const pointsOf = (key) => series.filter((p) => p[key] != null).map((p) => ({ ms: utcMs(p.t), v: p[key] }));
+  const hr = pointsOf('hr');
+  const rr = pointsOf('rr');
+  const showHr = hr.length >= 2;
+  const showRr = rr.length >= 2;
+  if (!showHr && !showRr) return null;
+  // "avg 82 bpm · 71–103" from the summary when the server sent one for that role. With NO summary (valid readings in the
+  // display span but none between onset and wake, so the track draws and its caption used to be blank) the range of the
+  // drawn points, "71–103 bpm", without "avg": there is no average over the time asleep to quote.
+  const captionOf = (s, unit, points) => {
+    if (s) return `avg ${s.avg}${unit} · ${s.min}–${s.max}`;
+    const vs = points.map((p) => Math.round(p.v));
+    return `${Math.min(...vs)}–${Math.max(...vs)}${unit}`;
+  };
+  return (
+    <>
+      {showHr && (
+        <LineTrack points={hr} startMs={startMs} endMs={endMs} color="var(--sleep-hr)" height={36} gapMs={VITALS_GAP_MS} labelsFromData
+          className="sleep-climate--hr" icon={<HeartPulse size={13} aria-hidden="true" />} label="Heart rate"
+          caption={captionOf(vitals.hr, ' bpm', hr)} format={(v) => String(Math.round(v))} />
+      )}
+      {showRr && (
+        <LineTrack points={rr} startMs={startMs} endMs={endMs} color="var(--sleep-rr)" height={36} gapMs={VITALS_GAP_MS} labelsFromData
+          className={`sleep-climate--rr${showHr ? ' sleep-climate--next' : ''}`} icon={<Wind size={13} aria-hidden="true" />} label="Breathing"
+          caption={captionOf(vitals.rr, '/min', rr)} format={(v) => String(Math.round(v))} />
+      )}
+      <div className="sleep-vitals__note">Sensor estimates from the radar, not for medical use.</div>
+    </>
   );
 }
 

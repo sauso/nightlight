@@ -636,6 +636,27 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     expect(contrast(sleep['--sleep-wake-text'], tint(sleep['--sleep-wake'], 0.14, t['--bg-elevated'])), 'the wake-up badge on its tag').toBeGreaterThanOrEqual(4.5);
   });
 
+  // The heart-rate and breathing tracks (SleepDetail LineTrack) draw a 2px line AND write their label and the bubble rows in the
+  // same colour, so the one token must clear the TEXT ratio (4.5:1), which also clears the 3:1 a line needs. On the card and on the
+  // inset the bubble and the track can sit on.
+  test.each([['day', day, sleepDay], ['night', night, sleepNight]])('★ %s: the heart-rate and breathing colours are readable as text and as lines on the card and the inset', (_name, t, sleep) => {
+    for (const token of ['--sleep-hr', '--sleep-rr']) {
+      expect(sleep[token], `${token} is defined`).toMatch(/^#[0-9a-f]{6}$/);
+      for (const surface of ['--bg-elevated', '--bg-elevated-2']) {
+        expect(contrast(sleep[token], t[surface]), `${token} on ${surface}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  test('★ the heart-rate and breathing labels and bubble rows use their tokens, not a literal', () => {
+    for (const [selector, token] of [['.sleep-climate--hr .sleep-climate__label', '--sleep-hr'], ['.sleep-climate--rr .sleep-climate__label', '--sleep-rr'],
+      ['.sleep-tl__tip-hr', '--sleep-hr'], ['.sleep-tl__tip-rr', '--sleep-rr']]) {
+      const rule = rules.find((r) => r.startsWith(`${selector} {`));
+      expect(rule, `${selector} has a rule`).toBeTruthy();
+      expect(rule, selector).toMatch(new RegExp(`(^|[ ;{])color: var\\(${token}\\)`));
+    }
+  });
+
   test('★ the room-activity duration, tag and label use the readable teal; the dots and legend swatch keep the bright one', () => {
     for (const selector of ['.sleep-wakes__dur--visit', '.sleep-visit-tag', '.sleep-refined__label']) {
       const rule = rules.find((r) => r.startsWith(`${selector} {`));

@@ -1518,6 +1518,11 @@ body.in-pip .tile-menu-backdrop {
 /* "Score and night summary after 7:00 AM" (lib/sleepScoreText.js pendingNightText), on a night that is still going: quiet, because
    it is a promise and not a result, so it is the muted tint and not the headline's weight. */
 .night__pending-line { font-size: 13px; line-height: 1.4; color: var(--night-muted); margin-top: 14px; overflow-wrap: anywhere; }
+/* The radar's heart rate and breathing (SleepSummaryCard `night.vitals`): one quiet line under the headline, the same muted tint as the
+   pending line because it is a sensor estimate and not the result. The two figures sit side by side and wrap onto a second line at 320px
+   (flex-wrap) rather than being cut. Tokens only: the navy card is the same in both themes (paletteTokens pins that). */
+.night__vitals { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; line-height: 1.4; color: var(--night-muted); margin-top: 10px; font-variant-numeric: tabular-nums; }
+.night__vital { display: inline-flex; align-items: center; gap: 5px; }
 
 /* Sleep summary card as a button into the detail page */
 .night__sleep--btn { width: 100%; background: none; border: none; border-top: 1px solid var(--night-divider); text-align: left; cursor: pointer; font: inherit; }
@@ -1579,8 +1584,8 @@ body.in-pip .tile-menu-backdrop {
             as text.
    temp, gap unchanged. There is no token for the design's dashed "still to come" / "not counted" edge (#8c86ae at night, 4.62:1
    on the night card): nothing draws it today, so it arrives with the element that does. */
-:root { --sleep-asleep: #4b53b5; --sleep-stir: #7279c6; --sleep-wake: #f0a257; --sleep-wake-text: #9a5410; --sleep-awake: #d2d0e2; --sleep-visit: #279189; --sleep-visit-text: #17706a; --sleep-temp: #cf5b39; --sleep-gap: #c7c7c7; --sleep-wake-gap: transparent; }
-:root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-stir: #a7ade4; --sleep-wake: #f6c899; --sleep-wake-text: #f6c899; --sleep-awake: #3c3f60; --sleep-visit: #279189; --sleep-visit-text: #3ec4b8; --sleep-temp: #ef8a5e; --sleep-gap: #5a5c6e; --sleep-wake-gap: var(--bg-elevated-2); }
+:root { --sleep-asleep: #4b53b5; --sleep-stir: #7279c6; --sleep-wake: #f0a257; --sleep-wake-text: #9a5410; --sleep-awake: #d2d0e2; --sleep-visit: #279189; --sleep-visit-text: #17706a; --sleep-temp: #cf5b39; --sleep-hr: #b8305a; --sleep-rr: #25689f; --sleep-gap: #c7c7c7; --sleep-wake-gap: transparent; }
+:root[data-theme='dark'] { --sleep-asleep: #7c85e6; --sleep-stir: #a7ade4; --sleep-wake: #f6c899; --sleep-wake-text: #f6c899; --sleep-awake: #3c3f60; --sleep-visit: #279189; --sleep-visit-text: #3ec4b8; --sleep-temp: #ef8a5e; --sleep-hr: #f08aa8; --sleep-rr: #7fb6ee; --sleep-gap: #5a5c6e; --sleep-wake-gap: var(--bg-elevated-2); }
 
 /* The sleep page's frame (UI refresh PR E): "Night of <date>" with a calendar button, then the seven-night strip. The
    previous / next arrows that used to sit here are gone: the strip reaches the newest seven nights and the calendar the rest. */
@@ -1812,6 +1817,11 @@ body.in-pip .tile-menu-backdrop {
 .sleep-tl__tip-time { font-size: 12.5px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 .sleep-tl__tip-status { font-size: 11.5px; color: var(--text-secondary); text-transform: capitalize; }
 .sleep-tl__tip-temp { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--sleep-temp); font-variant-numeric: tabular-nums; }
+/* Heart rate and breathing at the scrubbed minute: two more rows of the same size as the temperature one, so the bubble grows
+   taller (about 28px) and no wider (the widest row is still the status or the temperature). */
+.sleep-tl__tip-hr, .sleep-tl__tip-rr { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.sleep-tl__tip-hr { color: var(--sleep-hr); }
+.sleep-tl__tip-rr { color: var(--sleep-rr); }
 .sleep-live-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--on-accent); background: var(--accent); vertical-align: 2px; }
 .sleep-tl__axis { position: relative; height: 16px; margin-top: 4px; }
 .sleep-tl__tick { position: absolute; top: 0; width: 1px; height: 4px; background: var(--border); transform: translateX(-0.5px); }
@@ -1894,6 +1904,12 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .sleep-climate__hi, .sleep-climate__lo { position: absolute; right: 2px; font-size: 10px; color: var(--text-secondary); font-variant-numeric: tabular-nums; background: var(--bg-elevated); padding: 0 3px; border-radius: 3px; }
 .sleep-climate__hi { top: 0; }
 .sleep-climate__lo { bottom: 0; }
+/* The heart-rate and breathing tracks reuse the temperature track's markup (LineTrack) in their own colours. They are thinner (the
+   chart height is set in the component), and the second sits close under the first, with no divider between the two. */
+.sleep-climate--hr .sleep-climate__label { color: var(--sleep-hr); }
+.sleep-climate--rr .sleep-climate__label { color: var(--sleep-rr); }
+.sleep-climate--next { margin-top: 10px; padding-top: 0; border-top: 0; }
+.sleep-vitals__note { margin-top: 8px; font-size: 11.5px; line-height: 1.4; color: var(--text-secondary); }
 
 /* Temperature ↔ sleep insight card (Phase 5) */
 .sleep-insight__title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 10px; }
