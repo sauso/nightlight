@@ -30,9 +30,8 @@ own colour, `#778FFD` (the owner, 2026-11-06), lighter than the day accent. The 
 - **Small text** (links, "Saved ✓") uses `--accent-text`: a deeper periwinkle by day, a lighter tint at night.
 - The header uses the same navy (`--bar`, `#14142A`) in both themes.
 - The **complement** (`--complement`, a warm gold; peri's opposite) is for small highlights only: the current step in
-  the setup progress bar, the "Recommended" badge (`status-badge--highlight`, dark text on gold) and the border of the
-  avatar's camera badge. Not buttons, tabs or links. The gold border is decoration (1.65:1 on a day card): the badge's
-  own fill and its icon carry the meaning.
+  the setup progress bar and the "Recommended" badge (`status-badge--highlight`, dark text on gold). Not buttons, tabs or
+  links. (The avatar's camera badge used to have a gold border; it is a plain round disc now, see "Avatar editor".)
 
 The page and card surfaces (`--bg`, `--bg-elevated-2`, `--border`, `--field-bg`) are the **original navy and lavender
 neutrals** (owner, 2026-11-13: the navy background is wanted). A warm-grey trial on 2026-11-12 was rejected; what it
@@ -123,9 +122,16 @@ more at the corner the ring's 12% band wash lightens, per the design), `--night-
 Everything secondary on the card (the age, the label, the "asleep" unit) is `--night-muted`; the settings gear, the chevron and
 the quiet birthday line use `--night-link`. The score ring's colours on this card are in "Score ring" below.
 
+**The colour ring.** The card has a 2px ring in the child's colour (`.night--ringed`, the `--child-<id>-night` shade; see
+"Child colours" below). It is the card's border, with the padding reduced by 2px, so the card's size and everything inside it
+stay where they were. A child with no colour gets no ring. The band wash, the shadow and the focus rings are separate and
+unchanged. A 1px hairline in the card's own navy (`#191b38`) sits just outside the ring, as the first box-shadow layer: on the
+light page the pastel `-night` shades are only 1.48 to 2.53:1, below the 3:1 a non-text edge needs, and the navy hairline is
+about 15:1 there (on the dark page it is nearly invisible, and the ring is already clear).
+
 **What the card holds (UI refresh PR C, 2026-11-13).** Top to bottom, one card, nothing else:
-1. **Identity row**: the avatar (64px, with a small camera badge: it is the way to set the photo, and goes to child settings when
-   there is none), the name, the age (the line is left out when there is no birthday: there is no "Tap to add birthday & photo"
+1. **Identity row**: the avatar (64px, no badge: tapping it opens the photo, or goes to child settings when there is none;
+   the camera badge is on the edit screens only), the name, the age (the line is left out when there is no birthday: there is no "Tap to add birthday & photo"
    any more), and one **settings gear** (44px, named "Settings for <name>") that opens child settings.
 2. A hairline, then the **sleep row**, one button into the sleep page: a "Last night" label with a small moon (or "Tonight · so
    far"), the duration in 28px ("9h 40m" with a smaller "asleep"), **one ring** (72px, band word under the number: "82 / Good",
@@ -145,6 +151,53 @@ the quiet birthday line use `--night-link`. The score ring's colours on this car
 
 States without a score (tracking off, loading, no data, no clear sleep, an empty bed) keep their wording and show no ring.
 Colour is never the only signal: the band word and the number are drawn, and the button's name says both.
+
+### Child colours (`lib/childColors.js`, owner 2026-11-15)
+
+A child has one of six colours (yellow, green, blue, pink, orange, violet), chosen in child settings. It is drawn in three places:
+the initials disc of a child with no photo (`Avatar`), a 2px **ring** around the child's card on the Children list
+(`.child-card--ringed`) and around the night card on the child's page (`.night--ringed`), and the picker's swatches.
+
+**Stored value and shown colour are different things.** The server stores `#RRGGBB` and the app has always saved one of six
+pastel hexes (`#f4c56a`, `#7FBFA3`, `#8A9FE0`, `#E0A5C9`, `#E0B27F`, `#7c83db`). That value is not changed and nothing is migrated.
+What is drawn is a token by hue: `--child-<id>` (the ring and the disc) and `--child-<id>-on` (the initials). The pastels are
+1.61 to 3.43:1 on a white card (five of six under the 3:1 a graphic needs; white initials on them are 1.61 to 3.43:1, under the 4.5:1
+text needs), so **by day each token is a deeper shade of the same hue and saturation** (lightness only), and **at night it is the
+original pastel**. The initials are the header navy (`#14142A`) in both themes: white initials would need the yellow so deep it
+reads brown.
+
+**A stored colour that is not one of the six** (the server's default for a child created without one is `#F5D9A8`; the API accepts
+any `#RRGGBB`) is displayed as one of them, and the picker marks that swatch. `#F5D9A8` is yellow (the app's own migration moved
+that old pale gold to `#f4c56a`; by plain colour distance it would land on orange). Any other hex goes to the nearest of the six by RGB
+distance (display only; ties go to the earlier colour). Saving the form without pressing a swatch leaves the stored value
+exactly as it was. A child with no colour at all (empty or not a hex) shows the brand accent disc and gets no ring.
+
+**The night card is navy in both themes**, so its ring uses a separate fixed token, `--child-<id>-night`: the night shades, except
+violet, which is lightened (`#9096e0`): `#7c83db` is 3.62:1 on the gradient's lightest stop but 2.68:1 once the card's 12% band
+wash lightens that corner. The by-day shades only reach 3.2 to 3.3:1 on the bare gradient, so they are not used there. On a
+light page, the outer edge of that ring meets the pale page (a gold ring is about 1.5:1 against it); the ring is read against the
+navy card beside it.
+
+Measured with the WCAG formula, 2026-11-15, recomputed from the stylesheet by `test/paletteTokens.test.jsx`. Ring and disc need 3:1 on
+the card and the page; initials need 4.5:1 on the disc; the night ring needs 3:1 on the gradient's lightest stop (`#2C2F63`) bare and
+under the worst of the five band washes:
+
+| Colour | Day ring and disc | on card `#FFFFFF` | on page `#F7F4FD` | Initials | Night ring and disc | on card `#221F3C` | on page `#14142A` | Initials | Night-card ring | on gradient | worst under a wash |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Yellow | `#B0790D` | 3.76 | 3.46 | 4.80 | `#F4C56A` | 9.81 | 11.21 | 11.21 | `#F4C56A` | 7.70 | 5.70 |
+| Green | `#489070` | 3.82 | 3.51 | 4.73 | `#7FBFA3` | 7.44 | 8.50 | 8.50 | `#7FBFA3` | 5.83 | 4.32 |
+| Blue | `#627ED5` | 3.84 | 3.53 | 4.70 | `#8A9FE0` | 6.11 | 6.98 | 6.98 | `#8A9FE0` | 4.79 | 3.55 |
+| Pink | `#C85F9F` | 3.75 | 3.45 | 4.81 | `#E0A5C9` | 7.82 | 8.94 | 8.94 | `#E0A5C9` | 6.14 | 4.54 |
+| Orange | `#B6752C` | 3.77 | 3.47 | 4.79 | `#E0B27F` | 8.16 | 9.32 | 9.32 | `#E0B27F` | 6.40 | 4.74 |
+| Violet | `#747BD9` | 3.76 | 3.46 | 4.79 | `#7C83DB` | 4.61 | 5.27 | 5.27 | `#9096E0` | 4.50 | 3.33 |
+
+The weakest pairs are the day shades on the page (3.45 to 3.53:1) and the blue night ring under a wash (3.55:1): all clear 3:1,
+none by much. Blue and violet are close in both themes (they were already close as pastels), as are yellow and orange by day: the
+swatch's name and its check mark, not the colour, say which is chosen, and a colour is never the only signal (the ring is
+decoration; the card's text and accessible name are unchanged).
+
+**The picker** (`ChildSettings.jsx`): six 44px buttons, each named by its hue ("Yellow") with `aria-pressed`, a 34px disc in the
+themed shade, and the chosen one carries a check and a heavier ring.
 
 ### Band colours
 
@@ -612,9 +665,13 @@ credential-name check reads field names only. A screen that restores must say wh
 ### Avatar editor (`components/AvatarEditor.jsx`)
 
 Where someone changes a photo (the child's settings, your own Account, an admin editing a caregiver) the avatar is the control: the round photo, or the
-initials on their colour, with a small camera badge at its bottom-right, and a tap opens the file picker. The badge is a
-rounded square in the card colour with a complement (gold) border and a 16px-scale camera icon (`Camera`, sized from the avatar);
-it is decoration (`aria-hidden`), and the invisible file input that covers the avatar carries the name "Add photo" / "Change photo".
+initials on their colour, with a small camera badge at its bottom-right, and a tap opens the file picker. The badge is a round
+disc in `--text-primary` with the camera (`Camera`, sized from the avatar) in `--bg-elevated`, and a 2px ring in `--bg-elevated` that
+separates it from the avatar (owner, 2026-11-15: the look the child's page card used to have; it replaced a rounded square with a gold
+border). By tokens, so it reads in both themes: a light disc with a dark camera at night, the inverse by day. Camera on disc is
+12.53:1 at night and 16.65:1 by day, and the disc against the card or ring is the same pair. It is the same on the child's settings,
+Account, the caregiver form and the setup screens. It is decoration (`aria-hidden`), and the invisible file input that covers the avatar
+carries the name "Add photo" / "Change photo". The child's own page does not use this editor: its avatar carries no badge.
 The component is only the picker: resizing, saving, the Saving / Saved text and the Remove button stay with the page, since a
 child's photo and your own go to different endpoints and a new child holds its photo until its first save. Avatars that are only
 shown (lists, headers, the Settings row) stay the plain `Avatar` with no badge. Keyboard focus draws one ring around the whole

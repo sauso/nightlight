@@ -8,7 +8,7 @@ This guide covers setup, the child card and the sleep detail page, how a night i
 
 ## Turn it on per child
 
-The child settings form has a **Profile** card for their name, birthday, photo and colour, and a **Sleep** card for the controls below. An admin can remove a saved child from **⋯ → Remove child** in the page header; the confirmation lists the data that will be deleted. Caregivers cannot use that action.
+The child settings form has a **Profile** card for their name, birthday, photo and colour (one of six; it rings the child's cards, and is the colour of their initials when there is no photo), and a **Sleep** card for the controls below. An admin can remove a saved child from **⋯ → Remove child** in the page header; the confirmation lists the data that will be deleted. Caregivers cannot use that action.
 
 Each child has a **Track sleep** toggle in their settings, with
 their own **bedtime** and **wake time**. Turning tracking off stops it entirely. Only an

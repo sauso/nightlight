@@ -80,6 +80,39 @@
   --thumb-hi: #23264d;
   --thumb-lo: #14162f;
 
+  /* Child colours (lib/childColors.js): the six colours a child can be given, as drawn on screen. The STORED value is a different,
+     pastel hex that nothing here changes; these are what the avatar disc and the card ring use. Same six hues as the stored
+     pastels (same hue and saturation, lightness only), DEEPER by day so the ring and the disc clear the 3:1 a graphic needs on a
+     white card (the pastels are 1.61 to 3.43:1 there, five of the six under 3:1). Initials sit on the fill in --child-*-on, the header navy in both themes:
+     it clears 4.5:1 on every shade (white would need the yellow so deep it reads brown). Measured 2026-11-15 on the white card
+     / the page #f7f4fd by day (ring, then navy initials): yellow #b0790d 3.76 / 3.46, 4.80; green #489070 3.82 / 3.51, 4.73;
+     blue #627ed5 3.84 / 3.53, 4.70; pink #c85f9f 3.75 / 3.45, 4.81; orange #b6752c 3.77 / 3.47, 4.79; violet #747bd9
+     3.76 / 3.46, 4.79. The dark block holds the lighter, original shades; the full table is in docs/design-language.md
+     ("Child colours") and test/paletteTokens.test.jsx recomputes every pair from this stylesheet. */
+  --child-yellow: #b0790d;
+  --child-green: #489070;
+  --child-blue: #627ed5;
+  --child-pink: #c85f9f;
+  --child-orange: #b6752c;
+  --child-violet: #747bd9;
+  --child-yellow-on: #14142a;
+  --child-green-on: #14142a;
+  --child-blue-on: #14142a;
+  --child-pink-on: #14142a;
+  --child-orange-on: #14142a;
+  --child-violet-on: #14142a;
+  /* The ring on the child page's `.night` card, which is the same navy gradient (#2c2f63 to #191b38) in BOTH themes, so these do
+     not switch. They are the dark-theme shades, except violet, which is lightened (#7c83db is 3.62:1 on the gradient's lightest
+     stop, but only 2.68:1 once the card's 12% "great"-band wash lightens that corner; #9096e0 is 3.33:1 worst case). The day
+     shades are not used here: they only reach 3.2 to 3.3:1 on the plain gradient, and less under the wash. Defined here only; a
+     test checks every one against the lightest stop, bare and under each band wash. */
+  --child-yellow-night: #f4c56a;
+  --child-green-night: #7fbfa3;
+  --child-blue-night: #8a9fe0;
+  --child-pink-night: #e0a5c9;
+  --child-orange-night: #e0b27f;
+  --child-violet-night: #9096e0;
+
   --font-display: 'Nunito', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, sans-serif;
   --font-mono: 'SF Mono', 'IBM Plex Mono', Menlo, Consolas, monospace;
@@ -111,6 +144,14 @@
   --band-fair: #d99c50;
   --band-low: #c77790;
   --band-early: #d3cde6;
+  /* Child colours at night: the original lighter shades (the stored values), 4.61 to 9.81:1 on a night card #221f3c (5.27:1 or
+     more on the page), with the same navy initials (5.27:1 or more on each). See the day block above. */
+  --child-yellow: #f4c56a;
+  --child-green: #7fbfa3;
+  --child-blue: #8a9fe0;
+  --child-pink: #e0a5c9;
+  --child-orange: #e0b27f;
+  --child-violet: #7c83db;
 }
 
 * { box-sizing: border-box; }
@@ -1506,12 +1547,22 @@ body.in-pip .tile-menu-backdrop {
   }
 }
 .night__head { display: flex; align-items: center; gap: 13px; width: 100%; }
-/* The avatar button is the way to set the photo; the camera badge on its corner says so (it replaced the "Tap to add birthday &
-   photo" line). The badge is a light disc with a dark glyph, so it reads on the navy card in both themes; decorative, the button
-   already has the name. The 64px avatar is the design's smaller portrait: the card's weight now goes to the night, not the face. */
+/* The avatar button opens the photo, or settings when there is none (it replaced the "Tap to add birthday & photo" line); it
+   carries no camera badge (owner, 2026-11-15: the badge belongs on the edit screens, where the photo is actually changed).
+   The 64px avatar is the design's smaller portrait: the card's weight now goes to the night, not the face. */
 .night__avatar-btn { position: relative; background: none; border: none; padding: 0; cursor: pointer; flex-shrink: 0; border-radius: 50%; line-height: 0; }
 .night__avatar-btn:focus-visible { outline: 2px solid var(--night-link); outline-offset: 3px; }
-.night__avatar-badge { position: absolute; right: -3px; bottom: -3px; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--night-text); color: var(--night-on-action); box-shadow: 0 0 0 2px rgba(25, 27, 56, 0.9); }
+/* The child's colour ring (owner, 2026-11-15), set by ChildDetail from the child's colour (`--child-ring`: the `-night` shade,
+   because this card is the same navy in both themes). A border, with the padding cut by the same 2px, so the card's size and
+   everything inside it stay exactly where they were; the box-shadow, the band wash (`.night--<band>`, a background layer) and
+   the focus rings are untouched. A card with no colour does not get the class and keeps today's look. Decorative: no text.
+   The first box-shadow layer is a 1px hairline in the gradient's own navy (#191b38), just OUTSIDE the ring. WHY: the ring is
+   measured against the navy on its inside, but on its outside it sits straight on the page, which is pale in the light theme
+   (--bg #f7f4fd), where the pastel -night shades are only 1.48 to 2.53:1 (the owner's floor for a non-text edge is 3:1). The navy
+   hairline is about 15:1 on that page, so the card has a distinct outer edge. On the dark page (--bg #14142a) it is barely
+   visible, which is fine: the ring is already 3:1 or more there. A shadow takes no layout, so the card's size is unchanged. The
+   second layer restates the plain `.night` drop shadow, because a later box-shadow replaces the whole value. */
+.night--ringed { border: 2px solid var(--child-ring); padding: 14px; box-shadow: 0 0 0 1px #191b38, 0 18px 42px -26px rgba(18, 20, 58, 0.8); }
 /* Enlarged child photo in a modal (tapped from the detail hero). */
 .photo-full { display: block; width: 100%; border-radius: 12px; }
 .night__id { flex: 1; min-width: 0; }
@@ -2135,6 +2186,10 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
    detail screen reads too heavy repeated down a list on a light background). Dark mode: the same
    gradient as the detail hero, so the two feel of a piece there. */
 .child-card { display: flex; flex-direction: column; align-items: stretch; gap: 0; width: 100%; text-align: left; cursor: pointer; font: inherit; border: 1px solid var(--border); color: var(--text-primary); background: var(--bg-elevated); border-radius: 18px; padding: 15px 16px; margin-bottom: 12px; box-shadow: 0 10px 26px -22px rgba(30, 30, 70, 0.35); transition: transform 0.12s ease, box-shadow 0.12s ease; }
+/* The child's colour ring on the Children list (owner, 2026-11-15): `--child-ring` is set inline from the child's colour. The 1px
+   border becomes 2px and the padding drops by 1px on every side, so the card's size and its content stay put; the hover lift,
+   the dark-theme shadow and the keyboard focus ring are separate properties and are unchanged. */
+.child-card--ringed { border: 2px solid var(--child-ring); padding: 14px 15px; }
 .child-card__top { display: flex; align-items: center; gap: 14px; min-width: 0; }
 @media (hover: hover) {
   .child-card:hover { transform: translateY(-1px); box-shadow: 0 14px 32px -22px rgba(30, 30, 70, 0.45); }
@@ -3967,12 +4022,15 @@ html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; 
 .setup-player { max-width: 520px; margin-block: 16px; }
 @media (max-width: 600px) { .setup-banner { flex-wrap: wrap; } }
 .esphome-dates .field { flex: 1 1 140px; min-width: 0; }
-/* AvatarEditor (child settings, account): the avatar with a camera badge at its bottom-right. The invisible file input covers
-   the whole avatar so a tap lands on it; the badge is a rounded square in the card colour with a brand-violet border (the
-   reference image's border is green). Size is set inline from the avatar size, so the badge scales with it. */
+/* AvatarEditor (child settings, account, caregiver form, setup): the avatar with a camera badge at its bottom-right. The invisible
+   file input covers the whole avatar so a tap lands on it. The badge is a round disc (owner, 2026-11-15: the look the child's card
+   used to have, replacing the rounded square with the gold border): the text colour as the disc, the card colour as the camera
+   and as a 2px ring that separates it from the avatar. By tokens, so it reads in both themes: a light disc with a dark camera at
+   night, the inverse by day. Glyph on disc is 12.53:1 at night and 16.65:1 by day, and the disc against the card it sits on is
+   the same pair. Size is set inline from the avatar size, so the badge scales with it. */
 .avatar-editor { position: relative; display: inline-block; flex: none; border-radius: 50%; cursor: pointer; }
 .avatar-editor__input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border-radius: 50%; }
-.avatar-editor__badge { position: absolute; right: -4px; bottom: -4px; display: flex; align-items: center; justify-content: center; background: var(--bg-elevated); border: 2px solid var(--complement); border-radius: 9px; color: var(--accent-text); pointer-events: none; }
+.avatar-editor__badge { position: absolute; right: -4px; bottom: -4px; display: flex; align-items: center; justify-content: center; background: var(--text-primary); color: var(--bg-elevated); box-shadow: 0 0 0 2px var(--bg-elevated); border-radius: 50%; pointer-events: none; }
 /* Owner 2026-11-05: clicking the camera drew a second box around the badge. Cause: the ring was on `:focus-within`, and a click
    focuses the (invisible) file input. A keyboard user still needs to see where focus is (docs/design-language.md, accessibility
    floor), so the ring is now only for `:focus-visible` (the browser's own test for "focus arrived by keyboard"; a mouse or touch

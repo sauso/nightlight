@@ -83,6 +83,31 @@ describe('Children list sleep', () => {
     expect(card().getAttribute('aria-label')).toBeNull();
   });
 
+  // The colour ring (owner, 2026-11-15): the card's own themed shade, via `--child-ring`; decorative, so the name and the sleep row are untouched.
+  test.each([
+    ['#f4c56a', 'yellow'], ['#7FBFA3', 'green'], ['#8A9FE0', 'blue'], ['#E0A5C9', 'pink'], ['#E0B27F', 'orange'], ['#7c83db', 'violet'],
+    ['#F5D9A8', 'yellow'], // the server default, a legacy value: its nearest colour (display only)
+  ])('★ a child with colour %s has a ring in --child-%s', (color, id) => {
+    vi.spyOn(api, 'get').mockImplementation(() => new Promise(() => {}));
+    show([{ ...FIRST, color }]);
+    expect(card().classList.contains('child-card--ringed')).toBe(true);
+    expect(card().style.getPropertyValue('--child-ring')).toBe(`var(--child-${id})`);
+  });
+
+  test.each([[undefined], [null], ['']])('★ a child with no colour (%j) keeps the plain card: no ring class, no style', (color) => {
+    vi.spyOn(api, 'get').mockImplementation(() => new Promise(() => {}));
+    show([{ ...FIRST, color }]);
+    expect(card().className).toBe('child-card');
+    expect(card().getAttribute('style')).toBeNull();
+  });
+
+  test('the ring changes nothing the card says: the same button name with and without a colour', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(scored);
+    show([{ ...FIRST, color: '#7FBFA3' }]);
+    expect(await screen.findByText('7h 12m asleep')).toBeInTheDocument();
+    expect(card().getAttribute('aria-label')).toBe('First child, 2 cameras, Last night 7h 12m asleep, Sleep score 82, Good');
+  });
+
   test('loading keeps exactly the old card', () => {
     vi.spyOn(api, 'get').mockImplementation(() => new Promise(() => {}));
     show();

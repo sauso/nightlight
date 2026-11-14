@@ -12,6 +12,7 @@ import AppHeader from '../components/AppHeader.jsx';
 import TailscaleCard from '../components/TailscaleCard.jsx';
 import SetupCaregivers from '../components/SetupCaregivers.jsx';
 import AvatarEditor from '../components/AvatarEditor.jsx';
+import { CHILD_COLORS } from '../lib/childColors.js';
 
 // The guide starts at "Add your child". The Welcome screen, with the steps, now comes BEFORE the first admin account is created
 // (FirstRun.jsx, owner 2026-11-06), so it is not a step here. The server still stores `welcome` as the first activeStep of a new
@@ -233,7 +234,10 @@ export default function Setup() {
         {kids.length === 0 && <form id="setup-child-form" onSubmit={addChild}>
           <p>Add the first child to group their camera and alerts.</p>
           <div className="setup-caregivers__photo">
-            <AvatarEditor name={childName.trim() || 'Child'} src={childPhoto} size={64} onChange={pickChildPhoto} />
+            {/* The disc previews the colour the child really gets. The wizard sends no colour, so the server default is stored
+                (`#F5D9A8`, which childColorId maps to yellow); the new-child form's default is the same yellow, so the preview
+                matches rather than showing the brand accent. Display only: the POST body below stays without a colour. */}
+            <AvatarEditor name={childName.trim() || 'Child'} src={childPhoto} color={CHILD_COLORS[0].stored} size={64} onChange={pickChildPhoto} />
             {childPhoto && <button type="button" className="icon-btn" onClick={() => setChildPhoto(null)}>Remove</button>}
           </div>
           <div className="field"><label htmlFor="setup-child-name">Child's name</label>

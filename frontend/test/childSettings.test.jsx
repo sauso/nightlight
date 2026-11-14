@@ -286,22 +286,63 @@ describe('★★ the immediate photo write', () => {
 });
 
 describe('the colour picker', () => {
-  test('offers every colour and marks the chosen one', async () => {
+  const swatches = () => within(screen.getByRole('group', { name: 'Colour' })).getAllByRole('button');
+  const pressed = () => swatches().filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('aria-label'));
+
+  test('★ offers the six colours by hue name and marks exactly the chosen one (not by colour alone)', async () => {
     mount();
     await screen.findByLabelText('Name');
-    const chosen = screen.getByLabelText(`Colour ${KID.color}`);
-    expect(chosen.style.border).toContain('3px solid var(--text-primary)');
+    expect(swatches().map((b) => b.getAttribute('aria-label'))).toEqual(['Yellow', 'Green', 'Blue', 'Pink', 'Orange', 'Violet']);
+    expect(pressed()).toEqual(['Green']); // KID.color is the stored green
+    const green = screen.getByRole('button', { name: 'Green' });
+    expect(green.querySelector('svg'), 'the chosen swatch carries a check').not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Blue' }).querySelector('svg')).toBeNull();
   });
 
-  test('choosing one updates the form without saving', async () => {
+  test('★ the swatches show the theme-aware shades the cards use, not the stored pastels', async () => {
+    mount();
+    await screen.findByLabelText('Name');
+    const disc = (name) => screen.getByRole('button', { name }).querySelector('span');
+    expect(disc('Yellow').style.background).toBe('var(--child-yellow)');
+    expect(disc('Violet').style.background).toBe('var(--child-violet)');
+  });
+
+  test('★ each swatch is a 44px target', async () => {
+    mount();
+    await screen.findByLabelText('Name');
+    for (const b of swatches()) { expect(b.style.width).toBe('44px'); expect(b.style.height).toBe('44px'); }
+  });
+
+  test('choosing one updates the form without saving, and stores the swatch\'s own hex', async () => {
     const { user } = mount();
     await screen.findByLabelText('Name');
-    await user.click(screen.getByLabelText('Colour #8A9FE0'));
+    await user.click(screen.getByRole('button', { name: 'Blue' }));
     expect(putSpy).not.toHaveBeenCalled();
+    expect(pressed()).toEqual(['Blue']);
 
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(putSpy).toHaveBeenCalled());
     expect(putSpy.mock.calls[0][1].color).toBe('#8A9FE0');
+  });
+
+  // ★ The server default is #F5D9A8 and any API client may store any hex. The picker shows the NEAREST swatch as chosen, but only a
+  // press may change what is stored: a rename must not quietly rewrite the colour to the swatch it was displayed as.
+  test.each([['#F5D9A8', 'Yellow'], ['#00ff00', 'Green'], ['#d0a070', 'Orange']])('★ a legacy colour %s marks %s and saving a rename keeps it exactly', async (stored, swatch) => {
+    const { user } = mount({ kid: { ...KID, color: stored } });
+    const name = await screen.findByLabelText('Name');
+    expect(pressed()).toEqual([swatch]);
+    await user.clear(name);
+    await user.type(name, 'Renamed');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(putSpy).toHaveBeenCalled());
+    expect(putSpy.mock.calls[0][1].color).toBe(stored);
+    expect(putSpy.mock.calls[0][1].name).toBe('Renamed');
+  });
+
+  test('a child with no stored colour starts on the first swatch, as a new child does', async () => {
+    mount({ kid: { ...KID, color: null } });
+    await screen.findByLabelText('Name');
+    expect(pressed()).toEqual(['Yellow']);
   });
 });
 
