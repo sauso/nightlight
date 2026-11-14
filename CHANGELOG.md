@@ -9,6 +9,8 @@ features, patch bumps for fixes. History before 0.1.0 exists only as git history
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-11-15
+
 ### Added
 
 - Children list sleep: each child's card on the Children tab now shows last night's total sleep and the sleep score ring, or "Tonight so far" while the night is running. A missing night leaves the card as before; the list reads once when opened.
