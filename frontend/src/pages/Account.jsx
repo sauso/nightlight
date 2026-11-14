@@ -5,7 +5,7 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import { getTheme, setTheme, subscribeTheme } from '../lib/theme.js';
 import Modal from '../components/Modal.jsx';
 import AppHeader from '../components/AppHeader.jsx';
-import Switch from '../components/Switch.jsx';
+import SwitchRow from '../components/SwitchRow.jsx';
 import AvatarEditor from '../components/AvatarEditor.jsx';
 import TwoFactorSection from '../components/TwoFactorSection.jsx';
 import { fileToAvatarDataUrl } from '../lib/imageResize.js';
@@ -246,13 +246,13 @@ export default function Account() {
         </div>
 
         <div className="card" style={{ marginBottom: 14 }}>
-          <div className="card-title">Appearance</div>
-          <div className="segmented" role="group" aria-label="Theme">
+          <h2 className="card-heading">Appearance</h2>
+          <div className="seg-track" role="group" aria-label="Theme">
             {THEME_OPTIONS.map(({ value, label, Icon }) => (
               <button
                 key={value}
                 type="button"
-                className={`segmented__btn${theme === value ? ' segmented__btn--active' : ''}`}
+                className={`seg-track__btn${theme === value ? ' seg-track__btn--active' : ''}`}
                 aria-pressed={theme === value}
                 onClick={() => chooseTheme(value)}
               >
@@ -271,7 +271,7 @@ export default function Account() {
         {notificationsSupported() && (
           <>
             <div className="card" style={{ marginBottom: 14 }}>
-              <div className="card-title">Notifications</div>
+              <h2 className="card-heading">Notifications</h2>
               {serverPush && !serverPush.configured ? (
                 <div className="camera-tile__sub" style={{ padding: 12 }}>
                   Notifications aren't set up on this server yet. An admin needs to add a Firebase
@@ -284,14 +284,9 @@ export default function Account() {
                 </div>
               ) : (
                 <>
-                  <label className="log-viewer__toggle" style={{ padding: 12, margin: 0 }}>
-                    <Switch
-                      checked={notifEnabled}
-                      disabled={notifBusy || !serverPush}
-                      onChange={(e) => toggleNotifications(e.target.checked)}
-                    />
-                    Send motion alerts to this device
-                  </label>
+                  <SwitchRow label="Send motion alerts to this device" checked={notifEnabled}
+                    disabled={notifBusy || !serverPush}
+                    onChange={(e) => toggleNotifications(e.target.checked)} />
                   <div className="camera-tile__sub" style={{ padding: '0 12px 12px' }}>
                     Get a push notification when a camera with motion detection sees movement, even
                     when the app is closed. Turning this on asks for notification permission.
@@ -306,7 +301,7 @@ export default function Account() {
         )}
 
         <div className="card" style={{ marginBottom: 14 }}>
-          <div className="card-title">Signed in on</div>
+          <h2 className="card-heading">Signed in on</h2>
           {sessions.map((s) => (
             <div className="list-row" key={s.id}>
               <div className="list-row__main">

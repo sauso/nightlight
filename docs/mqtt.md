@@ -13,6 +13,8 @@ Neither requires the other — use one, both, or neither.
 
 **Settings → Integrations → MQTT** (admin only):
 
+The introduction sits above the **Broker** card. The Enable MQTT, TLS and certificate-verification switches are rows with their explanations visible below. Press **Save changes** at the bottom to apply all edits.
+
 | Field | Notes |
 |---|---|
 | Broker host | Required. IP or hostname, **only** (no `user@`, path or query). Letters, digits, `.`, `-` and `_` are accepted (an internationalised name such as `bücher.example` too), and an IPv6 address goes in square brackets (`[fe80::1]`); spaces before or after the host are removed. Anything else (a space or line break inside the name, `;`, `'`, `%`, `:` and so on) is refused when you press Save, with the reason, and nothing is stored. The reason names the first character that is not allowed (an invisible one by its code, such as `U+00A0`) but never repeats what you typed, so a pasted `mqtt://user:password@broker` does not send the password back or write it to the log. |

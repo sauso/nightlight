@@ -58,14 +58,14 @@ describe('the Settings hub', () => {
   test('ONLY an admin sees the system configuration rows', () => {
     hub({});
     const { unmount } = renderAsAdmin(<Settings />);
-    for (const label of ['General', 'Camera and recording', 'Caregivers', 'Integrations', 'Remote access', 'Logs']) {
+    for (const label of ['General', 'Camera and recording', 'Users', 'Integrations', 'Remote access', 'Logs']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     unmount();
 
     hub({});
     renderAsCaregiver(<Settings />);
-    for (const label of ['General', 'Camera and recording', 'Caregivers', 'Integrations', 'Remote access', 'Logs']) {
+    for (const label of ['General', 'Camera and recording', 'Users', 'Integrations', 'Remote access', 'Logs']) {
       expect(screen.queryByText(label)).not.toBeInTheDocument();
     }
     // A caregiver still gets their own account and About.
@@ -94,7 +94,7 @@ describe('the Settings hub', () => {
     expect(await screen.findByText('general page')).toBeInTheDocument();
   });
 
-  test('every row is keyboard-operable — they are divs, not buttons', async () => {
+  test('every row is keyboard-operable as a native button', async () => {
     hub({});
     const { user } = renderAsAdmin(
       <Routes>
@@ -102,14 +102,13 @@ describe('the Settings hub', () => {
         <Route path="/account" element={<div>account page</div>} />
       </Routes>
     );
-    // ⚠️ `role="button"` + `tabIndex` + an Enter/Space handler are the only things making these
-    // reachable at all. Tab rather than calling focus(), so the tab order is proven — and TWICE,
+    // Tab rather than calling focus(), so the tab order is proven — and TWICE,
     // because the header's logo button is the first tabbable thing on the page. Assert where focus
     // actually lands rather than assuming, which is how a one-tab version of this passed while
     // testing the wrong element entirely.
     await user.tab();
     await user.tab();
-    expect(document.activeElement).toHaveAttribute('role', 'button');
+    expect(document.activeElement.tagName).toBe('BUTTON');
     expect(document.activeElement.textContent).toContain('Account');
     await user.keyboard('{Enter}');
     expect(await screen.findByText('account page')).toBeInTheDocument();
@@ -123,7 +122,7 @@ describe('the Settings hub', () => {
         <Route path="/settings/general" element={<div>general page</div>} />
       </Routes>
     );
-    const row = screen.getByText('General').closest('[role="button"]');
+    const row = screen.getByText('General').closest('button');
     row.focus();
     await user.keyboard(' ');
     expect(await screen.findByText('general page')).toBeInTheDocument();
@@ -174,6 +173,7 @@ describe('Settings → Integrations → MQTT', () => {
     // blanked the whole page. Watched failing before the fix.
     loadMqtt(null);
     renderAsAdmin(<SettingsMqtt />);
+    expect(screen.getByRole('heading', { name: 'Broker', level: 2 }).closest('.card')).toBeTruthy();
     expect(await screen.findByLabelText('Broker host')).toHaveValue('');
     expect(screen.getByLabelText('Broker port')).toHaveValue(null);
   });
@@ -338,6 +338,9 @@ describe('Settings → Camera and recording → Recording', () => {
     withStorage(1024 ** 3);
     vi.spyOn(api, 'put').mockResolvedValue({});
     const { user } = renderAsAdmin(<SettingsRecording />, { settings: SETTINGS });
+    for (const title of ['Automatic clips', 'Wake clips', 'On-demand recording']) {
+      expect(screen.getByRole('heading', { name: title, level: 2 }).closest('.card')).toBeTruthy();
+    }
 
     await user.clear(screen.getByLabelText('Clip length (seconds)'));
     await user.type(screen.getByLabelText('Clip length (seconds)'), '45');

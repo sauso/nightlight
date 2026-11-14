@@ -14260,8 +14260,8 @@
   {
     "label": "W5 role UI M16: the tracking switch stays enabled for a caregiver",
     "file": "frontend/src/pages/ChildSettings.jsx",
-    "find": "<Switch checked={form.track_sleep} disabled={!isAdmin}",
-    "replace": "<Switch checked={form.track_sleep} disabled={false}",
+    "find": "<SwitchRow label=\"Track sleep\" checked={form.track_sleep} disabled={!isAdmin}",
+    "replace": "<SwitchRow label=\"Track sleep\" checked={form.track_sleep} disabled={false}",
     "expect": "killed",
     "tests": ["childSettings.test.jsx"],
     "namePattern": "shown but disabled"
@@ -20896,8 +20896,8 @@
   {
     "label": "#391 recording: the on/off switch is not disabled while Save is in flight",
     "file": "frontend/src/pages/SettingsRecording.jsx",
-    "find": "                disabled={busy}\n                onChange={(e) => setField('ondemand_enabled', e.target.checked)}",
-    "replace": "                onChange={(e) => setField('ondemand_enabled', e.target.checked)}",
+    "find": "checked={ondemandOn} disabled={busy}",
+    "replace": "checked={ondemandOn}",
     "expect": "killed",
     "tests": [
       "settingsRecording.test.jsx"

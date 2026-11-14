@@ -1,7 +1,8 @@
 # Adding caregivers
 
 Add a login for someone you trust without giving them control over every setting. Once signed in
-as admin, go to **Settings → Caregivers** to create additional logins (e.g. for a partner or babysitter).
+as admin, go to **Settings → Users** to create additional logins (e.g. for a partner or babysitter).
+The **Users** page lists **Accounts** and **Active sessions**. **Add user** is at the bottom of the Accounts card; the form opens with a **Details** card and a back button labelled **Users**. The role choice still says **Caregiver**.
 
 The rule (owner decision, 2026-10-10): **a caregiver can watch and act in the moment, but cannot
 destroy or reconfigure.**

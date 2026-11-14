@@ -14,6 +14,7 @@ which is which.
 
 All three are configured under **Settings → Camera and recording → Recording** (admin only), and all three write to the same
 place on disk — see [Where recordings are stored](#where-recordings-are-stored).
+The Recording page groups Storage, Automatic clips, Wake clips and On-demand recording under card headings, with one **Save changes** button at the bottom.
 
 ---
 

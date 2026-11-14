@@ -105,7 +105,7 @@ with a "privacy check" error and nothing is sent; please report it.
 > phone gets **no push alerts**, a live view or background audio that is playing stops (within about 15
 > seconds in Low latency mode, at its next request in Compatibility mode), and nothing on the phone says
 > so until someone opens the app and sees the sign-in screen. Signing in again restores everything. The
-> session lists (Account, and Settings → Caregivers for an admin) show when each device was last active,
+> session lists (Account, and Settings → Users for an admin) show when each device was last active,
 > **not** when it signed in or when it will be signed out, so if you rely on a phone's alerts, sign in
 > on it again at a time of day that suits you, before its lifetime runs out. Pushover, ntfy and Gotify
 > are not tied to a sign-in and are not affected.
@@ -135,7 +135,7 @@ the longer lifetime. Nor does raising it bring a signed-out device back; that de
   enforcing (no inline scripts, no `eval`) to make that hard, and a stolen token is only as good as its
   session: it is checked against the server on **every** request, so ending the session (below) ends it.
 - **Every sign-in can be ended from the server, at once:** sign out (on that device, or that device's
-  **Sign out** in your Account's session list), an admin signing out any device (Settings → Caregivers),
+  **Sign out** in your Account's session list), an admin signing out any device (Settings → Users),
   removing the account, or changing your password (signs out your other devices). Changing someone's role
   takes effect at their next request without signing them out.
 - **The 12-hour media token ends with its sign-in.** Video, snapshot, clip and talk URLs carry a separate

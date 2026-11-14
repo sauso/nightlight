@@ -445,9 +445,9 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
                 keyboard or screen reader could land on. The row is a real button with aria-expanded; the
                 `advancedOpen` rules above open it for the cases where something inside is needed. */}
             <div className="card camera-form__advanced">
-              <button type="button" className="camera-form__disclosure" aria-expanded={advancedOpen}
+              <button type="button" className="disclosure-row" aria-expanded={advancedOpen}
                 aria-controls="camera-advanced-fields" onClick={() => setAdvancedOpen((open) => !open)}>
-                <span className="camera-form__disclosure-text">
+                <span className="disclosure-row__text">
                   <strong>Advanced</strong>
                   <span>{!isNew && cam ? 'Stream paths, two-way audio, MQTT topic, recording and alerts' : 'Stream paths, two-way audio, MQTT topic'}</span>
                 </span>

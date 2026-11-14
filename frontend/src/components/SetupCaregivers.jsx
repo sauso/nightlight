@@ -5,7 +5,7 @@ import { useDemoStatus } from '../lib/demoStatus.js';
 import AvatarEditor from './AvatarEditor.jsx';
 
 // Adds caregiver accounts from inside the setup guide (owner, 2026-11-05: "Add a caregiver account" used to jump to Settings,
-// which broke the guide's feel). It is the same admin-only request Settings -> Caregivers makes for a new account
+// which broke the guide's feel). It is the same admin-only request Settings -> Users makes for a new account
 // (POST /auth/users), so the server's checks are the ones that decide: an 8+ character password, a free username, a valid photo.
 //
 // What it deliberately does NOT do:
@@ -13,7 +13,7 @@ import AvatarEditor from './AvatarEditor.jsx';
 //    moment the account is created, is never put in a message, and there is no draft (the guide has none, and a password must
 //    never be stored);
 //  * make an admin: the role is fixed to caregiver here, admin accounts stay in Settings;
-//  * edit or delete: the list below is only "what you added just now"; Settings -> Caregivers manages the rest.
+//  * edit or delete: the list below is only "what you added just now"; Settings -> Users manages the rest.
 const BLANK = { first_name: '', last_name: '', username: '', password: '', photo: null };
 
 export default function SetupCaregivers({ onAdded }) {
@@ -71,7 +71,7 @@ export default function SetupCaregivers({ onAdded }) {
 
   return (
     <>
-      <p>Caregivers can view the children and live cameras in this installation. You can add more, or change them, later in Settings → Caregivers.</p>
+      <p>Caregivers can view the children and live cameras in this installation. You can add more, or change them, later in Settings → Users.</p>
       {added.length > 0 && (
         <ul className="setup-caregivers__added" aria-label="Caregivers you added">
           {added.map((person) => <li key={person.id}>{person.name} <span aria-hidden="true">✓</span></li>)}

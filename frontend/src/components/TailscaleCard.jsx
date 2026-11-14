@@ -200,7 +200,7 @@ export default function TailscaleCard({ compact = false, publicHostSet = false, 
       </> : <><p>Waiting for your secure address…</p>{button('Retry', load)}</>}
       <h3>Add someone</h3>
       <ol><li>Install Tailscale on their phone or computer.</li><li>Invite them to your Tailscale network, or share this device with them from the Tailscale admin console.</li><li>Open the address above and sign in with their Nightlight account.</li></ol>
-      <p>Joining Tailscale doesn't replace a Nightlight account. Add caregivers in Settings → Caregivers.</p>
+      <p>Joining Tailscale doesn't replace a Nightlight account. Add caregivers in Settings → Users.</p>
       {/* Codex review of #978 (verified): pending=false is also what the server says before it has found the address, so it is not proof of ready. Claim nothing until there is an update to report. */}
       {view.video_address_pending && <p role="status">Low latency video: updating. Viewers reconnect once.</p>}
       {view.video_address_pending && button('Apply now', () => act('apply-video-address'))}
@@ -216,7 +216,7 @@ export default function TailscaleCard({ compact = false, publicHostSet = false, 
     {compact && <span className="status-badge status-badge--highlight">Recommended</span>}
     {error && view && !confirm && <div className="error-banner" role="alert">{error} {button('Retry', load, false)}</div>}
     {content}
-    {view && <details className="tailscale-advanced"><summary>Advanced</summary>
+    {view && <details className="tailscale-advanced"><summary className="disclosure-row">Advanced</summary>
       <form onSubmit={rename}><div className="field"><label htmlFor="tailscale-rename">Rename this device</label>
         <input id="tailscale-rename" value={name} maxLength={63} onChange={(event) => setName(event.target.value)} disabled={disabled || !view.enabled} /></div>
         <button type="submit" className="btn btn-secondary" disabled={disabled || !view.enabled || !NAME.test(name) || name === currentName}>Save</button></form>

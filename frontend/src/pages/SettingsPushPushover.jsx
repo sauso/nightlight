@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useLater } from '../lib/useLater.js';
 import AppHeader from '../components/AppHeader.jsx';
-import Switch from '../components/Switch.jsx';
+import SwitchRow from '../components/SwitchRow.jsx';
 import SecretField from '../components/SecretField.jsx';
 import { hasUnsavedEdits, UNSAVED_TEST_HINT } from '../lib/unsavedEdits.js';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
@@ -89,17 +89,16 @@ export default function SettingsPushPushover() {
           <UnsavedNotice restored={restored} onDiscard={discardChanges}
             note="The API token and user key are not kept if this page reloads; enter them again." />
         )}
-        <form onSubmit={save}>
-          <div className="card">
-            <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
+        <div className="page-intro">
               Install the <strong>Pushover</strong> app (iOS/Android), create a Pushover application to get an
               <strong> API token</strong>, and paste it below with your <strong>user or group key</strong> (a group
               key alerts multiple caregivers). Motion/sound alerts include a snapshot.
-            </div>
-            <label className="log-viewer__toggle" style={{ marginBottom: 14 }}>
-              <Switch checked={!!po.enabled} disabled={busy || !loaded} onChange={(e) => setPo({ ...po, enabled: e.target.checked })} />
-              Enable Pushover notifications
-            </label>
+        </div>
+        <form onSubmit={save}>
+          <div className="card">
+            <h2 className="card-heading">Connection</h2>
+            <SwitchRow label="Enable Pushover notifications" checked={!!po.enabled} disabled={busy || !loaded}
+              onChange={(e) => setPo({ ...po, enabled: e.target.checked })} />
             <div className="field">
               <SecretField
                 id="po-token"
@@ -140,7 +139,7 @@ export default function SettingsPushPushover() {
               </div>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className="form-actions">
             <button className="btn btn-primary" type="submit" disabled={busy || !loaded}>{busy ? 'Working…' : 'Save changes'}</button>
             <button className="btn btn-secondary" type="button" disabled={busy || !po.configured || dirty}
               aria-describedby={dirty ? 'po-test-hint' : undefined} onClick={sendTest}>Send test with saved settings</button>

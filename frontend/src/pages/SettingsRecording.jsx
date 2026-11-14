@@ -4,7 +4,7 @@ import { useLater } from '../lib/useLater.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { useSettingsDraft } from '../lib/useSettingsDraft.js';
 import AppHeader from '../components/AppHeader.jsx';
-import Switch from '../components/Switch.jsx';
+import SwitchRow from '../components/SwitchRow.jsx';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
 import Modal from '../components/Modal.jsx';
 import { useHomeTime } from '../lib/useHomeTime.js';
@@ -44,7 +44,7 @@ function StorageCard({ storage }) {
   const total = alertKnown ? storage.usedBytes + (manual.bytes || 0) + (wake.bytes || 0) : null;
   return (
     <div className="card">
-      <div className="card-title">Storage</div>
+      <h2 className="card-heading">Storage</h2>
       <div className="storage-readout">
         <div>Alert clips: <strong>{fmtBytes(storage.usedBytes)}</strong>
           {typeof storage.clipCount === 'number' ? ` · ${plural(storage.clipCount, 'clip')}` : ''}</div>
@@ -264,7 +264,7 @@ export default function SettingsRecording() {
         <form onSubmit={save}>
           {/* --- Automatic clips (detection-triggered) --- */}
           <div className="card">
-            <div className="card-title">Automatic clips</div>
+            <h2 className="card-heading">Automatic clips</h2>
             <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
               Recorded for you when motion or sound is detected, for cameras with “Save a clip when
               triggered” on (set per camera under its Motion/Sound settings). Each clip is shown on the
@@ -315,21 +315,10 @@ export default function SettingsRecording() {
 
           {/* --- Wake clips (sleep-tracker triggered, deliberately silent) --- */}
           <div className="card">
-            <div className="card-title">Wake clips</div>
-            <div className="list-row" style={{ padding: 0 }}>
-              <div>
-                <div>Record wake-ups without alerting</div>
-                <div className="camera-tile__sub">
-                  Save a short clip when your child wakes, and send nothing.
-                </div>
-              </div>
-              <Switch
-                checked={wakeClipsOn}
-                disabled={busy}
-                onChange={(e) => setField('wake_clips_enabled', e.target.checked)}
-                aria-label="Record wake-ups without alerting"
-              />
-            </div>
+            <h2 className="card-heading">Wake clips</h2>
+            <SwitchRow label="Record wake-ups without alerting" sub="Save a short clip when your child wakes, and send nothing."
+              checked={wakeClipsOn} disabled={busy}
+              onChange={(e) => setField('wake_clips_enabled', e.target.checked)} />
 
             {wakeClipsOn && (
               <>
@@ -365,21 +354,10 @@ export default function SettingsRecording() {
 
           {/* --- On-demand (the Record button) --- */}
           <div className="card">
-            <div className="card-title">On-demand recording</div>
-            <div className="list-row" style={{ padding: 0 }}>
-              <div>
-                <div>Show a Record button on each camera</div>
-                <div className="camera-tile__sub">
-                  Capture a moment yourself, whenever you want.
-                </div>
-              </div>
-              <Switch
-                checked={ondemandOn}
-                disabled={busy}
-                onChange={(e) => setField('ondemand_enabled', e.target.checked)}
-                aria-label="Show a Record button on each camera"
-              />
-            </div>
+            <h2 className="card-heading">On-demand recording</h2>
+            <SwitchRow label="Show a Record button on each camera" sub="Capture a moment yourself, whenever you want."
+              checked={ondemandOn} disabled={busy}
+              onChange={(e) => setField('ondemand_enabled', e.target.checked)} />
 
             {ondemandOn && (
               <>
@@ -410,7 +388,7 @@ export default function SettingsRecording() {
           {storage && <StorageCard storage={storage} />}
           {!storage && storageFailed && (
             <div className="card">
-              <div className="card-title">Storage</div>
+              <h2 className="card-heading">Storage</h2>
               <div className="storage-readout">
                 <div>Storage details unavailable.</div>
                 <button type="button" className="btn btn-secondary" style={{ marginTop: 8 }} onClick={loadStorage}>
@@ -420,9 +398,11 @@ export default function SettingsRecording() {
             </div>
           )}
 
-          <button className="btn btn-primary" type="submit" disabled={busy} style={{ marginTop: 20 }}>
-            {busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save changes'}
-          </button>
+          <div className="form-actions">
+            <button className="btn btn-primary" type="submit" disabled={busy}>
+              {busy ? 'Saving…' : saved ? 'Saved ✓' : 'Save changes'}
+            </button>
+          </div>
         </form>
         {deletePrompt && (
           <Modal title="Delete saved clips?" onClose={() => setDeletePrompt(null)} error={confirmError}>

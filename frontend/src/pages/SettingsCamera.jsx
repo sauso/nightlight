@@ -3,7 +3,7 @@ import { api } from '../lib/api.js';
 import { useLater } from '../lib/useLater.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
-import Switch from '../components/Switch.jsx';
+import SwitchRow from '../components/SwitchRow.jsx';
 
 // Camera controls — global camera behaviour that isn't per-camera: the PTZ step size (moved here out
 // of General), the offline-camera push alert and the long-silence alert (#552). Save-on-submit, same pattern
@@ -62,7 +62,7 @@ export default function SettingsCamera() {
         <form className="camera-controls" onSubmit={save}>
           <div className="card">
             <div className="field" style={{ marginBottom: 0 }}>
-              <h3 className="camera-controls__title"><label htmlFor="ptz-step">PTZ step size</label></h3>
+              <h3 className="card-heading"><label htmlFor="ptz-step">PTZ step size</label></h3>
               <input
                 id="ptz-step"
                 type="number"
@@ -81,23 +81,13 @@ export default function SettingsCamera() {
           </div>
 
           <div className="card">
-            <h3 className="camera-controls__title"><label htmlFor="offline-alerts">Notify when a camera goes offline</label></h3>
-            <div className="camera-controls__switch-row">
-              <div>
-                <div className="camera-tile__sub">
+            <SwitchRow heading id="offline-alerts" label="Notify when a camera goes offline"
+              checked={offlineOn} disabled={busy}
+              onChange={(e) => setForm({ ...form, camera_offline_alert_enabled: e.target.checked })}>
                   Send a push notification if a camera stops delivering video for longer than the
                   threshold below, and another when it comes back. Uses whichever push channels you've
                   set up (Firebase, Pushover, ntfy, Gotify).
-                </div>
-              </div>
-              <Switch
-                id="offline-alerts"
-                checked={offlineOn}
-                disabled={busy}
-                aria-label="Notify when a camera goes offline"
-                onChange={(e) => setForm({ ...form, camera_offline_alert_enabled: e.target.checked })}
-              />
-            </div>
+            </SwitchRow>
 
             <div className="field" style={{ marginTop: 14, marginBottom: 0 }}>
               <label htmlFor="offline-mins">Offline for longer than (minutes)</label>
@@ -120,26 +110,16 @@ export default function SettingsCamera() {
           {/* #552. Who receives it is stated here, not only in the docs, because it differs by channel and the
               difference is the part people get wrong: only the app's own push can leave someone out. */}
           <div className="card">
-            <h3 className="camera-controls__title"><label htmlFor="silence-alerts">Notify admins when a camera's alerts stay silenced for a long time</label></h3>
-            <div className="camera-controls__switch-row">
-              <div>
-                <div className="camera-tile__sub">
+            <SwitchRow heading id="silence-alerts" label="Notify admins when a camera's alerts stay silenced for a long time"
+              checked={silenceOn} disabled={busy}
+              onChange={(e) => setForm({ ...form, snooze_alert_enabled: e.target.checked })}>
                   Anyone signed in can silence a camera's alerts from its tile. Admins get one notification
                   when a camera's alerts are kept silenced, on and off, for longer than the time below. In the
                   Nightlight app (Firebase) it goes to admins only, not to the person who set the silence.
                   Pushover, ntfy and Gotify can't send to one person, so everyone on those receives it too,
                   including whoever set the silence. It names no one: the camera's tile and Camera history show
                   who set each silence.
-                </div>
-              </div>
-              <Switch
-                id="silence-alerts"
-                checked={silenceOn}
-                disabled={busy}
-                aria-label="Notify admins when a camera's alerts stay silenced for a long time"
-                onChange={(e) => setForm({ ...form, snooze_alert_enabled: e.target.checked })}
-              />
-            </div>
+            </SwitchRow>
 
             <div className="field" style={{ marginTop: 14, marginBottom: 0 }}>
               <label htmlFor="silence-mins">Silenced for longer than (minutes)</label>
@@ -160,9 +140,11 @@ export default function SettingsCamera() {
             </div>
           </div>
 
-          <button className="btn btn-primary" type="submit" disabled={busy} style={{ marginTop: 20 }}>
-            {busy ? 'Saving…' : 'Save changes'}
-          </button>
+          <div className="form-actions">
+            <button className="btn btn-primary" type="submit" disabled={busy}>
+              {busy ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
         </form>
       </main>
     </>

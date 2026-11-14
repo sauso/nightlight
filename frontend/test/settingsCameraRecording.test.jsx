@@ -82,7 +82,7 @@ describe('Camera controls cards', () => {
     for (const name of ['PTZ step size', 'Notify when a camera goes offline',
       "Notify admins when a camera's alerts stay silenced for a long time"]) {
       const title = screen.getByRole('heading', { name });
-      expect(title).toHaveClass('camera-controls__title');
+      expect(title).toHaveClass('card-heading');
       expect(screen.getByLabelText(name)).toBeInTheDocument();
     }
     expect(screen.getByLabelText('Offline for longer than (minutes)')).toBeInTheDocument();

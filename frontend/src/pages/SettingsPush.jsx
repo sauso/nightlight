@@ -1,17 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
 import { api } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
 import PushoverIcon from '../components/icons/PushoverIcon.jsx';
 import FirebaseIcon from '../components/icons/FirebaseIcon.jsx';
 import GotifyIcon from '../components/icons/GotifyIcon.jsx';
 import NtfyIcon from '../components/icons/NtfyIcon.jsx';
+import NavRow from '../components/NavRow.jsx';
 
 // Push notifications is now a hub, like the top-level Settings screen: one row per provider, each
 // drilling into its own config page. An alert fires to every provider that's enabled. State comes
 // from /notifications/status so each row can show On / Off / Not set up at a glance (see badgeFor).
-const PERI = 'var(--accent-line)';
 const BACK = { state: { from: { to: '/settings/integrations/notifications', label: 'Notifications' } } };
 
 const PROVIDERS = [
@@ -53,44 +52,17 @@ export default function SettingsPush() {
     <>
       <AppHeader title="Push notifications" back={{ to: '/settings/integrations', label: 'Integrations' }} />
       <main className="app-main">
-        <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
+        <div className="page-intro">
           Get alerted on your phone when a camera with motion or sound detection is triggered, even when
           the app is closed. Set up one or more providers below — an alert is sent to <strong>every</strong>{' '}
           one you enable. Detection and the in-app <strong>Recent alerts</strong> work with or without any of these.
         </div>
         <div className="card" style={{ padding: 0 }}>
           {PROVIDERS.map((p) => (
-            <Row key={p.key} {...p} badge={badgeOf(p.key)} onClick={() => navigate(p.to, BACK)} />
+            <NavRow key={p.key} Icon={p.Icon} label={p.label} sub={p.desc} badge={badgeOf(p.key)} onClick={() => navigate(p.to, BACK)} />
           ))}
         </div>
       </main>
     </>
-  );
-}
-
-function Row({ Icon, label, desc, badge, onClick }) {
-  return (
-    <div
-      className="list-row"
-      role="button"
-      tabIndex={0}
-      style={{ cursor: 'pointer', padding: '12px 14px' }}
-      onClick={onClick}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-        <span style={{ width: 24, display: 'inline-flex', justifyContent: 'center', flexShrink: 0 }}>
-          <Icon size={22} color={PERI} aria-hidden="true" />
-        </span>
-        <div style={{ minWidth: 0 }}>
-          <div>{label}</div>
-          <div className="camera-tile__sub">{desc}</div>
-        </div>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-        {badge && <span className={`status-badge ${badge.cls}`}>{badge.text}</span>}
-        <ChevronRight size={18} style={{ opacity: 0.5 }} aria-hidden="true" />
-      </div>
-    </div>
   );
 }

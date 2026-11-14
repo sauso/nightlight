@@ -50,12 +50,12 @@ export default function SettingsUsers() {
 
   return (
     <>
-      <AppHeader title="User management" back={{ to: '/settings', label: 'Settings' }} />
+      <AppHeader title="Users" back={{ to: '/settings', label: 'Settings' }} />
       <main className="app-main">
         {error && <div className="error-banner">{error}</div>}
 
         <div className="card tight">
-          <div className="card-title">Caregiver accounts</div>
+          <h2 className="card-heading">Accounts</h2>
           {users.map((u) => {
             const open = () => navigate(`/settings/users/${u.id}`);
             return (
@@ -79,13 +79,13 @@ export default function SettingsUsers() {
               </div>
             );
           })}
+          <button className="btn btn-primary" onClick={() => navigate('/settings/users/new')} style={{ marginTop: 12 }}>
+            <Plus size={16} aria-hidden="true" /> Add user
+          </button>
         </div>
-        <button className="btn btn-primary" onClick={() => navigate('/settings/users/new')} style={{ marginBottom: 14 }}>
-          <Plus size={16} aria-hidden="true" /> Add caregiver
-        </button>
 
         <div className="card" style={{ marginBottom: 14 }}>
-          <div className="card-title">All active sessions</div>
+          <h2 className="card-heading">Active sessions</h2>
           {allSessions.length === 0 && <div className="camera-tile__sub">None active</div>}
           {allSessions.map((s) => (
             <div className="list-row" key={s.id}>

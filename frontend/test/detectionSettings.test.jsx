@@ -114,7 +114,7 @@ describe('#1076 detection cards', () => {
     const cards = [...container.querySelectorAll('.detection-card')];
     expect(cards.map((card) => card.querySelector('h2')?.textContent || card.querySelector('.tgl-row > div > div')?.textContent))
       .toEqual(titles);
-    expect(cards[0].querySelector('.tgl-row')).toBeTruthy();
+    expect(cards[0].querySelector('.switch-row')).toBeTruthy();
   });
 
   test.each([

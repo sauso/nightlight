@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
 import { useLater } from '../lib/useLater.js';
 import AppHeader from '../components/AppHeader.jsx';
-import Switch from '../components/Switch.jsx';
+import SwitchRow from '../components/SwitchRow.jsx';
 import SecretField from '../components/SecretField.jsx';
 import { hasUnsavedEdits, UNSAVED_TEST_HINT } from '../lib/unsavedEdits.js';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
@@ -84,17 +84,16 @@ export default function SettingsPushGotify() {
           <UnsavedNotice restored={restored} onDiscard={discardChanges}
             note="The application token is not kept if this page reloads; enter it again." />
         )}
-        <form onSubmit={save}>
-          <div className="card">
-            <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
+        <div className="page-intro">
               Sends alerts to your self-hosted <strong>Gotify</strong> server. In Gotify, create an
               <strong> application</strong> and copy its token below. Text only (Gotify doesn't show images);
               tapping an alert opens the camera.
-            </div>
-            <label className="log-viewer__toggle" style={{ marginBottom: 14 }}>
-              <Switch checked={!!form.enabled} disabled={busy || !loaded} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
-              Enable Gotify notifications
-            </label>
+        </div>
+        <form onSubmit={save}>
+          <div className="card">
+            <h2 className="card-heading">Connection</h2>
+            <SwitchRow label="Enable Gotify notifications" checked={!!form.enabled} disabled={busy || !loaded}
+              onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
             <div className="field">
               <label htmlFor="gotify-server">Server URL</label>
               {/* ⚠️ `disabled={busy || !loaded}` like every other control here, and it is not
@@ -126,7 +125,7 @@ export default function SettingsPushGotify() {
               <div className="camera-tile__sub">Higher shows more prominently and can bypass quiet settings in the Gotify app.</div>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div className="form-actions">
             <button className="btn btn-primary" type="submit" disabled={busy || !loaded}>{busy ? 'Working…' : 'Save changes'}</button>
             <button className="btn btn-secondary" type="button" disabled={busy || !form.configured || dirty}
               aria-describedby={dirty ? 'gotify-test-hint' : undefined} onClick={sendTest}>Send test with saved settings</button>

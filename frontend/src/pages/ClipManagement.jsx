@@ -187,7 +187,7 @@ export default function ClipManagement() {
         {actionNote && <div className="camera-tile__sub" role="status">{actionNote}</div>}
 
         {protectedItems.length > 0 && <div className="card tight">
-          <div className="card-title">Protected</div>
+          <h2 className="card-heading">Protected</h2>
           {protectedItems.map(({ kind, clip }) => {
             const isWake = kind === 'wake';
             const when = parseUtc(clip.created_at);

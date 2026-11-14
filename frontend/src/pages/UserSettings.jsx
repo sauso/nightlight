@@ -26,7 +26,7 @@ export default function UserSettings() {
 }
 
 // Add / edit a caregiver on its own routed screen (replaces the modal), reached from the Family
-// hub or User management. Admin-only (gated by the route). The username stays editable here (an
+// hub or Users. Admin-only (gated by the route). The username stays editable here (an
 // admin action), unlike self-service on the Account screen.
 function UserSettingsForm() {
   const { id } = useParams();
@@ -97,7 +97,7 @@ function UserSettingsForm() {
     persistPhoto(null);
   }
 
-  const back = { to: '/settings/users', label: 'Caregivers' };
+  const back = { to: '/settings/users', label: 'Users' };
 
   useEffect(() => {
     // Reset immediately, not just on success below: this effect re-runs when `id` changes (this is a
@@ -189,7 +189,7 @@ function UserSettingsForm() {
 
   return (
     <>
-      <AppHeader title={isNew ? 'Add caregiver' : (fullName || 'Caregiver')} back={back} />
+      <AppHeader title={isNew ? 'Add user' : (fullName || 'Caregiver')} back={back} />
       <main className="app-main">
         {!loaded ? (
           <div className="empty-state">Loading…</div>
@@ -215,7 +215,7 @@ function UserSettingsForm() {
 
             {/* Identity fields live in their own titled tile, matching the other settings pages. */}
             <div className="card">
-              <div className="card-title">Caregiver details</div>
+              <h2 className="card-heading">Details</h2>
               <div className="onvif-box__row">
                 <div className="field">
                   <label htmlFor="u-first">First name</label>
@@ -262,7 +262,7 @@ function UserSettingsForm() {
 
             {!isNew && mfaEnabled && (
               <div className="card">
-                <div className="card-title">Two-factor</div>
+                <h2 className="card-heading">Two-factor</h2>
                 <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
                   This account has two-factor enabled. If they've lost their authenticator and backup
                   codes, reset it so they can sign in with just their password and set it up again.
@@ -274,9 +274,11 @@ function UserSettingsForm() {
             )}
 
             {/* Save sits below the two-factor tile, per the settings layout. */}
-            <button className="btn btn-primary" type="submit" disabled={busy}>
-              {busy ? 'Saving…' : isNew ? 'Add caregiver' : 'Save changes'}
-            </button>
+            <div className="form-actions">
+              <button className="btn btn-primary" type="submit" disabled={busy}>
+                {busy ? 'Saving…' : isNew ? 'Add user' : 'Save changes'}
+              </button>
+            </div>
             {!isNew && id !== me?.id && (
               <button className="btn btn-danger" type="button" style={{ marginTop: 10 }} onClick={() => { setRemoveError(''); setRemoving(true); }}>
                 Remove caregiver

@@ -40,12 +40,18 @@ describe('Settings → General temperature unit', () => {
     const { user } = show();
     const c = screen.getByRole('button', { name: '°C' });
     const f = screen.getByRole('button', { name: '°F' });
-    expect(c).toHaveClass('unit-btn--active');
-    expect(f).not.toHaveClass('unit-btn--active');
+    expect(screen.getByRole('heading', { name: 'General settings', level: 2 }).closest('.card')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Temperature unit', level: 2 }).closest('.card')).toBeTruthy();
+    expect(c.closest('.seg-track')).toHaveAttribute('aria-label', 'Temperature unit');
+    expect(c).toHaveAttribute('aria-pressed', 'true');
+    expect(f).toHaveAttribute('aria-pressed', 'false');
+    expect(c).toHaveClass('seg-track__btn--active');
+    expect(f).not.toHaveClass('seg-track__btn--active');
 
     await user.click(f);
-    expect(f).toHaveClass('unit-btn--active');
-    expect(c).not.toHaveClass('unit-btn--active');
+    expect(f).toHaveAttribute('aria-pressed', 'true');
+    expect(f).toHaveClass('seg-track__btn--active');
+    expect(c).not.toHaveClass('seg-track__btn--active');
     await user.click(screen.getByRole('button', { name: /Save/ }));
     await waitFor(() => expect(api.put).toHaveBeenCalled());
     // ⚠️ Both directions asserted: this setting decides whether every room-climate reading in the app

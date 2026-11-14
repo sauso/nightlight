@@ -18,7 +18,7 @@ export default function SettingsCameraRecording() {
     <>
       <AppHeader title="Camera and recording" back={{ to: '/settings', label: 'Settings' }} />
       <main className="app-main">
-        <div className="camera-tile__sub" style={{ marginBottom: 12 }}>
+        <div className="page-intro">
           Manage camera controls, recording settings and saved clips.
         </div>
         <div className="card" style={{ padding: 0 }}>

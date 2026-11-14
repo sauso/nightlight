@@ -669,6 +669,7 @@ describe('keeping readings (retention)', () => {
   test('shows the stored value with its range and default', async () => {
     mockApi({ settings: { retention_days: 45 } });
     renderAsAdmin(<SettingsEsphome />);
+    expect(screen.getByRole('heading', { name: 'Keeping readings', level: 2 })).toHaveClass('card-heading');
     expect(await screen.findByLabelText(/Days to keep \(1–365, default 30\)/)).toHaveValue(45);
   });
 

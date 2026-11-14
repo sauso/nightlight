@@ -8,7 +8,7 @@ New here? Start with the [main README](../README.md), then choose the guide that
 - [What you need, and what has been tested](requirements.md) — hosts, what each camera starts, disk, browsers and apps, and what has not been measured
 - [How it works](how-it-works.md) — FFmpeg, MediaMTX, the backend and the app, and how video reaches your browser
 - [Cameras and caregivers](cameras.md) — add cameras and share access
-- [Adding caregivers](caregivers.md) — what caregivers and admins can each do, and how long a sign-in lasts (`SESSION_TTL_DAYS`)
+- [Adding caregivers](caregivers.md) — use Settings → Users to add logins, see what caregivers and admins can do, and how long a sign-in lasts (`SESSION_TTL_DAYS`)
 - [Networking and remote access](networking.md) — LAN options, WebRTC, STUN, HTTPS and privacy
 - [Watch from anywhere](remote-access.md) — Tailscale, SWAG, `TRUST_PROXY`, `STUN_SERVERS`, `CLOUDFLARE_ANALYTICS`, Settings → Remote access, watching away from home
 - [Troubleshooting](troubleshooting.md) — common problems and first checks

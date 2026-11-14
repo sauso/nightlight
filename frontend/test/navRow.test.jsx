@@ -58,4 +58,19 @@ describe('NavRow', () => {
     const link = screen.getByRole('link', { name: /^Motion detection/ });
     expect(link).toHaveAttribute('href', '/cameras/cam-1/motion');
   });
+
+  test('keeps a status badge inside the destination button', () => {
+    render(ui({ badge: { text: 'Off', cls: 'status-badge--off' }, onClick: vi.fn() }));
+    const row = screen.getByRole('button', { name: 'Motion detection Off' });
+    expect(row.querySelector('.status-badge')).toHaveClass('status-badge--off');
+  });
+
+  test('renders an external destination as a safe new-tab link', () => {
+    render(ui({ external: 'https://example.com/help' }));
+    const link = screen.getByRole('link', { name: 'Motion detection' });
+    expect(link).toHaveAttribute('href', 'https://example.com/help');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link.querySelector('.lucide-external-link')).toBeTruthy();
+  });
 });

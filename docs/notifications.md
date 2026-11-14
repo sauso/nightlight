@@ -28,6 +28,8 @@ Each row on **Settings → Integrations → Push notifications** carries a badge
 
 There is no badge for the moment between opening the page and the answer arriving.
 
+Each provider page starts with an introduction above its **Connection** card. Its enable switch and fields are saved with **Save changes** at the bottom. Where **Send test with saved settings** is offered, it sits below Save and stays unavailable until the saved configuration is ready.
+
 ---
 
 ## What gets sent, and what each provider receives

@@ -42,15 +42,15 @@ const asCaregiver = () => ({ headers: { Authorization: `Bearer ${caregiverToken}
 test('an admin creates a caregiver through the real form', async ({ page }) => {
   await auth(page);
   await page.goto('/#/settings/users');
-  await page.getByRole('button', { name: 'Add caregiver' }).click();
+  await page.getByRole('button', { name: 'Add user' }).click();
 
   await page.getByLabel('First name').fill(CAREGIVER.first_name);
   await page.getByLabel('Last name').fill(CAREGIVER.last_name);
   await page.getByLabel('Username (login)').fill(CAREGIVER.username);
   await page.getByLabel('Password', { exact: true }).fill(CAREGIVER.password);
-  // ⚠️ The submit button is ALSO called 'Add caregiver' — the list page's button navigated here and
+  // ⚠️ The submit button is ALSO called 'Add user' — the list page's button navigated here and
   // is gone, so the name is unambiguous, but it is a coincidence worth naming rather than tripping over.
-  await page.getByRole('button', { name: 'Add caregiver' }).click();
+  await page.getByRole('button', { name: 'Add user' }).click();
 
   // Back on the list, with the new account on it — and shown as a caregiver, since the list is where
   // an admin would notice an account that had quietly been given the wrong role.
@@ -115,7 +115,7 @@ test('the admin-only screen is not reachable in the caregiver’s browser either
 
   // AdminProtected sends them away rather than rendering. Asserting on the absence of the screen's
   // own control, not on where they land, keeps this about the gate rather than the redirect target.
-  await expect(view.getByRole('button', { name: 'Add caregiver' })).toHaveCount(0);
+  await expect(view.getByRole('button', { name: 'Add user' })).toHaveCount(0);
   await ctx.close();
 });
 

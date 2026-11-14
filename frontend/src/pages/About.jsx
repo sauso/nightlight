@@ -115,7 +115,7 @@ export default function About() {
         {route && (
           <section className="card about-card" aria-label="Connection">
             <div className="about-card__heading">
-              <h2 className="card-title">Connection</h2>
+              <h2 className="card-heading">Connection</h2>
               {route.via !== 'other' && (
                 <span className="status-badge status-badge--off">
                   {route.via === 'tailscale' ? (route.kind === 'custom' ? 'Using your custom address' : 'Using Tailscale') : 'Using local address'}
@@ -145,7 +145,7 @@ export default function About() {
         {/* Owner 2026-11-07: Links, Support and the safety notice take the Connection card's look (a 16px bold title, 14px
             text) so the cards on this page read as one set; before, they kept the small grey title and 16px rows. */}
         <section className="card about-card" aria-label="Links">
-          <div className="about-card__heading"><h2 className="card-title">Links</h2></div>
+          <div className="about-card__heading"><h2 className="card-heading">Links</h2></div>
           {LINKS.map(({ label, url }) => (
             <a key={url} className="list-row about-link" href={url} target="_blank" rel="noreferrer">
               <span>{label}</span>
@@ -155,7 +155,7 @@ export default function About() {
         </section>
 
         <section className="card about-card" aria-label="Support the project">
-          <div className="about-card__heading"><h2 className="card-title">Support the project</h2></div>
+          <div className="about-card__heading"><h2 className="card-heading">Support the project</h2></div>
           <p className="about-card__text">
             Nightlight is free and open source. If it helps you keep watch over your
             little ones, consider supporting its development.
@@ -167,7 +167,7 @@ export default function About() {
         </section>
 
         <section className="card about-card" aria-label="Not a safety device">
-          <div className="about-card__heading"><h2 className="card-title">Not a safety device</h2></div>
+          <div className="about-card__heading"><h2 className="card-heading">Not a safety device</h2></div>
           <p className="about-card__text">
             Nightlight is a convenience tool — not a medical device, and not certified for
             safety monitoring of any kind. Streams can drop, apps can be stopped by the

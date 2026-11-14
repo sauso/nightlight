@@ -433,7 +433,7 @@ Motion, Sound and Alert schedule use the same card order: a 56px switch row, tri
 Timing where relevant, extras where relevant, then Recording where relevant. The switch-off
 message replaces the later cards. Each settings card has a visible 16px `h2` title. Motion's
 source selector uses the local `.seg-track` and `.seg-track__btn` rules, with `aria-pressed` on
-each button; the shared `.segmented` control elsewhere keeps its existing look. Sound's first
+each button; Account theme and General temperature unit use the same track. Sound's first
 detector limit is visible, while the other four and the longer Timing note use separate
 44px disclosures. The fields remain inside `.field`, and calibration retains its live status.
 
@@ -504,6 +504,14 @@ background: var(--bg-elevated); border: 1px solid var(--border);
 border-radius: var(--radius); padding: 16px; margin-bottom: 14px;
 ```
 One hairline border, no shadow. Shadows are reserved for things that float (sheets, the child card).
+
+### Settings cards and rows
+
+Use an `h2.card-heading` for a settings card title (16px display face, weight 800, 12px gap below). Keep `.card-title` for the small grey captions on sleep screens. Camera controls may use `h3.card-heading` with its existing label. Introductory text above a group of cards uses `.page-intro`; keep explanatory paragraphs visible below the row or heading they describe.
+
+Use `SwitchRow` for settings switches. It gives the switch a unique input id, a visible label tied to that input, a 56px row, and a 44px switch target. A short `sub` sits below the label; longer notes go in its `children` slot below the row. A page form puts its full-width primary Save button in `.form-actions` at the bottom. If it offers **Send test with saved settings**, place the full-width secondary button below Save and keep it disabled while edits are unsaved.
+
+Use `.seg-track` and `.seg-track__btn` for theme and temperature choices, with `aria-pressed` on each option. Settings hubs use `NavRow` for one real button or link per destination; its `value` shows the current setting and `badge` shows status. External destinations use `external`. Camera Advanced and Remote access Advanced use `.disclosure-row`; the latter keep native `details` and `summary` semantics.
 
 Settings sub-menus (Integrations and Camera and recording) share a pattern: a row on the Settings hub
 opens a sub-menu page. Its rows pass `state.from` for Back, and each destination has the sub-menu as
@@ -864,7 +872,7 @@ a 38 × 4 grabber, uppercase 12px section labels, `--bg-elevated-2` grouped sect
 `--accent` + weight 600 for the active choice, supports a submenu (`--submenu` row with a `--value` on
 the right, plus a `--back` item). Backdrop `rgba(0,0,0,0.45)`, `sheet-fade` 0.16s in.
 Connection mode and Quality use `.seg-track` with 44px buttons and `aria-pressed`; the shared
-`.segmented` control elsewhere keeps its own style. Stop/Start and Camera settings are separate
+track on Account and General uses the same style. Stop/Start and Camera settings are separate
 56px rows. Camera settings remains admin-only.
 
 ### Camera tile

@@ -63,7 +63,7 @@ describe('the peri palette', () => {
   });
 
   test('★ the primary button, the selected chip and the active toggle use --on-accent for their text', () => {
-    for (const selector of ['.btn-primary', '.btn-peri', '.segmented__btn--active', '.detect-toggle--on', '.log-chip--active', '.clip-cal__done']) {
+    for (const selector of ['.btn-primary', '.btn-peri', '.seg-track__btn--active', '.detect-toggle--on', '.log-chip--active', '.clip-cal__done']) {
       const rule = rules.find((r) => r.includes(`${selector} {`) && r.includes('background'));
       expect(rule, `${selector} has a rule`).toBeTruthy();
       expect(rule, `${selector} text colour`).toContain('color: var(--on-accent)');

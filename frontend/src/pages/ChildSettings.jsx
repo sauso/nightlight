@@ -6,7 +6,7 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import AvatarEditor from '../components/AvatarEditor.jsx';
 import Modal from '../components/Modal.jsx';
-import Switch from '../components/Switch.jsx';
+import SwitchRow from '../components/SwitchRow.jsx';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
 import { loadDraft, clearDraft } from '../lib/formDraft.js';
 import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
@@ -267,11 +267,8 @@ export default function ChildSettings() {
             </div>
 
             <div className="field">
-              <label className="child-sleep-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>Track sleep</span>
-                <Switch checked={form.track_sleep} disabled={!isAdmin}
-                  onChange={(e) => setForm({ ...form, track_sleep: e.target.checked })} />
-              </label>
+              <SwitchRow label="Track sleep" checked={form.track_sleep} disabled={!isAdmin}
+                onChange={(e) => setForm({ ...form, track_sleep: e.target.checked })} />
               {!isAdmin && (
                 <div className="camera-tile__sub" style={{ marginTop: 6 }}>
                   Only an admin can change sleep tracking, the bedtime window and the sleep camera.
@@ -289,11 +286,8 @@ export default function ChildSettings() {
               {form.track_sleep && (
                 <>
                   <div style={{ marginTop: 12 }}>
-                    <label className="child-sleep-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span>Hold alerts until asleep</span>
-                      <Switch checked={form.hold_alerts_until_asleep} disabled={!isAdmin}
-                        onChange={(e) => setForm({ ...form, hold_alerts_until_asleep: e.target.checked })} />
-                    </label>
+                    <SwitchRow label="Hold alerts until asleep" checked={form.hold_alerts_until_asleep} disabled={!isAdmin}
+                      onChange={(e) => setForm({ ...form, hold_alerts_until_asleep: e.target.checked })} />
                     <div className="camera-tile__sub" style={{ marginTop: 6 }}>
                       Hold this child's motion and sound alerts until sleep is detected. Outside the sleep window,
                       the hold has no time limit; an evening crying spell or daytime nap may be silent. Inside the
@@ -358,11 +352,8 @@ export default function ChildSettings() {
                       only hides the score: while it is off the server leaves the score out of this child's nights,
                       and the nights themselves, the report and the baseline are untouched. */}
                   <div style={{ marginTop: 16 }}>
-                    <label className="child-sleep-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span>Show sleep score</span>
-                      <Switch checked={form.show_sleep_score} disabled={!isAdmin}
-                        onChange={(e) => setForm({ ...form, show_sleep_score: e.target.checked })} />
-                    </label>
+                    <SwitchRow label="Show sleep score" checked={form.show_sleep_score} disabled={!isAdmin}
+                      onChange={(e) => setForm({ ...form, show_sleep_score: e.target.checked })} />
                     <div className="camera-tile__sub" style={{ marginTop: 6 }}>
                       A score from 0 to 100 for each night, on this child's card and sleep page. Off hides it for
                       everyone; the nights are still tracked the same way. On by default.
@@ -373,20 +364,15 @@ export default function ChildSettings() {
                       per child: what leaves the house is decided for each child on their own. The second switch is
                       meaningless while the first is off, so it is disabled then rather than hidden. */}
                   <div style={{ marginTop: 16 }}>
-                    <label className="child-sleep-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span>Send this child's sleep report</span>
-                      <Switch checked={form.sleep_report_enabled} disabled={!isAdmin}
-                        onChange={(e) => setForm({ ...form, sleep_report_enabled: e.target.checked })} />
-                    </label>
+                    <SwitchRow label="Send this child's sleep report" checked={form.sleep_report_enabled} disabled={!isAdmin}
+                      onChange={(e) => setForm({ ...form, sleep_report_enabled: e.target.checked })} />
                     <div className="camera-tile__sub" style={{ marginTop: 6 }}>
                       Each morning, a notification such as "asleep 8h12, 2 wakes, up 06:47" goes to every
                       notification service that is turned on in Settings. On by default.
                     </div>
-                    <label className="child-sleep-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
-                      <span>Show this child's name in the report</span>
-                      <Switch checked={form.sleep_report_show_name} disabled={!isAdmin || !form.sleep_report_enabled}
-                        onChange={(e) => setForm({ ...form, sleep_report_show_name: e.target.checked })} />
-                    </label>
+                    <SwitchRow label="Show this child's name in the report" checked={form.sleep_report_show_name}
+                      disabled={!isAdmin || !form.sleep_report_enabled}
+                      onChange={(e) => setForm({ ...form, sleep_report_show_name: e.target.checked })} />
                     <div className="camera-tile__sub" style={{ marginTop: 6 }}>
                       Off says "a child" instead, in the title and in the text. The notification still passes
                       through the service you use (Google, Pushover, ntfy or Gotify). On by default.
@@ -401,9 +387,11 @@ export default function ChildSettings() {
               )}
             </div>
 
-            <button className="btn btn-primary" type="submit" disabled={busy} style={{ marginTop: 8 }}>
-              {busy ? 'Saving…' : isNew ? 'Add child' : 'Save changes'}
-            </button>
+            <div className="form-actions">
+              <button className="btn btn-primary" type="submit" disabled={busy}>
+                {busy ? 'Saving…' : isNew ? 'Add child' : 'Save changes'}
+              </button>
+            </div>
             {/* Admin-only: DELETE /api/children/:id has always been requireAdmin, so offering it to a
                 caregiver only ever led to a refusal. */}
             {!isNew && isAdmin && (
