@@ -65,12 +65,21 @@ function fromCam(cam) {
 // any detection). Writes the per-camera detect_record_clips flag via the same /detection payload.
 function RecordClipsToggle({ d, apply }) {
   return (
-    <>
-      <div className="section-title">Recording</div>
+    <DetectionCard title="Recording">
       <EnableToggle checked={d.record_clips} onChange={(v) => apply({ record_clips: v })}
         label="Save a clip when triggered"
         sub="Records a short video around each alert (uses the pre/post-roll in Settings → Camera and Recording → Recording). Off by default. A silenced camera or the alert schedule stops the alert, and so its clip." />
-    </>
+    </DetectionCard>
+  );
+}
+
+// The same card wrapper keeps the three routed forms in one reading and focus order (#1076).
+function DetectionCard({ title, switchCard = false, children }) {
+  return (
+    <section className={`detection-card card${switchCard ? ' detection-card--switch' : ''}`}>
+      {title && <h2 className="detection-card__title">{title}</h2>}
+      {children}
+    </section>
   );
 }
 
@@ -171,7 +180,7 @@ export default function DetectionSettings() {
 
 function EnableToggle({ checked, onChange, label, sub }) {
   return (
-    <label className="tgl-row">
+    <label className="tgl-row detection-switch">
       <div>
         <div>{label}</div>
         {sub && <div className="camera-tile__sub">{sub}</div>}
@@ -188,7 +197,7 @@ function Slider({ label, value, onChange, lowLabel, highLabel }) {
   // hand-written id because this component is rendered on more than one screen.
   const id = useId();
   return (
-    <div className="field" style={{ marginTop: 12 }}>
+    <div className="field detection-slider" style={{ marginTop: 12 }}>
       <label htmlFor={id}>{label}: {value}</label>
       <input id={id} type="range" min="1" max="100" value={value} onChange={(e) => onChange(Number(e.target.value))} />
       <div className="slider-legend"><span>{lowLabel}</span><span>{highLabel}</span></div>
@@ -210,20 +219,20 @@ function MotionForm({ d, apply, cameraId, cam }) {
   const hasSnapshotPassword = !!cam?.snapshot_has_password;
   return (
     <>
-      <EnableToggle checked={d.motion_enabled} onChange={(v) => apply({ motion_enabled: v })}
-        label="Motion detection" sub="Off by default — watches this camera's video for movement." />
+      <DetectionCard switchCard><EnableToggle checked={d.motion_enabled} onChange={(v) => apply({ motion_enabled: v })}
+        label="Motion detection" sub="Off by default — watches this camera's video for movement." /></DetectionCard>
       {!d.motion_enabled ? (
         <div className="empty-state">Turn on to configure how motion is detected and when it alerts.</div>
       ) : (
         <>
-          <div className="section-title">Detection source</div>
-          <div className="segmented" role="group" aria-label="Detection source">
-            <button type="button" className={`segmented__btn${d.source === 'framediff' ? ' segmented__btn--active' : ''}`}
+          <DetectionCard title="Detection source">
+          <div className="seg-track" role="group" aria-label="Detection source">
+            <button type="button" aria-pressed={d.source === 'framediff'} className={`seg-track__btn${d.source === 'framediff' ? ' seg-track__btn--active' : ''}`}
               onClick={() => apply({ source: 'framediff' })}>Nightlight</button>
-            <button type="button" className={`segmented__btn${d.source === 'mqtt' ? ' segmented__btn--active' : ''}`}
+            <button type="button" aria-pressed={d.source === 'mqtt'} className={`seg-track__btn${d.source === 'mqtt' ? ' seg-track__btn--active' : ''}`}
               onClick={() => apply({ source: 'mqtt' })}>Camera via MQTT</button>
             {showOnvif && (
-              <button type="button" className={`segmented__btn${d.source === 'onvif' ? ' segmented__btn--active' : ''}`}
+              <button type="button" aria-pressed={d.source === 'onvif'} className={`seg-track__btn${d.source === 'onvif' ? ' seg-track__btn--active' : ''}`}
                 onClick={() => apply({ source: 'onvif' })}>Camera via ONVIF</button>
             )}
           </div>
@@ -255,8 +264,10 @@ function MotionForm({ d, apply, cameraId, cam }) {
             </>
           )}
 
-          <div className="section-title">Timing</div>
-          <div style={{ display: 'flex', gap: 10 }}>
+          </DetectionCard>
+
+          <DetectionCard title="Timing">
+          <div className="field-row">
             {d.source === 'framediff' && (
               <div className="field" style={{ flex: 1 }}>
                 <label htmlFor="m-confirm">Confirm (seconds)</label>
@@ -275,8 +286,10 @@ function MotionForm({ d, apply, cameraId, cam }) {
               ? 'Movement must persist for the confirm delay before it alerts, then won\'t alert again until the cooldown passes.'
               : 'Cooldown is the minimum gap between alerts (the camera has already confirmed the motion). Confirm and sensitivity do not apply to this source.'}
           </div>
+          </DetectionCard>
 
-          <div className="field" style={{ marginTop: 14 }}>
+          <DetectionCard title="Alert image">
+          <div className="field">
             <label htmlFor="snapshot-url">Alert image URL (optional)</label>
             <input id="snapshot-url" value={d.snapshot_url} placeholder="http://camera/snapshot.jpg"
               onChange={(e) => apply({ snapshot_url: e.target.value })} />
@@ -301,14 +314,16 @@ function MotionForm({ d, apply, cameraId, cam }) {
               {' '}Changing the address above to a different host drops the saved password, so it is never sent somewhere new.
             </div>
           </div>
+          </DetectionCard>
 
-          <div className="section-title">Bed area</div>
+          <DetectionCard title="Bed area">
           <div className="camera-tile__sub" style={{ marginBottom: 10 }}>
             {d.source === 'framediff'
               ? 'Limit motion detection — and sleep tracking — to the bed, so movement elsewhere in the room isn’t counted. Leave as the whole frame to watch everything.'
               : 'For sleep tracking: limit the movement signal to the bed so a fan or someone walking past isn’t counted as the baby stirring. (Motion alerts still come from the camera.)'}
           </div>
           <CribZonePicker cameraId={cameraId} zone={d.zone} onChange={(zoneVal) => apply({ zone: zoneVal })} />
+          </DetectionCard>
 
           <RecordClipsToggle d={d} apply={apply} />
         </>
@@ -318,23 +333,26 @@ function MotionForm({ d, apply, cameraId, cam }) {
 }
 
 function SoundForm({ d, apply, cameraId }) {
+  const [moreTiming, setMoreTiming] = useState(false);
   return (
     <>
-      <EnableToggle checked={d.sound_enabled} onChange={(v) => apply({ sound_enabled: v })}
-        label="Sound detection" sub="Needs a camera with a microphone." />
+      <DetectionCard switchCard><EnableToggle checked={d.sound_enabled} onChange={(v) => apply({ sound_enabled: v })}
+        label="Sound detection" sub="Needs a camera with a microphone." /></DetectionCard>
       {!d.sound_enabled ? (
         <div className="empty-state">Turn on to alert when sound stays above the room's ambient level.</div>
       ) : (
         <>
-          <div className="camera-tile__sub" style={{ marginTop: 12 }}>
+          <DetectionCard title="Sensitivity">
+          <div className="camera-tile__sub">
             Alerts when sound stays <strong>above the room's ambient level</strong>. The ambient is learned continuously,
             so a white-noise machine or fan gets absorbed into the baseline — only a sustained rise above it triggers.
           </div>
           <Slider label="Sensitivity" value={d.sound_sensitivity} onChange={(v) => apply({ sound_sensitivity: v })}
             lowLabel="Needs loud noise" highLabel="Triggers easily" />
+          </DetectionCard>
           <SoundCalibration cameraId={cameraId} sensitivity={d.sound_sensitivity} />
-          <div className="section-title">Timing</div>
-          <div style={{ display: 'flex', gap: 10 }}>
+          <DetectionCard title="Timing">
+          <div className="field-row">
             <div className="field" style={{ flex: 1 }}>
               <label htmlFor="s-confirm">Confirm (seconds)</label>
               <input id="s-confirm" type="number" min="0" max="30" value={d.sound_confirm_s}
@@ -348,11 +366,17 @@ function SoundForm({ d, apply, cameraId }) {
           </div>
           <div className="camera-tile__sub">
             Sound must persist for the confirm delay before it counts (filters a door slam or cough); cooldown is the
-            minimum gap between alerts. Longer than motion by default. Even a confirm of 0 needs about 0.6 seconds of
+            minimum gap between alerts.
+          </div>
+          <button type="button" className="detection-disclosure" aria-expanded={moreTiming}
+            onClick={() => setMoreTiming((v) => !v)}>More about timing</button>
+          {moreTiming && <div className="camera-tile__sub">
+            Longer than motion by default. Even a confirm of 0 needs about 0.6 seconds of
             sound, and for about 5 seconds after the detector starts it is still learning the room&apos;s usual noise.
             The form suggests up to 30 seconds and 3600 seconds, but the server only enforces the lower ends (confirm
             0, cooldown 1); a larger number is kept, rounded to a whole second.
-          </div>
+          </div>}
+          </DetectionCard>
           <RecordClipsToggle d={d} apply={apply} />
           <SoundLimits cooldownS={d.sound_cooldown_s} />
         </>
@@ -436,25 +460,24 @@ function SoundCalibration({ cameraId, sensitivity }) {
 
   const margin = Math.round(alertMarginDb(sensitivity));
   return (
-    <>
-      <div className="section-title">Calibration</div>
+    <DetectionCard title="Calibration">
       {/* role="status": it changes on its own every half minute, and a screen reader should get the new
           state without the person having to go looking for it. */}
-      <div className="card" role="status" style={{ marginBottom: 0 }}>
+      <div role="status" className="detection-status">
         {state.phase === 'loading' && <div className="camera-tile__sub">Checking…</div>}
         {state.phase === 'error' && (
-          <div className="camera-tile__sub">Couldn’t read the recent sound levels. The detector itself is not affected.</div>
+          <div className="camera-tile__sub"><span className="detection-status__dot detection-status__dot--error" aria-hidden="true" />Couldn’t read the recent sound levels. The detector itself is not affected.</div>
         )}
         {state.phase === 'ok' && !state.ready && (
           <div className="camera-tile__sub">
-            <strong>No sound readings yet.</strong> After the detector starts, or after you change a setting here,
+            <span className="detection-status__dot" aria-hidden="true" /><strong>No sound readings yet.</strong> After the detector starts, or after you change a setting here,
             it listens for about 5 seconds to learn the room’s level before it reports anything. If this stays
             blank, the camera may have no microphone or the detector may not be running.
           </div>
         )}
         {state.phase === 'ok' && state.ready && (
           <div className="camera-tile__sub">
-            <strong>Listening.</strong> Sound readings are coming in.
+            <span className="detection-status__dot detection-status__dot--live" aria-hidden="true" /><strong>Listening.</strong> Sound readings are coming in.
             {state.avg !== null && (
               <>
                 {' '}Over the last {LEVEL_WINDOW_MIN} minutes the sound averaged{' '}
@@ -466,22 +489,24 @@ function SoundCalibration({ cameraId, sensitivity }) {
           </div>
         )}
       </div>
-    </>
+    </DetectionCard>
   );
 }
 
-// #371: the detector's deliberate limits, in plain words and always visible. Every one of them is an
+// #371: the detector's deliberate limits, in plain words. The first stays visible and the others open
+// on demand (#1076), so the loudness-versus-crying caveat never disappears. Every one is an
 // existing, documented trade-off (docs/notifications.md, "Sound sensitivity also changes sleep tracking"),
 // not a defect found here; the 45 s / 5 min / 25 readings figures are REBASELINE_MS, DEAD_BAND_MAX_MS and
 // SEED_WINDOWS in backend/src/lib/soundBaseline.js. They were measured on two cameras in one house: they are
 // stated as what the detector does, not as what suits every room.
 function SoundLimits({ cooldownS }) {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <>
-      <div className="section-title">What this detector can and can’t do</div>
+    <DetectionCard title="What this detector can and can’t do">
       <ul className="camera-tile__sub" style={{ paddingLeft: 18, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <li><strong>It measures loudness, not crying.</strong> It can’t tell a cry from speech, a television, or a
           sound from another room; anything that stays louder than the room’s level counts.</li>
+        {expanded && <>
         <li><strong>It learns the room’s level at the start.</strong> That takes about 5 seconds of listening. If the
           room is already loud then, the starting level is set high, and quieter sounds won’t alert until it adjusts.</li>
         <li><strong>A steady noise stops alerting.</strong> A sound that stays well above the alert level is treated as
@@ -493,8 +518,11 @@ function SoundLimits({ cooldownS }) {
           there is no separate “still noisy” follow-up alert.</li>
         <li><strong>The level can be relearned.</strong> If the detector restarts, for example when the camera
           reconnects, it keeps what it learned, but a restart at the wrong moment can start the learning over.</li>
+        </>}
       </ul>
-    </>
+      <button type="button" className="detection-disclosure" aria-expanded={expanded}
+        onClick={() => setExpanded((v) => !v)}>Show the other four</button>
+    </DetectionCard>
   );
 }
 
@@ -548,11 +576,11 @@ function ScheduleForm({ d, apply }) {
   }
   return (
     <>
-      <EnableToggle checked={d.schedule_enabled} onChange={toggleEnabled}
-        label="Only alert during set hours" sub="Outside the window, motion and sound are ignored entirely." />
+      <DetectionCard switchCard><EnableToggle checked={d.schedule_enabled} onChange={toggleEnabled}
+        label="Only alert during set hours" sub="Outside the window, motion and sound are ignored entirely." /></DetectionCard>
       {d.schedule_enabled ? (
-        <>
-          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+        <DetectionCard title="Active hours">
+          <div className="field-row">
             <div className="field" style={{ flex: 1 }}>
               <label htmlFor="sched-start">From</label>
               <input id="sched-start" type="time" value={showStart} onChange={(e) => editStart(e.target.value)} />
@@ -567,7 +595,7 @@ function ScheduleForm({ d, apply }) {
             clip is only saved for an alert that fires. Shared by motion and sound.
             Uses the app timezone from Settings → General.
           </div>
-        </>
+        </DetectionCard>
       ) : (
         <div className="empty-state">Alerting 24/7.</div>
       )}

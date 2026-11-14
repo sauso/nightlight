@@ -53,6 +53,15 @@ In **Test your monitor**, choose **Run picture check**. Nightlight waits for suc
 - **Removing.** The same **⋯** menu holds **Remove camera**; on the camera's own Edit page the same item is in the **⋯** menu at the top right (admins only), and there is no red Remove button under **Save changes**. Both open the same confirmation, which lists what is permanently deleted: bed transitions and snapshot photos, activity history, alerts with clips and snapshots, recordings and wake clips including video files, the event log, and temperature and humidity history. Saved night summaries and timelapses stay, but their detail and morning-review photos go. You can add the camera again, but none of the deleted data comes back. See [Removing a child or a camera](recording.md#removing-a-child-or-a-camera).
 - **Assigning to a child.** Use the "Assigned to" dropdown on each camera (admin only; a caregiver sees the assignment as text). It is more than grouping: a camera's nights are tracked only while it is assigned to a child who has sleep tracking on, so unassigning a camera stops its tracking just as turning tracking off does.
 
+### Detection settings
+
+The Motion, Sound and Alert schedule settings each start with a switch card. Motion then shows
+Detection source, Timing, Alert image, Bed area and Recording. Sound shows Sensitivity,
+Calibration, Timing, Recording and its detector limits. Alert schedule shows Active hours.
+The first Sound limit stays visible; **Show the other four** reveals the remaining limits,
+and **More about timing** reveals the longer note. Settings save automatically. See
+[Detection settings](notifications.md#detection-settings-on-a-camera).
+
 ## Where to put the camera
 
 Nightlight works from **any** camera position: put the camera wherever it fits and you will still get sleep tracking and motion alerts. A good position makes them **more reliable**, and nothing more than that. These are suggestions from testing in one household, not guarantees, and not a measured result (a proper comparison of positions has not been done yet).

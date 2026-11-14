@@ -103,6 +103,90 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+describe('#1076 detection cards', () => {
+  test.each([
+    ['motion', ['Motion detection', 'Detection source', 'Timing', 'Alert image', 'Bed area', 'Recording']],
+    ['sound', ['Sound detection', 'Sensitivity', 'Calibration', 'Timing', 'Recording', 'What this detector can and can’t do']],
+    ['schedule', ['Only alert during set hours', 'Active hours']],
+  ])('%s follows the shared card order', async (kind, titles) => {
+    const { container } = mount(kind);
+    await screen.findByRole('heading', { name: titles[1] });
+    const cards = [...container.querySelectorAll('.detection-card')];
+    expect(cards.map((card) => card.querySelector('h2')?.textContent || card.querySelector('.tgl-row > div > div')?.textContent))
+      .toEqual(titles);
+    expect(cards[0].querySelector('.tgl-row')).toBeTruthy();
+  });
+
+  test.each([
+    ['motion', 'motion_enabled', 'Turn on to configure how motion is detected and when it alerts.'],
+    ['sound', 'sound_enabled', "Turn on to alert when sound stays above the room's ambient level."],
+    ['schedule', 'schedule_enabled', 'Alerting 24/7.'],
+  ])('%s off keeps its message and hides later cards', async (kind, field, message) => {
+    const cameraField = { motion_enabled: 'detect_motion_enabled', sound_enabled: 'detect_sound_enabled', schedule_enabled: 'detect_schedule_enabled' }[field];
+    const { container } = mount(kind, { ...CAM, [cameraField]: 0 });
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(container.querySelectorAll('.detection-card')).toHaveLength(1);
+  });
+
+  test('source buttons report selection and reveal MQTT fields', async () => {
+    const { user } = mount('motion');
+    const nightlight = await screen.findByRole('button', { name: 'Nightlight' });
+    const mqtt = screen.getByRole('button', { name: 'Camera via MQTT' });
+    expect(nightlight).toHaveAttribute('aria-pressed', 'true');
+    expect(mqtt).toHaveAttribute('aria-pressed', 'false');
+    await user.click(mqtt);
+    expect(mqtt).toHaveAttribute('aria-pressed', 'true');
+    expect(nightlight).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByLabelText('Motion MQTT topic')).toBeTruthy();
+    expect(screen.getByLabelText('Motion value (optional)')).toBeTruthy();
+    expect(screen.queryByLabelText(/^Sensitivity/)).toBeNull();
+  });
+
+  test('sound disclosures reveal every original sentence while the first limit stays visible', async () => {
+    const { user } = mount('sound');
+    await screen.findByText(/It measures loudness, not crying/);
+    const timing = screen.getByRole('button', { name: 'More about timing' });
+    const limits = screen.getByRole('button', { name: 'Show the other four' });
+    expect(timing).toHaveAttribute('aria-expanded', 'false');
+    expect(limits).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText(/Longer than motion by default/)).toBeNull();
+    expect(screen.queryByText(/It learns the room’s level at the start/)).toBeNull();
+    await user.click(timing);
+    await user.click(limits);
+    expect(timing).toHaveAttribute('aria-expanded', 'true');
+    expect(limits).toHaveAttribute('aria-expanded', 'true');
+    // Taken from the old SoundForm and SoundLimits; splitting them into disclosures must not lose a sentence.
+    const copy = document.body.textContent.replace(/\s+/g, ' ');
+    for (const sentence of [
+      'Sound must persist for the confirm delay before it counts (filters a door slam or cough); cooldown is the minimum gap between alerts.',
+      'Longer than motion by default.',
+      "Even a confirm of 0 needs about 0.6 seconds of sound, and for about 5 seconds after the detector starts it is still learning the room's usual noise.",
+      'The form suggests up to 30 seconds and 3600 seconds, but the server only enforces the lower ends (confirm 0, cooldown 1); a larger number is kept, rounded to a whole second.',
+      'It measures loudness, not crying.',
+      'It can’t tell a cry from speech, a television, or a sound from another room; anything that stays louder than the room’s level counts.',
+      'It learns the room’s level at the start.',
+      'That takes about 5 seconds of listening.',
+      'If the room is already loud then, the starting level is set high, and quieter sounds won’t alert until it adjusts.',
+      'A steady noise stops alerting.',
+      'A sound that stays well above the alert level is treated as part of the room after about 45 seconds; a moderate one (above half the alert level, below it) after about 5 minutes.',
+      'That is how a fan or white-noise machine is learned, and it also means a long, steady cry fades into the background.',
+      'Sustained noise may not alert again.',
+      'After an alert there is a 200-second wait before the next one.',
+      'Noise that carries on through it can be absorbed before another alert is possible, and there is no separate “still noisy” follow-up alert.',
+      'The level can be relearned.',
+      'If the detector restarts, for example when the camera reconnects, it keeps what it learned, but a restart at the wrong moment can start the learning over.',
+    ]) expect(copy).toContain(sentence);
+    expect(screen.getByLabelText('Sensitivity: 72')).toBeTruthy();
+  });
+
+  test('schedule keeps labelled Active hours fields', async () => {
+    mount('schedule');
+    expect(await screen.findByRole('heading', { name: 'Active hours' })).toBeTruthy();
+    expect(screen.getByLabelText('From')).toBeTruthy();
+    expect(screen.getByLabelText('To')).toBeTruthy();
+  });
+});
+
 describe('★★ every write carries ONLY the changed slice, since #444', () => {
   test('changing the SOUND sensitivity does not resend the motion slice at all', async () => {
     // Until #444 the sound screen sent the WHOLE detection state, so this test pinned that the motion
@@ -250,7 +334,7 @@ describe('reading a camera into the form', () => {
     // would show nothing selected and the next write would send the garbage value straight back.
     mount('motion', { ...CAM, detect_source: 'carrier-pigeon' });
     const nightlight = await screen.findByRole('button', { name: 'Nightlight' });
-    expect(nightlight.className).toContain('segmented__btn--active');
+    expect(nightlight.className).toContain('seg-track__btn--active');
   });
 
   test('a camera still loading shows Loading…, not an empty form', async () => {
@@ -478,7 +562,8 @@ describe('the motion screen', () => {
   });
 
   test('★ #374: the sound screen explains the 0.6 s minimum, the calibration and the lower-ends-only limits', async () => {
-    mount('sound');
+    const { user } = mount('sound');
+    await user.click(await screen.findByRole('button', { name: 'More about timing' }));
     const hint = await screen.findByText(/0\.6 seconds/);
     expect(hint.textContent).toMatch(/learning/i);
     expect(hint.textContent).toMatch(/only enforces the lower ends/i);

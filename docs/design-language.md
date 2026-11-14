@@ -427,6 +427,16 @@ under it.
 
 ## 5. Layout, spacing, radius
 
+### Camera detection screens (#1076)
+
+Motion, Sound and Alert schedule use the same card order: a 56px switch row, trigger settings,
+Timing where relevant, extras where relevant, then Recording where relevant. The switch-off
+message replaces the later cards. Each settings card has a visible 16px `h2` title. Motion's
+source selector uses the local `.seg-track` and `.seg-track__btn` rules, with `aria-pressed` on
+each button; the shared `.segmented` control elsewhere keeps its existing look. Sound's first
+detector limit is visible, while the other four and the longer Timing note use separate
+44px disclosures. The fields remain inside `.field`, and calibration retains its live status.
+
 ### Spacing
 
 Effectively a **2/4px scale**. Gaps, most to least used: `8`, `12`, `10`, `6`, `4`, `5`, `14`, `16`.
