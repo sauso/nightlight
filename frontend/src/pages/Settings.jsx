@@ -12,7 +12,7 @@ import Avatar from '../components/Avatar.jsx';
 import useSetupStatus from '../lib/useSetupStatus.js';
 
 // Settings is a hub. Account sits at the top in its own card (like the mockup); system config
-// (General / Camera and Recording / Caregivers / Integrations / Remote Access / Logs) is admin-only; About + Change server share the
+// (General / Camera and recording / Caregivers / Integrations / Remote access / Logs) is admin-only; About + Change server share the
 // last card. Sign out lives on the Account page, not here. Rows that stay under Settings pass
 // state.from so their back button returns here.
 const BACK = { state: { from: { to: '/settings', label: 'Settings' } } };
@@ -54,11 +54,11 @@ function Row({ Icon, iconSize = 20, label, desc, trailing, onClick }) {
 
 const ADMIN_ITEMS = [
   { key: 'setup', to: '/setup', Icon: ListChecks, label: 'Setup & diagnostics', desc: 'Finish setup or check the camera picture' },
-  { key: 'general', to: '/settings/general', Icon: SlidersHorizontal, label: 'General', desc: 'App name, timezone, theme, font, colours, temperature unit' },
-  { key: 'camera-recording', to: '/settings/camera-recording', Icon: Video, label: 'Camera and Recording', desc: 'Camera Controls, Recording Settings and Clip Management' },
+  { key: 'general', to: '/settings/general', Icon: SlidersHorizontal, label: 'General', desc: 'App name, timezone and temperature unit' },
+  { key: 'camera-recording', to: '/settings/camera-recording', Icon: Video, label: 'Camera and recording', desc: 'Camera controls, recording settings and clip management' },
   { key: 'caregivers', to: '/settings/users', Icon: Users, label: 'Caregivers', desc: 'Manage caregiver logins and active sessions' },
   { key: 'integrations', to: '/settings/integrations', Icon: Plug, label: 'Integrations', desc: 'Notifications and MQTT' },
-  { key: 'remote-access', to: '/settings/remote-access', Icon: Globe, label: 'Remote Access', desc: 'Check how you reach Nightlight from outside your home' },
+  { key: 'remote-access', to: '/settings/remote-access', Icon: Globe, label: 'Remote access', desc: 'Check how you reach Nightlight from outside your home' },
   { key: 'logs', to: '/settings/logs', Icon: ScrollText, label: 'Logs', desc: 'Camera history and server logs' },
 ];
 

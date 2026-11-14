@@ -58,7 +58,7 @@ describe('AppHeader', () => {
   });
 
   test('keeps a long back label in the accessible name and title', () => {
-    const label = 'Camera and Recording';
+    const label = 'Camera settings';
     at('/settings/camera', <AppHeader title="Camera controls" back={{ to: '/settings', label }} showDemoBanner={false} />);
     const back = screen.getByRole('button', { name: `Back to ${label}` });
     expect(back).toHaveAttribute('aria-label', `Back to ${label}`);

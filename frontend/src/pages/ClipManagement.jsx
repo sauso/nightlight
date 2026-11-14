@@ -11,7 +11,7 @@ import ClipPlayerModal from '../components/ClipPlayerModal.jsx';
 import WakeClipPlayerModal from '../components/WakeClipPlayerModal.jsx';
 import { ProtectedBadge } from '../components/ClipProtection.jsx';
 
-// Admin Clip Management: browse every recorded clip, filter by day, and bulk-select + delete. Deleting
+// Admin Clip management: browse every recorded clip, filter by day, and bulk-select + delete. Deleting
 // removes the video only — the alert and its snapshot stay. Reachable from Settings (admin).
 const TYPE = {
   motion: { label: 'Motion', Icon: Zap },
@@ -177,7 +177,7 @@ export default function ClipManagement() {
 
   return (
     <>
-      <AppHeader title="Clip Management" back={{ to: '/settings/camera-recording', label: 'Camera and Recording' }} />
+      <AppHeader title="Clip management" back={{ to: '/settings/camera-recording', label: 'Camera settings' }} />
       <main className="app-main" style={{ paddingBottom: selCount ? 84 : undefined }}>
         {listState === 'error' && <LoadFailed what="clips" error={error} onRetry={load} />}
         {listState === 'stale' && <LoadFailed what="clips" error={error} onRetry={load} stale />}

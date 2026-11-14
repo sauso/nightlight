@@ -50,7 +50,7 @@ describe('the Android app Connection card', () => {
   };
   // The card the rows are in: the header card holds only who and what this is.
   const connectionCard = async () => (await screen.findByText('Connection')).closest('.card');
-  // The card mirrors the Remote Access card (owner 2026-11-07): a badge by the title for the address in use, the address
+  // The card mirrors the Remote access card (owner 2026-11-07): a badge by the title for the address in use, the address
   // under a sub-heading, and a muted line under that (the saved note or the reason).
   const badgeOf = (card) => card.querySelector('.status-badge')?.textContent ?? null;
   const addressOf = (card) => card.querySelector('.tailscale-address').textContent;
@@ -82,7 +82,7 @@ describe('the Android app Connection card', () => {
 
   test('★ not saved: each reason is its own sentence, nothing is guessed when none is known, and a saved address never shows one', async () => {
     const reasons = {
-      'server-none': /isn't offering one.*Settings → Remote Access/,
+      'server-none': /isn't offering one.*Settings → Remote access/,
       unknown: /couldn't say just now.*each time it starts/,
       unreachable: /couldn't reach it. Turn Tailscale on in the phone, then restart/,
       different: /different server, so it was not saved/,

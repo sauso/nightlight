@@ -137,14 +137,14 @@ describe('clip management', () => {
     expect(await screen.findByRole('button', { name: 'Play protected alert clip from Camera A' })).toBeInTheDocument();
   });
 
-  test('a caregiver is redirected before Clip Management can load', () => {
+  test('a caregiver is redirected before Clip management can load', () => {
     const get = vi.spyOn(api, 'get');
     renderAsCaregiver(<Routes>
       <Route path="/settings/clips" element={<AdminProtected><ClipManagement /></AdminProtected>} />
       <Route path="/" element={<div>Home</div>} />
     </Routes>, { route: '/settings/clips' });
     expect(screen.getByText('Home')).toBeInTheDocument();
-    expect(screen.queryByText('Clip Management')).toBeNull();
+    expect(screen.queryByText('Clip management')).toBeNull();
     expect(get).not.toHaveBeenCalled();
   });
 

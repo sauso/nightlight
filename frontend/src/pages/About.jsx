@@ -21,9 +21,9 @@ const LINKS = [
 
 // Why the Android app has no Tailscale address saved, keyed by the outcome of its last ask (nativeBridge.js tailscaleOutcome).
 // No entry (not asked yet this run, or 'saved') shows no line: the app never guesses a cause. The shell's own refusal is not shown
-// word for word; each line is fixed text a person can act on. "Settings -> Remote Access" is the admin-only hub row.
+// word for word; each line is fixed text a person can act on. "Settings -> Remote access" is the admin-only hub row.
 const TAILSCALE_WHY = {
-  'server-none': "This server isn't offering one. An admin can turn it on in Settings → Remote Access.",
+  'server-none': "This server isn't offering one. An admin can turn it on in Settings → Remote access.",
   unknown: "The server couldn't say just now. The app asks again each time it starts.",
   unreachable: "The server offered one, but this phone couldn't reach it. Turn Tailscale on in the phone, then restart the app.",
   different: 'That address belongs to a different server, so it was not saved.',
@@ -107,11 +107,11 @@ export default function About() {
             is null there). An address that is neither of the server's two names nothing, only whether one is saved. */}
         {/* Owner 2026-11-07, after two layouts that read badly on a phone (label and value on one line broke the tailnet name
             mid-word; a label over each value looked unlike the rest of the app and the name outranked its card): laid out like
-            the Remote Access card (TailscaleCard.jsx): a 16px title with a badge, a 14px sub-heading, the address in the same
+            the Remote access card (TailscaleCard.jsx): a 16px title with a badge, a 14px sub-heading, the address in the same
             bold wrapping style, and a muted line under it saying what that means or, when none is saved, WHY, so "Not saved" is
             not a dead end. The badge is "which address this session is using". The address is on screen, so a screenshot of
             this card shows the person's tailnet name (docs/remote-access.md). The look lives in index.css next to the
-            Remote Access rules it shares. */}
+            Remote access rules it shares. */}
         {route && (
           <section className="card about-card" aria-label="Connection">
             <div className="about-card__heading">

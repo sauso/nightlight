@@ -37,6 +37,7 @@
   --offline: #aa3f54;
   --border: #ddd5ee;
   --field-bg: #eae3f8;
+  --tap: 44px;
   --radius: 16px;
 
   /* Score band colours (docs/design-language.md, "Band colours"). Defined here, used by the score ring (and the child card's 12% tint,
@@ -252,6 +253,7 @@ button, a, summary, label, select, input[type='checkbox'], input[type='radio'], 
 }
 
 .app-header__icon-btn {
+  position: relative;
   background: none;
   border: none;
   padding: 0;
@@ -259,6 +261,9 @@ button, a, summary, label, select, input[type='checkbox'], input[type='radio'], 
   display: flex;
   flex-shrink: 0;
 }
+
+/* UI consistency (PR-A): the 36px logo stays inside the fixed header row while its tap area reaches 44px. */
+.app-header__icon-btn::after { content: ''; position: absolute; inset: -4px; }
 
 .app-header__theme {
   position: relative;
@@ -326,15 +331,20 @@ button, a, summary, label, select, input[type='checkbox'], input[type='radio'], 
 }
 
 /* Owner's 2026-11-01 phone screenshots: long back labels took about 40% of the bar and wrapped
-   Camera controls / Clip Management. Cap Back at 35% to leave roughly 225dp for the title;
+   Camera controls / Clip management. Cap Back at 35% to leave roughly 225dp for the title;
    this is an estimate from those screenshots, not measured on devices. */
 .app-header__back {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 2px;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 35%;
+  /* 42%, up from 35% (UI consistency PR-A): "Camera settings" needs about 106px of text room and 35% left only 92px at
+     390px wide (Codex review of #1084, measured at 15px). The label never wraps now (nowrap + ellipsis below), so the
+     owner's 2026-11-01 worry (wrapping) does not apply; the title still gets about 190px at 390px. At 320px the longest
+     label still ellipsises, which is the accepted limit. */
+  max-width: 42%;
   margin-left: -6px;
   padding: 4px 6px 4px 0;
   background: none;
@@ -344,6 +354,9 @@ button, a, summary, label, select, input[type='checkbox'], input[type='radio'], 
   font-size: 15px;
   font-family: inherit;
 }
+
+/* UI consistency (PR-A): expand the back target vertically without changing the fixed 36px header row. */
+.app-header__back::after { content: ''; position: absolute; inset: -7px 0; }
 
 .app-header__back svg {
   flex-shrink: 0;
@@ -737,28 +750,28 @@ body.in-pip .tile-menu-backdrop {
 /* About's Support and safety text sits under the title (the Connection card's text follows an h3, which carries its own margin). */
 .about-card__text { margin: 12px 0; }
 .about-card__text:last-child { margin-bottom: 0; }
-/* A button straight under the title (Remote Access -> Test Low latency video) would touch it: the heading carries no bottom margin. */
+/* A button straight under the title (Remote access -> Test Low latency video) would touch it: the heading carries no bottom margin. */
 .about-card__heading + .btn { margin-top: 12px; }
 /* Owner testing 2026-11-05: the card's content outranked its own title. The title is the 12px grey .card-title, the h3s fell
    back to the browser default (~18px) and the address was 17.6px. Everything here now sits on the design-language scale
    (docs/design-language.md §3): title 16 (sheet-title size), sub-heading 14, address 15, body 14. The wizard shows the same
    card without the title; its step heading above it is the larger one, so the order still reads title > sub-heading > text. */
 /* Settings -> About -> Connection (.about-card) deliberately shares this look: the owner asked on 2026-11-07 for it to mirror
-   the Remote Access card, after two layouts of its own read badly on a phone. Change the two together. Owner 2026-11-10: the
+   the Remote access card, after two layouts of its own read badly on a phone. Change the two together. Owner 2026-11-10: the
    four cards under "Use your own domain or port forward (advanced)" had the old 12px grey title over 16px body text, the same
    inversion as 2026-11-05, so they are .about-card too (16px/800 title, 14px text). */
 .tailscale-card, .about-card { font-size: 14px; }
 .tailscale-card__heading .card-title, .about-card__heading .card-title { font-size: 16px; font-weight: 800; color: var(--text-primary); }
 .tailscale-card h3, .about-card h3 { font-size: 14px; font-weight: 700; margin: 18px 0 6px; }
 /* Owner 2026-11-07: the sub-heading on About is Inter, like the address and text under it (headings h1-h3 are Nunito by default,
-   design-language.md section 3). Only the card TITLES stay Nunito. The Remote Access card keeps the default for now. */
+   design-language.md section 3). Only the card TITLES stay Nunito. The Remote access card keeps the default for now. */
 .about-card h3 { font-family: var(--font-body); }
 /* Owner 2026-11-10: on a phone the address ("https://<name>.<tailnet>.ts.net", about 35-45 characters) ran onto a second line.
-   The font now shrinks with the screen (15px on a desktop, about 13px on a 390px phone, never below 12px) so a typical name stays
+   The font now shrinks with the screen (15px on a desktop, 14px on a 390px phone, never below 14px) so a typical name stays
    on one line; a name still too long wraps, at a dot first (TailscaleCard puts a <wbr> after each one), and only mid-word as the
-   last resort (overflow-wrap), so it can never run off the card. The 3.5vw and the 12px floor are judgement, checked against a
+   last resort (overflow-wrap), so it can never run off the card. The 3.5vw and the 14px floor are judgement, checked against a
    few fictional names at 320-430px, not measured on every device. */
-.tailscale-address { overflow-wrap: anywhere; font-weight: 600; font-size: clamp(12px, 3.5vw, 15px); }
+.tailscale-address { overflow-wrap: anywhere; font-weight: 600; font-size: clamp(14px, 3.5vw, 15px); }
 .tailscale-hint { color: var(--text-secondary); font-size: 0.875rem; }
 .tailscale-qr { width: min(180px, 100%); margin: 16px auto; text-align: center; }
 .tailscale-qr svg { display: block; width: 100%; height: auto; }
@@ -820,6 +833,7 @@ body.in-pip .tile-menu-backdrop {
   .app-header h1 { font-size: 17px; }
   .app-header__top-row { min-height: 28px; } /* the slim bar's row: the 28px logo, as 36px is on the full bar */
   .app-header__icon { width: 28px; height: 28px; }
+  .app-header__icon-btn::after { inset: -8px; } /* 28px logo + 8px each side = the same 44px target as portrait */
   .app-header__theme { width: 26px; height: 26px; }
   .app-header__theme::after { inset: -9px; }
 
@@ -1385,7 +1399,7 @@ body.in-pip .tile-menu-backdrop {
 .child-cam__settings:active { background: rgba(255, 255, 255, 0.16); }
 /* The detection line: quiet muted text under the name. #b9bdf0 is the night card's muted tint (6.85:1 on its lightest stop, and
    this tile is as dark). */
-.child-cam__detect { padding-left: 16px; font-size: 12.5px; line-height: 1.3; color: #b9bdf0; }
+.child-cam__detect { padding-left: 16px; font-size: 13px; line-height: 1.3; color: #b9bdf0; }
 .child-cam__watch {
   flex: none; min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px;
   border: none; border-radius: 999px; background: #8995ff; color: #14142a; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
@@ -1468,7 +1482,7 @@ body.in-pip .tile-menu-backdrop {
 .night__id { flex: 1; min-width: 0; }
 /* One line, cut with an ellipsis: a long or unbroken name must not push the gear off a 375px card (.night__id is a min-width: 0 flex child). */
 .night__name { display: block; font-family: var(--font-display); font-size: 22px; font-weight: 800; line-height: 1.1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.night__age { display: block; font-size: 12.5px; color: var(--night-muted); margin-top: 3px; }
+.night__age { display: block; font-size: 13px; color: var(--night-muted); margin-top: 3px; }
 /* The settings entry: one gear, 44px square (the touch-target floor), on the card's right. It replaced the name/age buttons and
    the "Edit ›" link, which all went to the same place. */
 .night__settings { flex: none; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; background: none; border: none; border-radius: 50%; cursor: pointer; color: var(--night-link); }
@@ -1500,7 +1514,7 @@ body.in-pip .tile-menu-backdrop {
 .night__sleep--btn:hover .night__sleep-chev, .night__sleep--btn:focus-visible .night__sleep-chev { opacity: 1; transform: translateX(2px); }
 /* "Add a birthday in settings to see a score sooner": a quiet text button, shown only when a missing birthday is why a night
    has no score (SleepSummaryCard.jsx). 44px tall to be a real target; no fill so it never competes with the question below. */
-.night__nudge { display: block; width: 100%; min-height: 44px; margin-top: 4px; padding: 0; background: none; border: none; cursor: pointer; text-align: left; font: inherit; font-size: 12.5px; color: var(--night-link); text-decoration: underline; }
+.night__nudge { display: block; width: 100%; min-height: 44px; margin-top: 4px; padding: 0; background: none; border: none; cursor: pointer; text-align: left; font: inherit; font-size: 13px; color: var(--night-link); text-decoration: underline; }
 
 /* The morning question, INSIDE the card (components/MorningReviewCard.jsx): a divider, the question, two equal buttons. The
    primary is the card's periwinkle with dark text (--night-action on --night-on-action, measured in paletteTokens.test.jsx);
@@ -1512,11 +1526,11 @@ body.in-pip .tile-menu-backdrop {
 .night__review-dismiss:hover { color: var(--night-text); }
 .night__review-dismiss:focus-visible { outline: 2px solid var(--night-link); outline-offset: -4px; }
 .night__review-actions { display: flex; gap: 10px; margin-top: 12px; }
-.night__review-actions .btn { flex: 1 1 0; min-height: 44px; padding: 10px 12px; }
+.night__review-actions .btn { flex: 1 1 0; padding: 10px 12px; }
 .night__review .night__review-yes { background: var(--night-action); color: var(--night-on-action); }
 .night__review .night__review-no { background: transparent; border: 1px solid rgba(238, 240, 255, 0.5); color: var(--night-text); }
 .night__review .btn:focus-visible, .night__review .review-card__body:focus-visible { outline: 2px solid var(--night-link); outline-offset: 2px; }
-.night__review-err { margin-top: 10px; font-size: 12.5px; font-weight: 600; color: var(--night-text); }
+.night__review-err { margin-top: 10px; font-size: 13px; font-weight: 600; color: var(--night-text); }
 /* The answered state (ReviewReceipt with `embedded`): the same words as the sleep page's receipt, in the card's own colours. */
 .night__review .review-card__body { width: 100%; min-height: 44px; padding: 0; gap: 12px; color: inherit; font: inherit; }
 .night__review .review-card__icon--done { color: var(--night-link); background: var(--night-divider); }
@@ -1760,7 +1774,7 @@ body.in-pip .tile-menu-backdrop {
 .sleep-live-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--on-accent); background: var(--accent); vertical-align: 2px; }
 .sleep-tl__axis { position: relative; height: 16px; margin-top: 4px; }
 .sleep-tl__tick { position: absolute; top: 0; width: 1px; height: 4px; background: var(--border); transform: translateX(-0.5px); }
-.sleep-tl__tick-label { position: absolute; top: 5px; left: 0; transform: translateX(-50%); font-size: 10px; color: var(--text-secondary); white-space: nowrap; }
+.sleep-tl__tick-label { position: absolute; top: 5px; left: 0; transform: translateX(-50%); font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
 /* The first and last labels sit on the bar's ends: centred they poke half a label past the card's content edge (owner, real phone,
    2026-11-13), so the first is left-aligned to the tick and the last right-aligned to it (see tickLabelAlign in lib/timelineEdges.js). */
 .sleep-tl__tick-label--start { left: 0.5px; transform: none; }
@@ -2015,7 +2029,6 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
    <textarea>, which would otherwise render as the browser's light default box in the dark theme. Monospace
    because the text is JSON a person may need to read; vertical resize only so it cannot widen the card. */
 .crib__text { width: 100%; box-sizing: border-box; background: var(--field-bg); border: 1px solid var(--border); color: var(--text-primary); border-radius: 10px; padding: 10px 12px; font: 12px/1.4 monospace; resize: vertical; }
-.btn-sm { padding: 6px 14px; font-size: 12.5px; white-space: nowrap; }
 .linkbtn { background: none; border: none; color: var(--accent-text); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
 
 /* Room-climate sensor history (Child detail). Temp + humidity sparklines from sensor_readings. */
@@ -2044,7 +2057,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .child-card:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .child-card__id { flex: 1; min-width: 0; }
 .child-card__name { display: block; font-family: var(--font-display); font-size: 20px; font-weight: 800; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.child-card__meta { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); margin-top: 4px; }
+.child-card__meta { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
 .child-card__chev { color: var(--accent-line); opacity: 0.6; flex-shrink: 0; }
 
 /* Only the shadows differ at night: border, colour and background already come from tokens in the base rule. */
@@ -2102,7 +2115,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .clip-protection-note { color: var(--text-secondary); font-size: 12px; line-height: 1.4; margin: -4px 0 12px; text-align: center; }
 .btn-block { display: block; width: 100%; text-align: center; }
 .icon-btn--danger { color: var(--offline); }
-/* Clip Management (Settings → Camera and Recording) */
+/* Clip management (Settings → Camera and recording) */
 .clip-day-select { width: auto; min-width: 140px; padding: 7px 10px; font-size: 13px; }
 
 /* Clip date filter — popup calendar */
@@ -2174,7 +2187,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 /* In-player "delete this clip?" confirm row */
 .clip-confirm { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 13.5px; }
 .clip-confirm > span { color: var(--text-secondary); }
-/* Recording storage readout (Settings → Camera and Recording → Recording) */
+/* Recording storage readout (Settings → Camera and recording → Recording) */
 .storage-readout { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
 .storage-readout code { font-size: 12px; background: var(--field-bg); padding: 1px 5px; border-radius: 5px; }
 /* Full-screen fallback shown by ErrorBoundary when a render throw would otherwise blank
@@ -2451,12 +2464,17 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   font-size: 15px;
 }
 
+/* UI consistency (PR-A): a switch's hidden checkbox must not grow across neighbouring controls. */
+.field select, .field input:not([type=checkbox]):not([type=radio]):not([type=range]) { min-height: var(--tap); }
+
 .field input:focus, .field select:focus, button:focus-visible, a:focus-visible {
   outline: 2px solid var(--accent-line);
   outline-offset: 2px;
 }
 
 .btn {
+  min-height: var(--tap);
+  text-decoration: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2469,6 +2487,9 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   cursor: pointer;
   width: 100%;
 }
+
+/* UI consistency (PR-A): compact actions in rows deliberately override the standard tap height. */
+.btn-sm { min-height: 0; padding: 6px 14px; font-size: 12.5px; white-space: nowrap; }
 
 .btn-primary {
   background: var(--accent);
@@ -2826,7 +2847,7 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .camera-controls__switch-row .switch__track { width: 42px; height: 24px; }
 .camera-controls__switch-row .switch__thumb { top: 13px; }
 .camera-controls .field input { min-height: 44px; }
-.camera-controls > .btn-primary { width: 100%; min-height: 44px; }
+.camera-controls > .btn-primary { width: 100%; }
 .tgl-row {
   display: flex;
   align-items: center;
@@ -3687,7 +3708,7 @@ input[type='range'] {
 .review-card__icon--done { color: var(--live); background: rgba(127, 191, 163, 0.14); }
 
 .review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.review-actions .btn { flex: 1 1 auto; min-height: 44px; } /* every answer on the review screen is a 44px target (PR I) */
+.review-actions .btn { flex: 1 1 auto; } /* every answer on the review screen is a 44px target (PR I) */
 
 /* "You corrected this" — shown wherever a night's times came from a person rather than the detector.
    Owner 2026-11-05: hard to read. It is only used on the sleep card (`.night`), which is a dark indigo gradient in BOTH themes,
@@ -3765,11 +3786,11 @@ input[type='range'] {
 .dev-card .esphome-entities { margin: 0; padding: 8px 14px; border-top: 1px solid var(--border); }
 .dev-card .esphome-entities li { padding: 8px 0; }
 .esp-add { margin: 14px 0; }
-.esp-add .btn { min-height: 44px; }
+
 .esp-add .camera-tile__sub { margin-top: 8px; }
 .esp-retention { margin-top: 22px; }
 .esp-retention h2 { margin: 0 0 4px; font: 800 16px var(--font-display); }
-.esp-retention .btn { min-height: 44px; }
+
 .esp-from-search { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 12px; padding: 3px 10px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent-text); font-size: 12px; font-weight: 600; } /* the .cam-chip recipe: --accent-text on a 12% tint; --accent-soft is light in BOTH themes, so accent text on it fails at night */
 .esp-encryption-callout { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; padding: 9px 11px; border-radius: 10px; background: var(--bg-elevated-2); font-size: 13px; }
 .esp-encryption-callout svg { flex: none; margin-top: 2px; }
@@ -3786,7 +3807,7 @@ input[type='range'] {
 .setup-main { width: min(100%, 760px); margin-inline: auto; }
 .setup-card { padding: clamp(20px, 5vw, 36px); }
 .setup-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-secondary); font-size: 13px; }
-.setup-wordmark { display: flex; align-items: center; gap: 9px; color: var(--text-primary); font: 800 19px var(--font-display); }
+.setup-wordmark { display: flex; align-items: center; gap: 9px; color: var(--text-primary); font: 800 20px var(--font-display); }
 /* One row however many steps there are (owner, 2026-11-06: with seven steps a fixed six columns wrapped the last one onto a second
    line). Columns are created per segment, equal width. */
 .setup-progress { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; margin: 24px 0; }
@@ -3800,9 +3821,9 @@ input[type='range'] {
 .setup-content > p { margin: 0; }
 .setup-card .app-main { padding: 0; }
 .setup-card select, .setup-card input { min-height: 44px; }
-.setup-card .btn { min-height: 44px; }
+
 .setup-actions { display: flex; gap: 10px; margin-top: 24px; }
-.setup-actions .btn { min-height: 44px; flex: 1; }
+.setup-actions .btn { flex: 1; }
 .setup-exit { display: block; margin: 12px auto 0; padding: 12px; min-height: 44px; background: none; border: 0; color: var(--accent-text); font: inherit; cursor: pointer; }
 .logo-tile.setup-welcome-icon { display: flex; margin: 0 auto; }
 /* The guide's own caregiver form (SetupCaregivers); the first-run account form (FirstRun) uses the same classes so the two look alike. */
@@ -3881,7 +3902,7 @@ input[type='range'] {
 .app-shell > .app-header { order: -1; }
 .setup-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: calc(10px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-left)) 10px; background: var(--bg-elevated-2); color: var(--text-primary); border-bottom: 1px solid var(--border); }
 .app-shell:has(> .app-header) > .setup-banner { padding-top: 10px; }
-.setup-banner .btn { width: auto; min-height: 44px; }
+.setup-banner .btn { width: auto; }
 /* The in-progress wizard has no AppHeader (a focused card with its own wordmark; owner's choice, 2026-11-05), so the space the
    header normally takes is reserved here instead: clear the status bar on a phone, a little more room on a wide screen. The
    finished-setup view (--terminal) renders the real header and needs neither. */

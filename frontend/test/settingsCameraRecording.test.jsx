@@ -38,7 +38,7 @@ function routes(realPage = false) {
   );
 }
 
-describe('Camera and Recording sub-menu', () => {
+describe('Camera and recording sub-menu', () => {
   test('shows the three existing destinations and returns to Settings', async () => {
     const { user } = renderAsAdmin(routes(), { route: '/settings/camera-recording' });
     for (const [label, , desc] of ROWS) {
@@ -57,7 +57,7 @@ describe('Camera and Recording sub-menu', () => {
     const { user } = renderAsAdmin(routes(), { route: '/settings/camera-recording' });
     await user.click(screen.getByText(label));
     expect(screen.getByText(`at ${path}`)).toBeInTheDocument();
-    expect(screen.getByText('from /settings/camera-recording (Camera and Recording)')).toBeInTheDocument();
+    expect(screen.getByText('from /settings/camera-recording (Camera settings)')).toBeInTheDocument();
   });
 
   test.each(ROWS)('%s Back returns to the sub-menu after a menu visit or direct link', async (label, path) => {
@@ -65,9 +65,9 @@ describe('Camera and Recording sub-menu', () => {
     for (const start of ['/settings/camera-recording', path]) {
       const { user, unmount } = renderAsAdmin(routes(true), { route: start });
       if (start !== path) await user.click(screen.getByText(label));
-      expect(await screen.findByRole('heading', { name: path === '/settings/clips' ? 'Clip Management' : label })).toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: 'Back to Camera and Recording' }));
-      expect(screen.getByRole('heading', { name: 'Camera and Recording' })).toBeInTheDocument();
+      expect(await screen.findByRole('heading', { name: path === '/settings/clips' ? 'Clip management' : label })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Back to Camera settings' }));
+      expect(screen.getByRole('heading', { name: 'Camera and recording' })).toBeInTheDocument();
       unmount();
     }
   });
