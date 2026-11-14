@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Moon, ChevronRight } from 'lucide-react';
-import { api } from '../lib/api.js';
+import { useLiveSleep } from '../lib/useLiveSleep.js';
+import { fmtDur } from '../lib/duration.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { scoreOf, scoreLabel, bandOf, bandWord, pendingNightText } from '../lib/sleepScoreText.js';
 import { nightSummaryText } from '../lib/nightSummaryPhrases.js';
@@ -20,13 +21,6 @@ import NightPendingRing from './NightPendingRing.jsx';
 // removed. The estimate/"not a medical measurement" line is the sleep page's one-line footer now, and "You corrected this"
 // is the receipt under the card (MorningReviewCard.jsx). The wording of every state that is NOT a scored night is unchanged.
 
-function fmtDur(min) {
-  if (min == null) return '';
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return h ? `${h}h ${m}m` : `${m}m`;
-}
-
 // `onBand` (optional): told the band colour key of the night shown (bandOf), or null when no score is shown, so the
 // child page can tint its hero card (index.css, `.night--<band>`). Without it the card behaves exactly as before.
 //
@@ -42,19 +36,7 @@ export default function SleepSummaryCard({ childId, onBand, onNightShown, birthd
   const { settings } = useSettings();
   const navigate = useNavigate();
   const tz = settings.timezone || 'UTC';
-  const [data, setData] = useState(undefined); // undefined = loading; { scope, night } | null
-
-  useEffect(() => {
-    let alive = true;
-    const load = () =>
-      api.get(`/children/${childId}/sleep/live`)
-        .then((r) => { if (alive) setData(r || null); })
-        .catch(() => { if (alive) setData(null); });
-    load();
-    // Refresh every few minutes so an in-progress night stays current (e.g. the morning wake appears).
-    const t = setInterval(load, 3 * 60 * 1000);
-    return () => { alive = false; clearInterval(t); };
-  }, [childId]);
+  const data = useLiveSleep(childId);
 
   const fmtDate = (nightDate) => {
     if (!nightDate) return '';

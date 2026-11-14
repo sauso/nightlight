@@ -634,6 +634,8 @@ button in `--text-secondary`, not `--offline` red, because it does not claim the
 on the amber "connecting" tempo and never turns red.
 
 ### Score ring (`components/ScoreRing.jsx`)
+On the Children list, a child card keeps its name and camera row, then adds a divided sleep row when the live endpoint has a usable duration. The 44px ring sits at the right with its band word printed below it; the caption and duration wrap at narrow widths. The whole card remains one button, whose name follows the printed order. The list makes one sleep request per child when opened and does not refresh on a timer; the child page retains its three-minute refresh.
+
 The sleep score as a ring with the number in the middle: an inline SVG arc filled to the score out of 100. **The arc is
 coloured by band** (owner approved the colour-scaled design, 2026-11-12; it was one colour before, out of caution that a
 red or green ring reads as a verdict) and there is **no animation** (section 7). The band comes from `bandOf(score)` in
