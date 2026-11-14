@@ -39,7 +39,17 @@ const DRAFT_FIELDS = [
 // of them must open it: otherwise the person's own half-typed stream path would be restored invisibly (the "unsaved
 // changes restored" notice would say so, but nothing on screen would show what).
 const ADVANCED_DRAFT_FIELDS = ['rtsp_path', 'sub_rtsp_path', 'mqtt_topic', 'talk_username'];
-const draftHasAdvanced = (draft) => !!draft && ADVANCED_DRAFT_FIELDS.some((key) => draft[key]);
+// "Holds a value" is not the test: a draft that CLEARS a saved path (key present, value '') is just as hidden, and a
+// later Save would send that blank path with nothing on screen to show it (Codex review of #1080). So the test is
+// "differs from what is stored", compared to `base` (the loaded camera, or the empty form on a new camera).
+const draftTouchesAdvanced = (draft, base) => !!draft
+  && ADVANCED_DRAFT_FIELDS.some((key) => key in draft && (draft[key] ?? '') !== (base[key] ?? ''));
+
+// The two messages the form raises ITSELF about a field that is NOT inside Advanced (the IP is in Camera, the child in
+// Assigned to). They arrive through `pageError` like a server message, but opening Advanced for them would jump the
+// layout under the person for no reason (Codex review of #1080), so the open-on-error rule below skips them.
+const IP_FIRST_ERROR = 'Enter the camera IP first';
+const CHILD_FIRST_ERROR = 'Assign this camera to a child before continuing setup.';
 
 // Per-camera settings as a routed screen (replaces the old edit modal). /cameras/new adds a
 // camera; /cameras/:id edits one. Only connection/identity fields live here — motion, sound and
@@ -90,7 +100,7 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
   // stream path is still empty, because the person who typed an address by hand has to give a path too, unless the
   // ONVIF fetch fills it. (Embedded forms are always new: they have no :id.) It also starts open for a restored
   // draft that holds a value inside it. An existing camera starts CLOSED: its path is already saved.
-  const [advancedOpen, setAdvancedOpen] = useState(() => draftHasAdvanced(restoredDraft) || (isNew && !restoredDraft?.rtsp_path));
+  const [advancedOpen, setAdvancedOpen] = useState(() => draftTouchesAdvanced(restoredDraft, EMPTY_FORM) || (isNew && !restoredDraft?.rtsp_path));
   const [talkVerifyBusy, setTalkVerifyBusy] = useState(false);
   const [talkVerifyMsg, setTalkVerifyMsg] = useState(null);
   const [pageError, setPageError] = useState('');
@@ -135,7 +145,7 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
     setForm({ ...loaded, ...draft });
     setRestored(!!draft);
     // An edit's draft is read here, after the camera loads, so the same rule as the initial state is applied now.
-    if (draftHasAdvanced(draft)) setAdvancedOpen(true);
+    if (draftTouchesAdvanced(draft, loaded)) setAdvancedOpen(true);
     setFormReady(true);
     setCaps({
       backchannel_supported: cam.backchannel_supported,
@@ -158,7 +168,7 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
   // focused: which one is at fault is not known, so nothing is promised. (The stream path has no `required`, so there
   // is no native validation message hiding in a closed section either.)
   useEffect(() => {
-    if (pageError || confirmMsg) setAdvancedOpen(true);
+    if (confirmMsg || (pageError && pageError !== IP_FIRST_ERROR && pageError !== CHILD_FIRST_ERROR)) setAdvancedOpen(true);
   }, [pageError, confirmMsg]);
 
   // Back to what is stored. useFormDraft sees form == baseline and removes the stored draft.
@@ -169,7 +179,7 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
 
   async function fetchFromOnvif() {
     const host = form.rtsp_host.trim();
-    if (!host) { setPageError('Enter the camera IP first'); return; }
+    if (!host) { setPageError(IP_FIRST_ERROR); return; }
     setOnvifBusy(true); setOnvifMsg(''); setPageError('');
     try {
       const r = await probeCamera({
@@ -185,6 +195,11 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
       extraRef.current = r.extra;
       setCaps((c) => ({ ...c, ...r.caps }));
       setOnvifMsg(r.summary);
+      // A successful fetch that finds two-way audio which is NOT carried by the stream (`backchannel_verified === false`
+      // is the Hikvision-style camera) makes the talk LOGIN necessary, and that block is behind Advanced: open it, or the
+      // summary says "two-way audio" while the field it needs is unreachable and a Save would send an empty talk
+      // username, which the server reads as "turn talk-back off" (Codex review of #1080).
+      if (r.caps.backchannel_supported === 'yes' && r.caps.backchannel_verified === false) setAdvancedOpen(true);
     } catch (err) {
       setPageError(err.message);
     } finally {
@@ -228,7 +243,7 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
   async function doSave(force) {
     setBusy(true); setPageError('');
     if (requireChild && !form.child_id) {
-      setPageError('Assign this camera to a child before continuing setup.');
+      setPageError(CHILD_FIRST_ERROR);
       setBusy(false);
       return;
     }
@@ -387,7 +402,7 @@ export default function CameraForm({ onCreated, initialChildId = '', embedded = 
               </div>
 
               <div className="camera-form__onvif">
-                <button type="button" className="btn btn-secondary camera-form__fetch" onClick={fetchFromOnvif} disabled={onvifBusy}>
+                <button type="button" className="btn btn-peri camera-form__fetch" onClick={fetchFromOnvif} disabled={onvifBusy}>
                   {onvifBusy ? 'Fetching…' : <><RotateCcw size={16} aria-hidden="true" />Fetch from ONVIF</>}
                 </button>
                 <p className="camera-form__hint">

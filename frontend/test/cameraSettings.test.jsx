@@ -873,6 +873,51 @@ describe('#1076 the form is in groups, with the rarely used fields behind Advanc
     await waitFor(() => expectAdvancedOpen());
   });
 
+  test('(b) a restored draft that CLEARS a saved path opens it too (a blank path would otherwise be saved unseen)', async () => {
+    // Codex review of #1080: the rule looked for a truthy value, so a draft whose path was emptied stayed hidden.
+    sessionStorage.clear();
+    saveDraft(draftKey('u-admin', `camera:${CAM.id}`), { rtsp_path: '' }, ['rtsp_path']);
+    const { user } = mount();
+    await screen.findByLabelText('Name');
+    expectAdvancedOpen();
+    expect(screen.getByLabelText('Stream path').value).toBe('');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect((await saved(putSpy)).rtsp_path).toBe('');
+  });
+
+  test('(b) the form\'s own "enter the IP first" message does NOT open Advanced (the IP is not in it)', async () => {
+    const { user } = mount();
+    await screen.findByLabelText('Name');
+    expectAdvancedClosed();
+    await user.clear(screen.getByLabelText('Camera IP address'));
+    await user.click(screen.getByRole('button', { name: 'Fetch from ONVIF' }));
+    expect(await screen.findByText('Enter the camera IP first')).toBeTruthy();
+    expectAdvancedClosed();
+  });
+
+  test('(b) …nor does the setup guide\'s "assign a child" message', async () => {
+    const embedded = renderAsAdmin(<CameraForm embedded requireChild />, { kids: KIDS, route: '/setup' });
+    const user = embedded.user;
+    await user.type(screen.getByLabelText('Name'), 'Nursery camera');
+    await user.type(screen.getByLabelText('Camera IP address'), '192.0.2.10');
+    await user.click(advancedRow()); // an embedded new form starts open (no path yet); close it
+    expectAdvancedClosed();
+    await user.click(screen.getByRole('button', { name: 'Add camera' }));
+    expect(await screen.findByText('Assign this camera to a child before continuing setup.')).toBeTruthy();
+    expectAdvancedClosed();
+    embedded.unmount();
+  });
+
+  test('(b) a fetch that finds two-way audio needing its own web login opens Advanced, where that login is asked for', async () => {
+    postSpy = vi.spyOn(api, 'post').mockResolvedValue({ backchannel: 'yes', backchannelVerified: false });
+    const { user } = mount({ cam: { ...CAM, backchannel_supported: 'no', talk_backend: null } });
+    await screen.findByLabelText('Name');
+    expectAdvancedClosed();
+    await user.click(screen.getByRole('button', { name: 'Fetch from ONVIF' }));
+    expect(await screen.findByLabelText('Talk username')).toBeTruthy();
+    expectAdvancedOpen();
+  });
+
   test('the stream path is not `required`: a blank one saves, there is no hidden native validation to trip over', async () => {
     const { user } = mount({ cam: { ...CAM, rtsp_path: '', sub_rtsp_path: '' } });
     await screen.findByLabelText('Name');
