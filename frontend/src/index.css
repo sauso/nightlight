@@ -3850,8 +3850,6 @@ input[type='range'] {
 .find-card__chip, .find-card__availability { display: inline-flex; align-items: center; gap: 4px; color: var(--night-link); font-size: 11px; font-weight: 600; }
 .find-card__chip { padding: 2px 8px; border: 1px solid var(--night-link); border-radius: 999px; }
 .find-card__availability { color: var(--night-muted); font-size: 12px; }
-.dev-card-list-title { display: flex; justify-content: space-between; align-items: baseline; }
-.dev-card-list-title span { font-weight: 600; text-transform: none; letter-spacing: 0; }
 .dev-card { position: relative; margin-bottom: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); }
 .dev-card__main { display: flex; align-items: flex-start; gap: 10px; padding: 14px 4px 12px 14px; }
 .dev-card__body { flex: 1; min-width: 0; }

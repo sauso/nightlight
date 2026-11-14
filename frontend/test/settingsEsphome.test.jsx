@@ -250,6 +250,15 @@ describe('the device list', () => {
     expect(await screen.findByText('Device A')).toBeInTheDocument();
   });
 
+  test('the Your devices heading carries no "n of 8" counter (it read as devices found vs added); the limit is only said when reached', async () => {
+    mockApi({ devices: [device()] });
+    renderAsAdmin(<SettingsEsphome />);
+    await screen.findByText('Device A');
+    expect(screen.getByRole('heading', { name: 'Your devices' })).toBeInTheDocument();
+    expect(screen.queryByText(/d+ of 8/)).toBeNull();
+    expect(screen.queryByText(/reached the limit/)).toBeNull();
+  });
+
   test('★ eight devices disable Add and say why; seven do not', async () => {
     const eight = Array.from({ length: 8 }, (_, i) => device({ id: i + 1, name: `Device ${i + 1}` }));
     mockApi({ devices: eight });
