@@ -2,7 +2,9 @@
 
 Add a login for someone you trust without giving them control over every setting. Once signed in
 as admin, go to **Settings → Users** to create additional logins (e.g. for a partner or babysitter).
-The **Users** page lists **Accounts** and **Active sessions**. **Add user** is at the bottom of the Accounts card; the form opens with a **Details** card and a back button labelled **Users**. The role choice still says **Caregiver**.
+The **Users** page lists **Accounts**. **Add user** is at the bottom of the Accounts card; the form opens with a **Details** card and a back button labelled **Users**. The role choice still says **Caregiver**.
+
+**Signing a device out.** Each account that is signed in somewhere has a down arrow at the right of its row. Tap it to see that account's active sessions: the device, "(this device)" on the one you are using, and when it was last active. **Sign out** ends that one session, so that phone or browser has to log in again. The sessions are closed until you open them, and an account with no sessions has no arrow. Signing out your own current device logs you out of this one. Tapping the account itself, not the arrow, opens its details.
 
 To remove another account, open that user's page and choose **⋯ → Remove user**. The confirmation explains that the person will be signed out everywhere. You cannot remove your own account from this menu.
 

@@ -2875,7 +2875,13 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 
 /* #1076: global camera controls use the setting itself as the card title. The switch is still
    tied to that visible title, while numeric inputs keep the shared field styling. */
-.card-heading label { cursor: pointer; }
+/* A label that IS the card title must look like the title. Camera controls' "PTZ step size" heading sits inside a
+   `.field`, so the generic `.field label` rule (12px grey caption, block, 6px below) restyled it and it no longer matched the
+   other two cards' headings. `.field .card-heading label` outranks `.field label` on specificity, not on source order, so
+   moving either rule cannot bring the caption look back. SwitchRow's heading label is not inside a `.field`, so it never
+   hit this; the rule covers both. */
+.card-heading label,
+.field .card-heading label { font: inherit; color: inherit; margin: 0; display: inline; cursor: pointer; }
 /* The shared Switch draws a 42×24 pill inside a 44px target. */
 .camera-controls .field input { min-height: 44px; }
 .tgl-row {
@@ -3933,3 +3939,26 @@ html.setup-wizard body::before { content: ""; position: fixed; top: 0; left: 0; 
    floor), so the ring is now only for `:focus-visible` (the browser's own test for "focus arrived by keyboard"; a mouse or touch
    click does not match it) and goes around the whole avatar, not the badge. */
 .avatar-editor:has(.avatar-editor__input:focus-visible) { outline: 2px solid var(--accent-line); outline-offset: 3px; }
+
+/* Users screen: one account row = the open-account area and, when the account has signed-in devices, a separate down-arrow
+   button, as siblings (a button inside a role=button row is invalid nesting). The sessions sit in a panel under the row. */
+.user-row { border-bottom: 1px solid var(--border); }
+.user-row__line { display: flex; align-items: center; gap: 4px; }
+.user-row__open { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0 12px 14px; cursor: pointer; font-size: 16px; font-weight: 500; }
+/* The open area has no right padding because, on a row with sessions, the toggle's own margin supplies the gap. A row WITHOUT
+   a toggle has the open area as its last child, so it would put its arrow flush against the card edge. Give that case the
+   distance the toggle's chevron sits from the edge (margin 6px + the centring inside the --tap wide button around an 18px
+   icon), so the arrows line up down the list whether or not an account has sessions. */
+.user-row__open:last-child { padding-right: calc(6px + (var(--tap) - 18px) / 2); }
+.user-row__open:focus-visible, .user-row__toggle:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.user-row__toggle { flex: none; width: var(--tap); height: var(--tap); display: inline-flex; align-items: center; justify-content: center; margin-right: 6px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.user-row__toggle:active { background: var(--child-action-active); }
+/* Hover only where a pointer can hover: on a phone a tapped control stays in :hover and would keep the fill (design-language states). */
+@media (hover: hover) { .user-row__toggle:hover { background: var(--child-action-hover); } }
+.user-row__toggle-chev { transition: transform 0.15s ease; }
+.user-row__toggle[aria-expanded='true'] .user-row__toggle-chev { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .user-row__toggle-chev { transition: none; } }
+/* Inset from the row's edges and tinted like the other nested panels so it reads as belonging to the row above. */
+.user-row__sessions { padding: 0 14px 8px; background: color-mix(in srgb, var(--accent-line) 6%, var(--bg-elevated)); border-radius: 10px; margin-bottom: 8px; }
+.user-row__sessions[hidden] { display: none; }
+.user-row__sessions .list-row:last-child { border-bottom: none; }

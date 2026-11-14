@@ -433,6 +433,19 @@ describe('Settings → Camera and recording → Camera controls', () => {
     expect(screen.getByLabelText('Silenced for longer than (minutes)')).toHaveValue(95);
   });
 
+  // GUARD, not a regression test: jsdom loads no stylesheet, so the fix itself (`.field .card-heading label` in index.css
+  // restores the heading look over the `.field label` caption) cannot be asserted here, and the computed style is NOT tested.
+  // What this pins is the structure the CSS rule depends on: the PTZ label is INSIDE the card heading, which is why the
+  // generic `.field label` rule reached it in the first place. Verify the look on a real browser.
+  test('the PTZ step size label is the card heading itself (structure the heading style relies on)', () => {
+    mockApi();
+    renderAsAdmin(<SettingsCamera />, { settings: SETTINGS });
+    const label = screen.getByText('PTZ step size');
+    expect(label.tagName).toBe('LABEL');
+    expect(label.closest('.card-heading')).toBe(screen.getByRole('heading', { name: 'PTZ step size', level: 3 }));
+    expect(label.closest('.field')).not.toBeNull();
+  });
+
   test('falls back to the documented defaults when settings are empty', () => {
     mockApi();
     renderAsAdmin(<SettingsCamera />, { settings: { ptz_step: undefined, camera_offline_alert_minutes: undefined } });
