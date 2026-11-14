@@ -637,8 +637,8 @@ if you add a state, pick its tempo deliberately.
 **Tile overlay states** (the text over a camera's video when it is not playing): *Connecting…*, *No signal*
 (the camera or its stream is down), and *Streaming service unavailable. Your camera may still be online.* (the
 server's own status check timed out, so the camera's state is unknown), the last as an icon, text and a Retry
-button in `--text-secondary`, not `--offline` red, because it does not claim the camera is down. Its dot stays
-on the "connecting" tempo and colour (`--accent` violet) and never turns red.
+button in `--text-secondary`, not `--offline` red, because it does not claim the camera is down. Its dot (the
+one on the video, next to the mic) stays on the "connecting" tempo and colour (`--accent` violet) and never turns red.
 
 ### Score ring (`components/ScoreRing.jsx`)
 On the Children list, a child card keeps its name and camera row, then adds a divided sleep row when the live endpoint has a usable duration. The 44px ring sits at the right with its band word printed below it; the caption and duration wrap at narrow widths. The whole card remains one button, whose name follows the printed order. The list makes one sleep request per child when opened and does not refresh on a timer; the child page retains its three-minute refresh.
@@ -875,14 +875,19 @@ track on Account and General uses the same style. Stop/Start and Camera settings
 The signature component. `--bg-elevated`, 1px `--border`, **radius 10px**, `overflow: hidden`.
 The video wrap is 16:9 (`height: 50vh` when not fullscreen) so `object-fit: cover` fills exactly
 rather than cropping the camera's own timestamp overlay. Stopped state is a `#0a0d1c` panel with a
-centred restart button. Controls overlay the video; identity (name, child, drag handle, live dot)
-sits in the strip below. The strip is at least 56px tall and shows one line, the status dot and then the
-wrapping name (dot before the name, centred on it), with the child under it, optional temperature and humidity chips,
-and the drag handle. **The status word is not printed in the strip**: it follows the name as visually hidden text
-(`.camera-tile__sr`, so a screen reader reads "Name, Online"; the dot is `aria-hidden`), and the camera's sheet prints
-the same dot and word under the name (`.tile-menu__state`), so colour is never the only signal. It uses
+centred restart button. Controls overlay the video, and so does the **status dot**: top-left, vertically centred on
+the control row, just to the right of the mic (two-way audio) button, or in the corner when the camera has no mic
+button (`.camera-tile__video-dot`, with `--after-mic` when the mic is there). It is not interactive
+(`pointer-events: none`), carries the same soft dark glow as the other overlay icons so it reads over bright and dark
+footage, and stays put while the mic is live; fullscreen keeps it beside the mic, and Picture-in-Picture hides it with
+the other overlay controls. Identity (name, child, drag handle) sits in the strip below. The strip is at least 56px
+tall and shows the wrapping name with the child under it (both start at the left edge), optional temperature and
+humidity chips, and the drag handle. **The status word is not printed in the strip**: it follows the name as visually
+hidden text (`.camera-tile__sr`, so a screen reader reads "Name, Online"; the dot is `aria-hidden`), and the camera's
+sheet prints the same dot and word under the name (`.tile-menu__state`), so colour is never the only signal. It uses
 `cameraState`, including **Status unknown** when a status check times out (it shows the same dot as Connecting, never red). (The Cameras tab cards still print
-the word above the name; only the Live tile changed.)
+the word above the name; only the Live tile changed. The dot used to sit in the strip before the name; the owner moved it onto the video,
+2026-11-15.)
 
 Picture-in-Picture hides every control and panel over the video, including Record. Fullscreen
 in the updated Android app hides the system status and gesture bars so they do not cover the

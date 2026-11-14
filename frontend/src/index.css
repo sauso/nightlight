@@ -415,6 +415,7 @@ body.in-pip .pip-btn,
 body.in-pip .settings-btn,
 body.in-pip .mute-btn,
 body.in-pip .talk-btn,
+body.in-pip .camera-tile__video-dot,
 body.in-pip .rec-btn,
 body.in-pip .fullscreen-btn,
 body.in-pip .ptz-btn,
@@ -1273,6 +1274,24 @@ body.in-pip .tile-menu-backdrop {
   0%, 100% { box-shadow: 0 0 0 0 rgba(224, 85, 95, 0.55); }
   50% { box-shadow: 0 0 0 7px rgba(224, 85, 95, 0); }
 }
+
+/* Camera status dot on the video (owner, 2026-11-15: it read oddly beside the child's name in the strip). Top-left,
+   on the vertical centre of the 30px control row that starts at top:10px (10 + 15 - 7 = 18). Without a mic button it
+   takes the corner (left:14px: the 10px edge the controls use plus 4px of air; not measured over real footage); with one (.--after-mic) it sits just right of the 30px mic button, which ends at 40px (left:48px).
+   ⚠️ Keep it clear of the mic's 44px tap area (::after reaches to 47px, see ".mute-btn::after" above): the dot starts
+   at 48px, and pointer-events:none means it can never take a tap anyway. The same drop-shadow glow as the neighbouring
+   overlay icons keeps it legible over bright and dark footage alike. It is the ordinary BreathingDot, so the
+   prefers-reduced-motion rule for .breathing__ring already stills it; no separate rule is needed. z-index 2 like the
+   buttons: above the video, and below the "Camera stopped" cover (z 5), which hides every overlay control the same way. */
+.camera-tile__video-dot {
+  position: absolute;
+  top: 18px;
+  left: 14px;
+  z-index: 2;
+  pointer-events: none;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9)) drop-shadow(0 0 4px rgba(0, 0, 0, 0.55));
+}
+.camera-tile__video-dot--after-mic { left: 48px; }
 
 .mute-btn svg,
 .pip-btn svg,
@@ -2381,6 +2400,15 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
 .camera-tile__video-wrap:fullscreen .pip-btn {
   right: calc(max(10px, env(safe-area-inset-right, 0px)) + 44px);
 }
+/* The status dot follows the mic button's inset in fullscreen: same offsets from the (inset-aware) 10px edge as in
+   the tile (+8 down, +4 across in the corner, +38 across when it sits after the mic). */
+.camera-tile__video-wrap:fullscreen .camera-tile__video-dot {
+  top: calc(max(10px, env(safe-area-inset-top, 0px)) + 8px);
+  left: calc(max(10px, env(safe-area-inset-left, 0px)) + 4px);
+}
+.camera-tile__video-wrap:fullscreen .camera-tile__video-dot--after-mic {
+  left: calc(max(10px, env(safe-area-inset-left, 0px)) + 38px);
+}
 
 .camera-tile__video-wrap:fullscreen .whep-video {
   width: 100%;
@@ -2405,12 +2433,13 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   min-width: 0;
 }
 .camera-tile__identity { min-width: 0; }
-/* One line: status dot, then the name, vertically centred on each other. The status word is not printed here (the
-   dot stands in; the word is visually hidden below and printed in the camera sheet, .tile-menu__state). */
+/* The name row. The status dot is no longer here: it sits on the video next to the mic (.camera-tile__video-dot),
+   and the child's name now starts at the same left edge as the camera name. The status word is not printed here
+   either (visually hidden below, printed in the camera sheet, .tile-menu__state). */
 .camera-tile__title { display: flex; align-items: center; gap: 8px; position: relative; min-width: 0; }
+/* The dot's fixed 14px box (neutral 8px and breathing 14px share one footprint). Used by the camera sheet and, with
+   the .camera-tile__video-dot modifiers, on the video. */
 .camera-tile__dot { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; }
-/* The child's name lines up under the camera NAME, not under the dot (the approved mock, option C): 14px dot + 8px gap. */
-.camera-tile__identity > .camera-tile__sub { padding-left: 22px; }
 /* Visually hidden, still read by a screen reader: ", Online" after the name. Same recipe as .child-cam__sr; position:
    absolute so it is not a flex item and adds no gap to the row. */
 .camera-tile__sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

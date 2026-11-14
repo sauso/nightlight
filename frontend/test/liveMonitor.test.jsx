@@ -152,14 +152,13 @@ describe('Live tile strip and sheet (#1076)', () => {
   ])('cameraState renders %s / unknown %s / disabled %s as %s', (statusLevel, statusUnknown, disabled, word, dot) => {
     const { container } = renderAsAdmin(<CameraTile camera={{ id: 'state', name: 'Camera', statusLevel, statusUnknown, disabled }} childName="A child" />);
     const strip = container.querySelector('.camera-tile__meta');
-    // Strip: the dot sits in the SAME row as the name, before it (owner decision, option C), and the word is only
-    // visually hidden text after the name, part of the row's accessible text ("Camera, Online").
+    // Strip: the status dot is NOT in the strip any more (it moved onto the video, next to the mic: owner, 2026-11-15;
+    // see the next test), and the word is only visually hidden text after the name, part of the row's accessible text
+    // ("Camera, Online"). Fails on the old code, which rendered the dot in the name row before the name.
     const row = within(strip).getByText('Camera').closest('.camera-tile__title');
     expect(row).not.toBeNull();
-    expect(row.querySelector(`.${dot}`)).toBeInTheDocument();
-    const dotBox = row.querySelector('.camera-tile__dot');
-    expect(dotBox).toHaveAttribute('aria-hidden', 'true');
-    expect(dotBox.compareDocumentPosition(within(row).getByText('Camera')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(strip.querySelector('.camera-tile__dot')).toBeNull();
+    expect(strip.querySelector(`.${dot}`)).toBeNull();
     // The hidden word must be its own element with the visually-hidden class (a class check, not a CSS value), and its
     // text EXACTLY ", <word>": without this, the "word is not printed" assertion below would also pass if the word were
     // dropped altogether.
@@ -168,11 +167,62 @@ describe('Live tile strip and sheet (#1076)', () => {
     expect(sr.classList.contains('camera-tile__sr')).toBe(true);
     expect(sr.textContent).toBe(`, ${word}`);
     expect(row).toHaveTextContent(`Camera, ${word}`);
-    if (word === 'Status unknown') expect(row.querySelector('.breathing--offline')).toBeNull();
     // Nothing prints the word in the strip any more: no status line above the name, no visible word.
     expect(strip.querySelector('.camera-tile__state')).toBeNull();
     expect(within(strip).queryByText(word)).toBeNull();
     expect(within(strip).getByText('A child')).toBeInTheDocument();
+  });
+
+  // The dot now sits ON the video (owner, 2026-11-15: "move it to next to the mic in the image"): inside the video
+  // wrapper, never in the strip. Each state keeps its dot; "Status unknown" stays the connecting dot even when the
+  // level it was last told is offline.
+  test.each([
+    ['live', false, false, 'breathing--live'],
+    ['connecting', false, false, 'breathing--connecting'],
+    ['offline', false, false, 'breathing--offline'],
+    ['connecting', true, false, 'breathing--connecting'],
+    ['offline', true, false, 'breathing--connecting'],
+    ['offline', false, true, 'dot--neutral'],
+  ])('the status dot is on the video for %s / unknown %s / disabled %s as %s', (statusLevel, statusUnknown, disabled, dot) => {
+    const { container } = renderAsAdmin(<CameraTile camera={{ id: 'vd', name: 'Camera', statusLevel, statusUnknown, disabled }} childName="A child" />);
+    const wrap = container.querySelector('.camera-tile__video-wrap');
+    const dots = wrap.querySelectorAll('.camera-tile__video-dot');
+    expect(dots).toHaveLength(1);
+    expect(dots[0].querySelector(`.${dot}`)).toBeInTheDocument();
+    // A decorative mark: hidden from assistive tech (the word is the accessible carrier), and not a control.
+    expect(dots[0]).toHaveAttribute('aria-hidden', 'true');
+    expect(dots[0].closest('button, a')).toBeNull();
+    expect(dots[0].matches('button, a, [tabindex]')).toBe(false);
+    expect(dots[0].querySelector('button, a, [tabindex]')).toBeNull();
+    // Unknown must never show the red offline dot, wherever the dot is drawn.
+    if (statusUnknown) expect(wrap.querySelector('.breathing--offline')).toBeNull();
+    // Exactly one dot per tile in the tile itself (the sheet is closed): none left in the strip.
+    expect(container.querySelectorAll('.camera-tile__dot')).toHaveLength(1);
+  });
+
+  // With a mic button the dot sits just after it; without one it takes the corner. The modifier is the hook the CSS
+  // positions on, so it must track `talk_configured` exactly (a modifier always on would push the dot past a mic that
+  // is not there; never on would put it under the mic button).
+  test.each([
+    [true, true],
+    [false, false],
+    [undefined, false],
+  ])('the video dot is placed after the mic only when talk_configured is %s', (talk, afterMic) => {
+    const { container } = renderAsAdmin(<CameraTile camera={{ id: 'vdm', name: 'Camera', statusLevel: 'live', talk_configured: talk }} childName="A child" />);
+    const dot = container.querySelector('.camera-tile__video-dot');
+    expect(dot.classList.contains('camera-tile__video-dot--after-mic')).toBe(afterMic);
+    expect(!!container.querySelector('.talk-btn')).toBe(afterMic);
+  });
+
+  // The dot is not part of the talk button: the button's red "talking" state (and its 44px tap area) must not move or
+  // swallow the dot, and the dot must not inherit the button's click. Fails on the old code (no dot on the video);
+  // kept afterwards so nobody nests the dot inside the button.
+  test('the video dot is a sibling of the mic button, not inside it', () => {
+    const { container } = renderAsAdmin(<CameraTile camera={{ id: 'vds', name: 'Camera', statusLevel: 'live', talk_configured: true }} childName="A child" />);
+    const talk = container.querySelector('.talk-btn');
+    const dot = container.querySelector('.camera-tile__video-dot');
+    expect(talk.contains(dot)).toBe(false);
+    expect(dot.parentElement).toBe(talk.parentElement);
   });
 
   // The word the strip no longer prints is printed (visibly, not in a visually hidden element) in the camera's
@@ -194,6 +244,9 @@ describe('Live tile strip and sheet (#1076)', () => {
     expect(within(sheet).getByText(word).closest('.camera-tile__sr')).toBeNull();
     expect(state.querySelector(`.${dot}`)).toBeInTheDocument();
     expect(state.querySelector('.camera-tile__dot')).toHaveAttribute('aria-hidden', 'true');
+    // The sheet's dot is the in-flow one, not the absolutely placed on-video one. (Guard: also true on the old code;
+    // kept so a shared dot component cannot leak the on-video placement class into the sheet.)
+    expect(state.querySelector('.camera-tile__video-dot')).toBeNull();
     // The state line sits right under the camera name in the sheet header.
     expect(sheet.querySelector('.tile-menu__title').nextElementSibling).toBe(state);
   });
