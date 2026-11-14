@@ -5,6 +5,7 @@ import { api } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Avatar from '../components/Avatar.jsx';
+import { useHomeTime } from '../lib/useHomeTime.js';
 
 function timeAgo(iso) {
   const seconds = Math.floor((Date.now() - new Date(iso + 'Z').getTime()) / 1000);
@@ -16,11 +17,35 @@ function timeAgo(iso) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+// The small status pill on a row for the caregiver invite feature (#1094), or null for an ordinary account. Three states, from the
+// fields GET /auth/users adds (all additive: a server older than this sends none of them and no pill shows):
+//  - password_set === false with a live invite: "Invite pending" (they have a link and have not used it);
+//  - password_set === false with invite_expires_at null: "No active invite". NOT "expired": null also means revoked or never made,
+//    and the server cannot tell the screen which, so the wording claims only what is known (the account cannot sign in);
+//  - invite_accepted_at set (the server sends it for 7 days after the invite was used): "Joined <date>".
+// `=== false`, not falsy, so an account with no `password_set` key is not mistaken for a pending one.
+// Colours are the existing status-badge modifiers (gold highlight, grey, green), which already have both themes.
+function invitePill(u, formatDay) {
+  if (u.password_set === false) {
+    return u.invite_expires_at
+      ? { text: 'Invite pending', cls: 'status-badge--highlight' }
+      : { text: 'No active invite', cls: 'status-badge--off' };
+  }
+  if (u.invite_accepted_at) {
+    // UTC text with no zone marker; the `T` and `Z` make it a real instant (Safari refuses a space before the Z).
+    const when = new Date(`${u.invite_accepted_at.replace(' ', 'T')}Z`);
+    const day = formatDay(when);
+    return { text: day ? `Joined ${day}` : 'Joined', cls: 'status-badge--ok' };
+  }
+  return null;
+}
+
 // Caregiver management list. Each account that has signed-in devices carries a down arrow that opens
 // that account's active sessions underneath it (they used to be one separate card listing everyone's).
 // Adding / editing a caregiver happens on its own routed screen (UserSettings.jsx) rather than a modal.
 export default function SettingsUsers() {
   const { logout } = useAuth();
+  const { day } = useHomeTime();
   const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [allSessions, setAllSessions] = useState([]);
@@ -85,6 +110,7 @@ export default function SettingsUsers() {
             const sessions = allSessions.filter((s) => s.username === u.username);
             const isOpen = expanded.has(u.id);
             const panelId = `user-sessions-${u.id}`;
+            const pill = invitePill(u, (d) => day(d, { month: 'short', day: 'numeric' }));
             return (
               <div className="user-row" key={u.id}>
                 {/* The row is two SIBLING controls, not one button holding another: a button inside a role=button
@@ -102,6 +128,7 @@ export default function SettingsUsers() {
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 500 }}>{displayName(u)}</div>
                         <div className="camera-tile__sub">{u.username} · {u.role}</div>
+                        {pill && <span className={`status-badge status-badge--sm ${pill.cls}`} style={{ marginTop: 4 }}>{pill.text}</span>}
                       </div>
                     </div>
                     <ChevronRight size={18} style={{ opacity: 0.45, flexShrink: 0 }} aria-hidden="true" />

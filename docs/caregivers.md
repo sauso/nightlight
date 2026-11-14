@@ -88,9 +88,34 @@ Rather than choosing a password for someone and telling it to them, an admin can
 without one and send them a link (or show it as a QR code). They open the link, choose their own password, and are
 signed in. The link never contains a password.
 
-> **Planned:** the server side of this is in place (#1094); the screens to create an invite, show its QR code and
-> manage it from **Settings → Users** come in a following update. Until then it can only be used through the API
-> ([docs/architecture.md](architecture.md#caregiver-invites-1094) lists the routes).
+**Making an invite (admin):**
+
+1. Go to **Settings → Users → Add user**.
+2. At the top of the form, choose **Send an invite** (the other choice, **Set a password**, is the usual way and is
+   what the form opens on). The password box goes away and the role is fixed to **Caregiver** ("Invites are for
+   caregivers").
+3. Enter their first name, last name and username, and a photo if you like, then tap **Create and show invite**.
+   The setup guide's **Add a caregiver** step has the same two choices.
+4. The page shows a **QR code**, the **link** with a **Copy link** button, and when it runs out. Let them scan the
+   code, or send the link to that person only. Tap **Done** when you have handed it over.
+
+**The link and code are shown once, on this screen.** Nightlight keeps no copy it can show you again. The
+automatic refresh that happens when the app has been in the background for a while is held off while the invite
+shows (so switching to your messaging app to send it does not lose it), but if you reload or leave the page, you
+cannot get the same link back. Make another one instead: open the account from **Settings → Users**, and in its **Invite**
+card tap **Show a new invite**. The old link stops working the moment the new one is made. **Revoke invite**, in the
+same card (and on the invite screen, though not in the setup guide), cancels the invite without making another; the account stays and still cannot
+sign in until it has an invite or a password. The card only offers Revoke while there is a working invite, and its
+password box stays available: setting a password makes the account a normal one and ends the invite.
+
+**What the caregiver sees.** The link opens a page in their browser that says "Welcome, *first name*. Choose a
+password to finish setting up your account.", shows their username, and asks for a password (at least 8
+characters) twice. When they save, they are signed in. The link's address is replaced on the page at once, so it
+does not stay in the browser's address bar or history. If that device is already signed in as someone else, the page
+says so and asks: **Sign out** (then it carries on with the invite) or **Go to Nightlight** (nothing is replaced). If
+the password is saved but signing in straight after fails (a network hiccup, say), the page says "Your password is
+set. Sign in with your username and the password you just chose." with a link to the sign-in page; the link has been
+used up, so there is no need to ask for another.
 
 **How an invite works:**
 
@@ -106,9 +131,16 @@ signed in. The link never contains a password.
   works: a home-network address works only at home.
 - **The phone app.** The link opens Nightlight in a browser. After choosing a password there, sign in to the
   Nightlight app with the username shown on that page and the new password.
-- The admin's list of accounts says which ones are still waiting on an invite and when it runs out, and, for 7 days
-  after, when an invite was used. An account that is waiting but shows no expiry has no link that works: it was
-  cancelled, ran out, or its password was set another way. Make a new link, or set its password yourself.
+- **The accounts list shows where each invite stands.** A small label under the name reads **Invite pending** (a
+  working link exists), **No active invite** (the account is waiting but has no link that works: it was cancelled,
+  ran out, or its password was set another way; make a new link or set its password yourself), and **Joined** with
+  the date, for 7 days after an invite was used. An account with a password and no recent invite has no label. An
+  account's own page shows the same state in its **Invite** card ("Waiting for *name* to choose a password" or "No
+  usable invite"). Dates and times are in your home time zone, as everywhere else in Nightlight.
+- **Nothing in the demo.** The public read-only demo refuses these actions like every other change.
+- **"Just a moment. If you just chose a password, try signing in with it."** The page shows this when another
+  request for the same link is still being processed (usually a second tap on the button). The password they chose
+  has most likely worked: ask them to sign in with it.
 - **"Too many attempts".** If the link's page says this, wait 15 minutes and open the link again. Each network
   address gets 100 failed tries at invite links per 15 minutes, and everyone who reaches Nightlight through the same
   reverse proxy, or through Tailscale, can share one address, so someone else's failed tries can use it up. Signing

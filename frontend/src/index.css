@@ -778,6 +778,10 @@ body.in-pip .tile-menu-backdrop {
 .tailscale-qr__background { fill: var(--bg-elevated); }
 .tailscale-qr__modules { fill: var(--text-primary); }
 .tailscale-qr figcaption { margin-top: 8px; color: var(--text-secondary); }
+/* The caregiver invite panel (components/InvitePanel.jsx, #1094). The link is long and has no spaces, so it must be allowed to break
+   anywhere (as .tailscale-address does); user-select: all makes one tap-and-hold select the whole thing for a hand copy. */
+.invite-panel__link { overflow-wrap: anywhere; word-break: break-all; font-size: 13px; color: var(--text-secondary); user-select: all; }
+.invite-panel__status { min-height: 1.4em; margin: 6px 0; }
 .tailscale-advanced, .remote-advanced { margin-top: 18px; }
 .tailscale-advanced summary, .remote-advanced summary { cursor: pointer; padding: 10px 0; font-weight: 600; }
 .tailscale-advanced summary:focus-visible, .remote-advanced summary:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }

@@ -620,6 +620,13 @@ child's photo and your own go to different endpoints and a new child holds its p
 shown (lists, headers, the Settings row) stay the plain `Avatar` with no badge. Keyboard focus draws one ring around the whole
 avatar (`:focus-visible` only); a click or tap draws nothing, since a second box around the badge looked wrong on the owner's phone.
 
+### Caregiver invite (`components/InvitePanel.jsx`, `pages/AcceptInvite.jsx`, #1094)
+
+- **The choice** on a new account (Users → Add user, and the setup guide's caregiver step) is a `.seg-track` with `aria-pressed`: **Set a password** (the default) and **Send an invite**. Invite mode hides the password field and disables the role select (value Caregiver, with the note "Invites are for caregivers."); the submit button reads **Create and show invite**.
+- **The panel** is a `.card` with an `h2.card-heading`, the shared `QrCode` (the `.tailscale-qr` figure; its label is a fixed phrase, never the link), the link as wrapping selectable text (`.invite-panel__link`), a **Copy link** button with an always-present `role="status"` region that says "Copied", the expiry in home time, and two plain sentences. **Done** (primary) and **Revoke invite** (secondary) sit in `.form-actions`; the guide shows no Revoke. The link is a secret: it appears only as that text and the QR, never in an accessible name, storage or the console.
+- **List pills** reuse `.status-badge status-badge--sm`: **Invite pending** is `--highlight`, **No active invite** is `--off`, **Joined** and a date is `--ok`. "No active invite" never says "expired": a missing invite can also be revoked.
+- **The public page** uses `.auth-screen` / `.auth-card` like the sign-in page (logo, app name, tagline, fields). Inline validation messages are `role="alert"` text in `--offline`; refusals use `.error-banner`.
+
 ### Badges, chips, status
 
 - A protected clip uses a quiet lock badge with the accessible name **Protected** in list metadata.
