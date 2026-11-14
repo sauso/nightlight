@@ -23,6 +23,8 @@ An admin can also switch on [Hold alerts until asleep](notifications.md#hold-ale
 
 ### At a glance, and live
 
+On the **Children** tab, each child card shows last night's total time asleep beneath the name and camera count. A finished night with a score also shows its ring and a word such as "Good" or "Early". While a night is running, the row says **Tonight so far** and shows the time asleep so far, without a score. The list reads each child's night once when opened; the child page below refreshes a running night every three minutes. With tracking off, no usable night or a failed read, the list card shows only the name and camera count. Turning off **Show sleep score** leaves the duration visible and hides the ring.
+
 Each child's page summarises last night in one card — the time asleep, a one-line headline and the
 night's [sleep score](#sleep-score) in a ring with its word ("Good"). The times, wake-ups and longest stretch are
 on the sleep page, one tap away. While a night is in progress the card updates as **"Tonight · so far"**, so an
