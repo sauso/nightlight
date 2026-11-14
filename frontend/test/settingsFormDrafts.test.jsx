@@ -494,8 +494,7 @@ describe('add / edit caregiver', () => {
   test('removing a caregiver clears its draft', async () => {
     const { user } = mount('/settings/users/u-a');
     await user.type(await screen.findByLabelText('Last name'), 'Smith');
-    await user.click(screen.getByRole('button', { name: 'More options for this user' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Remove user' }));
+    await user.click(screen.getByRole('button', { name: 'Remove user' }));
     const dialog = await screen.findByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
     expect(await screen.findByText('elsewhere')).toBeInTheDocument();

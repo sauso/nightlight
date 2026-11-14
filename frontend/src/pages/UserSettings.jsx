@@ -4,9 +4,7 @@ import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useLater } from '../lib/useLater.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
-import MoreMenu from '../components/MoreMenu.jsx';
 import ModalActions from '../components/ModalActions.jsx';
-import { Trash2 } from 'lucide-react';
 import AvatarEditor from '../components/AvatarEditor.jsx';
 import Modal from '../components/Modal.jsx';
 import UnsavedNotice from '../components/UnsavedNotice.jsx';
@@ -264,17 +262,7 @@ function UserSettingsForm() {
 
   return (
     <>
-      <AppHeader title={isNew ? 'Add user' : (fullName || 'Caregiver')} back={back}
-        // Offered only once the user record has loaded (formReady is set when the GET found it).
-        // Remove used to sit inside the form, which does not exist while loading; in the header it was
-        // reachable then, so an admin could confirm and send a DELETE for someone the page had not
-        // shown yet (PR #1088 review).
-        actions={!isNew && formReady && id !== me?.id ? <MoreMenu label="More options for this user" menuLabel="User">
-          <button type="button" role="menuitem" className="more-menu__item dev-card__delete"
-            onClick={() => { setRemoveError(''); setRemoving(true); }}>
-            <Trash2 size={16} aria-hidden="true" />Remove user
-          </button>
-        </MoreMenu> : null} />
+      <AppHeader title={isNew ? 'Add user' : (fullName || 'Caregiver')} back={back} />
       <main className="app-main">
         {!loaded ? (
           <div className="empty-state">Loading…</div>
@@ -415,6 +403,22 @@ function UserSettingsForm() {
                 {inviteMode ? (busy ? 'Creating…' : 'Create and show invite') : busy ? 'Saving…' : isNew ? 'Add user' : 'Save changes'}
               </button>
             </div>
+
+            {/* Remove user is a visible red button at the bottom, not in a header menu: PR #1088 moved it into a "⋯" menu
+                and the owner could not find it ("lost the ability to delete a caregiver"). Remove child and Remove camera
+                stay in their header menus. Three gates, all required:
+                  - !isNew: a new account has nothing to remove.
+                  - formReady: the form only exists once the GET found the record, so an admin cannot confirm and send a
+                    DELETE for someone the page has not shown yet (PR #1088 review; the form being inside the loaded branch
+                    is what enforces this, formReady is kept explicit so moving the button cannot drop the gate).
+                  - id !== me?.id: never offered on your own account (the server refuses it too). */}
+            {!isNew && formReady && id !== me?.id && (
+              <div className="form-actions" style={{ marginTop: 10 }}>
+                <button className="btn btn-danger" type="button" onClick={() => { setRemoveError(''); setRemoving(true); }}>
+                  Remove user
+                </button>
+              </div>
+            )}
           </form>
         )}
       </main>
