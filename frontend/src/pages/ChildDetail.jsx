@@ -139,8 +139,9 @@ export default function ChildDetail() {
               onClick={() => (kid.photo ? setPhotoOpen(true) : navigate(`/children/${id}/edit`))}
               aria-label={kid.photo ? `View ${kid.name}'s photo` : `Add a photo for ${kid.name}`}
             >
-              {/* `surface="night"`: this card is the same navy in both themes, so the photo's colour ring takes the `-night` shade
-                  and a navy gap (Avatar.jsx), not the themed shade the list and edit screens use. */}
+              {/* `surface="night"`: this card is the same navy in both themes, so the photo's colour ring (a plain 3px
+                  box-shadow around the photo, no gap: Avatar.jsx) takes the `-night` shade, not the themed shade the list and edit
+                  screens use. */}
               <Avatar name={kid.name} src={kid.photo} color={kid.color} size={64} surface="night" />
             </button>
             {/* Name and age are plain text now. The two buttons that wrapped them and the "Edit ›" link all went to child

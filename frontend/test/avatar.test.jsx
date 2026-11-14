@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'vitest';
 import { render } from '@testing-library/react';
 import Avatar from '../src/components/Avatar.jsx';
+import { ringSpreadPx } from './helpers/ringSpread.js';
 
 const PHOTO = 'data:image/png;base64,AAA';
 const img = (props) => render(<Avatar name="Child B" src={PHOTO} {...props} />).container.querySelector('img');
@@ -15,10 +16,21 @@ describe('Avatar ring', () => {
     expect(el.hasAttribute('data-child-ring')).toBe(true);
     expect(el.getAttribute('style')).toContain(`var(--child-${id})`);
     expect(el.getAttribute('style')).not.toContain('-night');
+    // The hook and the token name are not a ring: a 0px shadow has both and paints nothing (PR #1100 review).
+    expect(ringSpreadPx(el), 'the ring has a visible width').toBeGreaterThan(0);
+  });
+
+  test('ringSpreadPx reads the spread, and a zero-width shadow is not a ring (guards the guard)', () => {
+    const el = (style) => { const d = document.createElement('img'); d.setAttribute('style', style); return d; };
+    expect(ringSpreadPx(el('box-shadow: 0 0 0 3px var(--child-green)'))).toBe(3);
+    expect(ringSpreadPx(el('box-shadow: 0 0 0 0px var(--child-green)'))).toBe(0);
+    expect(ringSpreadPx(el('width: 8px'))).toBe(0);
   });
 
   test.each(IDS)('★ colour %s on the navy night card (surface="night"): the ring is the -night shade of --child-%s', (color, id) => {
-    expect(img({ color, surface: 'night' }).getAttribute('style')).toContain(`var(--child-${id}-night)`);
+    const el = img({ color, surface: 'night' });
+    expect(el.getAttribute('style')).toContain(`var(--child-${id}-night)`);
+    expect(ringSpreadPx(el), 'the ring has a visible width').toBeGreaterThan(0);
   });
 
   test.each([[undefined], [null], [''], ['not a colour']])('★ a photo with no usable colour (%j) is plain: no ring attribute, no shadow', (color) => {

@@ -117,6 +117,9 @@ export default function ChildSettings() {
     setRestored(false);
   }
 
+  // True when the colour is drawn as none (see the picker's comment): '' or any value that is not a hex we map.
+  const noColour = childColorId(form.color) === null;
+
   // The sleep camera picker (#655). Its options are EVERY camera assigned to this child, in tile order
   // (GET /cameras order), turned-off ones included and marked, because an admin may choose a camera that is
   // off for now: the choice takes effect once it is back on. Shown only when there is a choice to make (two
@@ -275,11 +278,15 @@ export default function ChildSettings() {
                     one the stored colour MEANS (childColorId: a legacy or custom hex marks its nearest swatch), and merely
                     opening and saving never rewrites `form.color`: it only changes when a swatch is pressed, and then to
                     that swatch's own stored hex. Each is a 44px button named by its hue; the selected one also carries a
-                    check and a heavier ring, so the colour is never the only signal. The first button, "No colour", stores ''
+                    check and a heavier outline, so the colour is never the only signal. The first button, "No colour", stores ''
                     (the child then has a plain photo and the brand-colour initials disc); it is marked by a slashed circle,
-                    not by colour, and when chosen it takes the same check and heavier ring. */}
+                    not by colour, and the slashed circle stays in BOTH states (chosen or not) so the mark that says "none" is
+                    never hidden: the choice is shown by the same heavier outline the swatches use, with no check.
+                    It is pressed whenever no swatch is (`childColorId` is null): that is '' AND a stored value that is not a
+                    hex we map (a legacy row), which is drawn as no colour everywhere, so the picker must say so too. The stored
+                    value is still not rewritten until a button is pressed. */}
                 <div role="group" aria-labelledby="child-colour-label" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  <button type="button" aria-label="No colour" aria-pressed={form.color === ''}
+                  <button type="button" aria-label="No colour" aria-pressed={noColour}
                     onClick={() => setForm({ ...form, color: '' })}
                     style={{
                       width: 44, height: 44, padding: 0, background: 'none', border: 'none', cursor: 'pointer',
@@ -288,9 +295,9 @@ export default function ChildSettings() {
                     <span aria-hidden="true" style={{
                       width: 34, height: 34, borderRadius: '50%', boxSizing: 'border-box', border: '2px solid var(--text-secondary)',
                       color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      boxShadow: form.color === '' ? '0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--text-primary)' : 'none',
+                      boxShadow: noColour ? '0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--text-primary)' : 'none',
                     }}>
-                      {form.color === '' ? <Check size={18} strokeWidth={3} /> : <Ban size={18} strokeWidth={2.5} />}
+                      <Ban size={18} strokeWidth={2.5} />
                     </span>
                   </button>
                   {CHILD_COLORS.map((c) => {

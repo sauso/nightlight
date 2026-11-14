@@ -10,6 +10,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { Routes, Route } from 'react-router-dom';
 import { renderAs, ADMIN } from './helpers/render.jsx';
 import AvatarEditor from '../src/components/AvatarEditor.jsx';
+import { ringSpreadPx } from './helpers/ringSpread.js';
 import ChildSettings from '../src/pages/ChildSettings.jsx';
 import Account from '../src/pages/Account.jsx';
 import UserSettings from '../src/pages/UserSettings.jsx';
@@ -54,6 +55,7 @@ describe('AvatarEditor', () => {
     expect(img.hasAttribute('data-child-ring')).toBe(true);
     expect(img.getAttribute('style')).toContain('var(--child-blue)');
     expect(img.getAttribute('style')).not.toContain('-night');
+    expect(ringSpreadPx(img), 'the ring has a visible width').toBeGreaterThan(0);
     expect(container.querySelector('.avatar-editor__badge')).not.toBeNull();
     expect(screen.getByLabelText('Change photo').type).toBe('file');
     expect(container.querySelector('.avatar-editor').style.width).toBe('88px');

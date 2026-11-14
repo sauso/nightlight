@@ -24,6 +24,7 @@ import { Routes, Route, useLocation } from 'react-router-dom';
 import { renderAs, renderAsAdmin, ADMIN, CAREGIVER } from './helpers/render.jsx';
 import ChildSettings from '../src/pages/ChildSettings.jsx';
 import { api } from '../src/lib/api.js';
+import { ringSpreadPx } from './helpers/ringSpread.js';
 
 const KID = {
   id: 'kid-1',
@@ -299,7 +300,7 @@ describe('the colour picker', () => {
     expect(screen.getByRole('button', { name: 'Blue' }).querySelector('svg')).toBeNull();
   });
 
-  test('★ the swatches show the theme-aware shades the cards use, not the stored pastels', async () => {
+  test('★ the swatches show the theme-aware shades the avatar and its photo ring use, not the stored pastels', async () => {
     mount();
     await screen.findByLabelText('Name');
     const disc = (name) => screen.getByRole('button', { name }).querySelector('span');
@@ -356,14 +357,44 @@ describe('the colour picker', () => {
       expect(none.style.width).toBe('44px');
       expect(none.style.height).toBe('44px');
       expect(none.getAttribute('aria-pressed')).toBe('false');
-      expect(none.querySelector('svg'), 'the slashed-circle mark').not.toBeNull();
+      expect(none.querySelector('.lucide-ban'), 'the slashed-circle mark, not chosen').not.toBeNull();
+    });
+
+    test('★ the slashed circle is on "No colour" in BOTH states, and the chosen state is not a check in its place', async () => {
+      const { user } = mount(); // starts on a colour
+      await screen.findByLabelText('Name');
+      const none = () => screen.getByRole('button', { name: 'No colour' });
+      expect(none().querySelector('.lucide-ban')).not.toBeNull();
+      expect(none().getAttribute('aria-pressed')).toBe('false');
+      await user.click(none());
+      expect(none().getAttribute('aria-pressed')).toBe('true');
+      expect(none().querySelector('.lucide-ban'), 'still the slashed circle once chosen').not.toBeNull();
+      expect(none().querySelector('.lucide-check'), 'no check hides the slash').toBeNull();
+      expect(none().querySelector('span').style.boxShadow, 'the selected outline the swatches use').not.toBe('none');
+      await user.click(screen.getByRole('button', { name: 'Blue' }));
+      expect(none().getAttribute('aria-pressed')).toBe('false');
+      expect(none().querySelector('.lucide-ban')).not.toBeNull();
+    });
+
+    test('★ a stored colour that is not a hex we map (a legacy row) is drawn as none, so "No colour" is pressed and no swatch is; saving untouched sends it unchanged', async () => {
+      const { user } = mount({ kid: { ...KID, color: 'rebeccapurple' } });
+      const name = await screen.findByLabelText('Name');
+      expect(pressed()).toEqual(['No colour']);
+      expect(document.querySelector('.avatar-editor [data-child-ring]'), 'drawn as none: a plain photo').toBeNull();
+      await user.clear(name);
+      await user.type(name, 'Renamed');
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+      await waitFor(() => expect(putSpy).toHaveBeenCalled());
+      expect(putSpy.mock.calls[0][1].color, 'not rewritten to "" or a swatch').toBe('rebeccapurple');
     });
 
     test('★ a child stored with no colour shows "No colour" pressed (not yellow), and saving untouched sends the empty colour', async () => {
       const { user } = mount({ kid: { ...KID, color: '' } });
       const name = await screen.findByLabelText('Name');
       expect(pressed()).toEqual(['No colour']);
-      expect(screen.getByRole('button', { name: 'No colour' }).querySelector('svg')).not.toBeNull();
+      // The slashed circle stays when "No colour" is chosen: selection is shown by the outline, not by swapping the mark for a
+      // check (PR #1100 review: the chosen state then had nothing that said "none").
+      expect(screen.getByRole('button', { name: 'No colour' }).querySelector('.lucide-ban'), 'the slashed circle, chosen').not.toBeNull();
       await user.clear(name);
       await user.type(name, 'Renamed');
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -398,6 +429,7 @@ describe('the colour picker', () => {
       await screen.findByLabelText('Name');
       expect(ringed(), 'a photo and a colour: ringed').not.toBeNull();
       expect(ringed().getAttribute('style')).toContain('var(--child-green)');
+      expect(ringSpreadPx(ringed()), 'the ring has a visible width').toBeGreaterThan(0);
       await user.click(screen.getByRole('button', { name: 'No colour' }));
       expect(ringed(), 'no colour: a plain photo').toBeNull();
       await user.click(screen.getByRole('button', { name: 'Blue' }));

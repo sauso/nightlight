@@ -15,6 +15,7 @@ import { renderAs, renderAsAdmin, renderAsCaregiver, forEachRole } from './helpe
 import Children from '../src/pages/Children.jsx';
 import ChildDetail from '../src/pages/ChildDetail.jsx';
 import { api } from '../src/lib/api.js';
+import { ringSpreadPx } from './helpers/ringSpread.js';
 
 const KIDS = [
   { id: 'kid-1', name: 'Child B', birthday: '2023-03-01', color: '#f4c56a', photo: null },
@@ -252,6 +253,7 @@ describe('a child detail screen', () => {
       await screen.findByText('Child A Room');
       expect(container.querySelector('.night__avatar-btn img').hasAttribute('data-child-ring')).toBe(true);
       expect(ringStyle(container)).toContain('var(--child-green-night)');
+      expect(ringSpreadPx(container.querySelector('.night__avatar-btn img')), 'the ring has a visible width').toBeGreaterThan(0);
       // Guards: the card ring of the first attempt (`night--ringed`, `--child-ring`) must not come back.
       expect(night(container).className).toBe('night');
       expect(night(container).getAttribute('style')).toBeNull();

@@ -5,6 +5,7 @@ import { renderAsAdmin } from './helpers/render.jsx';
 import Children from '../src/pages/Children.jsx';
 import { useLiveSleep } from '../src/lib/useLiveSleep.js';
 import { api } from '../src/lib/api.js';
+import { ringSpreadPx } from './helpers/ringSpread.js';
 
 const FIRST = { id: 'first', name: 'First child', birthday: null };
 const SECOND = { id: 'second', name: 'Second child', birthday: null };
@@ -98,6 +99,7 @@ describe('Children list sleep', () => {
     // The list card is the themed surface: the themed token, not the -night one the navy card uses.
     expect(photoStyle()).toContain(`var(--child-${id})`);
     expect(photoStyle()).not.toContain('-night');
+    expect(ringSpreadPx(img), 'the ring has a visible width').toBeGreaterThan(0);
     expect(card().className).toBe('child-card');
     expect(card().getAttribute('style')).toBeNull();
   });

@@ -206,8 +206,10 @@ decoration; the card's text and accessible name are unchanged).
 
 **The picker** (`ChildSettings.jsx`): seven 44px buttons. The first is **No colour** (a slashed circle, so it is not told apart by
 colour), then six named by their hue ("Yellow"), each with `aria-pressed` and a 34px disc in the themed shade; the chosen one
-carries a check and a heavier ring. A new child starts on yellow, as before; opening a child and saving without touching the picker
-sends exactly the stored value, including none.
+carries a check and a heavier outline (a chosen **No colour** keeps its slashed circle, with the same outline and no check, so the mark
+that says "none" is never hidden). **No colour** is also the pressed one when the stored value is not a hex we map (a legacy row),
+since that is drawn as none everywhere. A new child starts on yellow, as before; opening a child and saving without touching the
+picker sends exactly the stored value (including none, or such a legacy value) unchanged.
 
 ### Band colours
 
