@@ -140,7 +140,8 @@ export default function SettingsEsphome() {
               port: candidate.port, encrypted: candidate.encrypted === true } });
           }} />
 
-        <h2 className="section-title dev-card-list-title">Your devices <span>{list ? list.length : 0} of {MAX_DEVICES}</span></h2>
+        {/* No "n of 8" counter (owner, 2026-11-15): it read as "2 of 8 devices found were added". The limit is still stated when it is reached (below). */}
+        <h2 className="section-title">Your devices</h2>
 
         {list === null && !devices.error && <div className="camera-tile__sub" role="status">Loading…</div>}
         {list === null && devices.error && (
