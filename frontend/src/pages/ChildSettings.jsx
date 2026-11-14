@@ -6,7 +6,7 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import MoreMenu from '../components/MoreMenu.jsx';
 import ModalActions from '../components/ModalActions.jsx';
-import { Check, Trash2 } from 'lucide-react';
+import { Ban, Check, Trash2 } from 'lucide-react';
 import AvatarEditor from '../components/AvatarEditor.jsx';
 import Modal from '../components/Modal.jsx';
 import SwitchRow from '../components/SwitchRow.jsx';
@@ -16,8 +16,10 @@ import { useDraftKey, useFormDraft } from '../lib/useFormDraft.js';
 import { fileToAvatarDataUrl } from '../lib/imageResize.js';
 import { CHILD_COLORS, childColorId } from '../lib/childColors.js';
 
-// The colour a new child starts with, and what an existing child without one is shown as. The STORED value stays the picker's
-// own hex (lib/childColors.js): the server and the database are unchanged; only how it is drawn became theme-aware.
+// The colour a new child starts with, and what a child whose record carries no colour field at all is shown as. The STORED
+// value stays the picker's own hex (lib/childColors.js): the server and the database are unchanged; only how it is drawn became
+// theme-aware. A child can also have NO colour, stored as '' (owner, 2026-11-15, "No colour" in the picker): '' is a real value
+// here and must never be replaced by this default, on load or when a draft is restored.
 const DEFAULT_COLOR = CHILD_COLORS[0].stored;
 
 // Add / edit a child on its own routed screen, reached from the Children tab (or a child's detail
@@ -88,7 +90,7 @@ export default function ChildSettings() {
     if (isNew || initedRef.current || !kid) return;
     initedRef.current = true;
     const loaded = {
-      name: kid.name, birthday: kid.birthday || '', color: kid.color || DEFAULT_COLOR, photo: kid.photo || null,
+      name: kid.name, birthday: kid.birthday || '', color: typeof kid.color === 'string' ? kid.color : DEFAULT_COLOR, photo: kid.photo || null,
       track_sleep: kid.track_sleep == null ? true : !!kid.track_sleep,
       sleep_window_start: kid.sleep_window_start || '19:00',
       sleep_window_end: kid.sleep_window_end || '07:00',
@@ -273,8 +275,24 @@ export default function ChildSettings() {
                     one the stored colour MEANS (childColorId: a legacy or custom hex marks its nearest swatch), and merely
                     opening and saving never rewrites `form.color`: it only changes when a swatch is pressed, and then to
                     that swatch's own stored hex. Each is a 44px button named by its hue; the selected one also carries a
-                    check and a heavier ring, so the colour is never the only signal. */}
+                    check and a heavier ring, so the colour is never the only signal. The first button, "No colour", stores ''
+                    (the child then has a plain photo and the brand-colour initials disc); it is marked by a slashed circle,
+                    not by colour, and when chosen it takes the same check and heavier ring. */}
                 <div role="group" aria-labelledby="child-colour-label" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  <button type="button" aria-label="No colour" aria-pressed={form.color === ''}
+                    onClick={() => setForm({ ...form, color: '' })}
+                    style={{
+                      width: 44, height: 44, padding: 0, background: 'none', border: 'none', cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                    <span aria-hidden="true" style={{
+                      width: 34, height: 34, borderRadius: '50%', boxSizing: 'border-box', border: '2px solid var(--text-secondary)',
+                      color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: form.color === '' ? '0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--text-primary)' : 'none',
+                    }}>
+                      {form.color === '' ? <Check size={18} strokeWidth={3} /> : <Ban size={18} strokeWidth={2.5} />}
+                    </span>
+                  </button>
                   {CHILD_COLORS.map((c) => {
                     const selected = childColorId(form.color) === c.id;
                     return (
@@ -296,7 +314,7 @@ export default function ChildSettings() {
                   })}
                 </div>
                 <div className="camera-tile__sub" style={{ marginTop: 6 }}>
-                  The ring around this child's cards, and their initials when no photo is set.
+                  The ring around this child's photo, and the colour of their initials when no photo is set. "No colour" leaves the photo plain.
                 </div>
               </div>
             </div>

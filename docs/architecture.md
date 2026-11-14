@@ -308,7 +308,9 @@ camera-specific exposure tests cover those. The validation behind the settings, 
 routes (documented ranges, `#RRGGBB` colours, known timezones, the 12-hour snooze cap, no second enrolment
 while MFA is on) is pinned in `backend/test/input-validation.test.js`.
 
-A child's **colour** must be `#RRGGBB` and **birthday** a real `YYYY-MM-DD` date (blank still means default /
+A child's **colour** must be `#RRGGBB`, or the empty string for "no colour" (optional since 2026-11-15: `''` stores `''` on POST and
+clears the colour on PUT; absent or `null` still means the default on POST and "keep" on PUT, and `''` needs no migration because the column is
+`NOT NULL` and `''` satisfies it), and **birthday** a real `YYYY-MM-DD` date (blank still means default /
 clear), and an avatar **photo** (child or user) must be a base64 `data:image/jpeg`, `png` or `webp` URL of at
 most 90 KB (#555). The photo cap is 90 KB, not the 700 KB it once said, because `express.json()` refuses a body
 over its 100 KB default first. For colour, birthday and photo, a value identical to the one stored is accepted

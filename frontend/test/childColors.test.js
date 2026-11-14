@@ -27,13 +27,13 @@ describe('childColorId', () => {
     expect(childColorId('#d0a070')).toBe('orange');
   });
 
-  test('★ no colour, or something that is not #RRGGBB, is null (the caller draws nothing)', () => {
+  test('★ no colour (absent, null or the empty string a child with "No colour" is stored with), or something that is not #RRGGBB, is null (the caller draws no ring and an accent disc)', () => {
     for (const bad of [undefined, null, '', 'red', '#fff', '#12345', '#1234567', 123456, {}]) expect(childColorId(bad), String(bad)).toBeNull();
   });
 });
 
 describe('childColorVars', () => {
-  test('gives the theme tokens for the colour: fill, initials, list-card ring and night-card ring', () => {
+  test('gives the theme tokens for the colour: fill, initials, the photo ring and the photo ring on the navy night card', () => {
     expect(childColorVars('#7FBFA3')).toEqual({
       id: 'green', fill: 'var(--child-green)', on: 'var(--child-green-on)', ring: 'var(--child-green)', ringOnNight: 'var(--child-green-night)',
     });

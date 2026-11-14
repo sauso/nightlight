@@ -65,6 +65,18 @@ describe('child form', () => {
     expect(screen.getByLabelText(/Birthday/).value).toBe('2023-04-01');
   });
 
+  test('★ "No colour" chosen and not saved comes back after a reload as none, not as the default or the stored colour', async () => {
+    const first = mountChild();
+    await first.user.click(await screen.findByRole('button', { name: 'No colour' }));
+    first.unmount();
+
+    mountChild();
+    await screen.findByLabelText('Name');
+    expect(screen.getByRole('button', { name: 'No colour' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Green' }).getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByText('Unsaved changes restored.')).toBeInTheDocument();
+  });
+
   test('an untouched form stores nothing and shows no notice', async () => {
     const first = mountChild();
     await screen.findByLabelText('Name');

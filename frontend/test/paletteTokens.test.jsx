@@ -332,9 +332,8 @@ describe('the navy neutrals and the band colours (owner, 2026-11-13, design v3)'
     // here. Every place that declares one of the pinned tokens is therefore listed; the only deliberate exceptions are named:
     //   .night declares the --night-* custom properties, including search-card error text (and nothing else of the palette).
     // There are no others on this branch. Custom properties set in JSX style props are out of reach of this check.
-    const pinned = /^--(?:bg|bg-elevated|bg-elevated-2|field-bg|text-primary|text-secondary|border|bar|bar-text|on-accent|band-[a-z-]+|sleep-[a-z-]+|night-[a-z-]+|child-(?!ring$)[a-z]+(?:-on|-night)?)$/;
-    // The child colours (--child-<id>, -on, -night) are pinned too, so a later override elsewhere fails here. --child-ring is NOT:
-    // it is a per-element value (set by an inline style and read by the ring rules), not a palette token.
+    const pinned = /^--(?:bg|bg-elevated|bg-elevated-2|field-bg|text-primary|text-secondary|border|bar|bar-text|on-accent|band-[a-z-]+|sleep-[a-z-]+|night-[a-z-]+|child-[a-z]+(?:-on|-night)?)$/;
+    // The child colours (--child-<id>, -on, -night) are pinned too, so a later override elsewhere fails here.
     //   .night--<band> sets --night-tint (the tint colour, one of that band's --band-*-ring tokens) inside the @supports block that
     //           guards color-mix; the next test and "each band class feeds the tint from its own ring colour" pin its value.
     const allowed = (selector, token) => {
@@ -907,13 +906,13 @@ describe('the default avatar', () => {
   });
 });
 
-// Child colours (owner, 2026-11-15): six hues drawn as theme-aware tokens (lib/childColors.js). A ring or a disc is a graphic and
-// needs 3:1 against what it sits on; initials on the disc are text and need 4.5:1. Every pair is recomputed from the stylesheet's
+// Child colours (owner, 2026-11-15): six hues drawn as theme-aware tokens (lib/childColors.js). The ring around a child's PHOTO (and
+// the initials disc) is a graphic and needs 3:1 against what it sits on; initials on the disc are text and need 4.5:1. Every pair is recomputed from the stylesheet's
 // own values, in both themes, so a colour edit that makes one too faint fails here. The numbers are in docs/design-language.md.
-describe('child colours: the ring, the avatar disc and the initials on it', () => {
+describe('child colours: the photo ring, the avatar disc and the initials on it', () => {
   const IDS = ['yellow', 'green', 'blue', 'pink', 'orange', 'violet'];
   // The night card's gradient, lightest stop first (contrast only rises towards the darker end), and the five band washes
-  // (`.night--<band>`, 12%) that can lighten it. The ring is the card's border, drawn over the gradient AND its wash.
+  // (`.night--<band>`, 12%) that can lighten it. The photo ring on the night card is drawn over the gradient AND its wash.
   const washes = BANDS.map((band) => tint(day[`--band-${band}-ring`], 0.12, gradientLight));
 
   test('every colour has a fill, initials text and a night ring in the stylesheet (and the dark block redefines the fill)', () => {
@@ -925,7 +924,8 @@ describe('child colours: the ring, the avatar disc and the initials on it', () =
     }
   });
 
-  test.each(IDS)('★ %s: the ring and disc clear 3:1 on the card and on the page, in both themes', (id) => {
+  // The photo ring (Avatar, themed shade) sits on the list card and the edit screens' card or page.
+  test.each(IDS)('★ %s: the photo ring and disc clear 3:1 on the card and on the page, in both themes', (id) => {
     for (const [name, t] of [['day', day], ['night', night]]) {
       for (const surface of ['--bg-elevated', '--bg']) {
         expect(contrast(t[`--child-${id}`], t[surface]), `${name} --child-${id} on ${surface}`).toBeGreaterThanOrEqual(3);
@@ -939,7 +939,7 @@ describe('child colours: the ring, the avatar disc and the initials on it', () =
     }
   });
 
-  test.each(IDS)('★ %s: the ring on the always-navy night card clears 3:1, on the gradient and under every band wash', (id) => {
+  test.each(IDS)('★ %s: the photo ring on the always-navy night card clears 3:1, on the gradient and under every band wash', (id) => {
     const ring = day[`--child-${id}-night`];
     expect(contrast(ring, gradientLight), 'bare gradient, its lightest stop').toBeGreaterThanOrEqual(3);
     for (const wash of washes) expect(contrast(ring, wash), `under a band wash ${wash}`).toBeGreaterThanOrEqual(3);
@@ -961,39 +961,6 @@ describe('child colours: the ring, the avatar disc and the initials on it', () =
       expect(contrast(t['--bg-elevated'], t['--text-primary']), `${name} glyph on disc`).toBeGreaterThanOrEqual(4.5);
       expect(contrast(t['--text-primary'], t['--bg-elevated']), `${name} disc on the card/ring`).toBeGreaterThanOrEqual(3);
     }
-  });
-
-  // The ring is the card's border, so it must not change the card's size or move what is inside it: border + padding on each side
-  // has to add up to what the plain card had. Derived from the plain rules, so a padding edit to either side is caught.
-  test.each([['.night', '.night--ringed', 'night card'], ['.child-card', '.child-card--ringed', 'list card']])(
-    '★ %s: the ring (%s) keeps border + padding, so the card does not resize or shift its content', (plainSel, ringSel) => {
-      const sides = (rule) => {
-        const border = Number((rule.match(/(?:^|[ ;{])border:\s*(\d+)px solid/) || [])[1] || 0);
-        const pad = (rule.match(/(?:^|[ ;{])padding:\s*([\d.px ]+);/) || [])[1].trim().split(/\s+/).map((v) => parseFloat(v));
-        const [top, right = top, bottom = top, left = right] = pad;
-        return [top + border, right + border, bottom + border, left + border];
-      };
-      const plain = rules.find((rule) => rule.startsWith(`${plainSel} {`));
-      const ring = rules.find((rule) => rule.startsWith(`${ringSel} {`));
-      expect(plain, 'plain rule').toBeTruthy();
-      expect(ring, 'ring rule').toMatch(/border:\s*2px solid var\(--child-ring\)/);
-      expect(sides(ring)).toEqual(sides(plain));
-    });
-
-  // The ring is read against the navy on its inside, but its outside edge sits on the page, which is pale in the light theme, where
-  // the pastel -night shades are only 1.48 to 2.53:1 (Codex review of PR #1098). A 1px hairline just outside the ring (the first
-  // box-shadow layer: a spread, so it takes no layout) gives the card a distinct edge there. Recomputed from the real rule.
-  test('★ the ringed night card has a 1px outer hairline that clears 3:1 on the light page (the ring alone does not)', () => {
-    const ring = rules.find((rule) => rule.startsWith('.night--ringed {'));
-    expect(ring, 'ring rule').toBeTruthy();
-    const layers = (ring.match(/box-shadow:\s*([^;]+)/) || [])[1];
-    expect(layers, 'the ring rule declares a box-shadow').toBeTruthy();
-    const hairline = layers.match(/^0 0 0 1px (#[0-9a-fA-F]{6})\s*(?:,|$)/);
-    expect(hairline, `the first box-shadow layer is a 1px spread in a hex colour: ${layers}`).toBeTruthy();
-    expect(contrast(hairline[1].toLowerCase(), day['--bg']), 'hairline on the light page').toBeGreaterThanOrEqual(3);
-    // The plain card's drop shadow is kept as a later layer (a later box-shadow replaces the whole value).
-    const plainShadow = (rules.find((rule) => rule.startsWith('.night {')).match(/box-shadow:\s*([^;]+)/) || [])[1];
-    expect(layers).toContain(plainShadow);
   });
 });
 

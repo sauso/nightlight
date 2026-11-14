@@ -46,6 +46,31 @@ describe('AvatarEditor', () => {
     expect(onChange.mock.calls[0][0].target.files[0].name).toBe('face.png');
   });
 
+  // A child's colour is the ring around the PHOTO (owner, 2026-11-15). The ring is a box-shadow outside the avatar's box, so the
+  // label, the camera badge and the invisible file input (which all size themselves to the avatar) are unchanged by it.
+  test('★ a photo with a colour is ringed in the themed token; the badge and the file input are still there, unchanged', () => {
+    const { container } = mount({ src: 'data:image/png;base64,AAA', color: '#8A9FE0' });
+    const img = container.querySelector('img');
+    expect(img.hasAttribute('data-child-ring')).toBe(true);
+    expect(img.getAttribute('style')).toContain('var(--child-blue)');
+    expect(img.getAttribute('style')).not.toContain('-night');
+    expect(container.querySelector('.avatar-editor__badge')).not.toBeNull();
+    expect(screen.getByLabelText('Change photo').type).toBe('file');
+    expect(container.querySelector('.avatar-editor').style.width).toBe('88px');
+  });
+
+  test.each([[undefined], [null], ['']])('★ a photo with no colour (%j) is plain: no ring', (color) => {
+    const { container } = mount({ src: 'data:image/png;base64,AAA', color });
+    expect(container.querySelector('[data-child-ring]')).toBeNull();
+    expect(container.querySelector('img').getAttribute('style')).not.toContain('box-shadow');
+  });
+
+  test('no photo: the colour fills the initials disc and nothing is ringed', () => {
+    const { container } = mount({ color: '#8A9FE0' });
+    expect(container.querySelector('[data-child-ring]')).toBeNull();
+    expect(container.querySelector('.avatar-editor span').getAttribute('style')).toContain('var(--child-blue)');
+  });
+
   test('the camera badge is decoration: hidden from assistive technology, and the picker is only images', () => {
     const { container } = mount();
     const badge = container.querySelector('.avatar-editor__badge');

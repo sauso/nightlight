@@ -5,7 +5,8 @@
 // The router and database are real. Each refusal also asserts NOTHING was written, because a 400 that still
 // stored the row would look right from the response alone.
 //
-// What is pinned as UNCHANGED: blank/omitted colour and birthday still mean default / keep / clear, a value equal to
+// What is pinned as UNCHANGED: an omitted or null colour, and a blank birthday, still mean default / keep / clear (an EMPTY
+// colour now means "no colour", see the tests below), a value equal to
 // the stored one is accepted (the edit form re-sends the whole record), and the colours the app's own palette
 // sends and the date <input type="date"> sends pass.
 import { test, before, after, beforeEach, describe } from 'node:test';
@@ -73,14 +74,57 @@ describe('colour', () => {
     assert.equal(created.body.color, '#ABCDEF');
   });
 
-  test('blank or omitted colour keeps the default on POST and the stored value on PUT, as before', async () => {
+  test('an omitted or null colour keeps the default on POST and the stored value on PUT, as before', async () => {
     const created = await post({ name: 'New' });
     assert.equal(created.status, 201);
     assert.equal(created.body.color, '#F5D9A8');
-    for (const blank of [null, '']) {
-      assert.equal((await put({ name: 'Original', color: blank })).status, 200);
+    const createdNull = await post({ name: 'New null', color: null });
+    assert.equal(createdNull.status, 201);
+    assert.equal(createdNull.body.color, '#F5D9A8');
+    for (const unsent of [null, undefined]) {
+      assert.equal((await put({ name: 'Original', color: unsent })).status, 200);
       assert.equal(row().color, '#7FBFA3');
     }
+    // A partial PUT that never mentions the colour (the photo-only save) must not touch it either.
+    assert.equal((await put({ name: 'Original' })).status, 200);
+    assert.equal(row().color, '#7FBFA3');
+  });
+
+  // The colour is optional (owner, 2026-11-15): '' is "no colour", stored as '' (no migration: the column is NOT NULL and '' satisfies it).
+  // Before this, a POST of '' stored the gold default and a PUT of '' silently kept the old colour, so a child could never have none.
+  test('POST with an empty colour creates a child with no colour, and GET returns it', async () => {
+    const created = await post({ name: 'No colour' });
+    const none = await post({ name: 'Plain', color: '' });
+    assert.equal(none.status, 201);
+    assert.equal(none.body.color, '');
+    assert.equal(db.prepare('SELECT color FROM children WHERE id = ?').get(none.body.id).color, '');
+    assert.equal(created.body.color, '#F5D9A8', 'a sibling created without a colour still gets the default');
+    const list = await call(`${server.url}/api/children`, { token });
+    assert.equal(list.body.find((c) => c.id === none.body.id).color, '', 'the list returns the empty colour as it is stored');
+  });
+
+  test('PUT with an empty colour clears it, a later hex sets it again, and re-sending the cleared value is fine', async () => {
+    assert.equal((await put({ color: '' })).status, 200);
+    assert.equal(row().color, '');
+    assert.equal((await put({ name: 'Renamed', color: '' })).status, 200, 'the edit form re-sends the stored empty colour');
+    assert.equal(row().color, '');
+    assert.equal((await put({ name: 'Renamed' })).status, 200);
+    assert.equal(row().color, '', 'a PUT that does not mention the colour leaves a cleared colour cleared');
+    assert.equal((await put({ color: '#8A9FE0' })).status, 200);
+    assert.equal(row().color, '#8A9FE0');
+  });
+
+  test('a refused colour does not change a cleared colour either', async () => {
+    assert.equal((await put({ color: '' })).status, 200);
+    for (const bad of ['red', '#abc']) {
+      assert.equal((await put({ color: bad })).status, 400);
+      assert.equal(row().color, '');
+    }
+  });
+
+  test('an old client that sends the stored hex back unchanged still passes', async () => {
+    assert.equal((await put({ name: 'Original', color: '#7FBFA3' })).status, 200);
+    assert.equal(row().color, '#7FBFA3');
   });
 
   test('a colour stored before this check is accepted when re-sent unchanged, refused when changed to another bad one', async () => {
