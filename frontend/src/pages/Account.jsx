@@ -4,6 +4,7 @@ import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.jsx';
 import { getTheme, setTheme, subscribeTheme } from '../lib/theme.js';
 import Modal from '../components/Modal.jsx';
+import ModalActions from '../components/ModalActions.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import SwitchRow from '../components/SwitchRow.jsx';
 import AvatarEditor from '../components/AvatarEditor.jsx';
@@ -355,9 +356,11 @@ export default function Account() {
                 required
               />
             </div>
-            <button className="btn btn-primary" type="submit" disabled={busy}>
-              {busy ? 'Saving…' : 'Update password'}
-            </button>
+            <ModalActions>
+              <button className="btn btn-primary" type="submit" disabled={busy}>
+                {busy ? 'Saving…' : 'Update password'}
+              </button>
+            </ModalActions>
           </form>
         </Modal>
       )}

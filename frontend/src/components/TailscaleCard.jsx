@@ -8,6 +8,7 @@ import { probeLowLatency } from '../lib/webrtcProbe.js';
 import { copyText } from '../lib/copyText.js';
 import LoadFailed from './LoadFailed.jsx';
 import Modal from './Modal.jsx';
+import ModalActions from './ModalActions.jsx';
 
 const NETWORK_DOCS = 'https://github.com/sauso/nightlight/blob/main/docs/networking.md';
 
@@ -232,9 +233,12 @@ export default function TailscaleCard({ compact = false, publicHostSet = false, 
           : confirm === 'serve-disable' ? 'The secure address will stop working until you turn it on again.'
             : 'Viewers will lose this Tailscale connection. Watching at home still works.'}</p>
       {originIsTailnet && <p>You are viewing this page through Tailscale, so it will stop loading until Tailscale is set up again. Open Nightlight from your home network to do that.</p>}
-      <div className="tailscale-actions"><button className="btn btn-secondary" type="button" onClick={() => setConfirm(null)}>Cancel</button>
+      <ModalActions>
+        <button className="btn btn-secondary" type="button" onClick={() => setConfirm(null)}>Cancel</button>
         <button className="btn btn-danger" type="button" disabled={disabled} onClick={async () => { const done = confirm === 'disable' ? await setEnabled(false) : await act(confirm); if (done) setConfirm(null); }}>
-          {confirm === 'reset' ? 'Reset identity' : confirm === 'logout' ? 'Log out' : confirm === 'serve-disable' ? 'Turn off address' : 'Turn off'}</button></div>
+          {confirm === 'reset' ? 'Reset identity' : confirm === 'logout' ? 'Log out' : confirm === 'serve-disable' ? 'Turn off address' : 'Turn off'}
+        </button>
+      </ModalActions>
     </Modal>}
   </section>;
 }

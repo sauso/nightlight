@@ -504,10 +504,12 @@ function NightContent({ night, fmtTime, tz, tempUnit, childId, date, onAlertProt
     );
   }
 
+  // UI consistency (PR-C): the in-progress, still-asleep value sits under the label "Asleep" (below), so it says only
+  // "<time>, ongoing"; it used to read "asleep since <time> (ongoing)" and repeat the word right under its own label.
   const range = night.in_progress
     ? night.wake_at
       ? `${fmtTime(night.onset_at)} – awake since ${fmtTime(night.wake_at)}`
-      : `asleep since ${fmtTime(night.onset_at)} (ongoing)`
+      : `${fmtTime(night.onset_at)}, ongoing`
     : night.wake_at
       ? `${fmtTime(night.onset_at)} – ${fmtTime(night.wake_at)}`
       : `from ${fmtTime(night.onset_at)} · still asleep at ${fmtTime(night.window_end)}`;
@@ -636,10 +638,11 @@ function NightEventTabs({ wakes: allWakes, wakeCount, visits, alerts, wakeClips,
   };
   return (
     <div className="card sleep-events">
-      <div className="sleep-events__tabs" role="tablist" aria-label="Night events">
+      <div className="sleep-events__tabs seg-track seg-track--tabs" role="tablist" aria-label="Night events">
         {tabs.map((tab, index) => (
           <button key={tab} type="button" role="tab" id={tabId(tab)}
             aria-controls={panelId(tab)} aria-selected={selected === tab}
+            className={`seg-track__btn${selected === tab ? ' seg-track__btn--active' : ''}`}
             tabIndex={selected === tab ? 0 : -1} onClick={() => setSelected(tab)}
             onKeyDown={(event) => chooseFromKey(event, index)}>
             {tab === 'wakes' ? `Wake-ups · ${wakes.length}` : `Room activity · ${visits.length}`}

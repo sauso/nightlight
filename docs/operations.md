@@ -722,6 +722,8 @@ Keep cameras on their own network, as [cameras.md](cameras.md) says; that advice
 
 ## Logs
 
+Admins can also open **Settings → Logs** for recent alerts, camera history and the in-app log buffer. Its filter chips, search box, auto-refresh switches, and Refresh now and Clear log buttons have touch-sized controls. Clearing the in-app buffer does not clear Docker's logs. Inline links in explanatory paragraphs remain text links.
+
 Use Docker's logs to check what the app and MediaMTX are doing. Both log to stdout, which Docker captures:
 
 ```bash

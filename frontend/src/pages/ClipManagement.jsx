@@ -3,6 +3,7 @@ import { Zap, AudioLines, Play, Trash2, Lock } from 'lucide-react';
 import { api, SLOW_REQUEST_TIMEOUT_MS } from '../lib/api.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Modal from '../components/Modal.jsx';
+import ModalActions from '../components/ModalActions.jsx';
 import ClipDatePicker from '../components/ClipDatePicker.jsx';
 import LoadFailed from '../components/LoadFailed.jsx';
 import { loadState } from '../lib/loadState.js';
@@ -300,12 +301,12 @@ export default function ClipManagement() {
             Delete <strong>{selCount} clip{selCount === 1 ? '' : 's'}</strong>? This removes the video files; the
             alerts and their snapshots stay. It can’t be undone.
           </p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button className="btn" type="button" onClick={() => setConfirming(false)} disabled={busy}>Cancel</button>
+          <ModalActions>
+            <button className="btn btn-secondary" type="button" onClick={() => setConfirming(false)} disabled={busy}>Cancel</button>
             <button className="btn btn-danger" type="button" onClick={deleteSelected} disabled={busy}>
               {busy ? 'Deleting…' : `Delete ${selCount}`}
             </button>
-          </div>
+          </ModalActions>
         </Modal>
       )}
     </>

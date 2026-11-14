@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api.js';
 import Modal from './Modal.jsx';
-import Switch from './Switch.jsx';
+import SwitchRow from './SwitchRow.jsx';
+import ModalActions from './ModalActions.jsx';
 
 // Quick-filter chips: each just sets the existing text filter to a substring that matches the log tag
 // for that subsystem, so they need no new API surface and compose with the free-text box. Kept to the
@@ -70,13 +71,8 @@ export default function LogViewer() {
   return (
     <div className="log-viewer">
       <div className="log-viewer__toolbar">
-        <label className="log-viewer__toggle">
-          <Switch
-            checked={autoRefresh}
-            onChange={(e) => setAutoRefresh(e.target.checked)}
-          />
-          Auto-refresh
-        </label>
+        <SwitchRow label="Auto-refresh" checked={autoRefresh}
+          onChange={(e) => setAutoRefresh(e.target.checked)} />
         <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" className="icon-btn" onClick={load}>Refresh now</button>
           <button type="button" className="icon-btn" onClick={() => setConfirming(true)}>Clear log</button>
@@ -89,14 +85,14 @@ export default function LogViewer() {
             Clear the recent logs shown here? This empties the in-app buffer (it doesn't affect{' '}
             <code>docker logs</code>) and can't be undone.
           </p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button className="btn" type="button" onClick={() => setConfirming(false)} disabled={clearBusy}>
+          <ModalActions>
+            <button className="btn btn-secondary" type="button" onClick={() => setConfirming(false)} disabled={clearBusy}>
               Cancel
             </button>
             <button className="btn btn-danger" type="button" onClick={doClear} disabled={clearBusy}>
               {clearBusy ? 'Clearing…' : 'Clear log'}
             </button>
-          </div>
+          </ModalActions>
         </Modal>
       )}
       <div className="log-viewer__chips">

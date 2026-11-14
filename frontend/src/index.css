@@ -1607,6 +1607,23 @@ body.in-pip .tile-menu-backdrop {
 /* Which camera the night was scored from. Only one camera is analysed, so when a child has several this says which. */
 .sleep-detail__source { font-size: 12px; color: var(--text-secondary); }
 .card-heading { margin: 0 0 12px; color: var(--text-primary); font: 800 16px var(--font-display); }
+/* UI consistency (PR-C): the one dialog action row. Equal-width buttons (flex 1 1 0, so a long confirm label wraps instead of making one
+   button wider than the other) and a single action fills the row. The buttons themselves keep .btn (44px, PR-A). */
+.modal-actions { display: flex; gap: 8px; width: 100%; }
+.modal-actions > .btn { flex: 1 1 0; min-width: 0; }
+.seg-track--tabs { width: 100%; }
+/* The sleep detail tabs sit on a card, where the shared night track (--bg-elevated-2, #100f1c) is near-black against the card
+   (#221f3c, 1.20:1): the owner rejected exactly that look on these tabs on 2026-11-13. In the dark theme they keep the accent-tinted
+   track they had before the shared look (same token mix as the old .sleep-events__tabs). Measured from the token values: inactive
+   label (--text-secondary) on it 6.5:1, selected label (--on-accent on --accent) 6.7:1. The light theme keeps the shared track. */
+:root[data-theme='dark'] .seg-track--tabs { background: color-mix(in srgb, var(--accent-line) 12%, var(--bg-elevated)); }
+.seg-track--tabs .seg-track__btn { text-align: center; }
+/* UI consistency (PR-C): the Logs toolbars (Recent alerts, Camera history, Recent logs) are a SwitchRow plus two text buttons. At
+   phone width they do not fit on one line, so the row wraps and each control keeps its own 44px target (`--tap`) instead of
+   shrinking; the 6px/8px padding of a bare .icon-btn is far under a thumb (audit pattern 8). */
+.log-viewer__toolbar { flex-wrap: wrap; gap: 4px 12px; }
+.log-viewer__toolbar .switch-row { flex: 1 1 160px; }
+.log-viewer__toolbar .icon-btn { min-height: var(--tap); min-width: var(--tap); }
 .page-intro { font-size: 13px; color: var(--text-secondary); margin: 0 0 12px; }
 .form-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 20px; }
 .form-actions > .btn { width: 100%; }
@@ -1801,15 +1818,12 @@ body.in-pip .tile-menu-backdrop {
 .sleep-legend__sw.sleep-seg--wake { width: 4px; height: 14px; border-radius: 1px 1px 0 0; }
 
 .sleep-wakes { list-style: none; margin: 0; padding: 0; }
-/* The tab control: a light accent tint for the track and a stronger tint plus a 3px accent-line indicator for the selected tab, in both
-   themes. The track was --bg-elevated-2, which is the near-black inset (#100f1c) at night: an inactive tab read as a black hole next to the
-   raised selected one (owner, staging phone 2026-11-13; the same fault D2 fixed on the child page's buttons). The tints are mixes of
-   --accent-line over the card, so both themes follow it; the labels are --text-secondary / --text-primary on those mixes (checked
-   in the screenshots; no new colour literal). The selected state is never colour alone: the indicator bar and the heavier text say it. */
-.sleep-events__tabs { display: flex; gap: 3px; padding: 3px; margin-bottom: 12px; border-radius: 11px; background: color-mix(in srgb, var(--accent-line) 12%, var(--bg-elevated)); }
-.sleep-events__tabs [role="tab"] { flex: 1; min-height: 44px; padding: 8px 6px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
-.sleep-events__tabs [role="tab"][aria-selected="true"] { background: color-mix(in srgb, var(--accent-line) 26%, var(--bg-elevated)); color: var(--text-primary); font-weight: 750; box-shadow: inset 0 -3px 0 var(--accent-line); }
-.sleep-events__tabs [role="tab"]:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+/* The Wake-ups | Room activity tabs. UI consistency (PR-C): they take the shared .seg-track look (theme and unit pickers, the camera
+   screens) so every segmented control reads as one; the markup stays a tablist (role="tab", aria-selected, arrow keys) because the
+   tabs switch a panel rather than set a pressed value. The earlier accent-tinted track with its own 3px indicator is gone with that.
+   The owner flagged the near-black night track (--bg-elevated-2) on THESE tabs on 2026-11-13, so in the dark theme they override the
+   track fill (see .seg-track--tabs above). NOT checked on a phone: look at it at night before release. */
+.sleep-events__tabs { margin-bottom: 12px; }
 .sleep-events__empty { padding: 2px 2px 4px; }
 /* Room activity: ONE caption line (the kind the plain rows stand for) and the "What is this?" button, 44px tall; the full explanation opens
    under it. The dot is the timeline's room-activity teal (--sleep-visit), also the one on each plain row. */
@@ -2775,17 +2789,6 @@ button.sleep-wakes__thumbwrap:focus-visible { outline: 2px solid var(--accent-li
   margin-bottom: 2px;
 }
 
-.about-link {
-  text-decoration: none;
-  color: var(--text-primary);
-  font-size: 14px;
-}
-
-.about-link svg {
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
 /* --- Log viewer --- */
 .log-viewer__toolbar {
   display: flex;
@@ -3138,11 +3141,12 @@ input[type='range'] {
 .log-viewer__chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   margin-bottom: 8px;
 }
 
 .log-chip {
+  min-height: var(--tap);
   font-size: 12px;
   line-height: 1;
   padding: 6px 11px;
@@ -3174,6 +3178,7 @@ input[type='range'] {
 
 .log-viewer__filter {
   flex: 1;
+  min-height: var(--tap);
   background: var(--bg-elevated-2);
   border: 1px solid var(--border);
   color: var(--text-primary);
@@ -3797,9 +3802,9 @@ input[type='range'] {
 .logo-tile { display: inline-flex; flex-shrink: 0; background: var(--bar); border-radius: 25%; overflow: hidden; }
 .logo-tile img { display: block; width: 100%; height: 100%; }
 .logo-tile--glow { box-shadow: 0 8px 30px color-mix(in srgb, var(--accent) 18%, transparent); }
-.setup-checklist { list-style: none; padding: 0; margin: 8px 0; }
-.setup-checklist li { padding: 9px 0 9px 30px; position: relative; }
-.setup-checklist li::before { content: '✓'; position: absolute; left: 2px; color: var(--accent-text); font-weight: 800; }
+/* First-run welcome: plain bullets, not check marks. A tick means "done" everywhere else in the app and none of these steps is. */
+.setup-checklist { list-style: disc; padding-left: 24px; margin: 8px 0; }
+.setup-checklist li { padding: 9px 0; }
 .camera-connect { padding: 14px; }
 .camera-connect__title { margin: 0; font-size: 16px; font-weight: 700; overflow-wrap: anywhere; }
 .camera-connect__address { margin: 2px 0 12px; font-size: 13px; color: var(--text-secondary); }
@@ -3845,8 +3850,10 @@ input[type='range'] {
 .cameras-empty .btn { display: flex; align-items: center; justify-content: center; gap: 8px; }
 @media (hover: hover) { .camera-manual__trigger:hover { background: var(--child-action-hover); } }
 @media (prefers-reduced-motion: reduce) { .camera-manual__side svg { transition: none; } }
-.setup-summary { display: grid; gap: 10px; }
-.setup-summary div { display: flex; justify-content: space-between; gap: 10px; padding: 12px; background: var(--bg-elevated-2); border-radius: 10px; }
+/* Setup finish: the Child and Camera lines are two label/value rows inside one .card (rules between them), not two tinted pills. */
+.setup-summary { display: grid; gap: 0; }
+.setup-summary div { display: flex; justify-content: space-between; gap: 10px; padding: 12px 0; }
+.setup-summary div + div { border-top: 1px solid var(--border); }
 .setup-main--terminal { width: 100%; }
 /* Owner testing 2026-11-05 (Android app), two rounds. The banner is rendered by SetupGate ABOVE the page's header, so:
    1. it sat under the status bar (the header's env(safe-area-inset-top) padding does not cover it), and

@@ -1,22 +1,23 @@
 import { useEffect, useState } from 'react';
-import { ExternalLink, Heart } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Heart, Globe, GitBranch, Smartphone, FileText, Bug, Lightbulb, ClipboardList } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { getConnectionRoute } from '../lib/nativeBridge.js';
 import { useSettings } from '../lib/SettingsContext.jsx';
 import { useAuth } from '../lib/AuthContext.jsx';
 import AppHeader from '../components/AppHeader.jsx';
 import Logo from '../components/Logo.jsx';
+import NavRow from '../components/NavRow.jsx';
 import useSetupStatus from '../lib/useSetupStatus.js';
 
+// UI consistency (PR-C): each outside link is a NavRow (the shared row, with the external-link mark), so it needs an icon chip.
 const LINKS = [
-  { label: 'Website', url: 'https://nightlightbaby.app/' },
-  { label: 'GitHub — Nightlight', url: 'https://github.com/sauso/nightlight' },
-  { label: 'GitHub — Mobile app', url: 'https://github.com/sauso/nightlight-mobile' },
-  { label: 'Changelog', url: 'https://github.com/sauso/nightlight/blob/main/CHANGELOG.md' },
-  { label: 'Report an issue', url: 'https://github.com/sauso/nightlight/issues' },
+  { Icon: Globe, label: 'Website', url: 'https://nightlightbaby.app/' },
+  { Icon: GitBranch, label: 'GitHub — Nightlight', url: 'https://github.com/sauso/nightlight' },
+  { Icon: Smartphone, label: 'GitHub — Mobile app', url: 'https://github.com/sauso/nightlight-mobile' },
+  { Icon: FileText, label: 'Changelog', url: 'https://github.com/sauso/nightlight/blob/main/CHANGELOG.md' },
+  { Icon: Bug, label: 'Report an issue', url: 'https://github.com/sauso/nightlight/issues' },
   // GitHub loads issue forms from the default branch (main); this opens a plain new issue until the next release.
-  { label: 'Got an idea?', url: 'https://github.com/sauso/nightlight/issues/new?template=feature_request.yml' },
+  { Icon: Lightbulb, label: 'Got an idea?', url: 'https://github.com/sauso/nightlight/issues/new?template=feature_request.yml' },
 ];
 
 // Why the Android app has no Tailscale address saved, keyed by the outcome of its last ask (nativeBridge.js tailscaleOutcome).
@@ -139,18 +140,15 @@ export default function About() {
             While the status is unknown (loading, or the read failed) the row stays hidden, so a finished install never flashes it.
             The cost: a completed install has no menu path back to the picture check (the /setup address still works). */}
         {user?.role === 'admin' && setupStatus && setupStatus !== 'completed' && <div className="card">
-          <Link className="list-row about-link" to="/setup">Setup status and picture check</Link>
+          <NavRow Icon={ClipboardList} label="Setup status and picture check" to="/setup" />
         </div>}
 
         {/* Owner 2026-11-07: Links, Support and the safety notice take the Connection card's look (a 16px bold title, 14px
             text) so the cards on this page read as one set; before, they kept the small grey title and 16px rows. */}
         <section className="card about-card" aria-label="Links">
           <div className="about-card__heading"><h2 className="card-heading">Links</h2></div>
-          {LINKS.map(({ label, url }) => (
-            <a key={url} className="list-row about-link" href={url} target="_blank" rel="noreferrer">
-              <span>{label}</span>
-              <ExternalLink size={15} aria-hidden="true" />
-            </a>
+          {LINKS.map(({ Icon, label, url }) => (
+            <NavRow key={url} Icon={Icon} label={label} external={url} />
           ))}
         </section>
 

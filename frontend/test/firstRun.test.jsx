@@ -49,6 +49,8 @@ describe('the two screens, in order', () => {
     for (const step of ['Add your child', 'Connect your camera', 'Test your monitor', 'Invite caregivers (optional)', 'Watch from anywhere (optional)']) {
       expect(screen.getByText(step), step).toBeTruthy();
     }
+    // Five plain list items (the bullet look is CSS, guarded in paletteTokens.test.jsx: jsdom does not load index.css).
+    expect(document.querySelectorAll('ul.setup-checklist > li')).toHaveLength(5);
     expect(screen.queryByLabelText('Username')).toBeNull();
     expect(screen.queryByRole('progressbar')).toBeNull();
     expect(screen.queryByText(/Step \d of \d/)).toBeNull();

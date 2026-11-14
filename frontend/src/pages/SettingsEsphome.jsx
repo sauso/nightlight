@@ -3,6 +3,7 @@ import { api } from '../lib/api.js';
 import { useLater } from '../lib/useLater.js';
 import AppHeader from '../components/AppHeader.jsx';
 import Modal from '../components/Modal.jsx';
+import ModalActions from '../components/ModalActions.jsx';
 import Switch from '../components/Switch.jsx';
 import { saveTextDownload } from '../lib/saveTextDownload.js';
 import EsphomeDiscovery from '../components/EsphomeDiscovery.jsx';
@@ -423,10 +424,10 @@ function DeviceFormModal({ device, prefill, childOptions, childrenFailed, onClos
             {test && <TestResult result={test} />}
           </div>
         )}
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button className="btn" style={{ width: 'auto' }} type="button" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" style={{ width: 'auto' }} type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
-        </div>
+        <ModalActions>
+          <button className="btn btn-secondary" type="button" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+        </ModalActions>
       </form>
     </Modal>
   );
@@ -452,12 +453,12 @@ function DeleteModal({ device, onClose, onDeleted }) {
         This stops collecting from “{device.name}” and <strong>deletes all the readings stored for it</strong>. This
         cannot be undone. Download a CSV first if you want to keep them.
       </p>
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <button className="btn" style={{ width: 'auto' }} type="button" data-autofocus onClick={onClose}>Cancel</button>
-        <button className="btn btn-danger" style={{ width: 'auto' }} type="button" disabled={busy} onClick={confirm}>
+      <ModalActions>
+        <button className="btn btn-secondary" type="button" data-autofocus onClick={onClose}>Cancel</button>
+        <button className="btn btn-danger" type="button" disabled={busy} onClick={confirm}>
           {busy ? 'Deleting…' : 'Delete device and readings'}
         </button>
-      </div>
+      </ModalActions>
     </Modal>
   );
 }
@@ -519,13 +520,13 @@ function ExportModal({ device, onClose }) {
       )}
       {!range.ok && <div className="camera-tile__sub" role="status" style={{ marginBottom: 10 }}>{range.error}</div>}
       {message && <div className="camera-tile__sub" role="status" style={{ marginBottom: 10 }}>{message}</div>}
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <button className="btn" style={{ width: 'auto' }} type="button" onClick={onClose}>Close</button>
-        <button className="btn btn-primary" style={{ width: 'auto' }} type="button" data-autofocus
+      <ModalActions>
+        <button className="btn btn-secondary" type="button" onClick={onClose}>Close</button>
+        <button className="btn btn-primary" type="button" data-autofocus
           disabled={state !== 'idle' || !range.ok} onClick={download}>
           {state === 'busy' ? 'Preparing…' : state === 'done' ? 'Downloaded ✓' : 'Download'}
         </button>
-      </div>
+      </ModalActions>
     </Modal>
   );
 }

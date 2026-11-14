@@ -21,7 +21,9 @@ test.each(['not_started', 'in_progress', 'completed_limited', 'legacy_completed'
   '★ an admin sees the setup status and picture check link while setup is %s', async (status) => {
     mockSetup(status);
     renderAsAdmin(<About />);
-    expect(await screen.findByRole('link', LINK)).toHaveAttribute('href', '/setup');
+    const setupLink = await screen.findByRole('link', LINK);
+    expect(setupLink).toHaveAttribute('href', '/setup');
+    expect(setupLink).toHaveClass('nav-row');
   });
 
 test('★ an admin does not see the link once setup is completed', async () => {

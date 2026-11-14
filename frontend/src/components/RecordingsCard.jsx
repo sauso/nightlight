@@ -5,6 +5,7 @@ import { useAuth } from '../lib/AuthContext.jsx';
 import { useHomeTime } from '../lib/useHomeTime.js';
 import MediaPlayerModal from './MediaPlayerModal.jsx';
 import Modal from './Modal.jsx';
+import ModalActions from './ModalActions.jsx';
 import { deleteFailureText } from './ClipPlayerModal.jsx';
 
 // "Recordings" card on a child's detail page: the clips someone captured with the tile's Record button
@@ -183,14 +184,14 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
             video partway through. There’s nothing to play.
             {!isAdmin && ' An admin can remove it from this list.'}
           </p>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button type="button" className="btn" onClick={close} disabled={del === 'deleting'}>Close</button>
+          <ModalActions>
+            <button type="button" className="btn btn-secondary" onClick={close} disabled={del === 'deleting'}>Close</button>
             {isAdmin && (
               <button type="button" className="btn btn-danger" onClick={deleteNow} disabled={del === 'deleting'}>
                 {del === 'deleting' ? 'Removing…' : 'Remove'}
               </button>
             )}
-          </div>
+          </ModalActions>
           {del === 'error' && <p className="muted">{delError}</p>}
         </Modal>
       )}
@@ -215,12 +216,12 @@ export default function RecordingsCard({ childId, refreshNonce = 0 }) {
             confirming ? (
               <div className="clip-confirm">
                 <span>{del === 'error' ? delError : 'Delete this recording? This can’t be undone.'}</span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button type="button" className="btn" onClick={() => setDel('')} disabled={del === 'deleting'}>Cancel</button>
+                <ModalActions>
+                  <button type="button" className="btn btn-secondary" onClick={() => setDel('')} disabled={del === 'deleting'}>Cancel</button>
                   <button type="button" className="btn btn-danger" onClick={deleteNow} disabled={del === 'deleting'}>
                     {del === 'deleting' ? 'Deleting…' : 'Delete'}
                   </button>
-                </div>
+                </ModalActions>
               </div>
             ) : null
           }

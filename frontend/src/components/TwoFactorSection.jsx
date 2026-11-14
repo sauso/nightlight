@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { api } from '../lib/api.js';
 import Modal from './Modal.jsx';
+import ModalActions from './ModalActions.jsx';
 import { holdReload } from '../lib/reloadGuard.js';
 import { isNativeApp } from '../lib/nativeBridge.js';
 import { useLater } from '../lib/useLater.js';
@@ -209,9 +210,11 @@ export default function TwoFactorSection() {
               <input id="mfa-confirm" value={code} onChange={(e) => setCode(e.target.value)}
                 inputMode="numeric" autoComplete="one-time-code" placeholder="123456" required />
             </div>
-            <button className="btn btn-primary" type="submit" disabled={busy}>
-              {busy ? 'Verifying…' : 'Turn on'}
-            </button>
+            <ModalActions>
+              <button className="btn btn-primary" type="submit" disabled={busy}>
+                {busy ? 'Verifying…' : 'Turn on'}
+              </button>
+            </ModalActions>
           </form>
         </Modal>
       )}
@@ -230,10 +233,12 @@ export default function TwoFactorSection() {
               <div key={c} style={{ background: 'var(--bg-elevated-2)', padding: '8px 10px', borderRadius: 8, textAlign: 'center' }}>{c}</div>
             ))}
           </div>
-          <button className="btn btn-secondary" onClick={copyCodes} style={{ marginBottom: 8 }}>
-            {copied ? 'Copied ✓' : 'Copy codes'}
-          </button>
-          <button className="btn btn-primary" onClick={() => setBackupCodes(null)}>I've saved them</button>
+          <ModalActions>
+            <button className="btn btn-secondary" onClick={copyCodes}>
+              {copied ? 'Copied ✓' : 'Copy codes'}
+            </button>
+            <button className="btn btn-primary" onClick={() => setBackupCodes(null)}>I've saved them</button>
+          </ModalActions>
         </Modal>
       )}
 
@@ -249,9 +254,11 @@ export default function TwoFactorSection() {
               <input id="mfa-setup-pass" type="password" value={password}
                 onChange={(e) => setPassword(e.target.value)} required autoFocus />
             </div>
-            <button className="btn btn-primary" type="submit" disabled={busy}>
-              {busy ? 'Please wait…' : 'Continue'}
-            </button>
+            <ModalActions>
+              <button className="btn btn-primary" type="submit" disabled={busy}>
+                {busy ? 'Please wait…' : 'Continue'}
+              </button>
+            </ModalActions>
           </form>
         </Modal>
       )}
@@ -266,9 +273,11 @@ export default function TwoFactorSection() {
               <input id="mfa-disable-pass" type="password" value={password}
                 onChange={(e) => setPassword(e.target.value)} required autoFocus />
             </div>
-            <button className="btn btn-danger" type="submit" disabled={busy}>
-              {busy ? 'Turning off…' : 'Turn off two-factor'}
-            </button>
+            <ModalActions>
+              <button className="btn btn-danger" type="submit" disabled={busy}>
+                {busy ? 'Turning off…' : 'Turn off two-factor'}
+              </button>
+            </ModalActions>
           </form>
         </Modal>
       )}
