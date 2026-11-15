@@ -12,7 +12,7 @@
 //   * EventLog's Clear is irreversible and deletes the history you would use to diagnose a camera
 //     that keeps dropping — i.e. the thing you clear it while investigating.
 import { describe, test, expect, vi, afterEach, beforeEach } from 'vitest';
-import { screen, waitFor, within, act } from '@testing-library/react';
+import { screen, waitFor, within, act, fireEvent } from '@testing-library/react';
 import { renderAsAdmin, renderAsCaregiver, enabledButton } from './helpers/render.jsx';
 import TwoFactorSection from '../src/components/TwoFactorSection.jsx';
 import EventLog from '../src/components/EventLog.jsx';
@@ -242,9 +242,54 @@ describe('TwoFactorSection', () => {
 
     await user.click(screen.getByRole('button', { name: 'Copy codes' }));
     expect(document.execCommand).toHaveBeenCalledWith('copy');
-    expect(await screen.findByRole('status')).toHaveTextContent("Couldn't copy. Select the codes above and copy them by hand.");
+    expect(await screen.findByRole('status')).toHaveTextContent("Couldn't copy automatically. The codes are selected below: copy them by hand.");
     expect(screen.getByRole('button', { name: 'Copy codes' })).toBeInTheDocument();
     for (const c of CODES) expect(screen.getByText(c)).toHaveStyle({ userSelect: 'all' });
+    // The grid is not a keyboard stop; the selected field gives keyboard and touch users a copy path.
+    const selectedCodes = screen.getByRole('textbox', { name: 'Backup codes' });
+    expect(selectedCodes).toHaveAttribute('readonly');
+    expect(selectedCodes).toHaveValue(CODES.join('\n'));
+    expect(selectedCodes).toHaveAttribute('rows', String(CODES.length));
+    expect(selectedCodes).toHaveFocus();
+    expect(selectedCodes.selectionStart).toBe(0);
+    expect(selectedCodes.selectionEnd).toBe(selectedCodes.value.length);
+  });
+
+  test('a second successful copy keeps its confirmation for two seconds after the last click', async () => {
+    await openBackupCodesDialog();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue() } });
+    vi.useFakeTimers();
+    try {
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy codes' })); });
+      expect(screen.getByRole('button', { name: 'Copied ✓' })).toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copied ✓' })); });
+      // The first click's reset would fire here, one second too early.
+      await act(async () => { await vi.advanceTimersByTimeAsync(1001); });
+      expect(screen.getByRole('button', { name: 'Copied ✓' })).toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(999); });
+      expect(screen.getByRole('button', { name: 'Copy codes' })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('closing the backup-codes panel cancels its copy reset', async () => {
+    await openBackupCodesDialog();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue() } });
+    vi.useFakeTimers();
+    try {
+      const pendingBeforeCopy = vi.getTimerCount();
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy codes' })); });
+      expect(screen.getByRole('button', { name: 'Copied ✓' })).toBeInTheDocument();
+      expect(vi.getTimerCount()).toBe(pendingBeforeCopy + 1);
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: "I've saved them" })); });
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(vi.getTimerCount()).toBe(pendingBeforeCopy);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test('turning two-factor OFF requires the password, and refreshes the status', async () => {

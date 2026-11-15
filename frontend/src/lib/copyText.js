@@ -13,6 +13,7 @@ export async function copyText(text) {
       return 'copied';
     }
   } catch { /* denied or unavailable: fall through to the older way */ }
+  const previouslyFocused = document.activeElement;
   let box = null;
   try {
     box = document.createElement('textarea');
@@ -26,6 +27,8 @@ export async function copyText(text) {
     if (document.execCommand('copy')) return 'copied';
   } catch { /* no execCommand either */ } finally {
     box?.remove();
+    // Selecting the temporary box can steal focus from the Copy button; return it before announcing the result.
+    if (previouslyFocused && document.contains(previouslyFocused)) previouslyFocused.focus({ preventScroll: true });
   }
   return 'manual';
 }
